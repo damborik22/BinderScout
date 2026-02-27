@@ -8,8 +8,8 @@
 # With no --tool flag, an interactive menu lets you choose which tools to install.
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-BINDMASTER_DIR="/home/david/BindMaster"
-CONDA_BASE="/home/david/miniconda3"
+# BINDMASTER_DIR is wherever this script lives — works on any machine.
+BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHORTCUTS_DIR="${HOME}/.local/bin"
 LOG_FILE="${BINDMASTER_DIR}/install.log"
 
@@ -182,6 +182,34 @@ env_exists() {
 ensure_conda_in_path() {
     export PATH="${CONDA_BASE}/bin:${PATH}"
     source "${CONDA_BASE}/etc/profile.d/conda.sh"
+}
+
+# detect_conda
+# Finds the conda base directory and sets CONDA_BASE.
+detect_conda() {
+    # If conda is already on PATH, ask it where it lives
+    if command -v conda &>/dev/null; then
+        local base
+        base=$(conda info --base 2>/dev/null) && { CONDA_BASE="${base}"; return 0; }
+    fi
+    # Fall back to common install locations
+    local candidate
+    for candidate in \
+        "$HOME/miniconda3" \
+        "$HOME/anaconda3" \
+        "$HOME/miniforge3" \
+        "$HOME/mambaforge" \
+        "$HOME/conda" \
+        "/opt/conda" \
+        "/opt/miniconda3" \
+        "/opt/anaconda3"; do
+        if [[ -f "${candidate}/etc/profile.d/conda.sh" ]]; then
+            CONDA_BASE="${candidate}"
+            return 0
+        fi
+    done
+    print_fail "Could not find a conda installation. Please install Miniconda or Anaconda first."
+    return 1
 }
 
 # ─── Interactive Tool Selection ───────────────────────────────────────────────
@@ -367,13 +395,16 @@ install_bindcraft() {
 
 _write_bindcraft_shortcut() {
     mkdir -p "${SHORTCUTS_DIR}"
-    cat > "${SHORTCUTS_DIR}/bindcraft" << 'EOF'
-#!/bin/bash
-# BindCraft shortcut — activates the BindCraft conda environment
-# and opens an interactive shell in the BindCraft directory.
-
-BINDCRAFT_DIR="/home/david/BindMaster/BindCraft"
-CONDA_BASE="/home/david/miniconda3"
+    # Write path variables first (expanded at install time), then static body
+    {
+        echo "#!/bin/bash"
+        echo "# BindCraft shortcut — activates the BindCraft conda environment"
+        echo "# and opens an interactive shell in the BindCraft directory."
+        echo ""
+        echo "BINDCRAFT_DIR=\"${BINDCRAFT_DIR}\""
+        echo "CONDA_BASE=\"${CONDA_BASE}\""
+    } > "${SHORTCUTS_DIR}/bindcraft"
+    cat >> "${SHORTCUTS_DIR}/bindcraft" << 'EOF'
 
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
 conda activate BindCraft
@@ -483,13 +514,15 @@ install_boltzgen() {
 
 _write_boltzgen_shortcut() {
     mkdir -p "${SHORTCUTS_DIR}"
-    cat > "${SHORTCUTS_DIR}/boltzgen" << 'EOF'
-#!/bin/bash
-# BoltzGen shortcut — activates the BoltzGen conda environment
-# and opens an interactive shell in the BoltzGen directory.
-
-BOLTZGEN_DIR="/home/david/BindMaster/BoltzGen"
-CONDA_BASE="/home/david/miniconda3"
+    {
+        echo "#!/bin/bash"
+        echo "# BoltzGen shortcut — activates the BoltzGen conda environment"
+        echo "# and opens an interactive shell in the BoltzGen directory."
+        echo ""
+        echo "BOLTZGEN_DIR=\"${BOLTZGEN_DIR}\""
+        echo "CONDA_BASE=\"${CONDA_BASE}\""
+    } > "${SHORTCUTS_DIR}/boltzgen"
+    cat >> "${SHORTCUTS_DIR}/boltzgen" << 'EOF'
 
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
 conda activate BoltzGen
@@ -585,12 +618,14 @@ install_mosaic() {
 
 _write_mosaic_shortcut() {
     mkdir -p "${SHORTCUTS_DIR}"
-    cat > "${SHORTCUTS_DIR}/mosaic" << 'EOF'
-#!/bin/bash
-# Mosaic shortcut — activates the Mosaic uv virtual environment
-# and opens an interactive shell in the Mosaic directory.
-
-MOSAIC_DIR="/home/david/BindMaster/Mosaic"
+    {
+        echo "#!/bin/bash"
+        echo "# Mosaic shortcut — activates the Mosaic uv virtual environment"
+        echo "# and opens an interactive shell in the Mosaic directory."
+        echo ""
+        echo "MOSAIC_DIR=\"${MOSAIC_DIR}\""
+    } > "${SHORTCUTS_DIR}/mosaic"
+    cat >> "${SHORTCUTS_DIR}/mosaic" << 'EOF'
 
 source "${MOSAIC_DIR}/.venv/bin/activate"
 cd "${MOSAIC_DIR}"
@@ -612,6 +647,9 @@ main() {
     echo ""
     echo -e "${BOLD}=== BindMaster Installer — $(date) ===${RESET}"
     echo -e "CUDA: ${CUDA_VERSION} | Skip examples: ${SKIP_EXAMPLES}"
+
+    detect_conda || exit 1
+    print_ok "Conda found at: ${CONDA_BASE}"
 
     # Show interactive menu if no --tool was given
     if [[ "${TOOL_SPECIFIED}" == false ]]; then
