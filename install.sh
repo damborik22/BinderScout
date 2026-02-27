@@ -17,6 +17,8 @@ BINDCRAFT_DIR="${BINDMASTER_DIR}/BindCraft"
 BOLTZGEN_DIR="${BINDMASTER_DIR}/BoltzGen"
 MOSAIC_DIR="${BINDMASTER_DIR}/Mosaic"
 
+CONDA_CMD=""   # set by detect_conda: full path to mamba (preferred) or conda
+
 # ─── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -175,7 +177,7 @@ smoke_test() {
 # env_exists <name>
 # Returns 0 if conda env exists, 1 otherwise.
 env_exists() {
-    "${CONDA_BASE}/bin/conda" env list | grep -qw "$1"
+    "${CONDA_CMD}" env list | grep -qw "$1"
 }
 
 # ensure_conda_in_path
@@ -185,30 +187,51 @@ ensure_conda_in_path() {
 }
 
 # detect_conda
-# Finds the conda base directory and sets CONDA_BASE.
+# Finds conda/mamba and sets CONDA_BASE + CONDA_CMD.
+# Prefers mamba over conda (faster package installs).
 detect_conda() {
-    # If conda is already on PATH, ask it where it lives
-    if command -v conda &>/dev/null; then
-        local base
-        base=$(conda info --base 2>/dev/null) && { CONDA_BASE="${base}"; return 0; }
-    fi
-    # Fall back to common install locations
-    local candidate
+    local base cmd
+
+    # Helper: try a specific binary
+    _try_cmd() {
+        local bin="$1"
+        if command -v "${bin}" &>/dev/null; then
+            base=$(${bin} info --base 2>/dev/null) && {
+                CONDA_BASE="${base}"
+                CONDA_CMD="$(command -v "${bin}")"
+                return 0
+            }
+        fi
+        return 1
+    }
+
+    # Prefer mamba (much faster for installs), fall back to conda
+    _try_cmd mamba && return 0
+    _try_cmd conda && return 0
+
+    # Neither on PATH — probe common install locations
     for candidate in \
-        "$HOME/miniconda3" \
-        "$HOME/anaconda3" \
         "$HOME/miniforge3" \
         "$HOME/mambaforge" \
+        "$HOME/miniconda3" \
+        "$HOME/anaconda3" \
         "$HOME/conda" \
         "/opt/conda" \
+        "/opt/miniforge3" \
         "/opt/miniconda3" \
         "/opt/anaconda3"; do
-        if [[ -f "${candidate}/etc/profile.d/conda.sh" ]]; then
-            CONDA_BASE="${candidate}"
-            return 0
+        [[ -f "${candidate}/etc/profile.d/conda.sh" ]] || continue
+        CONDA_BASE="${candidate}"
+        # Prefer mamba binary inside this base if present
+        if [[ -x "${candidate}/bin/mamba" ]]; then
+            CONDA_CMD="${candidate}/bin/mamba"
+        else
+            CONDA_CMD="${candidate}/bin/conda"
         fi
+        return 0
     done
-    print_fail "Could not find a conda installation. Please install Miniconda or Anaconda first."
+
+    print_fail "Could not find conda or mamba. Install Miniconda, Mambaforge, or Anaconda first."
     return 1
 }
 
@@ -381,7 +404,7 @@ install_bindcraft() {
         print_warn "Conda environment 'BindCraft' already exists."
         if confirm "Remove and recreate the BindCraft conda environment?"; then
             run_logged "Removing existing BindCraft conda env" \
-                "${CONDA_BASE}/bin/conda" env remove -n BindCraft -y \
+                "${CONDA_CMD}" env remove -n BindCraft -y \
                 || return 1
         else
             print_warn "Keeping existing BindCraft conda env; skipping install script."
@@ -399,7 +422,7 @@ install_bindcraft() {
 
     # Smoke test
     smoke_test "colabdesign import" \
-        "${CONDA_BASE}/bin/conda" run -n BindCraft \
+        "${CONDA_CMD}" run -n BindCraft \
         python -c "from colabdesign import mk_af_model; print('OK')" \
         || return 1
 
@@ -411,7 +434,7 @@ install_bindcraft() {
             (
                 cd "${BINDCRAFT_DIR}" || exit 1
                 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-                "${CONDA_BASE}/bin/conda" run -n BindCraft \
+                "${CONDA_CMD}" run -n BindCraft \
                     python -u ./bindcraft.py \
                     --settings './settings_target/PDL1.json' \
                     --filters './settings_filters/default_filters.json' \
@@ -489,7 +512,7 @@ install_boltzgen() {
         print_warn "Conda environment 'BoltzGen' already exists."
         if confirm "Remove and recreate the BoltzGen conda environment?"; then
             run_logged "Removing existing BoltzGen conda env" \
-                "${CONDA_BASE}/bin/conda" env remove -n BoltzGen -y \
+                "${CONDA_CMD}" env remove -n BoltzGen -y \
                 || return 1
         else
             print_warn "Keeping existing BoltzGen conda env."
@@ -497,29 +520,29 @@ install_boltzgen() {
     fi
     if ! env_exists BoltzGen; then
         run_logged "Creating BoltzGen conda env (Python 3.12)" \
-            "${CONDA_BASE}/bin/conda" create -n BoltzGen python=3.12 -y \
+            "${CONDA_CMD}" create -n BoltzGen python=3.12 -y \
             || { print_fail "Failed to create BoltzGen conda env"; return 1; }
     fi
 
     # Install gcc — required by Triton to JIT-compile CUDA kernels at runtime
     run_logged "Installing gcc into BoltzGen env (required by Triton)" \
-        "${CONDA_BASE}/bin/conda" install -n BoltzGen -c conda-forge gcc -y \
+        "${CONDA_CMD}" install -n BoltzGen -c conda-forge gcc -y \
         || { print_fail "Failed to install gcc into BoltzGen env"; return 1; }
 
     # Install packages
     print_step "Installing PyTorch (cu121) and BoltzGen"
     run_logged "Installing PyTorch cu121" \
-        "${CONDA_BASE}/bin/conda" run -n BoltzGen \
+        "${CONDA_CMD}" run -n BoltzGen \
         pip install torch==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121 \
         || { print_fail "Failed to install PyTorch"; return 1; }
     run_logged "Installing BoltzGen package" \
-        "${CONDA_BASE}/bin/conda" run -n BoltzGen \
+        "${CONDA_CMD}" run -n BoltzGen \
         pip install -e "${BOLTZGEN_DIR}" \
         || { print_fail "Failed to install BoltzGen package"; return 1; }
 
     # Smoke test
     smoke_test "boltzgen --help" \
-        "${CONDA_BASE}/bin/conda" run -n BoltzGen boltzgen --help \
+        "${CONDA_CMD}" run -n BoltzGen boltzgen --help \
         || return 1
 
     # Example
@@ -530,7 +553,7 @@ install_boltzgen() {
             print_warn "First run downloads ~6 GB of model weights — this will take a while."
             (
                 cd "${BOLTZGEN_DIR}" || exit 1
-                "${CONDA_BASE}/bin/conda" run -n BoltzGen \
+                "${CONDA_CMD}" run -n BoltzGen \
                     boltzgen run example/vanilla_protein/1g13prot.yaml \
                     --output output/test_run \
                     --protocol protein-anything \
@@ -687,7 +710,10 @@ main() {
     echo -e "CUDA: ${CUDA_VERSION} | Skip examples: ${SKIP_EXAMPLES}"
 
     detect_conda || exit 1
-    print_ok "Conda found at: ${CONDA_BASE}"
+    local _conda_name _conda_ver
+    _conda_name="$(basename "${CONDA_CMD}")"
+    _conda_ver="$("${CONDA_CMD}" --version 2>/dev/null | awk '{print $2}')"
+    print_ok "${_conda_name} ${_conda_ver} found at: ${CONDA_BASE}"
 
     print_tool_status
 
