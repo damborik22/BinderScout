@@ -486,28 +486,51 @@ install_bindcraft() {
         "${CONDA_CMD}" create --name BindCraft python=3.10 -y \
         || { print_fail "Failed to create BindCraft conda env"; return 1; }
 
-    print_step "Installing conda packages (CONDA_OVERRIDE_CUDA=${CUDA_VERSION})"
+    # ── Step 1: conda packages ────────────────────────────────────────────────
+    # On aarch64, jaxlib CUDA conda packages don't exist — install only the
+    # non-CUDA conda packages here. JAX + CUDA come from PyPI in step 2.
+    # PyRosetta is available for aarch64 via the graylab conda channel.
+    print_step "Installing conda packages (PyRosetta + scientific libs)"
     print_warn "This takes 20–40 min — full output in install_aarch.log"
     run_logged "Installing BindCraft conda packages" \
-        bash -c "
-            source '${CONDA_BASE}/etc/profile.d/conda.sh'
-            conda activate BindCraft
-            CONDA_OVERRIDE_CUDA='${CUDA_VERSION}' ${CONDA_CMD} install \
-                pip pandas matplotlib 'numpy<2.0.0' biopython scipy pdbfixer \
-                seaborn libgfortran5 tqdm jupyter ffmpeg pyrosetta fsspec py3dmol \
-                chex dm-haiku 'flax<0.10.0' dm-tree joblib ml-collections \
-                immutabledict optax \
-                'jax>=0.4,<=0.6.0' 'jaxlib>=0.4,<=0.6.0=*cuda*' \
-                cuda-nvcc cudnn \
-                -c conda-forge -c nvidia \
-                --channel https://conda.graylab.jhu.edu \
-                -y
-        " || { print_fail "Failed to install BindCraft conda packages"; return 1; }
+        "${CONDA_CMD}" install -n BindCraft \
+            pip biopython matplotlib scipy seaborn pandas \
+            dm-tree einops absl-py tqdm \
+            pyrosetta \
+            -c conda-forge \
+            --channel https://conda.graylab.jhu.edu \
+            -y \
+        || { print_fail "Failed to install BindCraft conda packages"; return 1; }
 
-    print_step "Installing ColabDesign"
+    # ── Step 2: JAX with CUDA 12 plugins (PyPI — aarch64 wheels exist here) ──
+    # jax-cuda12-plugin pulls in all nvidia-cuda-*-cu12 CUDA libraries automatically.
+    # Pinned to 0.4.34 — tested working on DGX Spark (GH200, CUDA 12.1).
+    print_step "Installing JAX 0.4.34 with CUDA 12 plugins (PyPI)"
+    run_logged "Installing JAX + CUDA 12 plugins" \
+        "${CONDA_CMD}" run -n BindCraft \
+        pip install \
+            "numpy<2.0.0" \
+            "jax==0.4.34" \
+            "jax-cuda12-pjrt==0.4.34" \
+            "jax-cuda12-plugin==0.4.34" \
+            "jaxlib==0.4.34" \
+        || { print_fail "Failed to install JAX"; return 1; }
+
+    # ── Step 3: ColabDesign and BindCraft Python dependencies ─────────────────
+    print_step "Installing ColabDesign and dependencies"
     run_logged "Installing ColabDesign" \
         "${CONDA_CMD}" run -n BindCraft \
-        pip install git+https://github.com/sokrypton/ColabDesign.git --no-deps \
+        pip install \
+            "colabdesign==1.1.1" \
+            "chex==0.1.90" \
+            "dm-haiku==0.0.15" \
+            "optax==0.2.5" \
+            "ml-collections==1.1.0" \
+            "immutabledict" \
+            "joblib" \
+            "py3dmol" \
+            "fsspec" \
+            "pdbfixer" \
         || { print_fail "Failed to install ColabDesign"; return 1; }
 
     run_logged "Cleaning conda cache" "${CONDA_CMD}" clean -a -y
