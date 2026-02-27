@@ -1,12 +1,7 @@
 # Tool directories — cloned fresh by install.sh
 BindCraft/
 BoltzGen/
-
-# Mosaic — ignore the cloned repo but track our custom examples
-Mosaic/*
-!Mosaic/examples/
-Mosaic/examples/*
-!Mosaic/examples/bindmaster_examples/
+Mosaic/
 
 # Installer log — ephemeral, can be large
 install.log

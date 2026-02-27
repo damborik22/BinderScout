@@ -669,6 +669,23 @@ install_mosaic() {
         fi
     fi
 
+    # Copy BindMaster custom examples into Mosaic
+    local src_examples="${BINDMASTER_DIR}/bindmaster_examples"
+    local dst_examples="${MOSAIC_DIR}/examples/bindmaster_examples"
+    if [[ -d "${src_examples}" ]]; then
+        mkdir -p "${dst_examples}"
+        cp -r "${src_examples}/." "${dst_examples}/"
+        # Remove the placeholder if it's the only file
+        rm -f "${dst_examples}/.gitkeep"
+        local count
+        count=$(find "${dst_examples}" -maxdepth 1 -type f | wc -l)
+        if [[ "${count}" -gt 0 ]]; then
+            print_ok "Copied ${count} custom example(s) to ${dst_examples}"
+        else
+            print_ok "bindmaster_examples/ ready at ${dst_examples} (add your scripts there)"
+        fi
+    fi
+
     # Shortcut
     print_step "Installing mosaic shortcut"
     _write_mosaic_shortcut
