@@ -1,0 +1,46 @@
+# BindMaster test environment — simulates a fresh DGX Spark (aarch64, Ubuntu 24.04)
+# Build: docker build -f Dockerfile.test -t bindmaster-test .
+# Run:   ./test_env.sh
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CONDA_BASE=/opt/miniforge3
+ENV PATH=/opt/miniforge3/bin:${PATH}
+
+# ── System packages ────────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    wget \
+    curl \
+    ca-certificates \
+    sudo \
+    libgomp1 \
+    libgfortran5 \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Miniforge3 (mamba + conda, aarch64) ───────────────────────────────────────
+# Installed as root; envs_dirs and pkgs_dirs will point to world-writable
+# locations so any runtime UID can create conda environments.
+RUN wget -q \
+    "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-aarch64.sh" \
+    -O /tmp/miniforge.sh \
+    && bash /tmp/miniforge.sh -b -p /opt/miniforge3 \
+    && rm /tmp/miniforge.sh \
+    && /opt/miniforge3/bin/conda clean -a -y \
+    && chmod -R 755 /opt/miniforge3
+
+# Allow any UID to create conda envs and cache packages
+RUN mkdir -p /opt/conda-envs /opt/conda-pkgs \
+    && chmod 777 /opt/conda-envs /opt/conda-pkgs \
+    && /opt/miniforge3/bin/conda config --system --add envs_dirs /opt/conda-envs \
+    && /opt/miniforge3/bin/conda config --system --add pkgs_dirs /opt/conda-pkgs
+
+# ── Entrypoint: set up home dir and conda for whatever UID we run as ──────────
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["/bin/bash", "--login"]

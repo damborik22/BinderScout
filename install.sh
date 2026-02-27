@@ -17,7 +17,8 @@ BINDCRAFT_DIR="${BINDMASTER_DIR}/BindCraft"
 BOLTZGEN_DIR="${BINDMASTER_DIR}/BoltzGen"
 MOSAIC_DIR="${BINDMASTER_DIR}/Mosaic"
 
-CONDA_CMD=""   # set by detect_conda: full path to mamba (preferred) or conda
+CONDA_CMD=""          # set by detect_conda: full path to mamba (preferred) or conda
+ARCH="$(uname -m)"   # x86_64 or aarch64 (e.g. DGX Spark / Grace-Hopper)
 
 # ─── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -530,11 +531,19 @@ install_boltzgen() {
         || { print_fail "Failed to install gcc into BoltzGen env"; return 1; }
 
     # Install packages
-    print_step "Installing PyTorch (cu121) and BoltzGen"
-    run_logged "Installing PyTorch cu121" \
-        "${CONDA_CMD}" run -n BoltzGen \
-        pip install torch==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121 \
-        || { print_fail "Failed to install PyTorch"; return 1; }
+    # aarch64: +cuXXX wheels don't exist; plain PyPI torch includes CUDA for Linux aarch64
+    print_step "Installing PyTorch and BoltzGen"
+    if [[ "${ARCH}" == "aarch64" ]]; then
+        run_logged "Installing PyTorch (aarch64, from PyPI)" \
+            "${CONDA_CMD}" run -n BoltzGen \
+            pip install torch==2.5.1 \
+            || { print_fail "Failed to install PyTorch"; return 1; }
+    else
+        run_logged "Installing PyTorch cu121 (x86_64)" \
+            "${CONDA_CMD}" run -n BoltzGen \
+            pip install torch==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121 \
+            || { print_fail "Failed to install PyTorch"; return 1; }
+    fi
     run_logged "Installing BoltzGen package" \
         "${CONDA_CMD}" run -n BoltzGen \
         pip install -e "${BOLTZGEN_DIR}" \
@@ -724,13 +733,21 @@ EOF
 main() {
     echo ""
     echo -e "${BOLD}=== BindMaster Installer — $(date) ===${RESET}"
-    echo -e "CUDA: ${CUDA_VERSION} | Skip examples: ${SKIP_EXAMPLES}"
+    echo -e "CUDA: ${CUDA_VERSION} | Arch: ${ARCH} | Skip examples: ${SKIP_EXAMPLES}"
 
     detect_conda || exit 1
     local _conda_name _conda_ver
     _conda_name="$(basename "${CONDA_CMD}")"
     _conda_ver="$("${CONDA_CMD}" --version 2>/dev/null | awk '{print $2}')"
     print_ok "${_conda_name} ${_conda_ver} found at: ${CONDA_BASE}"
+
+    if [[ "${ARCH}" == "aarch64" ]]; then
+        print_warn "aarch64 detected (e.g. DGX Spark / Grace-Hopper)."
+        print_warn "  BindCraft: may fail — jaxlib CUDA conda packages not available for aarch64."
+        print_warn "  BoltzGen:  PyTorch will be installed from PyPI (no +cuXXX suffix)."
+        print_warn "  Mosaic:    may fail — torchtext has no Linux aarch64 wheel."
+    fi
+
 
     print_tool_status
 

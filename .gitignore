@@ -3,8 +3,12 @@ BindCraft/
 BoltzGen/
 Mosaic/
 
-# Installer log — ephemeral, can be large
+# Installer logs — ephemeral, can be large
 install.log
+install_aarch.log
 
 # Claude Code internal files
 .claude/
+
+# Docker build cache / test artifacts
+.docker-iidfile
