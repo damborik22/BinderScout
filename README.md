@@ -7,6 +7,7 @@ A toolkit for GPU-accelerated protein binder design — installer, configurator,
 | **BindCraft** | Designs protein binders for a target using AlphaFold2 | conda (Python 3.10) |
 | **BoltzGen** | Generates protein structures with the Boltz-1 model | conda (Python 3.12) |
 | **Mosaic** | JAX-based binder hallucination (non-interactive, fully configured) | uv venv |
+| **Evaluator** | Evaluates binder sequences: refolds with Boltz-2 + AF2, produces ranked report | Mosaic venv + conda |
 
 ---
 
@@ -14,12 +15,13 @@ A toolkit for GPU-accelerated protein binder design — installer, configurator,
 
 ```
 BindMaster/
-├── install.sh              ← installs BindCraft, BoltzGen, and/or Mosaic
+├── install.sh              ← installs BindCraft, BoltzGen, Mosaic, and/or Evaluator
 ├── configurator.py         ← wizard: configure targets and run pipelines
 ├── bindmaster_examples/    ← Mosaic non-interactive script (copied on install)
 ├── BindCraft/              ← installed tool (gitignored)
 ├── BoltzGen/               ← installed tool (gitignored)
 ├── Mosaic/                 ← installed tool (gitignored)
+├── Evaluator/              ← installed tool (gitignored)
 └── runs/                   ← generated run folders (gitignored)
 ```
 
@@ -125,6 +127,7 @@ The installer opens an **interactive menu** — all three tools are pre-selected
     1)  [x]  BindCraft     not installed   Binder design via AlphaFold2 (conda, Python 3.10)
     2)  [x]  BoltzGen      not installed   Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)
     3)  [x]  Mosaic        not installed   JAX-based protein design (uv venv)
+    4)  [x]  Evaluator     not installed   Evaluate binders: refold with Boltz-2 + AF2, ranked report
 
   a) Select all   n) Select none   Enter to confirm
 ```
@@ -135,6 +138,7 @@ The installer opens an **interactive menu** — all three tools are pre-selected
 bash install.sh --tool bindcraft
 bash install.sh --tool boltzgen
 bash install.sh --tool mosaic
+bash install.sh --tool evaluator   # requires Mosaic to be installed first
 bash install.sh --tool all
 bash install.sh --skip-examples
 bash install.sh --cuda 12.1        # override CUDA version (default: 12.4)
@@ -191,6 +195,7 @@ After installation, each tool has a launcher in `~/.local/bin/`:
 bindcraft          # activates BindCraft conda env, cd to BindCraft dir
 boltzgen           # activates BoltzGen conda env, cd to BoltzGen dir
 mosaic             # activates Mosaic uv venv, cd to Mosaic dir
+evaluate           # launches the interactive Evaluator wizard
 bindmaster-config  # runs configurator.py
 ```
 
