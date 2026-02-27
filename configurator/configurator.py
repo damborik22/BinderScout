@@ -520,6 +520,8 @@ FILTERS="{run_dir}/bindcraft/filters.json"
 ADVANCED="{run_dir}/bindcraft/advanced.json"
 
 # Robust conda init — works in non-interactive shells (no conda on PATH by default)
+# set +u: conda activate.d scripts (e.g. binutils) may reference unbound variables
+set +u
 _conda_found=false
 for _conda_sh in \\
     "{conda_base}/etc/profile.d/conda.sh" \\
@@ -532,8 +534,9 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found — install Miniconda or Miniforge first." >&2; exit 1; }}
-
 conda activate BindCraft
+set -u
+
 cd "$BINDCRAFT_DIR"
 
 echo "=== Running BindCraft for {cfg['name']} ==="
@@ -559,6 +562,8 @@ CONFIG="{run_dir}/boltzgen/config.yaml"
 OUTPUT_DIR="{run_dir}/boltzgen/outputs"
 
 # Robust conda init — works in non-interactive shells (no conda on PATH by default)
+# set +u: conda activate.d scripts may reference unbound variables
+set +u
 _conda_found=false
 for _conda_sh in \\
     "{conda_base}/etc/profile.d/conda.sh" \\
@@ -571,8 +576,8 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found — install Miniconda or Miniforge first." >&2; exit 1; }}
-
 conda activate BoltzGen
+set -u
 
 echo "=== Running BoltzGen for {cfg['name']} ==="
 boltzgen run "$CONFIG" \\
