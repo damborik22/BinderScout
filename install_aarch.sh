@@ -183,7 +183,10 @@ detect_conda() {
     _try_cmd() {
         local bin="$1"
         command -v "${bin}" &>/dev/null || return 1
-        local base; base=$(${bin} info --base 2>/dev/null) || return 1
+        # `mamba info --base` may output "base environment : /path" in some versions;
+        # extract the last path-like token regardless of format.
+        local base; base=$(${bin} info --base 2>/dev/null | awk '/\// {print $NF}' | tail -1) || return 1
+        [[ -n "${base}" ]] || return 1
         CONDA_BASE="${base}"
         CONDA_CMD="$(command -v "${bin}")"
         return 0
