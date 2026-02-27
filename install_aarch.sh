@@ -623,6 +623,14 @@ install_boltzgen() {
         pip install torch==2.5.1 \
         || { print_fail "Failed to install PyTorch"; return 1; }
 
+    # On aarch64, gemmi==0.6.5 has no binary wheel and fails to build from source.
+    # gemmi 0.7.4 ships manylinux_2_28_aarch64 wheels — relax the pin (idempotent).
+    local boltzgen_toml="${BOLTZGEN_DIR}/pyproject.toml"
+    if grep -q '"gemmi==0.6.5"' "${boltzgen_toml}"; then
+        sed -i 's/"gemmi==0.6.5"/"gemmi>=0.6.5"/' "${boltzgen_toml}"
+        print_ok "BoltzGen pyproject.toml: relaxed gemmi pin to >=0.6.5 (aarch64 binary wheel)"
+    fi
+
     run_logged "Installing BoltzGen package" \
         "${CONDA_CMD}" run -n BoltzGen \
         pip install -e "${BOLTZGEN_DIR}" \
