@@ -36,6 +36,7 @@ BindMaster/
 │   └── configurator.py         ← interactive setup wizard
 ├── evaluator/
 │   └── evaluator.py            ← output parser + Boltz2 re-fold (Mosaic venv)
+├── Evaluator/                  ← bundled evaluator code
 ├── bindmaster_examples/        ← Mosaic hallucination template (copied on install)
 ├── tools/
 │   └── aarch64/                ← pre-built ARM64 binaries (dssp, DAlphaBall)

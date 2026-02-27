@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "binder-comparison"
+version = "0.1.0"
+description = "Evaluate protein binder sequences by independent refolding with Boltz-2 and AlphaFold2 — sequences in, ranked interface metrics out."
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+# Install in the 'mosaic' conda env for Boltz2 refolding
+boltz2 = [
+    "jax",
+    "equinox",
+]
+# Install in the 'bindcraft_pr' conda env for AF2 refolding
+af2 = [
+    "colabdesign",
+]
+# Full installation (for the report step only — no heavy ML deps)
+report = [
+    "jinja2>=3.0",
+]
+# Everything for the report env
+all = [
+    "binder-comparison[report]",
+]
+
+[project.scripts]
+binder-compare = "binder_comparison.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["binder_comparison*"]
+
+[tool.setuptools.package-data]
+"binder_comparison" = ["py.typed"]

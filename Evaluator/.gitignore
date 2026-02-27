@@ -1,0 +1,30 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pdb
+*.npz
+*.cif
+*.egg-info/
+
+# Pipeline output files
+refold_designs.csv
+boltz2_results.csv
+af2_results.csv
+af2_results/
+refold_boltz2/
+refold_af2/
+
+# Machine-specific install config (written by install.sh)
+envs/mosaic_venv_path
+
+# Build / install artifacts
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store

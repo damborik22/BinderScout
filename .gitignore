@@ -2,7 +2,6 @@
 BindCraft/
 BoltzGen/
 Mosaic/
-Evaluator/
 
 # Installer logs — ephemeral, can be large
 install.log
@@ -13,3 +12,9 @@ install_aarch.log
 
 # Docker build cache / test artifacts
 .docker-iidfile
+
+# Evaluator build / runtime artefacts
+__pycache__/
+*.egg-info/
+Evaluator/envs/mosaic_venv_path
+.venv/

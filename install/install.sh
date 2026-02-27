@@ -3,7 +3,7 @@
 # Installs BindCraft, BoltzGen, and/or Mosaic protein design tools.
 #
 # Usage:
-#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples]
+#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples] [--yes]
 #   bindmaster install [same options]
 #
 # With no --tool flag, an interactive menu lets you choose which tools to install.
@@ -33,6 +33,7 @@ RESET='\033[0m'
 # ─── Defaults ─────────────────────────────────────────────────────────────────
 CUDA_VERSION="12.4"
 SKIP_EXAMPLES=false
+AUTO_YES=false
 TOOL_SPECIFIED=false   # set to true when --tool is passed on CLI
 
 # Per-tool install flags (set by arg parsing or interactive menu)
@@ -72,14 +73,19 @@ while [[ $# -gt 0 ]]; do
             SKIP_EXAMPLES=true
             shift
             ;;
+        --yes|-y)
+            AUTO_YES=true
+            shift
+            ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--cuda VERSION] [--skip-examples]
+Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--cuda VERSION] [--skip-examples] [--yes]
 
   --tool        Which tool(s) to install. Omit for interactive selection.
   --cuda        CUDA version for conda package resolution (default: 12.4).
   --skip-examples
                 Do not prompt to run bundled examples after install.
+  --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
 EOF
             exit 0
             ;;
@@ -124,28 +130,35 @@ run_logged() {
     local tmpfile
     tmpfile=$(mktemp)
 
+    # Check once whether /dev/tty is usable (not available in non-TTY containers)
+    local has_tty=false
+    { true >/dev/tty; } 2>/dev/null && has_tty=true
+
     "$@" >> "${tmpfile}" 2>&1 &
     local pid=$!
 
     local frames='/-\|'
     local i=0
-    while kill -0 "${pid}" 2>/dev/null; do
-        printf "\r  ${CYAN}%s${RESET}  %s" "${frames:$((i % 4)):1}" "${label}" >/dev/tty
-        sleep 0.15
-        (( i++ ))
-    done
+    if [[ "${has_tty}" == true ]]; then
+        while kill -0 "${pid}" 2>/dev/null; do
+            printf "\r  ${CYAN}%s${RESET}  %s" "${frames:$((i % 4)):1}" "${label}" >/dev/tty
+            sleep 0.15
+            (( i++ ))
+        done
+        printf "\r\033[K" >/dev/tty   # clear spinner line
+    fi
     wait "${pid}"
     local rc=$?
-    printf "\r\033[K" >/dev/tty   # clear spinner line
 
-    cat "${tmpfile}" >> "${LOG_FILE}"
-    rm -f "${tmpfile}"
+    cat "${tmpfile}" >> "${LOG_FILE}" 2>/dev/null
 
     if [[ ${rc} -eq 0 ]]; then
+        rm -f "${tmpfile}"
         print_ok "${label}"
     else
         echo -e "${RED}  Last output:${RESET}"
-        tail -30 "${LOG_FILE}" | sed 's/^/  /'
+        tail -30 "${tmpfile}" | sed 's/^/  /'
+        rm -f "${tmpfile}"
         print_fail "${label}"
     fi
     return ${rc}
@@ -155,6 +168,10 @@ run_logged() {
 # Returns 0 (yes) or 1 (no).
 confirm() {
     local prompt="${1:-Are you sure?}"
+    if [[ "${AUTO_YES}" == true ]]; then
+        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}y (auto-yes)"
+        return 0
+    fi
     while true; do
         read -rp "$(echo -e "${YELLOW}${prompt} [y/N]: ${RESET}")" answer
         case "${answer,,}" in
@@ -685,7 +702,11 @@ install_mosaic() {
             local marimo_pid=$!
             print_ok "Marimo running (PID ${marimo_pid}) — open the URL shown above in your browser"
             echo ""
-            read -rp "$(echo -e "${YELLOW}  Press Enter to stop Marimo and continue the installer...${RESET}")"
+            if [[ "${AUTO_YES}" == true ]]; then
+                sleep 5
+            else
+                read -rp "$(echo -e "${YELLOW}  Press Enter to stop Marimo and continue the installer...${RESET}")"
+            fi
             kill "${marimo_pid}" 2>/dev/null && print_ok "Marimo stopped" || print_warn "Marimo already exited"
             cd - > /dev/null
         else
@@ -758,21 +779,13 @@ install_evaluator() {
     MOSAIC_VENV="${MOSAIC_DIR}/.venv"
     print_ok "Mosaic venv found: ${MOSAIC_VENV}"
 
-    # Clone
-    print_step "Cloning BindMaster-evaluator repository"
-    if [[ -d "${EVALUATOR_DIR}" ]]; then
-        print_warn "Directory ${EVALUATOR_DIR} already exists."
-        if confirm "Remove and reclone?"; then
-            rm -rf "${EVALUATOR_DIR}" || { print_fail "Failed to remove ${EVALUATOR_DIR}"; return 1; }
-        else
-            print_warn "Skipping reclone; using existing directory."
-        fi
-    fi
+    # Evaluator is bundled in the monorepo — verify the directory exists
     if [[ ! -d "${EVALUATOR_DIR}" ]]; then
-        git clone https://github.com/damborik22/BindMaster-evaluator "${EVALUATOR_DIR}" \
-            || { print_fail "Failed to clone BindMaster-evaluator"; return 1; }
-        print_ok "Evaluator cloned to ${EVALUATOR_DIR}"
+        print_fail "Evaluator directory not found at ${EVALUATOR_DIR}"
+        print_warn "It should be bundled in the repository. Try re-cloning BindMaster."
+        return 1
     fi
+    print_ok "Evaluator directory: ${EVALUATOR_DIR}"
 
     # Install binder-compare into Mosaic venv (Boltz-2 step)
     print_step "Installing binder-compare into Mosaic venv"
