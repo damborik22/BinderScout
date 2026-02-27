@@ -120,6 +120,205 @@ def _sequence_from_pdb(pdb_path: Path, chain_id: str = "A") -> str | None:
     return "".join(seen.values()) if seen else None
 
 
+# ─── mmCIF sequence extractor ─────────────────────────────────────────────────
+
+def _cif_tokenize(text: str) -> list:
+    """
+    Tokenize mmCIF text into a flat list of string tokens.
+    Handles:
+      - Multi-line  ;...\\n;  text fields (semicolon at line start)
+      - Single- and double-quoted inline strings
+      - Inline  #  comments
+    """
+    tokens: list = []
+    i = 0
+    n = len(text)
+
+    while i < n:
+        # Skip whitespace, track whether a newline was crossed
+        preceded_by_newline = (i == 0)
+        while i < n and text[i] in " \t\r\n":
+            if text[i] in "\r\n":
+                preceded_by_newline = True
+            i += 1
+        if i >= n:
+            break
+
+        c = text[i]
+
+        # Inline comment — skip to end of line
+        if c == "#":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+
+        # Multi-line semicolon text field — ';' must be at line start
+        if c == ";" and preceded_by_newline:
+            i += 1                              # consume opening ';'
+            while i < n and text[i] != "\n":   # skip rest of opening line
+                i += 1
+            if i < n:
+                i += 1                          # skip the newline after ';\n'
+            start = i
+            while i < n:
+                if text[i] == "\n" and i + 1 < n and text[i + 1] == ";":
+                    tokens.append(text[start:i])
+                    i += 2                      # consume '\n' + closing ';'
+                    while i < n and text[i] != "\n":
+                        i += 1                  # skip anything after closing ';'
+                    break
+                i += 1
+            else:
+                tokens.append(text[start:])     # unterminated — take rest
+            continue
+
+        # Quoted string
+        if c in "\"'":
+            q = c
+            i += 1
+            start = i
+            while i < n and text[i] != q:
+                i += 1
+            tokens.append(text[start:i])
+            if i < n:
+                i += 1                          # consume closing quote
+            continue
+
+        # Bare token
+        start = i
+        while i < n and text[i] not in " \t\r\n#":
+            i += 1
+        tokens.append(text[start:i])
+
+    return tokens
+
+
+def _sequence_from_cif(path: Path, chain_id: str = "A") -> str | None:
+    """
+    Extract the one-letter amino-acid sequence for *chain_id* from an mmCIF file.
+    Strategy:
+      1. Look for  pdbx_seq_one_letter_code_can  in an  _entity_poly  loop
+         (or as a bare key-value pair).  Match by  pdbx_strand_id  when present.
+      2. Fall back to  _atom_site  CA atoms (same logic as the PDB parser).
+    """
+    try:
+        text = path.read_text(errors="ignore")
+    except OSError:
+        return None
+
+    tokens = _cif_tokenize(text)
+    n = len(tokens)
+    chain_id_up = chain_id.upper()
+
+    # ── Pass 1: _entity_poly ──────────────────────────────────────────────────
+    i = 0
+    while i < n:
+        t_low = tokens[i].lower()
+
+        # Bare key-value (non-loop)
+        if t_low == "_entity_poly.pdbx_seq_one_letter_code_can":
+            if i + 1 < n:
+                raw = tokens[i + 1].replace("\n", "").replace(" ", "").upper()
+                if raw and raw not in (".", "?"):
+                    return raw
+            i += 1
+            continue
+
+        if t_low != "loop_":
+            i += 1
+            continue
+
+        # Read loop_ column headers
+        i += 1
+        col_names: list = []
+        while i < n and tokens[i].startswith("_"):
+            col_names.append(tokens[i].lower())
+            i += 1
+
+        if not any("_entity_poly." in c for c in col_names):
+            continue  # i already past the header; go back to outer loop
+
+        num_cols = len(col_names)
+        if num_cols == 0:
+            continue
+
+        seq_idx    = next((j for j, c in enumerate(col_names)
+                           if "pdbx_seq_one_letter_code_can" in c), None)
+        strand_idx = next((j for j, c in enumerate(col_names)
+                           if "pdbx_strand_id" in c), None)
+
+        if seq_idx is None:
+            continue
+
+        # Read data rows
+        while i + num_cols <= n:
+            t0 = tokens[i].lower()
+            if t0.startswith("_") or t0 in ("loop_", "data_", "save_"):
+                break
+            row = tokens[i: i + num_cols]
+            raw = row[seq_idx].replace("\n", "").replace(" ", "").upper()
+            if raw and raw not in (".", "?"):
+                if strand_idx is None:
+                    return raw  # single entity — take it
+                strands = [s.strip().upper() for s in row[strand_idx].split(",")]
+                if chain_id_up in strands:
+                    return raw
+            i += num_cols
+
+    # ── Pass 2: _atom_site CA fallback ───────────────────────────────────────
+    i = 0
+    while i < n:
+        if tokens[i].lower() != "loop_":
+            i += 1
+            continue
+        i += 1
+        col_names = []
+        while i < n and tokens[i].startswith("_"):
+            col_names.append(tokens[i].lower())
+            i += 1
+
+        if not any("_atom_site." in c for c in col_names):
+            continue
+
+        col = {c: ci for ci, c in enumerate(col_names)}
+        atom_col    = col.get("_atom_site.label_atom_id")
+        chain_col   = col.get("_atom_site.auth_asym_id") or col.get("_atom_site.label_asym_id")
+        res_col     = col.get("_atom_site.label_comp_id")
+        seqn_col    = col.get("_atom_site.auth_seq_id")   or col.get("_atom_site.label_seq_id")
+        ins_col     = col.get("_atom_site.pdbx_pdb_ins_code")
+
+        if None in (atom_col, chain_col, res_col, seqn_col):
+            continue
+
+        num_cols = len(col_names)
+        seen: dict = {}
+        while i + num_cols <= n:
+            t0 = tokens[i].lower()
+            if t0.startswith("_") or t0 in ("loop_", "data_", "save_"):
+                break
+            row = tokens[i: i + num_cols]
+            if row[atom_col].strip() == "CA" and row[chain_col].strip().upper() == chain_id_up:
+                res  = row[res_col].strip().upper()
+                seqn = row[seqn_col].strip()
+                ins  = row[ins_col].strip() if ins_col is not None else ""
+                key  = (seqn, ins)
+                if key not in seen:
+                    seen[key] = _AA3TO1.get(res, "X")
+            i += num_cols
+
+        if seen:
+            return "".join(seen.values())
+
+    return None
+
+
+def _sequence_from_structure(path: Path, chain_id: str = "A") -> str | None:
+    """Dispatch to the CIF or PDB extractor based on file extension."""
+    if path.suffix.lower() in (".cif", ".mmcif"):
+        return _sequence_from_cif(path, chain_id)
+    return _sequence_from_pdb(path, chain_id)
+
+
 # ─── Output parsers (one per tool) ────────────────────────────────────────────
 
 def _parse_mosaic(run_dir: Path) -> list:
@@ -390,8 +589,9 @@ def _make_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         metavar="PDB",
-        help="Target PDB file. Used to extract the target sequence for re-folding "
-             "complex predictions. Auto-detected from run-dir/target/*.pdb if omitted.",
+        help="Target PDB or CIF file. Used to extract the target sequence for "
+             "re-folding complex predictions. "
+             "Auto-detected from run-dir/target/*.pdb or *.cif if omitted.",
     )
     return parser
 
@@ -414,7 +614,7 @@ def main():
 
         target_seq = None
         if args.target and args.target.exists():
-            target_seq = _sequence_from_pdb(args.target, "A")
+            target_seq = _sequence_from_structure(args.target, "A")
             if target_seq:
                 _print_ok(f"Target sequence: {len(target_seq)} aa from {args.target.name}")
 
@@ -482,14 +682,14 @@ def main():
     if target_pdb is None:
         target_dir = run_dir / "target"
         if target_dir.exists():
-            pdbs = sorted(target_dir.glob("*.pdb"))
-            if pdbs:
-                target_pdb = pdbs[0]
-                _print_ok(f"Auto-detected target PDB: {target_pdb.name}")
+            structs = sorted(target_dir.glob("*.pdb")) + sorted(target_dir.glob("*.cif"))
+            if structs:
+                target_pdb = structs[0]
+                _print_ok(f"Auto-detected target structure: {target_pdb.name}")
 
     target_seq = None
     if target_pdb and target_pdb.exists():
-        target_seq = _sequence_from_pdb(target_pdb, "A")
+        target_seq = _sequence_from_structure(target_pdb, "A")
         if target_seq:
             _print_ok(f"Target sequence: {len(target_seq)} aa")
     if target_seq is None:
