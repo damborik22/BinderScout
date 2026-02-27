@@ -1,0 +1,13 @@
+.git
+.venv
+__pycache__
+*.pyc
+runs/
+install.log
+install_aarch.log
+.claude/
+BindCraft/
+BoltzGen/
+Mosaic/
+tools/aarch64/*.gcc
+*.egg-info
