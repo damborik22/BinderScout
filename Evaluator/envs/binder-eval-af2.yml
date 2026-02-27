@@ -1,0 +1,14 @@
+name: binder-eval-af2
+# AlphaFold2 refolding step.
+# Used for: binder-compare refold-af2
+# Requires Python 3.10 and ColabDesign — incompatible with Boltz-2 JAX version.
+# AF2 weights (~4 GB) must be downloaded separately; set AF2_DATA_DIR accordingly.
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - colabdesign==1.1.1
+    - binder-comparison[af2]
