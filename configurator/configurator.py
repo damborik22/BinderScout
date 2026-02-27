@@ -4,8 +4,9 @@ BindMaster Configurator — interactive CLI wizard for setting up
 protein binder design runs (Mosaic → BoltzGen → BindCraft).
 
 Usage:
-    python configurator.py
-    bindmaster-config          # via shortcut
+    bindmaster configure        # via unified CLI
+    bindmaster-config           # via legacy shortcut
+    python configurator/configurator.py  # directly
 """
 
 import json
@@ -62,19 +63,28 @@ def _find_conda_base() -> Path | None:
 
 def _find_bindmaster_dir() -> Path:
     """
-    Find the BindMaster installer directory (the one containing install.sh
+    Find the BindMaster repo root (the one containing install/install.sh
     and the cloned tool subdirectories).
 
     Search order:
       1. BINDMASTER_DIR environment variable
-      2. This script's own parent (if configurator lives inside the installer repo)
-      3. Sibling / standard locations containing install.sh
-      4. Fallback: this script's parent
+      2. Parent of this script (new layout: configurator/configurator.py)
+      3. This script's own dir (legacy: configurator.py at repo root)
+      4. Sibling / standard locations
+      5. Fallback: parent of this script
     """
     if env := os.environ.get("BINDMASTER_DIR"):
         return Path(env).expanduser()
     script_parent = Path(__file__).resolve().parent
+    # New layout: configurator lives in configurator/ subdir
+    if (script_parent.parent / "bindmaster.py").exists():
+        return script_parent.parent
+    if (script_parent.parent / "install" / "install.sh").exists():
+        return script_parent.parent
+    # Legacy: configurator at repo root
     if (script_parent / "install.sh").exists():
+        return script_parent
+    if (script_parent / "install" / "install.sh").exists():
         return script_parent
     for candidate in [
         script_parent.parent / "BindMaster-installator",
@@ -82,9 +92,11 @@ def _find_bindmaster_dir() -> Path:
         Path.home() / "BindMaster-installator",
         Path.home() / "BindMaster",
     ]:
+        if (candidate / "install" / "install.sh").exists():
+            return candidate
         if (candidate / "install.sh").exists():
             return candidate
-    return script_parent  # best-effort fallback
+    return script_parent.parent  # best-effort fallback
 
 
 # ─── Paths ───────────────────────────────────────────────────────────────────
@@ -153,8 +165,8 @@ def banner():
     if CONDA_BASE is None:
         print_warn("conda/mamba not found. Install detection will be disabled.")
         print()
-    if not (BINDMASTER_DIR / "install.sh").exists():
-        print_warn(f"install.sh not found in {BINDMASTER_DIR}")
+    if not (BINDMASTER_DIR / "install" / "install.sh").exists():
+        print_warn(f"install/install.sh not found in {BINDMASTER_DIR}")
         print(f"  Set {YELLOW}BINDMASTER_DIR{RESET} env var to the correct path if tools are elsewhere.")
         print()
 
@@ -563,7 +575,7 @@ MOSAIC_DIR="{run_dir}/mosaic"
 
 if [[ ! -x "$MOSAIC_PYTHON" ]]; then
     echo "ERROR: Mosaic uv venv not found at $MOSAIC_PYTHON" >&2
-    echo "Run: bash {BINDMASTER_DIR}/install.sh --tool mosaic" >&2
+    echo "Run: bindmaster install --tool mosaic  (or: bash {BINDMASTER_DIR}/install/install.sh --tool mosaic)" >&2
     exit 1
 fi
 
@@ -815,7 +827,7 @@ def wizard():
     def _tag(key):
         if installed[key]:
             return f"{GREEN}installed{RESET}"
-        return f"{RED}NOT installed — run install.sh first{RESET}"
+        return f"{RED}NOT installed — run: bindmaster install{RESET}"
 
     print(f"  {BOLD}Mosaic{RESET}    [{_tag('mosaic')}]")
     use_mosaic = ask_yn("  Enable Mosaic?", default=False)

@@ -3,13 +3,14 @@
 # Installs BindCraft, BoltzGen, and/or Mosaic protein design tools.
 #
 # Usage:
-#   ./install.sh [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples]
+#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples]
+#   bindmaster install [same options]
 #
 # With no --tool flag, an interactive menu lets you choose which tools to install.
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-# BINDMASTER_DIR is wherever this script lives — works on any machine.
-BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# BINDMASTER_DIR is the repo root (one level above install/).
+BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHORTCUTS_DIR="${HOME}/.local/bin"
 LOG_FILE="${BINDMASTER_DIR}/install.log"
 
