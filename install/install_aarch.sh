@@ -7,13 +7,13 @@
 # read from TOOLS_DIR to avoid redundant downloads.
 #
 # Usage:
-#   ./install_aarch.sh [--tool bindcraft|boltzgen|mosaic|all] [--tools-dir PATH] [--skip-examples]
+#   bash install/install_aarch.sh [--tool bindcraft|boltzgen|mosaic|all] [--tools-dir PATH] [--skip-examples]
 #
 # --tools-dir: path to pre-cached resources. Defaults to the sibling
 #              Documents/OLD/BindMaster/bindcraft-tools directory.
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHORTCUTS_DIR="${HOME}/.local/bin"
 LOG_FILE="${BINDMASTER_DIR}/install_aarch.log"
 
