@@ -1061,5 +1061,5 @@ if __name__ == "__main__":
     try:
         wizard()
     except KeyboardInterrupt:
-        print(f"\n\n  {YELLOW}Interrupted.{RESET} No files were written.")
+        print(f"\n\n  {YELLOW}Interrupted.{RESET} Some files may have been partially written.")
         sys.exit(1)
