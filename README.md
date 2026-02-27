@@ -10,11 +10,30 @@ A unified installer for three GPU-accelerated protein design tools:
 
 ---
 
+## Platform support
+
+| Branch | Architecture | Hardware |
+|---|---|---|
+| `master` | x86_64 | Standard Linux workstations and servers |
+| `aarch64` | aarch64 / ARM64 | NVIDIA DGX Spark (Grace-Hopper), other ARM servers |
+
+```bash
+# x86_64 (default)
+git clone https://github.com/damborik22/BindMaster-installator.git
+cd BindMaster-installator
+
+# aarch64 / DGX Spark
+git clone -b aarch64 https://github.com/damborik22/BindMaster-installator.git
+cd BindMaster-installator
+```
+
+---
+
 ## Requirements
 
 - Linux with an NVIDIA GPU
 - CUDA driver ≥ 12.1
-- Miniconda/Anaconda installed at `~/miniconda3`
+- Miniconda, Anaconda, Mambaforge, or Miniforge (installer detects location automatically)
 - `git` available in PATH
 - ~60 GB free disk space (conda envs + model weights)
 - Stable internet connection
