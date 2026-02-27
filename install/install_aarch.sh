@@ -20,6 +20,7 @@ LOG_FILE="${BINDMASTER_DIR}/install_aarch.log"
 BINDCRAFT_DIR="${BINDMASTER_DIR}/BindCraft"
 BOLTZGEN_DIR="${BINDMASTER_DIR}/BoltzGen"
 MOSAIC_DIR="${BINDMASTER_DIR}/Mosaic"
+EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
 
 ARCH="$(uname -m)"     # expected: aarch64
 CUDA_VERSION="12.1"    # DGX Spark GB10 / GH200
@@ -46,6 +47,7 @@ TOOL_SPECIFIED=false
 DO_BINDCRAFT=false
 DO_BOLTZGEN=false
 DO_MOSAIC=false
+DO_EVALUATOR=false
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -53,12 +55,13 @@ while [[ $# -gt 0 ]]; do
         --tool)
             TOOL_SPECIFIED=true
             case "${2,,}" in
-                all)       DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true ;;
+                all)       DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true ;;
                 bindcraft) DO_BINDCRAFT=true ;;
                 boltzgen)  DO_BOLTZGEN=true ;;
                 mosaic)    DO_MOSAIC=true ;;
+                evaluator) DO_EVALUATOR=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool: $2. Must be: all, bindcraft, boltzgen, mosaic${RESET}"
+                    echo -e "${RED}Invalid --tool: $2. Must be: all, bindcraft, boltzgen, mosaic, evaluator${RESET}"
                     exit 1 ;;
             esac
             shift 2
@@ -77,7 +80,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--tool all|bindcraft|boltzgen|mosaic] [--tools-dir PATH] [--skip-examples] [--yes]
+Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--tools-dir PATH] [--skip-examples] [--yes]
 
 DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. All tools are bundled — no git clones needed.
 
@@ -240,11 +243,12 @@ check_tools_dir() {
 is_bindcraft_installed() { [[ -d "${BINDCRAFT_DIR}" ]] && env_exists BindCraft; }
 is_boltzgen_installed()  { [[ -d "${BOLTZGEN_DIR}" ]]  && env_exists BoltzGen; }
 is_mosaic_installed()    { [[ -d "${MOSAIC_DIR}" ]]    && [[ -d "${MOSAIC_DIR}/.venv" ]]; }
+is_evaluator_installed() { [[ -d "${EVALUATOR_DIR}" ]] && [[ -f "${EVALUATOR_DIR}/envs/mosaic_venv_path" ]]; }
 
 print_tool_status() {
     echo ""
     echo -e "${BOLD}=== Current Install Status ===${RESET}"
-    for _tool in BindCraft BoltzGen Mosaic; do
+    for _tool in BindCraft BoltzGen Mosaic Evaluator; do
         local _icon _status
         if "is_${_tool,,}_installed" 2>/dev/null; then
             _icon="${GREEN}✓${RESET}"; _status="${GREEN}installed${RESET}"
@@ -259,25 +263,27 @@ print_tool_status() {
 # ─── Interactive Menu ─────────────────────────────────────────────────────────
 
 select_tools_interactive() {
-    local sel_bc=true sel_bg=true sel_mo=true
-    local tools=("BindCraft" "BoltzGen" "Mosaic")
+    local sel_bc=true sel_bg=true sel_mo=true sel_ev=true
+    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator")
     local descs=(
         "Binder design via AlphaFold2 (mamba env, Python 3.10)"
         "Structure generation with Boltz-1 (mamba env, Python 3.12)"
         "JAX-based multi-objective design with Marimo notebooks (uv venv)"
+        "Evaluate binders: refold with Boltz-2 + AF2, ranked report (requires Mosaic)"
     )
 
-    local inst_bc inst_bg inst_mo
-    is_bindcraft_installed && inst_bc="${GREEN}installed${RESET}"   || inst_bc="${YELLOW}not installed${RESET}"
-    is_boltzgen_installed  && inst_bg="${GREEN}installed${RESET}"   || inst_bg="${YELLOW}not installed${RESET}"
-    is_mosaic_installed    && inst_mo="${GREEN}installed${RESET}"   || inst_mo="${YELLOW}not installed${RESET}"
-    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo")
+    local inst_bc inst_bg inst_mo inst_ev
+    is_bindcraft_installed  && inst_bc="${GREEN}installed${RESET}"   || inst_bc="${YELLOW}not installed${RESET}"
+    is_boltzgen_installed   && inst_bg="${GREEN}installed${RESET}"   || inst_bg="${YELLOW}not installed${RESET}"
+    is_mosaic_installed     && inst_mo="${GREEN}installed${RESET}"   || inst_mo="${YELLOW}not installed${RESET}"
+    is_evaluator_installed  && inst_ev="${GREEN}installed${RESET}"   || inst_ev="${YELLOW}not installed${RESET}"
+    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev")
 
     _print_menu() {
         echo ""; echo -e "${BOLD}${CYAN}  Select tools to install${RESET}"
         echo -e "  Type a number to toggle, then press Enter when done."; echo ""
-        local states=("$sel_bc" "$sel_bg" "$sel_mo")
-        for i in 0 1 2; do
+        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev")
+        for i in 0 1 2 3; do
             local box
             [[ "${states[$i]}" == true ]] && box="${GREEN}[x]${RESET}" || box="${RED}[ ]${RESET}"
             printf "    %d)  %b  ${BOLD}%-12s${RESET}  %-35b  %s\n" \
@@ -292,21 +298,23 @@ select_tools_interactive() {
             1) [[ "$sel_bc" == true ]] && sel_bc=false || sel_bc=true ;;
             2) [[ "$sel_bg" == true ]] && sel_bg=false || sel_bg=true ;;
             3) [[ "$sel_mo" == true ]] && sel_mo=false || sel_mo=true ;;
-            a) sel_bc=true; sel_bg=true; sel_mo=true ;;
-            n) sel_bc=false; sel_bg=false; sel_mo=false ;;
+            4) [[ "$sel_ev" == true ]] && sel_ev=false || sel_ev=true ;;
+            a) sel_bc=true; sel_bg=true; sel_mo=true; sel_ev=true ;;
+            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false ;;
             "")
-                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false ]]; then
+                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false ]]; then
                     echo -e "  ${RED}No tools selected.${RESET}"; continue
                 fi; break ;;
-            *) echo -e "  ${RED}Invalid input. Enter 1, 2, 3, a, n, or press Enter.${RESET}" ;;
+            *) echo -e "  ${RED}Invalid input. Enter 1–4, a, n, or press Enter.${RESET}" ;;
         esac
     done
 
-    DO_BINDCRAFT="$sel_bc"; DO_BOLTZGEN="$sel_bg"; DO_MOSAIC="$sel_mo"
+    DO_BINDCRAFT="$sel_bc"; DO_BOLTZGEN="$sel_bg"; DO_MOSAIC="$sel_mo"; DO_EVALUATOR="$sel_ev"
     echo ""; echo -e "  ${BOLD}Installing:${RESET}"
-    [[ "$DO_BINDCRAFT" == true ]] && echo -e "    ${GREEN}✓${RESET} BindCraft"
-    [[ "$DO_BOLTZGEN"  == true ]] && echo -e "    ${GREEN}✓${RESET} BoltzGen"
-    [[ "$DO_MOSAIC"    == true ]] && echo -e "    ${GREEN}✓${RESET} Mosaic"
+    [[ "$DO_BINDCRAFT"  == true ]] && echo -e "    ${GREEN}✓${RESET} BindCraft"
+    [[ "$DO_BOLTZGEN"   == true ]] && echo -e "    ${GREEN}✓${RESET} BoltzGen"
+    [[ "$DO_MOSAIC"     == true ]] && echo -e "    ${GREEN}✓${RESET} Mosaic"
+    [[ "$DO_EVALUATOR"  == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
     echo ""; confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
 }
 
@@ -780,6 +788,95 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/mosaic"
 }
 
+# ─── Evaluator ─────────────────────────────────────────────────────────────
+
+install_evaluator() {
+    print_step "Installing Evaluator"
+    ensure_conda_in_path
+
+    # Mosaic must be installed first — we use its venv for Boltz-2
+    if ! is_mosaic_installed; then
+        print_fail "Mosaic must be installed before the Evaluator (provides the Boltz-2 venv)."
+        print_warn "Run: bash install_aarch.sh --tool mosaic"
+        return 1
+    fi
+    MOSAIC_VENV="${MOSAIC_DIR}/.venv"
+    print_ok "Mosaic venv found: ${MOSAIC_VENV}"
+
+    # Evaluator is bundled in the monorepo — verify the directory exists
+    if [[ ! -d "${EVALUATOR_DIR}" ]]; then
+        print_fail "Evaluator directory not found at ${EVALUATOR_DIR}"
+        print_warn "It should be bundled in the repository. Try re-cloning BindMaster."
+        return 1
+    fi
+    print_ok "Evaluator directory: ${EVALUATOR_DIR}"
+
+    # Install binder-compare into Mosaic venv (Boltz-2 step)
+    print_step "Installing binder-compare into Mosaic venv"
+    run_logged "pip install binder-compare into Mosaic venv" \
+        "${MOSAIC_VENV}/bin/pip" install -q -e "${EVALUATOR_DIR}[boltz2]" \
+        || { print_fail "Failed to install binder-compare into Mosaic venv"; return 1; }
+
+    # Save the venv path so evaluate.sh can find it
+    mkdir -p "${EVALUATOR_DIR}/envs"
+    echo "${MOSAIC_VENV}" > "${EVALUATOR_DIR}/envs/mosaic_venv_path"
+    print_ok "Mosaic venv path saved → ${EVALUATOR_DIR}/envs/mosaic_venv_path"
+
+    # binder-eval conda env (parse-seqs + report — lightweight, no ML)
+    print_step "Creating binder-eval conda environment (Python 3.10)"
+    if env_exists binder-eval; then
+        print_warn "Conda environment 'binder-eval' already exists — skipping creation."
+    else
+        run_logged "Creating binder-eval conda env" \
+            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval.yml" -y \
+            || { print_fail "Failed to create binder-eval conda env"; return 1; }
+    fi
+    run_logged "Installing binder-compare into binder-eval" \
+        "${CONDA_CMD}" run -n binder-eval pip install -q -e "${EVALUATOR_DIR}[report]" \
+        || { print_fail "Failed to install binder-compare into binder-eval"; return 1; }
+
+    # binder-eval-af2 conda env (AF2 refolding via ColabDesign)
+    print_step "Creating binder-eval-af2 conda environment (Python 3.10)"
+    if env_exists binder-eval-af2; then
+        print_warn "Conda environment 'binder-eval-af2' already exists — skipping creation."
+    else
+        run_logged "Creating binder-eval-af2 conda env" \
+            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval-af2.yml" -y \
+            || { print_fail "Failed to create binder-eval-af2 conda env"; return 1; }
+    fi
+    run_logged "Installing ColabDesign + binder-compare into binder-eval-af2" \
+        "${CONDA_CMD}" run -n binder-eval-af2 pip install -q colabdesign==1.1.1 -e "${EVALUATOR_DIR}[af2]" \
+        || { print_fail "Failed to install packages into binder-eval-af2"; return 1; }
+
+    # Smoke test
+    smoke_test "binder-compare --help" \
+        "${CONDA_CMD}" run -n binder-eval binder-compare --help \
+        || return 1
+
+    # Shortcut
+    print_step "Installing evaluate shortcut"
+    _write_evaluator_shortcut
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/evaluate"
+
+    print_ok "Evaluator installation complete"
+    print_ok "  AF2 weights (~4 GB) must be at \$AF2_DATA_DIR — see Evaluator/docs/pipeline_reference.md"
+}
+
+_write_evaluator_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# BindMaster Evaluator shortcut — launches the interactive evaluation wizard."
+        echo ""
+        echo "EVALUATOR_DIR=\"${EVALUATOR_DIR}\""
+    } > "${SHORTCUTS_DIR}/evaluate"
+    cat >> "${SHORTCUTS_DIR}/evaluate" << 'EOF'
+
+exec bash "${EVALUATOR_DIR}/run.sh"
+EOF
+    chmod +x "${SHORTCUTS_DIR}/evaluate"
+}
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 main() {
@@ -808,6 +905,7 @@ main() {
     [[ "${DO_BINDCRAFT}" == true ]] && { install_bindcraft || failed_tools+=("BindCraft"); }
     [[ "${DO_BOLTZGEN}"  == true ]] && { install_boltzgen  || failed_tools+=("BoltzGen");  }
     [[ "${DO_MOSAIC}"    == true ]] && { install_mosaic    || failed_tools+=("Mosaic");    }
+    [[ "${DO_EVALUATOR}" == true ]] && { install_evaluator || failed_tools+=("Evaluator"); }
 
     echo ""; echo -e "${BOLD}=== Installation Summary ===${RESET}"
 
@@ -826,6 +924,7 @@ main() {
     [[ "${DO_BINDCRAFT}" == true ]] && echo -e "  ${GREEN}bindcraft${RESET}  — open BindCraft shell"
     [[ "${DO_BOLTZGEN}"  == true ]] && echo -e "  ${GREEN}boltzgen${RESET}   — open BoltzGen shell"
     [[ "${DO_MOSAIC}"    == true ]] && echo -e "  ${GREEN}mosaic${RESET}     — open Mosaic shell"
+    [[ "${DO_EVALUATOR}" == true ]] && echo -e "  ${GREEN}evaluate${RESET}   — launch evaluation wizard"
     echo ""; echo -e "Full log: ${LOG_FILE}"
 
     [[ ${#failed_tools[@]} -gt 0 ]] && exit 1 || exit 0
