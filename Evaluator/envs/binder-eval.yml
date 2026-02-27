@@ -1,0 +1,11 @@
+name: binder-eval
+# Extract sequences and generate reports — no heavy ML dependencies.
+# Used for: binder-compare extract, binder-compare report
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - binder-comparison[report]
