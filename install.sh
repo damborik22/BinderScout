@@ -212,6 +212,37 @@ detect_conda() {
     return 1
 }
 
+# ─── Install Status Checks ────────────────────────────────────────────────────
+
+is_bindcraft_installed() {
+    [[ -d "${BINDCRAFT_DIR}" ]] && env_exists BindCraft
+}
+
+is_boltzgen_installed() {
+    [[ -d "${BOLTZGEN_DIR}" ]] && env_exists BoltzGen
+}
+
+is_mosaic_installed() {
+    [[ -d "${MOSAIC_DIR}" ]] && [[ -d "${MOSAIC_DIR}/.venv" ]]
+}
+
+# print_tool_status
+# Shows installed/not-installed for each tool.
+print_tool_status() {
+    echo ""
+    echo -e "${BOLD}=== Installed Tools ===${RESET}"
+    local _status _icon
+    for _tool in BindCraft BoltzGen Mosaic; do
+        if "is_${_tool,,}_installed" 2>/dev/null; then
+            _icon="${GREEN}✓${RESET}"; _status="installed"
+        else
+            _icon="${RED}✗${RESET}"; _status="not installed"
+        fi
+        printf "  %b  %-12s  %s\n" "${_icon}" "${_tool}" "${_status}"
+    done
+    echo ""
+}
+
 # ─── Interactive Tool Selection ───────────────────────────────────────────────
 # Called when no --tool flag was supplied. Displays a toggle menu; sets
 # DO_BINDCRAFT / DO_BOLTZGEN / DO_MOSAIC based on user choices.
@@ -229,6 +260,13 @@ select_tools_interactive() {
         "JAX-based protein design with Marimo notebooks (uv venv)"
     )
 
+    # Check current install state once (avoid repeated conda calls in the loop)
+    local inst_bc inst_bg inst_mo
+    is_bindcraft_installed && inst_bc="${GREEN}installed${RESET}" || inst_bc="${YELLOW}not installed${RESET}"
+    is_boltzgen_installed  && inst_bg="${GREEN}installed${RESET}" || inst_bg="${YELLOW}not installed${RESET}"
+    is_mosaic_installed    && inst_mo="${GREEN}installed${RESET}" || inst_mo="${YELLOW}not installed${RESET}"
+    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo")
+
     # Helper: print current state
     _print_menu() {
         echo ""
@@ -237,14 +275,14 @@ select_tools_interactive() {
         echo ""
         local states=("$sel_bc" "$sel_bg" "$sel_mo")
         for i in 0 1 2; do
-            local mark box
+            local box
             if [[ "${states[$i]}" == true ]]; then
                 box="${GREEN}[x]${RESET}"
             else
                 box="${RED}[ ]${RESET}"
             fi
-            printf "    %d)  %b  ${BOLD}%-12s${RESET}  %s\n" \
-                $((i+1)) "$box" "${tools[$i]}" "${descs[$i]}"
+            printf "    %d)  %b  ${BOLD}%-12s${RESET}  %-35b  %s\n" \
+                $((i+1)) "$box" "${tools[$i]}" "${inst_states[$i]}" "${descs[$i]}"
         done
         echo ""
         echo -e "  ${YELLOW}a${RESET}) Select all   ${YELLOW}n${RESET}) Select none   ${YELLOW}Enter${RESET} to confirm"
@@ -650,6 +688,8 @@ main() {
 
     detect_conda || exit 1
     print_ok "Conda found at: ${CONDA_BASE}"
+
+    print_tool_status
 
     # Show interactive menu if no --tool was given
     if [[ "${TOOL_SPECIFIED}" == false ]]; then
