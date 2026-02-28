@@ -19,6 +19,11 @@ BOLTZGEN_DIR="${BINDMASTER_DIR}/BoltzGen"
 MOSAIC_DIR="${BINDMASTER_DIR}/Mosaic"
 EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
 
+# Pinned commits for reproducible installs (x86_64 clones only; aarch64 uses bundled)
+BINDCRAFT_COMMIT="828fd9f"
+BOLTZGEN_COMMIT="da0f092"
+MOSAIC_COMMIT="dc9c4d7"
+
 CONDA_CMD=""          # set by detect_conda: full path to mamba (preferred) or conda
 ARCH="$(uname -m)"   # x86_64 or aarch64 (e.g. DGX Spark / Grace-Hopper)
 
@@ -34,6 +39,7 @@ RESET='\033[0m'
 CUDA_VERSION="12.4"
 SKIP_EXAMPLES=false
 AUTO_YES=false
+UNINSTALL_MODE=false
 TOOL_SPECIFIED=false   # set to true when --tool is passed on CLI
 
 # Per-tool install flags (set by arg parsing or interactive menu)
@@ -77,15 +83,22 @@ while [[ $# -gt 0 ]]; do
             AUTO_YES=true
             shift
             ;;
+        --uninstall)
+            UNINSTALL_MODE=true
+            shift
+            ;;
         -h|--help)
             cat <<EOF
 Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--cuda VERSION] [--skip-examples] [--yes]
+       $0 --uninstall --tool <tool|all> [--yes]
 
-  --tool        Which tool(s) to install. Omit for interactive selection.
+  --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
   --cuda        CUDA version for conda package resolution (default: 12.4).
   --skip-examples
                 Do not prompt to run bundled examples after install.
   --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
+  --uninstall   Remove conda envs, venvs, and shortcuts for selected tool(s).
+                Never removes runs/, configs, or log files.
 EOF
             exit 0
             ;;
@@ -120,11 +133,16 @@ print_fail() {
     echo -e "${RED}✗ $1${RESET}"
 }
 
-# run_logged <label> <command...>
+# run_logged [--retries N] <label> <command...>
 # Runs a verbose command showing only a spinner on the terminal.
 # All output is written to LOG_FILE only. On failure the last 30 lines
 # are printed to the terminal for diagnosis.
+# Optional --retries N retries the command up to N times with linear backoff.
 run_logged() {
+    local retries=1
+    if [[ "$1" == "--retries" ]]; then
+        retries="$2"; shift 2
+    fi
     local label="$1"
     shift
     local tmpfile
@@ -134,21 +152,31 @@ run_logged() {
     local has_tty=false
     { true >/dev/tty; } 2>/dev/null && has_tty=true
 
-    "$@" >> "${tmpfile}" 2>&1 &
-    local pid=$!
+    local rc=0
+    for attempt in $(seq 1 "${retries}"); do
+        > "${tmpfile}"   # truncate on each attempt
+        "$@" >> "${tmpfile}" 2>&1 &
+        local pid=$!
 
-    local frames='/-\|'
-    local i=0
-    if [[ "${has_tty}" == true ]]; then
-        while kill -0 "${pid}" 2>/dev/null; do
-            printf "\r  ${CYAN}%s${RESET}  %s" "${frames:$((i % 4)):1}" "${label}" >/dev/tty
-            sleep 0.15
-            (( i++ ))
-        done
-        printf "\r\033[K" >/dev/tty   # clear spinner line
-    fi
-    wait "${pid}"
-    local rc=$?
+        local frames='/-\|'
+        local i=0
+        if [[ "${has_tty}" == true ]]; then
+            while kill -0 "${pid}" 2>/dev/null; do
+                printf "\r  ${CYAN}%s${RESET}  %s" "${frames:$((i % 4)):1}" "${label}" >/dev/tty
+                sleep 0.15
+                (( i++ ))
+            done
+            printf "\r\033[K" >/dev/tty   # clear spinner line
+        fi
+        wait "${pid}"
+        rc=$?
+
+        if [[ ${rc} -eq 0 ]]; then break; fi
+        if [[ ${attempt} -lt ${retries} ]]; then
+            print_warn "${label} — attempt ${attempt}/${retries} failed, retrying..."
+            sleep $((attempt * 2))
+        fi
+    done
 
     cat "${tmpfile}" >> "${LOG_FILE}" 2>/dev/null
 
@@ -424,9 +452,11 @@ install_bindcraft() {
         fi
     fi
     if [[ ! -d "${BINDCRAFT_DIR}" ]]; then
-        git clone https://github.com/martinpacesa/BindCraft "${BINDCRAFT_DIR}" \
+        run_logged --retries 3 "Cloning BindCraft" \
+            git clone --depth 50 https://github.com/martinpacesa/BindCraft "${BINDCRAFT_DIR}" \
             || { print_fail "Failed to clone BindCraft"; return 1; }
-        print_ok "BindCraft cloned to ${BINDCRAFT_DIR}"
+        git -C "${BINDCRAFT_DIR}" checkout "${BINDCRAFT_COMMIT}" --quiet \
+            || print_warn "Could not pin BindCraft to ${BINDCRAFT_COMMIT} — using latest"
     fi
 
     # Fix Colab paths in target settings
@@ -534,9 +564,11 @@ install_boltzgen() {
         fi
     fi
     if [[ ! -d "${BOLTZGEN_DIR}" ]]; then
-        git clone https://github.com/HannesStark/boltzgen "${BOLTZGEN_DIR}" \
+        run_logged --retries 3 "Cloning BoltzGen" \
+            git clone --depth 50 https://github.com/HannesStark/boltzgen "${BOLTZGEN_DIR}" \
             || { print_fail "Failed to clone BoltzGen"; return 1; }
-        print_ok "BoltzGen cloned to ${BOLTZGEN_DIR}"
+        git -C "${BOLTZGEN_DIR}" checkout "${BOLTZGEN_COMMIT}" --quiet \
+            || print_warn "Could not pin BoltzGen to ${BOLTZGEN_COMMIT} — using latest"
     fi
 
     # Conda environment
@@ -657,9 +689,11 @@ install_mosaic() {
         fi
     fi
     if [[ ! -d "${MOSAIC_DIR}" ]]; then
-        git clone https://github.com/escalante-bio/mosaic "${MOSAIC_DIR}" \
+        run_logged --retries 3 "Cloning Mosaic" \
+            git clone --depth 50 https://github.com/escalante-bio/mosaic "${MOSAIC_DIR}" \
             || { print_fail "Failed to clone Mosaic"; return 1; }
-        print_ok "Mosaic cloned to ${MOSAIC_DIR}"
+        git -C "${MOSAIC_DIR}" checkout "${MOSAIC_COMMIT}" --quiet \
+            || print_warn "Could not pin Mosaic to ${MOSAIC_COMMIT} — using latest"
     fi
 
     # Ensure uv is available
@@ -853,6 +887,66 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/evaluate"
 }
 
+# ─── Uninstall ─────────────────────────────────────────────────────────────────
+
+uninstall_tool() {
+    local tool="${1,,}"
+    case "${tool}" in
+        bindcraft)
+            print_step "Uninstalling BindCraft"
+            env_exists BindCraft && run_logged "Removing BindCraft conda env" \
+                "${CONDA_CMD}" env remove -n BindCraft -y
+            rm -f "${SHORTCUTS_DIR}/bindcraft"
+            # x86_64: cloned dir can be removed (not bundled)
+            if [[ -d "${BINDCRAFT_DIR}" ]]; then
+                rm -rf "${BINDCRAFT_DIR}"
+                print_ok "Removed ${BINDCRAFT_DIR}"
+            fi
+            print_ok "BindCraft uninstalled"
+            ;;
+        boltzgen)
+            print_step "Uninstalling BoltzGen"
+            env_exists BoltzGen && run_logged "Removing BoltzGen conda env" \
+                "${CONDA_CMD}" env remove -n BoltzGen -y
+            rm -f "${SHORTCUTS_DIR}/boltzgen"
+            # x86_64: cloned dir can be removed (not bundled)
+            if [[ -d "${BOLTZGEN_DIR}" ]]; then
+                rm -rf "${BOLTZGEN_DIR}"
+                print_ok "Removed ${BOLTZGEN_DIR}"
+            fi
+            print_ok "BoltzGen uninstalled"
+            ;;
+        mosaic)
+            print_step "Uninstalling Mosaic"
+            if [[ -d "${MOSAIC_DIR}/.venv" ]]; then
+                rm -rf "${MOSAIC_DIR}/.venv"
+                print_ok "Removed Mosaic .venv"
+            fi
+            rm -f "${SHORTCUTS_DIR}/mosaic"
+            # x86_64: cloned dir can be removed (not bundled)
+            if [[ -d "${MOSAIC_DIR}" ]]; then
+                rm -rf "${MOSAIC_DIR}"
+                print_ok "Removed ${MOSAIC_DIR}"
+            fi
+            print_ok "Mosaic uninstalled"
+            ;;
+        evaluator)
+            print_step "Uninstalling Evaluator"
+            env_exists binder-eval && run_logged "Removing binder-eval conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval -y
+            env_exists binder-eval-af2 && run_logged "Removing binder-eval-af2 conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-af2 -y
+            rm -f "${EVALUATOR_DIR}/envs/mosaic_venv_path"
+            rm -f "${SHORTCUTS_DIR}/evaluate"
+            print_ok "Evaluator uninstalled"
+            ;;
+        *)
+            print_fail "Unknown tool: ${tool}"
+            return 1
+            ;;
+    esac
+}
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 main() {
@@ -873,24 +967,58 @@ main() {
         print_warn "  Mosaic:    may fail — torchtext has no Linux aarch64 wheel."
     fi
 
-
     print_tool_status
 
     # Show interactive menu if no --tool was given
     if [[ "${TOOL_SPECIFIED}" == false ]]; then
+        if [[ "${UNINSTALL_MODE}" == true ]]; then
+            print_fail "--uninstall requires --tool <tool|all>"
+            exit 1
+        fi
         select_tools_interactive
     fi
 
+    # ── Uninstall mode ───────────────────────────────────────────────────────
+    if [[ "${UNINSTALL_MODE}" == true ]]; then
+        echo ""
+        echo -e "${BOLD}=== Uninstall Mode ===${RESET}"
+        echo -e "This removes conda envs, venvs, and shortcuts."
+        echo -e "User data (runs/, configs, logs) is ${GREEN}preserved${RESET}."
+        confirm "Proceed with uninstall?" || { echo "Aborted."; exit 0; }
+
+        local failed_uninstalls=()
+        [[ "${DO_BINDCRAFT}" == true ]] && { uninstall_tool bindcraft  || failed_uninstalls+=("BindCraft"); }
+        [[ "${DO_BOLTZGEN}"  == true ]] && { uninstall_tool boltzgen   || failed_uninstalls+=("BoltzGen");  }
+        [[ "${DO_MOSAIC}"    == true ]] && { uninstall_tool mosaic     || failed_uninstalls+=("Mosaic");    }
+        [[ "${DO_EVALUATOR}" == true ]] && { uninstall_tool evaluator  || failed_uninstalls+=("Evaluator"); }
+
+        echo ""
+        if [[ ${#failed_uninstalls[@]} -eq 0 ]]; then
+            print_ok "Uninstall complete."
+        else
+            print_fail "Failed to uninstall: ${failed_uninstalls[*]}"
+        fi
+        [[ ${#failed_uninstalls[@]} -gt 0 ]] && exit 1 || exit 0
+    fi
+
+    # ── Install mode ─────────────────────────────────────────────────────────
     echo ""
     echo -e "Log file: ${LOG_FILE}"
+
+    # Step counter for progress
+    local step=0 total=0
+    [[ "${DO_BINDCRAFT}" == true ]] && (( total++ ))
+    [[ "${DO_BOLTZGEN}"  == true ]] && (( total++ ))
+    [[ "${DO_MOSAIC}"    == true ]] && (( total++ ))
+    [[ "${DO_EVALUATOR}" == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
 
-    [[ "${DO_BINDCRAFT}" == true ]] && { install_bindcraft || failed_tools+=("BindCraft"); }
-    [[ "${DO_BOLTZGEN}"  == true ]] && { install_boltzgen  || failed_tools+=("BoltzGen");  }
-    [[ "${DO_MOSAIC}"    == true ]] && { install_mosaic    || failed_tools+=("Mosaic");    }
-    [[ "${DO_EVALUATOR}" == true ]] && { install_evaluator || failed_tools+=("Evaluator"); }
+    [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; install_bindcraft || failed_tools+=("BindCraft"); }
+    [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
+    [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
+    [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"
