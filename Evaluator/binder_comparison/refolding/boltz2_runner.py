@@ -46,8 +46,8 @@ def run_boltz2_refold(
                          Defaults to <repo_root>/scripts/.
         resume:          If True, skip binders already present in existing output CSV.
     """
-    output_dir = Path(output_dir)
-    output_csv = Path(output_csv)
+    output_dir = Path(output_dir).resolve()
+    output_csv = Path(output_csv).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     scripts_dir = _resolve_scripts_path(scripts_path)
@@ -80,6 +80,9 @@ def run_boltz2_refold(
     if generated_csv.exists():
         output_csv.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(str(generated_csv), str(output_csv))
+        # refold_boltz2.py writes paths relative to output_dir (which was CWD).
+        # Rewrite them as absolute so downstream tools can find the files.
+        _absolutize_csv_paths(output_csv, output_dir, ["pdb", "pae_file", "plddt_file"])
         print(f"[boltz2] Results → {output_csv}")
     else:
         raise FileNotFoundError(
@@ -103,6 +106,32 @@ def _load_completed_indices(csv_path: Path) -> set[int]:
         return indices
     except Exception:
         return set()
+
+
+def _absolutize_csv_paths(
+    csv_path: Path, base_dir: Path, path_cols: list[str]
+) -> None:
+    """Rewrite relative path columns in a CSV to absolute using *base_dir*."""
+    import csv as csv_mod  # noqa: PLC0415
+
+    rows: list[dict[str, str]] = []
+    fieldnames: list[str] | None = None
+    with open(csv_path) as f:
+        reader = csv_mod.DictReader(f)
+        fieldnames = reader.fieldnames
+        for row in reader:
+            for col in path_cols:
+                val = row.get(col, "")
+                if val and not Path(val).is_absolute():
+                    row[col] = str((base_dir / val).resolve())
+            rows.append(row)
+
+    if fieldnames is None:
+        return
+    with open(csv_path, "w", newline="") as f:
+        writer = csv_mod.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def _resolve_scripts_path(override: str | Path | None) -> Path:

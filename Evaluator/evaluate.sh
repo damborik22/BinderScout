@@ -15,6 +15,7 @@
 #   --skip-boltz2   skip Boltz-2 refolding (use existing boltz2_results.csv in output dir)
 #   --skip-af2      skip AF2 refolding     (use existing af2_results.csv in output dir)
 #   --resume        resume interrupted run — skip already-completed binders in both engines
+#   --mosaic-path   path to Mosaic repo root (for AF2's refold_Version6 module)
 
 set -euo pipefail
 
@@ -51,6 +52,7 @@ OUTPUT=""
 SKIP_BOLTZ2=0
 SKIP_AF2=0
 RESUME=0
+MOSAIC_PATH=""
 
 # --- parse arguments -------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -62,6 +64,7 @@ while [[ $# -gt 0 ]]; do
         --skip-boltz2) SKIP_BOLTZ2=1;    shift ;;
         --skip-af2)    SKIP_AF2=1;       shift ;;
         --resume)      RESUME=1;         shift ;;
+        --mosaic-path) MOSAIC_PATH="$2"; shift 2 ;;
         -h|--help)
             sed -n '2,20p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0 ;;
@@ -134,13 +137,14 @@ if [[ $SKIP_AF2 -eq 1 ]]; then
     [[ -f "$AF2_CSV" ]] || { echo "Error: $AF2_CSV not found"; exit 1; }
 else
     echo "[step 2/3] AF2 refolding       (binder-eval-af2)..."
-    AF2_RESUME_FLAG=""
-    [[ $RESUME -eq 1 ]] && AF2_RESUME_FLAG="--resume"
+    AF2_EXTRA_FLAGS=()
+    [[ $RESUME -eq 1 ]] && AF2_EXTRA_FLAGS+=(--resume)
+    [[ -n "$MOSAIC_PATH" ]] && AF2_EXTRA_FLAGS+=(--mosaic-path "$MOSAIC_PATH")
     conda run -n binder-eval-af2 binder-compare refold-af2 \
         --sequences  "$SEQUENCES" \
         --target-pdb "$TARGET_PDB" \
         -o           "$AF2_CSV" \
-        $AF2_RESUME_FLAG
+        "${AF2_EXTRA_FLAGS[@]}"
 fi
 
 # --- Step 3: Report --------------------------------------------------------
