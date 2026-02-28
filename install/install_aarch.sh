@@ -1,6 +1,6 @@
 #!/bin/bash
 # BindMaster Installer — DGX Spark (aarch64) Edition
-# Platform: NVIDIA DGX Spark / Grace-Hopper GH200, aarch64, CUDA 12.1, Ubuntu 24.04
+# Platform: NVIDIA DGX Spark (GB10 Blackwell), aarch64, CUDA 13.0, Ubuntu 24.04
 #
 # All three tools (BindCraft, BoltzGen, Mosaic) are bundled in this repo —
 # no cloning needed. Pre-cached resources (AF2 weights, ARM64 binaries) are
@@ -23,7 +23,7 @@ MOSAIC_DIR="${BINDMASTER_DIR}/Mosaic"
 EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
 
 ARCH="$(uname -m)"     # expected: aarch64
-CUDA_VERSION="12.1"    # DGX Spark GB10 / GH200
+CUDA_VERSION="13.0"    # DGX Spark GB10 (Blackwell, sm_121)
 
 # Pre-cached resources: two levels up → Documents/OLD/BindMaster/bindcraft-tools
 _default_tools="$(cd "${BINDMASTER_DIR}" && cd ../../OLD/BindMaster/bindcraft-tools 2>/dev/null && pwd || true)"
@@ -97,7 +97,7 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. All tools are bundled — no 
   --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
   --tools-dir   Path to pre-cached resources (AF2 weights, ARM64 binaries).
                 Default: <repo>/../../OLD/BindMaster/bindcraft-tools
-  --cuda        CUDA version (default: 12.1). Only 12.1 has been tested on DGX Spark.
+  --cuda        CUDA version (default: 13.0). Only 13.0 has been tested on DGX Spark (GB10).
   --skip-examples
                 Do not prompt to run bundled examples after install.
   --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
@@ -115,9 +115,9 @@ EOF
 done
 
 # ─── CUDA version warning ─────────────────────────────────────────────────────
-if [[ "${CUDA_VERSION}" != "12.1" ]]; then
-    echo -e "\033[1;33m⚠ CUDA ${CUDA_VERSION} selected — only 12.1 has been tested on DGX Spark.\033[0m"
-    echo -e "\033[1;33m⚠ JAX 0.4.34 and PyTorch 2.5.1 may not work with other CUDA versions.\033[0m"
+if [[ "${CUDA_VERSION}" != "13.0" ]]; then
+    echo -e "\033[1;33m⚠ CUDA ${CUDA_VERSION} selected — only 13.0 has been tested on DGX Spark (GB10).\033[0m"
+    echo -e "\033[1;33m⚠ PyTorch cu130 wheels and JAX CUDA plugin may not work with other CUDA versions.\033[0m"
 fi
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
@@ -658,10 +658,11 @@ install_boltzgen() {
         "${CONDA_CMD}" install -n BoltzGen -c conda-forge gcc -y \
         || { print_fail "Failed to install gcc"; return 1; }
 
-    # On aarch64, plain PyPI torch already bundles CUDA support — no +cuXXX suffix needed.
-    run_logged "Installing PyTorch (aarch64, plain PyPI)" \
+    # On aarch64 / DGX Spark (GB10), PyPI's default torch is CPU-only.
+    # Use the cu130 wheel index (CUDA 13.0, Blackwell sm_121).
+    run_logged "Installing PyTorch (aarch64, CUDA 13.0)" \
         "${CONDA_CMD}" run -n BoltzGen \
-        pip install torch==2.5.1 \
+        pip install torch --index-url https://download.pytorch.org/whl/cu130 \
         || { print_fail "Failed to install PyTorch"; return 1; }
 
     # On aarch64, gemmi==0.6.5 has no binary wheel and fails to build from source.
@@ -880,6 +881,11 @@ install_evaluator() {
     run_logged "Installing ColabDesign + binder-compare into binder-eval-af2" \
         "${CONDA_CMD}" run -n binder-eval-af2 pip install -q colabdesign==1.1.1 -e "${EVALUATOR_DIR}[af2]" \
         || { print_fail "Failed to install packages into binder-eval-af2"; return 1; }
+
+    # JAX CUDA plugin — ColabDesign/AF2 uses JAX; on aarch64 the default jaxlib is CPU-only.
+    run_logged "Installing JAX CUDA plugin into binder-eval-af2" \
+        "${CONDA_CMD}" run -n binder-eval-af2 pip install -q "jax[cuda]" \
+        || { print_fail "Failed to install JAX CUDA plugin"; return 1; }
 
     # Smoke test
     smoke_test "binder-compare --help" \

@@ -77,15 +77,17 @@ def compute_ipsae_from_pae(
 ) -> dict[str, float]:
     """Compute ipSAE scores from a full PAE matrix.
 
-    Implements the DunbrackLab (2025) evaluation formula:
-        ipSAE_A→B = mean_i [ pSAE_i ] for i with pSAE_i > 0  (qualifying source residues)
+    Implements the DunbrackLab (2025) d0res formula:
+        ipSAE_A→B = max_i [ pSAE_i ] over all source residues i in A
         pSAE_i = mean_j[ 1 / (1 + (PAE_ij / d0_i)^2) ] for j in B with PAE_ij < cutoff
         d0_i = max(1.0, 1.24 * (N_cutoff_i - 15)^(1/3) - 1.8)
         N_cutoff_i = count of j with PAE_ij < cutoff
 
-    DunbrackLab evaluation metric uses mean over qualifying source residues
-    (residues with at least one PAE < cutoff pair).  This differs from Mosaic's
-    optimisation-time metric which uses max aggregation.
+    Cross-validated against DunbrackLab ipsae package v1.0.1
+    (ipsae_d0res_asym values match to floating-point precision).
+
+    The key difference from Mosaic aux ipSAE is the PAE cutoff (10 Å vs 15 Å)
+    and d0 computation (per-residue d0_res vs per-chain).
 
     Args:
         pae:           PAE matrix in Ångströms, shape [L_total, L_total].
@@ -121,15 +123,13 @@ def compute_ipsae_from_pae(
     pae_tb = pae[L_b:, :L_b]   # shape [L_t, L_b]
 
     # Binder → target (bt): for each binder residue i, score over target residues j
-    # DunbrackLab: mean over qualifying source residues (score > 0)
+    # DunbrackLab d0res: max over source residues (confirmed against ipsae package v1.0.1)
     bt_scores = np.array([_psae_row(pae_bt[i], pae_cutoff) for i in range(L_b)])
-    bt_qualifying = bt_scores[bt_scores > 0.0]
-    bt_ipsae = float(np.mean(bt_qualifying)) if len(bt_qualifying) > 0 else 0.0
+    bt_ipsae = float(np.max(bt_scores)) if len(bt_scores) > 0 else 0.0
 
     # Target → binder (tb): for each target residue i, score over binder residues j
     tb_scores = np.array([_psae_row(pae_tb[i], pae_cutoff) for i in range(L_t)])
-    tb_qualifying = tb_scores[tb_scores > 0.0]
-    tb_ipsae = float(np.mean(tb_qualifying)) if len(tb_qualifying) > 0 else 0.0
+    tb_ipsae = float(np.max(tb_scores)) if len(tb_scores) > 0 else 0.0
 
     ipsae_min = float(np.nanmin([bt_ipsae, tb_ipsae]))
     ipsae_max = float(np.nanmax([bt_ipsae, tb_ipsae]))
@@ -144,6 +144,29 @@ def compute_ipsae_from_pae(
     )
 
 
+def _resolve_pae_path(
+    pae_path: str | None,
+    base_dir: str | Path | None,
+) -> Path | None:
+    """Try to resolve a PAE file path, returning None if not found.
+
+    Resolution order:
+        1. As-is (absolute or relative to CWD).
+        2. Relative to *base_dir* (for CSVs whose paths are relative to an
+           output directory different from CWD).
+    """
+    if pae_path is None or (isinstance(pae_path, float) and np.isnan(pae_path)):
+        return None
+    p = Path(str(pae_path))
+    if p.exists():
+        return p
+    if base_dir is not None:
+        candidate = Path(base_dir) / p
+        if candidate.exists():
+            return candidate
+    return None
+
+
 # ---------------------------------------------------------------------------
 # AF2 ipSAE from saved PAE files
 # ---------------------------------------------------------------------------
@@ -153,6 +176,7 @@ def add_af2_ipsae_from_files(
     pae_file_col: str = "af2_pae_file",
     binder_length_col: str = "binder_length",
     pae_cutoff: float = IPSAE_PAE_CUTOFF_AF2,
+    base_dir: str | Path | None = None,
 ) -> pd.DataFrame:
     """Load AF2 PAE .npy files and compute ipSAE scores, adding them to df.
 
@@ -166,6 +190,7 @@ def add_af2_ipsae_from_files(
         pae_file_col:    Column containing paths to PAE .npy files.
         binder_length_col: Column with binder sequence length.
         pae_cutoff:      PAE cutoff in Å (default 15 Å).
+        base_dir:        Base directory for resolving relative PAE file paths.
     """
     result = df.copy()
 
@@ -178,7 +203,8 @@ def add_af2_ipsae_from_files(
         pae_path = row.get(pae_file_col)
         L_b = row.get(binder_length_col)
 
-        if pd.isna(pae_path) or pd.isna(L_b) or not Path(str(pae_path)).exists():
+        resolved = _resolve_pae_path(pae_path, base_dir)
+        if pd.isna(pae_path) or pd.isna(L_b) or resolved is None:
             bt_ipsae_vals.append(np.nan)
             tb_ipsae_vals.append(np.nan)
             min_vals.append(np.nan)
@@ -186,7 +212,7 @@ def add_af2_ipsae_from_files(
             continue
 
         try:
-            pae = np.load(str(pae_path))
+            pae = np.load(str(resolved))
             scores = compute_ipsae_from_pae(
                 pae, int(L_b), pae_cutoff, ordering="target_binder"
             )
@@ -219,6 +245,7 @@ def add_boltz_ipsae_from_files(
     pae_file_col: str = "boltz_pae_file",
     binder_length_col: str = "binder_length",
     pae_cutoff: float = IPSAE_PAE_CUTOFF_BOLTZ,
+    base_dir: str | Path | None = None,
 ) -> pd.DataFrame:
     """Load Boltz-2 PAE .npy files and compute DunbrackLab ipSAE scores.
 
@@ -233,6 +260,7 @@ def add_boltz_ipsae_from_files(
         pae_file_col:    Column containing paths to PAE .npy files.
         binder_length_col: Column with binder sequence length.
         pae_cutoff:      PAE cutoff in Å (default 10 Å for Boltz-2).
+        base_dir:        Base directory for resolving relative PAE file paths.
     """
     result = df.copy()
 
@@ -245,7 +273,8 @@ def add_boltz_ipsae_from_files(
         pae_path = row.get(pae_file_col)
         L_b = row.get(binder_length_col)
 
-        if pd.isna(pae_path) or pd.isna(L_b) or not Path(str(pae_path)).exists():
+        resolved = _resolve_pae_path(pae_path, base_dir)
+        if pd.isna(pae_path) or pd.isna(L_b) or resolved is None:
             bt_ipsae_vals.append(np.nan)
             tb_ipsae_vals.append(np.nan)
             min_vals.append(np.nan)
@@ -253,7 +282,7 @@ def add_boltz_ipsae_from_files(
             continue
 
         try:
-            pae = np.load(str(pae_path))
+            pae = np.load(str(resolved))
             scores = compute_ipsae_from_pae(
                 pae, int(L_b), pae_cutoff, ordering="binder_target"
             )

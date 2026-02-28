@@ -59,13 +59,18 @@ def run(args: argparse.Namespace) -> None:
     # Step 2b: Compute ipSAE from PAE files using DunbrackLab formula.
     # This gives the correct evaluation metric (mean over qualifying residues)
     # with model-specific PAE cutoffs (10 Å Boltz-2, 15 Å AF2).
+    # base_dir helps resolve relative PAE paths in older CSVs where the runner
+    # didn't write absolute paths.  The CSV's parent dir is the best guess.
+    boltz_base = Path(args.boltz2_results).resolve().parent if args.boltz2_results else None
+    af2_base = Path(args.af2_results).resolve().parent if args.af2_results else None
+
     if "boltz_pae_file" in df.columns:
         print("[report] Computing Boltz-2 ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
-        df = add_boltz_ipsae_from_files(df, pae_file_col="boltz_pae_file")
+        df = add_boltz_ipsae_from_files(df, pae_file_col="boltz_pae_file", base_dir=boltz_base)
 
     if "af2_pae_file" in df.columns:
         print("[report] Computing AF2 ipSAE from PAE files (DunbrackLab, cutoff=15 Å)…")
-        df = add_af2_ipsae_from_files(df, pae_file_col="af2_pae_file")
+        df = add_af2_ipsae_from_files(df, pae_file_col="af2_pae_file", base_dir=af2_base)
 
     # Promote DunbrackLab PAE-based ipsae_min as the primary ranking column.
     # Prefer Boltz-2 PAE-based; fall back to AF2 PAE-based.
