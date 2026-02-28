@@ -14,6 +14,7 @@
 # Optional:
 #   --skip-boltz2   skip Boltz-2 refolding (use existing boltz2_results.csv in output dir)
 #   --skip-af2      skip AF2 refolding     (use existing af2_results.csv in output dir)
+#   --resume        resume interrupted run — skip already-completed binders in both engines
 
 set -euo pipefail
 
@@ -49,6 +50,7 @@ TARGET_PDB=""
 OUTPUT=""
 SKIP_BOLTZ2=0
 SKIP_AF2=0
+RESUME=0
 
 # --- parse arguments -------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -59,6 +61,7 @@ while [[ $# -gt 0 ]]; do
         --output|-o)   OUTPUT="$2";      shift 2 ;;
         --skip-boltz2) SKIP_BOLTZ2=1;    shift ;;
         --skip-af2)    SKIP_AF2=1;       shift ;;
+        --resume)      RESUME=1;         shift ;;
         -h|--help)
             sed -n '2,20p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0 ;;
@@ -114,10 +117,13 @@ if [[ $SKIP_BOLTZ2 -eq 1 ]]; then
     [[ -f "$BOLTZ2_CSV" ]] || { echo "Error: $BOLTZ2_CSV not found"; exit 1; }
 else
     echo "[step 1/3] Boltz-2 refolding  (Mosaic venv)..."
+    BOLTZ2_RESUME_FLAG=""
+    [[ $RESUME -eq 1 ]] && BOLTZ2_RESUME_FLAG="--resume"
     "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
         --sequences  "$SEQUENCES" \
         --target-seq "$TARGET_SEQ" \
-        -o           "$BOLTZ2_CSV"
+        -o           "$BOLTZ2_CSV" \
+        $BOLTZ2_RESUME_FLAG
 fi
 
 # --- Step 2: AF2 refolding -------------------------------------------------
@@ -128,10 +134,13 @@ if [[ $SKIP_AF2 -eq 1 ]]; then
     [[ -f "$AF2_CSV" ]] || { echo "Error: $AF2_CSV not found"; exit 1; }
 else
     echo "[step 2/3] AF2 refolding       (binder-eval-af2)..."
+    AF2_RESUME_FLAG=""
+    [[ $RESUME -eq 1 ]] && AF2_RESUME_FLAG="--resume"
     conda run -n binder-eval-af2 binder-compare refold-af2 \
         --sequences  "$SEQUENCES" \
         --target-pdb "$TARGET_PDB" \
-        -o           "$AF2_CSV"
+        -o           "$AF2_CSV" \
+        $AF2_RESUME_FLAG
 fi
 
 # --- Step 3: Report --------------------------------------------------------

@@ -864,11 +864,14 @@ def wizard():
     use_boltzgen = ask_yn("  Enable BoltzGen?", default=False)
     print(f"  {BOLD}BindCraft{RESET} [{_tag('bindcraft')}]")
     use_bindcraft = ask_yn("  Enable BindCraft?", default=True)
+    print(f"  {BOLD}PXDesign{RESET}  [external — protenix-server.com]")
+    use_pxdesign = ask_yn("  Import PXDesign results?", default=False)
 
     tools_enabled = {
         "mosaic": use_mosaic,
         "boltzgen": use_boltzgen,
         "bindcraft": use_bindcraft,
+        "pxdesign": use_pxdesign,
     }
 
     if not any(tools_enabled.values()):
@@ -980,6 +983,15 @@ def wizard():
             if not ask_yn("  Use this sequence?", default=True):
                 cfg["target_sequence"] = ask(
                     "  Enter target sequence", validator=validate_sequence)
+
+    if use_pxdesign:
+        print_step("Step 6d — PXDesign settings")
+        print(f"  PXDesign results are imported from a local directory containing")
+        print(f"  summary.csv (downloaded from protenix-server.com).")
+        cfg["pxdesign_output_dir"] = ask(
+            "  PXDesign output directory",
+            default="",
+            validator=lambda x: (True, "") if x.strip() else (False, "path required"))
 
     # ── Step 7: Preview ───────────────────────────────────────────────────────
     print_step("Step 7 — Preview")

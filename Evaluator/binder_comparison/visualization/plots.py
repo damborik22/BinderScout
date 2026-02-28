@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import base64
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -28,8 +27,12 @@ TOOL_COLOURS = {
 # direction_arrow: "↑" = higher is better, "↓" = lower is better, "" = n/a
 METRIC_META: dict[str, tuple[str, str, str]] = {
     "ipsae_min":           ("ipSAE_min",           "[0–1]", "↑"),
-    "bt_ipsae":            ("ipSAE (B→T)",          "[0–1]", "↑"),
-    "tb_ipsae":            ("ipSAE (T→B)",          "[0–1]", "↑"),
+    "bt_ipsae_aux":        ("ipSAE B→T (aux)",     "[0–1]", "↑"),
+    "tb_ipsae_aux":        ("ipSAE T→B (aux)",     "[0–1]", "↑"),
+    "ipsae_min_aux":       ("ipSAE_min (aux)",     "[0–1]", "↑"),
+    "boltz_pae_bt_ipsae":  ("Boltz ipSAE B→T",    "[0–1]", "↑"),
+    "boltz_pae_tb_ipsae":  ("Boltz ipSAE T→B",    "[0–1]", "↑"),
+    "boltz_pae_ipsae_min": ("Boltz ipSAE_min",    "[0–1]", "↑"),
     "af2_ipsae_min":       ("AF2 ipSAE_min",        "[0–1]", "↑"),
     "af2_bt_ipsae":        ("AF2 ipSAE (B→T)",      "[0–1]", "↑"),
     "af2_tb_ipsae":        ("AF2 ipSAE (T→B)",      "[0–1]", "↑"),
@@ -156,6 +159,71 @@ def plot_pae_heatmaps(
     fig.suptitle("PAE heatmaps (binder | target ordering)", y=1.01)
     fig.tight_layout()
     return fig
+
+
+def load_pae_data_from_df(
+    df: pd.DataFrame,
+    max_binders: int = 5,
+) -> tuple[list[str], dict[str, np.ndarray], dict[str, np.ndarray], dict[str, int]]:
+    """Load PAE .npy files for top-ranked binders from DataFrame file paths.
+
+    Returns (sequences, af2_pae_data, boltz_pae_data, binder_lengths).
+    """
+    af2_pae_data: dict[str, np.ndarray] = {}
+    boltz_pae_data: dict[str, np.ndarray] = {}
+    binder_lengths: dict[str, int] = {}
+    sequences: list[str] = []
+
+    count = 0
+    for _, row in df.iterrows():
+        if count >= max_binders:
+            break
+        seq = row.get("sequence", "")
+        if not seq or seq in af2_pae_data or seq in boltz_pae_data:
+            continue
+
+        L_b = row.get("binder_length")
+        if pd.isna(L_b):
+            L_b = len(seq)
+        binder_lengths[seq] = int(L_b)
+
+        loaded_any = False
+
+        # Load Boltz-2 PAE (binder|target ordering)
+        boltz_path = row.get("boltz_pae_file")
+        if boltz_path and not pd.isna(boltz_path):
+            try:
+                p = Path(str(boltz_path))
+                if p.exists():
+                    boltz_pae_data[seq] = np.load(str(p))
+                    loaded_any = True
+            except Exception:
+                pass
+
+        # Load AF2 PAE (target|binder ordering → transpose to binder|target)
+        af2_path = row.get("af2_pae_file")
+        if af2_path and not pd.isna(af2_path):
+            try:
+                p = Path(str(af2_path))
+                if p.exists():
+                    pae = np.load(str(p))
+                    # Transpose from [target|binder] to [binder|target]
+                    L_t = pae.shape[0] - int(L_b)
+                    if L_t > 0:
+                        pae = np.block([
+                            [pae[L_t:, L_t:],  pae[L_t:, :L_t]],
+                            [pae[:L_t, L_t:],  pae[:L_t, :L_t]],
+                        ])
+                    af2_pae_data[seq] = pae
+                    loaded_any = True
+            except Exception:
+                pass
+
+        if loaded_any:
+            sequences.append(seq)
+            count += 1
+
+    return sequences, af2_pae_data, boltz_pae_data, binder_lengths
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +387,7 @@ def plot_metric_distributions(
     if metrics is None:
         metrics = [
             "iptm", "ipae", "plddt_binder_mean",
-            "bt_ipsae", "ipsae_min", "binder_ptm",
+            "ipsae_min", "boltz_pae_ipsae_min", "binder_ptm",
         ]
 
     present = [m for m in metrics if m in df.columns]

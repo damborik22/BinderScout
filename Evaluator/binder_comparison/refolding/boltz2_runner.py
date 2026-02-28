@@ -33,6 +33,7 @@ def run_boltz2_refold(
     output_csv: str | Path,
     *,
     scripts_path: str | Path | None = None,
+    resume: bool = False,
 ) -> None:
     """Refold *sequences* against *target_sequence* using Boltz2.
 
@@ -43,12 +44,19 @@ def run_boltz2_refold(
         output_csv:      Path for the output CSV of metrics.
         scripts_path:    Path to the scripts/ directory containing refold_boltz2.py.
                          Defaults to <repo_root>/scripts/.
+        resume:          If True, skip binders already present in existing output CSV.
     """
     output_dir = Path(output_dir)
     output_csv = Path(output_csv)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     scripts_dir = _resolve_scripts_path(scripts_path)
+
+    skip_indices: set[int] = set()
+    if resume:
+        skip_indices = _load_completed_indices(output_dir / "refold_designs.csv")
+        if skip_indices:
+            print(f"[boltz2] Resuming — skipping {len(skip_indices)} already-completed binders")
 
     # refold_boltz2.refold_batch writes refold_designs.csv relative to CWD.
     # Change to output_dir so the CSV lands there.
@@ -62,6 +70,7 @@ def run_boltz2_refold(
             binder_sequences=sequences,
             target_sequence=target_sequence,
             output_dir="structures",
+            skip_indices=skip_indices,
         )
     finally:
         os.chdir(old_cwd)
@@ -76,6 +85,24 @@ def run_boltz2_refold(
         raise FileNotFoundError(
             f"Expected refold_boltz2 to write {generated_csv} but it was not found."
         )
+
+
+def _load_completed_indices(csv_path: Path) -> set[int]:
+    """Read existing CSV and return a set of completed 1-based binder indices."""
+    if not csv_path.exists():
+        return set()
+    try:
+        import csv
+        indices: set[int] = set()
+        with open(csv_path) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                idx_val = row.get("idx")
+                if idx_val is not None:
+                    indices.add(int(idx_val))
+        return indices
+    except Exception:
+        return set()
 
 
 def _resolve_scripts_path(override: str | Path | None) -> Path:

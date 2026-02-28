@@ -174,9 +174,9 @@ ENSEMBLE_METRIC_MAP = {
 
 # Boltz2-exclusive columns (after boltz_ prefix added by merger)
 BOLTZ2_EXCLUSIVE_COLS = [
-    "boltz_bt_ipsae",
-    "boltz_tb_ipsae",
-    "boltz_ipsae_min",
+    "boltz_bt_ipsae",       # Mosaic aux (max aggregation) — renamed to bt_ipsae_aux
+    "boltz_tb_ipsae",       # Mosaic aux — renamed to tb_ipsae_aux
+    "boltz_ipsae_min",      # Mosaic aux — renamed to ipsae_min_aux
     "boltz_ipsae_valid",
     "boltz_bt_iptm",
     "boltz_binder_ptm",
@@ -186,20 +186,24 @@ BOLTZ2_EXCLUSIVE_COLS = [
 ]
 
 # All standardised metrics that get z-scored (excluding boolean ipsae_valid).
-# Use post-ensemble-rename names: ensemble.py renames boltz_ipsae_min → ipsae_min, etc.
-# AF2 ipSAE columns (af2_ipsae_min, af2_bt_ipsae, af2_tb_ipsae) are optional —
-# only present when refold_Version6 PAE files exist and --af2-pae-dir is passed.
+# Use post-ensemble-rename names: ensemble.py renames boltz_ipsae_min → ipsae_min_aux, etc.
+# PAE-based DunbrackLab ipSAE columns are added by report.py after merging.
 # compute_statistics() filters to columns present in df, so absent ones are silently skipped.
 ZSCORE_METRICS = list(ENSEMBLE_METRIC_MAP.keys()) + [
-    # Boltz2-exclusive (renamed by ensemble.py)
-    "bt_ipsae",
-    "tb_ipsae",
-    "ipsae_min",
+    # Mosaic aux ipSAE (max aggregation, renamed by ensemble.py with _aux suffix)
+    "bt_ipsae_aux",
+    "tb_ipsae_aux",
+    "ipsae_min_aux",
+    # Boltz2-exclusive (non-ipSAE, renamed by ensemble.py)
     "binder_ptm",
     "intra_contact",
     "target_contact",
     "pTMEnergy",
-    # AF2 ipSAE (optional — only present when PAE .npy files are available)
+    # Boltz-2 PAE-based ipSAE (DunbrackLab formula, 10 Å cutoff)
+    "boltz_pae_bt_ipsae",
+    "boltz_pae_tb_ipsae",
+    "boltz_pae_ipsae_min",
+    # AF2 PAE-based ipSAE (DunbrackLab formula, 15 Å cutoff)
     "af2_bt_ipsae",
     "af2_tb_ipsae",
     "af2_ipsae_min",
