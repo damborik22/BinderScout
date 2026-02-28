@@ -26,8 +26,8 @@
 
 ## Part C: Finalize batch 1
 
-- [ ] C1. Push all changes to `origin/master`
-- [ ] C2. Archive `damborik22/BindMaster-evaluator` on GitHub
+- [x] C1. Push all changes to `origin/master`
+- [x] C2. Archive `damborik22/BindMaster-evaluator` on GitHub
 
 ---
 
