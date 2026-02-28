@@ -42,6 +42,7 @@ RESET='\033[0m'
 # ─── Defaults ─────────────────────────────────────────────────────────────────
 SKIP_EXAMPLES=false
 AUTO_YES=false
+UNINSTALL_MODE=false
 TOOL_SPECIFIED=false
 
 DO_BINDCRAFT=false
@@ -70,6 +71,10 @@ while [[ $# -gt 0 ]]; do
             TOOLS_DIR="$2"
             shift 2
             ;;
+        --cuda)
+            CUDA_VERSION="$2"
+            shift 2
+            ;;
         --skip-examples)
             SKIP_EXAMPLES=true
             shift
@@ -78,18 +83,26 @@ while [[ $# -gt 0 ]]; do
             AUTO_YES=true
             shift
             ;;
+        --uninstall)
+            UNINSTALL_MODE=true
+            shift
+            ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--tools-dir PATH] [--skip-examples] [--yes]
+Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--tools-dir PATH] [--cuda VERSION] [--skip-examples] [--yes]
+       $0 --uninstall --tool <tool|all> [--yes]
 
 DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. All tools are bundled — no git clones needed.
 
-  --tool        Which tool(s) to install. Omit for interactive selection.
+  --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
   --tools-dir   Path to pre-cached resources (AF2 weights, ARM64 binaries).
                 Default: <repo>/../../OLD/BindMaster/bindcraft-tools
+  --cuda        CUDA version (default: 12.1). Only 12.1 has been tested on DGX Spark.
   --skip-examples
                 Do not prompt to run bundled examples after install.
   --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
+  --uninstall   Remove conda envs, venvs, and shortcuts for selected tool(s).
+                Never removes runs/, configs, log files, or bundled source dirs.
 EOF
             exit 0
             ;;
@@ -100,6 +113,12 @@ EOF
             ;;
     esac
 done
+
+# ─── CUDA version warning ─────────────────────────────────────────────────────
+if [[ "${CUDA_VERSION}" != "12.1" ]]; then
+    echo -e "\033[1;33m⚠ CUDA ${CUDA_VERSION} selected — only 12.1 has been tested on DGX Spark.\033[0m"
+    echo -e "\033[1;33m⚠ JAX 0.4.34 and PyTorch 2.5.1 may not work with other CUDA versions.\033[0m"
+fi
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 mkdir -p "${BINDMASTER_DIR}"
@@ -113,6 +132,10 @@ print_warn() { echo -e "${YELLOW}⚠ $1${RESET}"; }
 print_fail() { echo -e "${RED}✗ $1${RESET}"; }
 
 run_logged() {
+    local retries=1
+    if [[ "$1" == "--retries" ]]; then
+        retries="$2"; shift 2
+    fi
     local label="$1"; shift
     local tmpfile; tmpfile=$(mktemp)
 
@@ -120,19 +143,28 @@ run_logged() {
     local has_tty=false
     { true >/dev/tty; } 2>/dev/null && has_tty=true
 
-    "$@" >> "${tmpfile}" 2>&1 &
-    local pid=$! frames='/-\|' i=0
+    local rc=0
+    for attempt in $(seq 1 "${retries}"); do
+        > "${tmpfile}"   # truncate on each attempt
+        "$@" >> "${tmpfile}" 2>&1 &
+        local pid=$! frames='/-\|' i=0
 
-    if [[ "${has_tty}" == true ]]; then
-        while kill -0 "${pid}" 2>/dev/null; do
-            printf "\r  ${CYAN}%s${RESET}  %s" "${frames:$((i % 4)):1}" "${label}" >/dev/tty
-            sleep 0.15; (( i++ ))
-        done
-        printf "\r\033[K" >/dev/tty
-    fi
-    wait "${pid}"; local rc=$?
+        if [[ "${has_tty}" == true ]]; then
+            while kill -0 "${pid}" 2>/dev/null; do
+                printf "\r  ${CYAN}%s${RESET}  %s" "${frames:$((i % 4)):1}" "${label}" >/dev/tty
+                sleep 0.15; (( i++ ))
+            done
+            printf "\r\033[K" >/dev/tty
+        fi
+        wait "${pid}"; rc=$?
 
-    # Append to log if writable; silently skip otherwise
+        if [[ ${rc} -eq 0 ]]; then break; fi
+        if [[ ${attempt} -lt ${retries} ]]; then
+            print_warn "${label} — attempt ${attempt}/${retries} failed, retrying..."
+            sleep $((attempt * 2))
+        fi
+    done
+
     cat "${tmpfile}" >> "${LOG_FILE}" 2>/dev/null
 
     if [[ ${rc} -eq 0 ]]; then
@@ -428,7 +460,8 @@ _install_af2_params() {
     # Fallback: download (~3 GB)
     print_warn "Downloading AF2 weights from Google (~3 GB) — takes several minutes"
     local params_file="${params_dir}/alphafold_params_2022-12-06.tar"
-    wget -q --show-progress -O "${params_file}" \
+    run_logged --retries 3 "Downloading AF2 weights" \
+        wget -q -O "${params_file}" \
         "https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar" \
         || { print_fail "Failed to download AF2 weights"; return 1; }
     [[ -s "${params_file}" ]] || { print_fail "Downloaded file is empty"; return 1; }
@@ -877,6 +910,54 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/evaluate"
 }
 
+# ─── Uninstall ─────────────────────────────────────────────────────────────────
+
+uninstall_tool() {
+    local tool="${1,,}"
+    case "${tool}" in
+        bindcraft)
+            print_step "Uninstalling BindCraft"
+            env_exists BindCraft && run_logged "Removing BindCraft conda env" \
+                "${CONDA_CMD}" env remove -n BindCraft -y
+            rm -f "${SHORTCUTS_DIR}/bindcraft"
+            # aarch64: bundled source dir is NOT removed
+            print_ok "BindCraft uninstalled (source dir preserved)"
+            ;;
+        boltzgen)
+            print_step "Uninstalling BoltzGen"
+            env_exists BoltzGen && run_logged "Removing BoltzGen conda env" \
+                "${CONDA_CMD}" env remove -n BoltzGen -y
+            rm -f "${SHORTCUTS_DIR}/boltzgen"
+            # aarch64: bundled source dir is NOT removed
+            print_ok "BoltzGen uninstalled (source dir preserved)"
+            ;;
+        mosaic)
+            print_step "Uninstalling Mosaic"
+            if [[ -d "${MOSAIC_DIR}/.venv" ]]; then
+                rm -rf "${MOSAIC_DIR}/.venv"
+                print_ok "Removed Mosaic .venv"
+            fi
+            rm -f "${SHORTCUTS_DIR}/mosaic"
+            # aarch64: bundled source dir is NOT removed
+            print_ok "Mosaic uninstalled (source dir preserved)"
+            ;;
+        evaluator)
+            print_step "Uninstalling Evaluator"
+            env_exists binder-eval && run_logged "Removing binder-eval conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval -y
+            env_exists binder-eval-af2 && run_logged "Removing binder-eval-af2 conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-af2 -y
+            rm -f "${EVALUATOR_DIR}/envs/mosaic_venv_path"
+            rm -f "${SHORTCUTS_DIR}/evaluate"
+            print_ok "Evaluator uninstalled"
+            ;;
+        *)
+            print_fail "Unknown tool: ${tool}"
+            return 1
+            ;;
+    esac
+}
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 main() {
@@ -894,18 +975,53 @@ main() {
     print_tool_status
 
     if [[ "${TOOL_SPECIFIED}" == false ]]; then
+        if [[ "${UNINSTALL_MODE}" == true ]]; then
+            print_fail "--uninstall requires --tool <tool|all>"
+            exit 1
+        fi
         select_tools_interactive
     fi
 
+    # ── Uninstall mode ───────────────────────────────────────────────────────
+    if [[ "${UNINSTALL_MODE}" == true ]]; then
+        echo ""
+        echo -e "${BOLD}=== Uninstall Mode ===${RESET}"
+        echo -e "This removes conda envs, venvs, and shortcuts."
+        echo -e "User data (runs/, configs, logs) and bundled source dirs are ${GREEN}preserved${RESET}."
+        confirm "Proceed with uninstall?" || { echo "Aborted."; exit 0; }
+
+        local failed_uninstalls=()
+        [[ "${DO_BINDCRAFT}" == true ]] && { uninstall_tool bindcraft  || failed_uninstalls+=("BindCraft"); }
+        [[ "${DO_BOLTZGEN}"  == true ]] && { uninstall_tool boltzgen   || failed_uninstalls+=("BoltzGen");  }
+        [[ "${DO_MOSAIC}"    == true ]] && { uninstall_tool mosaic     || failed_uninstalls+=("Mosaic");    }
+        [[ "${DO_EVALUATOR}" == true ]] && { uninstall_tool evaluator  || failed_uninstalls+=("Evaluator"); }
+
+        echo ""
+        if [[ ${#failed_uninstalls[@]} -eq 0 ]]; then
+            print_ok "Uninstall complete."
+        else
+            print_fail "Failed to uninstall: ${failed_uninstalls[*]}"
+        fi
+        [[ ${#failed_uninstalls[@]} -gt 0 ]] && exit 1 || exit 0
+    fi
+
+    # ── Install mode ─────────────────────────────────────────────────────────
     echo ""; echo -e "Log file: ${LOG_FILE}"
+
+    # Step counter for progress
+    local step=0 total=0
+    [[ "${DO_BINDCRAFT}" == true ]] && (( total++ ))
+    [[ "${DO_BOLTZGEN}"  == true ]] && (( total++ ))
+    [[ "${DO_MOSAIC}"    == true ]] && (( total++ ))
+    [[ "${DO_EVALUATOR}" == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()
 
-    [[ "${DO_BINDCRAFT}" == true ]] && { install_bindcraft || failed_tools+=("BindCraft"); }
-    [[ "${DO_BOLTZGEN}"  == true ]] && { install_boltzgen  || failed_tools+=("BoltzGen");  }
-    [[ "${DO_MOSAIC}"    == true ]] && { install_mosaic    || failed_tools+=("Mosaic");    }
-    [[ "${DO_EVALUATOR}" == true ]] && { install_evaluator || failed_tools+=("Evaluator"); }
+    [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; install_bindcraft || failed_tools+=("BindCraft"); }
+    [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
+    [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
+    [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
 
     echo ""; echo -e "${BOLD}=== Installation Summary ===${RESET}"
 

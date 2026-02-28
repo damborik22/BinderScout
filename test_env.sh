@@ -23,6 +23,7 @@ REBUILD=false
 GPU=false
 MOUNT_OLD=true
 CLEAN=false
+DRY_RUN=false
 
 for arg in "$@"; do
     case "$arg" in
@@ -30,14 +31,17 @@ for arg in "$@"; do
         --gpu)     GPU=true ;;
         --no-old)  MOUNT_OLD=false ;;
         --clean)   CLEAN=true ;;
+        --dry-run) DRY_RUN=true ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--rebuild] [--gpu] [--no-old] [--clean]
+Usage: $0 [--rebuild] [--gpu] [--no-old] [--clean] [--dry-run]
 
   --rebuild   Force rebuild of the Docker image
   --gpu       Expose the GPU to the container (requires nvidia runtime)
   --no-old    Don't mount OLD tools dir (AF2 weights will be downloaded)
   --clean     Remove test artifacts left in the repo from previous runs
+  --dry-run   Run install.sh --tool all --yes --skip-examples non-interactively
+              and report pass/fail (no interactive shell)
 EOF
             exit 0 ;;
         *)
@@ -107,7 +111,42 @@ if [[ "${GPU}" == true ]]; then
     echo "GPU access enabled."
 fi
 
-# ── Run ────────────────────────────────────────────────────────────────────────
+# ── Dry-run mode ──────────────────────────────────────────────────────────────
+if [[ "${DRY_RUN}" == true ]]; then
+    echo ""
+    echo "Dry-run: running install/install.sh --tool all --yes --skip-examples ..."
+    echo "─────────────────────────────────────────────────────────────"
+
+    # Override: non-interactive, no TTY
+    DRY_ARGS=(
+        --rm
+        --name "${CONTAINER_NAME}"
+        --user "$(id -u):$(id -g)"
+        --volume "${SCRIPT_DIR}:/workspace"
+        --workdir /workspace
+    )
+    if [[ "${MOUNT_OLD}" == true && -d "${OLD_TOOLS_DIR}" ]]; then
+        DRY_ARGS+=(--volume "${OLD_TOOLS_DIR}:/old-tools:ro")
+    fi
+    if [[ "${GPU}" == true ]]; then
+        DRY_ARGS+=(--gpus all)
+    fi
+
+    docker run "${DRY_ARGS[@]}" "${IMAGE_NAME}" \
+        bash -c "install/install.sh --tool all --yes --skip-examples"
+    rc=$?
+
+    echo ""
+    echo "─────────────────────────────────────────────────────────────"
+    if [[ ${rc} -eq 0 ]]; then
+        echo "PASS: dry-run install completed successfully (exit code 0)"
+    else
+        echo "FAIL: dry-run install failed (exit code ${rc})"
+    fi
+    exit ${rc}
+fi
+
+# ── Run (interactive) ─────────────────────────────────────────────────────────
 echo ""
 echo "Starting clean test environment..."
 echo "─────────────────────────────────────────────────────────────"

@@ -33,14 +33,13 @@
 
 ## Part D: Batch 2 — Installer robustness & testing
 
-- [ ] D1.  Add `Dockerfile` for full CI install test (install.sh --tool all --yes in container)
-- [ ] D2.  Add `test_install.sh` — dry-run validation (checks clones, envs, shortcuts without running ML)
-- [ ] D3.  Unify shared functions between `install.sh` and `install_aarch.sh` into `lib/installer_common.sh`
-- [ ] D4.  Add `--cuda` flag to `install_aarch.sh` (currently hardcoded 12.1)
-- [ ] D5.  Add retry logic to `run_logged()` — optional `--retries N` for flaky network operations
-- [ ] D6.  Add progress summary at each stage — "Step 3/7: Installing BoltzGen..."
-- [ ] D7.  Add `--uninstall` flag — removes conda envs and shortcuts cleanly
-- [ ] D8.  Pin tool repo commits (git clone --branch / --depth 1) for reproducible installs
+- [x] D1.  Rewrite `Dockerfile.test` with GPU-capable CUDA base image + multi-stage test target
+- [x] D2.  Add `--dry-run` to `test_env.sh` — non-interactive install validation (pass/fail)
+- [x] D3.  Add `--cuda` flag to `install_aarch.sh` (default 12.1, with compat warning)
+- [x] D4.  Add retry logic to `run_logged()` — optional `--retries N` for flaky network operations
+- [x] D5.  Add numbered progress summary — "[1/4] BindCraft", "[2/4] BoltzGen", etc.
+- [x] D6.  Add `--uninstall` flag — per-tool removal of conda envs, venvs, and shortcuts (safe)
+- [x] D7.  Pin tool repo commits (`--depth 50` + checkout) for reproducible installs
 
 ## Part E: Batch 3 — Evaluator enhancements
 
