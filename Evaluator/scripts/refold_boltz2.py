@@ -227,6 +227,7 @@ def refold_batch(
     output_dir: str = OUTPUT_DIR,
     *,
     checkpoint_path: str | None = None,
+    skip_indices: set[int] | None = None,
 ):
     """Refold a batch of binder sequences against a target.
 
@@ -234,7 +235,13 @@ def refold_batch(
       - Runs full metrics_loss (all 13 aux terms, recycling_steps=3, num_samples=6)
       - Runs folder.predict for PDB / PAE / pLDDT outputs
       - Appends to refold_designs.txt and refold_designs.csv
+
+    Args:
+        skip_indices: Set of 1-based binder indices to skip (already completed).
+                      When resuming, pass indices read from existing CSV.
     """
+    if skip_indices is None:
+        skip_indices = set()
     run_id = str(uuid.uuid4())[:8]
     os.makedirs(output_dir, exist_ok=True)
 
@@ -271,198 +278,202 @@ def refold_batch(
     csv_file = open(csv_path, "a", newline="")
     try:
         csv_writer = csv.DictWriter(csv_file, fieldnames=csv_columns)
-    if write_header:
-        csv_writer.writeheader()
-        csv_file.flush()
-    fasta_lines = []
+        if write_header:
+            csv_writer.writeheader()
+            csv_file.flush()
+        fasta_lines = []
 
-    for idx, seq_str in enumerate(binder_sequences, start=1):
-        binder_length = len(seq_str)
-        print(f"{'─' * 55}")
-        print(f"[{idx}/{len(binder_sequences)}] length={binder_length} aa  seq={seq_str}")
+        for idx, seq_str in enumerate(binder_sequences, start=1):
+            if idx in skip_indices:
+                print(f"[SKIP] Binder #{idx} already completed")
+                continue
 
-        seq = jnp.array([TOKENS.index(c) for c in seq_str])
-        pssm = jax.nn.one_hot(seq, 20)
+            binder_length = len(seq_str)
+            print(f"{'─' * 55}")
+            print(f"[{idx}/{len(binder_sequences)}] length={binder_length} aa  seq={seq_str}")
 
-        boltz_features, boltz_writer = folder.target_only_features(
-            chains=[
-                TargetChain(sequence=seq_str, use_msa=False),    # binder: de novo, no MSA
-                TargetChain(sequence=target_sequence, use_msa=True),  # target: real protein, use MSA
-            ]
-        )
+            seq = jnp.array([TOKENS.index(c) for c in seq_str])
+            pssm = jax.nn.one_hot(seq, 20)
 
-        # ---- Comprehensive aux metrics — all 13 loss terms ----
-        metrics_loss = folder.build_multisample_loss(
-            loss=(
-                sp.IPTMLoss()
-                + sp.BinderTargetIPSAE()
-                + sp.TargetBinderIPSAE()
-                + sp.IPSAE_min()
-                + sp.BinderTargetIPTM()
-                + sp.BinderPTMLoss()
-                + sp.PLDDTLoss()
-                + sp.WithinBinderPAE()
-                + sp.BinderTargetPAE()
-                + sp.TargetBinderPAE()
-                + sp.WithinBinderContact()
-                + sp.BinderTargetContact()
-                + sp.pTMEnergy()
-            ),
-            features=boltz_features,
-            recycling_steps=3,
-            num_samples=6,
-        )
-        _, aux = evaluate_loss(metrics_loss, pssm, key=jax.random.key(0))
+            boltz_features, boltz_writer = folder.target_only_features(
+                chains=[
+                    TargetChain(sequence=seq_str, use_msa=False),    # binder: de novo, no MSA
+                    TargetChain(sequence=target_sequence, use_msa=True),  # target: real protein, use MSA
+                ]
+            )
 
-        aux_dict = _merge_aux_entries(aux)
-        if idx == 1:
-            print(f"  [debug] aux keys: {sorted(aux_dict.keys())}")
+            # ---- Comprehensive aux metrics — all 13 loss terms ----
+            metrics_loss = folder.build_multisample_loss(
+                loss=(
+                    sp.IPTMLoss()
+                    + sp.BinderTargetIPSAE()
+                    + sp.TargetBinderIPSAE()
+                    + sp.IPSAE_min()
+                    + sp.BinderTargetIPTM()
+                    + sp.BinderPTMLoss()
+                    + sp.PLDDTLoss()
+                    + sp.WithinBinderPAE()
+                    + sp.BinderTargetPAE()
+                    + sp.TargetBinderPAE()
+                    + sp.WithinBinderContact()
+                    + sp.BinderTargetContact()
+                    + sp.pTMEnergy()
+                ),
+                features=boltz_features,
+                recycling_steps=3,
+                num_samples=6,
+            )
+            _, aux = evaluate_loss(metrics_loss, pssm, key=jax.random.key(0))
 
-        iptm_aux, _, _          = _mean_aux_metric(aux_dict, "iptm")
-        bt_ipsae, bt_key, bt_n  = _mean_aux_metric(aux_dict, "bt_ipsae", aliases=("binder_target_ipsae",))
-        tb_ipsae, tb_key, tb_n  = _mean_aux_metric(aux_dict, "tb_ipsae", aliases=("target_binder_ipsae",))
-        ipsae_min, _, _         = _mean_aux_metric(aux_dict, "ipsae_min")
-        bt_iptm, _, _           = _mean_aux_metric(aux_dict, "bt_iptm")
-        binder_ptm, _, _        = _mean_aux_metric(aux_dict, "binder_ptm")
-        plddt_aux, _, _         = _mean_aux_metric(aux_dict, "plddt")
-        bb_pae, _, _            = _mean_aux_metric(aux_dict, "bb_pae")
-        bt_pae_aux, _, _        = _mean_aux_metric(aux_dict, "bt_pae")
-        tb_pae, _, _            = _mean_aux_metric(aux_dict, "tb_pae")
-        intra_contact, _, _     = _mean_aux_metric(aux_dict, "intra_contact")
-        target_contact, _, _    = _mean_aux_metric(aux_dict, "target_contact")
-        pTMEnergy_val, _, _     = _mean_aux_metric(aux_dict, "pTMEnergy")
+            aux_dict = _merge_aux_entries(aux)
+            if idx == 1:
+                print(f"  [debug] aux keys: {sorted(aux_dict.keys())}")
 
-        if idx == 1:
-            print(f"  [debug] bt source={bt_key} n={bt_n}  tb source={tb_key} n={tb_n}")
+            iptm_aux, _, _          = _mean_aux_metric(aux_dict, "iptm")
+            bt_ipsae, bt_key, bt_n  = _mean_aux_metric(aux_dict, "bt_ipsae", aliases=("binder_target_ipsae",))
+            tb_ipsae, tb_key, tb_n  = _mean_aux_metric(aux_dict, "tb_ipsae", aliases=("target_binder_ipsae",))
+            ipsae_min, _, _         = _mean_aux_metric(aux_dict, "ipsae_min")
+            bt_iptm, _, _           = _mean_aux_metric(aux_dict, "bt_iptm")
+            binder_ptm, _, _        = _mean_aux_metric(aux_dict, "binder_ptm")
+            plddt_aux, _, _         = _mean_aux_metric(aux_dict, "plddt")
+            bb_pae, _, _            = _mean_aux_metric(aux_dict, "bb_pae")
+            bt_pae_aux, _, _        = _mean_aux_metric(aux_dict, "bt_pae")
+            tb_pae, _, _            = _mean_aux_metric(aux_dict, "tb_pae")
+            intra_contact, _, _     = _mean_aux_metric(aux_dict, "intra_contact")
+            target_contact, _, _    = _mean_aux_metric(aux_dict, "target_contact")
+            pTMEnergy_val, _, _     = _mean_aux_metric(aux_dict, "pTMEnergy")
 
-        # Change 3: ipsae_valid flag
-        ipsae_valid = 1 if (not np.isnan(ipsae_min) and ipsae_min > 0.0) else 0
+            if idx == 1:
+                print(f"  [debug] bt source={bt_key} n={bt_n}  tb source={tb_key} n={tb_n}")
 
-        # Change 2: Diagnose ipsae=0 cases
-        if bt_ipsae == 0.0 and tb_ipsae == 0.0:
-            print(f"  [WARNING] ipsae=0 for this binder — dumping aux_dict values for diagnosis:")
-            for k, v in sorted(aux_dict.items()):
-                vals = _flatten_numeric_values(v)
-                print(f"    {k}: {vals[:6]}")
+            # Change 3: ipsae_valid flag
+            ipsae_valid = 1 if (not np.isnan(ipsae_min) and ipsae_min > 0.0) else 0
 
-        # ---- Full prediction → structure files ----
-        prediction = folder.predict(
-            PSSM=pssm,
-            features=boltz_features,
-            writer=boltz_writer,
-            recycling_steps=3,
-            key=jax.random.key(0),
-        )
+            # Change 2: Diagnose ipsae=0 cases
+            if bt_ipsae == 0.0 and tb_ipsae == 0.0:
+                print(f"  [WARNING] ipsae=0 for this binder — dumping aux_dict values for diagnosis:")
+                for k, v in sorted(aux_dict.items()):
+                    vals = _flatten_numeric_values(v)
+                    print(f"    {k}: {vals[:6]}")
 
-        pred_metrics = _extract_prediction_metrics(prediction, binder_length)
-        iptm             = pred_metrics["iptm"]
-        plddt_binder_mean = pred_metrics["plddt_binder_mean"]
-        plddt_binder_min  = pred_metrics["plddt_binder_min"]
-        plddt_binder_max  = pred_metrics["plddt_binder_max"]
-        plddt_binder_std  = pred_metrics["plddt_binder_std"]
-        plddt_target_mean = pred_metrics["plddt_target_mean"]
-        plddt_target_min  = pred_metrics["plddt_target_min"]
-        pae_bb_mean      = pred_metrics["pae_bb_mean"]
-        pae_bt_mean      = pred_metrics["pae_bt_mean"]
-        pae_tb_mean      = pred_metrics["pae_tb_mean"]
-        pae_tt_mean      = pred_metrics["pae_tt_mean"]
-        pae_overall_mean = pred_metrics["pae_overall_mean"]
-        pae_max          = pred_metrics["pae_max"]
+            # ---- Full prediction → structure files ----
+            prediction = folder.predict(
+                PSSM=pssm,
+                features=boltz_features,
+                writer=boltz_writer,
+                recycling_steps=3,
+                key=jax.random.key(0),
+            )
 
-        # Change 1: ipae derived metric
-        ipae = (pae_bt_mean + pae_tb_mean) / 2.0
+            pred_metrics = _extract_prediction_metrics(prediction, binder_length)
+            iptm             = pred_metrics["iptm"]
+            plddt_binder_mean = pred_metrics["plddt_binder_mean"]
+            plddt_binder_min  = pred_metrics["plddt_binder_min"]
+            plddt_binder_max  = pred_metrics["plddt_binder_max"]
+            plddt_binder_std  = pred_metrics["plddt_binder_std"]
+            plddt_target_mean = pred_metrics["plddt_target_mean"]
+            plddt_target_min  = pred_metrics["plddt_target_min"]
+            pae_bb_mean      = pred_metrics["pae_bb_mean"]
+            pae_bt_mean      = pred_metrics["pae_bt_mean"]
+            pae_tb_mean      = pred_metrics["pae_tb_mean"]
+            pae_tt_mean      = pred_metrics["pae_tt_mean"]
+            pae_overall_mean = pred_metrics["pae_overall_mean"]
+            pae_max          = pred_metrics["pae_max"]
 
-        pdb_path   = f"{output_dir}/refold{idx}_{run_id}.pdb"
-        pae_file   = f"{output_dir}/refold{idx}_{run_id}_pae.npy"
-        plddt_file = f"{output_dir}/refold{idx}_{run_id}_plddt.csv"
+            # Change 1: ipae derived metric
+            ipae = (pae_bt_mean + pae_tb_mean) / 2.0
 
-        with open(pdb_path, "w") as f:
-            f.write(prediction.st.make_pdb_string())
+            pdb_path   = f"{output_dir}/refold{idx}_{run_id}.pdb"
+            pae_file   = f"{output_dir}/refold{idx}_{run_id}_pae.npy"
+            plddt_file = f"{output_dir}/refold{idx}_{run_id}_plddt.csv"
 
-        np.save(pae_file, np.array(prediction.pae))
+            with open(pdb_path, "w") as f:
+                f.write(prediction.st.make_pdb_string())
 
-        plddt_full = np.array(prediction.plddt)
-        with open(plddt_file, "w", newline="") as f:
-            plddt_writer = csv.writer(f)
-            plddt_writer.writerow(["residue_idx", "chain", "residue_in_chain", "plddt"])
-            for i, v in enumerate(plddt_full):
-                chain = "binder" if i < binder_length else "target"
-                res_in_chain = i if i < binder_length else i - binder_length
-                plddt_writer.writerow([i, chain, res_in_chain, f"{v:.6f}"])
+            np.save(pae_file, np.array(prediction.pae))
 
-        # Console summary
-        print(f"  Interface:       iptm={iptm:.4f}  bt_ipsae={bt_ipsae:.4f}  tb_ipsae={tb_ipsae:.4f}  ipsae_min={ipsae_min:.4f}  ipsae_valid={ipsae_valid}  bt_iptm={bt_iptm:.4f}")
-        print(f"  Binder quality:  binder_ptm={binder_ptm:.4f}  plddt_mean={plddt_binder_mean:.4f}  plddt_min={plddt_binder_min:.4f}  pae_bb={pae_bb_mean:.4f}  intra_contact={intra_contact:.4f}")
-        print(f"  PAE overview:    pae_bt={pae_bt_mean:.4f}  pae_tb={pae_tb_mean:.4f}  ipae={ipae:.4f}  pae_bb={pae_bb_mean:.4f}  pae_overall={pae_overall_mean:.4f}  pae_max={pae_max:.4f}")
-        print(f"  Energy/contacts: pTMEnergy={pTMEnergy_val:.4f}  target_contact={target_contact:.4f}")
-        print(f"  Files:  pdb={pdb_path}  pae={pae_file}  plddt={plddt_file}")
+            plddt_full = np.array(prediction.plddt)
+            with open(plddt_file, "w", newline="") as f:
+                plddt_writer = csv.writer(f)
+                plddt_writer.writerow(["residue_idx", "chain", "residue_in_chain", "plddt"])
+                for i, v in enumerate(plddt_full):
+                    chain = "binder" if i < binder_length else "target"
+                    res_in_chain = i if i < binder_length else i - binder_length
+                    plddt_writer.writerow([i, chain, res_in_chain, f"{v:.6f}"])
 
-        row = {
-            "run_id": run_id,
-            "idx": idx,
-            "sequence": seq_str,
-            "target_sequence": target_sequence,
-            "binder_length": binder_length,
-            # Aux-based metrics
-            "iptm_aux": iptm_aux,
-            "bt_ipsae": bt_ipsae,
-            "tb_ipsae": tb_ipsae,
-            "ipsae_min": ipsae_min,
-            "ipsae_valid": ipsae_valid,
-            "bt_iptm": bt_iptm,
-            "binder_ptm": binder_ptm,
-            "plddt_aux": plddt_aux,
-            "bb_pae": bb_pae,
-            "bt_pae_aux": bt_pae_aux,
-            "tb_pae": tb_pae,
-            "intra_contact": intra_contact,
-            "target_contact": target_contact,
-            "pTMEnergy": pTMEnergy_val,
-            # Prediction-based metrics
-            "iptm": iptm,
-            "plddt_binder_mean": plddt_binder_mean,
-            "plddt_binder_min": plddt_binder_min,
-            "plddt_binder_max": plddt_binder_max,
-            "plddt_binder_std": plddt_binder_std,
-            "plddt_target_mean": plddt_target_mean,
-            "plddt_target_min": plddt_target_min,
-            "pae_bb_mean": pae_bb_mean,
-            "pae_bt_mean": pae_bt_mean,
-            "pae_tb_mean": pae_tb_mean,
-            "ipae": ipae,
-            "pae_tt_mean": pae_tt_mean,
-            "pae_overall_mean": pae_overall_mean,
-            "pae_max": pae_max,
-            # Files
-            "pdb": pdb_path,
-            "pae_file": pae_file,
-            "plddt_file": plddt_file,
-        }
-        results_ref.append(row)
-        csv_writer.writerow(row)
-        csv_file.flush()
+            # Console summary
+            print(f"  Interface:       iptm={iptm:.4f}  bt_ipsae={bt_ipsae:.4f}  tb_ipsae={tb_ipsae:.4f}  ipsae_min={ipsae_min:.4f}  ipsae_valid={ipsae_valid}  bt_iptm={bt_iptm:.4f}")
+            print(f"  Binder quality:  binder_ptm={binder_ptm:.4f}  plddt_mean={plddt_binder_mean:.4f}  plddt_min={plddt_binder_min:.4f}  pae_bb={pae_bb_mean:.4f}  intra_contact={intra_contact:.4f}")
+            print(f"  PAE overview:    pae_bt={pae_bt_mean:.4f}  pae_tb={pae_tb_mean:.4f}  ipae={ipae:.4f}  pae_bb={pae_bb_mean:.4f}  pae_overall={pae_overall_mean:.4f}  pae_max={pae_max:.4f}")
+            print(f"  Energy/contacts: pTMEnergy={pTMEnergy_val:.4f}  target_contact={target_contact:.4f}")
+            print(f"  Files:  pdb={pdb_path}  pae={pae_file}  plddt={plddt_file}")
 
-        # Enriched FASTA header
-        header = (
-            f">refold{idx}_{run_id}"
-            f"  binder_length={binder_length}"
-            f"  iptm={iptm:.4f}"
-            f"  bt_ipsae={bt_ipsae:.4f}"
-            f"  tb_ipsae={tb_ipsae:.4f}"
-            f"  ipsae_min={ipsae_min:.4f}"
-            f"  ipsae_valid={ipsae_valid}"
-            f"  bt_iptm={bt_iptm:.4f}"
-            f"  binder_ptm={binder_ptm:.4f}"
-            f"  plddt_mean={plddt_binder_mean:.4f}"
-            f"  plddt_min={plddt_binder_min:.4f}"
-            f"  pae_bb={pae_bb_mean:.4f}"
-            f"  ipae={ipae:.4f}"
-            f"  pTMEnergy={pTMEnergy_val:.4f}"
-            f"  intra_contact={intra_contact:.4f}"
-            f"  target_contact={target_contact:.4f}"
-            f"  pdb={pdb_path}"
-        )
-        fasta_lines.append(f"{header}\n{seq_str}")
+            row = {
+                "run_id": run_id,
+                "idx": idx,
+                "sequence": seq_str,
+                "target_sequence": target_sequence,
+                "binder_length": binder_length,
+                # Aux-based metrics
+                "iptm_aux": iptm_aux,
+                "bt_ipsae": bt_ipsae,
+                "tb_ipsae": tb_ipsae,
+                "ipsae_min": ipsae_min,
+                "ipsae_valid": ipsae_valid,
+                "bt_iptm": bt_iptm,
+                "binder_ptm": binder_ptm,
+                "plddt_aux": plddt_aux,
+                "bb_pae": bb_pae,
+                "bt_pae_aux": bt_pae_aux,
+                "tb_pae": tb_pae,
+                "intra_contact": intra_contact,
+                "target_contact": target_contact,
+                "pTMEnergy": pTMEnergy_val,
+                # Prediction-based metrics
+                "iptm": iptm,
+                "plddt_binder_mean": plddt_binder_mean,
+                "plddt_binder_min": plddt_binder_min,
+                "plddt_binder_max": plddt_binder_max,
+                "plddt_binder_std": plddt_binder_std,
+                "plddt_target_mean": plddt_target_mean,
+                "plddt_target_min": plddt_target_min,
+                "pae_bb_mean": pae_bb_mean,
+                "pae_bt_mean": pae_bt_mean,
+                "pae_tb_mean": pae_tb_mean,
+                "ipae": ipae,
+                "pae_tt_mean": pae_tt_mean,
+                "pae_overall_mean": pae_overall_mean,
+                "pae_max": pae_max,
+                # Files
+                "pdb": pdb_path,
+                "pae_file": pae_file,
+                "plddt_file": plddt_file,
+            }
+            results_ref.append(row)
+            csv_writer.writerow(row)
+            csv_file.flush()
+
+            # Enriched FASTA header
+            header = (
+                f">refold{idx}_{run_id}"
+                f"  binder_length={binder_length}"
+                f"  iptm={iptm:.4f}"
+                f"  bt_ipsae={bt_ipsae:.4f}"
+                f"  tb_ipsae={tb_ipsae:.4f}"
+                f"  ipsae_min={ipsae_min:.4f}"
+                f"  ipsae_valid={ipsae_valid}"
+                f"  bt_iptm={bt_iptm:.4f}"
+                f"  binder_ptm={binder_ptm:.4f}"
+                f"  plddt_mean={plddt_binder_mean:.4f}"
+                f"  plddt_min={plddt_binder_min:.4f}"
+                f"  pae_bb={pae_bb_mean:.4f}"
+                f"  ipae={ipae:.4f}"
+                f"  pTMEnergy={pTMEnergy_val:.4f}"
+                f"  intra_contact={intra_contact:.4f}"
+                f"  target_contact={target_contact:.4f}"
+                f"  pdb={pdb_path}"
+            )
+            fasta_lines.append(f"{header}\n{seq_str}")
 
     except Exception:
         if checkpoint_path:

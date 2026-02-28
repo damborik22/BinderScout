@@ -25,6 +25,7 @@ from ..comparison.ensemble import compute_ensemble_metrics
 from ..comparison.statistics import compute_statistics, overall_rank
 from ..comparison.scoring import (
     add_af2_ipsae_from_files,
+    add_boltz_ipsae_from_files,
     apply_screening_thresholds,
     compute_composite_scores,
     rank_by_adaptyv_method,
@@ -55,12 +56,25 @@ def run(args: argparse.Namespace) -> None:
     print("[report] Computing ensemble metrics…")
     df = compute_ensemble_metrics(df, af2_weight=af2_weight, boltz2_weight=boltz2_weight)
 
-    # Step 2b: Compute AF2 ipSAE from PAE files.
-    # refold_Version6 saves af2_pae_file paths in the CSV; add_af2_ipsae_from_files
-    # is a no-op when the column is absent (older CSVs without PAE files).
+    # Step 2b: Compute ipSAE from PAE files using DunbrackLab formula.
+    # This gives the correct evaluation metric (mean over qualifying residues)
+    # with model-specific PAE cutoffs (10 Å Boltz-2, 15 Å AF2).
+    if "boltz_pae_file" in df.columns:
+        print("[report] Computing Boltz-2 ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
+        df = add_boltz_ipsae_from_files(df, pae_file_col="boltz_pae_file")
+
     if "af2_pae_file" in df.columns:
-        print("[report] Computing AF2 ipSAE from PAE files (Dunbrack formula)…")
+        print("[report] Computing AF2 ipSAE from PAE files (DunbrackLab, cutoff=15 Å)…")
         df = add_af2_ipsae_from_files(df, pae_file_col="af2_pae_file")
+
+    # Promote DunbrackLab PAE-based ipsae_min as the primary ranking column.
+    # Prefer Boltz-2 PAE-based; fall back to AF2 PAE-based.
+    if "boltz_pae_ipsae_min" in df.columns:
+        df["ipsae_min"] = df["boltz_pae_ipsae_min"]
+        print("[report] Using boltz_pae_ipsae_min as primary ipsae_min for ranking")
+    elif "af2_ipsae_min" in df.columns:
+        df["ipsae_min"] = df["af2_ipsae_min"]
+        print("[report] Using af2_ipsae_min as primary ipsae_min for ranking")
 
     # Step 3: Statistics + z-scores
     print("[report] Computing statistics…")

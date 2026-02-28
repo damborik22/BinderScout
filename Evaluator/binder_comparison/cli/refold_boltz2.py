@@ -36,6 +36,7 @@ def run(args: argparse.Namespace) -> None:
         output_dir=args.output_dir,
         output_csv=args.output,
         scripts_path=args.scripts_path,
+        resume=args.resume,
     )
 
 
@@ -56,4 +57,6 @@ def add_parser(subparsers) -> None:
                    help="Directory for structure files (default: ./refold_boltz2)")
     p.add_argument("--scripts-path", default=None, metavar="DIR",
                    help="Path to scripts/ directory (auto-detected if not set)")
+    p.add_argument("--resume", action="store_true",
+                   help="Skip binders already present in existing output CSV")
     p.set_defaults(func=run)

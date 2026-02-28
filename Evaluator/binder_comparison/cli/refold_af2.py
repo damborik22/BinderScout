@@ -40,6 +40,7 @@ def run(args: argparse.Namespace) -> None:
         models=models,
         num_recycles=args.num_recycles,
         mosaic_path=args.mosaic_path,
+        resume=args.resume,
     )
 
 
@@ -64,4 +65,6 @@ def add_parser(subparsers) -> None:
                    help="AF2 recycling iterations (default: 3)")
     p.add_argument("--mosaic-path", default=None, metavar="DIR",
                    help="Path to Mosaic repo root (auto-detected if not set)")
+    p.add_argument("--resume", action="store_true",
+                   help="Skip binders already present in existing output CSV")
     p.set_defaults(func=run)

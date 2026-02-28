@@ -6,6 +6,7 @@ Subcommands:
     refold-af2    — refold with AF2 (run in 'bindcraft_pr' env)
     report        — merge, ensemble, normalise, generate HTML report
     run           — full pipeline orchestrator
+    validate      — sanity-check input sequences before refolding
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .cli import extract, parse_seqs, refold_boltz2, refold_af2, report, run
+from .cli import extract, parse_seqs, refold_boltz2, refold_af2, report, run, validate
 
 
 def main(argv=None) -> None:
@@ -33,6 +34,7 @@ def main(argv=None) -> None:
     refold_af2.add_parser(subparsers)
     report.add_parser(subparsers)
     run.add_parser(subparsers)
+    validate.add_parser(subparsers)
 
     args = parser.parse_args(argv)
     args.func(args)
