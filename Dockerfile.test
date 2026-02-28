@@ -1,14 +1,17 @@
-# BindMaster test environment — simulates a fresh DGX Spark (aarch64, Ubuntu 24.04)
-# Build: docker build -f Dockerfile.test -t bindmaster-test .
-# Run:   ./test_env.sh
+# BindMaster test environment — GPU-capable CUDA 12.4 base image (x86_64, Ubuntu 22.04)
+#
+# Build (base):  docker build -f Dockerfile.test -t bindmaster-test .
+# Build (test):  docker build -f Dockerfile.test --target test -t bindmaster-test-run .
+# Run:           ./test_env.sh
 
-FROM ubuntu:24.04
+# ── Base stage: CUDA 12.4 + Miniforge + system packages ──────────────────────
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CONDA_BASE=/opt/miniforge3
 ENV PATH=/opt/miniforge3/bin:${PATH}
 
-# ── System packages ────────────────────────────────────────────────────────────
+# ── System packages ──────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     wget \
@@ -20,11 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Miniforge3 (mamba + conda, aarch64) ───────────────────────────────────────
-# Installed as root; envs_dirs and pkgs_dirs will point to world-writable
-# locations so any runtime UID can create conda environments.
+# ── Miniforge3 (mamba + conda) ──────────────────────────────────────────────
 RUN wget -q \
-    "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-aarch64.sh" \
+    "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh" \
     -O /tmp/miniforge.sh \
     && bash /tmp/miniforge.sh -b -p /opt/miniforge3 \
     && rm /tmp/miniforge.sh \
@@ -37,10 +38,16 @@ RUN mkdir -p /opt/conda-envs /opt/conda-pkgs \
     && /opt/miniforge3/bin/conda config --system --add envs_dirs /opt/conda-envs \
     && /opt/miniforge3/bin/conda config --system --add pkgs_dirs /opt/conda-pkgs
 
-# ── Entrypoint: set up home dir and conda for whatever UID we run as ──────────
+# ── Entrypoint ───────────────────────────────────────────────────────────────
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["/bin/bash", "--login"]
+
+# ── Test stage: runs the installer non-interactively ─────────────────────────
+FROM base AS test
+
+COPY . /workspace
+RUN bash install/install.sh --tool all --yes --skip-examples
