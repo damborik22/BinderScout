@@ -43,14 +43,11 @@
 
 ## Part E: Batch 3 — Evaluator enhancements
 
-- [ ] E1.  Add `--resume` flag to `evaluate.sh` — skip already-completed binders using checkpoint
-- [ ] E2.  Add parallel binder evaluation — process N binders concurrently on multi-GPU
-- [ ] E3.  Add PXDesign extractor integration into configurator.py tool selection
-- [ ] E4.  Add `binder-compare validate` subcommand — sanity-check input sequences before refolding
-- [ ] E5.  Add ipSAE computation for AF2 results in the report (currently Boltz-2 only via aux)
-- [ ] E6.  Add composite score (ipSAE × |ΔG/ΔSASA|) when native metrics are available
-- [ ] E7.  Add per-binder structure overlay visualization (PyMOL script or py3Dmol widget)
-- [ ] E8.  Add JSON schema validation for evaluator config / pipeline inputs
+- [x] E1.  Fix ipSAE to match DunbrackLab formula: mean aggregation, model-specific PAE cutoffs, post-hoc from PAE files
+- [x] E2.  Add `--resume` flag to evaluate.sh — skip already-completed binders via CSV check
+- [x] E3.  Add PXDesign as tool option in `configurator.py` wizard
+- [x] E4.  Add `binder-compare validate` subcommand — sanity-check input sequences
+- [x] E5.  Add per-binder PAE heatmap visualisation in HTML report (top N binders)
 
 ## Part F: Batch 4 — Configurator & UX
 

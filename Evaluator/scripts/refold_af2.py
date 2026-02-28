@@ -38,6 +38,7 @@ def refold_batch_af2(
     num_recycles: int = 3,
     output_dir: str = OUTPUT_DIR,
     csv_path: str = CSV_PATH,
+    skip_indices: set = None,
 ):
     """Evaluate a batch of binder sequences with AF2 multimer (ColabDesign binder protocol).
 
@@ -45,7 +46,13 @@ def refold_batch_af2(
       - Runs AF2 multimer prediction (target first, binder second ordering)
       - Extracts iptm, plddt, and pae metrics sliced into binder/target regions
       - Saves PDB and writes a CSV row immediately (incremental)
+
+    Args:
+        skip_indices: Set of 1-based binder indices to skip (already completed).
+                      When resuming, pass indices read from existing CSV.
     """
+    if skip_indices is None:
+        skip_indices = set()
     if models is None:
         models = [1]
 
@@ -68,108 +75,112 @@ def refold_batch_af2(
     csv_file = open(csv_path, "a", newline="")
     try:
         csv_writer = csv.DictWriter(csv_file, fieldnames=CSV_COLUMNS)
-    if write_header:
-        csv_writer.writeheader()
-        csv_file.flush()
+        if write_header:
+            csv_writer.writeheader()
+            csv_file.flush()
 
-    for idx, seq in enumerate(binder_sequences, start=1):
-        L_b = len(seq)
-        print(f"{'─' * 55}")
-        print(f"[{idx}/{len(binder_sequences)}] length={L_b} aa  seq={seq}")
+        for idx, seq in enumerate(binder_sequences, start=1):
+            if idx in skip_indices:
+                print(f"[SKIP] Binder #{idx} already completed")
+                continue
 
-        af.prep_inputs(pdb_filename=target_pdb_path, chain="A", binder_len=L_b)
-        af.set_seq(seq)
-        af.predict(models=models, num_recycles=num_recycles)
+            L_b = len(seq)
+            print(f"{'─' * 55}")
+            print(f"[{idx}/{len(binder_sequences)}] length={L_b} aa  seq={seq}")
 
-        # Diagnostic dump on first binder to catch API surprises early
-        if idx == 1:
-            print(f"  [debug] af.aux keys: {sorted(af.aux.keys())}")
-            log_val = af.aux.get("log", {})
-            log_keys = sorted(log_val.keys()) if isinstance(log_val, dict) else type(log_val)
-            print(f"  [debug] af.aux['log'] keys: {log_keys}")
-            print(f"  [debug] af._inputs keys: {sorted(af._inputs.keys())}")
+            af.prep_inputs(pdb_filename=target_pdb_path, chain="A", binder_len=L_b)
+            af.set_seq(seq)
+            af.predict(models=models, num_recycles=num_recycles)
 
-        # Determine target length — prefer explicit field, fall back to array arithmetic
-        L_t = af._inputs.get("target_length", None)
-        if L_t is None:
-            total_len = len(af.aux["plddt"])
-            L_t = total_len - L_b
-        L_t = int(L_t)
+            # Diagnostic dump on first binder to catch API surprises early
+            if idx == 1:
+                print(f"  [debug] af.aux keys: {sorted(af.aux.keys())}")
+                log_val = af.aux.get("log", {})
+                log_keys = sorted(log_val.keys()) if isinstance(log_val, dict) else type(log_val)
+                print(f"  [debug] af.aux['log'] keys: {log_keys}")
+                print(f"  [debug] af._inputs keys: {sorted(af._inputs.keys())}")
 
-        # Slice arrays: target [0:L_t], binder [L_t:L_t+L_b]
-        plddt = np.array(af.aux["plddt"])
-        pae   = np.array(af.aux["pae"])
+            # Determine target length — prefer explicit field, fall back to array arithmetic
+            L_t = af._inputs.get("target_length", None)
+            if L_t is None:
+                total_len = len(af.aux["plddt"])
+                L_t = total_len - L_b
+            L_t = int(L_t)
 
-        plddt_t = plddt[:L_t]
-        plddt_b = plddt[L_t:]
-        pae_tt  = pae[:L_t, :L_t]
-        pae_bt  = pae[L_t:, :L_t]   # binder rows → target cols
-        pae_tb  = pae[:L_t, L_t:]   # target rows → binder cols
-        pae_bb  = pae[L_t:, L_t:]
+            # Slice arrays: target [0:L_t], binder [L_t:L_t+L_b]
+            plddt = np.array(af.aux["plddt"])
+            pae   = np.array(af.aux["pae"])
 
-        # Interface iptm — prefer top-level key, fall back to log dict
-        if "i_ptm" in af.aux:
-            af2_iptm = float(af.aux["i_ptm"])
-        else:
-            log = af.aux.get("log", {})
-            af2_iptm = float(log.get("i_ptm", log.get("iptm", float("nan")))) if isinstance(log, dict) else float("nan")
+            plddt_t = plddt[:L_t]
+            plddt_b = plddt[L_t:]
+            pae_tt  = pae[:L_t, :L_t]
+            pae_bt  = pae[L_t:, :L_t]   # binder rows → target cols
+            pae_tb  = pae[:L_t, L_t:]   # target rows → binder cols
+            pae_bb  = pae[L_t:, L_t:]
 
-        # pLDDT statistics
-        af2_plddt_binder_mean = float(plddt_b.mean()) if plddt_b.size > 0 else float("nan")
-        af2_plddt_binder_min  = float(plddt_b.min())  if plddt_b.size > 0 else float("nan")
-        af2_plddt_binder_max  = float(plddt_b.max())  if plddt_b.size > 0 else float("nan")
-        af2_plddt_target_mean = float(plddt_t.mean()) if plddt_t.size > 0 else float("nan")
+            # Interface iptm — prefer top-level key, fall back to log dict
+            if "i_ptm" in af.aux:
+                af2_iptm = float(af.aux["i_ptm"])
+            else:
+                log = af.aux.get("log", {})
+                af2_iptm = float(log.get("i_ptm", log.get("iptm", float("nan")))) if isinstance(log, dict) else float("nan")
 
-        # PAE statistics
-        af2_pae_bt_mean      = float(pae_bt.mean()) if pae_bt.size > 0 else float("nan")
-        af2_pae_tb_mean      = float(pae_tb.mean()) if pae_tb.size > 0 else float("nan")
-        af2_ipae             = (af2_pae_bt_mean + af2_pae_tb_mean) / 2.0
-        af2_pae_bb_mean      = float(pae_bb.mean()) if pae_bb.size > 0 else float("nan")
-        af2_pae_tt_mean      = float(pae_tt.mean()) if pae_tt.size > 0 else float("nan")
-        af2_pae_overall_mean = float(pae.mean())
-        af2_pae_max          = float(pae.max())
+            # pLDDT statistics
+            af2_plddt_binder_mean = float(plddt_b.mean()) if plddt_b.size > 0 else float("nan")
+            af2_plddt_binder_min  = float(plddt_b.min())  if plddt_b.size > 0 else float("nan")
+            af2_plddt_binder_max  = float(plddt_b.max())  if plddt_b.size > 0 else float("nan")
+            af2_plddt_target_mean = float(plddt_t.mean()) if plddt_t.size > 0 else float("nan")
 
-        # Save structure
-        pdb_path = f"{output_dir}/af2_{idx}_{run_id}.pdb"
-        af.save_pdb(pdb_path)
+            # PAE statistics
+            af2_pae_bt_mean      = float(pae_bt.mean()) if pae_bt.size > 0 else float("nan")
+            af2_pae_tb_mean      = float(pae_tb.mean()) if pae_tb.size > 0 else float("nan")
+            af2_ipae             = (af2_pae_bt_mean + af2_pae_tb_mean) / 2.0
+            af2_pae_bb_mean      = float(pae_bb.mean()) if pae_bb.size > 0 else float("nan")
+            af2_pae_tt_mean      = float(pae_tt.mean()) if pae_tt.size > 0 else float("nan")
+            af2_pae_overall_mean = float(pae.mean())
+            af2_pae_max          = float(pae.max())
 
-        # Save PAE matrix for downstream ipSAE computation.
-        # Array is in native AF2 ordering: [target | binder].
-        # binder_comparison/comparison/scoring.py reads this with ordering="target_binder".
-        pae_path = f"{output_dir}/af2_{idx}_{run_id}_pae.npy"
-        np.save(pae_path, pae)
+            # Save structure
+            pdb_path = f"{output_dir}/af2_{idx}_{run_id}.pdb"
+            af.save_pdb(pdb_path)
 
-        # Console summary
-        print(f"  Interface:   iptm={af2_iptm:.4f}  ipae={af2_ipae:.4f}  pae_bt={af2_pae_bt_mean:.4f}  pae_tb={af2_pae_tb_mean:.4f}")
-        print(f"  Binder:      plddt_mean={af2_plddt_binder_mean:.4f}  plddt_min={af2_plddt_binder_min:.4f}  pae_bb={af2_pae_bb_mean:.4f}")
-        print(f"  Target:      plddt_mean={af2_plddt_target_mean:.4f}  pae_tt={af2_pae_tt_mean:.4f}")
-        print(f"  PAE overall: mean={af2_pae_overall_mean:.4f}  max={af2_pae_max:.4f}")
-        print(f"  PDB: {pdb_path}")
-        print(f"  PAE: {pae_path}")
+            # Save PAE matrix for downstream ipSAE computation.
+            # Array is in native AF2 ordering: [target | binder].
+            # binder_comparison/comparison/scoring.py reads this with ordering="target_binder".
+            pae_path = f"{output_dir}/af2_{idx}_{run_id}_pae.npy"
+            np.save(pae_path, pae)
 
-        row = {
-            "run_id":                run_id,
-            "idx":                   idx,
-            "sequence":              seq,
-            "target_pdb":            target_pdb_path,
-            "binder_length":         L_b,
-            "af2_iptm":              af2_iptm,
-            "af2_plddt_binder_mean": af2_plddt_binder_mean,
-            "af2_plddt_binder_min":  af2_plddt_binder_min,
-            "af2_plddt_binder_max":  af2_plddt_binder_max,
-            "af2_plddt_target_mean": af2_plddt_target_mean,
-            "af2_pae_bt_mean":       af2_pae_bt_mean,
-            "af2_pae_tb_mean":       af2_pae_tb_mean,
-            "af2_ipae":              af2_ipae,
-            "af2_pae_bb_mean":       af2_pae_bb_mean,
-            "af2_pae_tt_mean":       af2_pae_tt_mean,
-            "af2_pae_overall_mean":  af2_pae_overall_mean,
-            "af2_pae_max":           af2_pae_max,
-            "pdb":                   pdb_path,
-            "af2_pae_file":          pae_path,
-        }
-        csv_writer.writerow(row)
-        csv_file.flush()
+            # Console summary
+            print(f"  Interface:   iptm={af2_iptm:.4f}  ipae={af2_ipae:.4f}  pae_bt={af2_pae_bt_mean:.4f}  pae_tb={af2_pae_tb_mean:.4f}")
+            print(f"  Binder:      plddt_mean={af2_plddt_binder_mean:.4f}  plddt_min={af2_plddt_binder_min:.4f}  pae_bb={af2_pae_bb_mean:.4f}")
+            print(f"  Target:      plddt_mean={af2_plddt_target_mean:.4f}  pae_tt={af2_pae_tt_mean:.4f}")
+            print(f"  PAE overall: mean={af2_pae_overall_mean:.4f}  max={af2_pae_max:.4f}")
+            print(f"  PDB: {pdb_path}")
+            print(f"  PAE: {pae_path}")
+
+            row = {
+                "run_id":                run_id,
+                "idx":                   idx,
+                "sequence":              seq,
+                "target_pdb":            target_pdb_path,
+                "binder_length":         L_b,
+                "af2_iptm":              af2_iptm,
+                "af2_plddt_binder_mean": af2_plddt_binder_mean,
+                "af2_plddt_binder_min":  af2_plddt_binder_min,
+                "af2_plddt_binder_max":  af2_plddt_binder_max,
+                "af2_plddt_target_mean": af2_plddt_target_mean,
+                "af2_pae_bt_mean":       af2_pae_bt_mean,
+                "af2_pae_tb_mean":       af2_pae_tb_mean,
+                "af2_ipae":              af2_ipae,
+                "af2_pae_bb_mean":       af2_pae_bb_mean,
+                "af2_pae_tt_mean":       af2_pae_tt_mean,
+                "af2_pae_overall_mean":  af2_pae_overall_mean,
+                "af2_pae_max":           af2_pae_max,
+                "pdb":                   pdb_path,
+                "af2_pae_file":          pae_path,
+            }
+            csv_writer.writerow(row)
+            csv_file.flush()
 
     finally:
         csv_file.close()

@@ -17,7 +17,9 @@ import pandas as pd
 from .plots import (
     METRIC_META,
     fig_to_base64,
+    load_pae_data_from_df,
     plot_metric_distributions,
+    plot_pae_heatmaps,
     plot_radar_chart,
     plot_af2_vs_boltz2_scatter,
 )
@@ -101,6 +103,8 @@ _HTML_TEMPLATE = """\
 <h2>AF2 vs Boltz-2 Correlation</h2>
 {correlation_callout}
 <img src="data:image/png;base64,{scatter_plot}" alt="AF2 vs Boltz2 scatter">
+
+{pae_heatmap_section}
 
 <h2>Full Metrics Table</h2>
 <details>
@@ -237,6 +241,26 @@ def generate_report(
     corr = _compute_af2_boltz2_r(sort_df)
     correlation_callout = _correlation_callout_html(corr)
 
+    # PAE heatmaps for top-ranked binders
+    pae_heatmap_section = ""
+    if "boltz_pae_file" in sort_df.columns or "af2_pae_file" in sort_df.columns:
+        sequences, af2_pae, boltz_pae, binder_lens = load_pae_data_from_df(
+            sort_df, max_binders=5
+        )
+        if sequences:
+            pae_fig = plot_pae_heatmaps(
+                sequences, af2_pae, boltz_pae, binder_lens, max_binders=5
+            )
+            pae_b64 = fig_to_base64(pae_fig)
+            pae_heatmap_section = (
+                '<h2>PAE Heatmaps (Top-Ranked Binders)</h2>\n'
+                '<p style="font-size:0.85em;color:#555;">'
+                'White lines mark the binder/target boundary. '
+                'Low PAE (blue) in off-diagonal blocks indicates confident interface prediction.'
+                '</p>\n'
+                f'<img src="data:image/png;base64,{pae_b64}" alt="PAE heatmaps">'
+            )
+
     # Full table (all columns, collapsed)
     full_table = _df_to_html(sort_df, max_rows=None)
 
@@ -252,6 +276,7 @@ def generate_report(
         radar_plot=radar_b64,
         scatter_plot=scatter_b64,
         correlation_callout=correlation_callout,
+        pae_heatmap_section=pae_heatmap_section,
         full_table=full_table,
     )
 
@@ -265,7 +290,9 @@ def _select_display_cols(df: pd.DataFrame) -> list[str]:
     """Pick a readable subset of columns for the top-20 table."""
     preferred = [
         "adaptyv_rank", "binder_id", "source_tool", "quality_tier",
-        "ipsae_min", "bt_ipsae", "tb_ipsae", "ipsae_valid",
+        "ipsae_min", "ipsae_min_aux",
+        "boltz_pae_ipsae_min", "af2_ipsae_min",
+        "ipsae_valid",
         "iptm", "ipae", "plddt_binder_mean", "plddt_binder_min",
         "pae_bt", "pae_tb",
         "binder_ptm",

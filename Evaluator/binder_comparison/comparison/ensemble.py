@@ -20,10 +20,14 @@ import pandas as pd
 from ..core.schema import ENSEMBLE_METRIC_MAP
 
 # Renaming map: merged column → clean pre-ensemble column name for display
+#
+# Mosaic aux ipSAE values use max aggregation (optimisation metric) — rename
+# them to *_aux to distinguish from DunbrackLab PAE-based ipSAE (mean
+# aggregation, evaluation metric) which is added later by report.py.
 _BOLTZ2_DISPLAY_RENAMES = {
-    "boltz_bt_ipsae":      "bt_ipsae",
-    "boltz_tb_ipsae":      "tb_ipsae",
-    "boltz_ipsae_min":     "ipsae_min",
+    "boltz_bt_ipsae":      "bt_ipsae_aux",
+    "boltz_tb_ipsae":      "tb_ipsae_aux",
+    "boltz_ipsae_min":     "ipsae_min_aux",
     "boltz_ipsae_valid":   "ipsae_valid",
     "boltz_bt_iptm":       "bt_iptm",
     "boltz_binder_ptm":    "binder_ptm",

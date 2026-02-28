@@ -36,6 +36,7 @@ def run_af2_refold(
     models: list[int] | None = None,
     num_recycles: int = 3,
     mosaic_path: str | Path | None = None,
+    resume: bool = False,
 ) -> None:
     """Refold *sequences* against *target_pdb_path* using AF2 (ColabDesign).
 
@@ -47,6 +48,7 @@ def run_af2_refold(
         models:          AF2 model indices to use (default: [1]).
         num_recycles:    Number of recycling iterations (default: 3).
         mosaic_path:     Path to the Mosaic repo root. Auto-detected if None.
+        resume:          If True, skip binders already present in existing output CSV.
     """
     output_dir = Path(output_dir)
     output_csv = Path(output_csv)
@@ -56,6 +58,12 @@ def run_af2_refold(
 
     if not target_pdb_path.exists():
         raise FileNotFoundError(f"Target PDB not found: {target_pdb_path}")
+
+    skip_indices: set[int] = set()
+    if resume:
+        skip_indices = _load_completed_indices(output_csv)
+        if skip_indices:
+            print(f"[af2] Resuming — skipping {len(skip_indices)} already-completed binders")
 
     mosaic_root = _resolve_mosaic_path(mosaic_path)
     sys.path.insert(0, str(mosaic_root))
@@ -68,8 +76,27 @@ def run_af2_refold(
         csv_path=str(output_csv),
         models=models if models is not None else [1],
         num_recycles=num_recycles,
+        skip_indices=skip_indices,
     )
     print(f"[af2] Results → {output_csv}")
+
+
+def _load_completed_indices(csv_path: Path) -> set[int]:
+    """Read existing CSV and return a set of completed 1-based binder indices."""
+    if not csv_path.exists():
+        return set()
+    try:
+        import csv
+        indices: set[int] = set()
+        with open(csv_path) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                idx_val = row.get("idx")
+                if idx_val is not None:
+                    indices.add(int(idx_val))
+        return indices
+    except Exception:
+        return set()
 
 
 def _resolve_mosaic_path(override: str | Path | None) -> Path:
