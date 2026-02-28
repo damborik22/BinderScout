@@ -50,9 +50,9 @@ def run_af2_refold(
         mosaic_path:     Path to the Mosaic repo root. Auto-detected if None.
         resume:          If True, skip binders already present in existing output CSV.
     """
-    output_dir = Path(output_dir)
-    output_csv = Path(output_csv)
-    target_pdb_path = Path(target_pdb_path)
+    output_dir = Path(output_dir).resolve()
+    output_csv = Path(output_csv).resolve()
+    target_pdb_path = Path(target_pdb_path).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
@@ -65,9 +65,32 @@ def run_af2_refold(
         if skip_indices:
             print(f"[af2] Resuming — skipping {len(skip_indices)} already-completed binders")
 
+    # ColabDesign 1.1.1 uses jax.tree_* APIs removed in JAX 0.6.0.
+    # Restore them as shims so older code works transparently.
+    import jax  # noqa: PLC0415
+    _tree_shims = {
+        "tree_map": "map",
+        "tree_leaves": "leaves",
+        "tree_flatten": "flatten",
+        "tree_unflatten": "unflatten",
+        "tree_structure": "structure",
+    }
+    for old_name, new_name in _tree_shims.items():
+        if not hasattr(jax, old_name):
+            setattr(jax, old_name, getattr(jax.tree, new_name))
+
     mosaic_root = _resolve_mosaic_path(mosaic_path)
     sys.path.insert(0, str(mosaic_root))
     from refold_Version6 import refold_batch_af2  # noqa: PLC0415
+
+    # Filter out already-completed binders if resuming.
+    # refold_Version6 uses 1-based indexing so binder i maps to sequences[i-1].
+    if skip_indices:
+        filtered = [
+            seq for i, seq in enumerate(sequences, 1) if i not in skip_indices
+        ]
+        print(f"[af2] After resume filter: {len(filtered)} of {len(sequences)} to process")
+        sequences = filtered
 
     refold_batch_af2(
         binder_sequences=sequences,
@@ -76,7 +99,6 @@ def run_af2_refold(
         csv_path=str(output_csv),
         models=models if models is not None else [1],
         num_recycles=num_recycles,
-        skip_indices=skip_indices,
     )
     print(f"[af2] Results → {output_csv}")
 
