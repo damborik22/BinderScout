@@ -12,9 +12,8 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
-import sys
 
-from .cli import extract, parse_seqs, refold_boltz2, refold_af2, report, run, validate
+from .cli import extract, parse_seqs, refold_af2, refold_boltz2, report, run, validate
 
 
 def main(argv=None) -> None:

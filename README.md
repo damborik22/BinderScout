@@ -1,3 +1,8 @@
+[![CI](https://github.com/damborik22/BindMaster/actions/workflows/ci.yml/badge.svg)](https://github.com/damborik22/BindMaster/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20x86__64%20%7C%20aarch64-lightgrey.svg)]()
+
 # BindMaster
 
 A unified toolkit for GPU-accelerated protein binder design — installer, configurator, and evaluator in one repository.
@@ -21,6 +26,27 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 | **Mosaic** | JAX/Boltz2-based binder hallucination | uv venv (`Mosaic/.venv`) |
 
 > Each tool runs in its own isolated environment. Environments must not be mixed.
+
+### Architecture
+
+```mermaid
+flowchart LR
+    Input["Target structure\n(.pdb / .mmcif)"]
+    Config["Configurator\nwizard → run scripts"]
+    Mosaic["Mosaic\n(JAX + Boltz-2)"]
+    BG["BoltzGen\n(Boltz-1)"]
+    BC["BindCraft\n(AF2 + MPNN)"]
+    PX["PXDesign\n(Protenix)"]
+    Boltz2["Boltz-2\nrefolding"]
+    AF2["AF2\nrefolding"]
+    Report["Report generator\nranked HTML + CSV"]
+
+    Input --> Config
+    Config --> Mosaic & BG & BC & PX
+    Mosaic & BG & BC & PX -->|sequences| Boltz2
+    Boltz2 --> AF2
+    AF2 --> Report
+```
 
 ---
 

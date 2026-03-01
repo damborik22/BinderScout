@@ -25,15 +25,15 @@ from ..core.schema import ENSEMBLE_METRIC_MAP
 # them to *_aux to distinguish from DunbrackLab PAE-based ipSAE (mean
 # aggregation, evaluation metric) which is added later by report.py.
 _BOLTZ2_DISPLAY_RENAMES = {
-    "boltz_bt_ipsae":      "bt_ipsae_aux",
-    "boltz_tb_ipsae":      "tb_ipsae_aux",
-    "boltz_ipsae_min":     "ipsae_min_aux",
-    "boltz_ipsae_valid":   "ipsae_valid",
-    "boltz_bt_iptm":       "bt_iptm",
-    "boltz_binder_ptm":    "binder_ptm",
+    "boltz_bt_ipsae": "bt_ipsae_aux",
+    "boltz_tb_ipsae": "tb_ipsae_aux",
+    "boltz_ipsae_min": "ipsae_min_aux",
+    "boltz_ipsae_valid": "ipsae_valid",
+    "boltz_bt_iptm": "bt_iptm",
+    "boltz_binder_ptm": "binder_ptm",
     "boltz_intra_contact": "intra_contact",
-    "boltz_target_contact":"target_contact",
-    "boltz_pTMEnergy":     "pTMEnergy",
+    "boltz_target_contact": "target_contact",
+    "boltz_pTMEnergy": "pTMEnergy",
 }
 
 
@@ -71,7 +71,7 @@ def compute_ensemble_metrics(
         only_b = b_ok & ~a_ok
 
         ensemble = np.full(len(result), np.nan)
-        ensemble[both]   = (af2_weight * a[both] + boltz2_weight * b[both]) / total_w
+        ensemble[both] = (af2_weight * a[both] + boltz2_weight * b[both]) / total_w
         ensemble[only_a] = a[only_a]
         ensemble[only_b] = b[only_b]
 

@@ -25,13 +25,13 @@ from .base import SequenceExtractor
 _SEQUENCE_COL = "Sequence"
 
 _NATIVE_COL_MAP = {
-    "dG":                   "Average_dG",
-    "dSASA":                "Average_dSASA",
-    "shape_complementarity":"Average_ShapeComplementarity",
-    "packstat":             "Average_PackStat",
-    "hbonds_interface":     "Average_n_InterfaceHbonds",
-    "hbonds_pct":           "Average_InterfaceHbondsPercentage",
-    "mpnn_recovery":        "MPNN_seq_recovery",
+    "dG": "Average_dG",
+    "dSASA": "Average_dSASA",
+    "shape_complementarity": "Average_ShapeComplementarity",
+    "packstat": "Average_PackStat",
+    "hbonds_interface": "Average_n_InterfaceHbonds",
+    "hbonds_pct": "Average_InterfaceHbondsPercentage",
+    "mpnn_recovery": "MPNN_seq_recovery",
 }
 
 # Preferred CSV filenames, in search order
@@ -53,17 +53,13 @@ class BindCraftExtractor(SequenceExtractor):
         input_dir = Path(input_dir)
         csv_path = self._find_csv(input_dir)
         if csv_path is None:
-            warnings.warn(
-                f"BindCraft: no CSV found in {input_dir}. "
-                f"Looked for: {_CSV_CANDIDATES}"
-            )
+            warnings.warn(f"BindCraft: no CSV found in {input_dir}. Looked for: {_CSV_CANDIDATES}")
             return []
 
         df = pd.read_csv(csv_path)
         if _SEQUENCE_COL not in df.columns:
             raise ValueError(
-                f"BindCraft CSV {csv_path} missing '{_SEQUENCE_COL}' column. "
-                f"Available: {list(df.columns[:10])}"
+                f"BindCraft CSV {csv_path} missing '{_SEQUENCE_COL}' column. Available: {list(df.columns[:10])}"
             )
 
         results: list[ExtractedBinder] = []
@@ -82,12 +78,14 @@ class BindCraftExtractor(SequenceExtractor):
             if "Design" in row and pd.notna(row["Design"]):
                 binder_id = f"bindcraft_{row['Design']}"
 
-            results.append(ExtractedBinder(
-                binder_id=binder_id,
-                sequence=seq,
-                source_tool="bindcraft",
-                native=native,
-            ))
+            results.append(
+                ExtractedBinder(
+                    binder_id=binder_id,
+                    sequence=seq,
+                    source_tool="bindcraft",
+                    native=native,
+                )
+            )
 
         return results
 

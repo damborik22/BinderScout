@@ -30,41 +30,84 @@ from pathlib import Path
 # For sorting: lower sort key = better rank.
 # Higher-is-better metrics are negated so the sort always goes ascending.
 HIGHER_IS_BETTER = {
-    "iptm", "bt_ipsae", "tb_ipsae", "ipsae_min", "bt_iptm", "binder_ptm",
-    "plddt_binder_mean", "plddt_binder_min", "plddt_aux", "iptm_aux",
-    "i_ptm",                              # BindCraft column alias
+    "iptm",
+    "bt_ipsae",
+    "tb_ipsae",
+    "ipsae_min",
+    "bt_iptm",
+    "binder_ptm",
+    "plddt_binder_mean",
+    "plddt_binder_min",
+    "plddt_aux",
+    "iptm_aux",
+    "i_ptm",  # BindCraft column alias
 }
 LOWER_IS_BETTER = {
-    "ranking_loss", "pae_bb_mean", "pae_bt_mean", "pae_tb_mean",
-    "pae_overall_mean", "pae_max", "i_pae",  # BindCraft column alias
+    "ranking_loss",
+    "pae_bb_mean",
+    "pae_bt_mean",
+    "pae_tb_mean",
+    "pae_overall_mean",
+    "pae_max",
+    "i_pae",  # BindCraft column alias
 }
 VALID_METRICS = sorted(HIGHER_IS_BETTER | LOWER_IS_BETTER)
 
 # ─── AA 3→1 lookup (for PDB sequence extraction) ─────────────────────────────
 _AA3TO1 = {
-    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
-    "GLN": "Q", "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I",
-    "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P",
-    "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V",
-    "MSE": "M", "HSD": "H", "HSE": "H", "HSP": "H",
+    "ALA": "A",
+    "ARG": "R",
+    "ASN": "N",
+    "ASP": "D",
+    "CYS": "C",
+    "GLN": "Q",
+    "GLU": "E",
+    "GLY": "G",
+    "HIS": "H",
+    "ILE": "I",
+    "LEU": "L",
+    "LYS": "K",
+    "MET": "M",
+    "PHE": "F",
+    "PRO": "P",
+    "SER": "S",
+    "THR": "T",
+    "TRP": "W",
+    "TYR": "Y",
+    "VAL": "V",
+    "MSE": "M",
+    "HSD": "H",
+    "HSE": "H",
+    "HSP": "H",
 }
 
 # ─── Colors ───────────────────────────────────────────────────────────────────
-RED    = "\033[0;31m"
-GREEN  = "\033[0;32m"
+RED = "\033[0;31m"
+GREEN = "\033[0;32m"
 YELLOW = "\033[1;33m"
-CYAN   = "\033[0;36m"
-BOLD   = "\033[1m"
-RESET  = "\033[0m"
+CYAN = "\033[0;36m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
 
 
-def _print_step(msg): print(f"\n{CYAN}{BOLD}▶ {msg}{RESET}")
-def _print_ok(msg):   print(f"{GREEN}✓ {msg}{RESET}")
-def _print_warn(msg): print(f"{YELLOW}⚠ {msg}{RESET}")
-def _print_fail(msg): print(f"{RED}✗ {msg}{RESET}", file=sys.stderr)
+def _print_step(msg):
+    print(f"\n{CYAN}{BOLD}▶ {msg}{RESET}")
+
+
+def _print_ok(msg):
+    print(f"{GREEN}✓ {msg}{RESET}")
+
+
+def _print_warn(msg):
+    print(f"{YELLOW}⚠ {msg}{RESET}")
+
+
+def _print_fail(msg):
+    print(f"{RED}✗ {msg}{RESET}", file=sys.stderr)
 
 
 # ─── Numeric helpers ──────────────────────────────────────────────────────────
+
 
 def _safe_float(v, default=None):
     if v is None or str(v).strip() == "":
@@ -86,6 +129,7 @@ def _sort_key(row: dict, metric: str) -> float:
 
 # ─── CSV utilities ────────────────────────────────────────────────────────────
 
+
 def _read_csv(path: Path) -> list:
     rows = []
     try:
@@ -99,6 +143,7 @@ def _read_csv(path: Path) -> list:
 
 
 # ─── PDB sequence extractor ───────────────────────────────────────────────────
+
 
 def _sequence_from_pdb(pdb_path: Path, chain_id: str = "A") -> str | None:
     seen: dict = {}
@@ -122,6 +167,7 @@ def _sequence_from_pdb(pdb_path: Path, chain_id: str = "A") -> str | None:
 
 # ─── mmCIF sequence extractor ─────────────────────────────────────────────────
 
+
 def _cif_tokenize(text: str) -> list:
     """
     Tokenize mmCIF text into a flat list of string tokens.
@@ -136,7 +182,7 @@ def _cif_tokenize(text: str) -> list:
 
     while i < n:
         # Skip whitespace, track whether a newline was crossed
-        preceded_by_newline = (i == 0)
+        preceded_by_newline = i == 0
         while i < n and text[i] in " \t\r\n":
             if text[i] in "\r\n":
                 preceded_by_newline = True
@@ -154,22 +200,22 @@ def _cif_tokenize(text: str) -> list:
 
         # Multi-line semicolon text field — ';' must be at line start
         if c == ";" and preceded_by_newline:
-            i += 1                              # consume opening ';'
-            while i < n and text[i] != "\n":   # skip rest of opening line
+            i += 1  # consume opening ';'
+            while i < n and text[i] != "\n":  # skip rest of opening line
                 i += 1
             if i < n:
-                i += 1                          # skip the newline after ';\n'
+                i += 1  # skip the newline after ';\n'
             start = i
             while i < n:
                 if text[i] == "\n" and i + 1 < n and text[i + 1] == ";":
                     tokens.append(text[start:i])
-                    i += 2                      # consume '\n' + closing ';'
+                    i += 2  # consume '\n' + closing ';'
                     while i < n and text[i] != "\n":
-                        i += 1                  # skip anything after closing ';'
+                        i += 1  # skip anything after closing ';'
                     break
                 i += 1
             else:
-                tokens.append(text[start:])     # unterminated — take rest
+                tokens.append(text[start:])  # unterminated — take rest
             continue
 
         # Quoted string
@@ -181,7 +227,7 @@ def _cif_tokenize(text: str) -> list:
                 i += 1
             tokens.append(text[start:i])
             if i < n:
-                i += 1                          # consume closing quote
+                i += 1  # consume closing quote
             continue
 
         # Bare token
@@ -242,10 +288,8 @@ def _sequence_from_cif(path: Path, chain_id: str = "A") -> str | None:
         if num_cols == 0:
             continue
 
-        seq_idx    = next((j for j, c in enumerate(col_names)
-                           if "pdbx_seq_one_letter_code_can" in c), None)
-        strand_idx = next((j for j, c in enumerate(col_names)
-                           if "pdbx_strand_id" in c), None)
+        seq_idx = next((j for j, c in enumerate(col_names) if "pdbx_seq_one_letter_code_can" in c), None)
+        strand_idx = next((j for j, c in enumerate(col_names) if "pdbx_strand_id" in c), None)
 
         if seq_idx is None:
             continue
@@ -255,7 +299,7 @@ def _sequence_from_cif(path: Path, chain_id: str = "A") -> str | None:
             t0 = tokens[i].lower()
             if t0.startswith("_") or t0 in ("loop_", "data_", "save_"):
                 break
-            row = tokens[i: i + num_cols]
+            row = tokens[i : i + num_cols]
             raw = row[seq_idx].replace("\n", "").replace(" ", "").upper()
             if raw and raw not in (".", "?"):
                 if strand_idx is None:
@@ -281,11 +325,11 @@ def _sequence_from_cif(path: Path, chain_id: str = "A") -> str | None:
             continue
 
         col = {c: ci for ci, c in enumerate(col_names)}
-        atom_col    = col.get("_atom_site.label_atom_id")
-        chain_col   = col.get("_atom_site.auth_asym_id") or col.get("_atom_site.label_asym_id")
-        res_col     = col.get("_atom_site.label_comp_id")
-        seqn_col    = col.get("_atom_site.auth_seq_id")   or col.get("_atom_site.label_seq_id")
-        ins_col     = col.get("_atom_site.pdbx_pdb_ins_code")
+        atom_col = col.get("_atom_site.label_atom_id")
+        chain_col = col.get("_atom_site.auth_asym_id") or col.get("_atom_site.label_asym_id")
+        res_col = col.get("_atom_site.label_comp_id")
+        seqn_col = col.get("_atom_site.auth_seq_id") or col.get("_atom_site.label_seq_id")
+        ins_col = col.get("_atom_site.pdbx_pdb_ins_code")
 
         if None in (atom_col, chain_col, res_col, seqn_col):
             continue
@@ -296,12 +340,12 @@ def _sequence_from_cif(path: Path, chain_id: str = "A") -> str | None:
             t0 = tokens[i].lower()
             if t0.startswith("_") or t0 in ("loop_", "data_", "save_"):
                 break
-            row = tokens[i: i + num_cols]
+            row = tokens[i : i + num_cols]
             if row[atom_col].strip() == "CA" and row[chain_col].strip().upper() == chain_id_up:
-                res  = row[res_col].strip().upper()
+                res = row[res_col].strip().upper()
                 seqn = row[seqn_col].strip()
-                ins  = row[ins_col].strip() if ins_col is not None else ""
-                key  = (seqn, ins)
+                ins = row[ins_col].strip() if ins_col is not None else ""
+                key = (seqn, ins)
                 if key not in seen:
                     seen[key] = _AA3TO1.get(res, "X")
             i += num_cols
@@ -320,6 +364,7 @@ def _sequence_from_structure(path: Path, chain_id: str = "A") -> str | None:
 
 
 # ─── Output parsers (one per tool) ────────────────────────────────────────────
+
 
 def _parse_mosaic(run_dir: Path) -> list:
     """Read Mosaic designs.csv (all Boltz2 metrics already present)."""
@@ -379,6 +424,7 @@ def _parse_bindcraft(run_dir: Path) -> list:
 
 # ─── Ranking ──────────────────────────────────────────────────────────────────
 
+
 def _rank(rows: list, metric: str) -> list:
     """Sort rows by metric (best first). Rows missing the metric go last."""
     has_metric = sum(1 for r in rows if _safe_float(r.get(metric)) is not None)
@@ -388,6 +434,7 @@ def _rank(rows: list, metric: str) -> list:
 
 
 # ─── Writers ──────────────────────────────────────────────────────────────────
+
 
 def _write_summary_csv(path: Path, rows: list):
     if not rows:
@@ -416,17 +463,24 @@ def _write_report(path: Path, rows: list, metric: str, top_n: int):
         "",
     ]
     key_metrics = [
-        "iptm", "bt_ipsae", "tb_ipsae", "ipsae_min", "ranking_loss",
-        "plddt_binder_mean", "plddt_binder_min", "binder_ptm",
-        "pae_bb_mean", "pae_bt_mean", "i_ptm", "i_pae",
+        "iptm",
+        "bt_ipsae",
+        "tb_ipsae",
+        "ipsae_min",
+        "ranking_loss",
+        "plddt_binder_mean",
+        "plddt_binder_min",
+        "binder_ptm",
+        "pae_bb_mean",
+        "pae_bt_mean",
+        "i_ptm",
+        "i_pae",
     ]
     for i, row in enumerate(report_rows):
-        lines.append(f"Rank {i+1} — {row.get('source', '?').upper()}")
+        lines.append(f"Rank {i + 1} — {row.get('source', '?').upper()}")
         seq = row.get("sequence", "")
         if seq:
-            lines.append(
-                f"  Sequence ({len(seq)} aa): {seq[:60]}{'...' if len(seq) > 60 else ''}"
-            )
+            lines.append(f"  Sequence ({len(seq)} aa): {seq[:60]}{'...' if len(seq) > 60 else ''}")
         parts = []
         for m in key_metrics:
             v = _safe_float(row.get(m))
@@ -444,6 +498,7 @@ def _write_report(path: Path, rows: list, metric: str, top_n: int):
 
 # ─── Boltz2 re-fold ───────────────────────────────────────────────────────────
 
+
 def _refold(rows: list, n: int, target_seq: str | None, output_dir: Path):
     """
     Re-fold top-N binder sequences with Boltz2 (Mosaic venv only).
@@ -454,9 +509,9 @@ def _refold(rows: list, n: int, target_seq: str | None, output_dir: Path):
         import jax
         import jax.numpy as jnp
         import numpy as np
+        from mosaic.common import TOKENS
         from mosaic.models.boltz2 import Boltz2
         from mosaic.structure_prediction import TargetChain
-        from mosaic.common import TOKENS
     except ImportError as e:
         _print_fail(f"Boltz2 import failed — is Mosaic installed? {e}")
         return
@@ -474,7 +529,7 @@ def _refold(rows: list, n: int, target_seq: str | None, output_dir: Path):
     _print_step(f"Re-folding top {len(seqs)} designs with Boltz2 (Mosaic venv)")
 
     for i, (seq_str, src) in enumerate(zip(seqs, sources)):
-        print(f"\n[{i+1}/{len(seqs)}] {src}: {len(seq_str)} aa  {seq_str[:40]}{'...' if len(seq_str) > 40 else ''}")
+        print(f"\n[{i + 1}/{len(seqs)}] {src}: {len(seq_str)} aa  {seq_str[:40]}{'...' if len(seq_str) > 40 else ''}")
         try:
             chains = [TargetChain(sequence=seq_str, use_msa=True)]
             if target_seq:
@@ -495,7 +550,7 @@ def _refold(rows: list, n: int, target_seq: str | None, output_dir: Path):
 
             iptm = float(prediction.iptm)
             plddt_mean = float(np.array(prediction.plddt).mean())
-            pdb_path = output_dir / f"refolded_rank{i+1}_{src}.pdb"
+            pdb_path = output_dir / f"refolded_rank{i + 1}_{src}.pdb"
             with open(pdb_path, "w") as f:
                 f.write(prediction.st.make_pdb_string())
             _print_ok(f"  iptm={iptm:.4f}  plddt_mean={plddt_mean:.4f}  → {pdb_path.name}")
@@ -507,6 +562,7 @@ def _refold(rows: list, n: int, target_seq: str | None, output_dir: Path):
 
 
 # ─── Sequence-only mode ───────────────────────────────────────────────────────
+
 
 def _load_sequences(seq_source: str) -> list:
     """
@@ -542,6 +598,7 @@ def _load_sequences(seq_source: str) -> list:
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
+
 def _make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="bindmaster evaluate",
@@ -554,21 +611,21 @@ def _make_parser() -> argparse.ArgumentParser:
         "run_dir",
         nargs="?",
         help="Path to the run directory (e.g. runs/PDL1_test). "
-             "Omit to be prompted, or use --sequences for sequence-only mode.",
+        "Omit to be prompted, or use --sequences for sequence-only mode.",
     )
     parser.add_argument(
         "--sequences",
         metavar="FILE|-",
         help="Sequence-only mode: read bare AA sequences (one per line) from FILE "
-             "or stdin ('-') instead of parsing a run directory.",
+        "or stdin ('-') instead of parsing a run directory.",
     )
     parser.add_argument(
         "--metric",
         default="iptm",
         choices=VALID_METRICS,
         help="Primary ranking metric (default: iptm; higher-is-better: "
-             + ", ".join(sorted(HIGHER_IS_BETTER))
-             + "). For sequence-only mode without CSVs, metric is unused.",
+        + ", ".join(sorted(HIGHER_IS_BETTER))
+        + "). For sequence-only mode without CSVs, metric is unused.",
     )
     parser.add_argument(
         "--top",
@@ -590,8 +647,8 @@ def _make_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="PDB",
         help="Target PDB or CIF file. Used to extract the target sequence for "
-             "re-folding complex predictions. "
-             "Auto-detected from run-dir/target/*.pdb or *.cif if omitted.",
+        "re-folding complex predictions. "
+        "Auto-detected from run-dir/target/*.pdb or *.cif if omitted.",
     )
     return parser
 
@@ -622,9 +679,9 @@ def main():
             out_dir = Path("evaluation_refolded")
             _refold(rows, args.refold, target_seq, out_dir)
         else:
-            for i, row in enumerate(rows[:args.top]):
+            for i, row in enumerate(rows[: args.top]):
                 seq = row["sequence"]
-                print(f"  [{i+1}] {len(seq)} aa  {seq[:60]}{'...' if len(seq) > 60 else ''}")
+                print(f"  [{i + 1}] {len(seq)} aa  {seq[:60]}{'...' if len(seq) > 60 else ''}")
         return
 
     # ── Run-dir parse mode ─────────────────────────────────────────────────────
@@ -658,7 +715,7 @@ def main():
 
     if not all_rows:
         _print_warn("No design outputs found.")
-        print(f"  Expected one or more of:")
+        print("  Expected one or more of:")
         print(f"    {run_dir}/mosaic/designs.csv")
         print(f"    {run_dir}/boltzgen/outputs/*.csv")
         print(f"    {run_dir}/bindcraft/outputs/*.csv")
@@ -720,7 +777,7 @@ def main():
     print(f"    summary.csv — all designs ranked by {args.metric}")
     print(f"    report.txt  — top {args.top} with key metrics")
     if args.refold:
-        print(f"    refolded/   — Boltz2 re-folded PDB structures (Mosaic venv)")
+        print("    refolded/   — Boltz2 re-folded PDB structures (Mosaic venv)")
 
 
 if __name__ == "__main__":

@@ -18,10 +18,10 @@ from .plots import (
     METRIC_META,
     fig_to_base64,
     load_pae_data_from_df,
+    plot_af2_vs_boltz2_scatter,
     plot_metric_distributions,
     plot_pae_heatmaps,
     plot_radar_chart,
-    plot_af2_vs_boltz2_scatter,
 )
 
 _HTML_TEMPLATE = """\
@@ -120,6 +120,7 @@ _HTML_TEMPLATE = """\
 def _compute_af2_boltz2_r(df: pd.DataFrame) -> dict[str, float | int]:
     """Compute Pearson r between Boltz-2 and AF2 ipSAE_min (primary metric)."""
     import numpy as np
+
     result: dict[str, float | int] = {}
     for b_col, a_col in [("ipsae_min", "af2_ipsae_min"), ("iptm", "af2_iptm")]:
         if b_col in df.columns and a_col in df.columns:
@@ -141,15 +142,15 @@ def _correlation_callout_html(corr: dict) -> str:
 
     r_ipsae = corr.get("ipsae_min_vs_af2_ipsae_min")
     n_ipsae = corr.get("ipsae_min_vs_af2_ipsae_min_n", 0)
-    r_iptm  = corr.get("iptm_vs_af2_iptm")
-    n_iptm  = corr.get("iptm_vs_af2_iptm_n", 0)
+    r_iptm = corr.get("iptm_vs_af2_iptm")
+    n_iptm = corr.get("iptm_vs_af2_iptm_n", 0)
 
     # Pick the most impressive r value for the headline
-    headline_r, headline_n, headline_metric = None, 0, ""
+    headline_r = None
     if r_ipsae is not None:
-        headline_r, headline_n, headline_metric = r_ipsae, n_ipsae, "ipSAE_min"
+        headline_r = r_ipsae
     if r_iptm is not None and (headline_r is None or abs(r_iptm) > abs(headline_r)):
-        headline_r, headline_n, headline_metric = r_iptm, n_iptm, "ipTM"
+        headline_r = r_iptm
 
     if headline_r is None:
         return ""
@@ -165,9 +166,7 @@ def _correlation_callout_html(corr: dict) -> str:
         )
     if r_ipsae is not None:
         s2 = "strong" if abs(r_ipsae) >= 0.7 else ("moderate" if abs(r_ipsae) >= 0.5 else "weak")
-        lines.append(
-            f"<strong>ipSAE_min ↑:</strong> r = {r_ipsae:+.3f} (n = {n_ipsae}) — {s2}"
-        )
+        lines.append(f"<strong>ipSAE_min ↑:</strong> r = {r_ipsae:+.3f} (n = {n_ipsae}) — {s2}")
 
     inner = "<br>".join(lines)
     return (
@@ -213,9 +212,7 @@ def generate_report(
     tool_counts_str = ""
     if "source_tool" in sort_df.columns:
         counts = sort_df["source_tool"].value_counts()
-        tool_counts_str = " &nbsp;|&nbsp; ".join(
-            f'<span class="tool-{t}">{t}: {n}</span>' for t, n in counts.items()
-        )
+        tool_counts_str = " &nbsp;|&nbsp; ".join(f'<span class="tool-{t}">{t}: {n}</span>' for t, n in counts.items())
 
     # Tier summary
     tier_summary = _tier_summary_to_html(sort_df)
@@ -229,12 +226,12 @@ def generate_report(
     summary_table = _summary_to_html(summary)
 
     # Plots
-    dist_fig    = plot_metric_distributions(sort_df)
-    radar_fig   = plot_radar_chart(summary)
+    dist_fig = plot_metric_distributions(sort_df)
+    radar_fig = plot_radar_chart(summary)
     scatter_fig = plot_af2_vs_boltz2_scatter(sort_df)
 
-    dist_b64    = fig_to_base64(dist_fig)
-    radar_b64   = fig_to_base64(radar_fig)
+    dist_b64 = fig_to_base64(dist_fig)
+    radar_b64 = fig_to_base64(radar_fig)
     scatter_b64 = fig_to_base64(scatter_fig)
 
     # Correlation callout
@@ -244,20 +241,16 @@ def generate_report(
     # PAE heatmaps for top-ranked binders
     pae_heatmap_section = ""
     if "boltz_pae_file" in sort_df.columns or "af2_pae_file" in sort_df.columns:
-        sequences, af2_pae, boltz_pae, binder_lens = load_pae_data_from_df(
-            sort_df, max_binders=5
-        )
+        sequences, af2_pae, boltz_pae, binder_lens = load_pae_data_from_df(sort_df, max_binders=5)
         if sequences:
-            pae_fig = plot_pae_heatmaps(
-                sequences, af2_pae, boltz_pae, binder_lens, max_binders=5
-            )
+            pae_fig = plot_pae_heatmaps(sequences, af2_pae, boltz_pae, binder_lens, max_binders=5)
             pae_b64 = fig_to_base64(pae_fig)
             pae_heatmap_section = (
-                '<h2>PAE Heatmaps (Top-Ranked Binders)</h2>\n'
+                "<h2>PAE Heatmaps (Top-Ranked Binders)</h2>\n"
                 '<p style="font-size:0.85em;color:#555;">'
-                'White lines mark the binder/target boundary. '
-                'Low PAE (blue) in off-diagonal blocks indicates confident interface prediction.'
-                '</p>\n'
+                "White lines mark the binder/target boundary. "
+                "Low PAE (blue) in off-diagonal blocks indicates confident interface prediction."
+                "</p>\n"
                 f'<img src="data:image/png;base64,{pae_b64}" alt="PAE heatmaps">'
             )
 
@@ -289,15 +282,27 @@ def generate_report(
 def _select_display_cols(df: pd.DataFrame) -> list[str]:
     """Pick a readable subset of columns for the top-20 table."""
     preferred = [
-        "adaptyv_rank", "binder_id", "source_tool", "quality_tier",
-        "ipsae_min", "ipsae_min_aux",
-        "boltz_pae_ipsae_min", "af2_ipsae_min",
+        "adaptyv_rank",
+        "binder_id",
+        "source_tool",
+        "quality_tier",
+        "ipsae_min",
+        "ipsae_min_aux",
+        "boltz_pae_ipsae_min",
+        "af2_ipsae_min",
         "ipsae_valid",
-        "iptm", "ipae", "plddt_binder_mean", "plddt_binder_min",
-        "pae_bt", "pae_tb",
+        "iptm",
+        "ipae",
+        "plddt_binder_mean",
+        "plddt_binder_min",
+        "pae_bt",
+        "pae_tb",
         "binder_ptm",
-        "ipsae_dg_composite", "ipsae_shape_composite",
-        "native_dG", "native_dSASA", "native_shape_complementarity",
+        "ipsae_dg_composite",
+        "ipsae_shape_composite",
+        "native_dG",
+        "native_dSASA",
+        "native_shape_complementarity",
         "composite_score",
         "sequence",
     ]
@@ -309,11 +314,11 @@ def _tier_summary_to_html(df: pd.DataFrame) -> str:
     if "quality_tier" not in df.columns:
         return "<p style='color:#888;font-size:0.85em;'>ipSAE_min not available — tier classification skipped.</p>"
 
-    tier_order  = ["high", "medium", "low", "reject"]
+    tier_order = ["high", "medium", "low", "reject"]
     tier_labels = {
-        "high":   '<span style="color:#2e7d32">■ High (&gt;0.80)</span>',
+        "high": '<span style="color:#2e7d32">■ High (&gt;0.80)</span>',
         "medium": '<span style="color:#f57f17">■ Medium (&gt;0.61)</span>',
-        "low":    '<span style="color:#e65100">■ Low (&gt;0.40)</span>',
+        "low": '<span style="color:#e65100">■ Low (&gt;0.40)</span>',
         "reject": '<span style="color:#c62828">■ Reject (≤0.40)</span>',
     }
     n_total = len(df)
@@ -343,7 +348,6 @@ def _tier_summary_to_html(df: pd.DataFrame) -> str:
     # Optional: ipsae_dg_composite summary row
     composite_note = ""
     if "ipsae_dg_composite" in df.columns:
-        import numpy as np
         vals = pd.to_numeric(df["ipsae_dg_composite"], errors="coerce").dropna()
         if len(vals) > 0:
             composite_note = (
@@ -353,10 +357,7 @@ def _tier_summary_to_html(df: pd.DataFrame) -> str:
                 f"(n={len(vals)} with BindCraft native metrics)</p>"
             )
 
-    return (
-        f'<table class="stat-table">{header}{"".join(rows)}</table>'
-        + composite_note
-    )
+    return f'<table class="stat-table">{header}{"".join(rows)}</table>' + composite_note
 
 
 def _col_header(col: str) -> str:
@@ -392,9 +393,7 @@ def _df_to_html(
             return f"<td{cls}>{val:.4f}</td>"
         return f"<td{cls}>{val}</td>"
 
-    header = "<tr>" + "".join(
-        f"<th>{_col_header(c)}</th>" for c in df.columns
-    ) + "</tr>"
+    header = "<tr>" + "".join(f"<th>{_col_header(c)}</th>" for c in df.columns) + "</tr>"
 
     rows = []
     for _, row in df.iterrows():
@@ -417,10 +416,7 @@ def _summary_to_html(summary: dict) -> str:
     tools = list(summary.keys())
 
     # Tool name → colour class header cell
-    tool_cols = "".join(
-        f'<th><span class="tool-{t}">{t}</span><br><small>mean ± std</small></th>'
-        for t in tools
-    )
+    tool_cols = "".join(f'<th><span class="tool-{t}">{t}</span><br><small>mean ± std</small></th>' for t in tools)
     header = f"<tr><th>Metric</th>{tool_cols}</tr>"
 
     rows = []

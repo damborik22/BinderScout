@@ -24,7 +24,7 @@ from .base import SequenceExtractor
 
 _CSV_CANDIDATES = [
     "designs.csv",
-    "refold_designs.csv",   # fallback if designs.csv absent
+    "refold_designs.csv",  # fallback if designs.csv absent
 ]
 
 _SEQUENCE_COL = "sequence"
@@ -69,10 +69,7 @@ class MosaicExtractor(SequenceExtractor):
         input_dir = Path(input_dir)
         csv_path = self._find_csv(input_dir)
         if csv_path is None:
-            warnings.warn(
-                f"Mosaic: no CSV found in {input_dir}. "
-                f"Looked for: {_CSV_CANDIDATES}"
-            )
+            warnings.warn(f"Mosaic: no CSV found in {input_dir}. Looked for: {_CSV_CANDIDATES}")
             return []
 
         # Mosaic appends across runs; later runs may have extra columns
@@ -81,8 +78,7 @@ class MosaicExtractor(SequenceExtractor):
         df = _read_mosaic_csv(csv_path)
         if _SEQUENCE_COL not in df.columns:
             raise ValueError(
-                f"Mosaic CSV {csv_path} missing '{_SEQUENCE_COL}' column. "
-                f"Available: {list(df.columns[:10])}"
+                f"Mosaic CSV {csv_path} missing '{_SEQUENCE_COL}' column. Available: {list(df.columns[:10])}"
             )
 
         results: list[ExtractedBinder] = []
@@ -95,12 +91,14 @@ class MosaicExtractor(SequenceExtractor):
 
             binder_id = self._make_id(row, idx)
 
-            results.append(ExtractedBinder(
-                binder_id=binder_id,
-                sequence=seq,
-                source_tool="mosaic",
-                native=NativeMetrics(),
-            ))
+            results.append(
+                ExtractedBinder(
+                    binder_id=binder_id,
+                    sequence=seq,
+                    source_tool="mosaic",
+                    native=NativeMetrics(),
+                )
+            )
 
         return results
 

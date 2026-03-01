@@ -252,3 +252,94 @@ pyproject.toml
 - Boltz-2: Markov Research
 - AlphaFold2 multimer via ColabDesign
 - BindCraft: github.com/martinpacesa/BindCraft
+
+---
+
+## Troubleshooting
+
+### 1. `AF2_DATA_DIR` not set or AF2 weights missing
+
+```bash
+export AF2_DATA_DIR=/path/to/af2_params
+ls "$AF2_DATA_DIR"/params_model_*.npz   # should list 5 model files
+```
+
+If the `.npz` files are missing, download them:
+```bash
+# See https://github.com/google-deepmind/alphafold for download instructions
+```
+
+### 2. CUDA version mismatch
+
+Symptoms: `RuntimeError: CUDA error` or JAX failing to initialise.
+
+```bash
+nvidia-smi          # check driver CUDA version
+nvcc --version      # check toolkit version (if installed)
+```
+
+If the driver version is too old, update your NVIDIA driver. If reinstalling the
+evaluator environments, pass the matching CUDA version:
+
+```bash
+bash install.sh   # environments are pinned to compatible CUDA versions
+```
+
+### 3. `binder-eval-af2` environment not found
+
+```bash
+conda env list                    # check if environment exists
+bash install.sh                   # re-run evaluator installer
+```
+
+### 4. ColabDesign import error
+
+If `refold-af2` fails with an import error from ColabDesign:
+
+```bash
+conda run -n binder-eval-af2 pip install --force-reinstall colabdesign==1.1.1
+```
+
+### 5. PAE file not found during report generation
+
+If `report` fails because `*_pae.npy` files are missing, the refolding step was
+interrupted before saving PAE arrays. Re-run with `--resume` to fill in the gaps:
+
+```bash
+bash evaluate.sh \
+    --sequences sequences.fasta \
+    --target-pdb target.pdb \
+    --output ./results \
+    --resume
+```
+
+### 6. Mosaic venv path not found
+
+The evaluator installer saves the Mosaic venv path to `envs/mosaic_venv_path`.
+If this file is missing or wrong:
+
+```bash
+# Re-run the evaluator installer (auto-detects the venv)
+bash install.sh
+
+# Or set manually
+echo "/path/to/Mosaic/.venv" > envs/mosaic_venv_path
+```
+
+### 7. Duplicate CSV rows after a partial run
+
+If a refolding step was interrupted and re-run without `--resume`, the append-mode
+CSV may contain duplicate entries. Deduplicate with:
+
+```bash
+# Use --resume on re-run to skip already-completed sequences
+bash evaluate.sh --sequences sequences.fasta --target-pdb target.pdb --output ./results --resume
+
+# Or manually deduplicate an existing CSV (keeps first occurrence)
+python -c "
+import pandas as pd
+df = pd.read_csv('results/boltz2_results.csv')
+df = df.drop_duplicates(subset='sequence', keep='first')
+df.to_csv('results/boltz2_results.csv', index=False)
+"
+```

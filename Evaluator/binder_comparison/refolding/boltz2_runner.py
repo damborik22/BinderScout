@@ -64,7 +64,7 @@ def run_boltz2_refold(
     os.chdir(output_dir)
     try:
         sys.path.insert(0, str(scripts_dir))
-        from refold_boltz2 import refold_batch  # noqa: PLC0415
+        from refold_boltz2 import refold_batch
 
         refold_batch(
             binder_sequences=sequences,
@@ -85,9 +85,7 @@ def run_boltz2_refold(
         _absolutize_csv_paths(output_csv, output_dir, ["pdb", "pae_file", "plddt_file"])
         print(f"[boltz2] Results → {output_csv}")
     else:
-        raise FileNotFoundError(
-            f"Expected refold_boltz2 to write {generated_csv} but it was not found."
-        )
+        raise FileNotFoundError(f"Expected refold_boltz2 to write {generated_csv} but it was not found.")
 
 
 def _load_completed_indices(csv_path: Path) -> set[int]:
@@ -96,6 +94,7 @@ def _load_completed_indices(csv_path: Path) -> set[int]:
         return set()
     try:
         import csv
+
         indices: set[int] = set()
         with open(csv_path) as f:
             reader = csv.DictReader(f)
@@ -108,11 +107,9 @@ def _load_completed_indices(csv_path: Path) -> set[int]:
         return set()
 
 
-def _absolutize_csv_paths(
-    csv_path: Path, base_dir: Path, path_cols: list[str]
-) -> None:
+def _absolutize_csv_paths(csv_path: Path, base_dir: Path, path_cols: list[str]) -> None:
     """Rewrite relative path columns in a CSV to absolute using *base_dir*."""
-    import csv as csv_mod  # noqa: PLC0415
+    import csv as csv_mod
 
     rows: list[dict[str, str]] = []
     fieldnames: list[str] | None = None
@@ -145,7 +142,4 @@ def _resolve_scripts_path(override: str | Path | None) -> Path:
     candidate = repo_root / "scripts"
     if candidate.exists():
         return candidate
-    raise FileNotFoundError(
-        f"Could not locate scripts directory at {candidate}. "
-        "Pass --scripts-path explicitly."
-    )
+    raise FileNotFoundError(f"Could not locate scripts directory at {candidate}. Pass --scripts-path explicitly.")

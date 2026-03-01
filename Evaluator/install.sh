@@ -26,6 +26,7 @@ _CONDA_INIT="${HOME}/miniforge3/etc/profile.d/conda.sh"
 for _f in "$_CONDA_INIT" \
            "${HOME}/miniconda3/etc/profile.d/conda.sh" \
            "${HOME}/anaconda3/etc/profile.d/conda.sh"; do
+    # shellcheck disable=SC1090
     [[ -f "$_f" ]] && { source "$_f"; break; }
 done
 
@@ -78,6 +79,7 @@ echo "      Found Mosaic venv: $MOSAIC_VENV"
 
 # Install binder-compare into the Mosaic venv
 echo "      Installing binder-compare into Mosaic venv..."
+# shellcheck disable=SC1087
 "$MOSAIC_VENV/bin/pip" install -q -e "$REPO_DIR[boltz2]"
 echo "      binder-compare version: $("$MOSAIC_VENV/bin/binder-compare" --version)"
 
@@ -92,6 +94,7 @@ echo "      Saved venv path → $REPO_DIR/envs/mosaic_venv_path"
 echo "[1/3] Creating binder-eval..."
 conda env create -f "$REPO_DIR/envs/binder-eval.yml" --yes 2>/dev/null || \
     conda env update -f "$REPO_DIR/envs/binder-eval.yml" --prune
+# shellcheck disable=SC1087
 conda run -n binder-eval pip install -q -e "$REPO_DIR[report]"
 echo "      binder-compare version: $(conda run -n binder-eval binder-compare --version)"
 
@@ -101,6 +104,7 @@ echo "      binder-compare version: $(conda run -n binder-eval binder-compare --
 echo "[2/3] Creating binder-eval-af2..."
 conda env create -f "$REPO_DIR/envs/binder-eval-af2.yml" --yes 2>/dev/null || \
     conda env update -f "$REPO_DIR/envs/binder-eval-af2.yml" --prune
+# shellcheck disable=SC1087
 conda run -n binder-eval-af2 pip install -q colabdesign==1.1.1 -e "$REPO_DIR[af2]"
 echo "      binder-compare version: $(conda run -n binder-eval-af2 binder-compare --version)"
 

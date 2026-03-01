@@ -46,10 +46,7 @@ class BoltzGenExtractor(SequenceExtractor):
         input_dir = Path(input_dir)
         csv_path = self._find_csv(input_dir)
         if csv_path is None:
-            warnings.warn(
-                f"BoltzGen: no metrics CSV found in {input_dir}. "
-                f"Looked for: {_CSV_CANDIDATES}"
-            )
+            warnings.warn(f"BoltzGen: no metrics CSV found in {input_dir}. Looked for: {_CSV_CANDIDATES}")
             return []
 
         df = pd.read_csv(csv_path)
@@ -76,12 +73,14 @@ class BoltzGenExtractor(SequenceExtractor):
             else:
                 binder_id = f"boltzgen_{stem}_{idx}"
 
-            results.append(ExtractedBinder(
-                binder_id=binder_id,
-                sequence=seq,
-                source_tool="boltzgen",
-                native=NativeMetrics(),
-            ))
+            results.append(
+                ExtractedBinder(
+                    binder_id=binder_id,
+                    sequence=seq,
+                    source_tool="boltzgen",
+                    native=NativeMetrics(),
+                )
+            )
 
         return results
 

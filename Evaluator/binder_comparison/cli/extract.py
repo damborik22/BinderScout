@@ -84,11 +84,9 @@ def add_parser(subparsers) -> None:
         description=__doc__,
     )
     p.add_argument("--bindcraft", metavar="DIR", help="BindCraft output directory")
-    p.add_argument("--boltzgen",  metavar="DIR", help="BoltzGen output directory")
-    p.add_argument("--mosaic",    metavar="DIR", help="Mosaic output directory (containing designs.csv)")
-    p.add_argument("--pxdesign",  metavar="DIR", help="PXDesign output directory (containing summary.csv)")
-    p.add_argument("--output", "-o", required=True, metavar="FILE",
-                   help="Output FASTA path (e.g. sequences.fasta)")
-    p.add_argument("--keep-duplicates", action="store_true",
-                   help="Do not deduplicate identical sequences across tools")
+    p.add_argument("--boltzgen", metavar="DIR", help="BoltzGen output directory")
+    p.add_argument("--mosaic", metavar="DIR", help="Mosaic output directory (containing designs.csv)")
+    p.add_argument("--pxdesign", metavar="DIR", help="PXDesign output directory (containing summary.csv)")
+    p.add_argument("--output", "-o", required=True, metavar="FILE", help="Output FASTA path (e.g. sequences.fasta)")
+    p.add_argument("--keep-duplicates", action="store_true", help="Do not deduplicate identical sequences across tools")
     p.set_defaults(func=run)

@@ -51,20 +51,23 @@ def add_parser(subparsers) -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
     )
-    p.add_argument("--sequences", "-s", required=True, metavar="FASTA",
-                   help="Input FASTA (e.g. from 'binder-compare extract')")
-    p.add_argument("--target-pdb", required=True, metavar="PDB",
-                   help="Target PDB file path (chain A is used)")
-    p.add_argument("--output", "-o", required=True, metavar="CSV",
-                   help="Output CSV path for metrics (e.g. af2_results.csv)")
-    p.add_argument("--output-dir", default="./refold_af2", metavar="DIR",
-                   help="Directory for structure PDB files (default: ./refold_af2)")
-    p.add_argument("--models", default="1", metavar="N[,N]",
-                   help="Comma-separated AF2 model indices (default: 1)")
-    p.add_argument("--num-recycles", type=int, default=3, metavar="N",
-                   help="AF2 recycling iterations (default: 3)")
-    p.add_argument("--mosaic-path", default=None, metavar="DIR",
-                   help="Path to Mosaic repo root (auto-detected if not set)")
-    p.add_argument("--resume", action="store_true",
-                   help="Skip binders already present in existing output CSV")
+    p.add_argument(
+        "--sequences", "-s", required=True, metavar="FASTA", help="Input FASTA (e.g. from 'binder-compare extract')"
+    )
+    p.add_argument("--target-pdb", required=True, metavar="PDB", help="Target PDB file path (chain A is used)")
+    p.add_argument(
+        "--output", "-o", required=True, metavar="CSV", help="Output CSV path for metrics (e.g. af2_results.csv)"
+    )
+    p.add_argument(
+        "--output-dir",
+        default="./refold_af2",
+        metavar="DIR",
+        help="Directory for structure PDB files (default: ./refold_af2)",
+    )
+    p.add_argument("--models", default="1", metavar="N[,N]", help="Comma-separated AF2 model indices (default: 1)")
+    p.add_argument("--num-recycles", type=int, default=3, metavar="N", help="AF2 recycling iterations (default: 3)")
+    p.add_argument(
+        "--mosaic-path", default=None, metavar="DIR", help="Path to Mosaic repo root (auto-detected if not set)"
+    )
+    p.add_argument("--resume", action="store_true", help="Skip binders already present in existing output CSV")
     p.set_defaults(func=run)

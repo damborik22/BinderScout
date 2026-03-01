@@ -47,16 +47,21 @@ def add_parser(subparsers) -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
     )
-    p.add_argument("--sequences", "-s", required=True, metavar="FASTA",
-                   help="Input FASTA (e.g. from 'binder-compare parse-seqs')")
-    p.add_argument("--target-seq", required=True, metavar="SEQ",
-                   help="Target protein sequence (amino acid string)")
-    p.add_argument("--output", "-o", required=True, metavar="CSV",
-                   help="Output CSV path for metrics (e.g. boltz2_results.csv)")
-    p.add_argument("--output-dir", default="./refold_boltz2", metavar="DIR",
-                   help="Directory for structure files (default: ./refold_boltz2)")
-    p.add_argument("--scripts-path", default=None, metavar="DIR",
-                   help="Path to scripts/ directory (auto-detected if not set)")
-    p.add_argument("--resume", action="store_true",
-                   help="Skip binders already present in existing output CSV")
+    p.add_argument(
+        "--sequences", "-s", required=True, metavar="FASTA", help="Input FASTA (e.g. from 'binder-compare parse-seqs')"
+    )
+    p.add_argument("--target-seq", required=True, metavar="SEQ", help="Target protein sequence (amino acid string)")
+    p.add_argument(
+        "--output", "-o", required=True, metavar="CSV", help="Output CSV path for metrics (e.g. boltz2_results.csv)"
+    )
+    p.add_argument(
+        "--output-dir",
+        default="./refold_boltz2",
+        metavar="DIR",
+        help="Directory for structure files (default: ./refold_boltz2)",
+    )
+    p.add_argument(
+        "--scripts-path", default=None, metavar="DIR", help="Path to scripts/ directory (auto-detected if not set)"
+    )
+    p.add_argument("--resume", action="store_true", help="Skip binders already present in existing output CSV")
     p.set_defaults(func=run)
