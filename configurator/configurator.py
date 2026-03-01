@@ -130,7 +130,7 @@ FILTERS_DIR = BINDCRAFT_DIR / "settings_filters"
 ADVANCED_DIR = BINDCRAFT_DIR / "settings_advanced"
 EVALUATOR_DIR = BINDMASTER_DIR / "Evaluator"
 MOSAIC_VENV = MOSAIC_DIR / ".venv"
-MOSAIC_HALLUCINATE_SRC = MOSAIC_DIR / "examples" / "bindmaster_example" / "hallucinate_bindmaster.py"
+MOSAIC_HALLUCINATE_SRC = MOSAIC_DIR / "examples" / "bindmaster_examples" / "hallucinate_bindmaster.py"
 NANOBODY_SCAFFOLDS_SRC = BOLTZGEN_DIR / "example" / "nanobody_scaffolds"
 NANOBODY_SCAFFOLD_NAMES = ["7eow", "7xl0", "8coh", "8z8v"]
 
