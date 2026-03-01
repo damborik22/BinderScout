@@ -137,8 +137,6 @@ def run(args: argparse.Namespace) -> None:
         str(af2_csv),
         "--sequences",
         str(sequences_fasta),
-        "--weights",
-        args.weights,
         "--output",
         str(output_dir / "report"),
     ]
@@ -211,6 +209,5 @@ def add_parser(subparsers) -> None:
     p.add_argument(
         "--num-recycles", type=int, default=3, metavar="N", help="Recycling iterations for both engines (default: 3)"
     )
-    p.add_argument("--weights", default="af2=0.6,boltz2=0.4", help="Ensemble weights (default: af2=0.6,boltz2=0.4)")
     p.add_argument("--mosaic-path", default=None, metavar="DIR", help="Mosaic repo path (auto-detected if not set)")
     p.set_defaults(func=run)

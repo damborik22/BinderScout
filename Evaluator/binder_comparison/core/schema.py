@@ -33,17 +33,17 @@ class StandardisedMetrics:
 
     Every binder gets these, regardless of which tool designed it.
 
-    Ensemble columns are weighted averages of the AF2 and Boltz2 values.
-    If only one engine succeeded, that value is used unweighted.
+    Canonical columns (iptm, ipae, etc.) are direct copies of Boltz-2 values.
+    AF2 columns remain available for cross-validation.
     Boltz2-exclusive metrics (IPSAE family) have no AF2 equivalent.
 
-    Scale notes (verify against real output before using ensemble):
+    Scale notes:
     - pLDDT: expected [0, 1] for both engines
     - PAE: expected in Ångströms for both engines
     - IPSAE: Boltz2-specific score, higher = better interface contact
     """
 
-    # ---- Ensemble (weighted AF2 + Boltz2) ----
+    # ---- Canonical (Boltz-2 primary) ----
     iptm: float | None = None
     ipae: float | None = None
     pae_bt: float | None = None
@@ -172,17 +172,18 @@ LOWER_IS_BETTER = frozenset(
     }
 )
 
-# Standardised metrics included in the ensemble weighted average
-ENSEMBLE_METRIC_MAP = {
-    # ensemble_name: (boltz2_col, af2_col)
-    "iptm": ("boltz_iptm", "af2_iptm"),
-    "ipae": ("boltz_ipae", "af2_ipae"),
-    "pae_bt": ("boltz_pae_bt_mean", "af2_pae_bt_mean"),
-    "pae_tb": ("boltz_pae_tb_mean", "af2_pae_tb_mean"),
-    "pae_bb": ("boltz_pae_bb_mean", "af2_pae_bb_mean"),
-    "plddt_binder_mean": ("boltz_plddt_binder_mean", "af2_plddt_binder_mean"),
-    "plddt_binder_min": ("boltz_plddt_binder_min", "af2_plddt_binder_min"),
-    "plddt_target_mean": ("boltz_plddt_target_mean", "af2_plddt_target_mean"),
+# Canonical metric names → Boltz-2 source column.
+# These columns are promoted directly (no ensemble averaging).
+BOLTZ2_METRIC_MAP = {
+    # canonical_name: boltz2_col
+    "iptm": "boltz_iptm",
+    "ipae": "boltz_ipae",
+    "pae_bt": "boltz_pae_bt_mean",
+    "pae_tb": "boltz_pae_tb_mean",
+    "pae_bb": "boltz_pae_bb_mean",
+    "plddt_binder_mean": "boltz_plddt_binder_mean",
+    "plddt_binder_min": "boltz_plddt_binder_min",
+    "plddt_target_mean": "boltz_plddt_target_mean",
 }
 
 # Boltz2-exclusive columns (after boltz_ prefix added by merger)
@@ -202,7 +203,7 @@ BOLTZ2_EXCLUSIVE_COLS = [
 # Use post-ensemble-rename names: ensemble.py renames boltz_ipsae_min → ipsae_min_aux, etc.
 # PAE-based DunbrackLab ipSAE columns are added by report.py after merging.
 # compute_statistics() filters to columns present in df, so absent ones are silently skipped.
-ZSCORE_METRICS = list(ENSEMBLE_METRIC_MAP.keys()) + [
+ZSCORE_METRICS = list(BOLTZ2_METRIC_MAP.keys()) + [
     # Mosaic aux ipSAE (max aggregation, renamed by ensemble.py with _aux suffix)
     "bt_ipsae_aux",
     "tb_ipsae_aux",
