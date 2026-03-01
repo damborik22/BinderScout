@@ -26,12 +26,12 @@ from mosaic.optimizers import simplex_APGM
 # All values below are injected by BindMaster Configurator.
 # Edit manually to override after generation.
 
-TARGET_SEQUENCE = "REPLACE_ME"  # target protein sequence
-N_DESIGNS = 100  # Stage 1: how many designs to generate per length
-TOP_K = 5  # Stage 2: how many top designs to refold and export PDB
-MIN_LENGTH = 65  # minimum binder length (aa)
-MAX_LENGTH = 100  # maximum binder length (aa)
-LENGTH_STEP = 5  # step between scanned lengths; set MIN=MAX for a single length
+TARGET_SEQUENCE = "REPLACE_ME"   # target protein sequence
+N_DESIGNS       = 100            # Stage 1: how many designs to generate per length
+TOP_K           = 5              # Stage 2: how many top designs to refold and export PDB
+MIN_LENGTH      = 65             # minimum binder length (aa)
+MAX_LENGTH      = 100            # maximum binder length (aa)
+LENGTH_STEP     = 5              # step between scanned lengths; set MIN=MAX for a single length
 
 
 # ============================

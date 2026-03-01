@@ -826,7 +826,7 @@ install_evaluator() {
     # Install binder-compare into Mosaic venv (Boltz-2 step)
     print_step "Installing binder-compare into Mosaic venv"
     run_logged "pip install binder-compare into Mosaic venv" \
-        "${MOSAIC_VENV}/bin/pip" install -q -e "${EVALUATOR_DIR}[boltz2]" \
+        uv pip install --python "${MOSAIC_VENV}/bin/python" -q -e "${EVALUATOR_DIR}[boltz2]" \
         || { print_fail "Failed to install binder-compare into Mosaic venv"; return 1; }
 
     # Save the venv path so evaluate.sh can find it

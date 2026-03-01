@@ -9,6 +9,3 @@ channels:
 dependencies:
   - python=3.10
   - pip
-  - pip:
-    - colabdesign==1.1.1
-    - binder-comparison[af2]
