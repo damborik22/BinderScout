@@ -69,8 +69,7 @@ _HTML_TEMPLATE = """\
 <h1>Binder Design Comparison Report</h1>
 
 <div class="weights">
-  <strong>Ensemble weights:</strong>
-  AF2 = {af2_weight:.2f} &nbsp;|&nbsp; Boltz2 = {boltz2_weight:.2f}
+  <strong>Primary predictor:</strong> Boltz-2 &nbsp;(AF2 shown for cross-validation)
   &nbsp;&nbsp;·&nbsp;&nbsp;
   <strong>Total binders:</strong> {n_binders}
   &nbsp;&nbsp;·&nbsp;&nbsp;
@@ -184,18 +183,14 @@ def generate_report(
     summary: dict,
     output_path: str | Path,
     *,
-    af2_weight: float = 0.6,
-    boltz2_weight: float = 0.4,
     composite_col: str | None = "composite_score",
 ) -> None:
     """Generate and write the HTML report.
 
     Args:
-        df:            DataFrame with all metrics (after ensemble + statistics).
+        df:            DataFrame with all metrics (after Boltz-2 promotion + statistics).
         summary:       Per-tool summary dict from compute_statistics.
         output_path:   Where to write report.html.
-        af2_weight:    AF2 weight used for ensemble (shown in header).
-        boltz2_weight: Boltz2 weight used for ensemble.
         composite_col: Column to sort by for top-20 table (fallback if no adaptyv_rank).
     """
     output_path = Path(output_path)
@@ -258,8 +253,6 @@ def generate_report(
     full_table = _df_to_html(sort_df, max_rows=None)
 
     html = _HTML_TEMPLATE.format(
-        af2_weight=af2_weight,
-        boltz2_weight=boltz2_weight,
         n_binders=len(sort_df),
         tool_counts_str=tool_counts_str or "—",
         tier_summary=tier_summary,

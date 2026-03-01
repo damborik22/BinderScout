@@ -1,14 +1,13 @@
 """CLI subcommand: binder-compare report
 
-Merge Boltz2 and AF2 refolding results, compute ensemble metrics,
-z-score normalise, and generate the comparison report.
+Merge Boltz2 and AF2 refolding results, promote Boltz-2 as the primary
+predictor, z-score normalise, and generate the comparison report.
 
 Usage:
     binder-compare report \\
         --boltz2-results boltz2_results.csv \\
         --af2-results    af2_results.csv \\
         --sequences      sequences.fasta \\
-        --weights        af2=0.6,boltz2=0.4 \\
         --output         ./comparison_report
 """
 
@@ -34,8 +33,6 @@ from ..visualization.report import generate_report
 
 
 def run(args: argparse.Namespace) -> None:
-    af2_weight, boltz2_weight = _parse_weights(args.weights)
-
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -51,9 +48,9 @@ def run(args: argparse.Namespace) -> None:
     if args.native_metrics:
         df = _attach_native_metrics(df, args.native_metrics)
 
-    # Step 2: Ensemble
-    print("[report] Computing ensemble metrics…")
-    df = compute_ensemble_metrics(df, af2_weight=af2_weight, boltz2_weight=boltz2_weight)
+    # Step 2: Promote Boltz-2 as primary predictor
+    print("[report] Promoting Boltz-2 metrics as primary…")
+    df = compute_ensemble_metrics(df)
 
     # Step 2b: Compute ipSAE from PAE files using DunbrackLab formula.
     # This gives the correct evaluation metric (mean over qualifying residues)
@@ -110,8 +107,6 @@ def run(args: argparse.Namespace) -> None:
         df=df,
         summary=summary,
         output_path=output_dir / "report.html",
-        af2_weight=af2_weight,
-        boltz2_weight=boltz2_weight,
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
@@ -119,23 +114,6 @@ def run(args: argparse.Namespace) -> None:
     print("  metrics_zscore.csv — z-scored metrics")
     print("  summary.json       — per-tool statistics")
     print("  report.html        — interactive report")
-
-
-def _parse_weights(weights_str: str) -> tuple[float, float]:
-    """Parse 'af2=0.6,boltz2=0.4' → (0.6, 0.4)."""
-    af2_w, boltz2_w = 0.6, 0.4
-    if not weights_str:
-        return af2_w, boltz2_w
-    for part in weights_str.split(","):
-        if "=" not in part:
-            continue
-        k, v = part.split("=", 1)
-        k, v = k.strip(), float(v.strip())
-        if k == "af2":
-            af2_w = v
-        elif k in ("boltz2", "boltz"):
-            boltz2_w = v
-    return af2_w, boltz2_w
 
 
 def _attach_native_metrics(df: pd.DataFrame, native_csv: str) -> pd.DataFrame:
@@ -177,11 +155,6 @@ def add_parser(subparsers) -> None:
         metavar="DIR",
         help="Deprecated — PAE file paths are now recorded in af2_results.csv "
         "automatically by refold_Version6. This flag is ignored.",
-    )
-    p.add_argument(
-        "--weights",
-        default="af2=0.6,boltz2=0.4",
-        help="Ensemble weights, e.g. 'af2=0.7,boltz2=0.3' (default: af2=0.6,boltz2=0.4)",
     )
     p.add_argument("--output", "-o", required=True, metavar="DIR", help="Output directory for all report files")
     p.set_defaults(func=run)

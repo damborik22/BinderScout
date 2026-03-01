@@ -107,8 +107,8 @@ def overall_rank(
     Default weights are informed by Overath et al. (2025) meta-analysis:
     - ipsae_min: weight 4.0 — dominant primary metric
       (1.4× better average precision than ipAE across 3,766 designs; Boltz2-only)
-    - iptm: weight 2.0 — strong secondary metric (ensemble AF2+Boltz2)
-    - ipae: weight 1.5 — tertiary (ensemble)
+    - iptm: weight 2.0 — strong secondary metric (Boltz-2)
+    - ipae: weight 1.5 — tertiary (Boltz-2)
     - plddt_binder_mean: weight 1.0 — quaternary
     - all others: weight 0.5 — supplementary
 
@@ -131,9 +131,7 @@ def overall_rank(
     _default_weights: dict[str, float] = {
         # Primary — Dunbrack ipSAE_min from Boltz2 (best single metric, 1.4× > ipAE)
         "ipsae_min_z": 4.0,
-        # Primary — AF2 ipSAE_min (independent cross-validation; same weight as Boltz2)
-        "af2_ipsae_min_z": 4.0,
-        # Secondary — iptm ensemble
+        # Secondary — iptm (Boltz-2)
         "iptm_z": 2.0,
         # IPSAE directional (corroborates ipsae_min)
         "bt_ipsae_z": 1.5,
