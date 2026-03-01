@@ -5,9 +5,9 @@ from .mosaic import MosaicExtractor
 from .pxdesign import PXDesignExtractor
 
 __all__ = [
-    "SequenceExtractor",
     "BindCraftExtractor",
     "BoltzGenExtractor",
     "MosaicExtractor",
     "PXDesignExtractor",
+    "SequenceExtractor",
 ]

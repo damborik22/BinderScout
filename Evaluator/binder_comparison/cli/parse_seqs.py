@@ -45,8 +45,6 @@ def add_parser(subparsers) -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
     )
-    p.add_argument("--input", "-i", required=True, metavar="FILE",
-                   help="Input file in any supported format")
-    p.add_argument("--output", "-o", required=True, metavar="FASTA",
-                   help="Output FASTA file")
+    p.add_argument("--input", "-i", required=True, metavar="FILE", help="Input file in any supported format")
+    p.add_argument("--output", "-o", required=True, metavar="FASTA", help="Output FASTA file")
     p.set_defaults(func=run)

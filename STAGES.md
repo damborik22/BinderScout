@@ -60,9 +60,9 @@
 
 ## Part G: Batch 5 — Documentation & CI
 
-- [ ] G1.  Add GitHub Actions CI workflow — lint (shellcheck, ruff), test, Docker build
-- [ ] G2.  Add badges to README (license, CI, Python version, platform)
-- [ ] G3.  Add CONTRIBUTING.md with dev setup instructions
-- [ ] G4.  Add CHANGELOG.md
-- [ ] G5.  Add architecture diagram (Mermaid) in README — tool relationships and data flow
-- [ ] G6.  Add troubleshooting section for Evaluator (AF2 weight paths, CUDA version mismatches)
+- [x] G1.  Add GitHub Actions CI workflow — lint (shellcheck, ruff), test, Docker build
+- [x] G2.  Add badges to README (license, CI, Python version, platform)
+- [x] G3.  Add CONTRIBUTING.md with dev setup instructions
+- [x] G4.  Add CHANGELOG.md
+- [x] G5.  Add architecture diagram (Mermaid) in README — tool relationships and data flow
+- [x] G6.  Add troubleshooting section for Evaluator (AF2 weight paths, CUDA version mismatches)

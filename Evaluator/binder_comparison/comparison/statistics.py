@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
-from ..core.schema import LOWER_IS_BETTER, ZSCORE_METRICS
 from ..core.normalization import zscore_dataframe
+from ..core.schema import LOWER_IS_BETTER, ZSCORE_METRICS
 
 
 def compute_statistics(
@@ -59,12 +58,12 @@ def _per_group_summary(
             if len(vals) == 0:
                 continue
             summary[str(group_name)][col] = {
-                "mean":   float(vals.mean()),
-                "std":    float(vals.std()),
+                "mean": float(vals.mean()),
+                "std": float(vals.std()),
                 "median": float(vals.median()),
-                "min":    float(vals.min()),
-                "max":    float(vals.max()),
-                "n":      int(len(vals)),
+                "min": float(vals.min()),
+                "max": float(vals.max()),
+                "n": len(vals),
             }
     return summary
 
@@ -131,19 +130,19 @@ def overall_rank(
     # af2_ipsae_min_z is optional (only when PAE files are available); missing z-cols are skipped.
     _default_weights: dict[str, float] = {
         # Primary — Dunbrack ipSAE_min from Boltz2 (best single metric, 1.4× > ipAE)
-        "ipsae_min_z":         4.0,
+        "ipsae_min_z": 4.0,
         # Primary — AF2 ipSAE_min (independent cross-validation; same weight as Boltz2)
-        "af2_ipsae_min_z":     4.0,
+        "af2_ipsae_min_z": 4.0,
         # Secondary — iptm ensemble
-        "iptm_z":              2.0,
+        "iptm_z": 2.0,
         # IPSAE directional (corroborates ipsae_min)
-        "bt_ipsae_z":          1.5,
-        "tb_ipsae_z":          1.5,
+        "bt_ipsae_z": 1.5,
+        "tb_ipsae_z": 1.5,
         # Interface PAE (ensemble)
-        "ipae_z":              1.5,
+        "ipae_z": 1.5,
         # binder pLDDT
         "plddt_binder_mean_z": 1.0,
-        "plddt_binder_min_z":  0.8,
+        "plddt_binder_min_z": 0.8,
     }
     # Merge caller-supplied overrides over defaults; all others get 0.5
     effective_weights = dict(_default_weights)

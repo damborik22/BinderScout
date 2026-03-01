@@ -42,16 +42,13 @@ class PXDesignExtractor(SequenceExtractor):
         input_dir = Path(input_dir)
         csv_path = self._find_csv(input_dir)
         if csv_path is None:
-            warnings.warn(
-                f"PXDesign: no summary.csv found in {input_dir} or subdirectories."
-            )
+            warnings.warn(f"PXDesign: no summary.csv found in {input_dir} or subdirectories.")
             return []
 
         df = pd.read_csv(csv_path)
         if _SEQUENCE_COL not in df.columns:
             raise ValueError(
-                f"PXDesign CSV {csv_path} missing '{_SEQUENCE_COL}' column. "
-                f"Available: {list(df.columns[:10])}"
+                f"PXDesign CSV {csv_path} missing '{_SEQUENCE_COL}' column. Available: {list(df.columns[:10])}"
             )
 
         results: list[ExtractedBinder] = []
@@ -63,12 +60,14 @@ class PXDesignExtractor(SequenceExtractor):
                 continue
 
             binder_id = self._make_id(row, idx)
-            results.append(ExtractedBinder(
-                binder_id=binder_id,
-                sequence=seq,
-                source_tool="pxdesign",
-                native=NativeMetrics(),
-            ))
+            results.append(
+                ExtractedBinder(
+                    binder_id=binder_id,
+                    sequence=seq,
+                    source_tool="pxdesign",
+                    native=NativeMetrics(),
+                )
+            )
 
         return results
 

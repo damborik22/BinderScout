@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional
+from typing import Literal
 
 import numpy as np
 
@@ -17,13 +17,14 @@ class NativeMetrics:
     Currently populated only for BindCraft sequences, which go through
     PyRosetta relaxation and interface analysis during design.
     """
-    dG: Optional[float] = None                      # Rosetta interface energy (lower better)
-    dSASA: Optional[float] = None                   # Buried surface area Å² (higher better)
-    shape_complementarity: Optional[float] = None   # Geometric interface fit 0–1 (higher better)
-    packstat: Optional[float] = None                # Interface packing quality (higher better)
-    hbonds_interface: Optional[float] = None        # H-bond count at interface (higher better)
-    hbonds_pct: Optional[float] = None              # H-bonds as % of interface residues
-    mpnn_recovery: Optional[float] = None           # MPNN sequence recovery score
+
+    dG: float | None = None  # Rosetta interface energy (lower better)
+    dSASA: float | None = None  # Buried surface area Å² (higher better)
+    shape_complementarity: float | None = None  # Geometric interface fit 0–1 (higher better)
+    packstat: float | None = None  # Interface packing quality (higher better)
+    hbonds_interface: float | None = None  # H-bond count at interface (higher better)
+    hbonds_pct: float | None = None  # H-bonds as % of interface residues
+    mpnn_recovery: float | None = None  # MPNN sequence recovery score
 
 
 @dataclass
@@ -41,46 +42,47 @@ class StandardisedMetrics:
     - PAE: expected in Ångströms for both engines
     - IPSAE: Boltz2-specific score, higher = better interface contact
     """
+
     # ---- Ensemble (weighted AF2 + Boltz2) ----
-    iptm: Optional[float] = None
-    ipae: Optional[float] = None
-    pae_bt: Optional[float] = None
-    pae_tb: Optional[float] = None
-    pae_bb: Optional[float] = None
-    plddt_binder_mean: Optional[float] = None
-    plddt_binder_min: Optional[float] = None
-    plddt_target_mean: Optional[float] = None
+    iptm: float | None = None
+    ipae: float | None = None
+    pae_bt: float | None = None
+    pae_tb: float | None = None
+    pae_bb: float | None = None
+    plddt_binder_mean: float | None = None
+    plddt_binder_min: float | None = None
+    plddt_target_mean: float | None = None
 
     # ---- AF2-specific values (pre-ensemble) ----
-    af2_iptm: Optional[float] = None
-    af2_ipae: Optional[float] = None
-    af2_pae_bt: Optional[float] = None
-    af2_pae_tb: Optional[float] = None
-    af2_pae_bb: Optional[float] = None
-    af2_plddt_binder_mean: Optional[float] = None
-    af2_plddt_binder_min: Optional[float] = None
-    af2_plddt_target_mean: Optional[float] = None
+    af2_iptm: float | None = None
+    af2_ipae: float | None = None
+    af2_pae_bt: float | None = None
+    af2_pae_tb: float | None = None
+    af2_pae_bb: float | None = None
+    af2_plddt_binder_mean: float | None = None
+    af2_plddt_binder_min: float | None = None
+    af2_plddt_target_mean: float | None = None
 
     # ---- Boltz2-specific values (pre-ensemble) ----
-    boltz_iptm: Optional[float] = None
-    boltz_ipae: Optional[float] = None
-    boltz_pae_bt: Optional[float] = None
-    boltz_pae_tb: Optional[float] = None
-    boltz_pae_bb: Optional[float] = None
-    boltz_plddt_binder_mean: Optional[float] = None
-    boltz_plddt_binder_min: Optional[float] = None
-    boltz_plddt_target_mean: Optional[float] = None
+    boltz_iptm: float | None = None
+    boltz_ipae: float | None = None
+    boltz_pae_bt: float | None = None
+    boltz_pae_tb: float | None = None
+    boltz_pae_bb: float | None = None
+    boltz_plddt_binder_mean: float | None = None
+    boltz_plddt_binder_min: float | None = None
+    boltz_plddt_target_mean: float | None = None
 
     # ---- Boltz2-exclusive (no AF2 equivalent) ----
-    bt_ipsae: Optional[float] = None        # Binder→target IPSAE, 6-sample avg
-    tb_ipsae: Optional[float] = None        # Target→binder IPSAE
-    ipsae_min: Optional[float] = None       # min(bt, tb) — worst-case interface contact
-    ipsae_valid: Optional[int] = None       # 1 = interface detected, 0 = no contact
-    bt_iptm: Optional[float] = None         # Directional interface pTM
-    binder_ptm: Optional[float] = None      # Binder fold quality
-    intra_contact: Optional[float] = None   # Within-binder contacts
-    target_contact: Optional[float] = None  # Binder-target contacts
-    pTMEnergy: Optional[float] = None       # Boltz2 energy proxy (lower better)
+    bt_ipsae: float | None = None  # Binder→target IPSAE, 6-sample avg
+    tb_ipsae: float | None = None  # Target→binder IPSAE
+    ipsae_min: float | None = None  # min(bt, tb) — worst-case interface contact
+    ipsae_valid: int | None = None  # 1 = interface detected, 0 = no contact
+    bt_iptm: float | None = None  # Directional interface pTM
+    binder_ptm: float | None = None  # Binder fold quality
+    intra_contact: float | None = None  # Within-binder contacts
+    target_contact: float | None = None  # Binder-target contacts
+    pTMEnergy: float | None = None  # Boltz2 energy proxy (lower better)
 
 
 @dataclass
@@ -94,16 +96,18 @@ class PerResidueData:
     pLDDT shape: [L_b + L_t]
     PAE shape:   [L_b + L_t, L_b + L_t]
     """
-    binder_length: Optional[int] = None
-    af2_plddt: Optional[np.ndarray] = None
-    af2_pae: Optional[np.ndarray] = None
-    boltz_plddt: Optional[np.ndarray] = None
-    boltz_pae: Optional[np.ndarray] = None
+
+    binder_length: int | None = None
+    af2_plddt: np.ndarray | None = None
+    af2_pae: np.ndarray | None = None
+    boltz_plddt: np.ndarray | None = None
+    boltz_pae: np.ndarray | None = None
 
 
 @dataclass
 class ExtractedBinder:
     """Intermediate representation after sequence extraction but before refolding."""
+
     binder_id: str
     sequence: str
     source_tool: SourceTool
@@ -113,19 +117,18 @@ class ExtractedBinder:
 @dataclass
 class MetricResult:
     """Full result for one binder after extraction, refolding, and ensemble."""
+
     binder_id: str
     sequence: str
     source_tool: SourceTool
     standardised: StandardisedMetrics = field(default_factory=StandardisedMetrics)
     native: NativeMetrics = field(default_factory=NativeMetrics)
     per_residue: PerResidueData = field(default_factory=PerResidueData)
-    model_weights: Dict[str, float] = field(
-        default_factory=lambda: {"af2": 0.6, "boltz2": 0.4}
-    )
+    model_weights: dict[str, float] = field(default_factory=lambda: {"af2": 0.6, "boltz2": 0.4})
 
-    def to_flat_dict(self) -> Dict:
+    def to_flat_dict(self) -> dict:
         """Flatten all metrics into a single dict for CSV export."""
-        d: Dict = {
+        d: dict = {
             "binder_id": self.binder_id,
             "sequence": self.sequence,
             "source_tool": self.source_tool,
@@ -142,41 +145,51 @@ class MetricResult:
 @dataclass
 class ComparisonReport:
     """Aggregated results for the full comparison run."""
-    results: List[MetricResult]
-    summary_statistics: Dict[str, Dict[str, float]]  # metric → {mean, std, min, max}
-    z_scores: Dict[str, Dict[str, float]]             # binder_id → metric → z_score
-    rankings: Dict[str, List[str]]                    # metric → ordered binder_ids
-    model_weights: Dict[str, float] = field(
-        default_factory=lambda: {"af2": 0.6, "boltz2": 0.4}
-    )
+
+    results: list[MetricResult]
+    summary_statistics: dict[str, dict[str, float]]  # metric → {mean, std, min, max}
+    z_scores: dict[str, dict[str, float]]  # binder_id → metric → z_score
+    rankings: dict[str, list[str]]  # metric → ordered binder_ids
+    model_weights: dict[str, float] = field(default_factory=lambda: {"af2": 0.6, "boltz2": 0.4})
 
 
 # Metrics where lower is better (for correct ranking direction)
-LOWER_IS_BETTER = frozenset({
-    "ipae", "pae_bt", "pae_tb", "pae_bb",
-    "af2_ipae", "af2_pae_bt", "af2_pae_tb", "af2_pae_bb",
-    "boltz_ipae", "boltz_pae_bt", "boltz_pae_tb", "boltz_pae_bb",
-    "pTMEnergy",
-})
+LOWER_IS_BETTER = frozenset(
+    {
+        "ipae",
+        "pae_bt",
+        "pae_tb",
+        "pae_bb",
+        "af2_ipae",
+        "af2_pae_bt",
+        "af2_pae_tb",
+        "af2_pae_bb",
+        "boltz_ipae",
+        "boltz_pae_bt",
+        "boltz_pae_tb",
+        "boltz_pae_bb",
+        "pTMEnergy",
+    }
+)
 
 # Standardised metrics included in the ensemble weighted average
 ENSEMBLE_METRIC_MAP = {
     # ensemble_name: (boltz2_col, af2_col)
-    "iptm":               ("boltz_iptm",               "af2_iptm"),
-    "ipae":               ("boltz_ipae",               "af2_ipae"),
-    "pae_bt":             ("boltz_pae_bt_mean",         "af2_pae_bt_mean"),
-    "pae_tb":             ("boltz_pae_tb_mean",         "af2_pae_tb_mean"),
-    "pae_bb":             ("boltz_pae_bb_mean",         "af2_pae_bb_mean"),
-    "plddt_binder_mean":  ("boltz_plddt_binder_mean",   "af2_plddt_binder_mean"),
-    "plddt_binder_min":   ("boltz_plddt_binder_min",    "af2_plddt_binder_min"),
-    "plddt_target_mean":  ("boltz_plddt_target_mean",   "af2_plddt_target_mean"),
+    "iptm": ("boltz_iptm", "af2_iptm"),
+    "ipae": ("boltz_ipae", "af2_ipae"),
+    "pae_bt": ("boltz_pae_bt_mean", "af2_pae_bt_mean"),
+    "pae_tb": ("boltz_pae_tb_mean", "af2_pae_tb_mean"),
+    "pae_bb": ("boltz_pae_bb_mean", "af2_pae_bb_mean"),
+    "plddt_binder_mean": ("boltz_plddt_binder_mean", "af2_plddt_binder_mean"),
+    "plddt_binder_min": ("boltz_plddt_binder_min", "af2_plddt_binder_min"),
+    "plddt_target_mean": ("boltz_plddt_target_mean", "af2_plddt_target_mean"),
 }
 
 # Boltz2-exclusive columns (after boltz_ prefix added by merger)
 BOLTZ2_EXCLUSIVE_COLS = [
-    "boltz_bt_ipsae",       # Mosaic aux (max aggregation) — renamed to bt_ipsae_aux
-    "boltz_tb_ipsae",       # Mosaic aux — renamed to tb_ipsae_aux
-    "boltz_ipsae_min",      # Mosaic aux — renamed to ipsae_min_aux
+    "boltz_bt_ipsae",  # Mosaic aux (max aggregation) — renamed to bt_ipsae_aux
+    "boltz_tb_ipsae",  # Mosaic aux — renamed to tb_ipsae_aux
+    "boltz_ipsae_min",  # Mosaic aux — renamed to ipsae_min_aux
     "boltz_ipsae_valid",
     "boltz_bt_iptm",
     "boltz_binder_ptm",

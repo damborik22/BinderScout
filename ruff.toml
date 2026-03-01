@@ -1,0 +1,25 @@
+target-version = "py310"
+line-length = 120
+
+[lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",     # line too long (handled by formatter)
+    "E741",     # ambiguous variable name
+    "RUF001",   # ambiguous unicode in string (intentional: ×, —, etc.)
+    "RUF002",   # ambiguous unicode in docstring
+    "RUF003",   # ambiguous unicode in comment
+    "RUF005",   # iterable unpacking vs concatenation (style preference)
+    "B028",     # no explicit stacklevel in warnings
+    "B905",     # zip() without strict= (not always appropriate)
+    "SIM105",   # contextlib.suppress vs try-except-pass (style preference)
+    "SIM108",   # use ternary operator (reduces readability)
+    "SIM115",   # context manager for open (not always appropriate for long-lived handles)
+]
+
+[lint.per-file-ignores]
+"Evaluator/scripts/refold_*.py" = ["E402"]
+"bindmaster_examples/*.py" = ["ALL"]
+
+[format]
+quote-style = "double"

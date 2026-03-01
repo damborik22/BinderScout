@@ -15,14 +15,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import pandas as pd
 
-from ..comparison.merger import merge_refold_results
 from ..comparison.ensemble import compute_ensemble_metrics
-from ..comparison.statistics import compute_statistics, overall_rank
+from ..comparison.merger import merge_refold_results
 from ..comparison.scoring import (
     add_af2_ipsae_from_files,
     add_boltz_ipsae_from_files,
@@ -30,8 +28,9 @@ from ..comparison.scoring import (
     compute_composite_scores,
     rank_by_adaptyv_method,
 )
-from ..visualization.report import generate_report
+from ..comparison.statistics import compute_statistics, overall_rank
 from ..io.write import write_csv, write_json
+from ..visualization.report import generate_report
 
 
 def run(args: argparse.Namespace) -> None:
@@ -95,9 +94,7 @@ def run(args: argparse.Namespace) -> None:
 
     # Composite z-score rank (secondary ordering within tiers)
     df["composite_score"] = overall_rank(df)
-    df = df.sort_values(
-        ["adaptyv_rank"], ascending=[True]
-    ).reset_index(drop=True)
+    df = df.sort_values(["adaptyv_rank"], ascending=[True]).reset_index(drop=True)
 
     # Step 4: Write outputs
     write_csv(df, output_dir / "metrics.csv")
@@ -118,10 +115,10 @@ def run(args: argparse.Namespace) -> None:
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
-    print(f"  metrics.csv        — all metrics")
-    print(f"  metrics_zscore.csv — z-scored metrics")
-    print(f"  summary.json       — per-tool statistics")
-    print(f"  report.html        — interactive report")
+    print("  metrics.csv        — all metrics")
+    print("  metrics_zscore.csv — z-scored metrics")
+    print("  summary.json       — per-tool statistics")
+    print("  report.html        — interactive report")
 
 
 def _parse_weights(weights_str: str) -> tuple[float, float]:
@@ -143,8 +140,8 @@ def _parse_weights(weights_str: str) -> tuple[float, float]:
 
 def _attach_native_metrics(df: pd.DataFrame, native_csv: str) -> pd.DataFrame:
     """Left-join BindCraft native metrics (dG, dSASA, etc.) onto df by sequence."""
-    from ..io.read import read_csv_safe
     from ..extractors.bindcraft import _NATIVE_COL_MAP, _SEQUENCE_COL
+    from ..io.read import read_csv_safe
 
     native_df = read_csv_safe(native_csv)
     if native_df.empty or _SEQUENCE_COL not in native_df.columns:
@@ -167,19 +164,24 @@ def add_parser(subparsers) -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
     )
-    p.add_argument("--boltz2-results", metavar="CSV",
-                   help="Output from 'refold-boltz2' (boltz2_results.csv)")
-    p.add_argument("--af2-results", metavar="CSV",
-                   help="Output from 'refold-af2' (af2_results.csv)")
-    p.add_argument("--sequences", metavar="FASTA",
-                   help="FASTA from 'extract' step (for binder_id and source_tool tags)")
-    p.add_argument("--native-metrics", metavar="CSV",
-                   help="BindCraft final_design_stats.csv to attach dG/dSASA/ShapeComp")
-    p.add_argument("--af2-pae-dir", metavar="DIR",
-                   help="Deprecated — PAE file paths are now recorded in af2_results.csv "
-                        "automatically by refold_Version6. This flag is ignored.")
-    p.add_argument("--weights", default="af2=0.6,boltz2=0.4",
-                   help="Ensemble weights, e.g. 'af2=0.7,boltz2=0.3' (default: af2=0.6,boltz2=0.4)")
-    p.add_argument("--output", "-o", required=True, metavar="DIR",
-                   help="Output directory for all report files")
+    p.add_argument("--boltz2-results", metavar="CSV", help="Output from 'refold-boltz2' (boltz2_results.csv)")
+    p.add_argument("--af2-results", metavar="CSV", help="Output from 'refold-af2' (af2_results.csv)")
+    p.add_argument(
+        "--sequences", metavar="FASTA", help="FASTA from 'extract' step (for binder_id and source_tool tags)"
+    )
+    p.add_argument(
+        "--native-metrics", metavar="CSV", help="BindCraft final_design_stats.csv to attach dG/dSASA/ShapeComp"
+    )
+    p.add_argument(
+        "--af2-pae-dir",
+        metavar="DIR",
+        help="Deprecated — PAE file paths are now recorded in af2_results.csv "
+        "automatically by refold_Version6. This flag is ignored.",
+    )
+    p.add_argument(
+        "--weights",
+        default="af2=0.6,boltz2=0.4",
+        help="Ensemble weights, e.g. 'af2=0.7,boltz2=0.3' (default: af2=0.6,boltz2=0.4)",
+    )
+    p.add_argument("--output", "-o", required=True, metavar="DIR", help="Output directory for all report files")
     p.set_defaults(func=run)

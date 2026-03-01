@@ -154,6 +154,7 @@ run_logged() {
 
     local rc=0
     for attempt in $(seq 1 "${retries}"); do
+        # shellcheck disable=SC2188
         > "${tmpfile}"   # truncate on each attempt
         "$@" >> "${tmpfile}" 2>&1 &
         local pid=$!
@@ -241,6 +242,7 @@ ensure_conda_in_path() {
 # Finds conda/mamba and sets CONDA_BASE + CONDA_CMD.
 # Prefers mamba over conda (faster package installs).
 detect_conda() {
+    # shellcheck disable=SC2034
     local base cmd
 
     # Helper: try a specific binary
@@ -742,7 +744,7 @@ install_mosaic() {
                 read -rp "$(echo -e "${YELLOW}  Press Enter to stop Marimo and continue the installer...${RESET}")"
             fi
             kill "${marimo_pid}" 2>/dev/null && print_ok "Marimo stopped" || print_warn "Marimo already exited"
-            cd - > /dev/null
+            cd - > /dev/null || true
         else
             print_warn "Skipped Mosaic example."
         fi
