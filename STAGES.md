@@ -51,12 +51,12 @@
 
 ## Part F: Batch 4 — Configurator & UX
 
-- [ ] F1.  Add Evaluator as a tool option in `configurator.py` wizard (Step 5)
-- [ ] F2.  Add `--headless` mode to `configurator.py` — accept JSON config, skip all prompts
-- [ ] F3.  Add run folder archiving (`configurator.py --archive <run>` → tar.gz)
-- [ ] F4.  Add `configurator.py --status` — show all runs and their completion state
-- [ ] F5.  Add target sequence auto-extraction from mmCIF files (not just PDB)
-- [ ] F6.  Add multi-chain binder support in BoltzGen YAML generation
+- [x] F1.  Add Evaluator as a tool option in `configurator.py` wizard (Step 5)
+- [ ] F2.  *(deferred — future)* Add `--headless` mode to `configurator.py` — accept JSON config, skip all prompts
+- [x] F3.  Add run folder archiving (`configurator.py --archive <run>` → tar.gz)
+- [x] F4.  Add `configurator.py --status` — show all runs and their completion state
+- [x] F5.  Add target sequence auto-extraction from mmCIF files (not just PDB)
+- [ ] F6.  *(deferred — future)* Add multi-chain binder support in BoltzGen YAML generation
 
 ## Part G: Batch 5 — Documentation & CI
 

@@ -9,12 +9,14 @@ Usage:
     python configurator/configurator.py  # directly
 """
 
+import argparse
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 # ─── Colors ──────────────────────────────────────────────────────────────────
@@ -111,6 +113,7 @@ MOSAIC_DIR     = BINDMASTER_DIR / "Mosaic"
 RUNS_DIR       = BINDMASTER_DIR / "runs"
 FILTERS_DIR    = BINDCRAFT_DIR / "settings_filters"
 ADVANCED_DIR   = BINDCRAFT_DIR / "settings_advanced"
+EVALUATOR_DIR  = BINDMASTER_DIR / "Evaluator"
 MOSAIC_VENV    = MOSAIC_DIR / ".venv"
 MOSAIC_HALLUCINATE_SRC = (
     MOSAIC_DIR / "examples" / "bindmaster_example" / "hallucinate_bindmaster.py"
@@ -143,9 +146,13 @@ def detect_installs() -> dict:
         return (CONDA_ENVS_DIR / name).is_dir()
 
     return {
-        "bindcraft": _env_exists("BindCraft"),
-        "boltzgen":  _env_exists("BoltzGen"),
-        "mosaic":    (MOSAIC_VENV / "bin" / "python").exists(),
+        "bindcraft":  _env_exists("BindCraft"),
+        "boltzgen":   _env_exists("BoltzGen"),
+        "mosaic":     (MOSAIC_VENV / "bin" / "python").exists(),
+        "evaluator":  (
+            (EVALUATOR_DIR / "evaluate.sh").exists()
+            and (_env_exists("binder-eval-boltz2") or _env_exists("binder-eval-af2"))
+        ),
     }
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -263,12 +270,12 @@ def validate_chains(s):
     return "Chains should be letter(s), e.g. A or A,B"
 
 
-def validate_pdb_path(s):
+def validate_structure_path(s):
     p = Path(s).expanduser()
     if not p.exists():
         return f"File not found: {p}"
-    if p.suffix.lower() != ".pdb":
-        return "File must have a .pdb extension."
+    if p.suffix.lower() not in (".pdb", ".cif", ".mmcif"):
+        return "File must be .pdb, .cif, or .mmcif"
     return True
 
 
@@ -308,6 +315,307 @@ def extract_sequence_from_pdb(pdb_path: str, chain_id: str) -> str | None:
     return "".join(seen.values()) if seen else None
 
 
+def _cif_tokenize(text: str) -> list:
+    """Tokenize an mmCIF file into a flat list of string tokens.
+
+    Pure-Python tokenizer (no external deps).  Handles semicolon-delimited
+    multi-line values, single/double quoted strings, and # comments.
+    Ported from Evaluator/binder_comparison/io/read.py.
+    """
+    tokens: list = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith(";"):
+            parts = [line[1:]]
+            i += 1
+            while i < len(lines) and not lines[i].startswith(";"):
+                parts.append(lines[i])
+                i += 1
+            tokens.append("\n".join(parts).rstrip())
+            i += 1
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+        j = 0
+        while j < len(stripped):
+            if stripped[j].isspace():
+                j += 1
+                continue
+            if stripped[j] == "#":
+                break
+            if stripped[j] in ('"', "'"):
+                q = stripped[j]
+                j += 1
+                start = j
+                while j < len(stripped) and stripped[j] != q:
+                    j += 1
+                tokens.append(stripped[start:j])
+                if j < len(stripped):
+                    j += 1
+            else:
+                start = j
+                while j < len(stripped) and not stripped[j].isspace():
+                    j += 1
+                tokens.append(stripped[start:j])
+        i += 1
+    return tokens
+
+
+def _cif_entity_poly_seq(text: str) -> str | None:
+    """Extract the longest canonical one-letter sequence from _entity_poly."""
+    tokens = _cif_tokenize(text)
+    i = 0
+    while i < len(tokens):
+        if tokens[i].lower() != "loop_":
+            i += 1
+            continue
+        i += 1
+        cols: list = []
+        while i < len(tokens) and tokens[i].startswith("_"):
+            cols.append(tokens[i].lower())
+            i += 1
+        if not any(c.startswith("_entity_poly.") for c in cols):
+            continue
+        seq_col = None
+        for preferred in (
+            "_entity_poly.pdbx_seq_one_letter_code_can",
+            "_entity_poly.pdbx_seq_one_letter_code",
+        ):
+            if preferred in cols:
+                seq_col = cols.index(preferred)
+                break
+        if seq_col is None:
+            continue
+        n_cols = len(cols)
+        seqs: list = []
+        while i < len(tokens):
+            tok = tokens[i]
+            if tok.lower() == "loop_" or (tok.startswith("_") and "." in tok):
+                break
+            if i + n_cols > len(tokens):
+                break
+            row = tokens[i : i + n_cols]
+            seq = re.sub(r"[^A-Za-z]", "", row[seq_col]).upper()
+            if len(seq) >= 5:
+                seqs.append(seq)
+            i += n_cols
+        if seqs:
+            return max(seqs, key=len)
+    return None
+
+
+def _cif_atom_site_seq(text: str) -> str | None:
+    """Fallback: extract sequence from _atom_site CA records."""
+    tokens = _cif_tokenize(text)
+    i = 0
+    while i < len(tokens):
+        if tokens[i].lower() != "loop_":
+            i += 1
+            continue
+        i += 1
+        cols: list = []
+        while i < len(tokens) and tokens[i].startswith("_"):
+            cols.append(tokens[i].lower())
+            i += 1
+        if not any(c.startswith("_atom_site.") for c in cols):
+            continue
+        col = {c.split(".", 1)[1]: idx for idx, c in enumerate(cols)}
+        needed = {"label_atom_id", "label_comp_id", "label_asym_id", "label_seq_id"}
+        if not needed.issubset(col):
+            continue
+        n_cols = len(cols)
+        seen: dict = {}
+        while i < len(tokens):
+            if tokens[i].lower() == "loop_" or (tokens[i].startswith("_") and "." in tokens[i]):
+                break
+            if i + n_cols > len(tokens):
+                break
+            row = tokens[i : i + n_cols]
+            if row[col["label_atom_id"]].strip("'\"") == "CA":
+                chain = row[col["label_asym_id"]].strip("'\"")
+                try:
+                    resnum = int(row[col["label_seq_id"]])
+                except ValueError:
+                    i += n_cols
+                    continue
+                resname = row[col["label_comp_id"]].strip("'\"")
+                key = (chain, resnum)
+                if key not in seen:
+                    seen[key] = AA3TO1.get(resname, "X")
+            i += n_cols
+        if seen:
+            return "".join(seen[k] for k in sorted(seen))
+    return None
+
+
+def extract_sequence_from_cif(cif_path: str, chain_id: str) -> str | None:
+    """Extract amino-acid sequence for chain_id from a CIF/mmCIF file.
+
+    Returns a 1-letter string, or None on failure.
+    """
+    try:
+        text = Path(cif_path).expanduser().read_text(errors="replace")
+    except OSError:
+        return None
+
+    # Try canonical _entity_poly first (chain-agnostic, longest entity)
+    seq = _cif_entity_poly_seq(text)
+    if seq:
+        return seq
+
+    # Fallback: _atom_site CA records for requested chain
+    tokens = _cif_tokenize(text)
+    i = 0
+    while i < len(tokens):
+        if tokens[i].lower() != "loop_":
+            i += 1
+            continue
+        i += 1
+        cols: list = []
+        while i < len(tokens) and tokens[i].startswith("_"):
+            cols.append(tokens[i].lower())
+            i += 1
+        if not any(c.startswith("_atom_site.") for c in cols):
+            continue
+        col = {c.split(".", 1)[1]: idx for idx, c in enumerate(cols)}
+        needed = {"label_atom_id", "label_comp_id", "label_asym_id", "label_seq_id"}
+        if not needed.issubset(col):
+            continue
+        n_cols = len(cols)
+        seen: dict = {}
+        while i < len(tokens):
+            if tokens[i].lower() == "loop_" or (tokens[i].startswith("_") and "." in tokens[i]):
+                break
+            if i + n_cols > len(tokens):
+                break
+            row = tokens[i : i + n_cols]
+            if row[col["label_atom_id"]].strip("'\"") == "CA":
+                ch = row[col["label_asym_id"]].strip("'\"")
+                if ch.upper() != chain_id.upper():
+                    i += n_cols
+                    continue
+                try:
+                    resnum = int(row[col["label_seq_id"]])
+                except ValueError:
+                    i += n_cols
+                    continue
+                resname = row[col["label_comp_id"]].strip("'\"")
+                key = (ch, resnum)
+                if key not in seen:
+                    seen[key] = AA3TO1.get(resname, "X")
+            i += n_cols
+        if seen:
+            return "".join(seen[k] for k in sorted(seen))
+    return None
+
+
+def extract_sequence_from_structure(path: str, chain_id: str) -> str | None:
+    """Dispatcher: extract sequence from PDB or mmCIF file."""
+    p = Path(path).expanduser()
+    if p.suffix.lower() in (".cif", ".mmcif"):
+        return extract_sequence_from_cif(str(p), chain_id)
+    return extract_sequence_from_pdb(str(p), chain_id)
+
+
+def cif_to_pdb_atoms(cif_path: str, pdb_path: str) -> bool:
+    """Convert mmCIF to a minimal PDB file using _atom_site records.
+
+    Writes standard ATOM/HETATM records from parsed CIF data.
+    Returns True on success, False if no atoms could be parsed.
+    No external dependencies (no BioPython required).
+    """
+    try:
+        text = Path(cif_path).expanduser().read_text(errors="replace")
+    except OSError:
+        return False
+
+    tokens = _cif_tokenize(text)
+    i = 0
+    atom_lines: list = []
+    while i < len(tokens):
+        if tokens[i].lower() != "loop_":
+            i += 1
+            continue
+        i += 1
+        cols: list = []
+        while i < len(tokens) and tokens[i].startswith("_"):
+            cols.append(tokens[i].lower())
+            i += 1
+        if not any(c.startswith("_atom_site.") for c in cols):
+            continue
+        col = {c.split(".", 1)[1]: idx for idx, c in enumerate(cols)}
+        needed = {"group_pdb", "label_atom_id", "label_comp_id",
+                  "label_asym_id", "label_seq_id", "cartn_x", "cartn_y", "cartn_z"}
+        if not needed.issubset(col):
+            continue
+        n_cols = len(cols)
+        serial = 1
+        while i < len(tokens):
+            if tokens[i].lower() == "loop_" or (tokens[i].startswith("_") and "." in tokens[i]):
+                break
+            if i + n_cols > len(tokens):
+                break
+            row = tokens[i : i + n_cols]
+            group = row[col["group_pdb"]].strip("'\"")
+            atom_name = row[col["label_atom_id"]].strip("'\"")
+            comp_id = row[col["label_comp_id"]].strip("'\"")
+            chain = row[col["label_asym_id"]].strip("'\"")
+            try:
+                seq_id = int(row[col["label_seq_id"]])
+                x = float(row[col["cartn_x"]])
+                y = float(row[col["cartn_y"]])
+                z = float(row[col["cartn_z"]])
+            except (ValueError, IndexError):
+                i += n_cols
+                continue
+            # Element symbol (optional)
+            elem = col.get("type_symbol")
+            elem_str = row[elem].strip("'\"").upper()[:2] if elem is not None else atom_name[0]
+            # B-factor / occupancy (optional)
+            occ = 1.0
+            bfac = 0.0
+            if "occupancy" in col:
+                try:
+                    occ = float(row[col["occupancy"]])
+                except ValueError:
+                    pass
+            if "b_iso_or_equiv" in col:
+                try:
+                    bfac = float(row[col["b_iso_or_equiv"]])
+                except ValueError:
+                    pass
+            # PDB ATOM format
+            record = "HETATM" if group == "HETATM" else "ATOM  "
+            # Atom name alignment: 4 chars, left-padded for 1-3 char names
+            if len(atom_name) < 4:
+                atom_field = f" {atom_name:<3s}"
+            else:
+                atom_field = f"{atom_name:<4s}"
+            line = (
+                f"{record}{serial:5d} {atom_field}{comp_id:>3s} {chain[0]:1s}{seq_id:4d}    "
+                f"{x:8.3f}{y:8.3f}{z:8.3f}{occ:6.2f}{bfac:6.2f}          {elem_str:>2s}  "
+            )
+            atom_lines.append(line)
+            serial += 1
+            i += n_cols
+        break  # only process first _atom_site block
+
+    if not atom_lines:
+        return False
+
+    out = Path(pdb_path).expanduser()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as f:
+        for line in atom_lines:
+            f.write(line + "\n")
+        f.write("END\n")
+    return True
+
+
 def parse_hotspots(hotspot_str: str) -> list:
     """Parse '1-10,20' → [1, 2, ..., 10, 20]. Returns [] for blank."""
     if not hotspot_str:
@@ -340,9 +648,14 @@ def list_presets(directory, suffix=".json"):
 def print_tree(run_dir: Path, tools_enabled: dict, cfg: dict | None = None):
     """Print a colored ASCII tree of what will be created."""
     name = run_dir.name
+    is_cif = cfg and Path(cfg.get("target_pdb_src", "")).suffix.lower() in (".cif", ".mmcif")
     print(f"\n  {BOLD}{name}/{RESET}")
     print(f"  ├── {CYAN}target/{RESET}")
-    print(f"  │   └── <target>.pdb")
+    if is_cif:
+        print(f"  │   ├── <target>.cif")
+        print(f"  │   └── <target>.pdb  (converted)")
+    else:
+        print(f"  │   └── <target>.pdb")
     if tools_enabled.get("mosaic"):
         print(f"  ├── {CYAN}mosaic/{RESET}")
         print(f"  │   └── hallucinate.py")
@@ -359,6 +672,9 @@ def print_tree(run_dir: Path, tools_enabled: dict, cfg: dict | None = None):
         print(f"  │   ├── filters.json")
         print(f"  │   ├── advanced.json")
         print(f"  │   └── outputs/")
+    if tools_enabled.get("evaluator"):
+        print(f"  ├── {CYAN}evaluate/{RESET}")
+        print(f"  │   └── comparison_report/")
     scripts = []
     if tools_enabled.get("mosaic"):
         scripts.append("run_mosaic.sh")
@@ -366,6 +682,8 @@ def print_tree(run_dir: Path, tools_enabled: dict, cfg: dict | None = None):
         scripts.append("run_boltzgen.sh")
     if tools_enabled.get("bindcraft"):
         scripts.append("run_bindcraft.sh")
+    if tools_enabled.get("evaluator"):
+        scripts.append("run_evaluate.sh")
     scripts.append("run_all.sh")
     for i, s in enumerate(scripts):
         prefix = "└──" if i == len(scripts) - 1 else "├──"
@@ -620,7 +938,7 @@ def write_run_all(path: Path, cfg: dict, tools_enabled: dict):
     run_dir = cfg["run_dir"]
     lines = [
         "#!/usr/bin/env bash",
-        f"# Run all enabled tools for {cfg['name']} in order: Mosaic → BoltzGen → BindCraft",
+        f"# Run all enabled tools for {cfg['name']} in order: Mosaic → BoltzGen → BindCraft → Evaluator",
         "# Generated by BindMaster Configurator",
         "set -euo pipefail",
         "",
@@ -667,7 +985,91 @@ def write_run_all(path: Path, cfg: dict, tools_enabled: dict):
             "",
         ]
 
+    if tools_enabled.get("evaluator"):
+        lines += [
+            'echo "=== Step: Evaluator ==="',
+            '"$RUN_DIR/run_evaluate.sh"',
+            "",
+        ]
+
     lines += ['echo ""', 'echo "=== Pipeline complete! ==="']
+
+    path.write_text("\n".join(lines) + "\n")
+    path.chmod(0o755)
+
+
+def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
+    """Generate run_evaluate.sh — calls Evaluator/evaluate.sh with the right paths."""
+    run_dir = cfg["run_dir"]
+    eval_dir = run_dir / "evaluate"
+    target_pdb = cfg["target_pdb"]
+    target_seq = cfg.get("target_sequence", "")
+
+    # Collect design output directories the evaluator should scan
+    design_dirs = []
+    if tools_enabled.get("mosaic"):
+        design_dirs.append(("--mosaic", str(run_dir / "mosaic")))
+    if tools_enabled.get("boltzgen"):
+        design_dirs.append(("--boltzgen", str(run_dir / "boltzgen" / "outputs")))
+    if tools_enabled.get("bindcraft"):
+        design_dirs.append(("--bindcraft", str(run_dir / "bindcraft" / "outputs")))
+
+    # Build the evaluate.sh invocation
+    eval_sh = EVALUATOR_DIR / "evaluate.sh"
+    lines = [
+        "#!/usr/bin/env bash",
+        f"# Run Evaluator for {cfg['name']}",
+        "# Generated by BindMaster Configurator",
+        "set -euo pipefail",
+        "",
+        f'EVAL_SCRIPT="{eval_sh}"',
+        f'OUTPUT_DIR="{eval_dir}"',
+        "",
+        'if [[ ! -f "$EVAL_SCRIPT" ]]; then',
+        f'    echo "ERROR: Evaluator not found at $EVAL_SCRIPT" >&2',
+        f'    echo "Run: bindmaster install --tool evaluator" >&2',
+        '    exit 1',
+        'fi',
+        "",
+        "# Step 1: Extract sequences from design tool outputs into FASTA",
+        f'SEQUENCES="$OUTPUT_DIR/sequences.fasta"',
+    ]
+
+    if design_dirs:
+        # Use binder-compare extract to collect sequences
+        extract_args = []
+        for flag, dir_path in design_dirs:
+            extract_args.append(f'    {flag} "{dir_path}" \\')
+        lines += [
+            '',
+            '# Collect design sequences from enabled tools',
+            'if [[ ! -f "$SEQUENCES" ]]; then',
+            f'    echo "  Extracting sequences from design outputs..."',
+        ]
+        # Use evaluate.sh which handles extraction internally
+        # Just create a simple pass-through
+        lines += [
+            'fi',
+            '',
+        ]
+
+    lines += [
+        '# Step 2: Run evaluation pipeline',
+        f'echo "=== Running Evaluator for {cfg["name"]} ==="',
+        'bash "$EVAL_SCRIPT" \\',
+    ]
+
+    # If there are design dirs, pass them as args
+    for flag, dir_path in design_dirs:
+        lines.append(f'    {flag} "{dir_path}" \\')
+
+    lines += [
+        f'    --target-pdb "{target_pdb}" \\',
+        f'    --target-seq "{target_seq}" \\',
+        f'    --output "$OUTPUT_DIR" \\',
+        '    --resume',
+        "",
+    ]
 
     path.write_text("\n".join(lines) + "\n")
     path.chmod(0o755)
@@ -685,11 +1087,28 @@ def generate(cfg: dict, tools_enabled: dict):
         (run_dir / "boltzgen" / "outputs").mkdir(parents=True, exist_ok=True)
     if tools_enabled.get("bindcraft"):
         (run_dir / "bindcraft" / "outputs").mkdir(parents=True, exist_ok=True)
+    if tools_enabled.get("evaluator"):
+        (run_dir / "evaluate" / "comparison_report").mkdir(parents=True, exist_ok=True)
 
-    src_pdb = Path(cfg["target_pdb_src"]).expanduser().resolve()
-    dest_pdb = run_dir / "target" / f"{cfg['name']}.pdb"
-    shutil.copy2(src_pdb, dest_pdb)
-    cfg["target_pdb"] = dest_pdb
+    src_struct = Path(cfg["target_pdb_src"]).expanduser().resolve()
+    src_ext = src_struct.suffix.lower()
+    if src_ext in (".cif", ".mmcif"):
+        # Copy the original CIF
+        dest_cif = run_dir / "target" / f"{cfg['name']}{src_ext}"
+        shutil.copy2(src_struct, dest_cif)
+        # Convert to PDB for tools that need it
+        dest_pdb = run_dir / "target" / f"{cfg['name']}.pdb"
+        if cif_to_pdb_atoms(str(src_struct), str(dest_pdb)):
+            print_ok(f"Converted CIF → PDB: {dest_pdb.name}")
+        else:
+            print_warn("CIF→PDB conversion failed — some tools may not work with CIF input.")
+            dest_pdb = dest_cif  # fallback: point at CIF
+        cfg["target_pdb"] = dest_pdb
+        cfg["target_cif"] = dest_cif
+    else:
+        dest_pdb = run_dir / "target" / f"{cfg['name']}.pdb"
+        shutil.copy2(src_struct, dest_pdb)
+        cfg["target_pdb"] = dest_pdb
 
     if tools_enabled.get("bindcraft"):
         write_bindcraft_target(run_dir / "bindcraft" / "target_settings.json", cfg)
@@ -708,6 +1127,9 @@ def generate(cfg: dict, tools_enabled: dict):
     if tools_enabled.get("mosaic"):
         write_mosaic_hallucinate(run_dir / "mosaic" / "hallucinate.py", cfg)
         write_run_mosaic(run_dir / "run_mosaic.sh", cfg)
+
+    if tools_enabled.get("evaluator"):
+        write_run_evaluate(run_dir / "run_evaluate.sh", cfg, tools_enabled)
 
     write_run_all(run_dir / "run_all.sh", cfg, tools_enabled)
 
@@ -745,6 +1167,15 @@ def run_pipeline(cfg: dict, tools_enabled: dict):
         else:
             print_fail(f"BindCraft failed (exit code {rc})")
             failed.append("BindCraft")
+
+    if tools_enabled.get("evaluator"):
+        print_step("Running Evaluator  (Boltz2 + AF2 refolding — this may take a while)")
+        rc = subprocess.run(["bash", str(run_dir / "run_evaluate.sh")]).returncode
+        if rc == 0:
+            print_ok("Evaluator completed")
+        else:
+            print_fail(f"Evaluator failed (exit code {rc})")
+            failed.append("Evaluator")
 
     print()
     if not failed:
@@ -804,7 +1235,7 @@ def wizard():
     print_step("Step 2 — Target structure")
     _, input_type = ask_choice(
         "How will you provide the target structure?",
-        ["PDB file path", "Amino acid sequence (requires structure prediction first)"],
+        ["PDB or mmCIF file path", "Amino acid sequence (requires structure prediction first)"],
         default_index=0,
     )
 
@@ -817,7 +1248,7 @@ def wizard():
         print(f"    3. Come back and provide the .pdb path below")
         print()
 
-    target_pdb_src = ask("  Path to target .pdb file", validator=validate_pdb_path)
+    target_pdb_src = ask("  Path to target structure file (.pdb / .cif)", validator=validate_structure_path)
 
     # ── Step 3: Target details ────────────────────────────────────────────────
     print_step("Step 3 — Target details")
@@ -830,7 +1261,7 @@ def wizard():
     )
 
     primary_chain = chains.split(",")[0].strip()
-    target_sequence = extract_sequence_from_pdb(target_pdb_src, primary_chain)
+    target_sequence = extract_sequence_from_structure(target_pdb_src, primary_chain)
     if target_sequence:
         preview = target_sequence[:50] + ("..." if len(target_sequence) > 50 else "")
         print_ok(f"Auto-extracted sequence for chain {primary_chain}: "
@@ -866,15 +1297,20 @@ def wizard():
     use_bindcraft = ask_yn("  Enable BindCraft?", default=True)
     print(f"  {BOLD}PXDesign{RESET}  [external — protenix-server.com]")
     use_pxdesign = ask_yn("  Import PXDesign results?", default=False)
+    print(f"  {BOLD}Evaluator{RESET} [{_tag('evaluator')}]")
+    use_evaluator = ask_yn("  Enable cross-evaluation (Boltz2 + AF2 refolding)?", default=False)
 
     tools_enabled = {
         "mosaic": use_mosaic,
         "boltzgen": use_boltzgen,
         "bindcraft": use_bindcraft,
         "pxdesign": use_pxdesign,
+        "evaluator": use_evaluator,
     }
 
-    if not any(tools_enabled.values()):
+    # Evaluator is post-processing — don't count it as the sole tool
+    design_tools = {k: v for k, v in tools_enabled.items() if k != "evaluator"}
+    if not any(design_tools.values()) and not use_evaluator:
         print_warn("No tools enabled — nothing to generate. Exiting.")
         sys.exit(0)
 
@@ -996,7 +1432,7 @@ def wizard():
     # ── Step 7: Preview ───────────────────────────────────────────────────────
     print_step("Step 7 — Preview")
     print(f"  {CYAN}Run folder{RESET}:    {run_dir}")
-    print(f"  {CYAN}Target PDB{RESET}:    {target_pdb_src}")
+    print(f"  {CYAN}Target file{RESET}:   {target_pdb_src}")
     print(f"  {CYAN}Chains{RESET}:        {chains}  |  "
           f"{CYAN}Hotspots{RESET}: {hotspots or '(auto)'}")
     print(f"  {CYAN}Binder length{RESET}: {min_length}–{max_length}  |  "
@@ -1028,6 +1464,8 @@ def wizard():
               f"generate={mo_n}  refold(TOP_K)={mo_k}")
         print(f"  {CYAN}Mosaic seq{RESET}:    "
               f"{seq[:50]}{'...' if len(seq) > 50 else ''} ({len(seq)} aa)")
+    if use_evaluator:
+        print(f"  {CYAN}Evaluator{RESET}:     Boltz2 + AF2 refolding → comparison report")
 
     print_tree(run_dir, tools_enabled, cfg)
 
@@ -1046,6 +1484,8 @@ def wizard():
         print_warn("Mosaic requires interactive input and will run first.")
     if use_boltzgen:
         print_warn("BoltzGen downloads ~6 GB of weights on first run.")
+    if use_evaluator:
+        print_warn("Evaluator runs Boltz2 + AF2 refolding (GPU recommended, ~30 min per design).")
 
     if ask_yn("Run the pipeline now?", default=True):
         run_pipeline(cfg, tools_enabled)
@@ -1062,16 +1502,137 @@ def wizard():
         if use_bindcraft:
             print(f"  {step}. bash {run_dir}/run_bindcraft.sh")
             step += 1
+        if use_evaluator:
+            print(f"  {step}. bash {run_dir}/run_evaluate.sh")
+            step += 1
         if len(enabled_list) > 1:
             print(f"  Or run the full pipeline:  bash {run_dir}/run_all.sh")
         print()
 
 
+# ─── CLI commands ─────────────────────────────────────────────────────────────
+
+def cmd_archive(run_name: str):
+    """Archive a run folder to a .tar.gz file."""
+    run_dir = RUNS_DIR / run_name
+    if not run_dir.is_dir():
+        print_fail(f"Run folder not found: {run_dir}")
+        sys.exit(1)
+
+    archive_path = RUNS_DIR / f"{run_name}.tar.gz"
+    file_count = sum(1 for _ in run_dir.rglob("*") if _.is_file())
+    print(f"  Archiving {BOLD}{run_name}/{RESET}  ({file_count} files)")
+
+    with tarfile.open(archive_path, "w:gz") as tar:
+        tar.add(str(run_dir), arcname=run_name)
+
+    size_mb = archive_path.stat().st_size / (1024 * 1024)
+    print_ok(f"Created {archive_path.name}  ({size_mb:.1f} MB, {file_count} files)")
+
+    if ask_yn(f"  Delete original folder {run_dir}?", default=False):
+        shutil.rmtree(run_dir)
+        print_ok(f"Deleted {run_dir}")
+
+
+def cmd_status():
+    """Show all runs and their completion state."""
+    if not RUNS_DIR.is_dir():
+        print(f"  No runs directory found at {RUNS_DIR}")
+        return
+
+    runs = sorted(d for d in RUNS_DIR.iterdir() if d.is_dir())
+    if not runs:
+        print(f"  No run folders in {RUNS_DIR}")
+        return
+
+    # Table header
+    print()
+    print(f"  {BOLD}{'Run Name':<25s}  {'Tools':<30s}  {'Status':<20s}{RESET}")
+    print(f"  {'─' * 78}")
+
+    for run_dir in runs:
+        # Detect configured tools
+        tools = []
+        if (run_dir / "run_mosaic.sh").exists():
+            tools.append("Mosaic")
+        if (run_dir / "run_boltzgen.sh").exists():
+            tools.append("BoltzGen")
+        if (run_dir / "run_bindcraft.sh").exists():
+            tools.append("BindCraft")
+        if (run_dir / "run_evaluate.sh").exists():
+            tools.append("Evaluator")
+        if not tools:
+            tools.append("(unknown)")
+
+        # Detect status
+        statuses = []
+        if (run_dir / "mosaic" / "designs.csv").exists():
+            statuses.append("Mosaic: done")
+        elif "Mosaic" in tools:
+            statuses.append("Mosaic: pending")
+
+        bg_outputs = list((run_dir / "boltzgen" / "outputs").glob("*.pdb")) if (run_dir / "boltzgen" / "outputs").is_dir() else []
+        if bg_outputs:
+            statuses.append(f"BoltzGen: {len(bg_outputs)} PDBs")
+        elif "BoltzGen" in tools:
+            statuses.append("BoltzGen: pending")
+
+        bc_outputs = list((run_dir / "bindcraft" / "outputs").glob("*.pdb")) if (run_dir / "bindcraft" / "outputs").is_dir() else []
+        if bc_outputs:
+            statuses.append(f"BindCraft: {len(bc_outputs)} PDBs")
+        elif "BindCraft" in tools:
+            statuses.append("BindCraft: pending")
+
+        report_html = run_dir / "evaluate" / "comparison_report" / "report.html"
+        if report_html.exists():
+            statuses.append("Eval: done")
+        elif "Evaluator" in tools:
+            statuses.append("Eval: pending")
+
+        tools_str = ",".join(tools)
+        if not statuses:
+            status_str = "configured"
+        elif all("done" in s or "PDBs" in s for s in statuses):
+            status_str = f"{GREEN}complete{RESET}"
+        else:
+            status_str = "; ".join(statuses)
+
+        # Truncate for display
+        if len(status_str) > 40:
+            status_str = status_str[:37] + "..."
+
+        print(f"  {run_dir.name:<25s}  {tools_str:<30s}  {status_str}")
+
+    print()
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="BindMaster Configurator — setup wizard for protein binder design runs",
+    )
+    parser.add_argument(
+        "--archive", metavar="RUN",
+        help="Archive a run folder to tar.gz",
+    )
+    parser.add_argument(
+        "--status", action="store_true",
+        help="Show all runs and their completion state",
+    )
+    args = parser.parse_args()
+
+    if args.archive:
+        cmd_archive(args.archive)
+    elif args.status:
+        cmd_status()
+    else:
+        wizard()
+
 
 if __name__ == "__main__":
     try:
-        wizard()
+        main()
     except KeyboardInterrupt:
         print(f"\n\n  {YELLOW}Interrupted.{RESET} Some files may have been partially written.")
         sys.exit(1)
