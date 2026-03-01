@@ -19,28 +19,28 @@ Key findings implemented here:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 # ---- Thresholds from Overath et al. 2025 ----
-IPSAE_PASS_THRESHOLD    = 0.61   # F1-maximising threshold across 15 targets
-IPSAE_HIGH_THRESHOLD    = 0.80   # High-confidence binder
-IPSAE_MIN_THRESHOLD     = 0.40   # Below this → very unlikely binder
-SHAPE_COMP_PREFILTER    = 0.62   # Pre-filter from meta-analysis
-RMSD_BINDER_PREFILTER   = 3.73   # Å, pre-filter from meta-analysis
+IPSAE_PASS_THRESHOLD = 0.61  # F1-maximising threshold across 15 targets
+IPSAE_HIGH_THRESHOLD = 0.80  # High-confidence binder
+IPSAE_MIN_THRESHOLD = 0.40  # Below this → very unlikely binder
+SHAPE_COMP_PREFILTER = 0.62  # Pre-filter from meta-analysis
+RMSD_BINDER_PREFILTER = 3.73  # Å, pre-filter from meta-analysis
 
 # PAE cutoffs for Dunbrack ipSAE formula (Å)
 # DunbrackLab recommends 10 Å for Boltz-1/2 and AF3, 15 Å for AlphaFold2
-IPSAE_PAE_CUTOFF_BOLTZ  = 10.0
-IPSAE_PAE_CUTOFF_AF2    = 15.0
-IPSAE_PAE_CUTOFF        = IPSAE_PAE_CUTOFF_AF2   # backwards compat default
+IPSAE_PAE_CUTOFF_BOLTZ = 10.0
+IPSAE_PAE_CUTOFF_AF2 = 15.0
+IPSAE_PAE_CUTOFF = IPSAE_PAE_CUTOFF_AF2  # backwards compat default
 
 
 # ---------------------------------------------------------------------------
 # Dunbrack ipSAE formula
 # ---------------------------------------------------------------------------
+
 
 def _d0(n_qualifying: int | np.ndarray) -> float | np.ndarray:
     """Compute d0 from the count of qualifying residues (PAE < cutoff).
@@ -107,20 +107,21 @@ def compute_ipsae_from_pae(
     L_t = L - L_b
 
     if L_b <= 0 or L_t <= 0:
-        return dict(bt_ipsae=np.nan, tb_ipsae=np.nan,
-                    ipsae_min=np.nan, ipsae_max=np.nan, ipsae_valid=0)
+        return dict(bt_ipsae=np.nan, tb_ipsae=np.nan, ipsae_min=np.nan, ipsae_max=np.nan, ipsae_valid=0)
 
     # Normalise to [binder | target] ordering
     if ordering == "target_binder":
         # AF2 native: [target | binder] → swap to [binder | target]
-        pae = np.block([
-            [pae[L_t:, L_t:],  pae[L_t:, :L_t]],   # binder-binder, binder-target
-            [pae[:L_t, L_t:],  pae[:L_t, :L_t]],   # target-binder, target-target
-        ])
+        pae = np.block(
+            [
+                [pae[L_t:, L_t:], pae[L_t:, :L_t]],  # binder-binder, binder-target
+                [pae[:L_t, L_t:], pae[:L_t, :L_t]],  # target-binder, target-target
+            ]
+        )
 
     # pae_bt[i, j]: PAE(binder_i → target_j), i.e. row = binder, col = target
-    pae_bt = pae[:L_b, L_b:]   # shape [L_b, L_t]
-    pae_tb = pae[L_b:, :L_b]   # shape [L_t, L_b]
+    pae_bt = pae[:L_b, L_b:]  # shape [L_b, L_t]
+    pae_tb = pae[L_b:, :L_b]  # shape [L_t, L_b]
 
     # Binder → target (bt): for each binder residue i, score over target residues j
     # DunbrackLab d0res: max over source residues (confirmed against ipsae package v1.0.1)
@@ -171,6 +172,7 @@ def _resolve_pae_path(
 # AF2 ipSAE from saved PAE files
 # ---------------------------------------------------------------------------
 
+
 def add_af2_ipsae_from_files(
     df: pd.DataFrame,
     pae_file_col: str = "af2_pae_file",
@@ -213,23 +215,22 @@ def add_af2_ipsae_from_files(
 
         try:
             pae = np.load(str(resolved))
-            scores = compute_ipsae_from_pae(
-                pae, int(L_b), pae_cutoff, ordering="target_binder"
-            )
+            scores = compute_ipsae_from_pae(pae, int(L_b), pae_cutoff, ordering="target_binder")
             bt_ipsae_vals.append(scores["bt_ipsae"])
             tb_ipsae_vals.append(scores["tb_ipsae"])
             min_vals.append(scores["ipsae_min"])
             max_vals.append(scores["ipsae_max"])
         except Exception as e:
             import warnings
+
             warnings.warn(f"Failed to compute AF2 ipSAE for {pae_path}: {e}")
             bt_ipsae_vals.append(np.nan)
             tb_ipsae_vals.append(np.nan)
             min_vals.append(np.nan)
             max_vals.append(np.nan)
 
-    result["af2_bt_ipsae"]  = bt_ipsae_vals
-    result["af2_tb_ipsae"]  = tb_ipsae_vals
+    result["af2_bt_ipsae"] = bt_ipsae_vals
+    result["af2_tb_ipsae"] = tb_ipsae_vals
     result["af2_ipsae_min"] = min_vals
     result["af2_ipsae_max"] = max_vals
 
@@ -239,6 +240,7 @@ def add_af2_ipsae_from_files(
 # ---------------------------------------------------------------------------
 # Boltz-2 ipSAE from saved PAE files
 # ---------------------------------------------------------------------------
+
 
 def add_boltz_ipsae_from_files(
     df: pd.DataFrame,
@@ -283,23 +285,22 @@ def add_boltz_ipsae_from_files(
 
         try:
             pae = np.load(str(resolved))
-            scores = compute_ipsae_from_pae(
-                pae, int(L_b), pae_cutoff, ordering="binder_target"
-            )
+            scores = compute_ipsae_from_pae(pae, int(L_b), pae_cutoff, ordering="binder_target")
             bt_ipsae_vals.append(scores["bt_ipsae"])
             tb_ipsae_vals.append(scores["tb_ipsae"])
             min_vals.append(scores["ipsae_min"])
             max_vals.append(scores["ipsae_max"])
         except Exception as e:
             import warnings
+
             warnings.warn(f"Failed to compute Boltz-2 ipSAE for {pae_path}: {e}")
             bt_ipsae_vals.append(np.nan)
             tb_ipsae_vals.append(np.nan)
             min_vals.append(np.nan)
             max_vals.append(np.nan)
 
-    result["boltz_pae_bt_ipsae"]  = bt_ipsae_vals
-    result["boltz_pae_tb_ipsae"]  = tb_ipsae_vals
+    result["boltz_pae_bt_ipsae"] = bt_ipsae_vals
+    result["boltz_pae_tb_ipsae"] = tb_ipsae_vals
     result["boltz_pae_ipsae_min"] = min_vals
     result["boltz_pae_ipsae_max"] = max_vals
 
@@ -309,6 +310,7 @@ def add_boltz_ipsae_from_files(
 # ---------------------------------------------------------------------------
 # Screening thresholds and tier classification
 # ---------------------------------------------------------------------------
+
 
 def apply_screening_thresholds(df: pd.DataFrame) -> pd.DataFrame:
     """Add Boolean screening flags and quality tier column.
@@ -364,6 +366,7 @@ def apply_screening_thresholds(df: pd.DataFrame) -> pd.DataFrame:
 # Composite scores
 # ---------------------------------------------------------------------------
 
+
 def compute_composite_scores(df: pd.DataFrame) -> pd.DataFrame:
     """Add composite scoring columns derived from the meta-analysis.
 
@@ -391,10 +394,10 @@ def compute_composite_scores(df: pd.DataFrame) -> pd.DataFrame:
     ipsae = pd.to_numeric(result[ipsae_col], errors="coerce")
 
     # ipSAE_min × |ΔG / ΔSASA|
-    dg_col    = "native_dG"
+    dg_col = "native_dG"
     dsasa_col = "native_dSASA"
     if dg_col in result.columns and dsasa_col in result.columns:
-        dg    = pd.to_numeric(result[dg_col], errors="coerce")
+        dg = pd.to_numeric(result[dg_col], errors="coerce")
         dsasa = pd.to_numeric(result[dsasa_col], errors="coerce")
         # Avoid division by zero
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -413,6 +416,7 @@ def compute_composite_scores(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Adaptyv-method ranking
 # ---------------------------------------------------------------------------
+
 
 def rank_by_adaptyv_method(df: pd.DataFrame) -> pd.DataFrame:
     """Rank binders using the Adaptyv/meta-analysis hierarchy.
@@ -471,18 +475,19 @@ def rank_by_adaptyv_method(df: pd.DataFrame) -> pd.DataFrame:
 # Helper
 # ---------------------------------------------------------------------------
 
-def _best_ipsae_col(df: pd.DataFrame) -> Optional[str]:
+
+def _best_ipsae_col(df: pd.DataFrame) -> str | None:
     """Return the best available ipsae_min column name.
 
     Preference order: PAE-based DunbrackLab columns first (post-hoc, correct
     formula), then Mosaic aux columns (optimisation-time, max aggregation).
     """
     for col in [
-        "ipsae_min",               # ensemble-renamed DunbrackLab PAE-based
-        "boltz_pae_ipsae_min",     # Boltz-2 PAE-based (DunbrackLab, 10 Å cutoff)
-        "af2_ipsae_min",           # AF2 PAE-based (DunbrackLab, 15 Å cutoff)
-        "ipsae_min_aux",           # Mosaic aux (max aggregation, renamed)
-        "boltz_ipsae_min",         # Mosaic aux (pre-rename)
+        "ipsae_min",  # ensemble-renamed DunbrackLab PAE-based
+        "boltz_pae_ipsae_min",  # Boltz-2 PAE-based (DunbrackLab, 10 Å cutoff)
+        "af2_ipsae_min",  # AF2 PAE-based (DunbrackLab, 15 Å cutoff)
+        "ipsae_min_aux",  # Mosaic aux (max aggregation, renamed)
+        "boltz_ipsae_min",  # Mosaic aux (pre-rename)
     ]:
         if col in df.columns:
             return col

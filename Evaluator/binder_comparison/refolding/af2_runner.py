@@ -67,7 +67,8 @@ def run_af2_refold(
 
     # ColabDesign 1.1.1 uses jax.tree_* APIs removed in JAX 0.6.0.
     # Restore them as shims so older code works transparently.
-    import jax  # noqa: PLC0415
+    import jax
+
     _tree_shims = {
         "tree_map": "map",
         "tree_leaves": "leaves",
@@ -81,14 +82,12 @@ def run_af2_refold(
 
     mosaic_root = _resolve_mosaic_path(mosaic_path)
     sys.path.insert(0, str(mosaic_root))
-    from refold_Version6 import refold_batch_af2  # noqa: PLC0415
+    from refold_Version6 import refold_batch_af2
 
     # Filter out already-completed binders if resuming.
     # refold_Version6 uses 1-based indexing so binder i maps to sequences[i-1].
     if skip_indices:
-        filtered = [
-            seq for i, seq in enumerate(sequences, 1) if i not in skip_indices
-        ]
+        filtered = [seq for i, seq in enumerate(sequences, 1) if i not in skip_indices]
         print(f"[af2] After resume filter: {len(filtered)} of {len(sequences)} to process")
         sequences = filtered
 
@@ -109,6 +108,7 @@ def _load_completed_indices(csv_path: Path) -> set[int]:
         return set()
     try:
         import csv
+
         indices: set[int] = set()
         with open(csv_path) as f:
             reader = csv.DictReader(f)
@@ -131,7 +131,4 @@ def _resolve_mosaic_path(override: str | Path | None) -> Path:
     candidate = repo_root / "Mosaic"
     if candidate.exists():
         return candidate
-    raise FileNotFoundError(
-        f"Could not locate Mosaic directory at {candidate}. "
-        "Pass --mosaic-path explicitly."
-    )
+    raise FileNotFoundError(f"Could not locate Mosaic directory at {candidate}. Pass --mosaic-path explicitly.")

@@ -2,59 +2,59 @@
 
 from __future__ import annotations
 
-import io
 import base64
+import io
 from pathlib import Path
 
+import matplotlib
 import numpy as np
 import pandas as pd
-import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 from matplotlib.figure import Figure
 
 # Colour scheme per source tool
 TOOL_COLOURS = {
-    "bindcraft": "#2196F3",   # blue
-    "boltzgen":  "#FF9800",   # orange
-    "mosaic":    "#4CAF50",   # green
-    "pxdesign":  "#9C27B0",   # purple
-    "unknown":   "#9E9E9E",   # grey
+    "bindcraft": "#2196F3",  # blue
+    "boltzgen": "#FF9800",  # orange
+    "mosaic": "#4CAF50",  # green
+    "pxdesign": "#9C27B0",  # purple
+    "unknown": "#9E9E9E",  # grey
 }
 
 # Per-metric display metadata: (human_label, unit_str, direction_arrow)
 # direction_arrow: "↑" = higher is better, "↓" = lower is better, "" = n/a
 METRIC_META: dict[str, tuple[str, str, str]] = {
-    "ipsae_min":           ("ipSAE_min",           "[0–1]", "↑"),
-    "bt_ipsae_aux":        ("ipSAE B→T (aux)",     "[0–1]", "↑"),
-    "tb_ipsae_aux":        ("ipSAE T→B (aux)",     "[0–1]", "↑"),
-    "ipsae_min_aux":       ("ipSAE_min (aux)",     "[0–1]", "↑"),
-    "boltz_pae_bt_ipsae":  ("Boltz ipSAE B→T",    "[0–1]", "↑"),
-    "boltz_pae_tb_ipsae":  ("Boltz ipSAE T→B",    "[0–1]", "↑"),
-    "boltz_pae_ipsae_min": ("Boltz ipSAE_min",    "[0–1]", "↑"),
-    "af2_ipsae_min":       ("AF2 ipSAE_min",        "[0–1]", "↑"),
-    "af2_bt_ipsae":        ("AF2 ipSAE (B→T)",      "[0–1]", "↑"),
-    "af2_tb_ipsae":        ("AF2 ipSAE (T→B)",      "[0–1]", "↑"),
-    "iptm":                ("ipTM",                 "[0–1]", "↑"),
-    "af2_iptm":            ("AF2 ipTM",             "[0–1]", "↑"),
-    "binder_ptm":          ("Binder pTM",           "[0–1]", "↑"),
-    "plddt_binder_mean":   ("pLDDT binder (mean)",  "[0–1]", "↑"),
-    "plddt_binder_min":    ("pLDDT binder (min)",   "[0–1]", "↑"),
-    "plddt_target_mean":   ("pLDDT target (mean)",  "[0–1]", "↑"),
-    "ipae":                ("ipAE",                 "Å",     "↓"),
-    "af2_ipae":            ("AF2 ipAE",             "Å",     "↓"),
-    "pae_bt":              ("PAE (B→T)",            "Å",     "↓"),
-    "pae_tb":              ("PAE (T→B)",            "Å",     "↓"),
-    "pae_bb":              ("PAE (intra-B)",        "Å",     "↓"),
-    "composite_score":     ("Composite score",      "z",     "↑"),
-    "adaptyv_rank":        ("Rank",                 "",      ""),
-    "binder_id":           ("Binder ID",            "",      ""),
-    "source_tool":         ("Tool",                 "",      ""),
-    "quality_tier":        ("Tier",                 "",      ""),
-    "sequence":            ("Sequence",             "",      ""),
-    "binder_length":       ("Binder length",        "aa",    ""),
-    "ipsae_valid":         ("ipSAE valid",          "",      ""),
+    "ipsae_min": ("ipSAE_min", "[0–1]", "↑"),
+    "bt_ipsae_aux": ("ipSAE B→T (aux)", "[0–1]", "↑"),
+    "tb_ipsae_aux": ("ipSAE T→B (aux)", "[0–1]", "↑"),
+    "ipsae_min_aux": ("ipSAE_min (aux)", "[0–1]", "↑"),
+    "boltz_pae_bt_ipsae": ("Boltz ipSAE B→T", "[0–1]", "↑"),
+    "boltz_pae_tb_ipsae": ("Boltz ipSAE T→B", "[0–1]", "↑"),
+    "boltz_pae_ipsae_min": ("Boltz ipSAE_min", "[0–1]", "↑"),
+    "af2_ipsae_min": ("AF2 ipSAE_min", "[0–1]", "↑"),
+    "af2_bt_ipsae": ("AF2 ipSAE (B→T)", "[0–1]", "↑"),
+    "af2_tb_ipsae": ("AF2 ipSAE (T→B)", "[0–1]", "↑"),
+    "iptm": ("ipTM", "[0–1]", "↑"),
+    "af2_iptm": ("AF2 ipTM", "[0–1]", "↑"),
+    "binder_ptm": ("Binder pTM", "[0–1]", "↑"),
+    "plddt_binder_mean": ("pLDDT binder (mean)", "[0–1]", "↑"),
+    "plddt_binder_min": ("pLDDT binder (min)", "[0–1]", "↑"),
+    "plddt_target_mean": ("pLDDT target (mean)", "[0–1]", "↑"),
+    "ipae": ("ipAE", "Å", "↓"),
+    "af2_ipae": ("AF2 ipAE", "Å", "↓"),
+    "pae_bt": ("PAE (B→T)", "Å", "↓"),
+    "pae_tb": ("PAE (T→B)", "Å", "↓"),
+    "pae_bb": ("PAE (intra-B)", "Å", "↓"),
+    "composite_score": ("Composite score", "z", "↑"),
+    "adaptyv_rank": ("Rank", "", ""),
+    "binder_id": ("Binder ID", "", ""),
+    "source_tool": ("Tool", "", ""),
+    "quality_tier": ("Tier", "", ""),
+    "sequence": ("Sequence", "", ""),
+    "binder_length": ("Binder length", "aa", ""),
+    "ipsae_valid": ("ipSAE valid", "", ""),
 }
 
 
@@ -62,10 +62,11 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
 # pLDDT curves
 # ---------------------------------------------------------------------------
 
+
 def plot_plddt_curves(
     df: pd.DataFrame,
     plddt_data: dict[str, np.ndarray],  # {sequence: plddt_array [0,1] shape [L]}
-    binder_lengths: dict[str, int],     # {sequence: L_b}
+    binder_lengths: dict[str, int],  # {sequence: L_b}
     max_binders: int = 30,
     title: str = "pLDDT profiles (Boltz2)",
 ) -> Figure:
@@ -116,6 +117,7 @@ def plot_plddt_curves(
 # PAE heatmaps
 # ---------------------------------------------------------------------------
 
+
 def plot_pae_heatmaps(
     sequences: list[str],
     af2_pae_data: dict[str, np.ndarray],
@@ -138,9 +140,7 @@ def plot_pae_heatmaps(
 
     for row_i, seq in enumerate(seqs):
         L_b = binder_lengths.get(seq, 0)
-        for col_i, (label, pae_dict) in enumerate(
-            [("AF2", af2_pae_data), ("Boltz2", boltz_pae_data)]
-        ):
+        for col_i, (label, pae_dict) in enumerate([("AF2", af2_pae_data), ("Boltz2", boltz_pae_data)]):
             ax = axes[row_i][col_i]
             if seq in pae_dict:
                 pae = np.array(pae_dict[seq])
@@ -210,10 +210,12 @@ def load_pae_data_from_df(
                     # Transpose from [target|binder] to [binder|target]
                     L_t = pae.shape[0] - int(L_b)
                     if L_t > 0:
-                        pae = np.block([
-                            [pae[L_t:, L_t:],  pae[L_t:, :L_t]],
-                            [pae[:L_t, L_t:],  pae[:L_t, :L_t]],
-                        ])
+                        pae = np.block(
+                            [
+                                [pae[L_t:, L_t:], pae[L_t:, :L_t]],
+                                [pae[:L_t, L_t:], pae[:L_t, :L_t]],
+                            ]
+                        )
                     af2_pae_data[seq] = pae
                     loaded_any = True
             except Exception:
@@ -230,6 +232,7 @@ def load_pae_data_from_df(
 # Radar chart
 # ---------------------------------------------------------------------------
 
+
 def plot_radar_chart(
     summary: dict,
     metrics: list[str] | None = None,
@@ -242,8 +245,14 @@ def plot_radar_chart(
     """
     if metrics is None:
         metrics = [
-            "iptm", "ipae", "pae_bt", "pae_tb", "pae_bb",
-            "plddt_binder_mean", "plddt_binder_min", "plddt_target_mean",
+            "iptm",
+            "ipae",
+            "pae_bt",
+            "pae_tb",
+            "pae_bb",
+            "plddt_binder_mean",
+            "plddt_binder_min",
+            "plddt_target_mean",
         ]
 
     tools = list(summary.keys())
@@ -292,6 +301,7 @@ def plot_radar_chart(
 # AF2 vs Boltz2 scatter
 # ---------------------------------------------------------------------------
 
+
 def plot_af2_vs_boltz2_scatter(
     df: pd.DataFrame,
     metric_pairs: list[tuple[str, str]] | None = None,
@@ -304,8 +314,8 @@ def plot_af2_vs_boltz2_scatter(
     """
     if metric_pairs is None:
         metric_pairs = [
-            ("ipsae_min",  "af2_ipsae_min"),   # primary — most diagnostic
-            ("iptm",       "af2_iptm"),
+            ("ipsae_min", "af2_ipsae_min"),  # primary — most diagnostic
+            ("iptm", "af2_iptm"),
         ]
 
     n = len(metric_pairs)
@@ -314,8 +324,7 @@ def plot_af2_vs_boltz2_scatter(
     for i, (b_col, a_col) in enumerate(metric_pairs):
         ax = axes[0][i]
         if b_col not in df.columns or a_col not in df.columns:
-            ax.text(0.5, 0.5, f"Missing:\n{b_col}\n{a_col}",
-                    ha="center", va="center", transform=ax.transAxes)
+            ax.text(0.5, 0.5, f"Missing:\n{b_col}\n{a_col}", ha="center", va="center", transform=ax.transAxes)
             continue
 
         b_vals = pd.to_numeric(df[b_col], errors="coerce")
@@ -325,15 +334,13 @@ def plot_af2_vs_boltz2_scatter(
         if "source_tool" in df.columns:
             for tool, grp in df[mask].groupby("source_tool"):
                 colour = TOOL_COLOURS.get(tool, TOOL_COLOURS["unknown"])
-                ax.scatter(b_vals[grp.index], a_vals[grp.index],
-                           color=colour, alpha=0.7, s=30, label=tool)
+                ax.scatter(b_vals[grp.index], a_vals[grp.index], color=colour, alpha=0.7, s=30, label=tool)
         else:
             ax.scatter(b_vals[mask], a_vals[mask], alpha=0.7, s=30)
 
         # Identity line
         if mask.sum() == 0:
-            ax.text(0.5, 0.5, "No valid data points",
-                    ha="center", va="center", transform=ax.transAxes)
+            ax.text(0.5, 0.5, "No valid data points", ha="center", va="center", transform=ax.transAxes)
             continue
 
         lo = min(b_vals[mask].min(), a_vals[mask].min()) * 0.95
@@ -344,10 +351,14 @@ def plot_af2_vs_boltz2_scatter(
         if mask.sum() > 2:
             r = np.corrcoef(b_vals[mask], a_vals[mask])[0, 1]
             ax.text(
-                0.05, 0.95, f"r = {r:.3f}",
-                transform=ax.transAxes, va="top", fontsize=11, fontweight="bold",
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="#fff9c4",
-                          edgecolor="#f57f17", linewidth=1.5),
+                0.05,
+                0.95,
+                f"r = {r:.3f}",
+                transform=ax.transAxes,
+                va="top",
+                fontsize=11,
+                fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="#fff9c4", edgecolor="#f57f17", linewidth=1.5),
             )
 
         # Axis labels: use METRIC_META if available
@@ -379,6 +390,7 @@ def plot_af2_vs_boltz2_scatter(
 # Metric distribution box plots
 # ---------------------------------------------------------------------------
 
+
 def plot_metric_distributions(
     df: pd.DataFrame,
     metrics: list[str] | None = None,
@@ -386,8 +398,12 @@ def plot_metric_distributions(
     """Box plots of each metric grouped by source tool."""
     if metrics is None:
         metrics = [
-            "iptm", "ipae", "plddt_binder_mean",
-            "ipsae_min", "boltz_pae_ipsae_min", "binder_ptm",
+            "iptm",
+            "ipae",
+            "plddt_binder_mean",
+            "ipsae_min",
+            "boltz_pae_ipsae_min",
+            "binder_ptm",
         ]
 
     present = [m for m in metrics if m in df.columns]
@@ -397,11 +413,7 @@ def plot_metric_distributions(
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
         return fig
 
-    tools = (
-        sorted(df["source_tool"].dropna().unique())
-        if "source_tool" in df.columns
-        else ["all"]
-    )
+    tools = sorted(df["source_tool"].dropna().unique()) if "source_tool" in df.columns else ["all"]
 
     fig, axes = plt.subplots(1, n, figsize=(4 * n, 5), squeeze=False)
 
@@ -411,9 +423,7 @@ def plot_metric_distributions(
         labels = []
         for tool in tools:
             if "source_tool" in df.columns:
-                vals = pd.to_numeric(
-                    df.loc[df["source_tool"] == tool, metric], errors="coerce"
-                ).dropna()
+                vals = pd.to_numeric(df.loc[df["source_tool"] == tool, metric], errors="coerce").dropna()
             else:
                 vals = pd.to_numeric(df[metric], errors="coerce").dropna()
 
@@ -455,6 +465,7 @@ def plot_metric_distributions(
 # ---------------------------------------------------------------------------
 # Utility: figure → base64 PNG string for HTML embedding
 # ---------------------------------------------------------------------------
+
 
 def fig_to_base64(fig: Figure) -> str:
     """Encode a matplotlib figure as a base64 PNG string."""

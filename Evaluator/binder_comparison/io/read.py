@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import numpy as np
 import pandas as pd
@@ -53,6 +53,7 @@ def read_csv_safe(path: str | Path, **kwargs) -> pd.DataFrame:
         return pd.read_csv(path, **kwargs)
     except Exception as exc:
         import warnings
+
         warnings.warn(f"Could not read {path}: {exc}")
         return pd.DataFrame()
 
@@ -105,17 +106,16 @@ def parse_sequences_any_format(
     sep = "\t" if "\t" in first else ","
     if sep in first and any(kw in first for kw in ("sequence", "seq", "binder")):
         import io as _io
+
         df = pd.read_csv(_io.StringIO(text), sep=sep)
         df.columns = df.columns.str.strip().str.lower()
         seq_col = next(
-            (c for c in df.columns if c in ("sequence", "seq", "binder_seq",
-                                             "binder_sequence")),
+            (c for c in df.columns if c in ("sequence", "seq", "binder_seq", "binder_sequence")),
             None,
         )
         if seq_col:
             id_col = next(
-                (c for c in df.columns if c in ("id", "name", "binder_id",
-                                                 "design_id")),
+                (c for c in df.columns if c in ("id", "name", "binder_id", "design_id")),
                 None,
             )
             result = []
@@ -123,7 +123,7 @@ def parse_sequences_any_format(
                 seq = str(row[seq_col]).strip().upper()
                 if not _is_seq(seq):
                     continue
-                sid = str(row[id_col]).strip() if id_col else f"seq_{i+1:04d}"
+                sid = str(row[id_col]).strip() if id_col else f"seq_{i + 1:04d}"
                 result.append((sid, seq))
             return result
 
@@ -135,7 +135,7 @@ def parse_sequences_any_format(
             result = []
             for i, p in enumerate(parts):
                 if _is_seq(p):
-                    result.append((f"seq_{i+1:04d}", p))
+                    result.append((f"seq_{i + 1:04d}", p))
             if result:
                 return result
 
@@ -151,12 +151,35 @@ def parse_sequences_any_format(
 
 
 _THREE_TO_ONE = {
-    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
-    "GLN": "Q", "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I",
-    "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P",
-    "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V",
-    "SEC": "U", "PYL": "O", "MSE": "M", "HSD": "H", "HSE": "H",
-    "HSP": "H", "HIE": "H", "HID": "H", "HIP": "H",
+    "ALA": "A",
+    "ARG": "R",
+    "ASN": "N",
+    "ASP": "D",
+    "CYS": "C",
+    "GLN": "Q",
+    "GLU": "E",
+    "GLY": "G",
+    "HIS": "H",
+    "ILE": "I",
+    "LEU": "L",
+    "LYS": "K",
+    "MET": "M",
+    "PHE": "F",
+    "PRO": "P",
+    "SER": "S",
+    "THR": "T",
+    "TRP": "W",
+    "TYR": "Y",
+    "VAL": "V",
+    "SEC": "U",
+    "PYL": "O",
+    "MSE": "M",
+    "HSD": "H",
+    "HSE": "H",
+    "HSP": "H",
+    "HIE": "H",
+    "HID": "H",
+    "HIP": "H",
 }
 
 
@@ -368,7 +391,7 @@ def convert_cif_to_pdb(cif_path: str | Path, pdb_path: str | Path) -> Path:
     BioPython is available in the binder-eval-af2 environment (via colabdesign).
     Raises ImportError if BioPython is not installed.
     """
-    from Bio.PDB import MMCIFParser, PDBIO  # type: ignore
+    from Bio.PDB import PDBIO, MMCIFParser  # type: ignore
 
     cif_path = Path(cif_path)
     pdb_path = Path(pdb_path)

@@ -9,6 +9,7 @@ _CONDA_INIT="${HOME}/miniforge3/etc/profile.d/conda.sh"
 for _f in "$_CONDA_INIT" \
            "${HOME}/miniconda3/etc/profile.d/conda.sh" \
            "${HOME}/anaconda3/etc/profile.d/conda.sh"; do
+    # shellcheck disable=SC1090
     [[ -f "$_f" ]] && { source "$_f"; break; }
 done
 

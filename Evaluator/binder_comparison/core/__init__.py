@@ -1,19 +1,19 @@
 from .schema import (
+    ComparisonReport,
     ExtractedBinder,
     MetricResult,
-    ComparisonReport,
-    StandardisedMetrics,
     NativeMetrics,
     PerResidueData,
     SourceTool,
+    StandardisedMetrics,
 )
 
 __all__ = [
+    "ComparisonReport",
     "ExtractedBinder",
     "MetricResult",
-    "ComparisonReport",
-    "StandardisedMetrics",
     "NativeMetrics",
     "PerResidueData",
     "SourceTool",
+    "StandardisedMetrics",
 ]

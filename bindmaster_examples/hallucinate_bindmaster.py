@@ -26,12 +26,12 @@ from mosaic.optimizers import simplex_APGM
 # All values below are injected by BindMaster Configurator.
 # Edit manually to override after generation.
 
-TARGET_SEQUENCE = "REPLACE_ME"   # target protein sequence
-N_DESIGNS       = 100            # Stage 1: how many designs to generate per length
-TOP_K           = 5              # Stage 2: how many top designs to refold and export PDB
-MIN_LENGTH      = 65             # minimum binder length (aa)
-MAX_LENGTH      = 100            # maximum binder length (aa)
-LENGTH_STEP     = 5              # step between scanned lengths; set MIN=MAX for a single length
+TARGET_SEQUENCE = "REPLACE_ME"  # target protein sequence
+N_DESIGNS = 100  # Stage 1: how many designs to generate per length
+TOP_K = 5  # Stage 2: how many top designs to refold and export PDB
+MIN_LENGTH = 65  # minimum binder length (aa)
+MAX_LENGTH = 100  # maximum binder length (aa)
+LENGTH_STEP = 5  # step between scanned lengths; set MIN=MAX for a single length
 
 
 # ============================
@@ -47,6 +47,7 @@ _interrupt_state = {
 # ============================
 # HELPER FUNCTIONS
 # ============================
+
 
 def _check_gpu():
     devices = jax.devices()
@@ -109,16 +110,21 @@ def _load_checkpoint(path):
 
 def _install_signal_handler(get_candidates_fn, checkpoint_path_fn):
     """Install SIGINT handler that saves a checkpoint then exits cleanly."""
+
     def _handler(signum, frame):
         print("\n\nInterrupted! Saving checkpoint before exit...")
         candidates = get_candidates_fn()
         checkpoint_path = checkpoint_path_fn()
         if checkpoint_path and candidates is not None:
-            _save_checkpoint(checkpoint_path, {
-                "interrupted": True,
-                "candidates": candidates,
-            })
+            _save_checkpoint(
+                checkpoint_path,
+                {
+                    "interrupted": True,
+                    "candidates": candidates,
+                },
+            )
         sys.exit(0)
+
     signal.signal(signal.SIGINT, _handler)
 
 
@@ -140,6 +146,7 @@ def _print_length_summary(summary_rows):
 # ============================
 # DESIGN LOOP
 # ============================
+
 
 def _merge_aux_entries(aux):
     merged = {}
@@ -278,11 +285,7 @@ def design(
     folder = Boltz2()
     mpnn = load_mpnn_sol(0.05)
 
-    bias = (
-        jnp.zeros((binder_length, 20))
-        .at[:binder_length, TOKENS.index("C")]
-        .set(-1e6)
-    )
+    bias = jnp.zeros((binder_length, 20)).at[:binder_length, TOKENS.index("C")].set(-1e6)
 
     sp_loss = (
         sp.BinderTargetContact(epitope_idx=epitope_idx)
@@ -329,19 +332,34 @@ def design(
             shape=(binder_length, 19),
         )
         _, pssm = simplex_APGM(
-            loss_function=loss, x=jax.nn.softmax(_pssm),
-            n_steps=100, stepsize=0.2 * np.sqrt(binder_length),
-            momentum=0.3, scale=1.00, logspace=False, max_gradient_norm=1.0,
+            loss_function=loss,
+            x=jax.nn.softmax(_pssm),
+            n_steps=100,
+            stepsize=0.2 * np.sqrt(binder_length),
+            momentum=0.3,
+            scale=1.00,
+            logspace=False,
+            max_gradient_norm=1.0,
         )
         pssm, _ = simplex_APGM(
-            loss_function=loss, x=jnp.log(pssm + 1e-5),
-            n_steps=50, stepsize=0.5 * np.sqrt(binder_length),
-            momentum=0.0, scale=1.25, logspace=True, max_gradient_norm=1.0,
+            loss_function=loss,
+            x=jnp.log(pssm + 1e-5),
+            n_steps=50,
+            stepsize=0.5 * np.sqrt(binder_length),
+            momentum=0.0,
+            scale=1.25,
+            logspace=True,
+            max_gradient_norm=1.0,
         )
         pssm, _ = simplex_APGM(
-            loss_function=loss, x=jnp.log(pssm + 1e-5),
-            n_steps=15, stepsize=0.5 * np.sqrt(binder_length),
-            momentum=0.0, scale=1.4, logspace=True, max_gradient_norm=1.0,
+            loss_function=loss,
+            x=jnp.log(pssm + 1e-5),
+            n_steps=15,
+            stepsize=0.5 * np.sqrt(binder_length),
+            momentum=0.0,
+            scale=1.4,
+            logspace=True,
+            max_gradient_norm=1.0,
         )
 
         pssm = NoCys.sequence(pssm)
@@ -355,16 +373,12 @@ def design(
             ]
         )
         ranking_loss = folder.build_multisample_loss(
-            loss=1.00 * sp.IPTMLoss()
-            + 0.5 * sp.TargetBinderIPSAE()
-            + 0.5 * sp.BinderTargetIPSAE(),
+            loss=1.00 * sp.IPTMLoss() + 0.5 * sp.TargetBinderIPSAE() + 0.5 * sp.BinderTargetIPSAE(),
             features=boltz_features,
             recycling_steps=3,
             num_samples=6,
         )
-        loss_value, _ = evaluate_loss(
-            ranking_loss, jax.nn.one_hot(seq, 20), key=jax.random.key(0)
-        )
+        loss_value, _ = evaluate_loss(ranking_loss, jax.nn.one_hot(seq, 20), key=jax.random.key(0))
 
         print(f"  ranking_loss={loss_value.item():.4f}  seq={seq_str}")
         return seq_str, loss_value.item()
@@ -376,7 +390,7 @@ def design(
         candidates = ckpt["candidates"]
         print(f"  Loaded {len(candidates)} candidates from checkpoint: {resume_from}")
         for i, (seq, lv) in enumerate(candidates[:5]):
-            print(f"    [{i+1}] loss={lv:.4f}  seq={seq}")
+            print(f"    [{i + 1}] loss={lv:.4f}  seq={seq}")
         if len(candidates) > 5:
             print(f"    ... and {len(candidates) - 5} more")
     else:
@@ -388,22 +402,25 @@ def design(
         candidates = sorted(candidates, key=lambda x: x[1])
         _interrupt_state["candidates"] = candidates
 
-        _save_checkpoint(_checkpoint_file, {
-            "worker_id": worker_id,
-            "binder_length": binder_length,
-            "n_designs": n_designs,
-            "top_k": top_k,
-            "target_sequence": target_sequence,
-            "output_dir": output_dir,
-            "candidates": candidates,
-            "interrupted": False,
-        })
+        _save_checkpoint(
+            _checkpoint_file,
+            {
+                "worker_id": worker_id,
+                "binder_length": binder_length,
+                "n_designs": n_designs,
+                "top_k": top_k,
+                "target_sequence": target_sequence,
+                "output_dir": output_dir,
+                "candidates": candidates,
+                "interrupted": False,
+            },
+        )
 
     candidates = sorted(candidates, key=lambda x: x[1])
 
     print(f"\n=== Design ranking ===")
-    for i, (seq, loss_val) in enumerate(candidates[:min(10, len(candidates))]):
-        print(f"  Rank {i+1}: loss={loss_val:.4f}  seq={seq}")
+    for i, (seq, loss_val) in enumerate(candidates[: min(10, len(candidates))]):
+        print(f"  Rank {i + 1}: loss={loss_val:.4f}  seq={seq}")
     if len(candidates) > 10:
         print(f"  ... and {len(candidates) - 10} more designs")
 
@@ -494,19 +511,13 @@ def design(
                 recycling_steps=3,
                 num_samples=6,
             )
-            _, aux = evaluate_loss(
-                metrics_loss, jax.nn.one_hot(seq, 20), key=jax.random.key(0)
-            )
+            _, aux = evaluate_loss(metrics_loss, jax.nn.one_hot(seq, 20), key=jax.random.key(0))
 
             aux_dict = _merge_aux_entries(aux)
 
             iptm_aux, _, _ = _mean_aux_metric(aux_dict, "iptm")
-            bt_ipsae, bt_key, bt_n = _mean_aux_metric(
-                aux_dict, "bt_ipsae", aliases=("binder_target_ipsae",)
-            )
-            tb_ipsae, tb_key, tb_n = _mean_aux_metric(
-                aux_dict, "tb_ipsae", aliases=("target_binder_ipsae",)
-            )
+            bt_ipsae, bt_key, bt_n = _mean_aux_metric(aux_dict, "bt_ipsae", aliases=("binder_target_ipsae",))
+            tb_ipsae, tb_key, tb_n = _mean_aux_metric(aux_dict, "tb_ipsae", aliases=("target_binder_ipsae",))
             ipsae_min, _, _ = _mean_aux_metric(aux_dict, "ipsae_min")
             bt_iptm, _, _ = _mean_aux_metric(aux_dict, "bt_iptm")
             binder_ptm, _, _ = _mean_aux_metric(aux_dict, "binder_ptm")
@@ -568,9 +579,15 @@ def design(
                     res_in_chain = i if i < binder_length else i - binder_length
                     plddt_writer.writerow([i, chain, res_in_chain, f"{v:.6f}"])
 
-            print(f"  Interface:      iptm={iptm:.4f}  bt_ipsae={bt_ipsae:.4f}  tb_ipsae={tb_ipsae:.4f}  ipsae_min={ipsae_min:.4f}  bt_iptm={bt_iptm:.4f}")
-            print(f"  Binder quality: binder_ptm={binder_ptm:.4f}  plddt_mean={plddt_binder_mean:.4f}  plddt_min={plddt_binder_min:.4f}  pae_bb={pae_bb_mean:.4f}  intra_contact={intra_contact:.4f}")
-            print(f"  PAE overview:   pae_bt={pae_bt_mean:.4f}  pae_tb={pae_tb_mean:.4f}  pae_bb={pae_bb_mean:.4f}  pae_overall={pae_overall_mean:.4f}  pae_max={pae_max:.4f}")
+            print(
+                f"  Interface:      iptm={iptm:.4f}  bt_ipsae={bt_ipsae:.4f}  tb_ipsae={tb_ipsae:.4f}  ipsae_min={ipsae_min:.4f}  bt_iptm={bt_iptm:.4f}"
+            )
+            print(
+                f"  Binder quality: binder_ptm={binder_ptm:.4f}  plddt_mean={plddt_binder_mean:.4f}  plddt_min={plddt_binder_min:.4f}  pae_bb={pae_bb_mean:.4f}  intra_contact={intra_contact:.4f}"
+            )
+            print(
+                f"  PAE overview:   pae_bt={pae_bt_mean:.4f}  pae_tb={pae_tb_mean:.4f}  pae_bb={pae_bb_mean:.4f}  pae_overall={pae_overall_mean:.4f}  pae_max={pae_max:.4f}"
+            )
             print(f"  Energy/contacts: pTMEnergy={pTMEnergy_val:.4f}  target_contact={target_contact:.4f}")
             print(f"  Files:  pdb={pdb_path}  pae={pae_file}  plddt={plddt_file}")
 
@@ -593,7 +610,9 @@ def design(
                 f"  pdb={pdb_path}"
             )
         else:
-            header = f">rank{rank + 1}_{worker_id}  binder_length={binder_length}  ranking_loss={ranking_loss_value:.4f}"
+            header = (
+                f">rank{rank + 1}_{worker_id}  binder_length={binder_length}  ranking_loss={ranking_loss_value:.4f}"
+            )
 
         final_lines.append(f"{header}\n{seq_str}")
 
@@ -645,16 +664,42 @@ def design(
 
     csv_path = "designs.csv"
     csv_columns = [
-        "worker_id", "rank", "is_top", "sequence", "target_sequence", "binder_length",
+        "worker_id",
+        "rank",
+        "is_top",
+        "sequence",
+        "target_sequence",
+        "binder_length",
         "ranking_loss",
-        "iptm_aux", "bt_ipsae", "tb_ipsae", "ipsae_min", "bt_iptm", "binder_ptm",
-        "plddt_aux", "bb_pae", "bt_pae_aux", "tb_pae", "intra_contact", "target_contact",
+        "iptm_aux",
+        "bt_ipsae",
+        "tb_ipsae",
+        "ipsae_min",
+        "bt_iptm",
+        "binder_ptm",
+        "plddt_aux",
+        "bb_pae",
+        "bt_pae_aux",
+        "tb_pae",
+        "intra_contact",
+        "target_contact",
         "pTMEnergy",
-        "iptm", "plddt_binder_mean", "plddt_binder_min", "plddt_binder_max",
-        "plddt_binder_std", "plddt_target_mean", "plddt_target_min",
-        "pae_bb_mean", "pae_bt_mean", "pae_tb_mean", "pae_tt_mean",
-        "pae_overall_mean", "pae_max",
-        "pdb", "pae_file", "plddt_file",
+        "iptm",
+        "plddt_binder_mean",
+        "plddt_binder_min",
+        "plddt_binder_max",
+        "plddt_binder_std",
+        "plddt_target_mean",
+        "plddt_target_min",
+        "pae_bb_mean",
+        "pae_bt_mean",
+        "pae_tb_mean",
+        "pae_tt_mean",
+        "pae_overall_mean",
+        "pae_max",
+        "pdb",
+        "pae_file",
+        "plddt_file",
     ]
     write_header = (not os.path.exists(csv_path)) or os.path.getsize(csv_path) == 0
     with open(csv_path, "a", newline="") as f:
@@ -678,6 +723,7 @@ def design(
 # MAIN
 # ============================
 
+
 def main():
     print("=== Boltz2 Binder Design (BindMaster non-interactive) ===\n")
 
@@ -686,8 +732,8 @@ def main():
 
     # All parameters come from injected constants — no interactive prompts
     target_sequence = TARGET_SEQUENCE
-    n_designs       = N_DESIGNS
-    top_k           = TOP_K
+    n_designs = N_DESIGNS
+    top_k = TOP_K
 
     if MIN_LENGTH == MAX_LENGTH:
         binder_lengths = [MIN_LENGTH]
@@ -697,7 +743,9 @@ def main():
             binder_lengths.append(MAX_LENGTH)
 
     print(f"Parameters:")
-    print(f"  Target sequence : {target_sequence[:60]}{'...' if len(target_sequence) > 60 else ''} ({len(target_sequence)} aa)")
+    print(
+        f"  Target sequence : {target_sequence[:60]}{'...' if len(target_sequence) > 60 else ''} ({len(target_sequence)} aa)"
+    )
     print(f"  Designs (Stage 1): {n_designs}")
     print(f"  Refold (TOP_K)   : {top_k}")
     print(f"  Binder lengths   : {binder_lengths}")
@@ -711,18 +759,24 @@ def main():
     summary_rows = []
     for binder_length in binder_lengths:
         output_dir = f"structures_{binder_length}aa_{n_designs}_top{top_k}"
-        ckpt_path  = f"checkpoint_{binder_length}aa.json"
+        ckpt_path = f"checkpoint_{binder_length}aa.json"
 
         result = design(
-            n_designs, top_k, binder_length, target_sequence, output_dir,
+            n_designs,
+            top_k,
+            binder_length,
+            target_sequence,
+            output_dir,
             checkpoint_path=ckpt_path,
         )
 
-        summary_rows.append({
-            "binder_length": binder_length,
-            "best_ranking_loss": result["best_ranking_loss"] if result else None,
-            "n_designs": result["n_designs"] if result else n_designs,
-        })
+        summary_rows.append(
+            {
+                "binder_length": binder_length,
+                "best_ranking_loss": result["best_ranking_loss"] if result else None,
+                "n_designs": result["n_designs"] if result else n_designs,
+            }
+        )
 
     if len(binder_lengths) > 1:
         _print_length_summary(summary_rows)

@@ -1,21 +1,19 @@
-import re
-import uuid
-import os
 import csv
-import signal
 import json
+import os
+import re
+import signal
 import sys
+import uuid
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
-import numpy as np
-
-from mosaic.models.boltz2 import Boltz2
 import mosaic.losses.structure_prediction as sp
+import numpy as np
 from mosaic.common import TOKENS
+from mosaic.models.boltz2 import Boltz2
 from mosaic.structure_prediction import TargetChain
-
 
 # ============================
 # CONFIGURATION
@@ -32,6 +30,7 @@ _interrupt_state = {
 # ============================
 # HELPER FUNCTIONS
 # ============================
+
 
 def _check_gpu():
     devices = jax.devices()
@@ -140,22 +139,28 @@ def _save_checkpoint(path, data):
 
 def _install_signal_handler(get_results_fn, checkpoint_path_fn):
     """Install SIGINT handler that saves partial results then exits cleanly."""
+
     def _handler(signum, frame):
         print("\n\nInterrupted! Saving checkpoint before exit...")
         results = get_results_fn()
         checkpoint_path = checkpoint_path_fn()
         if checkpoint_path and results is not None:
-            _save_checkpoint(checkpoint_path, {
-                "interrupted": True,
-                "results": results,
-            })
+            _save_checkpoint(
+                checkpoint_path,
+                {
+                    "interrupted": True,
+                    "results": results,
+                },
+            )
         sys.exit(0)
+
     signal.signal(signal.SIGINT, _handler)
 
 
 # ============================
 # INPUT PARSING
 # ============================
+
 
 def _parse_fasta_like(lines: list[str]) -> list[str]:
     sequences = []
@@ -221,6 +226,7 @@ def _read_target_sequence() -> str:
 # REFOLD PIPELINE
 # ============================
 
+
 def refold_batch(
     binder_sequences: list[str],
     target_sequence: str,
@@ -264,15 +270,42 @@ def refold_batch(
 
     csv_path = "refold_designs.csv"
     csv_columns = [
-        "run_id", "idx", "sequence", "target_sequence", "binder_length",
-        "iptm_aux", "bt_ipsae", "tb_ipsae", "ipsae_min", "ipsae_valid", "bt_iptm",
-        "binder_ptm", "plddt_aux", "bb_pae", "bt_pae_aux", "tb_pae",
-        "intra_contact", "target_contact", "pTMEnergy",
-        "iptm", "plddt_binder_mean", "plddt_binder_min", "plddt_binder_max",
-        "plddt_binder_std", "plddt_target_mean", "plddt_target_min",
-        "pae_bb_mean", "pae_bt_mean", "pae_tb_mean", "ipae", "pae_tt_mean",
-        "pae_overall_mean", "pae_max",
-        "pdb", "pae_file", "plddt_file",
+        "run_id",
+        "idx",
+        "sequence",
+        "target_sequence",
+        "binder_length",
+        "iptm_aux",
+        "bt_ipsae",
+        "tb_ipsae",
+        "ipsae_min",
+        "ipsae_valid",
+        "bt_iptm",
+        "binder_ptm",
+        "plddt_aux",
+        "bb_pae",
+        "bt_pae_aux",
+        "tb_pae",
+        "intra_contact",
+        "target_contact",
+        "pTMEnergy",
+        "iptm",
+        "plddt_binder_mean",
+        "plddt_binder_min",
+        "plddt_binder_max",
+        "plddt_binder_std",
+        "plddt_target_mean",
+        "plddt_target_min",
+        "pae_bb_mean",
+        "pae_bt_mean",
+        "pae_tb_mean",
+        "ipae",
+        "pae_tt_mean",
+        "pae_overall_mean",
+        "pae_max",
+        "pdb",
+        "pae_file",
+        "plddt_file",
     ]
     write_header = (not os.path.exists(csv_path)) or os.path.getsize(csv_path) == 0
     csv_file = open(csv_path, "a", newline="")
@@ -297,7 +330,7 @@ def refold_batch(
 
             boltz_features, boltz_writer = folder.target_only_features(
                 chains=[
-                    TargetChain(sequence=seq_str, use_msa=False),    # binder: de novo, no MSA
+                    TargetChain(sequence=seq_str, use_msa=False),  # binder: de novo, no MSA
                     TargetChain(sequence=target_sequence, use_msa=True),  # target: real protein, use MSA
                 ]
             )
@@ -329,19 +362,19 @@ def refold_batch(
             if idx == 1:
                 print(f"  [debug] aux keys: {sorted(aux_dict.keys())}")
 
-            iptm_aux, _, _          = _mean_aux_metric(aux_dict, "iptm")
-            bt_ipsae, bt_key, bt_n  = _mean_aux_metric(aux_dict, "bt_ipsae", aliases=("binder_target_ipsae",))
-            tb_ipsae, tb_key, tb_n  = _mean_aux_metric(aux_dict, "tb_ipsae", aliases=("target_binder_ipsae",))
-            ipsae_min, _, _         = _mean_aux_metric(aux_dict, "ipsae_min")
-            bt_iptm, _, _           = _mean_aux_metric(aux_dict, "bt_iptm")
-            binder_ptm, _, _        = _mean_aux_metric(aux_dict, "binder_ptm")
-            plddt_aux, _, _         = _mean_aux_metric(aux_dict, "plddt")
-            bb_pae, _, _            = _mean_aux_metric(aux_dict, "bb_pae")
-            bt_pae_aux, _, _        = _mean_aux_metric(aux_dict, "bt_pae")
-            tb_pae, _, _            = _mean_aux_metric(aux_dict, "tb_pae")
-            intra_contact, _, _     = _mean_aux_metric(aux_dict, "intra_contact")
-            target_contact, _, _    = _mean_aux_metric(aux_dict, "target_contact")
-            pTMEnergy_val, _, _     = _mean_aux_metric(aux_dict, "pTMEnergy")
+            iptm_aux, _, _ = _mean_aux_metric(aux_dict, "iptm")
+            bt_ipsae, bt_key, bt_n = _mean_aux_metric(aux_dict, "bt_ipsae", aliases=("binder_target_ipsae",))
+            tb_ipsae, tb_key, tb_n = _mean_aux_metric(aux_dict, "tb_ipsae", aliases=("target_binder_ipsae",))
+            ipsae_min, _, _ = _mean_aux_metric(aux_dict, "ipsae_min")
+            bt_iptm, _, _ = _mean_aux_metric(aux_dict, "bt_iptm")
+            binder_ptm, _, _ = _mean_aux_metric(aux_dict, "binder_ptm")
+            plddt_aux, _, _ = _mean_aux_metric(aux_dict, "plddt")
+            bb_pae, _, _ = _mean_aux_metric(aux_dict, "bb_pae")
+            bt_pae_aux, _, _ = _mean_aux_metric(aux_dict, "bt_pae")
+            tb_pae, _, _ = _mean_aux_metric(aux_dict, "tb_pae")
+            intra_contact, _, _ = _mean_aux_metric(aux_dict, "intra_contact")
+            target_contact, _, _ = _mean_aux_metric(aux_dict, "target_contact")
+            pTMEnergy_val, _, _ = _mean_aux_metric(aux_dict, "pTMEnergy")
 
             if idx == 1:
                 print(f"  [debug] bt source={bt_key} n={bt_n}  tb source={tb_key} n={tb_n}")
@@ -351,7 +384,7 @@ def refold_batch(
 
             # Change 2: Diagnose ipsae=0 cases
             if bt_ipsae == 0.0 and tb_ipsae == 0.0:
-                print(f"  [WARNING] ipsae=0 for this binder — dumping aux_dict values for diagnosis:")
+                print("  [WARNING] ipsae=0 for this binder — dumping aux_dict values for diagnosis:")
                 for k, v in sorted(aux_dict.items()):
                     vals = _flatten_numeric_values(v)
                     print(f"    {k}: {vals[:6]}")
@@ -366,25 +399,25 @@ def refold_batch(
             )
 
             pred_metrics = _extract_prediction_metrics(prediction, binder_length)
-            iptm             = pred_metrics["iptm"]
+            iptm = pred_metrics["iptm"]
             plddt_binder_mean = pred_metrics["plddt_binder_mean"]
-            plddt_binder_min  = pred_metrics["plddt_binder_min"]
-            plddt_binder_max  = pred_metrics["plddt_binder_max"]
-            plddt_binder_std  = pred_metrics["plddt_binder_std"]
+            plddt_binder_min = pred_metrics["plddt_binder_min"]
+            plddt_binder_max = pred_metrics["plddt_binder_max"]
+            plddt_binder_std = pred_metrics["plddt_binder_std"]
             plddt_target_mean = pred_metrics["plddt_target_mean"]
-            plddt_target_min  = pred_metrics["plddt_target_min"]
-            pae_bb_mean      = pred_metrics["pae_bb_mean"]
-            pae_bt_mean      = pred_metrics["pae_bt_mean"]
-            pae_tb_mean      = pred_metrics["pae_tb_mean"]
-            pae_tt_mean      = pred_metrics["pae_tt_mean"]
+            plddt_target_min = pred_metrics["plddt_target_min"]
+            pae_bb_mean = pred_metrics["pae_bb_mean"]
+            pae_bt_mean = pred_metrics["pae_bt_mean"]
+            pae_tb_mean = pred_metrics["pae_tb_mean"]
+            pae_tt_mean = pred_metrics["pae_tt_mean"]
             pae_overall_mean = pred_metrics["pae_overall_mean"]
-            pae_max          = pred_metrics["pae_max"]
+            pae_max = pred_metrics["pae_max"]
 
             # Change 1: ipae derived metric
             ipae = (pae_bt_mean + pae_tb_mean) / 2.0
 
-            pdb_path   = f"{output_dir}/refold{idx}_{run_id}.pdb"
-            pae_file   = f"{output_dir}/refold{idx}_{run_id}_pae.npy"
+            pdb_path = f"{output_dir}/refold{idx}_{run_id}.pdb"
+            pae_file = f"{output_dir}/refold{idx}_{run_id}_pae.npy"
             plddt_file = f"{output_dir}/refold{idx}_{run_id}_plddt.csv"
 
             with open(pdb_path, "w") as f:
@@ -402,9 +435,15 @@ def refold_batch(
                     plddt_writer.writerow([i, chain, res_in_chain, f"{v:.6f}"])
 
             # Console summary
-            print(f"  Interface:       iptm={iptm:.4f}  bt_ipsae={bt_ipsae:.4f}  tb_ipsae={tb_ipsae:.4f}  ipsae_min={ipsae_min:.4f}  ipsae_valid={ipsae_valid}  bt_iptm={bt_iptm:.4f}")
-            print(f"  Binder quality:  binder_ptm={binder_ptm:.4f}  plddt_mean={plddt_binder_mean:.4f}  plddt_min={plddt_binder_min:.4f}  pae_bb={pae_bb_mean:.4f}  intra_contact={intra_contact:.4f}")
-            print(f"  PAE overview:    pae_bt={pae_bt_mean:.4f}  pae_tb={pae_tb_mean:.4f}  ipae={ipae:.4f}  pae_bb={pae_bb_mean:.4f}  pae_overall={pae_overall_mean:.4f}  pae_max={pae_max:.4f}")
+            print(
+                f"  Interface:       iptm={iptm:.4f}  bt_ipsae={bt_ipsae:.4f}  tb_ipsae={tb_ipsae:.4f}  ipsae_min={ipsae_min:.4f}  ipsae_valid={ipsae_valid}  bt_iptm={bt_iptm:.4f}"
+            )
+            print(
+                f"  Binder quality:  binder_ptm={binder_ptm:.4f}  plddt_mean={plddt_binder_mean:.4f}  plddt_min={plddt_binder_min:.4f}  pae_bb={pae_bb_mean:.4f}  intra_contact={intra_contact:.4f}"
+            )
+            print(
+                f"  PAE overview:    pae_bt={pae_bt_mean:.4f}  pae_tb={pae_tb_mean:.4f}  ipae={ipae:.4f}  pae_bb={pae_bb_mean:.4f}  pae_overall={pae_overall_mean:.4f}  pae_max={pae_max:.4f}"
+            )
             print(f"  Energy/contacts: pTMEnergy={pTMEnergy_val:.4f}  target_contact={target_contact:.4f}")
             print(f"  Files:  pdb={pdb_path}  pae={pae_file}  plddt={plddt_file}")
 
@@ -477,11 +516,14 @@ def refold_batch(
 
     except Exception:
         if checkpoint_path:
-            _save_checkpoint(checkpoint_path, {
-                "interrupted": True,
-                "exception": True,
-                "results": list(results_ref),
-            })
+            _save_checkpoint(
+                checkpoint_path,
+                {
+                    "interrupted": True,
+                    "exception": True,
+                    "results": list(results_ref),
+                },
+            )
         raise
     finally:
         csv_file.close()
@@ -494,7 +536,7 @@ def refold_batch(
         f.write("\n".join(fasta_lines) + "\n")
 
     print(f"\n{'=' * 55}")
-    print(f"=== Run Complete ===")
+    print("=== Run Complete ===")
     print(f"Processed {len(results_ref)} binder(s).")
     print(f"Results  → {txt_path}, {csv_path}")
     print(f"PDB      → {output_dir}/refold*_{run_id}.pdb")
@@ -506,6 +548,7 @@ def refold_batch(
 # ============================
 # MAIN
 # ============================
+
 
 def main():
     print("=== Boltz2 Refolding Tool (Version 5) ===\n")

@@ -21,19 +21,32 @@ from pathlib import Path
 
 # ─── Colors ──────────────────────────────────────────────────────────────────
 
-RED    = '\033[0;31m'
-GREEN  = '\033[0;32m'
-YELLOW = '\033[1;33m'
-CYAN   = '\033[0;36m'
-BOLD   = '\033[1m'
-RESET  = '\033[0m'
+RED = "\033[0;31m"
+GREEN = "\033[0;32m"
+YELLOW = "\033[1;33m"
+CYAN = "\033[0;36m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
 
-def print_step(msg): print(f"\n{CYAN}{BOLD}▶ {msg}{RESET}")
-def print_ok(msg):   print(f"{GREEN}✓ {msg}{RESET}")
-def print_warn(msg): print(f"{YELLOW}⚠ {msg}{RESET}")
-def print_fail(msg): print(f"{RED}✗ {msg}{RESET}")
+
+def print_step(msg):
+    print(f"\n{CYAN}{BOLD}▶ {msg}{RESET}")
+
+
+def print_ok(msg):
+    print(f"{GREEN}✓ {msg}{RESET}")
+
+
+def print_warn(msg):
+    print(f"{YELLOW}⚠ {msg}{RESET}")
+
+
+def print_fail(msg):
+    print(f"{RED}✗ {msg}{RESET}")
+
 
 # ─── Runtime detection ────────────────────────────────────────────────────────
+
 
 def _find_conda_base() -> Path | None:
     """Find conda/mamba base directory. Prefers mamba (faster installs)."""
@@ -41,7 +54,9 @@ def _find_conda_base() -> Path | None:
         try:
             result = subprocess.run(
                 [cmd, "info", "--base"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode == 0 and result.stdout.strip():
                 return Path(result.stdout.strip())
@@ -103,65 +118,87 @@ def _find_bindmaster_dir() -> Path:
 
 # ─── Paths ───────────────────────────────────────────────────────────────────
 
-CONDA_BASE     = _find_conda_base()
+CONDA_BASE = _find_conda_base()
 CONDA_ENVS_DIR = (CONDA_BASE / "envs") if CONDA_BASE else None
 
 BINDMASTER_DIR = _find_bindmaster_dir()
-BINDCRAFT_DIR  = BINDMASTER_DIR / "BindCraft"
-BOLTZGEN_DIR   = BINDMASTER_DIR / "BoltzGen"
-MOSAIC_DIR     = BINDMASTER_DIR / "Mosaic"
-RUNS_DIR       = BINDMASTER_DIR / "runs"
-FILTERS_DIR    = BINDCRAFT_DIR / "settings_filters"
-ADVANCED_DIR   = BINDCRAFT_DIR / "settings_advanced"
-EVALUATOR_DIR  = BINDMASTER_DIR / "Evaluator"
-MOSAIC_VENV    = MOSAIC_DIR / ".venv"
-MOSAIC_HALLUCINATE_SRC = (
-    MOSAIC_DIR / "examples" / "bindmaster_example" / "hallucinate_bindmaster.py"
-)
+BINDCRAFT_DIR = BINDMASTER_DIR / "BindCraft"
+BOLTZGEN_DIR = BINDMASTER_DIR / "BoltzGen"
+MOSAIC_DIR = BINDMASTER_DIR / "Mosaic"
+RUNS_DIR = BINDMASTER_DIR / "runs"
+FILTERS_DIR = BINDCRAFT_DIR / "settings_filters"
+ADVANCED_DIR = BINDCRAFT_DIR / "settings_advanced"
+EVALUATOR_DIR = BINDMASTER_DIR / "Evaluator"
+MOSAIC_VENV = MOSAIC_DIR / ".venv"
+MOSAIC_HALLUCINATE_SRC = MOSAIC_DIR / "examples" / "bindmaster_example" / "hallucinate_bindmaster.py"
 NANOBODY_SCAFFOLDS_SRC = BOLTZGEN_DIR / "example" / "nanobody_scaffolds"
 NANOBODY_SCAFFOLD_NAMES = ["7eow", "7xl0", "8coh", "8z8v"]
 
 # ─── Amino-acid 3→1 mapping ──────────────────────────────────────────────────
 
 AA3TO1 = {
-    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
-    "GLN": "Q", "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I",
-    "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P",
-    "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V",
+    "ALA": "A",
+    "ARG": "R",
+    "ASN": "N",
+    "ASP": "D",
+    "CYS": "C",
+    "GLN": "Q",
+    "GLU": "E",
+    "GLY": "G",
+    "HIS": "H",
+    "ILE": "I",
+    "LEU": "L",
+    "LYS": "K",
+    "MET": "M",
+    "PHE": "F",
+    "PRO": "P",
+    "SER": "S",
+    "THR": "T",
+    "TRP": "W",
+    "TYR": "Y",
+    "VAL": "V",
     # common non-standard aliases
-    "MSE": "M", "HSD": "H", "HSE": "H", "HSP": "H",
-    "SEC": "U", "PYL": "O",
+    "MSE": "M",
+    "HSD": "H",
+    "HSE": "H",
+    "HSP": "H",
+    "SEC": "U",
+    "PYL": "O",
 }
 
 # ─── Install detection ───────────────────────────────────────────────────────
+
 
 def detect_installs() -> dict:
     """
     BindCraft / BoltzGen: check for their conda env directory.
     Mosaic: check for the uv venv python binary.
     """
+
     def _env_exists(name: str) -> bool:
         if CONDA_ENVS_DIR is None:
             return False
         return (CONDA_ENVS_DIR / name).is_dir()
 
     return {
-        "bindcraft":  _env_exists("BindCraft"),
-        "boltzgen":   _env_exists("BoltzGen"),
-        "mosaic":     (MOSAIC_VENV / "bin" / "python").exists(),
-        "evaluator":  (
+        "bindcraft": _env_exists("BindCraft"),
+        "boltzgen": _env_exists("BoltzGen"),
+        "mosaic": (MOSAIC_VENV / "bin" / "python").exists(),
+        "evaluator": (
             (EVALUATOR_DIR / "evaluate.sh").exists()
             and (_env_exists("binder-eval-boltz2") or _env_exists("binder-eval-af2"))
         ),
     }
 
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+
 
 def banner():
     print()
     print(f"{BOLD}{'═' * 60}{RESET}")
     print(f"{BOLD}  BindMaster Configurator{RESET}")
-    print(f"  Protein Binder Design Pipeline Setup Wizard")
+    print("  Protein Binder Design Pipeline Setup Wizard")
     print(f"{BOLD}{'═' * 60}{RESET}")
     print(f"  {CYAN}Tools dir{RESET} : {BINDMASTER_DIR}")
     if CONDA_BASE:
@@ -218,13 +255,11 @@ def ask_choice(prompt, choices, default_index=0):
     print(f"\n{BOLD}{prompt}{RESET}")
     for i, c in enumerate(choices):
         if i == default_index:
-            print(f"  {GREEN}[{i+1}]{RESET} {c} {YELLOW}(default){RESET}")
+            print(f"  {GREEN}[{i + 1}]{RESET} {c} {YELLOW}(default){RESET}")
         else:
-            print(f"  {CYAN}[{i+1}]{RESET} {c}")
+            print(f"  {CYAN}[{i + 1}]{RESET} {c}")
     while True:
-        raw = input(
-            f"  {YELLOW}Choice [1-{len(choices)}]{RESET} (default {default_index+1}): "
-        ).strip()
+        raw = input(f"  {YELLOW}Choice [1-{len(choices)}]{RESET} (default {default_index + 1}): ").strip()
         if raw == "":
             return default_index, choices[default_index]
         if raw.isdigit():
@@ -235,6 +270,7 @@ def ask_choice(prompt, choices, default_index=0):
 
 
 # ─── Validators ──────────────────────────────────────────────────────────────
+
 
 def validate_name(s):
     if re.fullmatch(r"[A-Za-z0-9_\-]+", s):
@@ -252,6 +288,7 @@ def validate_int(min_val=None, max_val=None):
         if max_val is not None and n > max_val:
             return f"Value must be at most {max_val}."
         return True
+
     return _v
 
 
@@ -290,6 +327,7 @@ def validate_sequence(s):
 
 
 # ─── PDB / hotspot utilities ─────────────────────────────────────────────────
+
 
 def extract_sequence_from_pdb(pdb_path: str, chain_id: str) -> str | None:
     """
@@ -548,8 +586,16 @@ def cif_to_pdb_atoms(cif_path: str, pdb_path: str) -> bool:
         if not any(c.startswith("_atom_site.") for c in cols):
             continue
         col = {c.split(".", 1)[1]: idx for idx, c in enumerate(cols)}
-        needed = {"group_pdb", "label_atom_id", "label_comp_id",
-                  "label_asym_id", "label_seq_id", "cartn_x", "cartn_y", "cartn_z"}
+        needed = {
+            "group_pdb",
+            "label_atom_id",
+            "label_comp_id",
+            "label_asym_id",
+            "label_seq_id",
+            "cartn_x",
+            "cartn_y",
+            "cartn_z",
+        }
         if not needed.issubset(col):
             continue
         n_cols = len(cols)
@@ -637,6 +683,7 @@ def hotspots_to_boltzgen_str(hotspot_str: str) -> str:
 
 # ─── Directory / preset helpers ───────────────────────────────────────────────
 
+
 def list_presets(directory, suffix=".json"):
     """Return sorted list of preset stem names in a directory."""
     d = Path(directory)
@@ -652,29 +699,29 @@ def print_tree(run_dir: Path, tools_enabled: dict, cfg: dict | None = None):
     print(f"\n  {BOLD}{name}/{RESET}")
     print(f"  ├── {CYAN}target/{RESET}")
     if is_cif:
-        print(f"  │   ├── <target>.cif")
-        print(f"  │   └── <target>.pdb  (converted)")
+        print("  │   ├── <target>.cif")
+        print("  │   └── <target>.pdb  (converted)")
     else:
-        print(f"  │   └── <target>.pdb")
+        print("  │   └── <target>.pdb")
     if tools_enabled.get("mosaic"):
         print(f"  ├── {CYAN}mosaic/{RESET}")
-        print(f"  │   └── hallucinate.py")
+        print("  │   └── hallucinate.py")
     if tools_enabled.get("boltzgen"):
         nanobody = cfg and cfg.get("boltzgen_mode") == "nanobody"
         print(f"  ├── {CYAN}boltzgen/{RESET}")
         if nanobody:
-            print(f"  │   ├── nanobody_scaffolds/  ← 4 × .yaml + .cif")
-        print(f"  │   ├── config.yaml")
-        print(f"  │   └── outputs/")
+            print("  │   ├── nanobody_scaffolds/  ← 4 × .yaml + .cif")
+        print("  │   ├── config.yaml")
+        print("  │   └── outputs/")
     if tools_enabled.get("bindcraft"):
         print(f"  ├── {CYAN}bindcraft/{RESET}")
-        print(f"  │   ├── target_settings.json")
-        print(f"  │   ├── filters.json")
-        print(f"  │   ├── advanced.json")
-        print(f"  │   └── outputs/")
+        print("  │   ├── target_settings.json")
+        print("  │   ├── filters.json")
+        print("  │   ├── advanced.json")
+        print("  │   └── outputs/")
     if tools_enabled.get("evaluator"):
         print(f"  ├── {CYAN}evaluate/{RESET}")
-        print(f"  │   └── comparison_report/")
+        print("  │   └── comparison_report/")
     scripts = []
     if tools_enabled.get("mosaic"):
         scripts.append("run_mosaic.sh")
@@ -693,6 +740,7 @@ def print_tree(run_dir: Path, tools_enabled: dict, cfg: dict | None = None):
 
 # ─── Config writers ───────────────────────────────────────────────────────────
 
+
 def write_bindcraft_target(path: Path, cfg: dict):
     settings = {
         "design_path": str(cfg["run_dir"] / "bindcraft" / "outputs") + "/",
@@ -700,8 +748,10 @@ def write_bindcraft_target(path: Path, cfg: dict):
         "starting_pdb": str(cfg["target_pdb"]),
         "chains": cfg["chains"],
         "target_hotspot_residues": cfg["hotspots"] if cfg["hotspots"] else None,
-        "lengths": [cfg.get("bindcraft_min_length", cfg["min_length"]),
-                    cfg.get("bindcraft_max_length", cfg["max_length"])],
+        "lengths": [
+            cfg.get("bindcraft_min_length", cfg["min_length"]),
+            cfg.get("bindcraft_max_length", cfg["max_length"]),
+        ],
         "number_of_final_designs": cfg.get("bindcraft_n_designs", cfg["n_designs"]),
     }
     path.write_text(json.dumps(settings, indent=4))
@@ -719,61 +769,61 @@ def write_boltzgen_yaml(path: Path, cfg: dict):
     nanobody mode — four CDR-redesign scaffold YAMLs instead of a free chain
     """
     target_pdb = str(cfg["target_pdb"])
-    chain_ids  = [c.strip() for c in cfg["chains"].split(",") if c.strip()]
-    nanobody   = cfg.get("boltzgen_mode") == "nanobody"
+    chain_ids = [c.strip() for c in cfg["chains"].split(",") if c.strip()]
+    nanobody = cfg.get("boltzgen_mode") == "nanobody"
 
     lines = [
         f"# BoltzGen design specification for {cfg['name']}",
         f"# Mode: {'nanobody scaffold CDR redesign' if nanobody else 'de-novo protein binder'}",
-        f"# Generated by BindMaster Configurator",
-        f"#",
-        f"# Run with:",
-        f"#   boltzgen run config.yaml \\",
-        f"#       --output outputs/ \\",
-        f"#       --protocol protein-anything \\",
+        "# Generated by BindMaster Configurator",
+        "#",
+        "# Run with:",
+        "#   boltzgen run config.yaml \\",
+        "#       --output outputs/ \\",
+        "#       --protocol protein-anything \\",
         f"#       --num_designs {cfg['boltzgen_intermediate']} \\",
         f"#       --budget {cfg.get('boltzgen_budget', cfg['n_designs'])}",
-        f"",
-        f"entities:",
+        "",
+        "entities:",
     ]
 
     if nanobody:
         lines += [
-            f"  # Nanobody scaffolds: CDR loops (H1/H2/H3) will be redesigned",
-            f"  - file:",
-            f"      path:",
+            "  # Nanobody scaffolds: CDR loops (H1/H2/H3) will be redesigned",
+            "  - file:",
+            "      path:",
         ]
         for n in NANOBODY_SCAFFOLD_NAMES:
             lines.append(f"        - nanobody_scaffolds/{n}.yaml")
     else:
         lines += [
-            f"  # Designed binder chain: uniform random length in the given range",
-            f"  - protein:",
-            f"      id: B",
+            "  # Designed binder chain: uniform random length in the given range",
+            "  - protein:",
+            "      id: B",
             f"      sequence: {cfg.get('boltzgen_min_length', cfg['min_length'])}..{cfg.get('boltzgen_max_length', cfg['max_length'])}",
         ]
 
     lines += [
-        f"",
-        f"  # Target protein loaded from the copied PDB",
-        f"  - file:",
-        f"      path: \"{target_pdb}\"",
-        f"      include:",
+        "",
+        "  # Target protein loaded from the copied PDB",
+        "  - file:",
+        f'      path: "{target_pdb}"',
+        "      include:",
     ]
 
     for c in chain_ids:
-        lines.append(f"        - chain:")
+        lines.append("        - chain:")
         lines.append(f"            id: {c}")
 
     if cfg["hotspots"]:
         binding_str = hotspots_to_boltzgen_str(cfg["hotspots"])
-        lines.append(f"      binding_types:")
+        lines.append("      binding_types:")
         for c in chain_ids:
-            lines.append(f"        - chain:")
+            lines.append("        - chain:")
             lines.append(f"            id: {c}")
             lines.append(f"            binding: {binding_str}")
 
-    lines.append(f"      structure_groups: \"all\"")
+    lines.append('      structure_groups: "all"')
     lines.append("")
 
     path.write_text("\n".join(lines))
@@ -800,19 +850,19 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
 
     old_block = (
         'TARGET_SEQUENCE = "REPLACE_ME"   # target protein sequence\n'
-        'N_DESIGNS       = 100            # Stage 1: how many designs to generate per length\n'
-        'TOP_K           = 5              # Stage 2: how many top designs to refold and export PDB\n'
-        'MIN_LENGTH      = 65             # minimum binder length (aa)\n'
-        'MAX_LENGTH      = 100            # maximum binder length (aa)\n'
-        'LENGTH_STEP     = 5              # step between scanned lengths; set MIN=MAX for a single length'
+        "N_DESIGNS       = 100            # Stage 1: how many designs to generate per length\n"
+        "TOP_K           = 5              # Stage 2: how many top designs to refold and export PDB\n"
+        "MIN_LENGTH      = 65             # minimum binder length (aa)\n"
+        "MAX_LENGTH      = 100            # maximum binder length (aa)\n"
+        "LENGTH_STEP     = 5              # step between scanned lengths; set MIN=MAX for a single length"
     )
     new_block = (
-        f'TARGET_SEQUENCE = {repr(cfg["target_sequence"])}   # target protein sequence\n'
-        f'N_DESIGNS       = {cfg.get("mosaic_n_designs", 100):<6}           # Stage 1: how many designs to generate per length\n'
-        f'TOP_K           = {cfg.get("mosaic_top_k", cfg["n_designs"]):<6}           # Stage 2: how many top designs to refold and export PDB\n'
-        f'MIN_LENGTH      = {cfg.get("mosaic_min_length", cfg["min_length"]):<6}           # minimum binder length (aa)\n'
-        f'MAX_LENGTH      = {cfg.get("mosaic_max_length", cfg["max_length"]):<6}           # maximum binder length (aa)\n'
-        f'LENGTH_STEP     = {cfg.get("mosaic_length_step", 5):<6}           # step between scanned lengths; set MIN=MAX for a single length'
+        f"TARGET_SEQUENCE = {cfg['target_sequence']!r}   # target protein sequence\n"
+        f"N_DESIGNS       = {cfg.get('mosaic_n_designs', 100):<6}           # Stage 1: how many designs to generate per length\n"
+        f"TOP_K           = {cfg.get('mosaic_top_k', cfg['n_designs']):<6}           # Stage 2: how many top designs to refold and export PDB\n"
+        f"MIN_LENGTH      = {cfg.get('mosaic_min_length', cfg['min_length']):<6}           # minimum binder length (aa)\n"
+        f"MAX_LENGTH      = {cfg.get('mosaic_max_length', cfg['max_length']):<6}           # maximum binder length (aa)\n"
+        f"LENGTH_STEP     = {cfg.get('mosaic_length_step', 5):<6}           # step between scanned lengths; set MIN=MAX for a single length"
     )
 
     if old_block in content:
@@ -828,7 +878,7 @@ def write_run_bindcraft(path: Path, cfg: dict):
     conda_base = str(CONDA_BASE) if CONDA_BASE else ""
     content = f"""\
 #!/usr/bin/env bash
-# Run BindCraft for {cfg['name']}
+# Run BindCraft for {cfg["name"]}
 # Generated by BindMaster Configurator
 set -euo pipefail
 
@@ -857,7 +907,7 @@ set -u
 
 cd "$BINDCRAFT_DIR"
 
-echo "=== Running BindCraft for {cfg['name']} ==="
+echo "=== Running BindCraft for {cfg["name"]} ==="
 python -u ./bindcraft.py \\
     --settings "$SETTINGS" \\
     --filters  "$FILTERS" \\
@@ -872,7 +922,7 @@ def write_run_boltzgen(path: Path, cfg: dict):
     conda_base = str(CONDA_BASE) if CONDA_BASE else ""
     content = f"""\
 #!/usr/bin/env bash
-# Run BoltzGen for {cfg['name']}
+# Run BoltzGen for {cfg["name"]}
 # Generated by BindMaster Configurator
 set -euo pipefail
 
@@ -897,12 +947,12 @@ done
 conda activate BoltzGen
 set -u
 
-echo "=== Running BoltzGen for {cfg['name']} ==="
+echo "=== Running BoltzGen for {cfg["name"]} ==="
 boltzgen run "$CONFIG" \\
     --output "$OUTPUT_DIR" \\
     --protocol protein-anything \\
-    --num_designs {cfg['boltzgen_intermediate']} \\
-    --budget {cfg['n_designs']}
+    --num_designs {cfg["boltzgen_intermediate"]} \\
+    --budget {cfg["n_designs"]}
 """
     path.write_text(content)
     path.chmod(0o755)
@@ -913,7 +963,7 @@ def write_run_mosaic(path: Path, cfg: dict):
     mosaic_python = MOSAIC_VENV / "bin" / "python"
     content = f"""\
 #!/usr/bin/env bash
-# Run Mosaic for {cfg['name']}
+# Run Mosaic for {cfg["name"]}
 # Generated by BindMaster Configurator
 set -euo pipefail
 
@@ -926,7 +976,7 @@ if [[ ! -x "$MOSAIC_PYTHON" ]]; then
     exit 1
 fi
 
-echo "=== Running Mosaic for {cfg['name']} ==="
+echo "=== Running Mosaic for {cfg["name"]} ==="
 cd "$MOSAIC_DIR"
 "$MOSAIC_PYTHON" hallucinate.py
 """
@@ -956,16 +1006,16 @@ def write_run_all(path: Path, cfg: dict, tools_enabled: dict):
 
     if tools_enabled.get("mosaic"):
         lines += [
-            '# Mosaic is interactive — run it separately before the pipeline:',
+            "# Mosaic is interactive — run it separately before the pipeline:",
             '#   bash "$RUN_DIR/run_mosaic.sh"',
-            '# Then re-run this script. It will skip Mosaic if designs.csv already exists.',
+            "# Then re-run this script. It will skip Mosaic if designs.csv already exists.",
             'echo "=== Step: Mosaic ==="',
             'if [[ -f "$RUN_DIR/mosaic/designs.csv" ]]; then',
             '    echo "  Mosaic designs.csv found — skipping interactive run."',
-            'else',
+            "else",
             '    echo "  Mosaic requires interactive input. Run run_mosaic.sh first, then re-run run_all.sh." >&2',
-            '    exit 1',
-            'fi',
+            "    exit 1",
+            "fi",
             "",
         ]
 
@@ -1026,13 +1076,13 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         f'OUTPUT_DIR="{eval_dir}"',
         "",
         'if [[ ! -f "$EVAL_SCRIPT" ]]; then',
-        f'    echo "ERROR: Evaluator not found at $EVAL_SCRIPT" >&2',
-        f'    echo "Run: bindmaster install --tool evaluator" >&2',
-        '    exit 1',
-        'fi',
+        '    echo "ERROR: Evaluator not found at $EVAL_SCRIPT" >&2',
+        '    echo "Run: bindmaster install --tool evaluator" >&2',
+        "    exit 1",
+        "fi",
         "",
         "# Step 1: Extract sequences from design tool outputs into FASTA",
-        f'SEQUENCES="$OUTPUT_DIR/sequences.fasta"',
+        'SEQUENCES="$OUTPUT_DIR/sequences.fasta"',
     ]
 
     if design_dirs:
@@ -1041,20 +1091,20 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         for flag, dir_path in design_dirs:
             extract_args.append(f'    {flag} "{dir_path}" \\')
         lines += [
-            '',
-            '# Collect design sequences from enabled tools',
+            "",
+            "# Collect design sequences from enabled tools",
             'if [[ ! -f "$SEQUENCES" ]]; then',
-            f'    echo "  Extracting sequences from design outputs..."',
+            '    echo "  Extracting sequences from design outputs..."',
         ]
         # Use evaluate.sh which handles extraction internally
         # Just create a simple pass-through
         lines += [
-            'fi',
-            '',
+            "fi",
+            "",
         ]
 
     lines += [
-        '# Step 2: Run evaluation pipeline',
+        "# Step 2: Run evaluation pipeline",
         f'echo "=== Running Evaluator for {cfg["name"]} ==="',
         'bash "$EVAL_SCRIPT" \\',
     ]
@@ -1066,8 +1116,8 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     lines += [
         f'    --target-pdb "{target_pdb}" \\',
         f'    --target-seq "{target_seq}" \\',
-        f'    --output "$OUTPUT_DIR" \\',
-        '    --resume',
+        '    --output "$OUTPUT_DIR" \\',
+        "    --resume",
         "",
     ]
 
@@ -1076,6 +1126,7 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
 
 
 # ─── Generation ───────────────────────────────────────────────────────────────
+
 
 def generate(cfg: dict, tools_enabled: dict):
     run_dir: Path = cfg["run_dir"]
@@ -1112,10 +1163,8 @@ def generate(cfg: dict, tools_enabled: dict):
 
     if tools_enabled.get("bindcraft"):
         write_bindcraft_target(run_dir / "bindcraft" / "target_settings.json", cfg)
-        copy_bindcraft_preset(FILTERS_DIR, cfg["filter_preset"],
-                              run_dir / "bindcraft" / "filters.json")
-        copy_bindcraft_preset(ADVANCED_DIR, cfg["advanced_preset"],
-                              run_dir / "bindcraft" / "advanced.json")
+        copy_bindcraft_preset(FILTERS_DIR, cfg["filter_preset"], run_dir / "bindcraft" / "filters.json")
+        copy_bindcraft_preset(ADVANCED_DIR, cfg["advanced_preset"], run_dir / "bindcraft" / "advanced.json")
         write_run_bindcraft(run_dir / "run_bindcraft.sh", cfg)
 
     if tools_enabled.get("boltzgen"):
@@ -1136,10 +1185,11 @@ def generate(cfg: dict, tools_enabled: dict):
 
 # ─── Pipeline runner ──────────────────────────────────────────────────────────
 
+
 def run_pipeline(cfg: dict, tools_enabled: dict):
     """Run the enabled tools in sequence with live terminal output."""
     run_dir = cfg["run_dir"]
-    failed  = []
+    failed = []
 
     if tools_enabled.get("mosaic"):
         print_step("Running Mosaic  (interactive — you will be prompted below)")
@@ -1186,6 +1236,7 @@ def run_pipeline(cfg: dict, tools_enabled: dict):
 
 # ─── Shortcut installer ───────────────────────────────────────────────────────
 
+
 def install_shortcut():
     """
     Write ~/.local/bin/bindmaster-config pointing at this script.
@@ -1200,16 +1251,13 @@ def install_shortcut():
         return
 
     shortcuts_dir.mkdir(parents=True, exist_ok=True)
-    shortcut.write_text(
-        f"#!/usr/bin/env bash\n"
-        f"# BindMaster Configurator shortcut — auto-generated\n"
-        f"{target_line}"
-    )
+    shortcut.write_text(f"#!/usr/bin/env bash\n# BindMaster Configurator shortcut — auto-generated\n{target_line}")
     shortcut.chmod(0o755)
     print_ok(f"Shortcut installed: {shortcut}")
 
 
 # ─── Wizard ───────────────────────────────────────────────────────────────────
+
 
 def wizard():
     install_shortcut()
@@ -1217,12 +1265,14 @@ def wizard():
 
     # ── Step 1: Project name ──────────────────────────────────────────────────
     print_step("Step 1 — Project name")
-    print(f"  Used as binder name. Run folder path can be customised below.")
+    print("  Used as binder name. Run folder path can be customised below.")
     name = ask("  Target name", validator=validate_name)
-    run_dir = Path(ask(
-        "  Run folder",
-        default=str(RUNS_DIR / name),
-    )).expanduser()
+    run_dir = Path(
+        ask(
+            "  Run folder",
+            default=str(RUNS_DIR / name),
+        )
+    ).expanduser()
 
     if run_dir.exists():
         print()
@@ -1242,18 +1292,17 @@ def wizard():
     if "sequence" in input_type.lower():
         print()
         print_warn("You need to predict the structure first.")
-        print(f"  Recommended: ColabFold")
-        print(f"    1. Paste your sequence into the AlphaFold2 ColabFold notebook")
-        print(f"    2. Download the best-ranked .pdb file")
-        print(f"    3. Come back and provide the .pdb path below")
+        print("  Recommended: ColabFold")
+        print("    1. Paste your sequence into the AlphaFold2 ColabFold notebook")
+        print("    2. Download the best-ranked .pdb file")
+        print("    3. Come back and provide the .pdb path below")
         print()
 
     target_pdb_src = ask("  Path to target structure file (.pdb / .cif)", validator=validate_structure_path)
 
     # ── Step 3: Target details ────────────────────────────────────────────────
     print_step("Step 3 — Target details")
-    chains = ask("  Chain(s) to target (e.g. A or A,B)", default="A",
-                 validator=validate_chains)
+    chains = ask("  Chain(s) to target (e.g. A or A,B)", default="A", validator=validate_chains)
     hotspots = ask(
         "  Hotspot residues (e.g. 56 or 1-10,20, blank=auto)",
         default="",
@@ -1264,21 +1313,17 @@ def wizard():
     target_sequence = extract_sequence_from_structure(target_pdb_src, primary_chain)
     if target_sequence:
         preview = target_sequence[:50] + ("..." if len(target_sequence) > 50 else "")
-        print_ok(f"Auto-extracted sequence for chain {primary_chain}: "
-                 f"{preview} ({len(target_sequence)} aa)")
+        print_ok(f"Auto-extracted sequence for chain {primary_chain}: {preview} ({len(target_sequence)} aa)")
 
     # ── Step 4: Binder settings ───────────────────────────────────────────────
     print_step("Step 4 — Binder settings (global defaults)")
-    print(f"  These apply to all tools — you can override per-tool in Step 6.")
-    min_length = int(ask("  Minimum binder length", default=65,
-                         validator=validate_int(min_val=10, max_val=500)))
-    max_length = int(ask("  Maximum binder length", default=150,
-                         validator=validate_int(min_val=10, max_val=500)))
+    print("  These apply to all tools — you can override per-tool in Step 6.")
+    min_length = int(ask("  Minimum binder length", default=65, validator=validate_int(min_val=10, max_val=500)))
+    max_length = int(ask("  Maximum binder length", default=150, validator=validate_int(min_val=10, max_val=500)))
     if max_length < min_length:
         print_warn("max length < min length — swapping values.")
         min_length, max_length = max_length, min_length
-    n_designs = int(ask("  Number of top/final designs", default=10,
-                        validator=validate_int(min_val=1)))
+    n_designs = int(ask("  Number of top/final designs", default=10, validator=validate_int(min_val=1)))
 
     # ── Step 5: Tool selection ────────────────────────────────────────────────
     print_step("Step 5 — Tool selection")
@@ -1336,134 +1381,137 @@ def wizard():
         print_step("Step 6a — BindCraft settings")
         filter_presets = list_presets(FILTERS_DIR)
         if filter_presets:
-            default_fi = (filter_presets.index("default_filters")
-                          if "default_filters" in filter_presets else 0)
-            _, cfg["filter_preset"] = ask_choice(
-                "Filter preset:", filter_presets, default_index=default_fi)
+            default_fi = filter_presets.index("default_filters") if "default_filters" in filter_presets else 0
+            _, cfg["filter_preset"] = ask_choice("Filter preset:", filter_presets, default_index=default_fi)
         else:
             print_warn(f"No filter presets found in {FILTERS_DIR}")
 
         advanced_presets = list_presets(ADVANCED_DIR)
         if advanced_presets:
-            default_ai = (advanced_presets.index("default_4stage_multimer")
-                          if "default_4stage_multimer" in advanced_presets else 0)
-            _, cfg["advanced_preset"] = ask_choice(
-                "Advanced preset:", advanced_presets, default_index=default_ai)
+            default_ai = (
+                advanced_presets.index("default_4stage_multimer")
+                if "default_4stage_multimer" in advanced_presets
+                else 0
+            )
+            _, cfg["advanced_preset"] = ask_choice("Advanced preset:", advanced_presets, default_index=default_ai)
         else:
             print_warn(f"No advanced presets found in {ADVANCED_DIR}")
 
         print(f"  {YELLOW}Per-tool overrides (Enter = keep global default):{RESET}")
-        cfg["bindcraft_min_length"] = int(ask(
-            "  Min binder length", default=min_length,
-            validator=validate_int(min_val=1, max_val=500)))
-        cfg["bindcraft_max_length"] = int(ask(
-            "  Max binder length", default=max_length,
-            validator=validate_int(min_val=1, max_val=500)))
-        cfg["bindcraft_n_designs"] = int(ask(
-            "  Number of final designs", default=n_designs,
-            validator=validate_int(min_val=1)))
+        cfg["bindcraft_min_length"] = int(
+            ask("  Min binder length", default=min_length, validator=validate_int(min_val=1, max_val=500))
+        )
+        cfg["bindcraft_max_length"] = int(
+            ask("  Max binder length", default=max_length, validator=validate_int(min_val=1, max_val=500))
+        )
+        cfg["bindcraft_n_designs"] = int(
+            ask("  Number of final designs", default=n_designs, validator=validate_int(min_val=1))
+        )
 
     if use_boltzgen:
         print_step("Step 6b — BoltzGen settings")
         _, mode_choice = ask_choice(
             "Binder type:",
-            ["protein-anything — de-novo protein binder",
-             "nanobody — redesign CDR loops of four scaffold nanobodies"],
+            ["protein-anything — de-novo protein binder", "nanobody — redesign CDR loops of four scaffold nanobodies"],
             default_index=0,
         )
         cfg["boltzgen_mode"] = "nanobody" if "nanobody" in mode_choice else "protein"
         if cfg["boltzgen_mode"] == "nanobody":
             print(f"  Scaffolds: {CYAN}{', '.join(NANOBODY_SCAFFOLD_NAMES)}{RESET}")
-            print(f"  (will be copied to boltzgen/nanobody_scaffolds/)")
+            print("  (will be copied to boltzgen/nanobody_scaffolds/)")
         print(f"  {YELLOW}Per-tool overrides (Enter = keep global default):{RESET}")
-        cfg["boltzgen_budget"] = int(ask(
-            "  Final designs (--budget)", default=n_designs,
-            validator=validate_int(min_val=1)))
-        cfg["boltzgen_min_length"] = int(ask(
-            "  Min binder length", default=min_length,
-            validator=validate_int(min_val=1, max_val=500)))
-        cfg["boltzgen_max_length"] = int(ask(
-            "  Max binder length", default=max_length,
-            validator=validate_int(min_val=1, max_val=500)))
-        cfg["boltzgen_intermediate"] = int(ask(
-            "  Intermediate designs (--num_designs, recommended: 10 000)", default=10000,
-            validator=validate_int(min_val=1)))
+        cfg["boltzgen_budget"] = int(
+            ask("  Final designs (--budget)", default=n_designs, validator=validate_int(min_val=1))
+        )
+        cfg["boltzgen_min_length"] = int(
+            ask("  Min binder length", default=min_length, validator=validate_int(min_val=1, max_val=500))
+        )
+        cfg["boltzgen_max_length"] = int(
+            ask("  Max binder length", default=max_length, validator=validate_int(min_val=1, max_val=500))
+        )
+        cfg["boltzgen_intermediate"] = int(
+            ask(
+                "  Intermediate designs (--num_designs, recommended: 10 000)",
+                default=10000,
+                validator=validate_int(min_val=1),
+            )
+        )
 
     if use_mosaic:
         print_step("Step 6c — Mosaic settings")
         print(f"  {YELLOW}Per-tool overrides (Enter = keep global default):{RESET}")
-        cfg["mosaic_n_designs"] = int(ask(
-            "  Designs to generate (Stage 1)",
-            default=100,
-            validator=validate_int(min_val=1)))
-        cfg["mosaic_top_k"] = int(ask(
-            "  Top designs to refold (TOP_K)", default=n_designs,
-            validator=validate_int(min_val=0)))
-        cfg["mosaic_min_length"] = int(ask(
-            "  Min binder length", default=min_length,
-            validator=validate_int(min_val=1, max_val=500)))
-        cfg["mosaic_max_length"] = int(ask(
-            "  Max binder length", default=max_length,
-            validator=validate_int(min_val=1, max_val=500)))
-        cfg["mosaic_length_step"] = int(ask(
-            "  Length scan step (1 = every aa, set min=max to skip scan)", default=5,
-            validator=validate_int(min_val=1)))
+        cfg["mosaic_n_designs"] = int(
+            ask("  Designs to generate (Stage 1)", default=100, validator=validate_int(min_val=1))
+        )
+        cfg["mosaic_top_k"] = int(
+            ask("  Top designs to refold (TOP_K)", default=n_designs, validator=validate_int(min_val=0))
+        )
+        cfg["mosaic_min_length"] = int(
+            ask("  Min binder length", default=min_length, validator=validate_int(min_val=1, max_val=500))
+        )
+        cfg["mosaic_max_length"] = int(
+            ask("  Max binder length", default=max_length, validator=validate_int(min_val=1, max_val=500))
+        )
+        cfg["mosaic_length_step"] = int(
+            ask(
+                "  Length scan step (1 = every aa, set min=max to skip scan)",
+                default=5,
+                validator=validate_int(min_val=1),
+            )
+        )
         if not target_sequence:
             print_warn("Could not auto-extract target sequence from PDB.")
             cfg["target_sequence"] = ask(
-                f"  Target amino-acid sequence (chain {primary_chain})",
-                validator=validate_sequence)
+                f"  Target amino-acid sequence (chain {primary_chain})", validator=validate_sequence
+            )
         else:
             seq_preview = target_sequence[:60] + ("..." if len(target_sequence) > 60 else "")
             print(f"  Sequence ({len(target_sequence)} aa): {CYAN}{seq_preview}{RESET}")
             if not ask_yn("  Use this sequence?", default=True):
-                cfg["target_sequence"] = ask(
-                    "  Enter target sequence", validator=validate_sequence)
+                cfg["target_sequence"] = ask("  Enter target sequence", validator=validate_sequence)
 
     if use_pxdesign:
         print_step("Step 6d — PXDesign settings")
-        print(f"  PXDesign results are imported from a local directory containing")
-        print(f"  summary.csv (downloaded from protenix-server.com).")
+        print("  PXDesign results are imported from a local directory containing")
+        print("  summary.csv (downloaded from protenix-server.com).")
         cfg["pxdesign_output_dir"] = ask(
             "  PXDesign output directory",
             default="",
-            validator=lambda x: (True, "") if x.strip() else (False, "path required"))
+            validator=lambda x: (True, "") if x.strip() else (False, "path required"),
+        )
 
     # ── Step 7: Preview ───────────────────────────────────────────────────────
     print_step("Step 7 — Preview")
     print(f"  {CYAN}Run folder{RESET}:    {run_dir}")
     print(f"  {CYAN}Target file{RESET}:   {target_pdb_src}")
-    print(f"  {CYAN}Chains{RESET}:        {chains}  |  "
-          f"{CYAN}Hotspots{RESET}: {hotspots or '(auto)'}")
-    print(f"  {CYAN}Binder length{RESET}: {min_length}–{max_length}  |  "
-          f"{CYAN}Top designs{RESET}: {n_designs}")
+    print(f"  {CYAN}Chains{RESET}:        {chains}  |  {CYAN}Hotspots{RESET}: {hotspots or '(auto)'}")
+    print(f"  {CYAN}Binder length{RESET}: {min_length}–{max_length}  |  {CYAN}Top designs{RESET}: {n_designs}")
     enabled_list = [t for t, v in tools_enabled.items() if v]
     print(f"  {CYAN}Tools{RESET}:         {', '.join(enabled_list)}")
     if use_bindcraft:
         bc_min = cfg.get("bindcraft_min_length", min_length)
         bc_max = cfg.get("bindcraft_max_length", max_length)
-        bc_n   = cfg.get("bindcraft_n_designs", n_designs)
-        print(f"  {CYAN}BindCraft{RESET}:     "
-              f"filters={cfg['filter_preset']}  advanced={cfg['advanced_preset']}")
+        bc_n = cfg.get("bindcraft_n_designs", n_designs)
+        print(f"  {CYAN}BindCraft{RESET}:     filters={cfg['filter_preset']}  advanced={cfg['advanced_preset']}")
         print(f"             length={bc_min}–{bc_max}  final_designs={bc_n}")
     if use_boltzgen:
         bg_min = cfg.get("boltzgen_min_length", min_length)
         bg_max = cfg.get("boltzgen_max_length", max_length)
-        bg_n   = cfg.get("boltzgen_budget", n_designs)
+        bg_n = cfg.get("boltzgen_budget", n_designs)
         mode_label = "nanobody CDR redesign" if cfg["boltzgen_mode"] == "nanobody" else "de-novo protein"
-        print(f"  {CYAN}BoltzGen{RESET}:      {mode_label}  |  "
-              f"length={bg_min}–{bg_max}  budget={bg_n}  "
-              f"intermediate={cfg['boltzgen_intermediate']:,}")
+        print(
+            f"  {CYAN}BoltzGen{RESET}:      {mode_label}  |  "
+            f"length={bg_min}–{bg_max}  budget={bg_n}  "
+            f"intermediate={cfg['boltzgen_intermediate']:,}"
+        )
     if use_mosaic:
         mo_min = cfg.get("mosaic_min_length", min_length)
         mo_max = cfg.get("mosaic_max_length", max_length)
-        mo_n   = cfg.get("mosaic_n_designs", 100)
-        mo_k   = cfg.get("mosaic_top_k", n_designs)
+        mo_n = cfg.get("mosaic_n_designs", 100)
+        mo_k = cfg.get("mosaic_top_k", n_designs)
         seq = cfg["target_sequence"]
-        print(f"  {CYAN}Mosaic{RESET}:        length={mo_min}–{mo_max}  "
-              f"generate={mo_n}  refold(TOP_K)={mo_k}")
-        print(f"  {CYAN}Mosaic seq{RESET}:    "
-              f"{seq[:50]}{'...' if len(seq) > 50 else ''} ({len(seq)} aa)")
+        print(f"  {CYAN}Mosaic{RESET}:        length={mo_min}–{mo_max}  generate={mo_n}  refold(TOP_K)={mo_k}")
+        print(f"  {CYAN}Mosaic seq{RESET}:    {seq[:50]}{'...' if len(seq) > 50 else ''} ({len(seq)} aa)")
     if use_evaluator:
         print(f"  {CYAN}Evaluator{RESET}:     Boltz2 + AF2 refolding → comparison report")
 
@@ -1511,6 +1559,7 @@ def wizard():
 
 
 # ─── CLI commands ─────────────────────────────────────────────────────────────
+
 
 def cmd_archive(run_name: str):
     """Archive a run folder to a .tar.gz file."""
@@ -1571,13 +1620,21 @@ def cmd_status():
         elif "Mosaic" in tools:
             statuses.append("Mosaic: pending")
 
-        bg_outputs = list((run_dir / "boltzgen" / "outputs").glob("*.pdb")) if (run_dir / "boltzgen" / "outputs").is_dir() else []
+        bg_outputs = (
+            list((run_dir / "boltzgen" / "outputs").glob("*.pdb"))
+            if (run_dir / "boltzgen" / "outputs").is_dir()
+            else []
+        )
         if bg_outputs:
             statuses.append(f"BoltzGen: {len(bg_outputs)} PDBs")
         elif "BoltzGen" in tools:
             statuses.append("BoltzGen: pending")
 
-        bc_outputs = list((run_dir / "bindcraft" / "outputs").glob("*.pdb")) if (run_dir / "bindcraft" / "outputs").is_dir() else []
+        bc_outputs = (
+            list((run_dir / "bindcraft" / "outputs").glob("*.pdb"))
+            if (run_dir / "bindcraft" / "outputs").is_dir()
+            else []
+        )
         if bc_outputs:
             statuses.append(f"BindCraft: {len(bc_outputs)} PDBs")
         elif "BindCraft" in tools:
@@ -1608,16 +1665,19 @@ def cmd_status():
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="BindMaster Configurator — setup wizard for protein binder design runs",
     )
     parser.add_argument(
-        "--archive", metavar="RUN",
+        "--archive",
+        metavar="RUN",
         help="Archive a run folder to tar.gz",
     )
     parser.add_argument(
-        "--status", action="store_true",
+        "--status",
+        action="store_true",
         help="Show all runs and their completion state",
     )
     args = parser.parse_args()

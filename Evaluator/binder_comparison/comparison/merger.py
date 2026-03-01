@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..io.read import read_fasta, read_csv_safe
+from ..io.read import read_csv_safe, read_fasta
 
 # Columns from Boltz2 CSV (refold_Version5) that should NOT be prefixed
 _BOLTZ2_PASSTHROUGH_COLS = {"sequence", "target_sequence", "binder_length", "run_id"}
@@ -43,7 +43,7 @@ def merge_refold_results(
         get NaN for the missing model's columns (outer join).
     """
     boltz_df = _load_boltz2(boltz2_csv) if boltz2_csv else pd.DataFrame()
-    af2_df   = _load_af2(af2_csv)       if af2_csv   else pd.DataFrame()
+    af2_df = _load_af2(af2_csv) if af2_csv else pd.DataFrame()
 
     if boltz_df.empty and af2_df.empty:
         raise ValueError("Both boltz2_csv and af2_csv are absent or empty.")
@@ -58,9 +58,11 @@ def merge_refold_results(
         merged = pd.merge(boltz_df, af2_df, on="sequence", how="outer")
         n_both = merged[["boltz_iptm", "af2_iptm"]].notna().all(axis=1).sum()
         n_total = len(merged)
-        print(f"[merger] {n_total} unique sequences: {n_both} have both models, "
-              f"{(merged['boltz_iptm'].isna()).sum()} Boltz2-only, "
-              f"{(merged['af2_iptm'].isna()).sum()} AF2-only")
+        print(
+            f"[merger] {n_total} unique sequences: {n_both} have both models, "
+            f"{(merged['boltz_iptm'].isna()).sum()} Boltz2-only, "
+            f"{(merged['af2_iptm'].isna()).sum()} AF2-only"
+        )
 
     # Attach binder_id and source_tool from the FASTA if provided
     if sequences_fasta:
@@ -75,11 +77,7 @@ def _load_boltz2(path: str | Path) -> pd.DataFrame:
     if df.empty:
         return df
 
-    rename = {
-        col: f"boltz_{col}"
-        for col in df.columns
-        if col not in _BOLTZ2_PASSTHROUGH_COLS
-    }
+    rename = {col: f"boltz_{col}" for col in df.columns if col not in _BOLTZ2_PASSTHROUGH_COLS}
     return df.rename(columns=rename)
 
 
@@ -107,11 +105,13 @@ def _attach_fasta_metadata(df: pd.DataFrame, fasta_path: str | Path) -> pd.DataF
                 parts[k] = v
         # First token before whitespace/tags is the binder_id
         binder_id = tokens[0] if tokens else header
-        meta_rows.append({
-            "sequence":    seq,
-            "binder_id":   binder_id,
-            "source_tool": parts.get("source", "unknown"),
-        })
+        meta_rows.append(
+            {
+                "sequence": seq,
+                "binder_id": binder_id,
+                "source_tool": parts.get("source", "unknown"),
+            }
+        )
 
     if not meta_rows:
         return df
