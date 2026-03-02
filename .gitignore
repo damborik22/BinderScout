@@ -13,6 +13,10 @@ install_aarch.log
 # Docker build cache / test artifacts
 .docker-iidfile
 
+# Run outputs — generated per-experiment
+runs/
+refold_boltz2/
+
 # Evaluator build / runtime artefacts
 __pycache__/
 *.egg-info/
