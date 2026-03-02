@@ -2,8 +2,8 @@
 # BindMaster Installer — DGX Spark (aarch64) Edition
 # Platform: NVIDIA DGX Spark (GB10 Blackwell), aarch64, CUDA 13.0, Ubuntu 24.04
 #
-# All three tools (BindCraft, BoltzGen, Mosaic) are bundled in this repo —
-# no cloning needed. Pre-cached resources (AF2 weights, ARM64 binaries) are
+# BindCraft, BoltzGen, and Mosaic are cloned from upstream on first install
+# (same as x86_64). Pre-cached resources (AF2 weights, ARM64 binaries) are
 # read from TOOLS_DIR to avoid redundant downloads.
 #
 # Usage:
@@ -21,6 +21,11 @@ BINDCRAFT_DIR="${BINDMASTER_DIR}/BindCraft"
 BOLTZGEN_DIR="${BINDMASTER_DIR}/BoltzGen"
 MOSAIC_DIR="${BINDMASTER_DIR}/Mosaic"
 EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
+
+# Pinned commits for reproducible installs (same as x86_64)
+BINDCRAFT_COMMIT="828fd9f"
+BOLTZGEN_COMMIT="da0f092"
+MOSAIC_COMMIT="dc9c4d7"
 
 ARCH="$(uname -m)"     # expected: aarch64
 CUDA_VERSION="13.0"    # DGX Spark GB10 (Blackwell, sm_121)
@@ -92,7 +97,7 @@ while [[ $# -gt 0 ]]; do
 Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--tools-dir PATH] [--cuda VERSION] [--skip-examples] [--yes]
        $0 --uninstall --tool <tool|all> [--yes]
 
-DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. All tools are bundled — no git clones needed.
+DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstream on first install.
 
   --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
   --tools-dir   Path to pre-cached resources (AF2 weights, ARM64 binaries).
@@ -102,7 +107,7 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. All tools are bundled — no 
                 Do not prompt to run bundled examples after install.
   --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
   --uninstall   Remove conda envs, venvs, and shortcuts for selected tool(s).
-                Never removes runs/, configs, log files, or bundled source dirs.
+                Never removes runs/, configs, or log files.
 EOF
             exit 0
             ;;
@@ -506,14 +511,38 @@ install_bindcraft() {
     print_step "Installing BindCraft (aarch64 / CUDA ${CUDA_VERSION})"
     ensure_conda_in_path
 
-    [[ -d "${BINDCRAFT_DIR}" ]] \
-        || { print_fail "BindCraft not found at ${BINDCRAFT_DIR}"; return 1; }
-    print_ok "BindCraft source: ${BINDCRAFT_DIR}"
+    # Clone if missing (matches x86_64 installer behavior)
+    print_step "Cloning BindCraft repository"
+    if [[ -d "${BINDCRAFT_DIR}" ]]; then
+        print_warn "Directory ${BINDCRAFT_DIR} already exists."
+        if confirm "Remove and reclone?"; then
+            rm -rf "${BINDCRAFT_DIR}" || { print_fail "Failed to remove ${BINDCRAFT_DIR}"; return 1; }
+        else
+            print_warn "Skipping reclone; using existing directory."
+        fi
+    fi
+    if [[ ! -d "${BINDCRAFT_DIR}" ]]; then
+        run_logged --retries 3 "Cloning BindCraft" \
+            git clone --depth 50 https://github.com/martinpacesa/BindCraft "${BINDCRAFT_DIR}" \
+            || { print_fail "Failed to clone BindCraft"; return 1; }
+        git -C "${BINDCRAFT_DIR}" checkout "${BINDCRAFT_COMMIT}" --quiet \
+            || print_warn "Could not pin BindCraft to ${BINDCRAFT_COMMIT} — using latest"
+    fi
 
     _fix_target_settings
     _install_bindcraft_binaries_aarch64
     _install_af2_params || return 1
     _fix_advanced_settings
+
+    # PyRosetta's pr.init() uses shlex.split() — paths with spaces must be quoted.
+    # Upstream bindcraft.py interpolates dalphaball_path unquoted into the init
+    # string. Wrapping in double quotes is safe because the f-string delimiter is
+    # single-quoted and shlex.split() honours double-quoted tokens.
+    local _bc_main="${BINDCRAFT_DIR}/bindcraft.py"
+    if [[ -f "${_bc_main}" ]] && grep -q 'dalphaball {advanced_settings' "${_bc_main}"; then
+        sed -i 's|dalphaball {advanced_settings\["dalphaball_path"\]}|dalphaball "{advanced_settings["dalphaball_path"]}"|' "${_bc_main}"
+        print_ok "Patched bindcraft.py: quoted dalphaball_path for shlex (spaces in path)"
+    fi
 
     if env_exists BindCraft; then
         print_warn "Conda environment 'BindCraft' already exists."
@@ -548,7 +577,9 @@ install_bindcraft() {
         || { print_fail "Failed to install BindCraft conda packages"; return 1; }
 
     # ── Step 2: JAX with CUDA 12 plugins (PyPI — aarch64 wheels exist here) ──
-    # jax-cuda12-plugin pulls in all nvidia-cuda-*-cu12 CUDA libraries automatically.
+    # jax-cuda12-plugin does NOT pull in cuDNN or the full CUDA runtime.
+    # nvidia-cudnn-cu12 needs libcudart.so.12 + friends at dlopen time, so we
+    # install the complete set of nvidia-cu12 runtime packages explicitly.
     # Pinned to 0.4.34 — tested working on DGX Spark (GH200, CUDA 12.1).
     print_step "Installing JAX 0.4.34 with CUDA 12 plugins (PyPI)"
     run_logged "Installing JAX + CUDA 12 plugins" \
@@ -559,6 +590,14 @@ install_bindcraft() {
             "jax-cuda12-pjrt==0.4.34" \
             "jax-cuda12-plugin==0.4.34" \
             "jaxlib==0.4.34" \
+            "nvidia-cudnn-cu12" \
+            "nvidia-cuda-runtime-cu12" \
+            "nvidia-cublas-cu12" \
+            "nvidia-cusolver-cu12" \
+            "nvidia-cusparse-cu12" \
+            "nvidia-cufft-cu12" \
+            "nvidia-cuda-nvrtc-cu12" \
+            "nvidia-nvjitlink-cu12" \
         || { print_fail "Failed to install JAX"; return 1; }
 
     # ── Step 3: ColabDesign and BindCraft Python dependencies ─────────────────
@@ -608,7 +647,11 @@ install_bindcraft() {
 _bindcraft_smoke_test() {
     smoke_test "colabdesign import" \
         "${CONDA_CMD}" run -n BindCraft \
-        python -c "from colabdesign import mk_af_model; print('OK')"
+        python -c "from colabdesign import mk_af_model; print('OK')" \
+        || return 1
+    smoke_test "JAX GPU matmul" \
+        "${CONDA_CMD}" run -n BindCraft \
+        python -c "import jax.numpy as jnp; print(jnp.dot(jnp.ones((2,2)), jnp.ones((2,2))))"
 }
 
 _write_bindcraft_shortcut() {
@@ -636,9 +679,23 @@ install_boltzgen() {
     print_step "Installing BoltzGen (aarch64)"
     ensure_conda_in_path
 
-    [[ -d "${BOLTZGEN_DIR}" ]] \
-        || { print_fail "BoltzGen not found at ${BOLTZGEN_DIR}"; return 1; }
-    print_ok "BoltzGen source: ${BOLTZGEN_DIR}"
+    # Clone if missing (matches x86_64 installer behavior)
+    print_step "Cloning BoltzGen repository"
+    if [[ -d "${BOLTZGEN_DIR}" ]]; then
+        print_warn "Directory ${BOLTZGEN_DIR} already exists."
+        if confirm "Remove and reclone?"; then
+            rm -rf "${BOLTZGEN_DIR}" || { print_fail "Failed to remove ${BOLTZGEN_DIR}"; return 1; }
+        else
+            print_warn "Skipping reclone; using existing directory."
+        fi
+    fi
+    if [[ ! -d "${BOLTZGEN_DIR}" ]]; then
+        run_logged --retries 3 "Cloning BoltzGen" \
+            git clone --depth 50 https://github.com/HannesStark/boltzgen "${BOLTZGEN_DIR}" \
+            || { print_fail "Failed to clone BoltzGen"; return 1; }
+        git -C "${BOLTZGEN_DIR}" checkout "${BOLTZGEN_COMMIT}" --quiet \
+            || print_warn "Could not pin BoltzGen to ${BOLTZGEN_COMMIT} — using latest"
+    fi
 
     if env_exists BoltzGen; then
         print_warn "Conda environment 'BoltzGen' already exists."
@@ -661,6 +718,9 @@ install_boltzgen() {
 
     # On aarch64 / DGX Spark (GB10), PyPI's default torch is CPU-only.
     # Use the cu130 wheel index (CUDA 13.0, Blackwell sm_121).
+    # Note: PyTorch emits a UserWarning about cuda capability 12.1 (GB10) not
+    # being in the native arch list — this is harmless. The cu130 build ships
+    # compute_120 PTX which JIT-compiles to sm_121 at runtime.
     run_logged "Installing PyTorch (aarch64, CUDA 13.0)" \
         "${CONDA_CMD}" run -n BoltzGen \
         pip install torch --index-url https://download.pytorch.org/whl/cu130 \
@@ -679,8 +739,29 @@ install_boltzgen() {
         pip install -e "${BOLTZGEN_DIR}" \
         || { print_fail "Failed to install BoltzGen package"; return 1; }
 
+    # BoltzGen pulls cuequivariance-ops-cu12 which needs libnvrtc.so.12, but the
+    # cu130 PyTorch ships CUDA 13 runtime only. Swap to the cu13 builds (same API).
+    run_logged "Swapping cuequivariance-ops to cu13 (matching CUDA 13 runtime)" \
+        "${CONDA_CMD}" run -n BoltzGen \
+        pip install cuequivariance-ops-cu13 cuequivariance-ops-torch-cu13 --force-reinstall --no-deps \
+        || print_warn "cuequivariance cu13 swap failed — kernels may fall back to Python"
+
+    # PyTorch DataLoader with num_workers>=1 deadlocks on aarch64/DGX Spark
+    # (futex_wait_queue in worker process). Setting the CLI default to 0 forces
+    # single-process data loading, which completes design in ~24 s per structure.
+    local _bg_cli="${BOLTZGEN_DIR}/src/boltzgen/cli/boltzgen.py"
+    if [[ -f "${_bg_cli}" ]]; then
+        sed -i '/"--num_workers"/,/default=/{s/default=1,/default=0,/}' "${_bg_cli}" \
+            && print_ok "Patched boltzgen CLI: num_workers default 1 → 0 (aarch64 deadlock fix)" \
+            || print_warn "Could not patch num_workers default"
+    fi
+
     smoke_test "boltzgen --help" \
         "${CONDA_CMD}" run -n BoltzGen boltzgen --help || return 1
+    smoke_test "PyTorch GPU matmul" \
+        "${CONDA_CMD}" run -n BoltzGen \
+        python -c "import torch; x=torch.randn(2,2,device='cuda'); print(x@x.T)" \
+        || return 1
 
     if [[ "${SKIP_EXAMPLES}" == false ]]; then
         print_step "BoltzGen example run"
@@ -741,9 +822,23 @@ _patch_mosaic_pyproject() {
 install_mosaic() {
     print_step "Installing Mosaic (aarch64 / CUDA ${CUDA_VERSION})"
 
-    [[ -d "${MOSAIC_DIR}" ]] \
-        || { print_fail "Mosaic not found at ${MOSAIC_DIR}"; return 1; }
-    print_ok "Mosaic source: ${MOSAIC_DIR}"
+    # Clone if missing (matches x86_64 installer behavior)
+    print_step "Cloning Mosaic repository"
+    if [[ -d "${MOSAIC_DIR}" ]]; then
+        print_warn "Directory ${MOSAIC_DIR} already exists."
+        if confirm "Remove and reclone?"; then
+            rm -rf "${MOSAIC_DIR}" || { print_fail "Failed to remove ${MOSAIC_DIR}"; return 1; }
+        else
+            print_warn "Skipping reclone; using existing directory."
+        fi
+    fi
+    if [[ ! -d "${MOSAIC_DIR}" ]]; then
+        run_logged --retries 3 "Cloning Mosaic" \
+            git clone --depth 50 https://github.com/escalante-bio/mosaic "${MOSAIC_DIR}" \
+            || { print_fail "Failed to clone Mosaic"; return 1; }
+        git -C "${MOSAIC_DIR}" checkout "${MOSAIC_COMMIT}" --quiet \
+            || print_warn "Could not pin Mosaic to ${MOSAIC_COMMIT} — using latest"
+    fi
 
     if ! command -v uv &>/dev/null; then
         print_warn "uv not found — installing via official installer"
@@ -849,7 +944,7 @@ install_evaluator() {
     # Install binder-compare into Mosaic venv (Boltz-2 step)
     print_step "Installing binder-compare into Mosaic venv"
     run_logged "pip install binder-compare into Mosaic venv" \
-        "${MOSAIC_VENV}/bin/pip" install -q -e "${EVALUATOR_DIR}[boltz2]" \
+        uv pip install --python "${MOSAIC_VENV}/bin/python" -q -e "${EVALUATOR_DIR}[boltz2]" \
         || { print_fail "Failed to install binder-compare into Mosaic venv"; return 1; }
 
     # Save the venv path so evaluate.sh can find it
@@ -927,16 +1022,22 @@ uninstall_tool() {
             env_exists BindCraft && run_logged "Removing BindCraft conda env" \
                 "${CONDA_CMD}" env remove -n BindCraft -y
             rm -f "${SHORTCUTS_DIR}/bindcraft"
-            # aarch64: bundled source dir is NOT removed
-            print_ok "BindCraft uninstalled (source dir preserved)"
+            if [[ -d "${BINDCRAFT_DIR}" ]]; then
+                rm -rf "${BINDCRAFT_DIR}"
+                print_ok "Removed ${BINDCRAFT_DIR}"
+            fi
+            print_ok "BindCraft uninstalled"
             ;;
         boltzgen)
             print_step "Uninstalling BoltzGen"
             env_exists BoltzGen && run_logged "Removing BoltzGen conda env" \
                 "${CONDA_CMD}" env remove -n BoltzGen -y
             rm -f "${SHORTCUTS_DIR}/boltzgen"
-            # aarch64: bundled source dir is NOT removed
-            print_ok "BoltzGen uninstalled (source dir preserved)"
+            if [[ -d "${BOLTZGEN_DIR}" ]]; then
+                rm -rf "${BOLTZGEN_DIR}"
+                print_ok "Removed ${BOLTZGEN_DIR}"
+            fi
+            print_ok "BoltzGen uninstalled"
             ;;
         mosaic)
             print_step "Uninstalling Mosaic"
@@ -945,8 +1046,11 @@ uninstall_tool() {
                 print_ok "Removed Mosaic .venv"
             fi
             rm -f "${SHORTCUTS_DIR}/mosaic"
-            # aarch64: bundled source dir is NOT removed
-            print_ok "Mosaic uninstalled (source dir preserved)"
+            if [[ -d "${MOSAIC_DIR}" ]]; then
+                rm -rf "${MOSAIC_DIR}"
+                print_ok "Removed ${MOSAIC_DIR}"
+            fi
+            print_ok "Mosaic uninstalled"
             ;;
         evaluator)
             print_step "Uninstalling Evaluator"
@@ -994,7 +1098,7 @@ main() {
         echo ""
         echo -e "${BOLD}=== Uninstall Mode ===${RESET}"
         echo -e "This removes conda envs, venvs, and shortcuts."
-        echo -e "User data (runs/, configs, logs) and bundled source dirs are ${GREEN}preserved${RESET}."
+        echo -e "User data (runs/, configs, logs) is ${GREEN}preserved${RESET}."
         confirm "Proceed with uninstall?" || { echo "Aborted."; exit 0; }
 
         local failed_uninstalls=()
