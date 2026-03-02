@@ -96,7 +96,7 @@ def run_af2_refold(
         target_pdb_path=str(target_pdb_path),
         output_dir=str(output_dir),
         csv_path=str(output_csv),
-        models=models if models is not None else [1],
+        models=models if models is not None else [0],
         num_recycles=num_recycles,
     )
     print(f"[af2] Results → {output_csv}")
