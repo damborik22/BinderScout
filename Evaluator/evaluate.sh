@@ -144,6 +144,7 @@ else
         --sequences  "$SEQUENCES" \
         --target-pdb "$TARGET_PDB" \
         -o           "$AF2_CSV" \
+        --output-dir "$OUTPUT/refold_af2" \
         "${AF2_EXTRA_FLAGS[@]}"
 fi
 

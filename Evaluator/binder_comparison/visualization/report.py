@@ -32,18 +32,18 @@ _HTML_TEMPLATE = """\
 <title>Binder Comparison Report</title>
 <style>
   body {{ font-family: 'Segoe UI', sans-serif; margin: 2em; background: #f8f9fa; color: #333; }}
-  h1 {{ color: #1a237e; }}
-  h2 {{ color: #283593; margin-top: 2em; border-bottom: 2px solid #c5cae9; padding-bottom: 4px; }}
-  table {{ border-collapse: collapse; width: 100%; font-size: 0.85em; margin-bottom: 1em; }}
+  h1 {{ color: #1a5276; }}
+  h2 {{ color: #1a5276; margin-top: 2em; border-bottom: 2px solid #CFE6F6; padding-bottom: 4px; }}
+  table {{ border-collapse: collapse; width: auto; font-size: 0.85em; margin-bottom: 1em; }}
   th {{
-    background: #3f51b5; color: white; padding: 6px 10px;
-    text-align: left; white-space: nowrap;
+    background: #1a5276; color: white; padding: 6px 8px;
+    text-align: left; white-space: normal; min-width: 3em;
     position: sticky; top: 0; z-index: 2;
   }}
-  td {{ padding: 5px 10px; border-bottom: 1px solid #e0e0e0; white-space: nowrap; }}
+  td {{ padding: 5px 8px; border-bottom: 1px solid #e0e0e0; white-space: nowrap; }}
   td.num {{ text-align: right; font-variant-numeric: tabular-nums; }}
-  tr:nth-child(even) {{ background: #e8eaf6; }}
-  tr:hover {{ background: #c5cae9; }}
+  tr:nth-child(even) {{ background: #EBF5FB; }}
+  tr:hover {{ background: #CFE6F6; }}
   .tool-bindcraft {{ color: #1565C0; font-weight: bold; }}
   .tool-boltzgen  {{ color: #E65100; font-weight: bold; }}
   .tool-mosaic    {{ color: #2E7D32; font-weight: bold; }}
@@ -51,7 +51,7 @@ _HTML_TEMPLATE = """\
   .stat-table td {{ text-align: right; font-variant-numeric: tabular-nums; }}
   .stat-table th:first-child, .stat-table td:first-child {{ text-align: left; white-space: nowrap; }}
   img {{ max-width: 100%; margin: 1em 0; border: 1px solid #ccc; border-radius: 4px; }}
-  details summary {{ cursor: pointer; color: #3f51b5; font-weight: bold; margin-top: 1em; }}
+  details summary {{ cursor: pointer; color: #1a5276; font-weight: bold; margin-top: 1em; }}
   .metric-good {{ color: #2e7d32; }}
   .metric-bad  {{ color: #c62828; }}
   .weights {{ background: #fff3e0; border: 1px solid #ffb74d; padding: 0.8em 1.2em;
@@ -117,7 +117,7 @@ _HTML_TEMPLATE = """\
 
 
 def _compute_af2_boltz2_r(df: pd.DataFrame) -> dict[str, float | int]:
-    """Compute Pearson r between Boltz-2 and AF2 ipSAE_min (primary metric)."""
+    """Compute Pearson r and systematic bias between Boltz-2 and AF2 metrics."""
     import numpy as np
 
     result: dict[str, float | int] = {}
@@ -128,9 +128,14 @@ def _compute_af2_boltz2_r(df: pd.DataFrame) -> dict[str, float | int]:
             mask = b.notna() & a.notna()
             n = int(mask.sum())
             if n > 2:
-                r = float(np.corrcoef(b[mask], a[mask])[0, 1])
+                bv, av = b[mask], a[mask]
+                r = float(np.corrcoef(bv, av)[0, 1])
                 result[f"{b_col}_vs_{a_col}"] = r
                 result[f"{b_col}_vs_{a_col}_n"] = n
+                # Systematic bias: mean difference and mean absolute error
+                result[f"{b_col}_mean"] = float(bv.mean())
+                result[f"{a_col}_mean"] = float(av.mean())
+                result[f"{b_col}_vs_{a_col}_mae"] = float((bv - av).abs().mean())
     return result
 
 
@@ -144,7 +149,7 @@ def _correlation_callout_html(corr: dict) -> str:
     r_iptm = corr.get("iptm_vs_af2_iptm")
     n_iptm = corr.get("iptm_vs_af2_iptm_n", 0)
 
-    # Pick the most impressive r value for the headline
+    # Pick the most representative r value for the headline
     headline_r = None
     if r_ipsae is not None:
         headline_r = r_ipsae
@@ -156,23 +161,72 @@ def _correlation_callout_html(corr: dict) -> str:
 
     strength = "strong" if abs(headline_r) >= 0.7 else ("moderate" if abs(headline_r) >= 0.5 else "weak")
 
+    # Headline reflects the actual data
+    if strength == "strong":
+        headline_desc = "good rank-order agreement between the two predictors."
+    elif strength == "moderate":
+        headline_desc = "moderate rank-order correlation; absolute values may differ substantially."
+    else:
+        headline_desc = "weak correlation; the two predictors disagree on binder ranking."
+
+    # Detect systematic bias
+    bias_notes = []
+    for b_col, a_col, label in [
+        ("iptm", "af2_iptm", "ipTM"),
+        ("ipsae_min", "af2_ipsae_min", "ipSAE_min"),
+    ]:
+        b_mean = corr.get(f"{b_col}_mean")
+        a_mean = corr.get(f"{a_col}_mean")
+        mae = corr.get(f"{b_col}_vs_{a_col}_mae")
+        if b_mean is not None and a_mean is not None:
+            diff = b_mean - a_mean
+            if abs(diff) > 0.15:
+                higher = "Boltz-2" if diff > 0 else "AF2"
+                bias_notes.append(
+                    f"{label}: {higher} scores systematically higher "
+                    f"(Boltz-2 mean={b_mean:.3f}, AF2 mean={a_mean:.3f}, MAE={mae:.3f})"
+                )
+
+    # Correlation color: green for strong, amber for moderate, red for weak
+    r_colors = {"strong": "#1b5e20", "moderate": "#e65100", "weak": "#c62828"}
+    r_color = r_colors[strength]
+
     lines = []
     if r_iptm is not None:
+        s1 = "strong" if abs(r_iptm) >= 0.7 else ("moderate" if abs(r_iptm) >= 0.5 else "weak")
         lines.append(
-            f"<strong>ipTM ↑ (primary):</strong> Boltz-2 vs AF2 Pearson r = "
-            f"<strong style='font-size:1.25em; color:#1b5e20;'>{r_iptm:+.3f}</strong> "
-            f"(n = {n_iptm}) — {strength} agreement between two completely independent predictors."
+            f"<strong>ipTM:</strong> Boltz-2 vs AF2 Pearson r = "
+            f"<strong style='font-size:1.25em; color:{r_color};'>{r_iptm:+.3f}</strong> "
+            f"(n = {n_iptm}) — {s1} rank-order correlation."
         )
     if r_ipsae is not None:
         s2 = "strong" if abs(r_ipsae) >= 0.7 else ("moderate" if abs(r_ipsae) >= 0.5 else "weak")
-        lines.append(f"<strong>ipSAE_min ↑:</strong> r = {r_ipsae:+.3f} (n = {n_ipsae}) — {s2}")
+        lines.append(f"<strong>ipSAE_min:</strong> r = {r_ipsae:+.3f} (n = {n_ipsae}) — {s2}")
+
+    if bias_notes:
+        lines.append(
+            "<br><em style='color:#c62828;'>Systematic bias detected:</em> "
+            + "; ".join(bias_notes)
+            + ".<br><small>Note: AF2 (ColabDesign, single model, 3 recycles) is typically stricter "
+            "than Boltz-2 for de novo designs. Large absolute differences are common and do not "
+            "necessarily indicate errors.</small>"
+        )
+
+    # Callout style: green for strong, amber for moderate, muted for weak
+    if strength == "strong":
+        bg, border = "#e8f5e9", "#2e7d32"
+    elif strength == "moderate":
+        bg, border = "#fff8e1", "#f57f17"
+    else:
+        bg, border = "#fbe9e7", "#c62828"
 
     inner = "<br>".join(lines)
     return (
-        f'<div class="callout">'
+        f'<div style="background:{bg}; border-left:5px solid {border}; '
+        f'padding:0.8em 1.2em; border-radius:4px; margin:1em 0; font-size:0.95em;">'
         f'<p style="margin:0 0 0.4em 0; font-size:1.05em;">&#x1F4CA;&nbsp;'
-        f"<strong>Boltz-2 / AF2 Model Agreement</strong>&nbsp;"
-        f"— two independent structure predictors strongly agree on binder quality.</p>"
+        f"<strong>Boltz-2 / AF2 Cross-Validation</strong>&nbsp;"
+        f"— {headline_desc}</p>"
         f"<p style='margin:0;'>{inner}</p>"
         f"</div>"
     )
@@ -280,11 +334,9 @@ def _select_display_cols(df: pd.DataFrame) -> list[str]:
         "source_tool",
         "quality_tier",
         "ipsae_min",
-        "ipsae_min_aux",
-        "boltz_pae_ipsae_min",
         "af2_ipsae_min",
-        "ipsae_valid",
         "iptm",
+        "af2_iptm",
         "ipae",
         "plddt_binder_mean",
         "plddt_binder_min",
@@ -384,9 +436,16 @@ def _df_to_html(
             return f"<td{cls}>—</td>"
         if isinstance(val, float):
             return f"<td{cls}>{val:.4f}</td>"
+        # Truncate long strings like sequences
+        if isinstance(val, str) and len(val) > 20 and col in ("sequence", "target_sequence"):
+            return f'<td title="{val}">{val[:17]}…</td>'
         return f"<td{cls}>{val}</td>"
 
-    header = "<tr>" + "".join(f"<th>{_col_header(c)}</th>" for c in df.columns) + "</tr>"
+    header = "<tr>" + "".join(
+        f'<th style="text-align:right">{_col_header(c)}</th>' if c in numeric_cols
+        else f"<th>{_col_header(c)}</th>"
+        for c in df.columns
+    ) + "</tr>"
 
     rows = []
     for _, row in df.iterrows():
