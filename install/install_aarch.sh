@@ -31,7 +31,7 @@ ARCH="$(uname -m)"     # expected: aarch64
 CUDA_VERSION="13.0"    # DGX Spark GB10 (Blackwell, sm_121)
 
 # Pre-cached resources: two levels up → Documents/OLD/BindMaster/bindcraft-tools
-_default_tools="$(cd "${BINDMASTER_DIR}" && cd ../../OLD/BindMaster/bindcraft-tools 2>/dev/null && pwd || true)"
+_default_tools="$(cd "${BINDMASTER_DIR}" && cd ../../Documents/OLD/BindMaster/bindcraft-tools 2>/dev/null && pwd || true)"
 TOOLS_DIR="${_default_tools}"
 
 CONDA_CMD=""   # set by detect_conda: full path to mamba (preferred) or conda
@@ -211,7 +211,7 @@ smoke_test() {
     fi
 }
 
-env_exists() { "${CONDA_CMD}" env list | grep -qw "$1"; }
+env_exists() { "${CONDA_CMD}" env list | grep -qE "^\s+$1\s"; }
 
 ensure_conda_in_path() {
     export PATH="${CONDA_BASE}/bin:${PATH}"
@@ -534,14 +534,26 @@ install_bindcraft() {
     _install_af2_params || return 1
     _fix_advanced_settings
 
-    # PyRosetta's pr.init() uses shlex.split() — paths with spaces must be quoted.
-    # Upstream bindcraft.py interpolates dalphaball_path unquoted into the init
-    # string. Wrapping in double quotes is safe because the f-string delimiter is
-    # single-quoted and shlex.split() honours double-quoted tokens.
-    local _bc_main="${BINDCRAFT_DIR}/bindcraft.py"
-    if [[ -f "${_bc_main}" ]] && grep -q 'dalphaball {advanced_settings' "${_bc_main}"; then
-        sed -i 's|dalphaball {advanced_settings\["dalphaball_path"\]}|dalphaball "{advanced_settings["dalphaball_path"]}"|' "${_bc_main}"
-        print_ok "Patched bindcraft.py: quoted dalphaball_path for shlex (spaces in path)"
+    # PyRosetta's pr.init() passes paths through shlex.split() then into
+    # Rosetta's C++ option parser, which chokes on spaces even when the token
+    # is correctly quoted. Work around by creating space-free symlinks.
+    if [[ "${BINDCRAFT_DIR}" == *" "* ]]; then
+        local _link_dir="/tmp/bindmaster_bindcraft_bin"
+        mkdir -p "${_link_dir}"
+        local _dab="${BINDCRAFT_DIR}/functions/DAlphaBall.gcc"
+        local _dssp="${BINDCRAFT_DIR}/functions/dssp"
+        [[ -f "${_dab}" ]]  && ln -sf "${_dab}"  "${_link_dir}/DAlphaBall.gcc"
+        [[ -f "${_dssp}" ]] && ln -sf "${_dssp}" "${_link_dir}/dssp"
+        # Re-patch settings JSONs to use space-free symlink paths
+        local _adv="${BINDCRAFT_DIR}/settings_advanced"
+        if [[ -d "${_adv}" ]]; then
+            for f in "${_adv}"/*.json; do
+                [[ -f "$f" ]] || continue
+                sed -i "s|${BINDCRAFT_DIR}/functions/DAlphaBall.gcc|${_link_dir}/DAlphaBall.gcc|g" "$f"
+                sed -i "s|${BINDCRAFT_DIR}/functions/dssp|${_link_dir}/dssp|g" "$f"
+            done
+        fi
+        print_ok "Created space-free symlinks in ${_link_dir} (PyRosetta workaround)"
     fi
 
     if env_exists BindCraft; then
@@ -605,7 +617,7 @@ install_bindcraft() {
     run_logged "Installing ColabDesign" \
         "${CONDA_CMD}" run -n BindCraft \
         pip install \
-            "colabdesign==1.1.1" \
+            "colabdesign @ git+https://github.com/sokrypton/ColabDesign.git" \
             "chex==0.1.90" \
             "dm-haiku==0.0.15" \
             "optax==0.2.5" \
@@ -975,7 +987,7 @@ install_evaluator() {
             || { print_fail "Failed to create binder-eval-af2 conda env"; return 1; }
     fi
     run_logged "Installing ColabDesign + binder-compare into binder-eval-af2" \
-        "${CONDA_CMD}" run -n binder-eval-af2 pip install -q colabdesign==1.1.1 -e "${EVALUATOR_DIR}[af2]" \
+        "${CONDA_CMD}" run -n binder-eval-af2 pip install -q "colabdesign @ git+https://github.com/sokrypton/ColabDesign.git" -e "${EVALUATOR_DIR}[af2]" \
         || { print_fail "Failed to install packages into binder-eval-af2"; return 1; }
 
     # JAX CUDA plugin — ColabDesign/AF2 uses JAX; on aarch64 the default jaxlib is CPU-only.
