@@ -77,6 +77,13 @@ fi
 
 echo "      Found Mosaic venv: $MOSAIC_VENV"
 
+# Copy refold_Version6.py (AF2 refolding module) into Mosaic root
+MOSAIC_ROOT="$(dirname "$MOSAIC_VENV")"
+if [[ -f "$REPO_DIR/scripts/refold_Version6.py" ]]; then
+    cp "$REPO_DIR/scripts/refold_Version6.py" "$MOSAIC_ROOT/refold_Version6.py"
+    echo "      Copied refold_Version6.py → $MOSAIC_ROOT/"
+fi
+
 # Install binder-compare into the Mosaic venv
 echo "      Installing binder-compare into Mosaic venv..."
 # shellcheck disable=SC1087
