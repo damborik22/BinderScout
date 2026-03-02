@@ -64,7 +64,7 @@ def add_parser(subparsers) -> None:
         metavar="DIR",
         help="Directory for structure PDB files (default: ./refold_af2)",
     )
-    p.add_argument("--models", default="1", metavar="N[,N]", help="Comma-separated AF2 model indices (default: 1)")
+    p.add_argument("--models", default="0", metavar="N[,N]", help="Comma-separated AF2 model indices (default: 0)")
     p.add_argument("--num-recycles", type=int, default=3, metavar="N", help="AF2 recycling iterations (default: 3)")
     p.add_argument(
         "--mosaic-path", default=None, metavar="DIR", help="Path to Mosaic repo root (auto-detected if not set)"
