@@ -80,8 +80,12 @@ def run_af2_refold(
         if not hasattr(jax, old_name):
             setattr(jax, old_name, getattr(jax.tree, new_name))
 
+    # Import refold_Version6: try Mosaic root first, fall back to bundled copy
+    # in Evaluator/scripts/ (version-controlled).
     mosaic_root = _resolve_mosaic_path(mosaic_path)
+    scripts_dir = str(Path(__file__).resolve().parent.parent.parent / "scripts")
     sys.path.insert(0, str(mosaic_root))
+    sys.path.insert(1, scripts_dir)
     from refold_Version6 import refold_batch_af2
 
     # Filter out already-completed binders if resuming.
