@@ -1122,7 +1122,7 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         "# Step 2: Run evaluation pipeline",
         f'echo "=== Running Evaluator for {cfg["name"]} ==="',
         'bash "$EVAL_SCRIPT" \\',
-        f'    --sequences "$SEQUENCES" \\',
+        '    --sequences "$SEQUENCES" \\',
         f'    --target-pdb "{target_pdb}" \\',
         f'    --target-seq "{target_seq}" \\',
         '    --output "$OUTPUT_DIR" \\',
