@@ -441,11 +441,14 @@ def _df_to_html(
             return f'<td title="{val}">{val[:17]}…</td>'
         return f"<td{cls}>{val}</td>"
 
-    header = "<tr>" + "".join(
-        f'<th style="text-align:right">{_col_header(c)}</th>' if c in numeric_cols
-        else f"<th>{_col_header(c)}</th>"
-        for c in df.columns
-    ) + "</tr>"
+    header = (
+        "<tr>"
+        + "".join(
+            f'<th style="text-align:right">{_col_header(c)}</th>' if c in numeric_cols else f"<th>{_col_header(c)}</th>"
+            for c in df.columns
+        )
+        + "</tr>"
+    )
 
     rows = []
     for _, row in df.iterrows():
