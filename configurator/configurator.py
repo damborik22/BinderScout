@@ -59,7 +59,13 @@ def _find_conda_base() -> Path | None:
                 timeout=10,
             )
             if result.returncode == 0 and result.stdout.strip():
-                return Path(result.stdout.strip())
+                base = result.stdout.strip()
+                # mamba 2.x outputs "base environment : /path" instead of just "/path"
+                if ":" in base:
+                    base = base.rsplit(":", 1)[-1].strip()
+                p = Path(base)
+                if p.is_dir():
+                    return p
         except (FileNotFoundError, subprocess.TimeoutExpired):
             continue
     for candidate in [
@@ -849,20 +855,20 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
     content = MOSAIC_HALLUCINATE_SRC.read_text()
 
     old_block = (
-        'TARGET_SEQUENCE = "REPLACE_ME"   # target protein sequence\n'
-        "N_DESIGNS       = 100            # Stage 1: how many designs to generate per length\n"
-        "TOP_K           = 5              # Stage 2: how many top designs to refold and export PDB\n"
-        "MIN_LENGTH      = 65             # minimum binder length (aa)\n"
-        "MAX_LENGTH      = 100            # maximum binder length (aa)\n"
-        "LENGTH_STEP     = 5              # step between scanned lengths; set MIN=MAX for a single length"
+        'TARGET_SEQUENCE = "REPLACE_ME"  # target protein sequence\n'
+        "N_DESIGNS = 100  # Stage 1: how many designs to generate per length\n"
+        "TOP_K = 5  # Stage 2: how many top designs to refold and export PDB\n"
+        "MIN_LENGTH = 65  # minimum binder length (aa)\n"
+        "MAX_LENGTH = 100  # maximum binder length (aa)\n"
+        "LENGTH_STEP = 5  # step between scanned lengths; set MIN=MAX for a single length"
     )
     new_block = (
-        f"TARGET_SEQUENCE = {cfg['target_sequence']!r}   # target protein sequence\n"
-        f"N_DESIGNS       = {cfg.get('mosaic_n_designs', 100):<6}           # Stage 1: how many designs to generate per length\n"
-        f"TOP_K           = {cfg.get('mosaic_top_k', cfg['n_designs']):<6}           # Stage 2: how many top designs to refold and export PDB\n"
-        f"MIN_LENGTH      = {cfg.get('mosaic_min_length', cfg['min_length']):<6}           # minimum binder length (aa)\n"
-        f"MAX_LENGTH      = {cfg.get('mosaic_max_length', cfg['max_length']):<6}           # maximum binder length (aa)\n"
-        f"LENGTH_STEP     = {cfg.get('mosaic_length_step', 5):<6}           # step between scanned lengths; set MIN=MAX for a single length"
+        f"TARGET_SEQUENCE = {cfg['target_sequence']!r}  # target protein sequence\n"
+        f"N_DESIGNS = {cfg.get('mosaic_n_designs', 100)}  # Stage 1: how many designs to generate per length\n"
+        f"TOP_K = {cfg.get('mosaic_top_k', cfg['n_designs'])}  # Stage 2: how many top designs to refold and export PDB\n"
+        f"MIN_LENGTH = {cfg.get('mosaic_min_length', cfg['min_length'])}  # minimum binder length (aa)\n"
+        f"MAX_LENGTH = {cfg.get('mosaic_max_length', cfg['max_length'])}  # maximum binder length (aa)\n"
+        f"LENGTH_STEP = {cfg.get('mosaic_length_step', 5)}  # step between scanned lengths; set MIN=MAX for a single length"
     )
 
     if old_block in content:
@@ -1487,7 +1493,7 @@ def wizard():
         cfg["pxdesign_output_dir"] = ask(
             "  PXDesign output directory",
             default="",
-            validator=lambda x: (True, "") if x.strip() else (False, "path required"),
+            validator=lambda x: True if x.strip() else "path required",
         )
 
     # ── Step 7: Preview ───────────────────────────────────────────────────────
