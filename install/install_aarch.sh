@@ -687,6 +687,45 @@ EOF
 
 # ─── BoltzGen ─────────────────────────────────────────────────────────────────
 
+# Fix bare open().write() → context-managed writes in BoltzGen's writer.py.
+# Prevents ResourceWarning: unclosed file handles.
+_patch_boltzgen() {
+    local writer="${BOLTZGEN_DIR}/src/boltzgen/task/predict/writer.py"
+    [[ -f "${writer}" ]] || return 0
+    python3 - "${writer}" << 'PYEOF'
+import sys, re
+
+path = sys.argv[1]
+with open(path) as f:
+    src = f.read()
+original = src
+
+# Single-line: open(args).write(content)
+def fix_single(m):
+    ind, args, body = m.group(1), m.group(2), m.group(3)
+    return f"{ind}with open({args}) as _f:\n{ind}    _f.write({body})"
+src = re.sub(
+    r'^( +)open\((.+?)\)\.write\((.+)\)$',
+    fix_single, src, flags=re.MULTILINE)
+
+# Multi-line: open(args).write(\n...\nINDENT)
+def fix_multi(m):
+    ind, args, body = m.group(1), m.group(2), m.group(3)
+    body = "\n".join("    " + l for l in body.split("\n"))
+    return f"{ind}with open({args}) as _f:\n{ind}    _f.write(\n{body}\n{ind}    )"
+src = re.sub(
+    r'^( +)open\((.+?)\)\.write\(\n([\s\S]+?)\n\1\)',
+    fix_multi, src, flags=re.MULTILINE)
+
+if src != original:
+    with open(path, "w") as f:
+        f.write(src)
+    print("Patched writer.py: fixed unclosed file handles")
+else:
+    print("writer.py: already patched")
+PYEOF
+}
+
 install_boltzgen() {
     print_step "Installing BoltzGen (aarch64)"
     ensure_conda_in_path
@@ -708,6 +747,9 @@ install_boltzgen() {
         git -C "${BOLTZGEN_DIR}" checkout "${BOLTZGEN_COMMIT}" --quiet \
             || print_warn "Could not pin BoltzGen to ${BOLTZGEN_COMMIT} — using latest"
     fi
+
+    # Patch known issues in BoltzGen source
+    _patch_boltzgen
 
     if env_exists BoltzGen; then
         print_warn "Conda environment 'BoltzGen' already exists."
