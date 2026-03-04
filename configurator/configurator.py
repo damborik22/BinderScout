@@ -1069,6 +1069,8 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         design_dirs.append(("--boltzgen", str(run_dir / "boltzgen" / "outputs")))
     if tools_enabled.get("bindcraft"):
         design_dirs.append(("--bindcraft", str(run_dir / "bindcraft" / "outputs")))
+    if tools_enabled.get("pxdesign") and cfg.get("pxdesign_output_dir"):
+        design_dirs.append(("--pxdesign", cfg["pxdesign_output_dir"]))
 
     # Build the evaluate.sh invocation
     eval_sh = EVALUATOR_DIR / "evaluate.sh"
