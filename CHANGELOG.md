@@ -6,11 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] — Part H: Standalone installer (server-friendly)
+
+### Added
+- **Standalone mode**: installer auto-downloads Miniforge3 into `BindMaster/conda/` when system conda is unavailable or read-only (H1–H3)
+- `--standalone` flag to force local Miniforge install (H1)
+- `--system-conda` flag to opt out and use existing system conda (H1)
+- Local conda detection in all Evaluator shell scripts — `evaluate.sh`, `run.sh`, `install.sh` (H13–H15)
+- Local conda as first search entry in all generated run scripts from configurator (H12)
+- `PLAN_standalone_installer.md` — detailed implementation plan for Part H
+- `TODO_standalone_pack.md` — future plan for pre-packed distribution (Part I)
+
+### Changed
+- Shortcuts now write to `BindMaster/bin/` instead of `~/.local/bin/` (H4, H9)
+- `detect_conda()` rewritten with priority: local conda → writable system conda → auto-bootstrap (H3)
+- `_find_conda_base()` in configurator checks `BindMaster/conda/` first (H11)
+- `bindmaster.py` shortcut writes to `REPO/bin/` as primary, `~/.local/bin/` as non-fatal fallback (H9)
+- Uninstall offers to remove local Miniforge when all tools are uninstalled (H7)
+- Install summary now prints PATH instructions for `BindMaster/bin/` (H4)
+- All changes mirrored in `install_aarch.sh` for aarch64 / DGX Spark (H8)
+
+## [0.6.1] — Part G: Documentation & CI
+
 ### Added
 - GitHub Actions CI workflow — shellcheck, ruff, Docker build (G1)
 - README badges: CI status, license, Python version, platform (G2)
 - CONTRIBUTING.md with development setup and PR conventions (G3)
-- This CHANGELOG.md (G4)
+- CHANGELOG.md (G4)
 - Mermaid architecture diagram in README (G5)
 - Evaluator troubleshooting section with 7 common issues (G6)
 - `ruff.toml` configuration for Python linting and formatting (G1)

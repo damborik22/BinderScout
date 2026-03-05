@@ -116,6 +116,8 @@ Options:
 | `--tool all\|bindcraft\|boltzgen\|mosaic` | Which tool(s) to install. Omit for interactive menu. |
 | `--cuda VERSION` | CUDA version for conda package resolution (default: 12.4) |
 | `--skip-examples` | Do not prompt to run bundled examples after install |
+| `--standalone` | Force local Miniforge3 install (no system conda needed) |
+| `--system-conda` | Use existing system conda instead of local install |
 
 ### `bindmaster configure`
 
@@ -204,9 +206,9 @@ echo "MAEVKLSYVL..." | bindmaster evaluate --sequences - --refold 1
 ### Requirements
 
 - Linux with an NVIDIA GPU (CUDA driver ≥ 12.1)
-- Miniconda, Anaconda, or Miniforge installed
-- `git` available in PATH (or in conda base)
+- `git` and `curl` available in PATH
 - ~60 GB free disk space
+- Conda/Miniforge is **not required** — the installer downloads Miniforge3 automatically if needed
 
 ### What happens during install
 
@@ -215,7 +217,7 @@ Each tool goes through:
 2. **Environment** — conda env or uv venv created with packages (spinner + full log)
 3. **Smoke test** — minimal import or `--help` call
 4. **Example** (optional, skippable) — bundled example run
-5. **Shortcut** — launcher written to `~/.local/bin/`
+5. **Shortcut** — launcher written to `BindMaster/bin/`
 
 ### Non-interactive options
 
@@ -227,6 +229,24 @@ bash install/install.sh --tool all
 bash install/install.sh --skip-examples
 bash install/install.sh --cuda 12.1
 ```
+
+### Server / HPC installation (no admin required)
+
+BindMaster works fully standalone — no system conda, no admin, no writes outside the project directory:
+
+```bash
+git clone https://github.com/damborik22/BindMaster.git
+cd BindMaster
+python3 bindmaster.py install --tool all --yes
+
+# Add to PATH:
+export PATH="$(pwd)/bin:$PATH"
+echo 'export PATH="/path/to/BindMaster/bin:$PATH"' >> ~/.bashrc
+```
+
+The installer auto-detects if system conda is unavailable or read-only and downloads
+Miniforge3 into `BindMaster/conda/`. All environments and shortcuts stay inside the
+project directory. To remove everything: `rm -rf BindMaster/`.
 
 ---
 
@@ -257,7 +277,7 @@ Both branches: `bindmaster install` or `bash install/install.sh`.
 
 ## Shortcuts
 
-After installation, launchers are available in `~/.local/bin/`:
+After installation, launchers are available in `BindMaster/bin/`:
 
 ```bash
 bindmaster         # unified CLI (install / configure / evaluate)
@@ -313,6 +333,7 @@ bindmaster install --tool <toolname>
 
 **Checking what's installed**
 ```bash
-conda env list          # shows BindCraft and BoltzGen envs
-ls ~/.local/bin/        # shows shortcuts
+conda env list                    # shows BindCraft and BoltzGen envs
+ls BindMaster/bin/                # shows shortcuts
+ls BindMaster/conda/envs/         # shows local envs (standalone mode)
 ```

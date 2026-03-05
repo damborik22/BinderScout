@@ -19,16 +19,19 @@
 
 set -euo pipefail
 
-# Initialise conda so it is available in non-interactive shells
-_CONDA_INIT="${HOME}/miniforge3/etc/profile.d/conda.sh"
-if [[ -f "$_CONDA_INIT" ]]; then
+# Initialise conda — prefer local standalone install, then system locations
+_BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+for _conda_sh in \
+    "${_BINDMASTER_DIR}/conda/etc/profile.d/conda.sh" \
+    "${HOME}/miniforge3/etc/profile.d/conda.sh" \
+    "${HOME}/mambaforge/etc/profile.d/conda.sh" \
+    "${HOME}/miniconda3/etc/profile.d/conda.sh" \
+    "${HOME}/anaconda3/etc/profile.d/conda.sh" \
+    "/opt/conda/etc/profile.d/conda.sh" \
+    "/opt/miniforge3/etc/profile.d/conda.sh"; do
     # shellcheck source=/dev/null
-    source "$_CONDA_INIT"
-elif [[ -f "${HOME}/miniconda3/etc/profile.d/conda.sh" ]]; then
-    source "${HOME}/miniconda3/etc/profile.d/conda.sh"
-elif [[ -f "${HOME}/anaconda3/etc/profile.d/conda.sh" ]]; then
-    source "${HOME}/anaconda3/etc/profile.d/conda.sh"
-fi
+    [[ -f "$_conda_sh" ]] && { source "$_conda_sh"; break; }
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

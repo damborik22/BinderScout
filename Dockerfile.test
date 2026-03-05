@@ -51,3 +51,21 @@ FROM base AS test
 
 COPY . /workspace
 RUN bash install/install.sh --tool all --yes --skip-examples
+
+# ── Standalone test: no pre-installed conda, installs Miniforge locally ──────
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS standalone-test
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . /workspace
+WORKDIR /workspace
+
+# No conda pre-installed — standalone mode auto-downloads Miniforge3 into conda/
+RUN python3 bindmaster.py install --standalone --tool mosaic --yes --skip-examples \
+    && test -d conda/bin \
+    && test -f bin/mosaic \
+    && Mosaic/.venv/bin/python -c "import mosaic; print('OK')"
