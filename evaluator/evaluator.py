@@ -435,6 +435,65 @@ def _parse_bindcraft(run_dir: Path) -> list:
     return all_rows
 
 
+def _parse_pxdesign(run_dir: Path) -> list:
+    """Read PXDesign summary.csv from pxdesign/ or pxdesign/outputs/."""
+    candidates = [
+        run_dir / "pxdesign" / "outputs" / "summary.csv",
+        run_dir / "pxdesign" / "summary.csv",
+    ]
+    pxd_dir = run_dir / "pxdesign" / "outputs"
+    if pxd_dir.exists():
+        candidates.extend(sorted(pxd_dir.rglob("summary.csv")))
+    pxd_dir = run_dir / "pxdesign"
+    if pxd_dir.exists():
+        candidates.extend(sorted(pxd_dir.rglob("summary.csv")))
+
+    csv_path = None
+    for c in candidates:
+        if c.exists():
+            csv_path = c
+            break
+    if csv_path is None:
+        return []
+
+    rows = _read_csv(csv_path)
+    for row in rows:
+        row["source"] = "pxdesign"
+        row.setdefault("sequence", "")
+    if rows:
+        _print_ok(f"PXDesign: {len(rows)} designs from {csv_path.name}")
+    return rows
+
+
+def _parse_rfaa(run_dir: Path) -> list:
+    """Read RFAA + LigandMPNN output sequences.csv.
+
+    The RFAA pipeline produces backbone PDBs (stage 1) and then runs
+    LigandMPNN to design sequences (stage 2). The combined output is
+    collected in rfaa/sequences.csv.
+    """
+    csv_path = run_dir / "rfaa" / "sequences.csv"
+    if not csv_path.exists():
+        outputs_dir = run_dir / "rfaa" / "outputs"
+        if outputs_dir.exists():
+            pdb_count = len(list(outputs_dir.glob("*.pdb")))
+            if pdb_count:
+                _print_warn(
+                    f"RFAA: {pdb_count} backbone PDB(s) found but no sequences.csv. "
+                    "Run LigandMPNN first (included in run_rfaa.sh)."
+                )
+        return []
+
+    rows = _read_csv(csv_path)
+    for row in rows:
+        row["source"] = "rfaa"
+        row.setdefault("sequence", "")
+    rows = [r for r in rows if r.get("sequence")]
+    if rows:
+        _print_ok(f"RFAA: {len(rows)} sequences (via LigandMPNN)")
+    return rows
+
+
 # ─── Ranking ──────────────────────────────────────────────────────────────────
 
 
@@ -730,6 +789,8 @@ def main():
     all_rows.extend(_parse_mosaic(run_dir, top_only=not args.all_mosaic_designs))
     all_rows.extend(_parse_boltzgen(run_dir))
     all_rows.extend(_parse_bindcraft(run_dir))
+    all_rows.extend(_parse_pxdesign(run_dir))
+    all_rows.extend(_parse_rfaa(run_dir))
 
     if not all_rows:
         _print_warn("No design outputs found.")
@@ -737,6 +798,8 @@ def main():
         print(f"    {run_dir}/mosaic/designs.csv")
         print(f"    {run_dir}/boltzgen/outputs/*.csv")
         print(f"    {run_dir}/bindcraft/outputs/*.csv")
+        print(f"    {run_dir}/pxdesign/outputs/summary.csv (or pxdesign/summary.csv)")
+        print(f"    {run_dir}/rfaa/sequences.csv")
         sys.exit(1)
 
     _print_ok(f"Total designs loaded: {len(all_rows)}")

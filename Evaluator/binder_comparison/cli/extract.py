@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from ..core.schema import ExtractedBinder
-from ..extractors import BindCraftExtractor, BoltzGenExtractor, MosaicExtractor, PXDesignExtractor
+from ..extractors import BindCraftExtractor, BoltzGenExtractor, MosaicExtractor, PXDesignExtractor, RFAAExtractor
 from ..io.write import write_fasta
 
 
@@ -44,6 +44,12 @@ def run(args: argparse.Namespace) -> None:
     if args.pxdesign:
         print(f"[extract] PXDesign: {args.pxdesign}")
         extracted = PXDesignExtractor().extract(args.pxdesign)
+        print(f"  → {len(extracted)} sequences")
+        all_binders.extend(extracted)
+
+    if args.rfaa:
+        print(f"[extract] RFAA: {args.rfaa}")
+        extracted = RFAAExtractor().extract(args.rfaa)
         print(f"  → {len(extracted)} sequences")
         all_binders.extend(extracted)
 
@@ -88,6 +94,7 @@ def add_parser(subparsers) -> None:
     p.add_argument("--boltzgen", metavar="DIR", help="BoltzGen output directory")
     p.add_argument("--mosaic", metavar="DIR", help="Mosaic output directory (containing designs.csv)")
     p.add_argument("--pxdesign", metavar="DIR", help="PXDesign output directory (containing summary.csv)")
+    p.add_argument("--rfaa", metavar="DIR", help="RFAA output directory (containing sequences.csv)")
     p.add_argument("--output", "-o", required=True, metavar="FILE", help="Output FASTA path (e.g. sequences.fasta)")
     p.add_argument("--keep-duplicates", action="store_true", help="Do not deduplicate identical sequences across tools")
     p.add_argument(
