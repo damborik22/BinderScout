@@ -66,3 +66,48 @@
 - [x] G4.  Add CHANGELOG.md
 - [x] G5.  Add architecture diagram (Mermaid) in README — tool relationships and data flow
 - [x] G6.  Add troubleshooting section for Evaluator (AF2 weight paths, CUDA version mismatches)
+
+---
+
+## Part H: Standalone installer — local Miniforge (server-friendly)
+
+> Goal: BindMaster installs and runs entirely within its own directory.
+> No writes to system conda, no writes to ~/.local/bin, no root/admin needed.
+> Works on restricted HPC/shared servers where users cannot modify system packages.
+
+- [ ] H1.  `install.sh`: add `--standalone` / `--system-conda` flags + auto-detection logic
+- [ ] H2.  `install.sh`: add `install_local_conda()` — downloads + installs Miniforge3 into `BindMaster/conda/`
+- [ ] H3.  `install.sh`: modify `detect_conda()` — check local conda first, then system, auto-bootstrap if needed
+- [ ] H4.  `install.sh`: change `SHORTCUTS_DIR` from `~/.local/bin` to `BindMaster/bin/`
+- [ ] H5.  `install.sh`: ensure local conda is on PATH before calling BindCraft's `install_bindcraft.sh`
+- [ ] H6.  `install.sh`: update `ensure_conda_in_path()` to use local conda base
+- [ ] H7.  `install.sh`: update uninstall to handle local conda envs + local conda removal
+- [ ] H8.  `install_aarch.sh`: mirror all H1–H7 changes for aarch64
+- [ ] H9.  `bindmaster.py`: shortcut writes to `REPO/bin/` (fallback `~/.local/bin` if writable)
+- [ ] H10. `bindmaster.py`: detect local conda when resolving Mosaic venv path
+- [ ] H11. `configurator.py`: `_find_conda_base()` checks `BINDMASTER_DIR/conda/` first
+- [ ] H12. `configurator.py`: generated run scripts add local conda path as first entry in conda-search loop
+- [ ] H13. `Evaluator/evaluate.sh`: add local conda to conda init search
+- [ ] H14. `Evaluator/run.sh`: add local conda to conda init search
+- [ ] H15. `Evaluator/install.sh`: add local conda to conda init search
+- [ ] H16. `.gitignore`: add `conda/` and `bin/` entries
+- [ ] H17. Update CLAUDE.md: document standalone mode, local conda, new directory layout
+- [ ] H18. Update README.md: add "Server / HPC installation" section
+- [ ] H19. Update CHANGELOG.md
+- [ ] H20. CI: update Dockerfile.test to test standalone mode
+
+## Part I: Pre-packed standalone distribution (future)
+
+> Goal: Ship BindMaster as a single archive needing zero install on the target server.
+> Depends on Part H. Detailed plan in `TODO_standalone_pack.md`.
+
+- [ ] I1.  Add `conda-pack` dependency + verify env packing works
+- [ ] I2.  Create `pack/build_pack.sh` — build relocatable archive on dev machine
+- [ ] I3.  Create `pack/unpack.sh` — extract + fix paths on target server
+- [ ] I4.  Create `pack/manifest.py` — version/checksum metadata
+- [ ] I5.  Add `bindmaster pack` subcommand to CLI
+- [ ] I6.  Handle Mosaic uv venv relocation (shebang + pyvenv.cfg patching)
+- [ ] I7.  BoltzGen weights optional inclusion (`--include-boltzgen-weights`)
+- [ ] I8.  Platform build matrix (x86_64-cuda124, aarch64-cuda130)
+- [ ] I9.  Documentation: `docs/standalone_pack.md`
+- [ ] I10. CI/release: GitHub Actions build + publish to Releases

@@ -50,6 +50,10 @@ def print_fail(msg):
 
 def _find_conda_base() -> Path | None:
     """Find conda/mamba base directory. Prefers mamba (faster installs)."""
+    # Check local standalone conda first (BindMaster/conda/)
+    local_conda = Path(__file__).resolve().parent.parent / "conda"
+    if (local_conda / "etc" / "profile.d" / "conda.sh").exists():
+        return local_conda
     for cmd in ("mamba", "conda"):
         try:
             result = subprocess.run(
@@ -882,6 +886,7 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
 def write_run_bindcraft(path: Path, cfg: dict):
     run_dir = cfg["run_dir"]
     conda_base = str(CONDA_BASE) if CONDA_BASE else ""
+    bindmaster_dir = str(BINDMASTER_DIR)
     content = f"""\
 #!/usr/bin/env bash
 # Run BindCraft for {cfg["name"]}
@@ -898,6 +903,7 @@ ADVANCED="{run_dir}/bindcraft/advanced.json"
 set +u
 _conda_found=false
 for _conda_sh in \\
+    "{bindmaster_dir}/conda/etc/profile.d/conda.sh" \\
     "{conda_base}/etc/profile.d/conda.sh" \\
     "${{HOME}}/miniforge3/etc/profile.d/conda.sh" \\
     "${{HOME}}/mambaforge/etc/profile.d/conda.sh" \\
@@ -926,6 +932,7 @@ python -u ./bindcraft.py \\
 def write_run_boltzgen(path: Path, cfg: dict):
     run_dir = cfg["run_dir"]
     conda_base = str(CONDA_BASE) if CONDA_BASE else ""
+    bindmaster_dir = str(BINDMASTER_DIR)
     content = f"""\
 #!/usr/bin/env bash
 # Run BoltzGen for {cfg["name"]}
@@ -940,6 +947,7 @@ OUTPUT_DIR="{run_dir}/boltzgen/outputs"
 set +u
 _conda_found=false
 for _conda_sh in \\
+    "{bindmaster_dir}/conda/etc/profile.d/conda.sh" \\
     "{conda_base}/etc/profile.d/conda.sh" \\
     "${{HOME}}/miniforge3/etc/profile.d/conda.sh" \\
     "${{HOME}}/mambaforge/etc/profile.d/conda.sh" \\
@@ -1075,6 +1083,7 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     # Build the evaluate.sh invocation
     eval_sh = EVALUATOR_DIR / "evaluate.sh"
     conda_base = str(CONDA_BASE) if CONDA_BASE else ""
+    bindmaster_dir = str(BINDMASTER_DIR)
     lines = [
         "#!/usr/bin/env bash",
         f"# Run Evaluator for {cfg['name']}",
@@ -1085,6 +1094,7 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         "set +u",
         "_conda_found=false",
         "for _conda_sh in \\",
+        f'    "{bindmaster_dir}/conda/etc/profile.d/conda.sh" \\',
         f'    "{conda_base}/etc/profile.d/conda.sh" \\',
         '    "${HOME}/miniforge3/etc/profile.d/conda.sh" \\',
         '    "${HOME}/mambaforge/etc/profile.d/conda.sh" \\',

@@ -14,7 +14,8 @@
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SHORTCUTS_DIR="${HOME}/.local/bin"
+SHORTCUTS_DIR="${BINDMASTER_DIR}/bin"
+LOCAL_CONDA_DIR="${BINDMASTER_DIR}/conda"
 LOG_FILE="${BINDMASTER_DIR}/install_aarch.log"
 
 BINDCRAFT_DIR="${BINDMASTER_DIR}/BindCraft"
@@ -49,6 +50,7 @@ SKIP_EXAMPLES=false
 AUTO_YES=false
 UNINSTALL_MODE=false
 TOOL_SPECIFIED=false
+STANDALONE="auto"      # auto | true | false — controls local Miniforge install
 
 DO_BINDCRAFT=false
 DO_BOLTZGEN=false
@@ -88,6 +90,14 @@ while [[ $# -gt 0 ]]; do
             AUTO_YES=true
             shift
             ;;
+        --standalone)
+            STANDALONE=true
+            shift
+            ;;
+        --system-conda)
+            STANDALONE=false
+            shift
+            ;;
         --uninstall)
             UNINSTALL_MODE=true
             shift
@@ -106,6 +116,9 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
   --skip-examples
                 Do not prompt to run bundled examples after install.
   --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
+  --standalone  Force local Miniforge3 install into BindMaster/conda/ (server-friendly).
+  --system-conda
+                Use existing system conda (skip local Miniforge install).
   --uninstall   Remove conda envs, venvs, and shortcuts for selected tool(s).
                 Never removes runs/, configs, or log files.
 EOF
@@ -218,14 +231,59 @@ ensure_conda_in_path() {
     source "${CONDA_BASE}/etc/profile.d/conda.sh"
 }
 
+# install_local_conda
+# Downloads and installs Miniforge3 into LOCAL_CONDA_DIR (BindMaster/conda/).
+# Idempotent — skips if already installed.
+install_local_conda() {
+    if [[ -d "${LOCAL_CONDA_DIR}" && -x "${LOCAL_CONDA_DIR}/bin/conda" ]]; then
+        print_ok "Local Miniforge3 already installed at ${LOCAL_CONDA_DIR}"
+        CONDA_BASE="${LOCAL_CONDA_DIR}"
+        if [[ -x "${LOCAL_CONDA_DIR}/bin/mamba" ]]; then
+            CONDA_CMD="${LOCAL_CONDA_DIR}/bin/mamba"
+        else
+            CONDA_CMD="${LOCAL_CONDA_DIR}/bin/conda"
+        fi
+        return 0
+    fi
+
+    print_step "Installing local Miniforge3 into ${LOCAL_CONDA_DIR}"
+
+    local installer_url
+    if [[ "${ARCH}" == "aarch64" ]]; then
+        installer_url="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-aarch64.sh"
+    else
+        installer_url="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
+    fi
+
+    local installer_path
+    installer_path="$(mktemp /tmp/miniforge3-XXXXXXXX.sh)"
+
+    run_logged --retries 3 "Downloading Miniforge3 (~80 MB)" \
+        curl -fSL -o "${installer_path}" "${installer_url}" \
+        || { print_fail "Failed to download Miniforge3"; rm -f "${installer_path}"; return 1; }
+
+    run_logged "Installing Miniforge3 (batch mode)" \
+        bash "${installer_path}" -b -p "${LOCAL_CONDA_DIR}" \
+        || { print_fail "Miniforge3 installation failed"; rm -f "${installer_path}"; return 1; }
+
+    rm -f "${installer_path}"
+
+    CONDA_BASE="${LOCAL_CONDA_DIR}"
+    if [[ -x "${LOCAL_CONDA_DIR}/bin/mamba" ]]; then
+        CONDA_CMD="${LOCAL_CONDA_DIR}/bin/mamba"
+    else
+        CONDA_CMD="${LOCAL_CONDA_DIR}/bin/conda"
+    fi
+
+    print_ok "Miniforge3 installed at ${LOCAL_CONDA_DIR}"
+}
+
 # Finds conda/mamba and sets CONDA_BASE + CONDA_CMD.
-# Prefers mamba (faster installs).
+# Priority: local conda → system conda (if writable) → auto-install local.
 detect_conda() {
     _try_cmd() {
         local bin="$1"
         command -v "${bin}" &>/dev/null || return 1
-        # `mamba info --base` may output "base environment : /path" in some versions;
-        # extract the last path-like token regardless of format.
         local base; base=$(${bin} info --base 2>/dev/null | awk '/\// {print $NF}' | tail -1) || return 1
         [[ -n "${base}" ]] || return 1
         CONDA_BASE="${base}"
@@ -233,9 +291,28 @@ detect_conda() {
         return 0
     }
 
-    _try_cmd mamba && return 0
-    _try_cmd conda && return 0
+    # 1. Check for local (standalone) conda first
+    if [[ -x "${LOCAL_CONDA_DIR}/bin/conda" ]]; then
+        CONDA_BASE="${LOCAL_CONDA_DIR}"
+        if [[ -x "${LOCAL_CONDA_DIR}/bin/mamba" ]]; then
+            CONDA_CMD="${LOCAL_CONDA_DIR}/bin/mamba"
+        else
+            CONDA_CMD="${LOCAL_CONDA_DIR}/bin/conda"
+        fi
+        return 0
+    fi
 
+    # 2. If --standalone was explicitly requested, install local conda now
+    if [[ "${STANDALONE}" == "true" ]]; then
+        install_local_conda
+        return $?
+    fi
+
+    # 3. Try system conda/mamba on PATH
+    _try_cmd mamba && { _check_system_conda_writable && return 0; }
+    _try_cmd conda && { _check_system_conda_writable && return 0; }
+
+    # 4. Probe common install locations
     for candidate in \
         "$HOME/miniforge3" "$HOME/mambaforge" "$HOME/miniconda3" \
         "$HOME/anaconda3"  "$HOME/conda"      "/opt/conda" \
@@ -247,10 +324,34 @@ detect_conda() {
         else
             CONDA_CMD="${candidate}/bin/conda"
         fi
-        return 0
+        _check_system_conda_writable && return 0
     done
 
-    print_fail "Could not find conda or mamba. Install Miniforge first."
+    # 5. No usable conda found — install locally if allowed
+    if [[ "${STANDALONE}" != "false" ]]; then
+        print_warn "No writable conda found — installing local Miniforge3"
+        install_local_conda
+        return $?
+    fi
+
+    print_fail "Could not find a writable conda installation."
+    print_fail "Use --standalone to install Miniforge3 locally into ${LOCAL_CONDA_DIR}"
+    return 1
+}
+
+# _check_system_conda_writable
+_check_system_conda_writable() {
+    if [[ "${STANDALONE}" == "false" ]]; then
+        return 0
+    fi
+    local envs_dir="${CONDA_BASE}/envs"
+    if [[ -d "${envs_dir}" && -w "${envs_dir}" ]]; then
+        return 0
+    fi
+    if mkdir -p "${envs_dir}" 2>/dev/null && [[ -w "${envs_dir}" ]]; then
+        return 0
+    fi
+    print_warn "System conda at ${CONDA_BASE} — envs directory not writable"
     return 1
 }
 
@@ -510,6 +611,8 @@ _fix_advanced_settings() {
 install_bindcraft() {
     print_step "Installing BindCraft (aarch64 / CUDA ${CUDA_VERSION})"
     ensure_conda_in_path
+    # Ensure our conda is found first by BindCraft's own installer
+    export PATH="${CONDA_BASE}/bin:${PATH}"
 
     # Clone if missing (matches x86_64 installer behavior)
     print_step "Cloning BindCraft repository"
@@ -1128,13 +1231,16 @@ uninstall_tool() {
 main() {
     echo ""
     echo -e "${BOLD}=== BindMaster Installer — DGX Spark (aarch64) — $(date) ===${RESET}"
-    echo -e "Platform: ${ARCH} | CUDA: ${CUDA_VERSION} | Package manager: $(basename "${CONDA_CMD:-conda}")"
+    echo -e "Platform: ${ARCH} | CUDA: ${CUDA_VERSION} | Standalone: ${STANDALONE}"
 
     check_arch
     detect_conda || exit 1
     local _name _ver
     _name="$(basename "${CONDA_CMD}")"; _ver="$("${CONDA_CMD}" --version 2>/dev/null | awk '{print $2}')"
-    print_ok "${_name} ${_ver} found at: ${CONDA_BASE}"
+    print_ok "${_name} ${_ver} at: ${CONDA_BASE}"
+    if [[ "${CONDA_BASE}" == "${LOCAL_CONDA_DIR}" ]]; then
+        print_ok "Standalone mode — all environments local to ${BINDMASTER_DIR}"
+    fi
     check_tools_dir
 
     print_tool_status
@@ -1160,6 +1266,17 @@ main() {
         [[ "${DO_BOLTZGEN}"  == true ]] && { uninstall_tool boltzgen   || failed_uninstalls+=("BoltzGen");  }
         [[ "${DO_MOSAIC}"    == true ]] && { uninstall_tool mosaic     || failed_uninstalls+=("Mosaic");    }
         [[ "${DO_EVALUATOR}" == true ]] && { uninstall_tool evaluator  || failed_uninstalls+=("Evaluator"); }
+
+        # Offer to remove local Miniforge when all tools are uninstalled
+        if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
+              "${DO_MOSAIC}" == true && "${DO_EVALUATOR}" == true ]]; then
+            if [[ -d "${LOCAL_CONDA_DIR}" ]]; then
+                if confirm "Also remove local Miniforge3 installation (${LOCAL_CONDA_DIR})?"; then
+                    rm -rf "${LOCAL_CONDA_DIR}"
+                    print_ok "Removed local Miniforge3"
+                fi
+            fi
+        fi
 
         echo ""
         if [[ ${#failed_uninstalls[@]} -eq 0 ]]; then
@@ -1206,6 +1323,11 @@ main() {
     [[ "${DO_BOLTZGEN}"  == true ]] && echo -e "  ${GREEN}boltzgen${RESET}   — open BoltzGen shell"
     [[ "${DO_MOSAIC}"    == true ]] && echo -e "  ${GREEN}mosaic${RESET}     — open Mosaic shell"
     [[ "${DO_EVALUATOR}" == true ]] && echo -e "  ${GREEN}evaluate${RESET}   — launch evaluation wizard"
+    echo ""
+    echo -e "${BOLD}To use BindMaster, add to your PATH:${RESET}"
+    echo -e "  ${CYAN}export PATH=\"${SHORTCUTS_DIR}:\$PATH\"${RESET}"
+    echo -e "  ${CYAN}# For persistence, add to ~/.bashrc:${RESET}"
+    echo -e "  ${CYAN}echo 'export PATH=\"${SHORTCUTS_DIR}:\$PATH\"' >> ~/.bashrc${RESET}"
     echo ""; echo -e "Full log: ${LOG_FILE}"
 
     [[ ${#failed_tools[@]} -gt 0 ]] && exit 1 || exit 0

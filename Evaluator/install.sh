@@ -21,13 +21,18 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Initialise conda in this shell
-_CONDA_INIT="${HOME}/miniforge3/etc/profile.d/conda.sh"
-for _f in "$_CONDA_INIT" \
-           "${HOME}/miniconda3/etc/profile.d/conda.sh" \
-           "${HOME}/anaconda3/etc/profile.d/conda.sh"; do
+# Initialise conda — prefer local standalone install, then system locations
+_BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+for _conda_sh in \
+    "${_BINDMASTER_DIR}/conda/etc/profile.d/conda.sh" \
+    "${HOME}/miniforge3/etc/profile.d/conda.sh" \
+    "${HOME}/mambaforge/etc/profile.d/conda.sh" \
+    "${HOME}/miniconda3/etc/profile.d/conda.sh" \
+    "${HOME}/anaconda3/etc/profile.d/conda.sh" \
+    "/opt/conda/etc/profile.d/conda.sh" \
+    "/opt/miniforge3/etc/profile.d/conda.sh"; do
     # shellcheck disable=SC1090
-    [[ -f "$_f" ]] && { source "$_f"; break; }
+    [[ -f "$_conda_sh" ]] && { source "$_conda_sh"; break; }
 done
 
 echo "=== BindMaster Evaluator — install ==="
