@@ -56,6 +56,8 @@ def run(args: argparse.Namespace) -> None:
     if args.pxdesign:
         extract_cmd += ["--pxdesign", args.pxdesign]
     extract_cmd += ["--output", str(sequences_fasta)]
+    if getattr(args, "all_mosaic_designs", False):
+        extract_cmd += ["--all-mosaic-designs"]
 
     _run_step(extract_cmd, "extract")
 
@@ -210,4 +212,9 @@ def add_parser(subparsers) -> None:
         "--num-recycles", type=int, default=3, metavar="N", help="Recycling iterations for both engines (default: 3)"
     )
     p.add_argument("--mosaic-path", default=None, metavar="DIR", help="Mosaic repo path (auto-detected if not set)")
+    p.add_argument(
+        "--all-mosaic-designs",
+        action="store_true",
+        help="Include all Mosaic designs (default: only is_top=1 refolded designs)",
+    )
     p.set_defaults(func=run)
