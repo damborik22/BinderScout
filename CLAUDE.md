@@ -4,7 +4,7 @@
 
 BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. It wraps three independent design tools (BindCraft, BoltzGen, Mosaic) behind a single CLI (`bindmaster`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders.
 
-**Current status:** v0.6.0 (Part G complete). Active development on the `master` branch. The `aarch64` branch tracks DGX Spark / Grace-Hopper support and is periodically rebased from master.
+**Current status:** v0.7.0 (Part H complete). Active development on the `master` branch. The `aarch64` branch tracks DGX Spark / Grace-Hopper support and is periodically rebased from master.
 
 **Repository:** `github.com/damborik22/BindMaster`
 
@@ -37,6 +37,8 @@ BindMaster/
 ├── install/
 │   ├── install.sh             ← x86_64 installer (master branch)
 │   └── install_aarch.sh       ← aarch64 / DGX Spark installer
+├── conda/                     ← LOCAL Miniforge3 (standalone mode, gitignored)
+├── bin/                       ← LOCAL shortcuts (standalone mode, gitignored)
 ├── configurator/
 │   └── configurator.py        ← interactive 5-step setup wizard (~1700 lines)
 ├── evaluator/
@@ -82,6 +84,8 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `binder-eval-af2` | Evaluator | 3.10 | conda | AF2 refolding via ColabDesign |
 
 The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in their correct environment — `install` runs in bash, `configure` runs in system Python, `evaluate` runs in the Mosaic `.venv` Python.
+
+In **standalone mode** (`--standalone` or auto-detected), all conda environments live under `BindMaster/conda/envs/` instead of the system conda's envs directory. This requires zero system permissions.
 
 ### Machines and platforms
 
@@ -219,8 +223,9 @@ The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in t
 
 ### Active work and recent decisions
 
-- **Parts A–G complete** (see STAGES.md). Latest work was Part G (CI, badges, documentation).
+- **Parts A–H complete** (see STAGES.md). Latest work was Part H (standalone installer for server-friendly operation).
 - **Mosaic is_top filter** (`6bfbc4f`): Both `MosaicExtractor` and legacy `_parse_mosaic()` now default to extracting only `is_top=1` designs. `--all-mosaic-designs` flag added to `binder-compare extract`, `binder-compare run`, and `bindmaster evaluate`. The `REPLACE_ME` target_sequence placeholder is now guarded in the legacy evaluator's CSV fallback path.
+- **Standalone mode** (`Part H`): Installer auto-detects whether system conda is writable. If not, downloads Miniforge3 into `BindMaster/conda/` and creates all environments locally. Shortcuts go to `BindMaster/bin/` instead of `~/.local/bin/`. `--standalone` forces this; `--system-conda` opts out. All generated run scripts and Evaluator shell scripts search local conda first.
 - **Deferred items:**
   - F2: `--headless` mode for configurator (accept JSON config, skip prompts)
   - F6: Multi-chain binder support in BoltzGen YAML generation
@@ -245,10 +250,13 @@ The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in t
 git clone https://github.com/damborik22/BindMaster.git ~/BindMaster
 cd ~/BindMaster
 
-bindmaster install              # interactive menu
+bindmaster install              # interactive menu (auto-detects standalone mode)
 bindmaster configure            # interactive wizard
 bash runs/<name>/run_all.sh     # run all enabled tools
 bindmaster evaluate runs/<name> # rank and report
+
+# Add BindMaster/bin to PATH:
+export PATH="$(pwd)/bin:$PATH"
 ```
 
 ### Install
@@ -259,6 +267,8 @@ bindmaster install --tool all               # install everything
 bindmaster install --tool mosaic            # install one tool
 bindmaster install --tool all --yes --skip-examples  # non-interactive (CI)
 bindmaster install --uninstall --tool all   # remove envs + shortcuts (preserves runs/)
+bindmaster install --standalone --tool all    # force local Miniforge install
+bindmaster install --system-conda --tool all  # use existing system conda
 ```
 
 ### Configure
