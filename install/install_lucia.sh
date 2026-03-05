@@ -1,22 +1,1101 @@
 #!/bin/bash
-# BindMaster Installer — Lucia's custom profile
-# Installs BindCraft with conda env named "BindCraft_1" and venv mode enabled.
+# BindMaster Installer
+# Installs BindCraft, BoltzGen, and/or Mosaic protein design tools.
 #
 # Usage:
-#   bash install/install_lucia.sh [additional options...]
+#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples] [--yes]
+#   bindmaster install [same options]
 #
-# This is a thin wrapper around install.sh with pre-configured defaults:
-#   --tool bindcraft  (only BindCraft)
-#   --env-name BindCraft_1
-#   --venv            (no conda required)
-#
-# All other install.sh flags are still accepted, e.g.:
-#   bash install/install_lucia.sh --cuda 12.4 --skip-examples --yes
+# With no --tool flag, an interactive menu lets you choose which tools to install.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ─── Constants ────────────────────────────────────────────────────────────────
+# BINDMASTER_DIR is the repo root (one level above install/).
+BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SHORTCUTS_DIR="${HOME}/.local/bin"
+LOG_FILE="${BINDMASTER_DIR}/install.log"
 
-exec bash "${SCRIPT_DIR}/install.sh" \
-    --tool bindcraft \
-    --env-name BindCraft_1 \
-    --venv \
-    "$@"
+BINDCRAFT_DIR="${BINDMASTER_DIR}/BindCraft"
+BOLTZGEN_DIR="${BINDMASTER_DIR}/BoltzGen"
+MOSAIC_DIR="${BINDMASTER_DIR}/Mosaic"
+EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
+
+# Pinned commits for reproducible installs (x86_64 clones only; aarch64 uses bundled)
+BINDCRAFT_COMMIT="828fd9f"
+BOLTZGEN_COMMIT="da0f092"
+MOSAIC_COMMIT="dc9c4d7"
+
+CONDA_CMD=""          # set by detect_conda: full path to mamba (preferred) or conda
+ARCH="$(uname -m)"   # x86_64 or aarch64 (e.g. DGX Spark / Grace-Hopper)
+
+# ─── Colors ───────────────────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+# ─── Defaults ─────────────────────────────────────────────────────────────────
+CUDA_VERSION="12.4"
+SKIP_EXAMPLES=false
+AUTO_YES=false
+UNINSTALL_MODE=false
+TOOL_SPECIFIED=false   # set to true when --tool is passed on CLI
+
+# Per-tool install flags (set by arg parsing or interactive menu)
+DO_BINDCRAFT=false
+DO_BOLTZGEN=false
+DO_MOSAIC=false
+DO_EVALUATOR=false
+
+# ─── Argument Parsing ─────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --tool)
+            TOOL_SPECIFIED=true
+            case "${2,,}" in
+                all)
+                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true ;;
+                bindcraft)
+                    DO_BINDCRAFT=true ;;
+                boltzgen)
+                    DO_BOLTZGEN=true ;;
+                mosaic)
+                    DO_MOSAIC=true ;;
+                evaluator)
+                    DO_EVALUATOR=true ;;
+                *)
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator${RESET}"
+                    exit 1
+                    ;;
+            esac
+            shift 2
+            ;;
+        --cuda)
+            CUDA_VERSION="$2"
+            shift 2
+            ;;
+        --skip-examples)
+            SKIP_EXAMPLES=true
+            shift
+            ;;
+        --yes|-y)
+            AUTO_YES=true
+            shift
+            ;;
+        --uninstall)
+            UNINSTALL_MODE=true
+            shift
+            ;;
+        -h|--help)
+            cat <<EOF
+Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--cuda VERSION] [--skip-examples] [--yes]
+       $0 --uninstall --tool <tool|all> [--yes]
+
+  --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
+  --cuda        CUDA version for conda package resolution (default: 12.4).
+  --skip-examples
+                Do not prompt to run bundled examples after install.
+  --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
+  --uninstall   Remove conda envs, venvs, and shortcuts for selected tool(s).
+                Never removes runs/, configs, or log files.
+EOF
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${RESET}"
+            echo "Run '$0 --help' for usage."
+            exit 1
+            ;;
+    esac
+done
+
+# ─── Logging setup ────────────────────────────────────────────────────────────
+mkdir -p "${BINDMASTER_DIR}"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+# ─── Helper Functions ─────────────────────────────────────────────────────────
+
+print_step() {
+    echo ""
+    echo -e "${CYAN}${BOLD}▶ $1${RESET}"
+}
+
+print_ok() {
+    echo -e "${GREEN}✓ $1${RESET}"
+}
+
+print_warn() {
+    echo -e "${YELLOW}⚠ $1${RESET}"
+}
+
+print_fail() {
+    echo -e "${RED}✗ $1${RESET}"
+}
+
+# run_logged [--retries N] <label> <command...>
+# Runs a verbose command showing only a spinner on the terminal.
+# All output is written to LOG_FILE only. On failure the last 30 lines
+# are printed to the terminal for diagnosis.
+# Optional --retries N retries the command up to N times with linear backoff.
+run_logged() {
+    local retries=1
+    if [[ "$1" == "--retries" ]]; then
+        retries="$2"; shift 2
+    fi
+    local label="$1"
+    shift
+    local tmpfile
+    tmpfile=$(mktemp)
+
+    # Check once whether /dev/tty is usable (not available in non-TTY containers)
+    local has_tty=false
+    { true >/dev/tty; } 2>/dev/null && has_tty=true
+
+    local rc=0
+    for attempt in $(seq 1 "${retries}"); do
+        # shellcheck disable=SC2188
+        > "${tmpfile}"   # truncate on each attempt
+        "$@" >> "${tmpfile}" 2>&1 &
+        local pid=$!
+
+        local frames='/-\|'
+        local i=0
+        if [[ "${has_tty}" == true ]]; then
+            while kill -0 "${pid}" 2>/dev/null; do
+                printf "\r  ${CYAN}%s${RESET}  %s" "${frames:$((i % 4)):1}" "${label}" >/dev/tty
+                sleep 0.15
+                (( i++ ))
+            done
+            printf "\r\033[K" >/dev/tty   # clear spinner line
+        fi
+        wait "${pid}"
+        rc=$?
+
+        if [[ ${rc} -eq 0 ]]; then break; fi
+        if [[ ${attempt} -lt ${retries} ]]; then
+            print_warn "${label} — attempt ${attempt}/${retries} failed, retrying..."
+            sleep $((attempt * 2))
+        fi
+    done
+
+    cat "${tmpfile}" >> "${LOG_FILE}" 2>/dev/null
+
+    if [[ ${rc} -eq 0 ]]; then
+        rm -f "${tmpfile}"
+        print_ok "${label}"
+    else
+        echo -e "${RED}  Last output:${RESET}"
+        tail -30 "${tmpfile}" | sed 's/^/  /'
+        rm -f "${tmpfile}"
+        print_fail "${label}"
+    fi
+    return ${rc}
+}
+
+# confirm <prompt>
+# Returns 0 (yes) or 1 (no).
+confirm() {
+    local prompt="${1:-Are you sure?}"
+    if [[ "${AUTO_YES}" == true ]]; then
+        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}y (auto-yes)"
+        return 0
+    fi
+    while true; do
+        read -rp "$(echo -e "${YELLOW}${prompt} [y/N]: ${RESET}")" answer
+        case "${answer,,}" in
+            y|yes) return 0 ;;
+            n|no|"") return 1 ;;
+            *) echo "Please answer y or n." ;;
+        esac
+    done
+}
+
+# smoke_test <label> <command...>
+# Runs a command; prints OK or FAIL. Returns the exit code.
+smoke_test() {
+    local label="$1"
+    shift
+    print_step "Smoke test: ${label}"
+    if "$@"; then
+        print_ok "Smoke test passed: ${label}"
+        return 0
+    else
+        print_fail "Smoke test FAILED: ${label}"
+        return 1
+    fi
+}
+
+# env_exists <name>
+# Returns 0 if conda env exists, 1 otherwise.
+env_exists() {
+    "${CONDA_CMD}" env list | grep -qw "$1"
+}
+
+# ensure_conda_in_path
+ensure_conda_in_path() {
+    export PATH="${CONDA_BASE}/bin:${PATH}"
+    source "${CONDA_BASE}/etc/profile.d/conda.sh"
+}
+
+# detect_conda
+# Finds conda/mamba and sets CONDA_BASE + CONDA_CMD.
+# Prefers mamba over conda (faster package installs).
+detect_conda() {
+    # shellcheck disable=SC2034
+    local base cmd
+
+    # Helper: try a specific binary
+    _try_cmd() {
+        local bin="$1"
+        if command -v "${bin}" &>/dev/null; then
+            base=$(${bin} info --base 2>/dev/null) && {
+                CONDA_BASE="${base}"
+                CONDA_CMD="$(command -v "${bin}")"
+                return 0
+            }
+        fi
+        return 1
+    }
+
+    # Prefer mamba (much faster for installs), fall back to conda
+    _try_cmd mamba && return 0
+    _try_cmd conda && return 0
+
+    # Neither on PATH — probe common install locations
+    for candidate in \
+        "$HOME/miniforge3" \
+        "$HOME/mambaforge" \
+        "$HOME/miniconda3" \
+        "$HOME/anaconda3" \
+        "$HOME/conda" \
+        "/opt/conda" \
+        "/opt/miniforge3" \
+        "/opt/miniconda3" \
+        "/opt/anaconda3"; do
+        [[ -f "${candidate}/etc/profile.d/conda.sh" ]] || continue
+        CONDA_BASE="${candidate}"
+        # Prefer mamba binary inside this base if present
+        if [[ -x "${candidate}/bin/mamba" ]]; then
+            CONDA_CMD="${candidate}/bin/mamba"
+        else
+            CONDA_CMD="${candidate}/bin/conda"
+        fi
+        return 0
+    done
+
+    print_fail "Could not find conda or mamba. Install Miniconda, Mambaforge, or Anaconda first."
+    return 1
+}
+
+# ─── Install Status Checks ────────────────────────────────────────────────────
+
+is_bindcraft_installed() {
+    [[ -d "${BINDCRAFT_DIR}" ]] && env_exists BindCraft_1
+}
+
+is_boltzgen_installed() {
+    [[ -d "${BOLTZGEN_DIR}" ]] && env_exists BoltzGen
+}
+
+is_mosaic_installed() {
+    [[ -d "${MOSAIC_DIR}" ]] && [[ -d "${MOSAIC_DIR}/.venv" ]]
+}
+
+is_evaluator_installed() {
+    [[ -d "${EVALUATOR_DIR}" ]] && [[ -f "${EVALUATOR_DIR}/envs/mosaic_venv_path" ]]
+}
+
+# print_tool_status
+# Shows installed/not-installed for each tool.
+print_tool_status() {
+    echo ""
+    echo -e "${BOLD}=== Installed Tools ===${RESET}"
+    local _status _icon
+    for _tool in BindCraft BoltzGen Mosaic Evaluator; do
+        if "is_${_tool,,}_installed" 2>/dev/null; then
+            _icon="${GREEN}✓${RESET}"; _status="installed"
+        else
+            _icon="${RED}✗${RESET}"; _status="not installed"
+        fi
+        printf "  %b  %-12s  %s\n" "${_icon}" "${_tool}" "${_status}"
+    done
+    echo ""
+}
+
+# ─── Interactive Tool Selection ───────────────────────────────────────────────
+# Called when no --tool flag was supplied. Displays a toggle menu; sets
+# DO_BINDCRAFT / DO_BOLTZGEN / DO_MOSAIC based on user choices.
+
+select_tools_interactive() {
+    # Default: all selected
+    local sel_bc=true
+    local sel_bg=true
+    local sel_mo=true
+    local sel_ev=true
+
+    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator")
+    local descs=(
+        "Binder design via AlphaFold2 (conda, Python 3.10)"
+        "Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)"
+        "JAX-based protein design with Marimo notebooks (uv venv)"
+        "Evaluate binders: refold with Boltz-2 + AF2, ranked report (requires Mosaic)"
+    )
+
+    # Check current install state once (avoid repeated conda calls in the loop)
+    local inst_bc inst_bg inst_mo inst_ev
+    is_bindcraft_installed && inst_bc="${GREEN}installed${RESET}" || inst_bc="${YELLOW}not installed${RESET}"
+    is_boltzgen_installed  && inst_bg="${GREEN}installed${RESET}" || inst_bg="${YELLOW}not installed${RESET}"
+    is_mosaic_installed    && inst_mo="${GREEN}installed${RESET}" || inst_mo="${YELLOW}not installed${RESET}"
+    is_evaluator_installed && inst_ev="${GREEN}installed${RESET}" || inst_ev="${YELLOW}not installed${RESET}"
+    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev")
+
+    # Helper: print current state
+    _print_menu() {
+        echo ""
+        echo -e "${BOLD}${CYAN}  Select tools to install${RESET}"
+        echo -e "  Type a number to toggle selection, then press Enter when done."
+        echo ""
+        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev")
+        for i in 0 1 2 3; do
+            local box
+            if [[ "${states[$i]}" == true ]]; then
+                box="${GREEN}[x]${RESET}"
+            else
+                box="${RED}[ ]${RESET}"
+            fi
+            printf "    %d)  %b  ${BOLD}%-12s${RESET}  %-35b  %s\n" \
+                $((i+1)) "$box" "${tools[$i]}" "${inst_states[$i]}" "${descs[$i]}"
+        done
+        echo ""
+        echo -e "  ${YELLOW}a${RESET}) Select all   ${YELLOW}n${RESET}) Select none   ${YELLOW}Enter${RESET} to confirm"
+        echo ""
+    }
+
+    while true; do
+        # Re-print menu on each iteration (scroll-friendly, no tput)
+        _print_menu
+        read -rp "  > " choice
+        case "${choice,,}" in
+            1) [[ "$sel_bc" == true ]] && sel_bc=false || sel_bc=true ;;
+            2) [[ "$sel_bg" == true ]] && sel_bg=false || sel_bg=true ;;
+            3) [[ "$sel_mo" == true ]] && sel_mo=false || sel_mo=true ;;
+            4) [[ "$sel_ev" == true ]] && sel_ev=false || sel_ev=true ;;
+            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true  ;;
+            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false ;;
+            "")
+                # Confirm: at least one must be selected
+                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false ]]; then
+                    echo -e "  ${RED}No tools selected. Select at least one.${RESET}"
+                    continue
+                fi
+                break
+                ;;
+            *) echo -e "  ${RED}Invalid input. Enter 1–4, a, n, or press Enter.${RESET}" ;;
+        esac
+    done
+
+    DO_BINDCRAFT="$sel_bc"
+    DO_BOLTZGEN="$sel_bg"
+    DO_MOSAIC="$sel_mo"
+    DO_EVALUATOR="$sel_ev"
+
+    echo ""
+    echo -e "  ${BOLD}Installing:${RESET}"
+    [[ "$DO_BINDCRAFT" == true ]] && echo -e "    ${GREEN}✓${RESET} BindCraft"
+    [[ "$DO_BOLTZGEN"  == true ]] && echo -e "    ${GREEN}✓${RESET} BoltzGen"
+    [[ "$DO_MOSAIC"    == true ]] && echo -e "    ${GREEN}✓${RESET} Mosaic"
+    [[ "$DO_EVALUATOR" == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
+    echo ""
+
+    confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
+}
+
+# ─── BindCraft ────────────────────────────────────────────────────────────────
+
+# Rewrite Colab-style /content/... paths in all settings_target/*.json files
+# to proper local paths under BINDCRAFT_DIR.
+_fix_target_settings() {
+    local settings_dir="${BINDCRAFT_DIR}/settings_target"
+    [[ -d "${settings_dir}" ]] || return 0
+
+    local count=0
+    for f in "${settings_dir}"/*.json; do
+        [[ -f "$f" ]] || continue
+        # /content/drive/My Drive/BindCraft/<target>/ → <BINDCRAFT_DIR>/output/<target>/
+        sed -i "s|/content/drive/My Drive/BindCraft/|${BINDCRAFT_DIR}/output/|g" "$f"
+        # /content/bindcraft/ → <BINDCRAFT_DIR>/
+        sed -i "s|/content/bindcraft/|${BINDCRAFT_DIR}/|g" "$f"
+        (( count++ ))
+    done
+    print_ok "Patched Colab paths in ${count} target settings file(s)"
+
+    # Reduce example design count and max binder length for a quick smoke run
+    local pdl1="${settings_dir}/PDL1.json"
+    if [[ -f "${pdl1}" ]]; then
+        sed -i 's|"number_of_final_designs":.*|"number_of_final_designs": 1|' "${pdl1}"
+        sed -i 's|"lengths":.*|"lengths": [65, 100],|' "${pdl1}"
+        print_ok "PDL1 example: number_of_final_designs=1, max binder length=100"
+    fi
+}
+
+install_bindcraft() {
+    print_step "Installing BindCraft"
+    ensure_conda_in_path
+
+    # Clone
+    print_step "Cloning BindCraft repository"
+    if [[ -d "${BINDCRAFT_DIR}" ]]; then
+        print_warn "Directory ${BINDCRAFT_DIR} already exists."
+        if confirm "Remove and reclone?"; then
+            rm -rf "${BINDCRAFT_DIR}" || { print_fail "Failed to remove ${BINDCRAFT_DIR}"; return 1; }
+        else
+            print_warn "Skipping reclone; using existing directory."
+        fi
+    fi
+    if [[ ! -d "${BINDCRAFT_DIR}" ]]; then
+        run_logged --retries 3 "Cloning BindCraft" \
+            git clone --depth 50 https://github.com/martinpacesa/BindCraft "${BINDCRAFT_DIR}" \
+            || { print_fail "Failed to clone BindCraft"; return 1; }
+        git -C "${BINDCRAFT_DIR}" checkout "${BINDCRAFT_COMMIT}" --quiet \
+            || print_warn "Could not pin BindCraft to ${BINDCRAFT_COMMIT} — using latest"
+    fi
+
+    # Fix Colab paths in target settings
+    _fix_target_settings
+
+    # Remove existing conda env if present
+    if env_exists BindCraft_1; then
+        print_warn "Conda environment 'BindCraft_1' already exists."
+        if confirm "Remove and recreate the BindCraft_1 conda environment?"; then
+            run_logged "Removing existing BindCraft_1 conda env" \
+                "${CONDA_CMD}" env remove -n BindCraft_1 -y \
+                || return 1
+        else
+            print_warn "Keeping existing BindCraft_1 conda env; skipping install script."
+        fi
+    fi
+
+    # Delegate to BindCraft's own installer
+    if ! env_exists BindCraft_1; then
+        print_step "Running BindCraft install script (conda env + AlphaFold2 weights)"
+        print_warn "This will take 45-90 min — full output in install.log"
+        run_logged "Installing BindCraft (conda packages + AlphaFold2 weights)" \
+            bash -c "cd '${BINDCRAFT_DIR}' && bash install_bindcraft.sh --cuda '${CUDA_VERSION}' --pkg_manager conda --env_name BindCraft_1" \
+            || { print_fail "BindCraft install script failed"; return 1; }
+    fi
+
+    # Smoke test
+    smoke_test "colabdesign import" \
+        "${CONDA_CMD}" run -n BindCraft_1 \
+        python -c "from colabdesign import mk_af_model; print('OK')" \
+        || return 1
+
+    # Example
+    if [[ "${SKIP_EXAMPLES}" == false ]]; then
+        print_step "BindCraft example run"
+        print_warn "The example will run BindCraft on PDL1 target (may take a very long time)."
+        if confirm "Run the BindCraft PDL1 example?"; then
+            (
+                cd "${BINDCRAFT_DIR}" || exit 1
+                XLA_PYTHON_CLIENT_PREALLOCATE=false \
+                "${CONDA_CMD}" run -n BindCraft_1 \
+                    python -u ./bindcraft.py \
+                    --settings './settings_target/PDL1.json' \
+                    --filters './settings_filters/default_filters.json' \
+                    --advanced './settings_advanced/default_4stage_multimer.json'
+            ) && { print_ok "BindCraft example completed"; } \
+              || { print_fail "BindCraft example failed — installation is still OK"; FAILED_EXAMPLES+=("BindCraft"); }
+        else
+            print_warn "Skipped BindCraft example."
+        fi
+    fi
+
+    # Shortcut
+    print_step "Installing bindcraft shortcut"
+    _write_bindcraft_shortcut
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/bindcraft"
+
+    print_ok "BindCraft installation complete"
+}
+
+_write_bindcraft_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    # Write path variables first (expanded at install time), then static body
+    {
+        echo "#!/bin/bash"
+        echo "# BindCraft shortcut — activates the BindCraft_1 conda environment"
+        echo "# and opens an interactive shell in the BindCraft directory."
+        echo ""
+        echo "BINDCRAFT_DIR=\"${BINDCRAFT_DIR}\""
+        echo "CONDA_BASE=\"${CONDA_BASE}\""
+    } > "${SHORTCUTS_DIR}/bindcraft"
+    cat >> "${SHORTCUTS_DIR}/bindcraft" << 'EOF'
+
+source "${CONDA_BASE}/etc/profile.d/conda.sh"
+conda activate BindCraft_1
+cd "${BINDCRAFT_DIR}"
+
+echo "BindCraft_1 environment activated."
+echo "Working directory: ${BINDCRAFT_DIR}"
+echo "To run BindCraft:"
+echo "  python -u ./bindcraft.py --settings './settings_target/<target>.json' \\"
+echo "    --filters './settings_filters/default_filters.json' \\"
+echo "    --advanced './settings_advanced/default_4stage_multimer.json'"
+echo ""
+
+exec bash
+EOF
+    chmod +x "${SHORTCUTS_DIR}/bindcraft"
+}
+
+# ─── BoltzGen ─────────────────────────────────────────────────────────────────
+
+# Fix bare open().write() → context-managed writes in BoltzGen's writer.py.
+# Prevents ResourceWarning: unclosed file handles.
+_patch_boltzgen() {
+    local writer="${BOLTZGEN_DIR}/src/boltzgen/task/predict/writer.py"
+    [[ -f "${writer}" ]] || return 0
+    python3 - "${writer}" << 'PYEOF'
+import sys, re
+
+path = sys.argv[1]
+with open(path) as f:
+    src = f.read()
+original = src
+
+# Single-line: open(args).write(content)
+def fix_single(m):
+    ind, args, body = m.group(1), m.group(2), m.group(3)
+    return f"{ind}with open({args}) as _f:\n{ind}    _f.write({body})"
+src = re.sub(
+    r'^( +)open\((.+?)\)\.write\((.+)\)$',
+    fix_single, src, flags=re.MULTILINE)
+
+# Multi-line: open(args).write(\n...\nINDENT)
+def fix_multi(m):
+    ind, args, body = m.group(1), m.group(2), m.group(3)
+    body = "\n".join("    " + l for l in body.split("\n"))
+    return f"{ind}with open({args}) as _f:\n{ind}    _f.write(\n{body}\n{ind}    )"
+src = re.sub(
+    r'^( +)open\((.+?)\)\.write\(\n([\s\S]+?)\n\1\)',
+    fix_multi, src, flags=re.MULTILINE)
+
+if src != original:
+    with open(path, "w") as f:
+        f.write(src)
+    print("Patched writer.py: fixed unclosed file handles")
+else:
+    print("writer.py: already patched")
+PYEOF
+}
+
+install_boltzgen() {
+    print_step "Installing BoltzGen"
+    ensure_conda_in_path
+
+    # Clone
+    print_step "Cloning BoltzGen repository"
+    if [[ -d "${BOLTZGEN_DIR}" ]]; then
+        print_warn "Directory ${BOLTZGEN_DIR} already exists."
+        if confirm "Remove and reclone?"; then
+            rm -rf "${BOLTZGEN_DIR}" || { print_fail "Failed to remove ${BOLTZGEN_DIR}"; return 1; }
+        else
+            print_warn "Skipping reclone; using existing directory."
+        fi
+    fi
+    if [[ ! -d "${BOLTZGEN_DIR}" ]]; then
+        run_logged --retries 3 "Cloning BoltzGen" \
+            git clone --depth 50 https://github.com/HannesStark/boltzgen "${BOLTZGEN_DIR}" \
+            || { print_fail "Failed to clone BoltzGen"; return 1; }
+        git -C "${BOLTZGEN_DIR}" checkout "${BOLTZGEN_COMMIT}" --quiet \
+            || print_warn "Could not pin BoltzGen to ${BOLTZGEN_COMMIT} — using latest"
+    fi
+
+    # Patch known issues in BoltzGen source
+    _patch_boltzgen
+
+    # Conda environment
+    print_step "Creating BoltzGen conda environment (Python 3.12)"
+    if env_exists BoltzGen; then
+        print_warn "Conda environment 'BoltzGen' already exists."
+        if confirm "Remove and recreate the BoltzGen conda environment?"; then
+            run_logged "Removing existing BoltzGen conda env" \
+                "${CONDA_CMD}" env remove -n BoltzGen -y \
+                || return 1
+        else
+            print_warn "Keeping existing BoltzGen conda env."
+        fi
+    fi
+    if ! env_exists BoltzGen; then
+        run_logged "Creating BoltzGen conda env (Python 3.12)" \
+            "${CONDA_CMD}" create -n BoltzGen python=3.12 -y \
+            || { print_fail "Failed to create BoltzGen conda env"; return 1; }
+    fi
+
+    # Install gcc — required by Triton to JIT-compile CUDA kernels at runtime
+    run_logged "Installing gcc into BoltzGen env (required by Triton)" \
+        "${CONDA_CMD}" install -n BoltzGen -c conda-forge gcc -y \
+        || { print_fail "Failed to install gcc into BoltzGen env"; return 1; }
+
+    # Install packages
+    # aarch64: +cuXXX wheels don't exist; plain PyPI torch includes CUDA for Linux aarch64
+    print_step "Installing PyTorch and BoltzGen"
+    if [[ "${ARCH}" == "aarch64" ]]; then
+        run_logged "Installing PyTorch (aarch64, from PyPI)" \
+            "${CONDA_CMD}" run -n BoltzGen \
+            pip install torch==2.5.1 \
+            || { print_fail "Failed to install PyTorch"; return 1; }
+    else
+        run_logged "Installing PyTorch cu121 (x86_64)" \
+            "${CONDA_CMD}" run -n BoltzGen \
+            pip install torch==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121 \
+            || { print_fail "Failed to install PyTorch"; return 1; }
+    fi
+    run_logged "Installing BoltzGen package" \
+        "${CONDA_CMD}" run -n BoltzGen \
+        pip install -e "${BOLTZGEN_DIR}" \
+        || { print_fail "Failed to install BoltzGen package"; return 1; }
+
+    # Smoke test
+    smoke_test "boltzgen --help" \
+        "${CONDA_CMD}" run -n BoltzGen boltzgen --help \
+        || return 1
+
+    # Example
+    if [[ "${SKIP_EXAMPLES}" == false ]]; then
+        print_step "BoltzGen example run"
+        print_warn "The example downloads ~6 GB of model weights on first run."
+        if confirm "Run the BoltzGen example (2 designs of 1g13)?"; then
+            print_warn "First run downloads ~6 GB of model weights — this will take a while."
+            (
+                cd "${BOLTZGEN_DIR}" || exit 1
+                "${CONDA_CMD}" run -n BoltzGen \
+                    boltzgen run example/vanilla_protein/1g13prot.yaml \
+                    --output output/test_run \
+                    --protocol protein-anything \
+                    --num_designs 2
+            ) && { print_ok "BoltzGen example completed"; } \
+              || { print_fail "BoltzGen example failed — installation is still OK"; FAILED_EXAMPLES+=("BoltzGen"); }
+        else
+            print_warn "Skipped BoltzGen example."
+        fi
+    fi
+
+    # Shortcut
+    print_step "Installing boltzgen shortcut"
+    _write_boltzgen_shortcut
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/boltzgen"
+
+    print_ok "BoltzGen installation complete"
+}
+
+_write_boltzgen_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# BoltzGen shortcut — activates the BoltzGen conda environment"
+        echo "# and opens an interactive shell in the BoltzGen directory."
+        echo ""
+        echo "BOLTZGEN_DIR=\"${BOLTZGEN_DIR}\""
+        echo "CONDA_BASE=\"${CONDA_BASE}\""
+    } > "${SHORTCUTS_DIR}/boltzgen"
+    cat >> "${SHORTCUTS_DIR}/boltzgen" << 'EOF'
+
+source "${CONDA_BASE}/etc/profile.d/conda.sh"
+conda activate BoltzGen
+cd "${BOLTZGEN_DIR}"
+
+echo "BoltzGen environment activated."
+echo "Working directory: ${BOLTZGEN_DIR}"
+echo "To run BoltzGen:"
+echo "  boltzgen run <config.yaml> --output <output_dir> --protocol protein-anything --num_designs 2"
+echo ""
+
+exec bash
+EOF
+    chmod +x "${SHORTCUTS_DIR}/boltzgen"
+}
+
+# ─── Mosaic ───────────────────────────────────────────────────────────────────
+
+install_mosaic() {
+    print_step "Installing Mosaic"
+
+    # Clone
+    print_step "Cloning Mosaic repository"
+    if [[ -d "${MOSAIC_DIR}" ]]; then
+        print_warn "Directory ${MOSAIC_DIR} already exists."
+        if confirm "Remove and reclone?"; then
+            rm -rf "${MOSAIC_DIR}" || { print_fail "Failed to remove ${MOSAIC_DIR}"; return 1; }
+        else
+            print_warn "Skipping reclone; using existing directory."
+        fi
+    fi
+    if [[ ! -d "${MOSAIC_DIR}" ]]; then
+        run_logged --retries 3 "Cloning Mosaic" \
+            git clone --depth 50 https://github.com/escalante-bio/mosaic "${MOSAIC_DIR}" \
+            || { print_fail "Failed to clone Mosaic"; return 1; }
+        git -C "${MOSAIC_DIR}" checkout "${MOSAIC_COMMIT}" --quiet \
+            || print_warn "Could not pin Mosaic to ${MOSAIC_COMMIT} — using latest"
+    fi
+
+    # Ensure uv is available
+    print_step "Checking for uv package manager"
+    if ! command -v uv &>/dev/null; then
+        print_warn "uv not found — installing via official installer"
+        curl -LsSf https://astral.sh/uv/install.sh | sh \
+            || { print_fail "Failed to install uv"; return 1; }
+        export PATH="${HOME}/.local/bin:${PATH}"
+        # Add to .bashrc if not already there
+        if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
+            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
+            print_ok "Added ~/.local/bin to PATH in ~/.bashrc"
+        fi
+    fi
+    if ! command -v uv &>/dev/null; then
+        print_fail "uv still not found after install; check PATH"
+        return 1
+    fi
+    print_ok "uv is available: $(command -v uv)"
+
+    # Create virtual environment with JAX CUDA support
+    print_step "Running uv sync --group jax-cuda (creates .venv/ inside Mosaic/)"
+    run_logged "Setting up Mosaic venv (uv sync --group jax-cuda)" \
+        bash -c "cd '${MOSAIC_DIR}' && uv sync --group jax-cuda" \
+        || { print_fail "uv sync failed for Mosaic"; return 1; }
+
+    # Smoke test
+    smoke_test "import mosaic" \
+        "${MOSAIC_DIR}/.venv/bin/python" -c "import mosaic; print('OK')" \
+        || return 1
+
+    # Example
+    if [[ "${SKIP_EXAMPLES}" == false ]]; then
+        print_step "Mosaic example"
+        print_warn "The example opens an interactive Marimo notebook in your browser."
+        if confirm "Open the Mosaic example notebook?"; then
+            cd "${MOSAIC_DIR}" || return 1
+            "${MOSAIC_DIR}/.venv/bin/marimo" edit examples/example_notebook.py &
+            local marimo_pid=$!
+            print_ok "Marimo running (PID ${marimo_pid}) — open the URL shown above in your browser"
+            echo ""
+            if [[ "${AUTO_YES}" == true ]]; then
+                sleep 5
+            else
+                read -rp "$(echo -e "${YELLOW}  Press Enter to stop Marimo and continue the installer...${RESET}")"
+            fi
+            kill "${marimo_pid}" 2>/dev/null && print_ok "Marimo stopped" || print_warn "Marimo already exited"
+            cd - > /dev/null || true
+        else
+            print_warn "Skipped Mosaic example."
+        fi
+    fi
+
+    # Copy BindMaster custom examples into Mosaic
+    local src_examples="${BINDMASTER_DIR}/bindmaster_examples"
+    local dst_examples="${MOSAIC_DIR}/examples/bindmaster_examples"
+    if [[ -d "${src_examples}" ]]; then
+        mkdir -p "${dst_examples}"
+        cp -r "${src_examples}/." "${dst_examples}/"
+        # Remove the placeholder if it's the only file
+        rm -f "${dst_examples}/.gitkeep"
+        local count
+        count=$(find "${dst_examples}" -maxdepth 1 -type f | wc -l)
+        if [[ "${count}" -gt 0 ]]; then
+            print_ok "Copied ${count} custom example(s) to ${dst_examples}"
+        else
+            print_ok "bindmaster_examples/ ready at ${dst_examples} (add your scripts there)"
+        fi
+    fi
+
+    # Shortcut
+    print_step "Installing mosaic shortcut"
+    _write_mosaic_shortcut
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/mosaic"
+
+    print_ok "Mosaic installation complete"
+}
+
+_write_mosaic_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# Mosaic shortcut — activates the Mosaic uv virtual environment"
+        echo "# and opens an interactive shell in the Mosaic directory."
+        echo ""
+        echo "MOSAIC_DIR=\"${MOSAIC_DIR}\""
+    } > "${SHORTCUTS_DIR}/mosaic"
+    cat >> "${SHORTCUTS_DIR}/mosaic" << 'EOF'
+
+source "${MOSAIC_DIR}/.venv/bin/activate"
+cd "${MOSAIC_DIR}"
+
+echo "Mosaic environment activated."
+echo "Working directory: ${MOSAIC_DIR}"
+echo "To open the example notebook:"
+echo "  marimo edit examples/example_notebook.py"
+echo ""
+
+exec bash
+EOF
+    chmod +x "${SHORTCUTS_DIR}/mosaic"
+}
+
+# ─── Evaluator ────────────────────────────────────────────────────────────────
+
+install_evaluator() {
+    print_step "Installing Evaluator"
+    ensure_conda_in_path
+
+    # Mosaic must be installed first — we use its venv for Boltz-2
+    if ! is_mosaic_installed; then
+        print_fail "Mosaic must be installed before the Evaluator (provides the Boltz-2 venv)."
+        print_warn "Run: bash install.sh --tool mosaic"
+        return 1
+    fi
+    MOSAIC_VENV="${MOSAIC_DIR}/.venv"
+    print_ok "Mosaic venv found: ${MOSAIC_VENV}"
+
+    # Evaluator is bundled in the monorepo — verify the directory exists
+    if [[ ! -d "${EVALUATOR_DIR}" ]]; then
+        print_fail "Evaluator directory not found at ${EVALUATOR_DIR}"
+        print_warn "It should be bundled in the repository. Try re-cloning BindMaster."
+        return 1
+    fi
+    print_ok "Evaluator directory: ${EVALUATOR_DIR}"
+
+    # Install binder-compare into Mosaic venv (Boltz-2 step)
+    print_step "Installing binder-compare into Mosaic venv"
+    run_logged "pip install binder-compare into Mosaic venv" \
+        uv pip install --python "${MOSAIC_VENV}/bin/python" -q -e "${EVALUATOR_DIR}[boltz2]" \
+        || { print_fail "Failed to install binder-compare into Mosaic venv"; return 1; }
+
+    # Save the venv path so evaluate.sh can find it
+    mkdir -p "${EVALUATOR_DIR}/envs"
+    echo "${MOSAIC_VENV}" > "${EVALUATOR_DIR}/envs/mosaic_venv_path"
+    print_ok "Mosaic venv path saved → ${EVALUATOR_DIR}/envs/mosaic_venv_path"
+
+    # binder-eval conda env (parse-seqs + report — lightweight, no ML)
+    print_step "Creating binder-eval conda environment (Python 3.10)"
+    if env_exists binder-eval; then
+        print_warn "Conda environment 'binder-eval' already exists — skipping creation."
+    else
+        run_logged "Creating binder-eval conda env" \
+            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval.yml" -y \
+            || { print_fail "Failed to create binder-eval conda env"; return 1; }
+    fi
+    run_logged "Installing binder-compare into binder-eval" \
+        "${CONDA_CMD}" run -n binder-eval pip install -q -e "${EVALUATOR_DIR}[report]" \
+        || { print_fail "Failed to install binder-compare into binder-eval"; return 1; }
+
+    # binder-eval-af2 conda env (AF2 refolding via ColabDesign)
+    print_step "Creating binder-eval-af2 conda environment (Python 3.10)"
+    if env_exists binder-eval-af2; then
+        print_warn "Conda environment 'binder-eval-af2' already exists — skipping creation."
+    else
+        run_logged "Creating binder-eval-af2 conda env" \
+            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval-af2.yml" -y \
+            || { print_fail "Failed to create binder-eval-af2 conda env"; return 1; }
+    fi
+    run_logged "Installing ColabDesign + binder-compare into binder-eval-af2" \
+        "${CONDA_CMD}" run -n binder-eval-af2 pip install -q colabdesign==1.1.1 -e "${EVALUATOR_DIR}[af2]" \
+        || { print_fail "Failed to install packages into binder-eval-af2"; return 1; }
+
+    # ColabDesign pulls CPU-only JAX by default; install CUDA plugin
+    run_logged "Installing JAX CUDA plugin into binder-eval-af2" \
+        "${CONDA_CMD}" run -n binder-eval-af2 pip install -q "jax[cuda12]" \
+        || { print_fail "Failed to install JAX CUDA plugin"; return 1; }
+
+    # Smoke test
+    smoke_test "binder-compare --help" \
+        "${CONDA_CMD}" run -n binder-eval binder-compare --help \
+        || return 1
+
+    # Shortcut
+    print_step "Installing evaluate shortcut"
+    _write_evaluator_shortcut
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/evaluate"
+
+    print_ok "Evaluator installation complete"
+    print_ok "  AF2 weights (~4 GB) must be at \$AF2_DATA_DIR — see Evaluator/docs/pipeline_reference.md"
+}
+
+_write_evaluator_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# BindMaster Evaluator shortcut — launches the interactive evaluation wizard."
+        echo ""
+        echo "EVALUATOR_DIR=\"${EVALUATOR_DIR}\""
+    } > "${SHORTCUTS_DIR}/evaluate"
+    cat >> "${SHORTCUTS_DIR}/evaluate" << 'EOF'
+
+exec bash "${EVALUATOR_DIR}/run.sh"
+EOF
+    chmod +x "${SHORTCUTS_DIR}/evaluate"
+}
+
+# ─── Uninstall ─────────────────────────────────────────────────────────────────
+
+uninstall_tool() {
+    local tool="${1,,}"
+    case "${tool}" in
+        bindcraft)
+            print_step "Uninstalling BindCraft"
+            env_exists BindCraft_1 && run_logged "Removing BindCraft_1 conda env" \
+                "${CONDA_CMD}" env remove -n BindCraft_1 -y
+            rm -f "${SHORTCUTS_DIR}/bindcraft"
+            # x86_64: cloned dir can be removed (not bundled)
+            if [[ -d "${BINDCRAFT_DIR}" ]]; then
+                rm -rf "${BINDCRAFT_DIR}"
+                print_ok "Removed ${BINDCRAFT_DIR}"
+            fi
+            print_ok "BindCraft uninstalled"
+            ;;
+        boltzgen)
+            print_step "Uninstalling BoltzGen"
+            env_exists BoltzGen && run_logged "Removing BoltzGen conda env" \
+                "${CONDA_CMD}" env remove -n BoltzGen -y
+            rm -f "${SHORTCUTS_DIR}/boltzgen"
+            # x86_64: cloned dir can be removed (not bundled)
+            if [[ -d "${BOLTZGEN_DIR}" ]]; then
+                rm -rf "${BOLTZGEN_DIR}"
+                print_ok "Removed ${BOLTZGEN_DIR}"
+            fi
+            print_ok "BoltzGen uninstalled"
+            ;;
+        mosaic)
+            print_step "Uninstalling Mosaic"
+            if [[ -d "${MOSAIC_DIR}/.venv" ]]; then
+                rm -rf "${MOSAIC_DIR}/.venv"
+                print_ok "Removed Mosaic .venv"
+            fi
+            rm -f "${SHORTCUTS_DIR}/mosaic"
+            # x86_64: cloned dir can be removed (not bundled)
+            if [[ -d "${MOSAIC_DIR}" ]]; then
+                rm -rf "${MOSAIC_DIR}"
+                print_ok "Removed ${MOSAIC_DIR}"
+            fi
+            print_ok "Mosaic uninstalled"
+            ;;
+        evaluator)
+            print_step "Uninstalling Evaluator"
+            env_exists binder-eval && run_logged "Removing binder-eval conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval -y
+            env_exists binder-eval-af2 && run_logged "Removing binder-eval-af2 conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-af2 -y
+            rm -f "${EVALUATOR_DIR}/envs/mosaic_venv_path"
+            rm -f "${SHORTCUTS_DIR}/evaluate"
+            print_ok "Evaluator uninstalled"
+            ;;
+        *)
+            print_fail "Unknown tool: ${tool}"
+            return 1
+            ;;
+    esac
+}
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+main() {
+    echo ""
+    echo -e "${BOLD}=== BindMaster Installer — $(date) ===${RESET}"
+    echo -e "CUDA: ${CUDA_VERSION} | Arch: ${ARCH} | Skip examples: ${SKIP_EXAMPLES}"
+
+    detect_conda || exit 1
+    local _conda_name _conda_ver
+    _conda_name="$(basename "${CONDA_CMD}")"
+    _conda_ver="$("${CONDA_CMD}" --version 2>/dev/null | awk '{print $2}')"
+    print_ok "${_conda_name} ${_conda_ver} found at: ${CONDA_BASE}"
+
+    if [[ "${ARCH}" == "aarch64" ]]; then
+        print_warn "aarch64 detected (e.g. DGX Spark / Grace-Hopper)."
+        print_warn "  BindCraft: may fail — jaxlib CUDA conda packages not available for aarch64."
+        print_warn "  BoltzGen:  PyTorch will be installed from PyPI (no +cuXXX suffix)."
+        print_warn "  Mosaic:    may fail — torchtext has no Linux aarch64 wheel."
+    fi
+
+    print_tool_status
+
+    # Show interactive menu if no --tool was given
+    if [[ "${TOOL_SPECIFIED}" == false ]]; then
+        if [[ "${UNINSTALL_MODE}" == true ]]; then
+            print_fail "--uninstall requires --tool <tool|all>"
+            exit 1
+        fi
+        select_tools_interactive
+    fi
+
+    # ── Uninstall mode ───────────────────────────────────────────────────────
+    if [[ "${UNINSTALL_MODE}" == true ]]; then
+        echo ""
+        echo -e "${BOLD}=== Uninstall Mode ===${RESET}"
+        echo -e "This removes conda envs, venvs, and shortcuts."
+        echo -e "User data (runs/, configs, logs) is ${GREEN}preserved${RESET}."
+        confirm "Proceed with uninstall?" || { echo "Aborted."; exit 0; }
+
+        local failed_uninstalls=()
+        [[ "${DO_BINDCRAFT}" == true ]] && { uninstall_tool bindcraft  || failed_uninstalls+=("BindCraft"); }
+        [[ "${DO_BOLTZGEN}"  == true ]] && { uninstall_tool boltzgen   || failed_uninstalls+=("BoltzGen");  }
+        [[ "${DO_MOSAIC}"    == true ]] && { uninstall_tool mosaic     || failed_uninstalls+=("Mosaic");    }
+        [[ "${DO_EVALUATOR}" == true ]] && { uninstall_tool evaluator  || failed_uninstalls+=("Evaluator"); }
+
+        echo ""
+        if [[ ${#failed_uninstalls[@]} -eq 0 ]]; then
+            print_ok "Uninstall complete."
+        else
+            print_fail "Failed to uninstall: ${failed_uninstalls[*]}"
+        fi
+        [[ ${#failed_uninstalls[@]} -gt 0 ]] && exit 1 || exit 0
+    fi
+
+    # ── Install mode ─────────────────────────────────────────────────────────
+    echo ""
+    echo -e "Log file: ${LOG_FILE}"
+
+    # Step counter for progress
+    local step=0 total=0
+    [[ "${DO_BINDCRAFT}" == true ]] && (( total++ ))
+    [[ "${DO_BOLTZGEN}"  == true ]] && (( total++ ))
+    [[ "${DO_MOSAIC}"    == true ]] && (( total++ ))
+    [[ "${DO_EVALUATOR}" == true ]] && (( total++ ))
+
+    local failed_tools=()
+    FAILED_EXAMPLES=()   # populated by install functions on example failure
+
+    [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; install_bindcraft || failed_tools+=("BindCraft"); }
+    [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
+    [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
+    [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
+
+    echo ""
+    echo -e "${BOLD}=== Installation Summary ===${RESET}"
+
+    # Installation results
+    if [[ ${#failed_tools[@]} -eq 0 ]]; then
+        print_ok "All selected tools installed successfully."
+    else
+        print_fail "The following tools failed to install: ${failed_tools[*]}"
+    fi
+
+    # Example results (separate from installation)
+    if [[ ${#FAILED_EXAMPLES[@]} -gt 0 ]]; then
+        print_warn "Examples failed (tools themselves are usable): ${FAILED_EXAMPLES[*]}"
+        echo -e "  Check the log for details: ${LOG_FILE}"
+    fi
+
+    # Shortcuts
+    echo ""
+    echo -e "Shortcuts available in ${SHORTCUTS_DIR}:"
+    [[ "${DO_BINDCRAFT}" == true ]] && echo -e "  ${GREEN}bindcraft${RESET}  — open BindCraft shell"
+    [[ "${DO_BOLTZGEN}"  == true ]] && echo -e "  ${GREEN}boltzgen${RESET}   — open BoltzGen shell"
+    [[ "${DO_MOSAIC}"    == true ]] && echo -e "  ${GREEN}mosaic${RESET}     — open Mosaic shell"
+    [[ "${DO_EVALUATOR}" == true ]] && echo -e "  ${GREEN}evaluate${RESET}   — launch evaluation wizard"
+    echo ""
+    echo -e "Full log: ${LOG_FILE}"
+
+    [[ ${#failed_tools[@]} -gt 0 ]] && exit 1 || exit 0
+}
+
+main

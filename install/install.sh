@@ -3,7 +3,7 @@
 # Installs BindCraft, BoltzGen, and/or Mosaic protein design tools.
 #
 # Usage:
-#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples] [--yes] [--venv] [--env-name NAME]
+#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples] [--yes]
 #   bindmaster install [same options]
 #
 # With no --tool flag, an interactive menu lets you choose which tools to install.
@@ -40,8 +40,6 @@ CUDA_VERSION="12.4"
 SKIP_EXAMPLES=false
 AUTO_YES=false
 UNINSTALL_MODE=false
-VENV_MODE=false        # when true, install into local venvs instead of conda envs
-BINDCRAFT_ENV_NAME="BindCraft"  # conda env name (or venv subdir) — override with --env-name
 TOOL_SPECIFIED=false   # set to true when --tool is passed on CLI
 
 # Per-tool install flags (set by arg parsing or interactive menu)
@@ -85,30 +83,17 @@ while [[ $# -gt 0 ]]; do
             AUTO_YES=true
             shift
             ;;
-        --venv)
-            VENV_MODE=true
-            shift
-            ;;
-        --env-name)
-            BINDCRAFT_ENV_NAME="$2"
-            shift 2
-            ;;
         --uninstall)
             UNINSTALL_MODE=true
             shift
             ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--cuda VERSION] [--skip-examples] [--yes] [--venv] [--env-name NAME]
-       $0 --uninstall --tool <tool|all> [--yes] [--env-name NAME]
+Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--cuda VERSION] [--skip-examples] [--yes]
+       $0 --uninstall --tool <tool|all> [--yes]
 
   --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
   --cuda        CUDA version for conda package resolution (default: 12.4).
-  --venv        Install into local Python venvs instead of conda environments.
-                Useful on servers where conda is unavailable or permissions are limited.
-                Requires Python 3.10+ and system gcc.
-  --env-name    Custom name for the BindCraft conda env or venv (default: BindCraft).
-                Allows side-by-side installs, e.g. --env-name BindCraft_1.
   --skip-examples
                 Do not prompt to run bundled examples after install.
   --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
@@ -244,7 +229,7 @@ smoke_test() {
 # env_exists <name>
 # Returns 0 if conda env exists, 1 otherwise.
 env_exists() {
-    [[ -n "${CONDA_CMD}" ]] && "${CONDA_CMD}" env list 2>/dev/null | grep -qw "$1"
+    "${CONDA_CMD}" env list | grep -qw "$1"
 }
 
 # ensure_conda_in_path
@@ -306,10 +291,7 @@ detect_conda() {
 # ─── Install Status Checks ────────────────────────────────────────────────────
 
 is_bindcraft_installed() {
-    [[ -d "${BINDCRAFT_DIR}" ]] && {
-        # Check both venv and conda installations
-        [[ -f "${BINDCRAFT_DIR}/.venv/bin/python" ]] || env_exists "${BINDCRAFT_ENV_NAME}"
-    }
+    [[ -d "${BINDCRAFT_DIR}" ]] && env_exists BindCraft
 }
 
 is_boltzgen_installed() {
@@ -353,22 +335,12 @@ select_tools_interactive() {
     local sel_ev=true
 
     local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator")
-    local descs
-    if [[ "${VENV_MODE}" == true ]]; then
-        descs=(
-            "Binder design via AlphaFold2 (venv, Python 3.10)"
-            "Structure generation with Boltz-1 (venv, Python 3.12, ~6 GB download)"
-            "JAX-based protein design with Marimo notebooks (uv venv)"
-            "Evaluate binders: refold with Boltz-2 + AF2, ranked report (requires Mosaic)"
-        )
-    else
-        descs=(
-            "Binder design via AlphaFold2 (conda, Python 3.10)"
-            "Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)"
-            "JAX-based protein design with Marimo notebooks (uv venv)"
-            "Evaluate binders: refold with Boltz-2 + AF2, ranked report (requires Mosaic)"
-        )
-    fi
+    local descs=(
+        "Binder design via AlphaFold2 (conda, Python 3.10)"
+        "Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)"
+        "JAX-based protein design with Marimo notebooks (uv venv)"
+        "Evaluate binders: refold with Boltz-2 + AF2, ranked report (requires Mosaic)"
+    )
 
     # Check current install state once (avoid repeated conda calls in the loop)
     local inst_bc inst_bg inst_mo inst_ev
@@ -493,29 +465,29 @@ install_bindcraft() {
     _fix_target_settings
 
     # Remove existing conda env if present
-    if env_exists "${BINDCRAFT_ENV_NAME}"; then
-        print_warn "Conda environment '${BINDCRAFT_ENV_NAME}' already exists."
-        if confirm "Remove and recreate the ${BINDCRAFT_ENV_NAME} conda environment?"; then
-            run_logged "Removing existing ${BINDCRAFT_ENV_NAME} conda env" \
-                "${CONDA_CMD}" env remove -n "${BINDCRAFT_ENV_NAME}" -y \
+    if env_exists BindCraft; then
+        print_warn "Conda environment 'BindCraft' already exists."
+        if confirm "Remove and recreate the BindCraft conda environment?"; then
+            run_logged "Removing existing BindCraft conda env" \
+                "${CONDA_CMD}" env remove -n BindCraft -y \
                 || return 1
         else
-            print_warn "Keeping existing ${BINDCRAFT_ENV_NAME} conda env; skipping install script."
+            print_warn "Keeping existing BindCraft conda env; skipping install script."
         fi
     fi
 
     # Delegate to BindCraft's own installer
-    if ! env_exists "${BINDCRAFT_ENV_NAME}"; then
-        print_step "Running BindCraft install script (conda env '${BINDCRAFT_ENV_NAME}' + AlphaFold2 weights)"
+    if ! env_exists BindCraft; then
+        print_step "Running BindCraft install script (conda env + AlphaFold2 weights)"
         print_warn "This will take 45-90 min — full output in install.log"
         run_logged "Installing BindCraft (conda packages + AlphaFold2 weights)" \
-            bash -c "cd '${BINDCRAFT_DIR}' && bash install_bindcraft.sh --cuda '${CUDA_VERSION}' --pkg_manager conda --env_name '${BINDCRAFT_ENV_NAME}'" \
+            bash -c "cd '${BINDCRAFT_DIR}' && bash install_bindcraft.sh --cuda '${CUDA_VERSION}' --pkg_manager conda" \
             || { print_fail "BindCraft install script failed"; return 1; }
     fi
 
     # Smoke test
     smoke_test "colabdesign import" \
-        "${CONDA_CMD}" run -n "${BINDCRAFT_ENV_NAME}" \
+        "${CONDA_CMD}" run -n BindCraft \
         python -c "from colabdesign import mk_af_model; print('OK')" \
         || return 1
 
@@ -527,7 +499,7 @@ install_bindcraft() {
             (
                 cd "${BINDCRAFT_DIR}" || exit 1
                 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-                "${CONDA_CMD}" run -n "${BINDCRAFT_ENV_NAME}" \
+                "${CONDA_CMD}" run -n BindCraft \
                     python -u ./bindcraft.py \
                     --settings './settings_target/PDL1.json' \
                     --filters './settings_filters/default_filters.json' \
@@ -539,237 +511,32 @@ install_bindcraft() {
         fi
     fi
 
-    # Save env name marker for configurator
-    echo "${BINDCRAFT_ENV_NAME}" > "${BINDCRAFT_DIR}/.bindmaster_env_name"
-
     # Shortcut
     print_step "Installing bindcraft shortcut"
     _write_bindcraft_shortcut
     print_ok "Shortcut installed at ${SHORTCUTS_DIR}/bindcraft"
 
-    print_ok "BindCraft installation complete (env: ${BINDCRAFT_ENV_NAME})"
-}
-
-# ─── BindCraft (venv mode) ───────────────────────────────────────────────────
-
-# detect_python310
-# Finds a Python 3.10 interpreter. Checks python3.10, then python3, then python.
-detect_python310() {
-    local py
-    for py in python3.10 python3 python; do
-        if command -v "${py}" &>/dev/null; then
-            local ver
-            ver=$("${py}" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
-            if [[ "${ver}" == "3.10" ]]; then
-                echo "${py}"
-                return 0
-            fi
-        fi
-    done
-    return 1
-}
-
-install_bindcraft_venv() {
-    print_step "Installing BindCraft (venv mode — no conda required)"
-
-    # Find Python 3.10
-    local py310
-    py310=$(detect_python310) || {
-        print_fail "Python 3.10 is required for BindCraft but was not found on PATH."
-        print_fail "Install Python 3.10 or use pyenv, then retry."
-        return 1
-    }
-    print_ok "Found Python 3.10: $(command -v "${py310}")"
-
-    # Check for system gcc (needed by Triton / some compiled extensions)
-    if ! command -v gcc &>/dev/null; then
-        print_warn "gcc not found on PATH. Some BindCraft dependencies may fail to build."
-        print_warn "Ask your admin to install gcc, or load it via 'module load gcc' if available."
-    fi
-
-    # Clone
-    print_step "Cloning BindCraft repository"
-    if [[ -d "${BINDCRAFT_DIR}" ]]; then
-        print_warn "Directory ${BINDCRAFT_DIR} already exists."
-        if confirm "Remove and reclone?"; then
-            rm -rf "${BINDCRAFT_DIR}" || { print_fail "Failed to remove ${BINDCRAFT_DIR}"; return 1; }
-        else
-            print_warn "Skipping reclone; using existing directory."
-        fi
-    fi
-    if [[ ! -d "${BINDCRAFT_DIR}" ]]; then
-        run_logged --retries 3 "Cloning BindCraft" \
-            git clone --depth 50 https://github.com/martinpacesa/BindCraft "${BINDCRAFT_DIR}" \
-            || { print_fail "Failed to clone BindCraft"; return 1; }
-        git -C "${BINDCRAFT_DIR}" checkout "${BINDCRAFT_COMMIT}" --quiet \
-            || print_warn "Could not pin BindCraft to ${BINDCRAFT_COMMIT} — using latest"
-    fi
-
-    # Fix Colab paths in target settings
-    _fix_target_settings
-
-    # Create venv
-    local venv_dir="${BINDCRAFT_DIR}/.venv"
-    if [[ -d "${venv_dir}" ]]; then
-        print_warn "Venv ${venv_dir} already exists."
-        if confirm "Remove and recreate the BindCraft venv?"; then
-            rm -rf "${venv_dir}"
-        else
-            print_warn "Keeping existing venv; skipping dependency install."
-        fi
-    fi
-
-    if [[ ! -d "${venv_dir}" ]]; then
-        print_step "Creating BindCraft venv with ${py310}"
-        run_logged "Creating venv" \
-            "${py310}" -m venv "${venv_dir}" \
-            || { print_fail "Failed to create venv"; return 1; }
-
-        print_step "Upgrading pip"
-        run_logged "Upgrading pip" \
-            "${venv_dir}/bin/pip" install --upgrade pip \
-            || { print_fail "Failed to upgrade pip"; return 1; }
-
-        # Install CUDA-aware JAX first (BindCraft needs AF2 via ColabDesign)
-        print_step "Installing JAX with CUDA ${CUDA_VERSION} support"
-        local cuda_short="${CUDA_VERSION//./}"   # 12.4 → 124
-        # JAX CUDA wheels use cu12 for any CUDA 12.x
-        local jax_cuda="cuda12"
-        run_logged "Installing JAX" \
-            "${venv_dir}/bin/pip" install "jax[${jax_cuda}]" \
-            || { print_fail "Failed to install JAX with CUDA"; return 1; }
-
-        # Install ColabDesign (AF2 interface used by BindCraft)
-        print_step "Installing ColabDesign and BindCraft dependencies"
-        run_logged "Installing ColabDesign" \
-            "${venv_dir}/bin/pip" install \
-                git+https://github.com/sokrypton/ColabDesign.git \
-            || { print_fail "Failed to install ColabDesign"; return 1; }
-
-        # Install PyRosetta (distributed, pip-installable)
-        print_step "Installing PyRosetta"
-        run_logged "Installing PyRosetta" \
-            "${venv_dir}/bin/pip" install pyrosetta-installer \
-            || { print_fail "Failed to install pyrosetta-installer"; return 1; }
-        run_logged "Configuring PyRosetta" \
-            "${venv_dir}/bin/python" -c "import pyrosetta_installer; pyrosetta_installer.install_pyrosetta()" \
-            || { print_fail "Failed to configure PyRosetta"; return 1; }
-
-        # Install remaining BindCraft dependencies
-        run_logged "Installing additional dependencies" \
-            "${venv_dir}/bin/pip" install \
-                numpy scipy biopython pandas matplotlib seaborn \
-                dm-haiku absl-py chex ml-collections immutabledict \
-                docker pdb-tools \
-            || { print_fail "Failed to install additional dependencies"; return 1; }
-    fi
-
-    # Download AlphaFold2 weights if not already present
-    local params_dir="${BINDCRAFT_DIR}/params"
-    if [[ ! -d "${params_dir}" ]] || [[ -z "$(ls -A "${params_dir}" 2>/dev/null)" ]]; then
-        print_step "Downloading AlphaFold2 weights (~4 GB)"
-        print_warn "This may take a while depending on your connection."
-        local af2_script="${BINDCRAFT_DIR}/functions/af2_downloads.sh"
-        if [[ -f "${af2_script}" ]]; then
-            run_logged "Downloading AF2 weights" \
-                bash "${af2_script}" "${params_dir}" \
-                || print_warn "AF2 weight download failed — you can retry manually later."
-        else
-            # Fallback: download params directly
-            mkdir -p "${params_dir}"
-            run_logged "Downloading AF2 weights" \
-                bash -c "cd '${BINDCRAFT_DIR}' && ${venv_dir}/bin/python -c \"
-from colabdesign.af.alphafold.common import residue_constants
-print('ColabDesign loaded — AF2 weights will be downloaded on first use.')
-\"" \
-                || print_warn "AF2 weight check failed — weights will download on first use."
-        fi
-    else
-        print_ok "AlphaFold2 weights already present in ${params_dir}"
-    fi
-
-    # Smoke test
-    smoke_test "colabdesign import" \
-        "${venv_dir}/bin/python" \
-        -c "from colabdesign import mk_af_model; print('OK')" \
-        || return 1
-
-    # Example
-    if [[ "${SKIP_EXAMPLES}" == false ]]; then
-        print_step "BindCraft example run"
-        print_warn "The example will run BindCraft on PDL1 target (may take a very long time)."
-        if confirm "Run the BindCraft PDL1 example?"; then
-            (
-                cd "${BINDCRAFT_DIR}" || exit 1
-                XLA_PYTHON_CLIENT_PREALLOCATE=false \
-                "${venv_dir}/bin/python" -u ./bindcraft.py \
-                    --settings './settings_target/PDL1.json' \
-                    --filters './settings_filters/default_filters.json' \
-                    --advanced './settings_advanced/default_4stage_multimer.json'
-            ) && { print_ok "BindCraft example completed"; } \
-              || { print_fail "BindCraft example failed — installation is still OK"; FAILED_EXAMPLES+=("BindCraft"); }
-        else
-            print_warn "Skipped BindCraft example."
-        fi
-    fi
-
-    # Save env name marker for configurator
-    echo "${BINDCRAFT_ENV_NAME}" > "${BINDCRAFT_DIR}/.bindmaster_env_name"
-
-    # Shortcut
-    print_step "Installing bindcraft shortcut"
-    _write_bindcraft_shortcut
-    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/bindcraft"
-
-    print_ok "BindCraft venv installation complete (env: ${BINDCRAFT_ENV_NAME})"
+    print_ok "BindCraft installation complete"
 }
 
 _write_bindcraft_shortcut() {
     mkdir -p "${SHORTCUTS_DIR}"
-
-    if [[ "${VENV_MODE}" == true ]]; then
-        # Venv-mode shortcut
-        {
-            echo "#!/bin/bash"
-            echo "# BindCraft shortcut — activates the BindCraft venv"
-            echo "# and opens an interactive shell in the BindCraft directory."
-            echo ""
-            echo "BINDCRAFT_DIR=\"${BINDCRAFT_DIR}\""
-        } > "${SHORTCUTS_DIR}/bindcraft"
-        cat >> "${SHORTCUTS_DIR}/bindcraft" << 'EOF'
-
-source "${BINDCRAFT_DIR}/.venv/bin/activate"
-cd "${BINDCRAFT_DIR}"
-
-echo "BindCraft venv activated."
-echo "Working directory: ${BINDCRAFT_DIR}"
-echo "To run BindCraft:"
-echo "  python -u ./bindcraft.py --settings './settings_target/<target>.json' \\"
-echo "    --filters './settings_filters/default_filters.json' \\"
-echo "    --advanced './settings_advanced/default_4stage_multimer.json'"
-echo ""
-
-exec bash
-EOF
-    else
-        # Conda-mode shortcut (original)
-        # Write path variables first (expanded at install time), then static body
-        {
-            echo "#!/bin/bash"
-            echo "# BindCraft shortcut — activates the ${BINDCRAFT_ENV_NAME} conda environment"
-            echo "# and opens an interactive shell in the BindCraft directory."
-            echo ""
-            echo "BINDCRAFT_DIR=\"${BINDCRAFT_DIR}\""
-            echo "CONDA_BASE=\"${CONDA_BASE}\""
-            echo "BINDCRAFT_ENV_NAME=\"${BINDCRAFT_ENV_NAME}\""
-        } > "${SHORTCUTS_DIR}/bindcraft"
-        cat >> "${SHORTCUTS_DIR}/bindcraft" << 'EOF'
+    # Write path variables first (expanded at install time), then static body
+    {
+        echo "#!/bin/bash"
+        echo "# BindCraft shortcut — activates the BindCraft conda environment"
+        echo "# and opens an interactive shell in the BindCraft directory."
+        echo ""
+        echo "BINDCRAFT_DIR=\"${BINDCRAFT_DIR}\""
+        echo "CONDA_BASE=\"${CONDA_BASE}\""
+    } > "${SHORTCUTS_DIR}/bindcraft"
+    cat >> "${SHORTCUTS_DIR}/bindcraft" << 'EOF'
 
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
-conda activate "${BINDCRAFT_ENV_NAME}"
+conda activate BindCraft
 cd "${BINDCRAFT_DIR}"
 
-echo "${BINDCRAFT_ENV_NAME} environment activated."
+echo "BindCraft environment activated."
 echo "Working directory: ${BINDCRAFT_DIR}"
 echo "To run BindCraft:"
 echo "  python -u ./bindcraft.py --settings './settings_target/<target>.json' \\"
@@ -779,7 +546,6 @@ echo ""
 
 exec bash
 EOF
-    fi
     chmod +x "${SHORTCUTS_DIR}/bindcraft"
 }
 
@@ -1177,16 +943,8 @@ uninstall_tool() {
     case "${tool}" in
         bindcraft)
             print_step "Uninstalling BindCraft"
-            # Remove venv if present
-            if [[ -d "${BINDCRAFT_DIR}/.venv" ]]; then
-                rm -rf "${BINDCRAFT_DIR}/.venv"
-                print_ok "Removed BindCraft venv"
-            fi
-            # Remove conda env if present (and conda is available)
-            if [[ -n "${CONDA_CMD}" ]] && env_exists "${BINDCRAFT_ENV_NAME}" 2>/dev/null; then
-                run_logged "Removing ${BINDCRAFT_ENV_NAME} conda env" \
-                    "${CONDA_CMD}" env remove -n "${BINDCRAFT_ENV_NAME}" -y
-            fi
+            env_exists BindCraft && run_logged "Removing BindCraft conda env" \
+                "${CONDA_CMD}" env remove -n BindCraft -y
             rm -f "${SHORTCUTS_DIR}/bindcraft"
             # x86_64: cloned dir can be removed (not bundled)
             if [[ -d "${BINDCRAFT_DIR}" ]]; then
@@ -1243,27 +1001,13 @@ uninstall_tool() {
 main() {
     echo ""
     echo -e "${BOLD}=== BindMaster Installer — $(date) ===${RESET}"
-    echo -e "CUDA: ${CUDA_VERSION} | Arch: ${ARCH} | Skip examples: ${SKIP_EXAMPLES} | Venv mode: ${VENV_MODE} | BindCraft env: ${BINDCRAFT_ENV_NAME}"
+    echo -e "CUDA: ${CUDA_VERSION} | Arch: ${ARCH} | Skip examples: ${SKIP_EXAMPLES}"
 
-    if [[ "${VENV_MODE}" == true ]]; then
-        # In venv mode, conda is optional — try to detect it but don't fail
-        if detect_conda 2>/dev/null; then
-            local _conda_name _conda_ver
-            _conda_name="$(basename "${CONDA_CMD}")"
-            _conda_ver="$("${CONDA_CMD}" --version 2>/dev/null | awk '{print $2}')"
-            print_ok "${_conda_name} ${_conda_ver} found at: ${CONDA_BASE} (available but not required)"
-        else
-            print_warn "conda/mamba not found — using venv mode (no conda required)."
-            CONDA_CMD=""
-            CONDA_BASE=""
-        fi
-    else
-        detect_conda || exit 1
-        local _conda_name _conda_ver
-        _conda_name="$(basename "${CONDA_CMD}")"
-        _conda_ver="$("${CONDA_CMD}" --version 2>/dev/null | awk '{print $2}')"
-        print_ok "${_conda_name} ${_conda_ver} found at: ${CONDA_BASE}"
-    fi
+    detect_conda || exit 1
+    local _conda_name _conda_ver
+    _conda_name="$(basename "${CONDA_CMD}")"
+    _conda_ver="$("${CONDA_CMD}" --version 2>/dev/null | awk '{print $2}')"
+    print_ok "${_conda_name} ${_conda_ver} found at: ${CONDA_BASE}"
 
     if [[ "${ARCH}" == "aarch64" ]]; then
         print_warn "aarch64 detected (e.g. DGX Spark / Grace-Hopper)."
@@ -1320,14 +1064,7 @@ main() {
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
 
-    if [[ "${DO_BINDCRAFT}" == true ]]; then
-        (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"
-        if [[ "${VENV_MODE}" == true ]]; then
-            install_bindcraft_venv || failed_tools+=("BindCraft")
-        else
-            install_bindcraft || failed_tools+=("BindCraft")
-        fi
-    fi
+    [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; install_bindcraft || failed_tools+=("BindCraft"); }
     [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
     [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
