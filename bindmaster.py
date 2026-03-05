@@ -3,11 +3,13 @@
 BindMaster — unified CLI entry point (system Python, stdlib only)
 
 Dispatches sub-commands to their respective scripts:
+  (no args) → interactive TUI menu (tui/app.py)
   install   → bash install/install.sh
   configure → python configurator/configurator.py
   evaluate  → Mosaic/.venv/bin/python evaluator/evaluator.py
 
 Usage:
+  bindmaster                                                    Interactive menu (TUI)
   bindmaster install   [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples]
   bindmaster configure [options passed through to configurator.py]
   bindmaster evaluate  <run-dir> [--metric METRIC] [--top N] [--refold N]
@@ -30,12 +32,14 @@ RESET = "\033[0m"
 USAGE = f"""{BOLD}BindMaster{RESET} — GPU-accelerated protein binder design toolkit
 
 {BOLD}Usage:{RESET}
+  bindmaster                                                    Interactive menu (TUI)
   bindmaster install   [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples]
   bindmaster configure [options passed through]
   bindmaster evaluate  <run-dir> [--metric METRIC] [--top N] [--refold N]
   bindmaster --help
 
 {BOLD}Commands:{RESET}
+  {CYAN}(no args){RESET}  Launch interactive menu — install, configure, run, evaluate
   {CYAN}install{RESET}    Install BindCraft, BoltzGen, and/or Mosaic
   {CYAN}configure{RESET}  Interactive wizard to set up a run (target, tools, parameters)
   {CYAN}evaluate{RESET}   Parse outputs, rank designs, optionally re-fold top candidates
@@ -122,7 +126,14 @@ def main() -> None:
     _install_bindmaster_shortcut()
 
     args = sys.argv[1:]
-    if not args or args[0] in ("-h", "--help"):
+
+    if not args:
+        from tui.app import launch_tui
+
+        launch_tui(REPO)
+        return
+
+    if args[0] in ("-h", "--help"):
         print(USAGE)
         sys.exit(0)
 
