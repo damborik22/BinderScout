@@ -200,7 +200,8 @@ The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in t
 - **iptm is gameable** — AF2-designed sequences (BindCraft) tend to score high on ipTM by construction. Use `ipsae_min` as the primary ranking metric instead.
 - **AF2 vs Boltz-2 disagreement** — For short binders (~60aa), Boltz-2 may score high while AF2 scores low. This is meaningful signal, not noise. The composite score reflects the disagreement.
 - **Binder length is a main driver** — Longer binders tend to score lower on `ipsae_min` (r ≈ -0.78).
-- **Mosaic designs.csv format** — Can mix column formats between workers (old 11-col / new 13-col). The parser must handle this carefully or columns misalign.
+- **Mosaic designs.csv format** — Can mix column formats between workers (old 11-col / new 13-col). The parser must handle this carefully or columns misalign. The `is_top` column marks the ~40 refolded designs out of ~800 total; extractors filter to `is_top=1` by default.
+- **Mosaic `target_sequence` placeholder** — The Mosaic template (`hallucinate_bindmaster.py`) writes `"REPLACE_ME"` as `target_sequence` when not configured. The legacy evaluator guards against using this as a real target sequence.
 - **AF2 pLDDT scale** — ColabDesign `get_plddt()` returns values in [0,1], not [0,100].
 - **PAE ordering** — Boltz-2: [binder|target]; AF2: [target|binder]. Column prefixes distinguish them (`boltz_pae_*` vs `af2_*`).
 - **Append-mode CSVs** — Both `refold_boltz2.py` and `refold_af2.py` append to CSV. If rerun after partial failure, check for duplicate `run_id` entries.
@@ -219,6 +220,7 @@ The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in t
 ### Active work and recent decisions
 
 - **Parts A–G complete** (see STAGES.md). Latest work was Part G (CI, badges, documentation).
+- **Mosaic is_top filter** (`6bfbc4f`): Both `MosaicExtractor` and legacy `_parse_mosaic()` now default to extracting only `is_top=1` designs. `--all-mosaic-designs` flag added to `binder-compare extract`, `binder-compare run`, and `bindmaster evaluate`. The `REPLACE_ME` target_sequence placeholder is now guarded in the legacy evaluator's CSV fallback path.
 - **Deferred items:**
   - F2: `--headless` mode for configurator (accept JSON config, skip prompts)
   - F6: Multi-chain binder support in BoltzGen YAML generation
@@ -226,6 +228,7 @@ The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in t
 
 ### Known issues
 
+- **Mosaic `is_top` filtering:** Both extractors (Evaluator package `MosaicExtractor` and legacy `evaluator.py`) now default to `is_top=1` rows only (~40 refolded designs instead of all ~800). Use `--all-mosaic-designs` to override. The `target_sequence` CSV fallback also skips `"REPLACE_ME"` placeholders.
 - **Mosaic CSV column mismatch:** `designs.csv` can mix two column formats when multiple workers run. Parser may misalign columns for some workers. Documented in `Evaluator/docs/pipeline_reference.md`.
 - **BoltzGen pass rate is low:** In CALCA target testing, only 1/50 BoltzGen designs passed the `ipsae_min > 0.61` threshold. Sequences designed for Boltz-2 often don't cross-validate well.
 - **aarch64 BindCraft:** May fail because jaxlib CUDA conda packages are not available for aarch64.
@@ -273,6 +276,7 @@ bindmaster configure --archive <run>  # tar.gz a run directory
 bindmaster evaluate runs/<name>
 bindmaster evaluate runs/<name> --metric ipsae_min --top 20
 bindmaster evaluate runs/<name> --refold 5 --target target.pdb
+bindmaster evaluate runs/<name> --all-mosaic-designs  # include all ~800 Mosaic designs
 
 # Sequence-only mode (fold bare sequences without a run directory)
 bindmaster evaluate --sequences my_seqs.txt --refold 3 --target target.pdb
@@ -313,9 +317,11 @@ docker run --rm -it bindmaster-test bash
 ### Full Evaluator pipeline (Evaluator/)
 
 ```bash
-# Extract sequences from all tool outputs
+# Extract sequences from all tool outputs (Mosaic: is_top=1 only by default)
 conda run -n binder-eval binder-compare extract \
     --bindcraft DIR --boltzgen DIR --mosaic DIR -o seqs.fasta
+# To include all Mosaic designs (not just refolded):
+#   binder-compare extract --mosaic DIR --all-mosaic-designs -o seqs.fasta
 
 # Refold with Boltz-2 (must use Mosaic venv, NOT conda)
 Mosaic/.venv/bin/binder-compare refold-boltz2 \
