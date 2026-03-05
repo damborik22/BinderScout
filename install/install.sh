@@ -902,6 +902,11 @@ install_evaluator() {
         "${CONDA_CMD}" run -n binder-eval-af2 pip install -q colabdesign==1.1.1 -e "${EVALUATOR_DIR}[af2]" \
         || { print_fail "Failed to install packages into binder-eval-af2"; return 1; }
 
+    # ColabDesign pulls CPU-only JAX by default; install CUDA plugin
+    run_logged "Installing JAX CUDA plugin into binder-eval-af2" \
+        "${CONDA_CMD}" run -n binder-eval-af2 pip install -q "jax[cuda12]" \
+        || { print_fail "Failed to install JAX CUDA plugin"; return 1; }
+
     # Smoke test
     smoke_test "binder-compare --help" \
         "${CONDA_CMD}" run -n binder-eval binder-compare --help \

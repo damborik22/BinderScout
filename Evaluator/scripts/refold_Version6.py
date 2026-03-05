@@ -14,9 +14,21 @@ import numpy as np
 from colabdesign import mk_af_model
 
 OUTPUT_DIR = "af2_structures"
-AF2_DATA_DIR = os.environ.get(
-    "AF2_DATA_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "BindCraft", "params")
-)
+def _find_af2_data_dir():
+    """Locate AF2 weights: $AF2_DATA_DIR → BindMaster/BindCraft/params → Evaluator/../BindCraft/params."""
+    env = os.environ.get("AF2_DATA_DIR")
+    if env and os.path.isdir(env):
+        return env
+    # Walk up from this script to find BindCraft/params
+    d = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(5):
+        candidate = os.path.join(d, "BindCraft", "params")
+        if os.path.isdir(candidate):
+            return candidate
+        d = os.path.dirname(d)
+    return os.environ.get("AF2_DATA_DIR", "")
+
+AF2_DATA_DIR = _find_af2_data_dir()
 CSV_PATH = "af2_eval.csv"
 
 CSV_COLUMNS = [
