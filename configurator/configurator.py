@@ -140,6 +140,20 @@ MOSAIC_HALLUCINATE_SRC = MOSAIC_DIR / "examples" / "bindmaster_examples" / "hall
 NANOBODY_SCAFFOLDS_SRC = BOLTZGEN_DIR / "example" / "nanobody_scaffolds"
 NANOBODY_SCAFFOLD_NAMES = ["7eow", "7xl0", "8coh", "8z8v"]
 
+
+def _read_bindcraft_env_name() -> str:
+    """Read the BindCraft env name from the marker file written by the installer.
+    Falls back to 'BindCraft' if the marker file doesn't exist."""
+    marker = BINDCRAFT_DIR / ".bindmaster_env_name"
+    if marker.is_file():
+        name = marker.read_text().strip()
+        if name:
+            return name
+    return "BindCraft"
+
+
+BINDCRAFT_ENV_NAME = _read_bindcraft_env_name()
+
 # ─── Amino-acid 3→1 mapping ──────────────────────────────────────────────────
 
 AA3TO1 = {
@@ -190,7 +204,7 @@ def detect_installs() -> dict:
         return (tool_dir / ".venv" / "bin" / "python").exists()
 
     return {
-        "bindcraft": _env_exists("BindCraft") or _has_venv(BINDCRAFT_DIR),
+        "bindcraft": _env_exists(BINDCRAFT_ENV_NAME) or _has_venv(BINDCRAFT_DIR),
         "boltzgen": _env_exists("BoltzGen") or _has_venv(BOLTZGEN_DIR),
         "mosaic": (MOSAIC_VENV / "bin" / "python").exists(),
         "evaluator": (
@@ -948,7 +962,7 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found — install Miniconda or Miniforge first." >&2; exit 1; }}
-conda activate BindCraft
+conda activate {BINDCRAFT_ENV_NAME}
 set -u
 
 cd "$BINDCRAFT_DIR"

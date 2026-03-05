@@ -3,7 +3,7 @@
 # Installs BindCraft, BoltzGen, and/or Mosaic protein design tools.
 #
 # Usage:
-#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples] [--yes] [--venv]
+#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples] [--yes] [--venv] [--env-name NAME]
 #   bindmaster install [same options]
 #
 # With no --tool flag, an interactive menu lets you choose which tools to install.
@@ -41,6 +41,7 @@ SKIP_EXAMPLES=false
 AUTO_YES=false
 UNINSTALL_MODE=false
 VENV_MODE=false        # when true, install into local venvs instead of conda envs
+BINDCRAFT_ENV_NAME="BindCraft"  # conda env name (or venv subdir) — override with --env-name
 TOOL_SPECIFIED=false   # set to true when --tool is passed on CLI
 
 # Per-tool install flags (set by arg parsing or interactive menu)
@@ -88,20 +89,26 @@ while [[ $# -gt 0 ]]; do
             VENV_MODE=true
             shift
             ;;
+        --env-name)
+            BINDCRAFT_ENV_NAME="$2"
+            shift 2
+            ;;
         --uninstall)
             UNINSTALL_MODE=true
             shift
             ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--cuda VERSION] [--skip-examples] [--yes] [--venv]
-       $0 --uninstall --tool <tool|all> [--yes]
+Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--cuda VERSION] [--skip-examples] [--yes] [--venv] [--env-name NAME]
+       $0 --uninstall --tool <tool|all> [--yes] [--env-name NAME]
 
   --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
   --cuda        CUDA version for conda package resolution (default: 12.4).
   --venv        Install into local Python venvs instead of conda environments.
                 Useful on servers where conda is unavailable or permissions are limited.
                 Requires Python 3.10+ and system gcc.
+  --env-name    Custom name for the BindCraft conda env or venv (default: BindCraft).
+                Allows side-by-side installs, e.g. --env-name BindCraft_1.
   --skip-examples
                 Do not prompt to run bundled examples after install.
   --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
@@ -301,7 +308,7 @@ detect_conda() {
 is_bindcraft_installed() {
     [[ -d "${BINDCRAFT_DIR}" ]] && {
         # Check both venv and conda installations
-        [[ -f "${BINDCRAFT_DIR}/.venv/bin/python" ]] || env_exists BindCraft
+        [[ -f "${BINDCRAFT_DIR}/.venv/bin/python" ]] || env_exists "${BINDCRAFT_ENV_NAME}"
     }
 }
 
@@ -486,29 +493,29 @@ install_bindcraft() {
     _fix_target_settings
 
     # Remove existing conda env if present
-    if env_exists BindCraft; then
-        print_warn "Conda environment 'BindCraft' already exists."
-        if confirm "Remove and recreate the BindCraft conda environment?"; then
-            run_logged "Removing existing BindCraft conda env" \
-                "${CONDA_CMD}" env remove -n BindCraft -y \
+    if env_exists "${BINDCRAFT_ENV_NAME}"; then
+        print_warn "Conda environment '${BINDCRAFT_ENV_NAME}' already exists."
+        if confirm "Remove and recreate the ${BINDCRAFT_ENV_NAME} conda environment?"; then
+            run_logged "Removing existing ${BINDCRAFT_ENV_NAME} conda env" \
+                "${CONDA_CMD}" env remove -n "${BINDCRAFT_ENV_NAME}" -y \
                 || return 1
         else
-            print_warn "Keeping existing BindCraft conda env; skipping install script."
+            print_warn "Keeping existing ${BINDCRAFT_ENV_NAME} conda env; skipping install script."
         fi
     fi
 
     # Delegate to BindCraft's own installer
-    if ! env_exists BindCraft; then
-        print_step "Running BindCraft install script (conda env + AlphaFold2 weights)"
+    if ! env_exists "${BINDCRAFT_ENV_NAME}"; then
+        print_step "Running BindCraft install script (conda env '${BINDCRAFT_ENV_NAME}' + AlphaFold2 weights)"
         print_warn "This will take 45-90 min — full output in install.log"
         run_logged "Installing BindCraft (conda packages + AlphaFold2 weights)" \
-            bash -c "cd '${BINDCRAFT_DIR}' && bash install_bindcraft.sh --cuda '${CUDA_VERSION}' --pkg_manager conda" \
+            bash -c "cd '${BINDCRAFT_DIR}' && bash install_bindcraft.sh --cuda '${CUDA_VERSION}' --pkg_manager conda --env_name '${BINDCRAFT_ENV_NAME}'" \
             || { print_fail "BindCraft install script failed"; return 1; }
     fi
 
     # Smoke test
     smoke_test "colabdesign import" \
-        "${CONDA_CMD}" run -n BindCraft \
+        "${CONDA_CMD}" run -n "${BINDCRAFT_ENV_NAME}" \
         python -c "from colabdesign import mk_af_model; print('OK')" \
         || return 1
 
@@ -520,7 +527,7 @@ install_bindcraft() {
             (
                 cd "${BINDCRAFT_DIR}" || exit 1
                 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-                "${CONDA_CMD}" run -n BindCraft \
+                "${CONDA_CMD}" run -n "${BINDCRAFT_ENV_NAME}" \
                     python -u ./bindcraft.py \
                     --settings './settings_target/PDL1.json' \
                     --filters './settings_filters/default_filters.json' \
@@ -532,12 +539,15 @@ install_bindcraft() {
         fi
     fi
 
+    # Save env name marker for configurator
+    echo "${BINDCRAFT_ENV_NAME}" > "${BINDCRAFT_DIR}/.bindmaster_env_name"
+
     # Shortcut
     print_step "Installing bindcraft shortcut"
     _write_bindcraft_shortcut
     print_ok "Shortcut installed at ${SHORTCUTS_DIR}/bindcraft"
 
-    print_ok "BindCraft installation complete"
+    print_ok "BindCraft installation complete (env: ${BINDCRAFT_ENV_NAME})"
 }
 
 # ─── BindCraft (venv mode) ───────────────────────────────────────────────────
@@ -703,12 +713,15 @@ print('ColabDesign loaded — AF2 weights will be downloaded on first use.')
         fi
     fi
 
+    # Save env name marker for configurator
+    echo "${BINDCRAFT_ENV_NAME}" > "${BINDCRAFT_DIR}/.bindmaster_env_name"
+
     # Shortcut
     print_step "Installing bindcraft shortcut"
     _write_bindcraft_shortcut
     print_ok "Shortcut installed at ${SHORTCUTS_DIR}/bindcraft"
 
-    print_ok "BindCraft venv installation complete"
+    print_ok "BindCraft venv installation complete (env: ${BINDCRAFT_ENV_NAME})"
 }
 
 _write_bindcraft_shortcut() {
@@ -743,19 +756,20 @@ EOF
         # Write path variables first (expanded at install time), then static body
         {
             echo "#!/bin/bash"
-            echo "# BindCraft shortcut — activates the BindCraft conda environment"
+            echo "# BindCraft shortcut — activates the ${BINDCRAFT_ENV_NAME} conda environment"
             echo "# and opens an interactive shell in the BindCraft directory."
             echo ""
             echo "BINDCRAFT_DIR=\"${BINDCRAFT_DIR}\""
             echo "CONDA_BASE=\"${CONDA_BASE}\""
+            echo "BINDCRAFT_ENV_NAME=\"${BINDCRAFT_ENV_NAME}\""
         } > "${SHORTCUTS_DIR}/bindcraft"
         cat >> "${SHORTCUTS_DIR}/bindcraft" << 'EOF'
 
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
-conda activate BindCraft
+conda activate "${BINDCRAFT_ENV_NAME}"
 cd "${BINDCRAFT_DIR}"
 
-echo "BindCraft environment activated."
+echo "${BINDCRAFT_ENV_NAME} environment activated."
 echo "Working directory: ${BINDCRAFT_DIR}"
 echo "To run BindCraft:"
 echo "  python -u ./bindcraft.py --settings './settings_target/<target>.json' \\"
@@ -1169,9 +1183,9 @@ uninstall_tool() {
                 print_ok "Removed BindCraft venv"
             fi
             # Remove conda env if present (and conda is available)
-            if [[ -n "${CONDA_CMD}" ]] && env_exists BindCraft 2>/dev/null; then
-                run_logged "Removing BindCraft conda env" \
-                    "${CONDA_CMD}" env remove -n BindCraft -y
+            if [[ -n "${CONDA_CMD}" ]] && env_exists "${BINDCRAFT_ENV_NAME}" 2>/dev/null; then
+                run_logged "Removing ${BINDCRAFT_ENV_NAME} conda env" \
+                    "${CONDA_CMD}" env remove -n "${BINDCRAFT_ENV_NAME}" -y
             fi
             rm -f "${SHORTCUTS_DIR}/bindcraft"
             # x86_64: cloned dir can be removed (not bundled)
@@ -1229,7 +1243,7 @@ uninstall_tool() {
 main() {
     echo ""
     echo -e "${BOLD}=== BindMaster Installer — $(date) ===${RESET}"
-    echo -e "CUDA: ${CUDA_VERSION} | Arch: ${ARCH} | Skip examples: ${SKIP_EXAMPLES} | Venv mode: ${VENV_MODE}"
+    echo -e "CUDA: ${CUDA_VERSION} | Arch: ${ARCH} | Skip examples: ${SKIP_EXAMPLES} | Venv mode: ${VENV_MODE} | BindCraft env: ${BINDCRAFT_ENV_NAME}"
 
     if [[ "${VENV_MODE}" == true ]]; then
         # In venv mode, conda is optional — try to detect it but don't fail
