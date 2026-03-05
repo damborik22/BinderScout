@@ -366,16 +366,29 @@ def _sequence_from_structure(path: Path, chain_id: str = "A") -> str | None:
 # ─── Output parsers (one per tool) ────────────────────────────────────────────
 
 
-def _parse_mosaic(run_dir: Path) -> list:
-    """Read Mosaic designs.csv (all Boltz2 metrics already present)."""
+def _parse_mosaic(run_dir: Path, *, top_only: bool = True) -> list:
+    """Read Mosaic designs.csv (all Boltz2 metrics already present).
+
+    When *top_only* is True (default) and an ``is_top`` column exists, only
+    rows with ``is_top == 1`` are returned (the refolded subset).  Pass
+    ``top_only=False`` (via ``--all-mosaic-designs``) to include everything.
+    """
     csv_path = run_dir / "mosaic" / "designs.csv"
     if not csv_path.exists():
         return []
     rows = _read_csv(csv_path)
+    total = len(rows)
+
+    # Filter to refolded designs (is_top == 1) unless explicitly asked for all
+    if top_only and rows and "is_top" in rows[0]:
+        rows = [r for r in rows if _safe_float(r.get("is_top")) == 1.0]
+        _print_ok(f"Mosaic: {len(rows)}/{total} designs (is_top=1) from {csv_path.name}")
+    else:
+        _print_ok(f"Mosaic: {len(rows)} designs from {csv_path.name}")
+
     for row in rows:
         row["source"] = "mosaic"
         row.setdefault("sequence", "")
-    _print_ok(f"Mosaic: {len(rows)} designs from {csv_path.name}")
     return rows
 
 
@@ -650,6 +663,11 @@ def _make_parser() -> argparse.ArgumentParser:
         "re-folding complex predictions. "
         "Auto-detected from run-dir/target/*.pdb or *.cif if omitted.",
     )
+    parser.add_argument(
+        "--all-mosaic-designs",
+        action="store_true",
+        help="Include all Mosaic designs (default: only is_top=1 refolded designs).",
+    )
     return parser
 
 
@@ -709,7 +727,7 @@ def main():
     # ── Parse tool outputs ─────────────────────────────────────────────────────
     _print_step("Parsing design outputs")
     all_rows: list = []
-    all_rows.extend(_parse_mosaic(run_dir))
+    all_rows.extend(_parse_mosaic(run_dir, top_only=not args.all_mosaic_designs))
     all_rows.extend(_parse_boltzgen(run_dir))
     all_rows.extend(_parse_bindcraft(run_dir))
 
@@ -752,11 +770,16 @@ def main():
     if target_seq is None:
         # Try to grab from rows (Mosaic includes target_sequence column)
         for r in ranked:
-            ts = r.get("target_sequence", "")
-            if ts:
+            ts = r.get("target_sequence", "").strip()
+            if ts and ts.upper() != "REPLACE_ME":
                 target_seq = ts
                 _print_ok(f"Target sequence from designs.csv: {len(target_seq)} aa")
                 break
+        if target_seq is None:
+            # Check if every candidate was REPLACE_ME
+            has_placeholder = any(r.get("target_sequence", "").strip().upper() == "REPLACE_ME" for r in ranked)
+            if has_placeholder:
+                _print_warn("target_sequence in designs.csv is 'REPLACE_ME' (template placeholder) — ignored")
 
     # ── Optional Boltz2 re-fold ───────────────────────────────────────────────
     if args.refold > 0:

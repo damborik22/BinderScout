@@ -36,7 +36,8 @@ def run(args: argparse.Namespace) -> None:
 
     if args.mosaic:
         print(f"[extract] Mosaic: {args.mosaic}")
-        extracted = MosaicExtractor().extract(args.mosaic)
+        top_only = not getattr(args, "all_mosaic_designs", False)
+        extracted = MosaicExtractor(top_only=top_only).extract(args.mosaic)
         print(f"  → {len(extracted)} sequences")
         all_binders.extend(extracted)
 
@@ -89,4 +90,9 @@ def add_parser(subparsers) -> None:
     p.add_argument("--pxdesign", metavar="DIR", help="PXDesign output directory (containing summary.csv)")
     p.add_argument("--output", "-o", required=True, metavar="FILE", help="Output FASTA path (e.g. sequences.fasta)")
     p.add_argument("--keep-duplicates", action="store_true", help="Do not deduplicate identical sequences across tools")
+    p.add_argument(
+        "--all-mosaic-designs",
+        action="store_true",
+        help="Include all Mosaic designs (default: only is_top=1 refolded designs)",
+    )
     p.set_defaults(func=run)

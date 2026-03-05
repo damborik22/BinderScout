@@ -28,6 +28,7 @@ _CSV_CANDIDATES = [
 ]
 
 _SEQUENCE_COL = "sequence"
+_IS_TOP_COL = "is_top"
 
 
 def _read_mosaic_csv(path: Path) -> pd.DataFrame:
@@ -61,6 +62,9 @@ def _read_mosaic_csv(path: Path) -> pd.DataFrame:
 class MosaicExtractor(SequenceExtractor):
     """Extract binder sequences from Mosaic designs.csv."""
 
+    def __init__(self, *, top_only: bool = True):
+        self.top_only = top_only
+
     @property
     def tool_name(self) -> str:
         return "mosaic"
@@ -80,6 +84,15 @@ class MosaicExtractor(SequenceExtractor):
             raise ValueError(
                 f"Mosaic CSV {csv_path} missing '{_SEQUENCE_COL}' column. Available: {list(df.columns[:10])}"
             )
+
+        # Filter to refolded designs (is_top == 1) unless --all-mosaic-designs
+        if self.top_only and _IS_TOP_COL in df.columns:
+            before = len(df)
+            df[_IS_TOP_COL] = pd.to_numeric(df[_IS_TOP_COL], errors="coerce")
+            df = df[df[_IS_TOP_COL] == 1]
+            after = len(df)
+            if before != after:
+                warnings.warn(f"Mosaic: filtered to is_top=1: {after}/{before} designs")
 
         results: list[ExtractedBinder] = []
 
