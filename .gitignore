@@ -1,11 +1,13 @@
 # Tool directories — cloned fresh by install.sh
 BindCraft/
+BindCraft_1/
 BoltzGen/
 Mosaic/
 
 # Installer logs — ephemeral, can be large
 install.log
 install_aarch.log
+install_lucia.log
 
 # Claude Code internal files
 .claude/
