@@ -3,7 +3,7 @@
 # Installs BindCraft, BoltzGen, and/or Mosaic protein design tools.
 #
 # Usage:
-#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples] [--yes]
+#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|rfaa|pxdesign|all] [--cuda VERSION] [--skip-examples] [--yes]
 #   bindmaster install [same options]
 #
 # With no --tool flag, an interactive menu lets you choose which tools to install.
@@ -24,6 +24,14 @@ EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
 BINDCRAFT_COMMIT="828fd9f"
 BOLTZGEN_COMMIT="da0f092"
 MOSAIC_COMMIT="dc9c4d7"
+
+RFAA_REPO="https://github.com/baker-laboratory/rf_diffusion_all_atom.git"
+RFAA_DIR="${BINDMASTER_DIR}/rf_diffusion_all_atom"
+LIGANDMPNN_REPO="https://github.com/dauparas/LigandMPNN.git"
+LIGANDMPNN_DIR="${BINDMASTER_DIR}/LigandMPNN"
+PXDESIGN_REPO="https://github.com/bytedance/PXDesign.git"
+PXDESIGN_COMMIT="HEAD"
+PXDESIGN_DIR="${BINDMASTER_DIR}/PXDesign"
 
 CONDA_CMD=""          # set by detect_conda: full path to mamba (preferred) or conda
 ARCH="$(uname -m)"   # x86_64 or aarch64 (e.g. DGX Spark / Grace-Hopper)
@@ -49,6 +57,8 @@ DO_BINDCRAFT=false
 DO_BOLTZGEN=false
 DO_MOSAIC=false
 DO_EVALUATOR=false
+DO_RFAA=false
+DO_PXDESIGN=false
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -57,7 +67,7 @@ while [[ $# -gt 0 ]]; do
             TOOL_SPECIFIED=true
             case "${2,,}" in
                 all)
-                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true ;;
+                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_RFAA=true; DO_PXDESIGN=true ;;
                 bindcraft)
                     DO_BINDCRAFT=true ;;
                 boltzgen)
@@ -66,8 +76,12 @@ while [[ $# -gt 0 ]]; do
                     DO_MOSAIC=true ;;
                 evaluator)
                     DO_EVALUATOR=true ;;
+                rfaa)
+                    DO_RFAA=true ;;
+                pxdesign)
+                    DO_PXDESIGN=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfaa, pxdesign${RESET}"
                     exit 1
                     ;;
             esac
@@ -416,13 +430,21 @@ is_evaluator_installed() {
     [[ -d "${EVALUATOR_DIR}" ]] && [[ -f "${EVALUATOR_DIR}/envs/mosaic_venv_path" ]]
 }
 
+is_rfaa_installed() {
+    [[ -d "${RFAA_DIR}" ]] && env_exists bindmaster_rfaa
+}
+
+is_pxdesign_installed() {
+    [[ -d "${PXDESIGN_DIR}" ]] && env_exists bindmaster_pxdesign
+}
+
 # print_tool_status
 # Shows installed/not-installed for each tool.
 print_tool_status() {
     echo ""
     echo -e "${BOLD}=== Installed Tools ===${RESET}"
     local _status _icon
-    for _tool in BindCraft BoltzGen Mosaic Evaluator; do
+    for _tool in BindCraft BoltzGen Mosaic Evaluator RFAA PXDesign; do
         if "is_${_tool,,}_installed" 2>/dev/null; then
             _icon="${GREEN}✓${RESET}"; _status="installed"
         else
@@ -443,22 +465,28 @@ select_tools_interactive() {
     local sel_bg=true
     local sel_mo=true
     local sel_ev=true
+    local sel_rfaa=false
+    local sel_pxd=false
 
-    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator")
+    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "RFAA" "PXDesign")
     local descs=(
         "Binder design via AlphaFold2 (conda, Python 3.10)"
         "Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)"
         "JAX-based protein design with Marimo notebooks (uv venv)"
         "Evaluate binders: refold with Boltz-2 + AF2, ranked report (requires Mosaic)"
+        "All-atom diffusion + LigandMPNN for ligand binder design (conda)"
+        "Protenix-based de novo binder design (conda)"
     )
 
     # Check current install state once (avoid repeated conda calls in the loop)
-    local inst_bc inst_bg inst_mo inst_ev
+    local inst_bc inst_bg inst_mo inst_ev inst_rfaa inst_pxd
     is_bindcraft_installed && inst_bc="${GREEN}installed${RESET}" || inst_bc="${YELLOW}not installed${RESET}"
     is_boltzgen_installed  && inst_bg="${GREEN}installed${RESET}" || inst_bg="${YELLOW}not installed${RESET}"
     is_mosaic_installed    && inst_mo="${GREEN}installed${RESET}" || inst_mo="${YELLOW}not installed${RESET}"
     is_evaluator_installed && inst_ev="${GREEN}installed${RESET}" || inst_ev="${YELLOW}not installed${RESET}"
-    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev")
+    is_rfaa_installed      && inst_rfaa="${GREEN}installed${RESET}" || inst_rfaa="${YELLOW}not installed${RESET}"
+    is_pxdesign_installed  && inst_pxd="${GREEN}installed${RESET}" || inst_pxd="${YELLOW}not installed${RESET}"
+    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev" "$inst_rfaa" "$inst_pxd")
 
     # Helper: print current state
     _print_menu() {
@@ -466,8 +494,8 @@ select_tools_interactive() {
         echo -e "${BOLD}${CYAN}  Select tools to install${RESET}"
         echo -e "  Type a number to toggle selection, then press Enter when done."
         echo ""
-        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev")
-        for i in 0 1 2 3; do
+        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_rfaa" "$sel_pxd")
+        for i in 0 1 2 3 4 5; do
             local box
             if [[ "${states[$i]}" == true ]]; then
                 box="${GREEN}[x]${RESET}"
@@ -491,17 +519,19 @@ select_tools_interactive() {
             2) [[ "$sel_bg" == true ]] && sel_bg=false || sel_bg=true ;;
             3) [[ "$sel_mo" == true ]] && sel_mo=false || sel_mo=true ;;
             4) [[ "$sel_ev" == true ]] && sel_ev=false || sel_ev=true ;;
-            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true  ;;
-            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false ;;
+            5) [[ "$sel_rfaa" == true ]] && sel_rfaa=false || sel_rfaa=true ;;
+            6) [[ "$sel_pxd" == true ]] && sel_pxd=false || sel_pxd=true ;;
+            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true;  sel_rfaa=true;  sel_pxd=true  ;;
+            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false; sel_rfaa=false; sel_pxd=false ;;
             "")
                 # Confirm: at least one must be selected
-                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false ]]; then
+                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false && "$sel_rfaa" == false && "$sel_pxd" == false ]]; then
                     echo -e "  ${RED}No tools selected. Select at least one.${RESET}"
                     continue
                 fi
                 break
                 ;;
-            *) echo -e "  ${RED}Invalid input. Enter 1–4, a, n, or press Enter.${RESET}" ;;
+            *) echo -e "  ${RED}Invalid input. Enter 1–6, a, n, or press Enter.${RESET}" ;;
         esac
     done
 
@@ -509,6 +539,8 @@ select_tools_interactive() {
     DO_BOLTZGEN="$sel_bg"
     DO_MOSAIC="$sel_mo"
     DO_EVALUATOR="$sel_ev"
+    DO_RFAA="$sel_rfaa"
+    DO_PXDESIGN="$sel_pxd"
 
     echo ""
     echo -e "  ${BOLD}Installing:${RESET}"
@@ -516,6 +548,8 @@ select_tools_interactive() {
     [[ "$DO_BOLTZGEN"  == true ]] && echo -e "    ${GREEN}✓${RESET} BoltzGen"
     [[ "$DO_MOSAIC"    == true ]] && echo -e "    ${GREEN}✓${RESET} Mosaic"
     [[ "$DO_EVALUATOR" == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
+    [[ "$DO_RFAA"      == true ]] && echo -e "    ${GREEN}✓${RESET} RFAA"
+    [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
     echo ""
 
     confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
@@ -1049,6 +1083,143 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/evaluate"
 }
 
+# ─── RFAA + LigandMPNN ──────────────────────────────────────────────────────
+
+install_rfaa() {
+    print_step "Installing RFDiffusionAA + LigandMPNN"
+
+    # Clone RFAA
+    if [[ -d "${RFAA_DIR}" ]]; then
+        print_ok "RFAA already cloned at ${RFAA_DIR}"
+    else
+        run_logged "Cloning RFAA" \
+            git clone "${RFAA_REPO}" "${RFAA_DIR}" \
+            || { print_fail "Failed to clone RFAA"; return 1; }
+    fi
+
+    # Init submodules
+    run_logged "RFAA submodules" \
+        bash -c "cd '${RFAA_DIR}' && git submodule init && git submodule update" \
+        || print_warn "RFAA submodule init failed (may not have submodules)"
+
+    # Create conda env
+    print_step "Creating bindmaster_rfaa conda environment"
+    run_logged "Creating bindmaster_rfaa env" \
+        "${CONDA_CMD}" create -n bindmaster_rfaa -y python=3.11 \
+            "pytorch>=2.2" "pytorch-cuda=12.4" -c pytorch -c nvidia -c conda-forge \
+        || { print_fail "Failed to create bindmaster_rfaa env"; return 1; }
+
+    # Install RFAA
+    run_logged "Installing RFAA (pip)" \
+        "${CONDA_CMD}" run -n bindmaster_rfaa pip install -q -e "${RFAA_DIR}" \
+        || print_warn "RFAA pip install failed — may need manual install"
+
+    # Install LigandMPNN
+    if [[ -d "${LIGANDMPNN_DIR}" ]]; then
+        print_ok "LigandMPNN already cloned at ${LIGANDMPNN_DIR}"
+    else
+        run_logged "Cloning LigandMPNN" \
+            git clone "${LIGANDMPNN_REPO}" "${LIGANDMPNN_DIR}" \
+            || { print_fail "Failed to clone LigandMPNN"; return 1; }
+    fi
+
+    run_logged "Installing LigandMPNN (pip)" \
+        "${CONDA_CMD}" run -n bindmaster_rfaa pip install -q -e "${LIGANDMPNN_DIR}" \
+        || { print_fail "Failed to install LigandMPNN"; return 1; }
+
+    # Download LigandMPNN weights
+    if [[ -d "${LIGANDMPNN_DIR}/model_params" ]]; then
+        print_ok "LigandMPNN weights already present"
+    else
+        run_logged "Downloading LigandMPNN weights" \
+            bash -c "cd '${LIGANDMPNN_DIR}' && bash get_model_params.sh ./model_params" \
+            || print_warn "LigandMPNN weights download failed — download manually later"
+    fi
+
+    # Download RFAA weights
+    local rfaa_weights="${RFAA_DIR}/weights"
+    if [[ -d "${rfaa_weights}" && -n "$(ls -A "${rfaa_weights}" 2>/dev/null)" ]]; then
+        print_ok "RFAA weights already present at ${rfaa_weights}"
+    else
+        mkdir -p "${rfaa_weights}"
+        print_warn "RFAA weights must be downloaded manually to ${rfaa_weights}"
+        print_warn "See: https://github.com/baker-laboratory/rf_diffusion_all_atom#setup"
+    fi
+
+    # Smoke test
+    smoke_test "RFAA import check" \
+        "${CONDA_CMD}" run -n bindmaster_rfaa python -c "import torch; print('RFAA env OK')" \
+        || return 1
+
+    # Shortcut
+    mkdir -p "${SHORTCUTS_DIR}"
+    cat > "${SHORTCUTS_DIR}/rfaa" << RFAAEOF
+#!/bin/bash
+# BindMaster RFAA shortcut
+exec ${CONDA_CMD} run -n bindmaster_rfaa bash
+RFAAEOF
+    chmod +x "${SHORTCUTS_DIR}/rfaa"
+
+    print_ok "RFAA + LigandMPNN installation complete"
+}
+
+# ─── PXDesign ────────────────────────────────────────────────────────────────
+
+install_pxdesign() {
+    print_step "Installing PXDesign"
+
+    # Clone PXDesign
+    if [[ -d "${PXDESIGN_DIR}" ]]; then
+        print_ok "PXDesign already cloned at ${PXDESIGN_DIR}"
+    else
+        run_logged "Cloning PXDesign" \
+            git clone "${PXDESIGN_REPO}" "${PXDESIGN_DIR}" \
+            || { print_fail "Failed to clone PXDesign"; return 1; }
+        if [[ "${PXDESIGN_COMMIT}" != "HEAD" ]]; then
+            run_logged "Pinning PXDesign to ${PXDESIGN_COMMIT}" \
+                bash -c "cd '${PXDESIGN_DIR}' && git checkout '${PXDESIGN_COMMIT}'" \
+                || print_warn "Failed to checkout pinned commit"
+        fi
+    fi
+
+    # Create conda env
+    print_step "Creating bindmaster_pxdesign conda environment"
+    run_logged "Creating bindmaster_pxdesign env" \
+        "${CONDA_CMD}" create -n bindmaster_pxdesign -y python=3.11 \
+            "pytorch>=2.2" "pytorch-cuda=12.4" -c pytorch -c nvidia -c conda-forge \
+        || { print_fail "Failed to create bindmaster_pxdesign env"; return 1; }
+
+    # Install PXDesign
+    run_logged "Installing PXDesign (pip)" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -e "${PXDESIGN_DIR}" \
+        || { print_fail "Failed to install PXDesign"; return 1; }
+
+    # Download weights if script exists
+    if [[ -f "${PXDESIGN_DIR}/download_tool_weights.sh" ]]; then
+        run_logged "Downloading PXDesign weights" \
+            bash -c "cd '${PXDESIGN_DIR}' && bash download_tool_weights.sh" \
+            || print_warn "PXDesign weights download failed — download manually later"
+    else
+        print_warn "No download_tool_weights.sh found — download PXDesign weights manually"
+    fi
+
+    # Smoke test
+    smoke_test "PXDesign import check" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign python -c "import torch; print('PXDesign env OK')" \
+        || return 1
+
+    # Shortcut
+    mkdir -p "${SHORTCUTS_DIR}"
+    cat > "${SHORTCUTS_DIR}/pxdesign" << PXDEOF
+#!/bin/bash
+# BindMaster PXDesign shortcut
+exec ${CONDA_CMD} run -n bindmaster_pxdesign bash
+PXDEOF
+    chmod +x "${SHORTCUTS_DIR}/pxdesign"
+
+    print_ok "PXDesign installation complete"
+}
+
 # ─── Uninstall ─────────────────────────────────────────────────────────────────
 
 uninstall_tool() {
@@ -1101,6 +1272,23 @@ uninstall_tool() {
             rm -f "${EVALUATOR_DIR}/envs/mosaic_venv_path"
             rm -f "${SHORTCUTS_DIR}/evaluate"
             print_ok "Evaluator uninstalled"
+            ;;
+        rfaa)
+            print_step "Uninstalling RFAA"
+            env_exists bindmaster_rfaa && run_logged "Removing bindmaster_rfaa conda env" \
+                "${CONDA_CMD}" env remove -n bindmaster_rfaa -y
+            rm -f "${SHORTCUTS_DIR}/rfaa"
+            [[ -d "${RFAA_DIR}" ]] && { rm -rf "${RFAA_DIR}"; print_ok "Removed ${RFAA_DIR}"; }
+            [[ -d "${LIGANDMPNN_DIR}" ]] && { rm -rf "${LIGANDMPNN_DIR}"; print_ok "Removed ${LIGANDMPNN_DIR}"; }
+            print_ok "RFAA uninstalled"
+            ;;
+        pxdesign)
+            print_step "Uninstalling PXDesign"
+            env_exists bindmaster_pxdesign && run_logged "Removing bindmaster_pxdesign conda env" \
+                "${CONDA_CMD}" env remove -n bindmaster_pxdesign -y
+            rm -f "${SHORTCUTS_DIR}/pxdesign"
+            [[ -d "${PXDESIGN_DIR}" ]] && { rm -rf "${PXDESIGN_DIR}"; print_ok "Removed ${PXDESIGN_DIR}"; }
+            print_ok "PXDesign uninstalled"
             ;;
         *)
             print_fail "Unknown tool: ${tool}"
@@ -1156,6 +1344,8 @@ main() {
         [[ "${DO_BOLTZGEN}"  == true ]] && { uninstall_tool boltzgen   || failed_uninstalls+=("BoltzGen");  }
         [[ "${DO_MOSAIC}"    == true ]] && { uninstall_tool mosaic     || failed_uninstalls+=("Mosaic");    }
         [[ "${DO_EVALUATOR}" == true ]] && { uninstall_tool evaluator  || failed_uninstalls+=("Evaluator"); }
+        [[ "${DO_RFAA}"      == true ]] && { uninstall_tool rfaa      || failed_uninstalls+=("RFAA"); }
+        [[ "${DO_PXDESIGN}"  == true ]] && { uninstall_tool pxdesign  || failed_uninstalls+=("PXDesign"); }
 
         # Offer to remove local Miniforge when all tools are uninstalled
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
@@ -1187,6 +1377,8 @@ main() {
     [[ "${DO_BOLTZGEN}"  == true ]] && (( total++ ))
     [[ "${DO_MOSAIC}"    == true ]] && (( total++ ))
     [[ "${DO_EVALUATOR}" == true ]] && (( total++ ))
+    [[ "${DO_RFAA}"      == true ]] && (( total++ ))
+    [[ "${DO_PXDESIGN}"  == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
@@ -1195,6 +1387,8 @@ main() {
     [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
     [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
+    [[ "${DO_RFAA}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFAA${RESET}";      install_rfaa      || failed_tools+=("RFAA"); }
+    [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"
@@ -1219,6 +1413,8 @@ main() {
     [[ "${DO_BOLTZGEN}"  == true ]] && echo -e "  ${GREEN}boltzgen${RESET}   — open BoltzGen shell"
     [[ "${DO_MOSAIC}"    == true ]] && echo -e "  ${GREEN}mosaic${RESET}     — open Mosaic shell"
     [[ "${DO_EVALUATOR}" == true ]] && echo -e "  ${GREEN}evaluate${RESET}   — launch evaluation wizard"
+    [[ "${DO_RFAA}"      == true ]] && echo -e "  ${GREEN}rfaa${RESET}       — open RFAA shell"
+    [[ "${DO_PXDESIGN}"  == true ]] && echo -e "  ${GREEN}pxdesign${RESET}   — open PXDesign shell"
     echo ""
     echo -e "${BOLD}To use BindMaster, add to your PATH:${RESET}"
     echo -e "  ${CYAN}export PATH=\"${SHORTCUTS_DIR}:\$PATH\"${RESET}"

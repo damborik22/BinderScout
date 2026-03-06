@@ -2,6 +2,9 @@
 BindCraft/
 BoltzGen/
 Mosaic/
+rf_diffusion_all_atom/
+LigandMPNN/
+PXDesign/
 
 # Local Miniforge3 installation (standalone mode)
 conda/

@@ -7,7 +7,7 @@ from typing import Literal
 
 import numpy as np
 
-SourceTool = Literal["bindcraft", "boltzgen", "mosaic", "pxdesign", "unknown"]
+SourceTool = Literal["bindcraft", "boltzgen", "mosaic", "pxdesign", "rfaa", "unknown"]
 
 
 @dataclass
