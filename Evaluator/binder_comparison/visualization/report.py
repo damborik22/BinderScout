@@ -332,6 +332,8 @@ def _select_display_cols(df: pd.DataFrame) -> list[str]:
         "af2_ipsae_min",
         "iptm",
         "af2_iptm",
+        "boltz_pae_iptm",
+        "af2_pae_iptm",
         "ipae",
         "plddt_binder_mean",
         "plddt_binder_min",

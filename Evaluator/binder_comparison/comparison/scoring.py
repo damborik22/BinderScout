@@ -310,6 +310,62 @@ def add_boltz_ipsae_from_files(
 
 
 # ---------------------------------------------------------------------------
+# ipTM from saved PAE files (computed independently of model-reported values)
+# ---------------------------------------------------------------------------
+
+
+def add_iptm_from_pae_files(
+    df: pd.DataFrame,
+    pae_file_col: str,
+    binder_length_col: str = "binder_length",
+    ordering: str = "binder_target",
+    prefix: str = "boltz",
+    base_dir: str | Path | None = None,
+) -> pd.DataFrame:
+    """Load PAE .npy files and compute ipTM, adding columns to df.
+
+    Adds columns: {prefix}_pae_iptm (independently computed from PAE matrix).
+
+    Args:
+        df:              DataFrame with refolding results.
+        pae_file_col:    Column containing paths to PAE .npy files.
+        binder_length_col: Column with binder sequence length.
+        ordering:        PAE matrix ordering ('binder_target' or 'target_binder').
+        prefix:          Column name prefix ('boltz' or 'af2').
+        base_dir:        Base directory for resolving relative PAE file paths.
+    """
+    result = df.copy()
+
+    if pae_file_col not in df.columns:
+        return result
+
+    iptm_vals = []
+
+    for _, row in df.iterrows():
+        pae_path = row.get(pae_file_col)
+        L_b = row.get(binder_length_col)
+
+        resolved = _resolve_pae_path(pae_path, base_dir)
+        if pd.isna(pae_path) or pd.isna(L_b) or resolved is None:
+            iptm_vals.append(np.nan)
+            continue
+
+        try:
+            pae = np.load(str(resolved))
+            scores = compute_iptm_from_pae(pae, int(L_b), ordering=ordering)
+            iptm_vals.append(scores["iptm"])
+        except Exception as e:
+            import warnings
+
+            warnings.warn(f"Failed to compute ipTM for {pae_path}: {e}")
+            iptm_vals.append(np.nan)
+
+    result[f"{prefix}_pae_iptm"] = iptm_vals
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Screening thresholds and tier classification
 # ---------------------------------------------------------------------------
 
