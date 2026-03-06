@@ -38,6 +38,8 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "af2_tb_ipsae": ("AF2 ipSAE (T→B)", "[0–1]", "↑"),
     "iptm": ("ipTM", "[0–1]", "↑"),
     "af2_iptm": ("AF2 ipTM", "[0–1]", "↑"),
+    "boltz_pae_iptm": ("Boltz ipTM (PAE)", "[0–1]", "↑"),
+    "af2_pae_iptm": ("AF2 ipTM (PAE)", "[0–1]", "↑"),
     "binder_ptm": ("Binder pTM", "[0–1]", "↑"),
     "plddt_binder_mean": ("pLDDT binder (mean)", "[0–1]", "↑"),
     "plddt_binder_min": ("pLDDT binder (min)", "[0–1]", "↑"),

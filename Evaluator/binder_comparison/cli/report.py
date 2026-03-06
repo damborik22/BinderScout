@@ -23,6 +23,7 @@ from ..comparison.merger import merge_refold_results
 from ..comparison.scoring import (
     add_af2_ipsae_from_files,
     add_boltz_ipsae_from_files,
+    add_iptm_from_pae_files,
     apply_screening_thresholds,
     compute_agreement,
     compute_composite_scores,
@@ -63,10 +64,18 @@ def run(args: argparse.Namespace) -> None:
     if "boltz_pae_file" in df.columns:
         print("[report] Computing Boltz-2 ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
         df = add_boltz_ipsae_from_files(df, pae_file_col="boltz_pae_file", base_dir=boltz_base)
+        print("[report] Computing Boltz-2 ipTM from PAE files…")
+        df = add_iptm_from_pae_files(
+            df, pae_file_col="boltz_pae_file", ordering="binder_target", prefix="boltz", base_dir=boltz_base
+        )
 
     if "af2_pae_file" in df.columns:
         print("[report] Computing AF2 ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
         df = add_af2_ipsae_from_files(df, pae_file_col="af2_pae_file", base_dir=af2_base)
+        print("[report] Computing AF2 ipTM from PAE files…")
+        df = add_iptm_from_pae_files(
+            df, pae_file_col="af2_pae_file", ordering="target_binder", prefix="af2", base_dir=af2_base
+        )
 
     # Promote DunbrackLab PAE-based ipsae_min as the primary ranking column.
     # Prefer Boltz-2 PAE-based; fall back to AF2 PAE-based.

@@ -221,4 +221,7 @@ ZSCORE_METRICS = list(BOLTZ2_METRIC_MAP.keys()) + [
     "af2_bt_ipsae",
     "af2_tb_ipsae",
     "af2_ipsae_min",
+    # ipTM computed independently from PAE matrices
+    "boltz_pae_iptm",
+    "af2_pae_iptm",
 ]
