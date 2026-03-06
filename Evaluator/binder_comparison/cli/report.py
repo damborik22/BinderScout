@@ -24,10 +24,11 @@ from ..comparison.scoring import (
     add_af2_ipsae_from_files,
     add_boltz_ipsae_from_files,
     apply_screening_thresholds,
+    compute_agreement,
     compute_composite_scores,
     rank_by_adaptyv_method,
 )
-from ..comparison.statistics import compute_statistics, overall_rank
+from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
 from ..visualization.report import generate_report
 
@@ -53,8 +54,7 @@ def run(args: argparse.Namespace) -> None:
     df = compute_ensemble_metrics(df)
 
     # Step 2b: Compute ipSAE from PAE files using DunbrackLab formula.
-    # This gives the correct evaluation metric (mean over qualifying residues)
-    # with model-specific PAE cutoffs (10 Å Boltz-2, 15 Å AF2).
+    # Uniform 10 Å cutoff for both engines so scores are directly comparable.
     # base_dir helps resolve relative PAE paths in older CSVs where the runner
     # didn't write absolute paths.  The CSV's parent dir is the best guess.
     boltz_base = Path(args.boltz2_results).resolve().parent if args.boltz2_results else None
@@ -65,7 +65,7 @@ def run(args: argparse.Namespace) -> None:
         df = add_boltz_ipsae_from_files(df, pae_file_col="boltz_pae_file", base_dir=boltz_base)
 
     if "af2_pae_file" in df.columns:
-        print("[report] Computing AF2 ipSAE from PAE files (DunbrackLab, cutoff=15 Å)…")
+        print("[report] Computing AF2 ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
         df = add_af2_ipsae_from_files(df, pae_file_col="af2_pae_file", base_dir=af2_base)
 
     # Promote DunbrackLab PAE-based ipsae_min as the primary ranking column.
@@ -87,10 +87,9 @@ def run(args: argparse.Namespace) -> None:
     print("[report] Applying Adaptyv screening thresholds (ipSAE_min > 0.61)…")
     df = apply_screening_thresholds(df)
     df = compute_composite_scores(df)
+    df = compute_agreement(df)
     df = rank_by_adaptyv_method(df)
 
-    # Composite z-score rank (secondary ordering within tiers)
-    df["composite_score"] = overall_rank(df)
     df = df.sort_values(["adaptyv_rank"], ascending=[True]).reset_index(drop=True)
 
     # Step 4: Write outputs

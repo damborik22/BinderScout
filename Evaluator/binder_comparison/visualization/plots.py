@@ -47,7 +47,7 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "pae_bt": ("PAE (B→T)", "Å", "↓"),
     "pae_tb": ("PAE (T→B)", "Å", "↓"),
     "pae_bb": ("PAE (intra-B)", "Å", "↓"),
-    "composite_score": ("Composite score", "z", "↑"),
+    "agreement_count": ("Agreement", "", "↑"),
     "adaptyv_rank": ("Rank", "", ""),
     "binder_id": ("Binder ID", "", ""),
     "source_tool": ("Tool", "", ""),
