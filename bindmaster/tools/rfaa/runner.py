@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional
 
 from bindmaster.tools.base import ToolAdapter, ToolResult
 from bindmaster.tools.rfaa.config import RFAAConfig
@@ -24,13 +23,12 @@ class RFAARunner(ToolAdapter):
 
     tool_name = "rfaa"
 
-    def __init__(self, rfaa_root: Optional[Path] = None):
+    def __init__(self, rfaa_root: Path | None = None):
         if rfaa_root is None:
             env_root = os.environ.get("BINDMASTER_RFAA_ROOT")
             if not env_root:
-                raise EnvironmentError(
-                    "RFAA root not specified. Set BINDMASTER_RFAA_ROOT env var "
-                    "or pass rfaa_root to RFAARunner()."
+                raise OSError(
+                    "RFAA root not specified. Set BINDMASTER_RFAA_ROOT env var or pass rfaa_root to RFAARunner()."
                 )
             rfaa_root = Path(env_root)
 
@@ -39,18 +37,11 @@ class RFAARunner(ToolAdapter):
             raise FileNotFoundError(f"RFAA root not found: {self.rfaa_root}")
 
     def validate_environment(self) -> bool:
-        result = subprocess.run(
-            ["conda", "env", "list"],
-            capture_output=True, text=True
-        )
-        envs = [line.split()[0] for line in result.stdout.splitlines()
-                if line and not line.startswith("#")]
+        result = subprocess.run(["conda", "env", "list"], capture_output=True, text=True)
+        envs = [line.split()[0] for line in result.stdout.splitlines() if line and not line.startswith("#")]
         found = "bindmaster_rfaa" in envs
         if not found:
-            print(
-                "[rfaa] Conda env 'bindmaster_rfaa' not found.\n"
-                "   Run: bash scripts/install_rfaa.sh"
-            )
+            print("[rfaa] Conda env 'bindmaster_rfaa' not found.\n   Run: bash scripts/install_rfaa.sh")
         return found
 
     def validate_weights(self) -> bool:
@@ -80,9 +71,7 @@ class RFAARunner(ToolAdapter):
 
         # Pre-flight checks
         if config.inference.ligand:
-            ligand_ok = verify_ligand_in_pdb(
-                config.inference.input_pdb, config.inference.ligand
-            )
+            ligand_ok = verify_ligand_in_pdb(config.inference.input_pdb, config.inference.ligand)
             if not ligand_ok:
                 return ToolResult(
                     success=False,
@@ -91,10 +80,7 @@ class RFAARunner(ToolAdapter):
                     output_dir=output_dir,
                     pdb_paths=[],
                     log_path=log_path,
-                    error_message=(
-                        f"Ligand '{config.inference.ligand}' not found in "
-                        f"{config.inference.input_pdb}"
-                    ),
+                    error_message=(f"Ligand '{config.inference.ligand}' not found in {config.inference.input_pdb}"),
                 )
 
         # Build command
@@ -105,14 +91,22 @@ class RFAARunner(ToolAdapter):
 
         if config.use_apptainer and config.apptainer_sif:
             cmd = [
-                "/usr/bin/apptainer", "run", "--nv",
+                "/usr/bin/apptainer",
+                "run",
+                "--nv",
                 str(config.apptainer_sif),
-                "-u", str(self.rfaa_root / "run_inference.py"),
+                "-u",
+                str(self.rfaa_root / "run_inference.py"),
             ] + hydra_overrides
         else:
             cmd = [
-                "conda", "run", "-n", config.conda_env, "--no-capture-output",
-                "python", str(self.rfaa_root / "run_inference.py"),
+                "conda",
+                "run",
+                "-n",
+                config.conda_env,
+                "--no-capture-output",
+                "python",
+                str(self.rfaa_root / "run_inference.py"),
             ] + hydra_overrides
 
         if dry_run:
@@ -155,8 +149,7 @@ class RFAARunner(ToolAdapter):
         output_prefix = Path(config.inference.output_prefix)
         pdb_paths = []
         for i in range(
-            config.inference.design_startnum,
-            config.inference.design_startnum + config.inference.num_designs
+            config.inference.design_startnum, config.inference.design_startnum + config.inference.num_designs
         ):
             pdb_candidate = Path(f"{output_prefix}_{i}.pdb")
             if pdb_candidate.exists():
@@ -167,15 +160,9 @@ class RFAARunner(ToolAdapter):
         success = proc.returncode == 0 and len(pdb_paths) > 0
 
         if not success:
-            print(
-                f"[rfaa] Run failed (returncode={proc.returncode}, "
-                f"pdbs_found={len(pdb_paths)}). See: {log_path}"
-            )
+            print(f"[rfaa] Run failed (returncode={proc.returncode}, pdbs_found={len(pdb_paths)}). See: {log_path}")
         else:
-            print(
-                f"[rfaa] Done: {len(pdb_paths)} designs in {elapsed:.1f}s "
-                f"({elapsed/len(pdb_paths):.1f}s/design)"
-            )
+            print(f"[rfaa] Done: {len(pdb_paths)} designs in {elapsed:.1f}s ({elapsed / len(pdb_paths):.1f}s/design)")
 
         meta = {
             "design_id": design_id,

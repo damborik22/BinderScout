@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Optional
 
 
 class ToolOrigin(str, Enum):
@@ -49,33 +48,33 @@ class BinderScore:
     binder_length: int
 
     # --- Structural confidence ---
-    plddt_binder: Optional[float] = None
-    iptm: Optional[float] = None
-    ptm: Optional[float] = None
-    ipae: Optional[float] = None
-    pae_interaction: Optional[float] = None
+    plddt_binder: float | None = None
+    iptm: float | None = None
+    ptm: float | None = None
+    ipae: float | None = None
+    pae_interaction: float | None = None
 
     # --- Geometry ---
-    binder_rmsd: Optional[float] = None
-    complex_rmsd: Optional[float] = None
+    binder_rmsd: float | None = None
+    complex_rmsd: float | None = None
 
     # --- Filter pass/fail (PXDesign-style booleans) ---
-    passes_af2ig_easy: Optional[bool] = None
-    passes_af2ig_strict: Optional[bool] = None
-    passes_protenix_basic: Optional[bool] = None
-    passes_protenix_strict: Optional[bool] = None
+    passes_af2ig_easy: bool | None = None
+    passes_af2ig_strict: bool | None = None
+    passes_protenix_basic: bool | None = None
+    passes_protenix_strict: bool | None = None
 
     # --- Ligand-specific (RFDiffusionAA only) ---
-    ligand_ccd_code: Optional[str] = None
-    ligand_contact_residues: Optional[int] = None
+    ligand_ccd_code: str | None = None
+    ligand_contact_residues: int | None = None
 
     # --- Computed composite ---
-    composite_score: Optional[float] = field(default=None, init=False)
+    composite_score: float | None = field(default=None, init=False)
 
     def __post_init__(self):
         self.composite_score = self._compute_composite()
 
-    def _compute_composite(self) -> Optional[float]:
+    def _compute_composite(self) -> float | None:
         """Compute composite score from available metrics."""
         terms = {}
 

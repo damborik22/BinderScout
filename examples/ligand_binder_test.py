@@ -17,17 +17,12 @@ from pathlib import Path
 from bindmaster.feature_flags import flags
 
 if not flags.rfaa_enabled:
-    print(
-        "RFDiffusionAA is disabled.\n"
-        "   Enable with: export BINDMASTER_ENABLE_RFAA=true"
-    )
+    print("RFDiffusionAA is disabled.\n   Enable with: export BINDMASTER_ENABLE_RFAA=true")
     sys.exit(1)
 
-from bindmaster.tools.rfaa.config import (
-    RFAAConfig, RFAAInferenceConfig, RFAADiffuserConfig, RFAAContigConfig
-)
-from bindmaster.tools.rfaa.runner import RFAARunner
+from bindmaster.tools.rfaa.config import RFAAConfig, RFAAContigConfig, RFAADiffuserConfig, RFAAInferenceConfig
 from bindmaster.tools.rfaa.postprocess import prepare_ligandmpnn_input
+from bindmaster.tools.rfaa.runner import RFAARunner
 
 # --- Benchmark target: PDB 7v11, ligand OQO ---
 TARGET_PDB = Path("input/7v11.pdb")

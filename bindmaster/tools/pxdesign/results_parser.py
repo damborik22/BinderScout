@@ -7,7 +7,6 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-
 COLUMN_MAP = {
     "af2_ipTM": "af2_iptm",
     "af2_ipAE": "af2_ipae",
@@ -89,10 +88,7 @@ def get_passing_designs(
     }.get(filter_name)
 
     if not filter_key:
-        raise ValueError(
-            f"Unknown filter '{filter_name}'. "
-            f"Choose from: AF2-IG-easy, AF2-IG, Protenix-basic, Protenix"
-        )
+        raise ValueError(f"Unknown filter '{filter_name}'. Choose from: AF2-IG-easy, AF2-IG, Protenix-basic, Protenix")
 
     return [r for r in records if r.get(filter_key) is True]
 
@@ -112,13 +108,21 @@ def summarize_run(summary_csv: Path) -> dict:
 
     print(f"\n[pxdesign] Run summary ({summary_csv.parent.name}):")
     print(f"  Total designs:      {n_total:>6}")
-    print(f"  AF2-IG easy pass:   {summary['passes_af2ig_easy']:>6} "
-          f"({100*summary['passes_af2ig_easy']/max(n_total,1):.1f}%)")
-    print(f"  AF2-IG strict pass: {summary['passes_af2ig_strict']:>6} "
-          f"({100*summary['passes_af2ig_strict']/max(n_total,1):.1f}%)")
-    print(f"  Protenix basic:     {summary['passes_protenix_basic']:>6} "
-          f"({100*summary['passes_protenix_basic']/max(n_total,1):.1f}%)")
-    print(f"  Protenix strict:    {summary['passes_protenix_strict']:>6} "
-          f"({100*summary['passes_protenix_strict']/max(n_total,1):.1f}%)")
+    print(
+        f"  AF2-IG easy pass:   {summary['passes_af2ig_easy']:>6} "
+        f"({100 * summary['passes_af2ig_easy'] / max(n_total, 1):.1f}%)"
+    )
+    print(
+        f"  AF2-IG strict pass: {summary['passes_af2ig_strict']:>6} "
+        f"({100 * summary['passes_af2ig_strict'] / max(n_total, 1):.1f}%)"
+    )
+    print(
+        f"  Protenix basic:     {summary['passes_protenix_basic']:>6} "
+        f"({100 * summary['passes_protenix_basic'] / max(n_total, 1):.1f}%)"
+    )
+    print(
+        f"  Protenix strict:    {summary['passes_protenix_strict']:>6} "
+        f"({100 * summary['passes_protenix_strict'] / max(n_total, 1):.1f}%)"
+    )
 
     return summary

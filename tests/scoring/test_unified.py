@@ -1,8 +1,6 @@
 """Tests for BinderScore unified scoring — no GPU."""
 
-import pytest
-
-from bindmaster.scoring.unified import BinderScore, ToolOrigin, from_pxdesign_record, from_rfaa_result
+from bindmaster.scoring.unified import BinderScore, ToolOrigin, from_pxdesign_record
 
 
 def test_composite_all_metrics():
