@@ -10,7 +10,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from bindmaster.tools.pxdesign.config import PXDesignConfig, ChainConfig
+from bindmaster.tools.pxdesign.config import ChainConfig, PXDesignConfig
 
 
 class MSAManager:
@@ -28,10 +28,7 @@ class MSAManager:
         cache_path = self.cache_dir / key
         if not cache_path.exists():
             return False
-        for chain_id in config.target.chains:
-            if not (cache_path / chain_id).exists():
-                return False
-        return True
+        return all((cache_path / chain_id).exists() for chain_id in config.target.chains)
 
     def get_msa_paths(self, config: PXDesignConfig) -> dict[str, Path]:
         key = self.cache_key(config)
@@ -41,8 +38,7 @@ class MSAManager:
             chain_msa = cache_path / chain_id
             if not chain_msa.exists():
                 raise FileNotFoundError(
-                    f"MSA not cached for chain {chain_id} "
-                    f"(target_hash={key}). Run compute_msa() first."
+                    f"MSA not cached for chain {chain_id} (target_hash={key}). Run compute_msa() first."
                 )
             paths[chain_id] = chain_msa
         return paths
@@ -68,8 +64,17 @@ class MSAManager:
 
         t0 = time.time()
         proc = subprocess.run(
-            ["conda", "run", "-n", conda_env, "--no-capture-output",
-             "pxdesign", "prepare-msa", "--yaml", str(tmp_yaml)],
+            [
+                "conda",
+                "run",
+                "-n",
+                conda_env,
+                "--no-capture-output",
+                "pxdesign",
+                "prepare-msa",
+                "--yaml",
+                str(tmp_yaml),
+            ],
             capture_output=True,
             text=True,
         )

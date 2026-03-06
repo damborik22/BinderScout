@@ -5,9 +5,8 @@ PXDesign configuration — generates the YAML files that PXDesign CLI consumes.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
 
 import yaml
 
@@ -15,16 +14,18 @@ import yaml
 @dataclass
 class ChainConfig:
     """Configuration for a single target chain."""
-    crop: Optional[list[str]] = None
-    hotspots: Optional[list[int]] = None
-    msa: Optional[Path] = None
+
+    crop: list[str] | None = None
+    hotspots: list[int] | None = None
+    msa: Path | None = None
 
 
 @dataclass
 class PXDesignTargetConfig:
     """Target structure configuration."""
+
     file: Path
-    chains: dict[str, Union[ChainConfig, str]]
+    chains: dict[str, ChainConfig | str]
 
     def __post_init__(self):
         if not Path(self.file).exists():
@@ -37,6 +38,7 @@ class PXDesignConfig:
     Complete PXDesign run configuration.
     Generates a YAML file that pxdesign CLI consumes.
     """
+
     target: PXDesignTargetConfig
     binder_length: int
     n_samples: int = 1000
@@ -48,7 +50,7 @@ class PXDesignConfig:
     # BindMaster-specific (not written to YAML)
     gpu_device: int = 0
     conda_env: str = "bindmaster_pxdesign"
-    task_name: Optional[str] = None
+    task_name: str | None = None
 
     def get_task_name(self) -> str:
         if self.task_name:
@@ -75,7 +77,7 @@ class PXDesignConfig:
             "target": {
                 "file": str(self.target.file),
                 "chains": {},
-            }
+            },
         }
 
         for chain_id, chain_cfg in self.target.chains.items():
@@ -99,9 +101,12 @@ class PXDesignConfig:
     def to_cli_args(self) -> list[str]:
         """Generate the `pxdesign pipeline` CLI argument list."""
         args = [
-            "--preset", self.preset,
-            "--N_sample", str(self.n_samples),
-            "--dtype", self.dtype,
+            "--preset",
+            self.preset,
+            "--N_sample",
+            str(self.n_samples),
+            "--dtype",
+            self.dtype,
         ]
         if self.use_fast_ln:
             args += ["--use_fast_ln", "True"]

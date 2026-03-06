@@ -56,11 +56,11 @@ def validate_contig_string(contig: str) -> tuple[bool, str]:
     parts = contig.split(",")
     for part in parts:
         part = part.strip()
-        if re.fullmatch(r'\d+-\d+', part):
-            lo, hi = map(int, part.split('-'))
+        if re.fullmatch(r"\d+-\d+", part):
+            lo, hi = map(int, part.split("-"))
             if lo > hi:
                 return False, f"Invalid range {part}: lower bound > upper bound"
-        elif re.fullmatch(r'[A-Za-z]\d+-\d+', part):
+        elif re.fullmatch(r"[A-Za-z]\d+-\d+", part):
             pass
         else:
             return False, f"Unrecognized contig element: '{part}'"

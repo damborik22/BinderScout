@@ -82,8 +82,12 @@ class TestParseRfaa:
         with open(csv_path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=["design_id", "sequence", "overall_confidence", "source"])
             w.writeheader()
-            w.writerow({"design_id": "sample_0_111", "sequence": "MAEVKLSYVL", "overall_confidence": "0.87", "source": "rfaa"})
-            w.writerow({"design_id": "sample_0_112", "sequence": "KGDVLAEVSL", "overall_confidence": "0.82", "source": "rfaa"})
+            w.writerow(
+                {"design_id": "sample_0_111", "sequence": "MAEVKLSYVL", "overall_confidence": "0.87", "source": "rfaa"}
+            )
+            w.writerow(
+                {"design_id": "sample_0_112", "sequence": "KGDVLAEVSL", "overall_confidence": "0.82", "source": "rfaa"}
+            )
 
         rows = ev._parse_rfaa(run_dir)
         assert len(rows) == 2

@@ -17,18 +17,13 @@ from pathlib import Path
 from bindmaster.feature_flags import flags
 
 if not flags.pxdesign_enabled:
-    print(
-        "PXDesign is disabled.\n"
-        "   Enable with: export BINDMASTER_ENABLE_PXDESIGN=true"
-    )
+    print("PXDesign is disabled.\n   Enable with: export BINDMASTER_ENABLE_PXDESIGN=true")
     sys.exit(1)
 
-from bindmaster.tools.pxdesign.config import (
-    PXDesignConfig, PXDesignTargetConfig, ChainConfig
-)
+from bindmaster.scoring.unified import from_pxdesign_record
+from bindmaster.tools.pxdesign.config import ChainConfig, PXDesignConfig, PXDesignTargetConfig
+from bindmaster.tools.pxdesign.results_parser import get_passing_designs
 from bindmaster.tools.pxdesign.runner import PXDesignRunner
-from bindmaster.tools.pxdesign.results_parser import summarize_run, get_passing_designs
-from bindmaster.scoring.unified import from_pxdesign_record, ToolOrigin
 
 TARGET_CIF = Path("examples/5o45.cif")
 OUTPUT_DIR = Path("runs/pxdesign_pdl1_test")
@@ -51,7 +46,7 @@ def main(preset: str = "preview", n_samples: int = 50):
                     crop=["1-116"],
                     hotspots=[40, 99, 107],
                 )
-            }
+            },
         ),
         binder_length=80,
         n_samples=n_samples,
@@ -77,17 +72,14 @@ def main(preset: str = "preview", n_samples: int = 50):
     summary_csv = OUTPUT_DIR / "design_outputs" / "PDL1_test" / "summary.csv"
     if summary_csv.exists():
         passing = get_passing_designs(summary_csv, filter_name="Protenix-basic")
-        print(f"\nTop designs (Protenix-basic pass, ranked by ptx_iptm):")
+        print("\nTop designs (Protenix-basic pass, ranked by ptx_iptm):")
 
-        scores = [
-            from_pxdesign_record(r, f"pdl1_{i}", "PDL1", 80)
-            for i, r in enumerate(passing)
-        ]
+        scores = [from_pxdesign_record(r, f"pdl1_{i}", "PDL1", 80) for i, r in enumerate(passing)]
         scores.sort(key=lambda s: s.composite_score or 0, reverse=True)
 
         for i, s in enumerate(scores[:5]):
             print(
-                f"  {i+1}. composite={s.composite_score:.3f} | "
+                f"  {i + 1}. composite={s.composite_score:.3f} | "
                 f"ipTM={s.iptm:.2f} | pLDDT={s.plddt_binder:.2f} | "
                 f"ipAE={s.ipae:.1f}"
             )

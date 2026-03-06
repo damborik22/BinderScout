@@ -1,12 +1,11 @@
 """Tests for PXDesign config and results parsing — no GPU required."""
-import tempfile
+
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
 import pytest
 
-from bindmaster.tools.pxdesign.config import (
-    PXDesignConfig, PXDesignTargetConfig, ChainConfig
-)
+from bindmaster.tools.pxdesign.config import ChainConfig, PXDesignConfig, PXDesignTargetConfig
 
 
 def make_config(tmp_path) -> PXDesignConfig:
@@ -21,7 +20,7 @@ def make_config(tmp_path) -> PXDesignConfig:
                     crop=["1-116"],
                     hotspots=[40, 99, 107],
                 )
-            }
+            },
         ),
         binder_length=80,
         n_samples=10,
@@ -32,6 +31,7 @@ def make_config(tmp_path) -> PXDesignConfig:
 def test_yaml_generation(tmp_path):
     """YAML output must contain required keys."""
     import yaml
+
     config = make_config(tmp_path)
     yaml_path = tmp_path / "test_input.yaml"
     config.to_yaml(yaml_path)
