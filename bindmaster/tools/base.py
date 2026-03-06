@@ -8,7 +8,6 @@ Existing tools are NOT required to be retrofitted.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -24,9 +23,9 @@ class ToolResult:
     output_dir: Path
     pdb_paths: list[Path]
     log_path: Path
-    error_message: Optional[str] = None
-    raw_scores: Optional[dict] = None  # Tool-specific scores, unmodified
-    metadata: Optional[dict] = None  # Any additional tool-specific info
+    error_message: str | None = None
+    raw_scores: dict | None = None  # Tool-specific scores, unmodified
+    metadata: dict | None = None  # Any additional tool-specific info
 
 
 class ToolAdapter(ABC):

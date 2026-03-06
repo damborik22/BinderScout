@@ -25,24 +25,19 @@ class PXDesignRunner(ToolAdapter):
         self.msa_manager = MSAManager(msa_cache_dir)
 
     def validate_environment(self) -> bool:
-        result = subprocess.run(
-            ["conda", "env", "list"], capture_output=True, text=True
-        )
-        envs = [line.split()[0] for line in result.stdout.splitlines()
-                if line and not line.startswith("#")]
+        result = subprocess.run(["conda", "env", "list"], capture_output=True, text=True)
+        envs = [line.split()[0] for line in result.stdout.splitlines() if line and not line.startswith("#")]
         found = "bindmaster_pxdesign" in envs
         if not found:
-            print(
-                "[pxdesign] Conda env 'bindmaster_pxdesign' not found.\n"
-                "   Run: bash scripts/install_pxdesign.sh"
-            )
+            print("[pxdesign] Conda env 'bindmaster_pxdesign' not found.\n   Run: bash scripts/install_pxdesign.sh")
         return found
 
     def validate_weights(self) -> bool:
         result = subprocess.run(
-            ["conda", "run", "-n", "bindmaster_pxdesign",
-             "python", "-c", "import pxdesign; print('ok')"],
-            capture_output=True, text=True, timeout=30,
+            ["conda", "run", "-n", "bindmaster_pxdesign", "python", "-c", "import pxdesign; print('ok')"],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         ok = result.returncode == 0 and "ok" in result.stdout
         if not ok:
@@ -66,13 +61,17 @@ class PXDesignRunner(ToolAdapter):
         # MSA handling
         if not skip_msa and config.preset == "extended":
             if not self.msa_manager.is_cached(config):
-                print(f"[pxdesign] MSA not cached — computing now (this takes ~10 min)...")
+                print("[pxdesign] MSA not cached — computing now (this takes ~10 min)...")
                 try:
                     self.msa_manager.compute_msa(config, conda_env=config.conda_env)
                 except RuntimeError as e:
                     return ToolResult(
-                        success=False, tool_name=self.tool_name, design_id=design_id,
-                        output_dir=output_dir, pdb_paths=[], log_path=log_path,
+                        success=False,
+                        tool_name=self.tool_name,
+                        design_id=design_id,
+                        output_dir=output_dir,
+                        pdb_paths=[],
+                        log_path=log_path,
                         error_message=f"MSA computation failed: {e}",
                     )
             config = self.msa_manager.inject_msa_into_config(config)
@@ -85,23 +84,36 @@ class PXDesignRunner(ToolAdapter):
         # Validate YAML
         print("[pxdesign] Validating YAML...")
         check_result = subprocess.run(
-            ["conda", "run", "-n", config.conda_env, "--no-capture-output",
-             "pxdesign", "check-input", "--yaml", str(yaml_path)],
-            capture_output=True, text=True,
+            [
+                "conda",
+                "run",
+                "-n",
+                config.conda_env,
+                "--no-capture-output",
+                "pxdesign",
+                "check-input",
+                "--yaml",
+                str(yaml_path),
+            ],
+            capture_output=True,
+            text=True,
         )
         if check_result.returncode != 0:
             print(f"[pxdesign] YAML validation failed:\n{check_result.stderr}")
             return ToolResult(
-                success=False, tool_name=self.tool_name, design_id=design_id,
-                output_dir=output_dir, pdb_paths=[], log_path=log_path,
+                success=False,
+                tool_name=self.tool_name,
+                design_id=design_id,
+                output_dir=output_dir,
+                pdb_paths=[],
+                log_path=log_path,
                 error_message=f"YAML validation failed: {check_result.stderr}",
             )
         print("[pxdesign] YAML valid")
 
         # Build command
         cmd = (
-            ["conda", "run", "-n", config.conda_env, "--no-capture-output",
-             "pxdesign", "pipeline"]
+            ["conda", "run", "-n", config.conda_env, "--no-capture-output", "pxdesign", "pipeline"]
             + config.to_cli_args()
             + ["-i", str(yaml_path), "-o", str(output_dir)]
         )
@@ -110,8 +122,12 @@ class PXDesignRunner(ToolAdapter):
             print("[pxdesign] DRY RUN — command:")
             print(" \\\n  ".join(cmd))
             return ToolResult(
-                success=True, tool_name=self.tool_name, design_id=design_id,
-                output_dir=output_dir, pdb_paths=[], log_path=log_path,
+                success=True,
+                tool_name=self.tool_name,
+                design_id=design_id,
+                output_dir=output_dir,
+                pdb_paths=[],
+                log_path=log_path,
                 metadata={"dry_run": True, "command": cmd},
             )
 
@@ -126,9 +142,7 @@ class PXDesignRunner(ToolAdapter):
 
         t0 = time.time()
         with open(log_path, "w") as log_f:
-            proc = subprocess.run(
-                cmd, env=env, stdout=log_f, stderr=subprocess.STDOUT, text=True
-            )
+            proc = subprocess.run(cmd, env=env, stdout=log_f, stderr=subprocess.STDOUT, text=True)
         elapsed = time.time() - t0
 
         # Parse results
@@ -157,10 +171,13 @@ class PXDesignRunner(ToolAdapter):
             print(f"[pxdesign] Run failed (rc={proc.returncode}). See: {log_path}")
 
         meta = {
-            "design_id": design_id, "task_name": task_name,
-            "preset": config.preset, "n_samples": config.n_samples,
+            "design_id": design_id,
+            "task_name": task_name,
+            "preset": config.preset,
+            "n_samples": config.n_samples,
             "binder_length": config.binder_length,
-            "elapsed_seconds": elapsed, "returncode": proc.returncode,
+            "elapsed_seconds": elapsed,
+            "returncode": proc.returncode,
             "summary_csv": str(summary_csv) if summary_csv.exists() else None,
             **raw_scores,
         }
@@ -168,8 +185,13 @@ class PXDesignRunner(ToolAdapter):
             json.dump(meta, f, indent=2, default=str)
 
         return ToolResult(
-            success=success, tool_name=self.tool_name, design_id=design_id,
-            output_dir=output_dir, pdb_paths=list(pdb_paths), log_path=log_path,
+            success=success,
+            tool_name=self.tool_name,
+            design_id=design_id,
+            output_dir=output_dir,
+            pdb_paths=list(pdb_paths),
+            log_path=log_path,
             error_message=None if success else f"rc={proc.returncode}",
-            raw_scores=raw_scores, metadata=meta,
+            raw_scores=raw_scores,
+            metadata=meta,
         )

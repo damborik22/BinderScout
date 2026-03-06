@@ -152,7 +152,14 @@ class TestWriteRunAll:
         assert "run_pxdesign.sh" in content
 
     def test_correct_order(self, base_cfg, tmp_path):
-        tools = {"mosaic": True, "boltzgen": True, "bindcraft": True, "rfaa": True, "pxdesign_local": True, "evaluator": True}
+        tools = {
+            "mosaic": True,
+            "boltzgen": True,
+            "bindcraft": True,
+            "rfaa": True,
+            "pxdesign_local": True,
+            "evaluator": True,
+        }
         script = tmp_path / "run_all.sh"
         conf.write_run_all(script, base_cfg, tools)
         content = script.read_text()

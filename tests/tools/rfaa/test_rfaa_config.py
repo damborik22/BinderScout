@@ -1,10 +1,11 @@
 """Tests for RFAA config validation — no GPU required."""
-import pytest
+
 from pathlib import Path
 from unittest.mock import patch
-from bindmaster.tools.rfaa.config import (
-    RFAAConfig, RFAAInferenceConfig, RFAADiffuserConfig, RFAAContigConfig
-)
+
+import pytest
+
+from bindmaster.tools.rfaa.config import RFAAConfig, RFAAContigConfig, RFAAInferenceConfig
 
 
 def test_ligand_ccd_validation():
@@ -47,6 +48,7 @@ def test_hydra_overrides_ligand():
 
 def test_contig_validation():
     from bindmaster.tools.rfaa.ligand_prep import validate_contig_string
+
     valid, msg = validate_contig_string("150-150")
     assert valid and msg == ""
     valid, msg = validate_contig_string("10-120,A84-87,10-120")
@@ -67,6 +69,7 @@ def test_dry_run_does_not_execute(tmp_path):
         )
 
     from bindmaster.tools.rfaa.runner import RFAARunner
+
     runner = object.__new__(RFAARunner)
     runner.rfaa_root = Path("/fake/rfaa")
 
