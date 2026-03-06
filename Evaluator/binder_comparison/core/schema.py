@@ -217,7 +217,7 @@ ZSCORE_METRICS = list(BOLTZ2_METRIC_MAP.keys()) + [
     "boltz_pae_bt_ipsae",
     "boltz_pae_tb_ipsae",
     "boltz_pae_ipsae_min",
-    # AF2 PAE-based ipSAE (DunbrackLab formula, 15 Å cutoff)
+    # AF2 PAE-based ipSAE (DunbrackLab formula, 10 Å cutoff)
     "af2_bt_ipsae",
     "af2_tb_ipsae",
     "af2_ipsae_min",

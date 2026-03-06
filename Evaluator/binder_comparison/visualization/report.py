@@ -236,8 +236,6 @@ def generate_report(
     df: pd.DataFrame,
     summary: dict,
     output_path: str | Path,
-    *,
-    composite_col: str | None = "composite_score",
 ) -> None:
     """Generate and write the HTML report.
 
@@ -245,17 +243,13 @@ def generate_report(
         df:            DataFrame with all metrics (after Boltz-2 promotion + statistics).
         summary:       Per-tool summary dict from compute_statistics.
         output_path:   Where to write report.html.
-        composite_col: Column to sort by for top-20 table (fallback if no adaptyv_rank).
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Prefer adaptyv_rank ordering; fall back to composite_score
     sort_df = df.copy()
     if "adaptyv_rank" in sort_df.columns:
         sort_df = sort_df.sort_values("adaptyv_rank", ascending=True)
-    elif composite_col and composite_col in sort_df.columns:
-        sort_df = sort_df.sort_values(composite_col, ascending=False)
 
     # Tool counts
     tool_counts_str = ""
@@ -333,6 +327,7 @@ def _select_display_cols(df: pd.DataFrame) -> list[str]:
         "binder_id",
         "source_tool",
         "quality_tier",
+        "agreement_count",
         "ipsae_min",
         "af2_ipsae_min",
         "iptm",
@@ -348,7 +343,6 @@ def _select_display_cols(df: pd.DataFrame) -> list[str]:
         "native_dG",
         "native_dSASA",
         "native_shape_complementarity",
-        "composite_score",
         "sequence",
     ]
     return [c for c in preferred if c in df.columns]

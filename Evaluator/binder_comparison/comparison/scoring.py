@@ -12,8 +12,8 @@ Key findings implemented here:
 2. Threshold ipSAE_min > 0.61 maximises F1; > 0.8 is high-confidence
 3. Best composite: ipSAE_min × |ΔG/ΔSASA|  (median AP = 0.58 across 15 targets)
 4. Pre-filter: shape_complementarity > 0.62 when available (from BindCraft)
-5. ipSAE computed from PAE via Dunbrack formula (PAE cutoff 10 Å Boltz-2, 15 Å AF2, d0 per-residue)
-6. Ranking: ipSAE_min primary, iptm secondary, plddt_binder_mean tertiary
+5. ipSAE computed from PAE via Dunbrack formula (uniform 10 Å cutoff, d0_res per-residue)
+6. Ranking: agreement_count primary, ipSAE_min secondary, iptm tertiary
 """
 
 from __future__ import annotations
@@ -30,11 +30,11 @@ IPSAE_MIN_THRESHOLD = 0.40  # Below this → very unlikely binder
 SHAPE_COMP_PREFILTER = 0.62  # Pre-filter from meta-analysis
 RMSD_BINDER_PREFILTER = 3.73  # Å, pre-filter from meta-analysis
 
-# PAE cutoffs for Dunbrack ipSAE formula (Å)
-# DunbrackLab recommends 10 Å for Boltz-1/2 and AF3, 15 Å for AlphaFold2
-IPSAE_PAE_CUTOFF_BOLTZ = 10.0
-IPSAE_PAE_CUTOFF_AF2 = 15.0
-IPSAE_PAE_CUTOFF = IPSAE_PAE_CUTOFF_AF2  # backwards compat default
+# PAE cutoff for Dunbrack ipSAE formula (Å).
+# Uniform 10 Å for all engines so that ipSAE scores are directly comparable
+# across Boltz-2 and AF2.  Overath et al. (2025) thresholds (0.61, 0.80) were
+# calibrated with a 10 Å cutoff on AF3 data.
+IPSAE_PAE_CUTOFF = 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -86,14 +86,14 @@ def compute_ipsae_from_pae(
     Cross-validated against DunbrackLab ipsae package v1.0.1
     (ipsae_d0res_asym values match to floating-point precision).
 
-    The key difference from Mosaic aux ipSAE is the PAE cutoff (10 Å vs 15 Å)
-    and d0 computation (per-residue d0_res vs per-chain).
+    The key difference from Mosaic aux ipSAE is the d0 computation
+    (per-residue d0_res vs per-chain).
 
     Args:
         pae:           PAE matrix in Ångströms, shape [L_total, L_total].
         binder_length: Number of binder residues (L_b).
-        pae_cutoff:    PAE filter threshold in Å (default: 15 Å for AF2,
-                       use 10 Å for Boltz-2).
+        pae_cutoff:    PAE filter threshold in Å (default: 10 Å, uniform
+                       for both Boltz-2 and AF2).
         ordering:      'binder_target' (Boltz2 native, [binder|target]) or
                        'target_binder' (AF2 native, [target|binder]).
                        AF2 arrays are transposed internally to [binder|target].
@@ -102,6 +102,8 @@ def compute_ipsae_from_pae(
         dict with keys: bt_ipsae, tb_ipsae, ipsae_min, ipsae_max, ipsae_valid
     """
     pae = np.asarray(pae, dtype=float)
+    if pae.ndim != 2 or pae.shape[0] != pae.shape[1]:
+        raise ValueError(f"PAE must be a square 2D matrix, got shape {pae.shape}")
     L = pae.shape[0]
     L_b = binder_length
     L_t = L - L_b
@@ -177,7 +179,7 @@ def add_af2_ipsae_from_files(
     df: pd.DataFrame,
     pae_file_col: str = "af2_pae_file",
     binder_length_col: str = "binder_length",
-    pae_cutoff: float = IPSAE_PAE_CUTOFF_AF2,
+    pae_cutoff: float = IPSAE_PAE_CUTOFF,
     base_dir: str | Path | None = None,
 ) -> pd.DataFrame:
     """Load AF2 PAE .npy files and compute ipSAE scores, adding them to df.
@@ -191,7 +193,7 @@ def add_af2_ipsae_from_files(
         df:              DataFrame with AF2 refolding results.
         pae_file_col:    Column containing paths to PAE .npy files.
         binder_length_col: Column with binder sequence length.
-        pae_cutoff:      PAE cutoff in Å (default 15 Å).
+        pae_cutoff:      PAE cutoff in Å (default 10 Å, uniform across engines).
         base_dir:        Base directory for resolving relative PAE file paths.
     """
     result = df.copy()
@@ -246,7 +248,7 @@ def add_boltz_ipsae_from_files(
     df: pd.DataFrame,
     pae_file_col: str = "boltz_pae_file",
     binder_length_col: str = "binder_length",
-    pae_cutoff: float = IPSAE_PAE_CUTOFF_BOLTZ,
+    pae_cutoff: float = IPSAE_PAE_CUTOFF,
     base_dir: str | Path | None = None,
 ) -> pd.DataFrame:
     """Load Boltz-2 PAE .npy files and compute DunbrackLab ipSAE scores.
@@ -261,7 +263,7 @@ def add_boltz_ipsae_from_files(
         df:              DataFrame with Boltz-2 refolding results.
         pae_file_col:    Column containing paths to PAE .npy files.
         binder_length_col: Column with binder sequence length.
-        pae_cutoff:      PAE cutoff in Å (default 10 Å for Boltz-2).
+        pae_cutoff:      PAE cutoff in Å (default 10 Å, uniform across engines).
         base_dir:        Base directory for resolving relative PAE file paths.
     """
     result = df.copy()
@@ -414,19 +416,112 @@ def compute_composite_scores(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Adaptyv-method ranking
+# ipTM computation from PAE matrices
+# ---------------------------------------------------------------------------
+
+
+def compute_iptm_from_pae(
+    pae: np.ndarray,
+    binder_length: int,
+    *,
+    ordering: str = "binder_target",
+) -> dict[str, float]:
+    """Compute ipTM from a full PAE matrix (independently of model-reported values).
+
+    Uses the standard TM-score kernel with global d0 (no PAE cutoff, all
+    cross-chain pairs contribute).  This gives an independent ipTM that is
+    comparable across engines.
+
+    Formula:
+        ipTM(A→B) = max_i∈A [ mean_j∈B ( 1/(1+(PAE_ij/d0)²) ) ]
+        d0 = max(1.0, 1.24 * (L_A + L_B - 15)^(1/3) - 1.8)
+        ipTM = max(bt, tb)
+
+    Args:
+        pae:           PAE matrix in Å, shape [L_total, L_total].
+        binder_length: Number of binder residues.
+        ordering:      'binder_target' or 'target_binder'.
+
+    Returns:
+        dict with keys: bt_iptm, tb_iptm, iptm
+    """
+    pae = np.asarray(pae, dtype=float)
+    if pae.ndim != 2 or pae.shape[0] != pae.shape[1]:
+        raise ValueError(f"PAE must be a square 2D matrix, got shape {pae.shape}")
+    L = pae.shape[0]
+    L_b = binder_length
+    L_t = L - L_b
+
+    if L_b <= 0 or L_t <= 0:
+        return dict(bt_iptm=np.nan, tb_iptm=np.nan, iptm=np.nan)
+
+    # Normalise to [binder | target] ordering
+    if ordering == "target_binder":
+        pae = np.block(
+            [
+                [pae[L_t:, L_t:], pae[L_t:, :L_t]],
+                [pae[:L_t, L_t:], pae[:L_t, :L_t]],
+            ]
+        )
+
+    # Global d0 (uses total chain lengths, no minimum of 27)
+    d0 = max(1.0, 1.24 * (L_b + L_t - 15) ** (1.0 / 3.0) - 1.8)
+
+    pae_bt = pae[:L_b, L_b:]  # shape [L_b, L_t]
+    pae_tb = pae[L_b:, :L_b]  # shape [L_t, L_b]
+
+    # bt: for each binder residue i, mean TM-kernel over all target residues j
+    bt_per_res = np.mean(1.0 / (1.0 + (pae_bt / d0) ** 2), axis=1)
+    bt_iptm = float(np.max(bt_per_res)) if len(bt_per_res) > 0 else 0.0
+
+    # tb: for each target residue i, mean TM-kernel over all binder residues j
+    tb_per_res = np.mean(1.0 / (1.0 + (pae_tb / d0) ** 2), axis=1)
+    tb_iptm = float(np.max(tb_per_res)) if len(tb_per_res) > 0 else 0.0
+
+    return dict(bt_iptm=bt_iptm, tb_iptm=tb_iptm, iptm=float(max(bt_iptm, tb_iptm)))
+
+
+# ---------------------------------------------------------------------------
+# Multi-model agreement scoring
+# ---------------------------------------------------------------------------
+
+
+def compute_agreement(df: pd.DataFrame, threshold: float = IPSAE_PASS_THRESHOLD) -> pd.DataFrame:
+    """Count how many independent refolding engines agree a design passes.
+
+    Checks each of boltz_pae_ipsae_min, af2_ipsae_min (and ipsae_min as
+    promoted column) against *threshold*.  Designs with higher agreement
+    are stronger candidates.
+
+    Adds column 'agreement_count' (0–N, where N = number of available engines).
+    """
+    result = df.copy()
+    engine_cols = ["boltz_pae_ipsae_min", "af2_ipsae_min"]
+    count = pd.Series(0, index=df.index)
+    for col in engine_cols:
+        if col in result.columns:
+            vals = pd.to_numeric(result[col], errors="coerce")
+            count += (vals > threshold).astype(int)
+    result["agreement_count"] = count
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Adaptyv-method ranking (with agreement)
 # ---------------------------------------------------------------------------
 
 
 def rank_by_adaptyv_method(df: pd.DataFrame) -> pd.DataFrame:
     """Rank binders using the Adaptyv/meta-analysis hierarchy.
 
-    Primary:   ipsae_min (descending — higher is better)
-    Secondary: iptm       (descending)
-    Tertiary:  plddt_binder_mean (descending)
+    Sort order (all descending = better first):
+        1. agreement_count  — how many engines agree ipsae_min > 0.61
+        2. ipsae_min        — primary metric (higher = better)
+        3. iptm             — secondary (higher = better)
+        4. plddt_binder_mean — tertiary (higher = better)
 
     Adds a column 'adaptyv_rank' (1 = best).
-    Filters: ipsae_valid == 1 (interface detected) are shown first.
+    Rows with ipsae_valid == 1 are shown before those without.
     """
     result = df.copy()
     ipsae_col = _best_ipsae_col(result)
@@ -440,19 +535,24 @@ def rank_by_adaptyv_method(df: pd.DataFrame) -> pd.DataFrame:
         sort_keys.append("_ipsae_valid_sort")
         ascending.append(True)
 
-    # Primary: ipSAE_min
+    # Primary: agreement count (more engines agreeing = better)
+    if "agreement_count" in result.columns:
+        sort_keys.append("agreement_count")
+        ascending.append(False)
+
+    # Secondary: ipSAE_min
     if ipsae_col is not None:
         sort_keys.append(ipsae_col)
         ascending.append(False)
 
-    # Secondary: iptm (ensemble preferred)
+    # Tertiary: iptm
     for col in ["iptm", "boltz_iptm", "af2_iptm"]:
         if col in result.columns:
             sort_keys.append(col)
             ascending.append(False)
             break
 
-    # Tertiary: pLDDT
+    # Quaternary: pLDDT
     for col in ["plddt_binder_mean", "boltz_plddt_binder_mean", "af2_plddt_binder_mean"]:
         if col in result.columns:
             sort_keys.append(col)
@@ -483,9 +583,9 @@ def _best_ipsae_col(df: pd.DataFrame) -> str | None:
     formula), then Mosaic aux columns (optimisation-time, max aggregation).
     """
     for col in [
-        "ipsae_min",  # ensemble-renamed DunbrackLab PAE-based
+        "ipsae_min",  # promoted DunbrackLab PAE-based (10 Å cutoff)
         "boltz_pae_ipsae_min",  # Boltz-2 PAE-based (DunbrackLab, 10 Å cutoff)
-        "af2_ipsae_min",  # AF2 PAE-based (DunbrackLab, 15 Å cutoff)
+        "af2_ipsae_min",  # AF2 PAE-based (DunbrackLab, 10 Å cutoff)
         "ipsae_min_aux",  # Mosaic aux (max aggregation, renamed)
         "boltz_ipsae_min",  # Mosaic aux (pre-rename)
     ]:
