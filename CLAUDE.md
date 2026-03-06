@@ -166,7 +166,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 | **Refolding** | Re-predicting structure from sequence using an independent model (cross-validation) |
 | **ipTM** | Interface predicted TM-score (0–1, higher = better). Measures binding interface quality |
 | **iPSAE** | Interface Predicted Structural Alignment Error (DunbrackLab 2025 formula). TM-score analogue; **higher is better** |
-| **ipsae_min** | min(binder→target iPSAE, target→binder iPSAE). **Primary ranking metric** (weight 4.0) |
+| **ipsae_min** | min(binder→target iPSAE, target→binder iPSAE). **Primary ranking metric** |
 | **PAE** | Predicted Aligned Error (Angstroms, **lower = better**). Raw error between residue pairs |
 | **pLDDT** | Predicted Local Distance Difference Test (0–1, higher = better). Per-residue confidence |
 | **MPNN** | ProteinMPNN — sequence design neural network |
@@ -184,7 +184,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 
 ### Evaluation metrics and ranking
 
-**Primary metric: `ipsae_min`** — the minimum of binder→target and target→binder iPSAE scores. Computed from PAE arrays using the DunbrackLab 2025 formula (mean aggregation, model-specific PAE cutoffs).
+**Primary metric: `ipsae_min`** — the minimum of binder→target and target→binder iPSAE scores. Computed from PAE arrays using the DunbrackLab 2025 formula: `max_i[mean_j(1/(1+(PAE_ij/d0)²))]` (d0_res variant, uniform 10 Å PAE cutoff for both Boltz-2 and AF2). Ranking uses agreement_count (how many engines agree ipsae_min > 0.61) as primary sort, then ipsae_min desc.
 
 **Direction guide:**
 - **Higher is better:** `iptm`, `bt_ipsae`, `tb_ipsae`, `ipsae_min`, `plddt_binder_mean`, `binder_ptm`
@@ -194,15 +194,15 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 
 | Tier | Threshold | Meaning |
 |---|---|---|
-| High | > 0.70 | Strong candidate for experimental testing |
-| Medium | 0.61 – 0.70 | Promising, may need optimization |
+| High | > 0.80 | Strong candidate for experimental testing |
+| Medium | 0.61 – 0.80 | Promising, may need optimization |
 | Low | 0.40 – 0.61 | Weak binding prediction |
 | Reject | ≤ 0.40 | Unlikely to bind |
 
 ### Critical domain facts
 
 - **iptm is gameable** — AF2-designed sequences (BindCraft) tend to score high on ipTM by construction. Use `ipsae_min` as the primary ranking metric instead.
-- **AF2 vs Boltz-2 disagreement** — For short binders (~60aa), Boltz-2 may score high while AF2 scores low. This is meaningful signal, not noise. The composite score reflects the disagreement.
+- **AF2 vs Boltz-2 disagreement** — For short binders (~60aa), Boltz-2 may score high while AF2 scores low. This is meaningful signal, not noise. The `agreement_count` column reflects how many engines agree above the 0.61 threshold.
 - **Binder length is a main driver** — Longer binders tend to score lower on `ipsae_min` (r ≈ -0.78).
 - **Mosaic designs.csv format** — Can mix column formats between workers (old 11-col / new 13-col). The parser must handle this carefully or columns misalign. The `is_top` column marks the ~40 refolded designs out of ~800 total; extractors filter to `is_top=1` by default.
 - **Mosaic `target_sequence` placeholder** — The Mosaic template (`hallucinate_bindmaster.py`) writes `"REPLACE_ME"` as `target_sequence` when not configured. The legacy evaluator guards against using this as a real target sequence.
