@@ -1255,7 +1255,9 @@ def write_run_pxdesign(path: Path, cfg: dict):
             else:
                 chain_lines += f"    {cid}: all\\n"
 
-        content = header + f"""
+        content = (
+            header
+            + f"""
 RUN_DIR="{run_dir}"
 TARGET_PDB="{target_pdb}"
 
@@ -1323,8 +1325,11 @@ if [[ -f "$MERGED" ]]; then
     echo "  Merged summary: ${{MERGED}} (${{N_MERGED}} designs)"
 fi
 """
+        )
     else:
-        content = header + f"""
+        content = (
+            header
+            + f"""
 INPUT_YAML="{run_dir}/pxdesign/input.yaml"
 OUTPUT_DIR="{run_dir}/pxdesign/outputs"
 
@@ -1337,6 +1342,7 @@ pxdesign pipeline \\
     -i "$INPUT_YAML" \\
     -o "$OUTPUT_DIR"
 """
+        )
     path.write_text(content)
     path.chmod(0o755)
 
@@ -1928,7 +1934,9 @@ def wizard():
                 ask("  Samples per length", default=10, validator=validate_int(min_val=1, max_val=1000))
             )
             # Compute total for user info
-            n_lengths = len(range(cfg["pxdesign_min_length"], cfg["pxdesign_max_length"] + 1, cfg["pxdesign_length_step"]))
+            n_lengths = len(
+                range(cfg["pxdesign_min_length"], cfg["pxdesign_max_length"] + 1, cfg["pxdesign_length_step"])
+            )
             total = n_lengths * cfg["pxdesign_n_samples"]
             print_ok(f"  {n_lengths} lengths x {cfg['pxdesign_n_samples']} samples = {total} total designs")
             # Set binder_length to min for the base YAML (overridden per-length in run script)
