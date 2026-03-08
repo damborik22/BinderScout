@@ -325,7 +325,7 @@ detect_conda() {
     _try_cmd() {
         local bin="$1"
         if command -v "${bin}" &>/dev/null; then
-            base=$(${bin} info --base 2>/dev/null) && {
+            base=$(${bin} info --base 2>/dev/null | awk '/\// {print $NF}' | tail -1) && [[ -n "${base}" ]] && {
                 CONDA_BASE="${base}"
                 CONDA_CMD="$(command -v "${bin}")"
                 return 0
@@ -1109,10 +1109,11 @@ install_rfaa() {
             "pytorch>=2.2" "pytorch-cuda=12.4" -c pytorch -c nvidia -c conda-forge \
         || { print_fail "Failed to create bindmaster_rfaa env"; return 1; }
 
-    # Install RFAA
-    run_logged "Installing RFAA (pip)" \
-        "${CONDA_CMD}" run -n bindmaster_rfaa pip install -q -e "${RFAA_DIR}" \
-        || print_warn "RFAA pip install failed — may need manual install"
+    # Install RFAA dependencies (RFAA is not pip-installable; used via PYTHONPATH)
+    run_logged "Installing RFAA dependencies" \
+        "${CONDA_CMD}" run -n bindmaster_rfaa \
+        pip install -q hydra-core omegaconf icecream scipy numpy pandas tqdm fire assertpy deepdiff opt-einsum e3nn "dgl==1.1.3" "torchdata==0.7.1" prody openbabel-wheel \
+        || print_warn "Some RFAA deps failed — may need manual install"
 
     # Install LigandMPNN
     if [[ -d "${LIGANDMPNN_DIR}" ]]; then
@@ -1123,9 +1124,7 @@ install_rfaa() {
             || { print_fail "Failed to clone LigandMPNN"; return 1; }
     fi
 
-    run_logged "Installing LigandMPNN (pip)" \
-        "${CONDA_CMD}" run -n bindmaster_rfaa pip install -q -e "${LIGANDMPNN_DIR}" \
-        || { print_fail "Failed to install LigandMPNN"; return 1; }
+    print_ok "LigandMPNN cloned (used via PYTHONPATH, not pip-installable)"
 
     # Download LigandMPNN weights
     if [[ -d "${LIGANDMPNN_DIR}/model_params" ]]; then
@@ -1155,7 +1154,8 @@ install_rfaa() {
     mkdir -p "${SHORTCUTS_DIR}"
     cat > "${SHORTCUTS_DIR}/rfaa" << RFAAEOF
 #!/bin/bash
-# BindMaster RFAA shortcut
+# BindMaster RFAA shortcut — adds RFAA + LigandMPNN to PYTHONPATH
+export PYTHONPATH="${RFAA_DIR}:${LIGANDMPNN_DIR}\${PYTHONPATH:+:\$PYTHONPATH}"
 exec ${CONDA_CMD} run -n bindmaster_rfaa bash
 RFAAEOF
     chmod +x "${SHORTCUTS_DIR}/rfaa"
@@ -1193,6 +1193,85 @@ install_pxdesign() {
     run_logged "Installing PXDesign (pip)" \
         "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -e "${PXDESIGN_DIR}" \
         || { print_fail "Failed to install PXDesign"; return 1; }
+
+    # Install Protenix (PXDesign-specific fork) and PXDesignBench
+    run_logged "Installing Protenix (PXDesign fork)" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install --no-cache-dir "git+https://github.com/bytedance/Protenix.git@v0.5.0+pxd" \
+        || print_warn "Protenix install failed — PXDesign may not work"
+
+    run_logged "Installing PXDesignBench" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install --no-cache-dir "git+https://github.com/bytedance/PXDesignBench.git@v0.1.2" --no-deps \
+        || print_warn "PXDesignBench install failed — PXDesign may not work"
+
+    # PXDesign setup.py has install_requires commented out; install deps from requirements.txt
+    if [[ -f "${PXDESIGN_DIR}/requirements.txt" ]]; then
+        run_logged "Installing PXDesign requirements" \
+            "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -r "${PXDESIGN_DIR}/requirements.txt" \
+            || print_warn "Some PXDesign deps failed — may need manual install"
+    fi
+    # click is needed by pxdesign CLI but not in requirements.txt
+    run_logged "Installing PXDesign CLI deps" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q click \
+        || print_warn "Failed to install click — pxdesign CLI may not work"
+
+    # requirements.txt pins torch==2.3.1 (CPU-only from PyPI); reinstall with CUDA
+    run_logged "Reinstalling PyTorch with CUDA ${CUDA_VERSION}" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install torch --force-reinstall --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION//./}" \
+        || print_warn "PyTorch CUDA reinstall failed — GPU may not work"
+
+    # ColabDesign from GitHub (PyPI version 1.1.1 too old, missing 'weights' param)
+    run_logged "Installing ColabDesign from GitHub" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install --no-cache-dir "git+https://github.com/sokrypton/ColabDesign.git" \
+        || print_warn "ColabDesign install failed — AF2 eval may not work"
+
+    # Upgrade deepspeed for PyTorch 2.x compatibility
+    run_logged "Upgrading deepspeed" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install -q "deepspeed>=0.18" \
+        || print_warn "deepspeed upgrade failed"
+
+    # ── Post-install patches for known upstream issues ──────────────────────
+    print_step "Applying PXDesign compatibility patches"
+
+    # Patch: configs_infer.py num_workers (default 16 causes dataloader deadlock)
+    if [[ -f "${PXDESIGN_DIR}/pxdesign/configs/configs_infer.py" ]]; then
+        sed -i 's/"num_workers": 16/"num_workers": 0/' \
+            "${PXDESIGN_DIR}/pxdesign/configs/configs_infer.py" 2>/dev/null && \
+            print_ok "Patched configs_infer.py: num_workers=0"
+    fi
+
+    # Patch: pxdbench NumpyEncoder (numpy float32 not JSON serializable)
+    run_logged "Patching pxdbench JSON serialization" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign python << 'PATCHEOF'
+import importlib.util, pathlib
+spec = importlib.util.find_spec('pxdbench')
+if not spec or not spec.submodule_search_locations:
+    print('pxdbench not found — skipping'); exit(0)
+base = pathlib.Path(spec.submodule_search_locations[0])
+ENC = ('\n\nclass _NumpyEncoder(json.JSONEncoder):\n'
+    '    def default(self, obj):\n'
+    '        if isinstance(obj, (np.floating,)):\n'
+    '            return float(obj)\n'
+    '        if isinstance(obj, (np.integer,)):\n'
+    '            return int(obj)\n'
+    '        if isinstance(obj, np.ndarray):\n'
+    '            return obj.tolist()\n'
+    '        return super().default(obj)\n')
+for fn in ['tools/af2/main_af2_complex.py', 'tools/af2/main_af2_monomer.py']:
+    fp = base / fn
+    if not fp.exists(): continue
+    t = fp.read_text()
+    if '_NumpyEncoder' in t: print(f'Already patched: {fn}'); continue
+    m = 'from colabdesign import clear_mem, mk_afdesign_model'
+    if m in t: t = t.replace(m, m + ENC)
+    t = t.replace('json.dump(stats, f)', 'json.dump(stats, f, cls=_NumpyEncoder)')
+    t = t.replace('json.dump(results, f)', 'json.dump(results, f, cls=_NumpyEncoder)')
+    fp.write_text(t); print(f'Patched: {fn}')
+PATCHEOF
 
     # Download weights if script exists
     if [[ -f "${PXDESIGN_DIR}/download_tool_weights.sh" ]]; then
