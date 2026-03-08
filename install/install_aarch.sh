@@ -1373,6 +1373,7 @@ install_rfaa() {
     print_step "Creating bindmaster_rfaa conda environment"
     run_logged "Creating bindmaster_rfaa env" \
         "${CONDA_CMD}" create -n bindmaster_rfaa -y python=3.11 \
+            gcc_linux-aarch64 gxx_linux-aarch64 -c conda-forge \
         || { print_fail "Failed to create bindmaster_rfaa env"; return 1; }
 
     # aarch64: install PyTorch from PyPI with cu130 index (no conda pytorch-cuda for aarch64)
@@ -1409,12 +1410,15 @@ install_rfaa() {
 
     # Download RFAA weights
     local rfaa_weights="${RFAA_DIR}/weights"
-    if [[ -d "${rfaa_weights}" && -n "$(ls -A "${rfaa_weights}" 2>/dev/null)" ]]; then
-        print_ok "RFAA weights already present at ${rfaa_weights}"
+    local rfaa_weights_file="${rfaa_weights}/RFDiffusionAA_paper_weights.pt"
+    if [[ -f "${rfaa_weights_file}" ]]; then
+        print_ok "RFAA weights already present"
     else
         mkdir -p "${rfaa_weights}"
-        print_warn "RFAA weights must be downloaded manually to ${rfaa_weights}"
-        print_warn "See: https://github.com/baker-laboratory/rf_diffusion_all_atom#setup"
+        run_logged "Downloading RFAA weights" \
+            wget -q -O "${rfaa_weights_file}" \
+            "http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_weights.pt" \
+            || print_warn "RFAA weights download failed — retry: wget -O ${rfaa_weights_file} http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_weights.pt"
     fi
 
     # Smoke test
@@ -1797,11 +1801,17 @@ main() {
     [[ "${DO_EVALUATOR}" == true ]] && echo -e "  ${GREEN}evaluate${RESET}   — launch evaluation wizard"
     [[ "${DO_RFAA}"      == true ]] && echo -e "  ${GREEN}rfaa${RESET}       — open RFAA shell"
     [[ "${DO_PXDESIGN}"  == true ]] && echo -e "  ${GREEN}pxdesign${RESET}   — open PXDesign shell"
-    echo ""
-    echo -e "${BOLD}To use BindMaster, add to your PATH:${RESET}"
-    echo -e "  ${CYAN}export PATH=\"${SHORTCUTS_DIR}:\$PATH\"${RESET}"
-    echo -e "  ${CYAN}# For persistence, add to ~/.bashrc:${RESET}"
-    echo -e "  ${CYAN}echo 'export PATH=\"${SHORTCUTS_DIR}:\$PATH\"' >> ~/.bashrc${RESET}"
+    # Add shortcuts dir to PATH in .bashrc (idempotent)
+    local path_line="export PATH=\"${SHORTCUTS_DIR}:\$PATH\""
+    if ! grep -qF "${SHORTCUTS_DIR}" "${HOME}/.bashrc" 2>/dev/null; then
+        echo "" >> "${HOME}/.bashrc"
+        echo "# BindMaster shortcuts" >> "${HOME}/.bashrc"
+        echo "${path_line}" >> "${HOME}/.bashrc"
+        print_ok "Added ${SHORTCUTS_DIR} to PATH in ~/.bashrc"
+    else
+        print_ok "${SHORTCUTS_DIR} already in ~/.bashrc"
+    fi
+    export PATH="${SHORTCUTS_DIR}:${PATH}"
     echo ""
     echo -e "Full log: ${LOG_FILE}"
 
