@@ -13,7 +13,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 | Component | What it does | Runs in |
 |---|---|---|
-| `bindmaster install` | Installs BindCraft, BoltzGen, and/or Mosaic | bash |
+| `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, RFAA, PXDesign) | bash |
 | `bindmaster configure` | Interactive wizard: target → configs → run scripts | system Python |
 | `bindmaster evaluate` | Parse outputs, rank designs, optionally re-fold with Boltz2 | Mosaic uv venv |
 
@@ -24,6 +24,8 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 | **BindCraft** | Protein binder design via AlphaFold2 | conda env `BindCraft` (Python 3.10) |
 | **BoltzGen** | Structure generation with Boltz-1 | conda env `BoltzGen` (Python 3.12) |
 | **Mosaic** | JAX/Boltz2-based binder hallucination | uv venv (`Mosaic/.venv`) |
+| **RFAA** | All-atom diffusion + LigandMPNN for ligand binder design | conda env `bindmaster_rfaa` (Python 3.11) |
+| **PXDesign** | Protenix-based de novo binder design (diffusion + MPNN + AF2 eval) | conda env `bindmaster_pxdesign` (Python 3.11) |
 
 > Each tool runs in its own isolated environment. Environments must not be mixed.
 
@@ -69,6 +71,9 @@ BindMaster/
 ├── BindCraft/                  ← installed tool (gitignored)
 ├── BoltzGen/                   ← installed tool (gitignored)
 ├── Mosaic/                     ← installed tool (gitignored)
+├── rf_diffusion_all_atom/      ← RFAA (gitignored)
+├── LigandMPNN/                 ← LigandMPNN for RFAA (gitignored)
+├── PXDesign/                   ← PXDesign (gitignored)
 └── runs/                       ← generated run folders (gitignored)
 ```
 
@@ -100,7 +105,7 @@ bindmaster evaluate runs/<name>
 ## `bindmaster` CLI reference
 
 ```
-bindmaster install   [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples]
+bindmaster install   [--tool bindcraft|boltzgen|mosaic|rfaa|pxdesign|all] [--cuda VERSION] [--skip-examples]
 bindmaster configure [options passed through to configurator.py]
 bindmaster evaluate  <run-dir> [--metric METRIC] [--top N] [--refold N] [--target PDB]
 bindmaster evaluate  --sequences FILE  [--target PDB] [--refold N]
@@ -113,7 +118,7 @@ Options:
 
 | Flag | Description |
 |---|---|
-| `--tool all\|bindcraft\|boltzgen\|mosaic` | Which tool(s) to install. Omit for interactive menu. |
+| `--tool all\|bindcraft\|boltzgen\|mosaic\|rfaa\|pxdesign` | Which tool(s) to install. Omit for interactive menu. |
 | `--cuda VERSION` | CUDA version for conda package resolution (default: 12.4) |
 | `--skip-examples` | Do not prompt to run bundled examples after install |
 | `--standalone` | Force local Miniforge3 install (no system conda needed) |
@@ -124,7 +129,7 @@ Options:
 Interactive wizard that:
 1. Asks for a target name, PDB file, chain(s), and hotspot residues
 2. Sets global binder length and design count, with per-tool overrides
-3. Lets you enable/disable each tool (Mosaic → BoltzGen → BindCraft)
+3. Lets you enable/disable each tool (Mosaic, BoltzGen, BindCraft, RFAA, PXDesign)
 4. Writes all config files and shell scripts into `runs/<name>/`
 5. Optionally runs the full pipeline immediately
 
@@ -151,12 +156,14 @@ runs/<name>/
 ├── run_mosaic.sh
 ├── run_boltzgen.sh
 ├── run_bindcraft.sh
+├── run_rfaa.sh
+├── run_pxdesign.sh
 └── run_all.sh                  ← runs all enabled tools in sequence
 ```
 
 ### `bindmaster evaluate`
 
-Parses design outputs from any combination of Mosaic, BoltzGen, and BindCraft,
+Parses design outputs from any combination of Mosaic, BoltzGen, BindCraft, RFAA, and PXDesign,
 cross-ranks all designs by a configurable metric, and writes a summary.
 
 **Runs inside the Mosaic uv venv** (the only environment that has JAX + Boltz2).
@@ -225,6 +232,8 @@ Each tool goes through:
 bash install/install.sh --tool bindcraft
 bash install/install.sh --tool boltzgen
 bash install/install.sh --tool mosaic
+bash install/install.sh --tool rfaa
+bash install/install.sh --tool pxdesign
 bash install/install.sh --tool all
 bash install/install.sh --skip-examples
 bash install/install.sh --cuda 12.1
@@ -272,6 +281,8 @@ Both branches: `bindmaster install` or `bash install/install.sh`.
 - **BindCraft**: ARM64 binaries (`DAlphaBall.gcc`, `dssp`) bundled in `tools/aarch64/` — copied automatically.
 - **BoltzGen**: `pip install torch==2.5.1` (aarch64 PyPI wheels include CUDA).
 - **Mosaic**: `esmj` excluded on aarch64 (no wheel available).
+- **RFAA**: **Not supported on aarch64.** DGL (Deep Graph Library) has no CUDA-enabled aarch64 wheels; the SE3-Transformer requires DGL CUDA operations. Use x86_64 for RFAA.
+- **PXDesign**: Full pipeline works on aarch64/Blackwell. The installer applies automatic patches for CUDA arch compatibility (sm_120), JSON serialization, and dataloader config. Run scripts auto-detect aarch64 and set required env vars (`TORCH_CUDA_ARCH_LIST`, `JAX_PLATFORMS`).
 
 ---
 
@@ -284,6 +295,8 @@ bindmaster         # unified CLI (install / configure / evaluate)
 bindcraft          # activates BindCraft conda env, cd to BindCraft dir
 boltzgen           # activates BoltzGen conda env, cd to BoltzGen dir
 mosaic             # activates Mosaic uv venv, cd to Mosaic dir
+rfaa               # activates RFAA conda env, sets PYTHONPATH
+pxdesign           # activates PXDesign conda env
 bindmaster-config  # runs configurator directly (legacy)
 ```
 

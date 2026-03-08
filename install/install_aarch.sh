@@ -518,7 +518,7 @@ select_tools_interactive() {
         "Structure generation with Boltz-1 (conda, Python 3.12)"
         "JAX-based protein design with Marimo notebooks (uv venv)"
         "Evaluate binders: refold with Boltz-2 + AF2, ranked report (requires Mosaic)"
-        "All-atom diffusion + LigandMPNN for ligand binder design (conda)"
+        "All-atom diffusion + LigandMPNN (${RED}NOT SUPPORTED on aarch64${RESET} — DGL lacks CUDA)"
         "Protenix-based de novo binder design (conda)"
     )
 
@@ -1347,7 +1347,13 @@ EOF
 # ─── RFAA + LigandMPNN ──────────────────────────────────────────────────────
 
 install_rfaa() {
-    print_step "Installing RFDiffusionAA + LigandMPNN"
+    print_warn "RFAA is NOT SUPPORTED on aarch64 (DGL has no CUDA-enabled aarch64 wheels)."
+    print_warn "The SE3-Transformer requires DGL CUDA operations which are unavailable on this platform."
+    print_warn "RFAA will be installed but will only work for CPU-based tasks (not inference)."
+    print_warn "Use x86_64 for full RFAA support."
+    echo ""
+
+    print_step "Installing RFDiffusionAA + LigandMPNN (limited — no GPU inference on aarch64)"
 
     # Clone RFAA
     if [[ -d "${RFAA_DIR}" ]]; then

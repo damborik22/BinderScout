@@ -66,7 +66,7 @@ BindMaster/
 ```
 
 **Gitignored (created at runtime):**
-- `BindCraft/`, `BoltzGen/`, `Mosaic/` — cloned by installer
+- `BindCraft/`, `BoltzGen/`, `Mosaic/`, `rf_diffusion_all_atom/`, `LigandMPNN/`, `PXDesign/` — cloned by installer
 - `runs/` — generated experiment directories
 - `install.log`, `install_aarch.log` — installer output
 - `refold_boltz2/` — intermediate refolding outputs
@@ -80,6 +80,8 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `BindCraft` | BindCraft | 3.10 | conda | AF2 + MPNN + PyRosetta binder design |
 | `BoltzGen` | BoltzGen | 3.12 | conda | Boltz-1 diffusion-based generation |
 | `Mosaic/.venv` | Mosaic | 3.12 | uv | JAX + Boltz-2 hallucination |
+| `bindmaster_rfaa` | RFAA + LigandMPNN | 3.11 | conda | All-atom diffusion (x86_64 only) |
+| `bindmaster_pxdesign` | PXDesign | 3.11 | conda | Protenix binder design + eval |
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
 | `binder-eval-af2` | Evaluator | 3.10 | conda | AF2 refolding via ColabDesign |
 
@@ -180,7 +182,8 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 | **BindCraft** | AF2 hallucination + MPNN sequence design + PyRosetta filtering | `martinpacesa/BindCraft` |
 | **BoltzGen** | Boltz-1 structure diffusion + flow matching for binder generation | `HannesStark/boltzgen` |
 | **Mosaic** | JAX-based Boltz-2 gradient hallucination (no internal AF2 cross-val) | `escalante-bio/mosaic` |
-| **PXDesign** | Protenix (ByteDance AF3-class model) — prediction only | Not yet fully integrated |
+| **RFAA** | All-atom diffusion + LigandMPNN for ligand binder design | `baker-laboratory/rf_diffusion_all_atom` |
+| **PXDesign** | Protenix-based de novo binder design (diffusion + MPNN + AF2 eval) | `bytedance/PXDesign` |
 
 ### Evaluation metrics and ranking
 
@@ -229,10 +232,14 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - **Deferred items:**
   - F2: `--headless` mode for configurator (accept JSON config, skip prompts)
   - F6: Multi-chain binder support in BoltzGen YAML generation
-- **PXDesign** added as tool option in configurator but Protenix not yet fully integrated into the automated pipeline.
+- **PXDesign** full pipeline integrated: diffusion → MPNN → AF2 complex/monomer eval → summary CSV. Works on both x86_64 and aarch64 (with automated post-install patches).
+- **RFAA** integrated for x86_64; not supported on aarch64 (DGL lacks CUDA aarch64 wheels).
 
 ### Known issues
 
+- **aarch64 RFAA:** Not supported. DGL (Deep Graph Library) has no CUDA-enabled aarch64 wheels. The SE3-Transformer requires DGL CUDA operations. The installer shows a warning but still installs dependencies. Use x86_64 for RFAA.
+- **PXDesign site-packages patches:** The installer applies post-install patches to `protenix` (CUDA arch), `pxdbench` (NumpyEncoder), and `configs_infer.py` (num_workers). These patches are reapplied on each install but would be lost if packages are upgraded manually.
+- **PXDesign requirements.txt:** Pins `torch==2.3.1` (CPU-only from PyPI). The installer force-reinstalls PyTorch with CUDA after requirements.txt. Do not run `pip install -r requirements.txt` manually without reinstalling PyTorch afterward.
 - **Mosaic `is_top` filtering:** Both extractors (Evaluator package `MosaicExtractor` and legacy `evaluator.py`) now default to `is_top=1` rows only (~40 refolded designs instead of all ~800). Use `--all-mosaic-designs` to override. The `target_sequence` CSV fallback also skips `"REPLACE_ME"` placeholders.
 - **Mosaic CSV column mismatch:** `designs.csv` can mix two column formats when multiple workers run. Parser may misalign columns for some workers. Documented in `Evaluator/docs/pipeline_reference.md`.
 - **BoltzGen pass rate is low:** In CALCA target testing, only 1/50 BoltzGen designs passed the `ipsae_min > 0.61` threshold. Sequences designed for Boltz-2 often don't cross-validate well.
