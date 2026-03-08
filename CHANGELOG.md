@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **RFAA** (RFDiffusionAA + LigandMPNN): new design tool in installer, configurator, and evaluator (x86_64 only)
+- **PXDesign** (Protenix): full pipeline support — diffusion, MPNN sequence design, AF2 complex/monomer evaluation
+- Post-install patches in both installers for PXDesign upstream issues (NumpyEncoder, num_workers, CUDA arch, ColabDesign, deepspeed, JAX pin)
+- aarch64 run scripts auto-detect platform and set `TORCH_CUDA_ARCH_LIST` and `JAX_PLATFORMS` for Blackwell GPUs
+- RFAA platform warning in aarch64 installer (DGL lacks CUDA aarch64 wheels)
+
+### Fixed
+- Configurator `ask_choice()` return value destructuring for PXDesign mode and preset selection
+- RFAA template: Python 3.12 f-string syntax replaced with 3.10-compatible `ligand_line` variable
+- RFAA template: added missing PYTHONPATH export and `inference.ckpt_path`
+- PXDesign requirements.txt overwrites PyTorch with CPU-only version — installer now force-reinstalls with CUDA
+
 ## [0.7.0] — Part H: Standalone installer (server-friendly)
 
 ### Added
