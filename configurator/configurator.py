@@ -1292,8 +1292,9 @@ for LENGTH in $(seq "$MIN_LENGTH" "$LENGTH_STEP" "$MAX_LENGTH"); do
         -i "$INPUT_YAML" \\
         -o "$OUTPUT_DIR"
 
-    if [[ -f "$OUTPUT_DIR/design_outputs/input/summary.csv" ]]; then
-        N_DONE=$(tail -n +2 "$OUTPUT_DIR/design_outputs/input/summary.csv" | wc -l)
+    SCAN_CSV=$(find "$OUTPUT_DIR/design_outputs" -name "summary.csv" 2>/dev/null | head -1)
+    if [[ -n "$SCAN_CSV" ]]; then
+        N_DONE=$(tail -n +2 "$SCAN_CSV" | wc -l)
         TOTAL_DESIGNS=$((TOTAL_DESIGNS + N_DONE))
         echo "  -> ${{N_DONE}} designs at length ${{LENGTH}}"
     fi
@@ -1307,8 +1308,8 @@ echo "  Total designs: ${{TOTAL_DESIGNS}}"
 MERGED="$RUN_DIR/pxdesign/summary_all.csv"
 FIRST=true
 for LENGTH in $(seq "$MIN_LENGTH" "$LENGTH_STEP" "$MAX_LENGTH"); do
-    CSV="$RUN_DIR/pxdesign/outputs_len${{LENGTH}}/design_outputs/input/summary.csv"
-    if [[ -f "$CSV" ]]; then
+    CSV=$(find "$RUN_DIR/pxdesign/outputs_len${{LENGTH}}/design_outputs" -name "summary.csv" 2>/dev/null | head -1)
+    if [[ -n "$CSV" ]]; then
         if [[ "$FIRST" == true ]]; then
             cat "$CSV" > "$MERGED"
             FIRST=false
