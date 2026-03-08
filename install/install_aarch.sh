@@ -7,7 +7,7 @@
 # read from TOOLS_DIR to avoid redundant downloads.
 #
 # Usage:
-#   bash install/install_aarch.sh [--tool bindcraft|boltzgen|mosaic|all] [--tools-dir PATH] [--skip-examples]
+#   bash install/install_aarch.sh [--tool bindcraft|boltzgen|mosaic|evaluator|rfaa|pxdesign|all] [--tools-dir PATH] [--skip-examples]
 #
 # --tools-dir: path to pre-cached resources. Defaults to the sibling
 #              Documents/OLD/BindMaster/bindcraft-tools directory.
@@ -28,6 +28,14 @@ BINDCRAFT_COMMIT="828fd9f"
 BOLTZGEN_COMMIT="da0f092"
 MOSAIC_COMMIT="dc9c4d7"
 
+RFAA_REPO="https://github.com/baker-laboratory/rf_diffusion_all_atom.git"
+RFAA_DIR="${BINDMASTER_DIR}/rf_diffusion_all_atom"
+LIGANDMPNN_REPO="https://github.com/dauparas/LigandMPNN.git"
+LIGANDMPNN_DIR="${BINDMASTER_DIR}/LigandMPNN"
+PXDESIGN_REPO="https://github.com/bytedance/PXDesign.git"
+PXDESIGN_COMMIT="HEAD"
+PXDESIGN_DIR="${BINDMASTER_DIR}/PXDesign"
+
 ARCH="$(uname -m)"     # expected: aarch64
 CUDA_VERSION="13.0"    # DGX Spark GB10 (Blackwell, sm_121)
 
@@ -35,7 +43,7 @@ CUDA_VERSION="13.0"    # DGX Spark GB10 (Blackwell, sm_121)
 _default_tools="$(cd "${BINDMASTER_DIR}" && cd ../../Documents/OLD/BindMaster/bindcraft-tools 2>/dev/null && pwd || true)"
 TOOLS_DIR="${_default_tools}"
 
-CONDA_CMD=""   # set by detect_conda: full path to mamba (preferred) or conda
+CONDA_CMD=""          # set by detect_conda: full path to mamba (preferred) or conda
 
 # ─── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -49,13 +57,16 @@ RESET='\033[0m'
 SKIP_EXAMPLES=false
 AUTO_YES=false
 UNINSTALL_MODE=false
-TOOL_SPECIFIED=false
+TOOL_SPECIFIED=false   # set to true when --tool is passed on CLI
 STANDALONE="auto"      # auto | true | false — controls local Miniforge install
 
+# Per-tool install flags (set by arg parsing or interactive menu)
 DO_BINDCRAFT=false
 DO_BOLTZGEN=false
 DO_MOSAIC=false
 DO_EVALUATOR=false
+DO_RFAA=false
+DO_PXDESIGN=false
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -63,14 +74,24 @@ while [[ $# -gt 0 ]]; do
         --tool)
             TOOL_SPECIFIED=true
             case "${2,,}" in
-                all)       DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true ;;
-                bindcraft) DO_BINDCRAFT=true ;;
-                boltzgen)  DO_BOLTZGEN=true ;;
-                mosaic)    DO_MOSAIC=true ;;
-                evaluator) DO_EVALUATOR=true ;;
+                all)
+                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_RFAA=true; DO_PXDESIGN=true ;;
+                bindcraft)
+                    DO_BINDCRAFT=true ;;
+                boltzgen)
+                    DO_BOLTZGEN=true ;;
+                mosaic)
+                    DO_MOSAIC=true ;;
+                evaluator)
+                    DO_EVALUATOR=true ;;
+                rfaa)
+                    DO_RFAA=true ;;
+                pxdesign)
+                    DO_PXDESIGN=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool: $2. Must be: all, bindcraft, boltzgen, mosaic, evaluator${RESET}"
-                    exit 1 ;;
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfaa, pxdesign${RESET}"
+                    exit 1
+                    ;;
             esac
             shift 2
             ;;
@@ -104,7 +125,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--tools-dir PATH] [--cuda VERSION] [--skip-examples] [--yes]
+Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator|rfaa|pxdesign] [--tools-dir PATH] [--cuda VERSION] [--skip-examples] [--yes]
        $0 --uninstall --tool <tool|all> [--yes]
 
 DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstream on first install.
@@ -117,6 +138,7 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
                 Do not prompt to run bundled examples after install.
   --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
   --standalone  Force local Miniforge3 install into BindMaster/conda/ (server-friendly).
+                All envs and shortcuts stay inside the project directory.
   --system-conda
                 Use existing system conda (skip local Miniforge install).
   --uninstall   Remove conda envs, venvs, and shortcuts for selected tool(s).
@@ -138,24 +160,43 @@ if [[ "${CUDA_VERSION}" != "13.0" ]]; then
     echo -e "\033[1;33m⚠ PyTorch cu130 wheels and JAX CUDA plugin may not work with other CUDA versions.\033[0m"
 fi
 
-# ─── Logging ──────────────────────────────────────────────────────────────────
+# ─── Logging setup ────────────────────────────────────────────────────────────
 mkdir -p "${BINDMASTER_DIR}"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# ─── Helper Functions ─────────────────────────────────────────────────────────
 
-print_step() { echo ""; echo -e "${CYAN}${BOLD}▶ $1${RESET}"; }
-print_ok()   { echo -e "${GREEN}✓ $1${RESET}"; }
-print_warn() { echo -e "${YELLOW}⚠ $1${RESET}"; }
-print_fail() { echo -e "${RED}✗ $1${RESET}"; }
+print_step() {
+    echo ""
+    echo -e "${CYAN}${BOLD}▶ $1${RESET}"
+}
 
+print_ok() {
+    echo -e "${GREEN}✓ $1${RESET}"
+}
+
+print_warn() {
+    echo -e "${YELLOW}⚠ $1${RESET}"
+}
+
+print_fail() {
+    echo -e "${RED}✗ $1${RESET}"
+}
+
+# run_logged [--retries N] <label> <command...>
+# Runs a verbose command showing only a spinner on the terminal.
+# All output is written to LOG_FILE only. On failure the last 30 lines
+# are printed to the terminal for diagnosis.
+# Optional --retries N retries the command up to N times with linear backoff.
 run_logged() {
     local retries=1
     if [[ "$1" == "--retries" ]]; then
         retries="$2"; shift 2
     fi
-    local label="$1"; shift
-    local tmpfile; tmpfile=$(mktemp)
+    local label="$1"
+    shift
+    local tmpfile
+    tmpfile=$(mktemp)
 
     # Check once whether /dev/tty is usable (not available in non-TTY containers)
     local has_tty=false
@@ -166,16 +207,20 @@ run_logged() {
         # shellcheck disable=SC2188
         > "${tmpfile}"   # truncate on each attempt
         "$@" >> "${tmpfile}" 2>&1 &
-        local pid=$! frames='/-\|' i=0
+        local pid=$!
 
+        local frames='/-\|'
+        local i=0
         if [[ "${has_tty}" == true ]]; then
             while kill -0 "${pid}" 2>/dev/null; do
                 printf "\r  ${CYAN}%s${RESET}  %s" "${frames:$((i % 4)):1}" "${label}" >/dev/tty
-                sleep 0.15; (( i++ ))
+                sleep 0.15
+                (( i++ ))
             done
-            printf "\r\033[K" >/dev/tty
+            printf "\r\033[K" >/dev/tty   # clear spinner line
         fi
-        wait "${pid}"; rc=$?
+        wait "${pid}"
+        rc=$?
 
         if [[ ${rc} -eq 0 ]]; then break; fi
         if [[ ${attempt} -lt ${retries} ]]; then
@@ -198,6 +243,8 @@ run_logged() {
     return ${rc}
 }
 
+# confirm <prompt>
+# Returns 0 (yes) or 1 (no).
 confirm() {
     local prompt="${1:-Are you sure?}"
     if [[ "${AUTO_YES}" == true ]]; then
@@ -214,18 +261,28 @@ confirm() {
     done
 }
 
+# smoke_test <label> <command...>
+# Runs a command; prints OK or FAIL. Returns the exit code.
 smoke_test() {
-    local label="$1"; shift
+    local label="$1"
+    shift
     print_step "Smoke test: ${label}"
     if "$@"; then
-        print_ok "Smoke test passed: ${label}"; return 0
+        print_ok "Smoke test passed: ${label}"
+        return 0
     else
-        print_fail "Smoke test FAILED: ${label}"; return 1
+        print_fail "Smoke test FAILED: ${label}"
+        return 1
     fi
 }
 
-env_exists() { "${CONDA_CMD}" env list | grep -qE "^\s+$1\s"; }
+# env_exists <name>
+# Returns 0 if conda env exists, 1 otherwise.
+env_exists() {
+    "${CONDA_CMD}" env list | grep -qw "$1"
+}
 
+# ensure_conda_in_path
 ensure_conda_in_path() {
     export PATH="${CONDA_BASE}/bin:${PATH}"
     source "${CONDA_BASE}/etc/profile.d/conda.sh"
@@ -262,6 +319,7 @@ install_local_conda() {
         curl -fSL -o "${installer_path}" "${installer_url}" \
         || { print_fail "Failed to download Miniforge3"; rm -f "${installer_path}"; return 1; }
 
+    # Batch mode (-b): no prompts, no license question, no PATH modification
     run_logged "Installing Miniforge3 (batch mode)" \
         bash "${installer_path}" -b -p "${LOCAL_CONDA_DIR}" \
         || { print_fail "Miniforge3 installation failed"; rm -f "${installer_path}"; return 1; }
@@ -278,17 +336,24 @@ install_local_conda() {
     print_ok "Miniforge3 installed at ${LOCAL_CONDA_DIR}"
 }
 
+# detect_conda
 # Finds conda/mamba and sets CONDA_BASE + CONDA_CMD.
 # Priority: local conda → system conda (if writable) → auto-install local.
 detect_conda() {
+    # shellcheck disable=SC2034
+    local base cmd
+
+    # Helper: try a specific binary on PATH
     _try_cmd() {
         local bin="$1"
-        command -v "${bin}" &>/dev/null || return 1
-        local base; base=$(${bin} info --base 2>/dev/null | awk '/\// {print $NF}' | tail -1) || return 1
-        [[ -n "${base}" ]] || return 1
-        CONDA_BASE="${base}"
-        CONDA_CMD="$(command -v "${bin}")"
-        return 0
+        if command -v "${bin}" &>/dev/null; then
+            base=$(${bin} info --base 2>/dev/null | awk '/\// {print $NF}' | tail -1) && [[ -n "${base}" ]] && {
+                CONDA_BASE="${base}"
+                CONDA_CMD="$(command -v "${bin}")"
+                return 0
+            }
+        fi
+        return 1
     }
 
     # 1. Check for local (standalone) conda first
@@ -314,9 +379,15 @@ detect_conda() {
 
     # 4. Probe common install locations
     for candidate in \
-        "$HOME/miniforge3" "$HOME/mambaforge" "$HOME/miniconda3" \
-        "$HOME/anaconda3"  "$HOME/conda"      "/opt/conda" \
-        "/opt/miniforge3"  "/opt/miniconda3"; do
+        "$HOME/miniforge3" \
+        "$HOME/mambaforge" \
+        "$HOME/miniconda3" \
+        "$HOME/anaconda3" \
+        "$HOME/conda" \
+        "/opt/conda" \
+        "/opt/miniforge3" \
+        "/opt/miniconda3" \
+        "/opt/anaconda3"; do
         [[ -f "${candidate}/etc/profile.d/conda.sh" ]] || continue
         CONDA_BASE="${candidate}"
         if [[ -x "${candidate}/bin/mamba" ]]; then
@@ -340,17 +411,25 @@ detect_conda() {
 }
 
 # _check_system_conda_writable
+# Returns 0 if the current CONDA_BASE envs dir is writable, or if --system-conda was forced.
+# In auto mode, returns 1 (triggering fallback to local install) if not writable.
 _check_system_conda_writable() {
+    # --system-conda: trust the user, skip writability check
     if [[ "${STANDALONE}" == "false" ]]; then
         return 0
     fi
+
     local envs_dir="${CONDA_BASE}/envs"
     if [[ -d "${envs_dir}" && -w "${envs_dir}" ]]; then
         return 0
     fi
+
+    # Try creating the envs dir (some conda installs start without it)
     if mkdir -p "${envs_dir}" 2>/dev/null && [[ -w "${envs_dir}" ]]; then
         return 0
     fi
+
+    # Not writable — in auto mode, this triggers local install
     print_warn "System conda at ${CONDA_BASE} — envs directory not writable"
     return 1
 }
@@ -377,84 +456,146 @@ check_tools_dir() {
     fi
 }
 
-# ─── Tool Status ──────────────────────────────────────────────────────────────
+# ─── Install Status Checks ────────────────────────────────────────────────────
 
-is_bindcraft_installed() { [[ -d "${BINDCRAFT_DIR}" ]] && env_exists BindCraft; }
-is_boltzgen_installed()  { [[ -d "${BOLTZGEN_DIR}" ]]  && env_exists BoltzGen; }
-is_mosaic_installed()    { [[ -d "${MOSAIC_DIR}" ]]    && [[ -d "${MOSAIC_DIR}/.venv" ]]; }
-is_evaluator_installed() { [[ -d "${EVALUATOR_DIR}" ]] && [[ -f "${EVALUATOR_DIR}/envs/mosaic_venv_path" ]]; }
+is_bindcraft_installed() {
+    [[ -d "${BINDCRAFT_DIR}" ]] && env_exists BindCraft
+}
 
+is_boltzgen_installed() {
+    [[ -d "${BOLTZGEN_DIR}" ]] && env_exists BoltzGen
+}
+
+is_mosaic_installed() {
+    [[ -d "${MOSAIC_DIR}" ]] && [[ -d "${MOSAIC_DIR}/.venv" ]]
+}
+
+is_evaluator_installed() {
+    [[ -d "${EVALUATOR_DIR}" ]] && [[ -f "${EVALUATOR_DIR}/envs/mosaic_venv_path" ]]
+}
+
+is_rfaa_installed() {
+    [[ -d "${RFAA_DIR}" ]] && env_exists bindmaster_rfaa
+}
+
+is_pxdesign_installed() {
+    [[ -d "${PXDESIGN_DIR}" ]] && env_exists bindmaster_pxdesign
+}
+
+# print_tool_status
+# Shows installed/not-installed for each tool.
 print_tool_status() {
     echo ""
-    echo -e "${BOLD}=== Current Install Status ===${RESET}"
-    for _tool in BindCraft BoltzGen Mosaic Evaluator; do
-        local _icon _status
+    echo -e "${BOLD}=== Installed Tools ===${RESET}"
+    local _status _icon
+    for _tool in BindCraft BoltzGen Mosaic Evaluator RFAA PXDesign; do
         if "is_${_tool,,}_installed" 2>/dev/null; then
-            _icon="${GREEN}✓${RESET}"; _status="${GREEN}installed${RESET}"
+            _icon="${GREEN}✓${RESET}"; _status="installed"
         else
-            _icon="${RED}✗${RESET}";  _status="${YELLOW}not installed${RESET}"
+            _icon="${RED}✗${RESET}"; _status="not installed"
         fi
-        printf "  %b  %-12s  %b\n" "${_icon}" "${_tool}" "${_status}"
+        printf "  %b  %-12s  %s\n" "${_icon}" "${_tool}" "${_status}"
     done
     echo ""
 }
 
-# ─── Interactive Menu ─────────────────────────────────────────────────────────
+# ─── Interactive Tool Selection ───────────────────────────────────────────────
+# Called when no --tool flag was supplied. Displays a toggle menu; sets
+# DO_BINDCRAFT / DO_BOLTZGEN / DO_MOSAIC based on user choices.
 
 select_tools_interactive() {
-    local sel_bc=true sel_bg=true sel_mo=true sel_ev=true
-    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator")
+    # Default: all selected
+    local sel_bc=true
+    local sel_bg=true
+    local sel_mo=true
+    local sel_ev=true
+    local sel_rfaa=false
+    local sel_pxd=false
+
+    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "RFAA" "PXDesign")
     local descs=(
-        "Binder design via AlphaFold2 (mamba env, Python 3.10)"
-        "Structure generation with Boltz-1 (mamba env, Python 3.12)"
-        "JAX-based multi-objective design with Marimo notebooks (uv venv)"
+        "Binder design via AlphaFold2 (conda, Python 3.10)"
+        "Structure generation with Boltz-1 (conda, Python 3.12)"
+        "JAX-based protein design with Marimo notebooks (uv venv)"
         "Evaluate binders: refold with Boltz-2 + AF2, ranked report (requires Mosaic)"
+        "All-atom diffusion + LigandMPNN for ligand binder design (conda)"
+        "Protenix-based de novo binder design (conda)"
     )
 
-    local inst_bc inst_bg inst_mo inst_ev
-    is_bindcraft_installed  && inst_bc="${GREEN}installed${RESET}"   || inst_bc="${YELLOW}not installed${RESET}"
-    is_boltzgen_installed   && inst_bg="${GREEN}installed${RESET}"   || inst_bg="${YELLOW}not installed${RESET}"
-    is_mosaic_installed     && inst_mo="${GREEN}installed${RESET}"   || inst_mo="${YELLOW}not installed${RESET}"
-    is_evaluator_installed  && inst_ev="${GREEN}installed${RESET}"   || inst_ev="${YELLOW}not installed${RESET}"
-    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev")
+    # Check current install state once (avoid repeated conda calls in the loop)
+    local inst_bc inst_bg inst_mo inst_ev inst_rfaa inst_pxd
+    is_bindcraft_installed && inst_bc="${GREEN}installed${RESET}" || inst_bc="${YELLOW}not installed${RESET}"
+    is_boltzgen_installed  && inst_bg="${GREEN}installed${RESET}" || inst_bg="${YELLOW}not installed${RESET}"
+    is_mosaic_installed    && inst_mo="${GREEN}installed${RESET}" || inst_mo="${YELLOW}not installed${RESET}"
+    is_evaluator_installed && inst_ev="${GREEN}installed${RESET}" || inst_ev="${YELLOW}not installed${RESET}"
+    is_rfaa_installed      && inst_rfaa="${GREEN}installed${RESET}" || inst_rfaa="${YELLOW}not installed${RESET}"
+    is_pxdesign_installed  && inst_pxd="${GREEN}installed${RESET}" || inst_pxd="${YELLOW}not installed${RESET}"
+    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev" "$inst_rfaa" "$inst_pxd")
 
+    # Helper: print current state
     _print_menu() {
-        echo ""; echo -e "${BOLD}${CYAN}  Select tools to install${RESET}"
-        echo -e "  Type a number to toggle, then press Enter when done."; echo ""
-        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev")
-        for i in 0 1 2 3; do
+        echo ""
+        echo -e "${BOLD}${CYAN}  Select tools to install${RESET}"
+        echo -e "  Type a number to toggle selection, then press Enter when done."
+        echo ""
+        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_rfaa" "$sel_pxd")
+        for i in 0 1 2 3 4 5; do
             local box
-            [[ "${states[$i]}" == true ]] && box="${GREEN}[x]${RESET}" || box="${RED}[ ]${RESET}"
+            if [[ "${states[$i]}" == true ]]; then
+                box="${GREEN}[x]${RESET}"
+            else
+                box="${RED}[ ]${RESET}"
+            fi
             printf "    %d)  %b  ${BOLD}%-12s${RESET}  %-35b  %s\n" \
                 $((i+1)) "$box" "${tools[$i]}" "${inst_states[$i]}" "${descs[$i]}"
         done
-        echo ""; echo -e "  ${YELLOW}a${RESET}) Select all   ${YELLOW}n${RESET}) Select none   ${YELLOW}Enter${RESET} to confirm"; echo ""
+        echo ""
+        echo -e "  ${YELLOW}a${RESET}) Select all   ${YELLOW}n${RESET}) Select none   ${YELLOW}Enter${RESET} to confirm"
+        echo ""
     }
 
     while true; do
-        _print_menu; read -rp "  > " choice
+        _print_menu
+        read -rp "  > " choice
         case "${choice,,}" in
             1) [[ "$sel_bc" == true ]] && sel_bc=false || sel_bc=true ;;
             2) [[ "$sel_bg" == true ]] && sel_bg=false || sel_bg=true ;;
             3) [[ "$sel_mo" == true ]] && sel_mo=false || sel_mo=true ;;
             4) [[ "$sel_ev" == true ]] && sel_ev=false || sel_ev=true ;;
-            a) sel_bc=true; sel_bg=true; sel_mo=true; sel_ev=true ;;
-            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false ;;
+            5) [[ "$sel_rfaa" == true ]] && sel_rfaa=false || sel_rfaa=true ;;
+            6) [[ "$sel_pxd" == true ]] && sel_pxd=false || sel_pxd=true ;;
+            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true;  sel_rfaa=true;  sel_pxd=true  ;;
+            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false; sel_rfaa=false; sel_pxd=false ;;
             "")
-                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false ]]; then
-                    echo -e "  ${RED}No tools selected.${RESET}"; continue
-                fi; break ;;
-            *) echo -e "  ${RED}Invalid input. Enter 1–4, a, n, or press Enter.${RESET}" ;;
+                # Confirm: at least one must be selected
+                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false && "$sel_rfaa" == false && "$sel_pxd" == false ]]; then
+                    echo -e "  ${RED}No tools selected. Select at least one.${RESET}"
+                    continue
+                fi
+                break
+                ;;
+            *) echo -e "  ${RED}Invalid input. Enter 1–6, a, n, or press Enter.${RESET}" ;;
         esac
     done
 
-    DO_BINDCRAFT="$sel_bc"; DO_BOLTZGEN="$sel_bg"; DO_MOSAIC="$sel_mo"; DO_EVALUATOR="$sel_ev"
-    echo ""; echo -e "  ${BOLD}Installing:${RESET}"
-    [[ "$DO_BINDCRAFT"  == true ]] && echo -e "    ${GREEN}✓${RESET} BindCraft"
-    [[ "$DO_BOLTZGEN"   == true ]] && echo -e "    ${GREEN}✓${RESET} BoltzGen"
-    [[ "$DO_MOSAIC"     == true ]] && echo -e "    ${GREEN}✓${RESET} Mosaic"
-    [[ "$DO_EVALUATOR"  == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
-    echo ""; confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
+    DO_BINDCRAFT="$sel_bc"
+    DO_BOLTZGEN="$sel_bg"
+    DO_MOSAIC="$sel_mo"
+    DO_EVALUATOR="$sel_ev"
+    DO_RFAA="$sel_rfaa"
+    DO_PXDESIGN="$sel_pxd"
+
+    echo ""
+    echo -e "  ${BOLD}Installing:${RESET}"
+    [[ "$DO_BINDCRAFT" == true ]] && echo -e "    ${GREEN}✓${RESET} BindCraft"
+    [[ "$DO_BOLTZGEN"  == true ]] && echo -e "    ${GREEN}✓${RESET} BoltzGen"
+    [[ "$DO_MOSAIC"    == true ]] && echo -e "    ${GREEN}✓${RESET} Mosaic"
+    [[ "$DO_EVALUATOR" == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
+    [[ "$DO_RFAA"      == true ]] && echo -e "    ${GREEN}✓${RESET} RFAA"
+    [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
+    echo ""
+
+    confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
 }
 
 # ─── BindCraft helpers ────────────────────────────────────────────────────────
@@ -771,18 +912,29 @@ _bindcraft_smoke_test() {
 
 _write_bindcraft_shortcut() {
     mkdir -p "${SHORTCUTS_DIR}"
-    { echo "#!/bin/bash"
-      echo "BINDCRAFT_DIR=\"${BINDCRAFT_DIR}\""
-      echo "CONDA_BASE=\"${CONDA_BASE}\""; } > "${SHORTCUTS_DIR}/bindcraft"
+    {
+        echo "#!/bin/bash"
+        echo "# BindCraft shortcut — activates the BindCraft conda environment"
+        echo "# and opens an interactive shell in the BindCraft directory."
+        echo ""
+        echo "BINDCRAFT_DIR=\"${BINDCRAFT_DIR}\""
+        echo "CONDA_BASE=\"${CONDA_BASE}\""
+    } > "${SHORTCUTS_DIR}/bindcraft"
     cat >> "${SHORTCUTS_DIR}/bindcraft" << 'EOF'
+
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
 conda activate BindCraft
 cd "${BINDCRAFT_DIR}"
-echo "BindCraft environment activated. Working directory: ${BINDCRAFT_DIR}"
-echo "Run: XLA_PYTHON_CLIENT_PREALLOCATE=false python -u ./bindcraft.py \\"
-echo "       --settings './settings_target/<target>.json' \\"
-echo "       --filters './settings_filters/default_filters.json' \\"
-echo "       --advanced './settings_advanced/default_4stage_multimer.json'"
+
+echo "BindCraft environment activated."
+echo "Working directory: ${BINDCRAFT_DIR}"
+echo "To run BindCraft:"
+echo "  XLA_PYTHON_CLIENT_PREALLOCATE=false python -u ./bindcraft.py \\"
+echo "    --settings './settings_target/<target>.json' \\"
+echo "    --filters './settings_filters/default_filters.json' \\"
+echo "    --advanced './settings_advanced/default_4stage_multimer.json'"
+echo ""
+
 exec bash
 EOF
     chmod +x "${SHORTCUTS_DIR}/bindcraft"
@@ -945,15 +1097,26 @@ install_boltzgen() {
 
 _write_boltzgen_shortcut() {
     mkdir -p "${SHORTCUTS_DIR}"
-    { echo "#!/bin/bash"
-      echo "BOLTZGEN_DIR=\"${BOLTZGEN_DIR}\""
-      echo "CONDA_BASE=\"${CONDA_BASE}\""; } > "${SHORTCUTS_DIR}/boltzgen"
+    {
+        echo "#!/bin/bash"
+        echo "# BoltzGen shortcut — activates the BoltzGen conda environment"
+        echo "# and opens an interactive shell in the BoltzGen directory."
+        echo ""
+        echo "BOLTZGEN_DIR=\"${BOLTZGEN_DIR}\""
+        echo "CONDA_BASE=\"${CONDA_BASE}\""
+    } > "${SHORTCUTS_DIR}/boltzgen"
     cat >> "${SHORTCUTS_DIR}/boltzgen" << 'EOF'
+
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
 conda activate BoltzGen
 cd "${BOLTZGEN_DIR}"
-echo "BoltzGen environment activated. Working directory: ${BOLTZGEN_DIR}"
-echo "Run: boltzgen run <config.yaml> --output <output_dir> --protocol protein-anything --num_designs 2"
+
+echo "BoltzGen environment activated."
+echo "Working directory: ${BOLTZGEN_DIR}"
+echo "To run BoltzGen:"
+echo "  boltzgen run <config.yaml> --output <output_dir> --protocol protein-anything --num_designs 2"
+echo ""
+
 exec bash
 EOF
     chmod +x "${SHORTCUTS_DIR}/boltzgen"
@@ -1064,12 +1227,24 @@ install_mosaic() {
 
 _write_mosaic_shortcut() {
     mkdir -p "${SHORTCUTS_DIR}"
-    { echo "#!/bin/bash"; echo "MOSAIC_DIR=\"${MOSAIC_DIR}\""; } > "${SHORTCUTS_DIR}/mosaic"
+    {
+        echo "#!/bin/bash"
+        echo "# Mosaic shortcut — activates the Mosaic uv virtual environment"
+        echo "# and opens an interactive shell in the Mosaic directory."
+        echo ""
+        echo "MOSAIC_DIR=\"${MOSAIC_DIR}\""
+    } > "${SHORTCUTS_DIR}/mosaic"
     cat >> "${SHORTCUTS_DIR}/mosaic" << 'EOF'
+
 source "${MOSAIC_DIR}/.venv/bin/activate"
 cd "${MOSAIC_DIR}"
-echo "Mosaic environment activated. Working directory: ${MOSAIC_DIR}"
-echo "Run: marimo edit examples/example_notebook.py"
+
+echo "Mosaic environment activated."
+echo "Working directory: ${MOSAIC_DIR}"
+echo "To open the example notebook:"
+echo "  marimo edit examples/example_notebook.py"
+echo ""
+
 exec bash
 EOF
     chmod +x "${SHORTCUTS_DIR}/mosaic"
@@ -1169,6 +1344,269 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/evaluate"
 }
 
+# ─── RFAA + LigandMPNN ──────────────────────────────────────────────────────
+
+install_rfaa() {
+    print_step "Installing RFDiffusionAA + LigandMPNN"
+
+    # Clone RFAA
+    if [[ -d "${RFAA_DIR}" ]]; then
+        print_ok "RFAA already cloned at ${RFAA_DIR}"
+    else
+        run_logged "Cloning RFAA" \
+            git clone "${RFAA_REPO}" "${RFAA_DIR}" \
+            || { print_fail "Failed to clone RFAA"; return 1; }
+    fi
+
+    # Init submodules
+    run_logged "RFAA submodules" \
+        bash -c "cd '${RFAA_DIR}' && git submodule init && git submodule update" \
+        || print_warn "RFAA submodule init failed (may not have submodules)"
+
+    # Create conda env
+    print_step "Creating bindmaster_rfaa conda environment"
+    run_logged "Creating bindmaster_rfaa env" \
+        "${CONDA_CMD}" create -n bindmaster_rfaa -y python=3.11 \
+        || { print_fail "Failed to create bindmaster_rfaa env"; return 1; }
+
+    # aarch64: install PyTorch from PyPI with cu130 index (no conda pytorch-cuda for aarch64)
+    run_logged "Installing PyTorch (aarch64, CUDA 13.0)" \
+        "${CONDA_CMD}" run -n bindmaster_rfaa \
+        pip install torch --index-url https://download.pytorch.org/whl/cu130 \
+        || { print_fail "Failed to install PyTorch"; return 1; }
+
+    # Install RFAA dependencies (RFAA is not pip-installable; used via PYTHONPATH)
+    run_logged "Installing RFAA dependencies" \
+        "${CONDA_CMD}" run -n bindmaster_rfaa \
+        pip install -q hydra-core omegaconf icecream scipy numpy pandas tqdm fire assertpy deepdiff opt-einsum e3nn "dgl==1.1.3" "torchdata==0.7.1" prody openbabel-wheel \
+        || print_warn "Some RFAA deps failed — may need manual install"
+
+    # Install LigandMPNN
+    if [[ -d "${LIGANDMPNN_DIR}" ]]; then
+        print_ok "LigandMPNN already cloned at ${LIGANDMPNN_DIR}"
+    else
+        run_logged "Cloning LigandMPNN" \
+            git clone "${LIGANDMPNN_REPO}" "${LIGANDMPNN_DIR}" \
+            || { print_fail "Failed to clone LigandMPNN"; return 1; }
+    fi
+
+    print_ok "LigandMPNN cloned (used via PYTHONPATH, not pip-installable)"
+
+    # Download LigandMPNN weights
+    if [[ -d "${LIGANDMPNN_DIR}/model_params" ]]; then
+        print_ok "LigandMPNN weights already present"
+    else
+        run_logged "Downloading LigandMPNN weights" \
+            bash -c "cd '${LIGANDMPNN_DIR}' && bash get_model_params.sh ./model_params" \
+            || print_warn "LigandMPNN weights download failed — download manually later"
+    fi
+
+    # Download RFAA weights
+    local rfaa_weights="${RFAA_DIR}/weights"
+    if [[ -d "${rfaa_weights}" && -n "$(ls -A "${rfaa_weights}" 2>/dev/null)" ]]; then
+        print_ok "RFAA weights already present at ${rfaa_weights}"
+    else
+        mkdir -p "${rfaa_weights}"
+        print_warn "RFAA weights must be downloaded manually to ${rfaa_weights}"
+        print_warn "See: https://github.com/baker-laboratory/rf_diffusion_all_atom#setup"
+    fi
+
+    # Smoke test
+    smoke_test "RFAA import check" \
+        "${CONDA_CMD}" run -n bindmaster_rfaa python -c "import torch; print('RFAA env OK')" \
+        || return 1
+
+    # Shortcut
+    mkdir -p "${SHORTCUTS_DIR}"
+    cat > "${SHORTCUTS_DIR}/rfaa" << RFAAEOF
+#!/bin/bash
+# BindMaster RFAA shortcut — adds RFAA + LigandMPNN to PYTHONPATH
+export PYTHONPATH="${RFAA_DIR}:${LIGANDMPNN_DIR}\${PYTHONPATH:+:\$PYTHONPATH}"
+exec ${CONDA_CMD} run -n bindmaster_rfaa bash
+RFAAEOF
+    chmod +x "${SHORTCUTS_DIR}/rfaa"
+
+    print_ok "RFAA + LigandMPNN installation complete"
+}
+
+# ─── PXDesign ────────────────────────────────────────────────────────────────
+
+install_pxdesign() {
+    print_step "Installing PXDesign"
+
+    # Clone PXDesign
+    if [[ -d "${PXDESIGN_DIR}" ]]; then
+        print_ok "PXDesign already cloned at ${PXDESIGN_DIR}"
+    else
+        run_logged "Cloning PXDesign" \
+            git clone "${PXDESIGN_REPO}" "${PXDESIGN_DIR}" \
+            || { print_fail "Failed to clone PXDesign"; return 1; }
+        if [[ "${PXDESIGN_COMMIT}" != "HEAD" ]]; then
+            run_logged "Pinning PXDesign to ${PXDESIGN_COMMIT}" \
+                bash -c "cd '${PXDESIGN_DIR}' && git checkout '${PXDESIGN_COMMIT}'" \
+                || print_warn "Failed to checkout pinned commit"
+        fi
+    fi
+
+    # Create conda env
+    print_step "Creating bindmaster_pxdesign conda environment"
+    run_logged "Creating bindmaster_pxdesign env" \
+        "${CONDA_CMD}" create -n bindmaster_pxdesign -y python=3.11 \
+        || { print_fail "Failed to create bindmaster_pxdesign env"; return 1; }
+
+    # aarch64: install PyTorch from PyPI with cu130 index (no conda pytorch-cuda for aarch64)
+    run_logged "Installing PyTorch (aarch64, CUDA 13.0)" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install torch --index-url https://download.pytorch.org/whl/cu130 \
+        || { print_fail "Failed to install PyTorch"; return 1; }
+
+    # Install PXDesign
+    run_logged "Installing PXDesign (pip)" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -e "${PXDESIGN_DIR}" \
+        || { print_fail "Failed to install PXDesign"; return 1; }
+
+    # Install Protenix (PXDesign-specific fork) and PXDesignBench
+    run_logged "Installing Protenix (PXDesign fork)" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install --no-cache-dir "git+https://github.com/bytedance/Protenix.git@v0.5.0+pxd" \
+        || print_warn "Protenix install failed — PXDesign may not work"
+
+    run_logged "Installing PXDesignBench" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install --no-cache-dir "git+https://github.com/bytedance/PXDesignBench.git@v0.1.2" --no-deps \
+        || print_warn "PXDesignBench install failed — PXDesign may not work"
+
+    # PXDesign setup.py has install_requires commented out; install deps from requirements.txt
+    if [[ -f "${PXDESIGN_DIR}/requirements.txt" ]]; then
+        run_logged "Installing PXDesign requirements" \
+            "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -r "${PXDESIGN_DIR}/requirements.txt" \
+            || print_warn "Some PXDesign deps failed — may need manual install"
+    fi
+    # click is needed by pxdesign CLI but not in requirements.txt
+    run_logged "Installing PXDesign CLI deps" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q click \
+        || print_warn "Failed to install click — pxdesign CLI may not work"
+
+    # requirements.txt pins torch==2.3.1 (CPU-only from PyPI); reinstall with CUDA
+    run_logged "Reinstalling PyTorch with CUDA 13.0 (aarch64)" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install torch --force-reinstall --index-url https://download.pytorch.org/whl/cu130 \
+        || print_warn "PyTorch CUDA reinstall failed — GPU may not work"
+
+    # ColabDesign from GitHub (PyPI version 1.1.1 too old, missing 'weights' param)
+    run_logged "Installing ColabDesign from GitHub" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install --no-cache-dir "git+https://github.com/sokrypton/ColabDesign.git" \
+        || print_warn "ColabDesign install failed — AF2 eval may not work"
+
+    # Pin JAX <=0.4.34 (newer JAX removes jax.lib.xla_bridge, breaks ColabDesign)
+    run_logged "Pinning JAX for ColabDesign compatibility" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install -q "jax<=0.4.34" "jaxlib<=0.4.34" \
+        || print_warn "JAX pin failed — AF2 eval may not work"
+
+    # Upgrade deepspeed for PyTorch 2.10+ compatibility (torch.amp.custom_fwd changes)
+    run_logged "Upgrading deepspeed" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install -q "deepspeed>=0.18" \
+        || print_warn "deepspeed upgrade failed"
+
+    # ── Post-install patches for known upstream issues ──────────────────────
+    print_step "Applying PXDesign compatibility patches (aarch64)"
+
+    # Patch: configs_infer.py num_workers (default 16 causes dataloader deadlock)
+    if [[ -f "${PXDESIGN_DIR}/pxdesign/configs/configs_infer.py" ]]; then
+        sed -i 's/"num_workers": 16/"num_workers": 0/' \
+            "${PXDESIGN_DIR}/pxdesign/configs/configs_infer.py" 2>/dev/null && \
+            print_ok "Patched configs_infer.py: num_workers=0"
+    fi
+
+    # Patch: pxdbench NumpyEncoder (numpy float32 not JSON serializable)
+    run_logged "Patching pxdbench JSON serialization" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign python << 'PATCHEOF'
+import importlib.util, pathlib
+spec = importlib.util.find_spec('pxdbench')
+if not spec or not spec.submodule_search_locations:
+    print('pxdbench not found — skipping'); exit(0)
+base = pathlib.Path(spec.submodule_search_locations[0])
+ENC = ('\n\nclass _NumpyEncoder(json.JSONEncoder):\n'
+    '    def default(self, obj):\n'
+    '        if isinstance(obj, (np.floating,)):\n'
+    '            return float(obj)\n'
+    '        if isinstance(obj, (np.integer,)):\n'
+    '            return int(obj)\n'
+    '        if isinstance(obj, np.ndarray):\n'
+    '            return obj.tolist()\n'
+    '        return super().default(obj)\n')
+for fn in ['tools/af2/main_af2_complex.py', 'tools/af2/main_af2_monomer.py']:
+    fp = base / fn
+    if not fp.exists(): continue
+    t = fp.read_text()
+    if '_NumpyEncoder' in t: print(f'Already patched: {fn}'); continue
+    m = 'from colabdesign import clear_mem, mk_afdesign_model'
+    if m in t: t = t.replace(m, m + ENC)
+    t = t.replace('json.dump(stats, f)', 'json.dump(stats, f, cls=_NumpyEncoder)')
+    t = t.replace('json.dump(results, f)', 'json.dump(results, f, cls=_NumpyEncoder)')
+    fp.write_text(t); print(f'Patched: {fn}')
+PATCHEOF
+
+    # Patch: protenix torch_ext_compile.py (CUDA 13 dropped sm_70; Blackwell needs sm_120)
+    run_logged "Patching protenix CUDA arch (sm_120 for Blackwell)" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign python << 'PATCHEOF'
+import importlib.util, pathlib, re
+spec = importlib.util.find_spec('protenix')
+if not spec or not spec.submodule_search_locations:
+    print('protenix not found — skipping'); exit(0)
+base = pathlib.Path(spec.submodule_search_locations[0])
+fp = base / 'model' / 'layer_norm' / 'torch_ext_compile.py'
+if not fp.exists():
+    print(f'{fp} not found — skipping'); exit(0)
+t = fp.read_text()
+if 'compute_120' in t:
+    print('Already patched'); exit(0)
+# Set TORCH_CUDA_ARCH_LIST
+if 'TORCH_CUDA_ARCH_LIST' not in t:
+    t = t.replace(
+        'def compile(name, sources, extra_include_paths, build_directory):',
+        'def compile(name, sources, extra_include_paths, build_directory):\n'
+        '    os.environ["TORCH_CUDA_ARCH_LIST"] = "12.0"'
+    )
+# Replace all gencode lines with sm_120 only
+t = re.sub(
+    r'(\s*"-gencode",\s*"arch=compute_\d+,code=sm_\d+",?\s*\n?)+',
+    '            "-gencode",\n            "arch=compute_120,code=sm_120",\n',
+    t
+)
+fp.write_text(t)
+print('Patched torch_ext_compile.py for sm_120')
+PATCHEOF
+
+    # Download weights if script exists
+    if [[ -f "${PXDESIGN_DIR}/download_tool_weights.sh" ]]; then
+        run_logged "Downloading PXDesign weights" \
+            bash -c "cd '${PXDESIGN_DIR}' && bash download_tool_weights.sh" \
+            || print_warn "PXDesign weights download failed — download manually later"
+    else
+        print_warn "No download_tool_weights.sh found — download PXDesign weights manually"
+    fi
+
+    # Smoke test
+    smoke_test "PXDesign import check" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign python -c "import torch; print('PXDesign env OK')" \
+        || return 1
+
+    # Shortcut
+    mkdir -p "${SHORTCUTS_DIR}"
+    cat > "${SHORTCUTS_DIR}/pxdesign" << PXDEOF
+#!/bin/bash
+# BindMaster PXDesign shortcut
+exec ${CONDA_CMD} run -n bindmaster_pxdesign bash
+PXDEOF
+    chmod +x "${SHORTCUTS_DIR}/pxdesign"
+
+    print_ok "PXDesign installation complete"
+}
+
 # ─── Uninstall ─────────────────────────────────────────────────────────────────
 
 uninstall_tool() {
@@ -1219,6 +1657,23 @@ uninstall_tool() {
             rm -f "${SHORTCUTS_DIR}/evaluate"
             print_ok "Evaluator uninstalled"
             ;;
+        rfaa)
+            print_step "Uninstalling RFAA"
+            env_exists bindmaster_rfaa && run_logged "Removing bindmaster_rfaa conda env" \
+                "${CONDA_CMD}" env remove -n bindmaster_rfaa -y
+            rm -f "${SHORTCUTS_DIR}/rfaa"
+            [[ -d "${RFAA_DIR}" ]] && { rm -rf "${RFAA_DIR}"; print_ok "Removed ${RFAA_DIR}"; }
+            [[ -d "${LIGANDMPNN_DIR}" ]] && { rm -rf "${LIGANDMPNN_DIR}"; print_ok "Removed ${LIGANDMPNN_DIR}"; }
+            print_ok "RFAA uninstalled"
+            ;;
+        pxdesign)
+            print_step "Uninstalling PXDesign"
+            env_exists bindmaster_pxdesign && run_logged "Removing bindmaster_pxdesign conda env" \
+                "${CONDA_CMD}" env remove -n bindmaster_pxdesign -y
+            rm -f "${SHORTCUTS_DIR}/pxdesign"
+            [[ -d "${PXDESIGN_DIR}" ]] && { rm -rf "${PXDESIGN_DIR}"; print_ok "Removed ${PXDESIGN_DIR}"; }
+            print_ok "PXDesign uninstalled"
+            ;;
         *)
             print_fail "Unknown tool: ${tool}"
             return 1
@@ -1266,6 +1721,8 @@ main() {
         [[ "${DO_BOLTZGEN}"  == true ]] && { uninstall_tool boltzgen   || failed_uninstalls+=("BoltzGen");  }
         [[ "${DO_MOSAIC}"    == true ]] && { uninstall_tool mosaic     || failed_uninstalls+=("Mosaic");    }
         [[ "${DO_EVALUATOR}" == true ]] && { uninstall_tool evaluator  || failed_uninstalls+=("Evaluator"); }
+        [[ "${DO_RFAA}"      == true ]] && { uninstall_tool rfaa      || failed_uninstalls+=("RFAA"); }
+        [[ "${DO_PXDESIGN}"  == true ]] && { uninstall_tool pxdesign  || failed_uninstalls+=("PXDesign"); }
 
         # Offer to remove local Miniforge when all tools are uninstalled
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
@@ -1288,7 +1745,8 @@ main() {
     fi
 
     # ── Install mode ─────────────────────────────────────────────────────────
-    echo ""; echo -e "Log file: ${LOG_FILE}"
+    echo ""
+    echo -e "Log file: ${LOG_FILE}"
 
     # Step counter for progress
     local step=0 total=0
@@ -1296,16 +1754,21 @@ main() {
     [[ "${DO_BOLTZGEN}"  == true ]] && (( total++ ))
     [[ "${DO_MOSAIC}"    == true ]] && (( total++ ))
     [[ "${DO_EVALUATOR}" == true ]] && (( total++ ))
+    [[ "${DO_RFAA}"      == true ]] && (( total++ ))
+    [[ "${DO_PXDESIGN}"  == true ]] && (( total++ ))
 
     local failed_tools=()
-    FAILED_EXAMPLES=()
+    FAILED_EXAMPLES=()   # populated by install functions on example failure
 
     [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; install_bindcraft || failed_tools+=("BindCraft"); }
     [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
     [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
+    [[ "${DO_RFAA}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFAA${RESET}";      install_rfaa      || failed_tools+=("RFAA"); }
+    [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
 
-    echo ""; echo -e "${BOLD}=== Installation Summary ===${RESET}"
+    echo ""
+    echo -e "${BOLD}=== Installation Summary ===${RESET}"
 
     if [[ ${#failed_tools[@]} -eq 0 ]]; then
         print_ok "All selected tools installed successfully."
@@ -1313,22 +1776,28 @@ main() {
         print_fail "The following tools failed to install: ${failed_tools[*]}"
     fi
 
+    # Example results (separate from installation)
     if [[ ${#FAILED_EXAMPLES[@]} -gt 0 ]]; then
-        print_warn "Examples failed (tools are usable): ${FAILED_EXAMPLES[*]}"
-        echo -e "  See log: ${LOG_FILE}"
+        print_warn "Examples failed (tools themselves are usable): ${FAILED_EXAMPLES[*]}"
+        echo -e "  Check the log for details: ${LOG_FILE}"
     fi
 
-    echo ""; echo -e "Shortcuts in ${SHORTCUTS_DIR}:"
+    # Shortcuts and PATH instructions
+    echo ""
+    echo -e "Shortcuts available in ${SHORTCUTS_DIR}:"
     [[ "${DO_BINDCRAFT}" == true ]] && echo -e "  ${GREEN}bindcraft${RESET}  — open BindCraft shell"
     [[ "${DO_BOLTZGEN}"  == true ]] && echo -e "  ${GREEN}boltzgen${RESET}   — open BoltzGen shell"
     [[ "${DO_MOSAIC}"    == true ]] && echo -e "  ${GREEN}mosaic${RESET}     — open Mosaic shell"
     [[ "${DO_EVALUATOR}" == true ]] && echo -e "  ${GREEN}evaluate${RESET}   — launch evaluation wizard"
+    [[ "${DO_RFAA}"      == true ]] && echo -e "  ${GREEN}rfaa${RESET}       — open RFAA shell"
+    [[ "${DO_PXDESIGN}"  == true ]] && echo -e "  ${GREEN}pxdesign${RESET}   — open PXDesign shell"
     echo ""
     echo -e "${BOLD}To use BindMaster, add to your PATH:${RESET}"
     echo -e "  ${CYAN}export PATH=\"${SHORTCUTS_DIR}:\$PATH\"${RESET}"
     echo -e "  ${CYAN}# For persistence, add to ~/.bashrc:${RESET}"
     echo -e "  ${CYAN}echo 'export PATH=\"${SHORTCUTS_DIR}:\$PATH\"' >> ~/.bashrc${RESET}"
-    echo ""; echo -e "Full log: ${LOG_FILE}"
+    echo ""
+    echo -e "Full log: ${LOG_FILE}"
 
     [[ ${#failed_tools[@]} -gt 0 ]] && exit 1 || exit 0
 }
