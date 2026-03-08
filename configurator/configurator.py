@@ -1046,12 +1046,12 @@ def write_run_rfaa(path: Path, cfg: dict):
     conda_base = str(CONDA_BASE) if CONDA_BASE else ""
     bindmaster_dir = str(BINDMASTER_DIR)
     ligand = cfg.get("rfaa_ligand")
-    ligand_override = f'inference.ligand="{ligand}"' if ligand else ""
     contigs = cfg.get("rfaa_contigs", f"{cfg['min_length']}-{cfg['max_length']}")
     n_designs = cfg.get("rfaa_n_designs", cfg["n_designs"])
     diffusion_t = cfg.get("rfaa_diffusion_steps", 100)
     lmpnn_temperature = cfg.get("lmpnn_temperature", 0.1)
     lmpnn_seqs = cfg.get("lmpnn_seqs_per_backbone", 5)
+    ligand_line = f'\n    inference.ligand="{ligand}" \\' if ligand else ""
 
     content = f"""\
 #!/usr/bin/env bash
@@ -1085,6 +1085,9 @@ done
 conda activate bindmaster_rfaa
 set -u
 
+# Add RFAA + LigandMPNN to PYTHONPATH (not pip-installed)
+export PYTHONPATH="${{RFAA_DIR}}:${{LIGANDMPNN_DIR}}${{PYTHONPATH:+:$PYTHONPATH}}"
+
 # ============================================================
 # Stage 1: RFDiffusionAA — generate backbone PDBs
 # ============================================================
@@ -1094,9 +1097,9 @@ cd "$RFAA_DIR"
 python run_inference.py \\
     inference.input_pdb="$TARGET_PDB" \\
     inference.output_prefix="$OUTPUT_DIR/sample" \\
+    inference.ckpt_path="$RFAA_DIR/weights/RFDiffusionAA_paper_weights.pt" \\
     inference.num_designs={n_designs} \\
-    {ligand_override} \\
-    diffuser.T={diffusion_t} \\
+    diffuser.T={diffusion_t} \\{ligand_line}
     contigmap.contigs="['{contigs}']"
 
 BACKBONE_COUNT=$(find "$OUTPUT_DIR" -name "*.pdb" | wc -l)
@@ -1222,6 +1225,12 @@ set -u
 
 echo "=== Running PXDesign for {cfg["name"]} ==="
 
+# aarch64/Blackwell: CUDA arch list and JAX CPU-only mode
+if [[ "$(uname -m)" == "aarch64" ]]; then
+    export TORCH_CUDA_ARCH_LIST="12.0"
+    export JAX_PLATFORMS=cpu
+fi
+
 cd "$PXDESIGN_DIR"
 
 pxdesign pipeline \\
@@ -1330,6 +1339,8 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         design_dirs.append(("--boltzgen", str(run_dir / "boltzgen" / "outputs")))
     if tools_enabled.get("bindcraft"):
         design_dirs.append(("--bindcraft", str(run_dir / "bindcraft" / "outputs")))
+    if tools_enabled.get("rfaa"):
+        design_dirs.append(("--rfaa", str(run_dir / "rfaa")))
     if tools_enabled.get("pxdesign_local"):
         design_dirs.append(("--pxdesign", str(run_dir / "pxdesign" / "outputs")))
     elif tools_enabled.get("pxdesign") and cfg.get("pxdesign_output_dir"):
@@ -1654,7 +1665,7 @@ def wizard():
     print(f"  {BOLD}RFAA{RESET}      [{_tag('rfaa')}]")
     use_rfaa = ask_yn("  Enable RFDiffusionAA (ligand binder design)?", default=False)
     print(f"  {BOLD}PXDesign{RESET}  [{_tag('pxdesign_local')}] / [external import]")
-    _, pxdesign_mode = ask_choice(
+    pxdesign_mode, _ = ask_choice(
         "  PXDesign mode",
         ["Skip", "Run locally (requires install)", "Import external results"],
         default_index=0,
@@ -1801,7 +1812,7 @@ def wizard():
         cfg["pxdesign_n_samples"] = int(
             ask("  Number of design samples", default=1000, validator=validate_int(min_val=10, max_val=10000))
         )
-        _, preset_idx = ask_choice(
+        preset_idx, _ = ask_choice(
             "  PXDesign preset",
             ["preview (fast, ~5 min)", "extended (production, ~2 hrs)"],
             default_index=0,
