@@ -255,9 +255,11 @@ smoke_test() {
 }
 
 # env_exists <name>
-# Returns 0 if conda env exists, 1 otherwise.
+# Returns 0 if conda env exists in OUR conda, 1 otherwise.
+# Uses filesystem check (not conda registry) to avoid stale entries
+# from unwritable system conda installations.
 env_exists() {
-    "${CONDA_CMD}" env list | grep -qw "$1"
+    [[ -d "${CONDA_BASE}/envs/$1" ]]
 }
 
 # ensure_conda_in_path
@@ -277,6 +279,16 @@ install_local_conda() {
             CONDA_CMD="${LOCAL_CONDA_DIR}/bin/mamba"
         else
             CONDA_CMD="${LOCAL_CONDA_DIR}/bin/conda"
+        fi
+        # Ensure .condarc pins envs/pkgs locally (may be missing from older installs)
+        local condarc="${LOCAL_CONDA_DIR}/.condarc"
+        if ! grep -q "envs_dirs" "${condarc}" 2>/dev/null; then
+            cat > "${condarc}" <<RCEOF
+envs_dirs:
+  - ${LOCAL_CONDA_DIR}/envs
+pkgs_dirs:
+  - ${LOCAL_CONDA_DIR}/pkgs
+RCEOF
         fi
         return 0
     fi
@@ -310,6 +322,16 @@ install_local_conda() {
     else
         CONDA_CMD="${LOCAL_CONDA_DIR}/bin/conda"
     fi
+
+    # Pin envs + pkgs to local dirs so conda ignores ~/.conda/environments.txt
+    # (prevents stale entries from an unwritable system conda from interfering)
+    local condarc="${LOCAL_CONDA_DIR}/.condarc"
+    cat > "${condarc}" <<RCEOF
+envs_dirs:
+  - ${LOCAL_CONDA_DIR}/envs
+pkgs_dirs:
+  - ${LOCAL_CONDA_DIR}/pkgs
+RCEOF
 
     print_ok "Miniforge3 installed at ${LOCAL_CONDA_DIR}"
 }
@@ -628,7 +650,7 @@ install_bindcraft() {
         print_step "Running BindCraft install script (conda env + AlphaFold2 weights)"
         print_warn "This will take 45-90 min — full output in install.log"
         run_logged "Installing BindCraft (conda packages + AlphaFold2 weights)" \
-            bash -c "cd '${BINDCRAFT_DIR}' && bash install_bindcraft.sh --cuda '${CUDA_VERSION}' --pkg_manager conda" \
+            bash -c "export PATH='${CONDA_BASE}/bin:${PATH}'; cd '${BINDCRAFT_DIR}' && bash install_bindcraft.sh --cuda '${CUDA_VERSION}' --pkg_manager conda" \
             || { print_fail "BindCraft install script failed"; return 1; }
     fi
 
