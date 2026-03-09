@@ -277,9 +277,11 @@ smoke_test() {
 }
 
 # env_exists <name>
-# Returns 0 if conda env exists, 1 otherwise.
+# Returns 0 if conda env exists in OUR conda, 1 otherwise.
+# Uses filesystem check (not conda registry) to avoid stale entries
+# from unwritable system conda installations.
 env_exists() {
-    "${CONDA_CMD}" env list | grep -qw "$1"
+    [[ -d "${CONDA_BASE}/envs/$1" ]]
 }
 
 # ensure_conda_in_path
@@ -299,6 +301,16 @@ install_local_conda() {
             CONDA_CMD="${LOCAL_CONDA_DIR}/bin/mamba"
         else
             CONDA_CMD="${LOCAL_CONDA_DIR}/bin/conda"
+        fi
+        # Ensure .condarc pins envs/pkgs locally (may be missing from older installs)
+        local condarc="${LOCAL_CONDA_DIR}/.condarc"
+        if ! grep -q "envs_dirs" "${condarc}" 2>/dev/null; then
+            cat > "${condarc}" <<RCEOF
+envs_dirs:
+  - ${LOCAL_CONDA_DIR}/envs
+pkgs_dirs:
+  - ${LOCAL_CONDA_DIR}/pkgs
+RCEOF
         fi
         return 0
     fi
@@ -332,6 +344,16 @@ install_local_conda() {
     else
         CONDA_CMD="${LOCAL_CONDA_DIR}/bin/conda"
     fi
+
+    # Pin envs + pkgs to local dirs so conda ignores ~/.conda/environments.txt
+    # (prevents stale entries from an unwritable system conda from interfering)
+    local condarc="${LOCAL_CONDA_DIR}/.condarc"
+    cat > "${condarc}" <<RCEOF
+envs_dirs:
+  - ${LOCAL_CONDA_DIR}/envs
+pkgs_dirs:
+  - ${LOCAL_CONDA_DIR}/pkgs
+RCEOF
 
     print_ok "Miniforge3 installed at ${LOCAL_CONDA_DIR}"
 }
