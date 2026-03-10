@@ -53,19 +53,43 @@ COPY . /workspace
 RUN bash install/install.sh --tool all --yes --skip-examples
 
 # ── Standalone test: no pre-installed conda, installs Miniforge locally ──────
+#
+# Simulates a server where system conda exists but is NOT writable (like the
+# colleague's /software/ncbr/... setup). Tests that standalone auto-detection,
+# .condarc pinning, binutils install, and BindCraft all work correctly.
+#
+# Build:  docker build -f Dockerfile.test --target standalone-test -t bindmaster-standalone .
+# Verify: docker run --rm bindmaster-standalone bash -c "conda/bin/conda env list && cat conda/.condarc"
 FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS standalone-test
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl ca-certificates python3 \
+    git curl wget ca-certificates python3 build-essential \
     && rm -rf /var/lib/apt/lists/*
+
+# Simulate an unwritable system conda (like /software/ncbr/softrepo/...):
+# install Miniforge but make envs dir read-only, so standalone mode triggers
+RUN wget -q "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh" \
+        -O /tmp/miniforge.sh \
+    && bash /tmp/miniforge.sh -b -p /opt/system-conda \
+    && rm /tmp/miniforge.sh \
+    && chmod -R 555 /opt/system-conda/envs
+ENV PATH="/opt/system-conda/bin:${PATH}"
 
 COPY . /workspace
 WORKDIR /workspace
 
-# No conda pre-installed — standalone mode auto-downloads Miniforge3 into conda/
-RUN python3 bindmaster.py install --standalone --tool mosaic --yes --skip-examples \
+# Stage 1: Install Mosaic (fast, tests standalone Miniforge + .condarc + uv)
+RUN bash install/install.sh --tool mosaic --yes --skip-examples \
     && test -d conda/bin \
     && test -f bin/mosaic \
-    && Mosaic/.venv/bin/python -c "import mosaic; print('OK')"
+    && cat conda/.condarc \
+    && grep -q "conda-forge" conda/.condarc \
+    && grep -q "envs_dirs" conda/.condarc \
+    && Mosaic/.venv/bin/python -c "import mosaic; print('Mosaic OK')"
+
+# Stage 2: Install BindCraft (tests binutils, ocl-icd, colabdesign — the failures)
+RUN bash install/install.sh --tool bindcraft --yes --skip-examples \
+    && test -d conda/envs/BindCraft \
+    && conda/bin/conda run -n BindCraft python -c "from colabdesign import mk_af_model; print('BindCraft OK')"
