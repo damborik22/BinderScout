@@ -268,6 +268,25 @@ ensure_conda_in_path() {
     source "${CONDA_BASE}/etc/profile.d/conda.sh"
 }
 
+# _write_local_condarc <conda_dir>
+# Writes/updates .condarc to pin envs + pkgs locally while preserving channels.
+_write_local_condarc() {
+    local conda_dir="$1"
+    local condarc="${conda_dir}/.condarc"
+    if grep -q "envs_dirs" "${condarc}" 2>/dev/null; then
+        return 0  # already configured
+    fi
+    # Append to (not overwrite) existing .condarc so Miniforge's default channels survive
+    cat >> "${condarc}" <<RCEOF
+
+# BindMaster standalone: pin envs + pkgs locally
+envs_dirs:
+  - ${conda_dir}/envs
+pkgs_dirs:
+  - ${conda_dir}/pkgs
+RCEOF
+}
+
 # install_local_conda
 # Downloads and installs Miniforge3 into LOCAL_CONDA_DIR (BindMaster/conda/).
 # Idempotent — skips if already installed.
@@ -281,15 +300,7 @@ install_local_conda() {
             CONDA_CMD="${LOCAL_CONDA_DIR}/bin/conda"
         fi
         # Ensure .condarc pins envs/pkgs locally (may be missing from older installs)
-        local condarc="${LOCAL_CONDA_DIR}/.condarc"
-        if ! grep -q "envs_dirs" "${condarc}" 2>/dev/null; then
-            cat > "${condarc}" <<RCEOF
-envs_dirs:
-  - ${LOCAL_CONDA_DIR}/envs
-pkgs_dirs:
-  - ${LOCAL_CONDA_DIR}/pkgs
-RCEOF
-        fi
+        _write_local_condarc "${LOCAL_CONDA_DIR}"
         return 0
     fi
 
@@ -323,15 +334,11 @@ RCEOF
         CONDA_CMD="${LOCAL_CONDA_DIR}/bin/conda"
     fi
 
-    # Pin envs + pkgs to local dirs so conda ignores ~/.conda/environments.txt
-    # (prevents stale entries from an unwritable system conda from interfering)
-    local condarc="${LOCAL_CONDA_DIR}/.condarc"
-    cat > "${condarc}" <<RCEOF
-envs_dirs:
-  - ${LOCAL_CONDA_DIR}/envs
-pkgs_dirs:
-  - ${LOCAL_CONDA_DIR}/pkgs
-RCEOF
+    _write_local_condarc "${LOCAL_CONDA_DIR}"
+
+    # ocl-icd-system (pulled by BindCraft's jaxlib) needs binutils in base env
+    "${CONDA_CMD}" install -n base -y -c conda-forge binutils_linux-64 --quiet 2>/dev/null \
+        || print_warn "Could not install binutils_linux-64 in base (non-fatal)"
 
     print_ok "Miniforge3 installed at ${LOCAL_CONDA_DIR}"
 }
