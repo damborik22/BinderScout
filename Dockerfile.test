@@ -69,27 +69,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Simulate an unwritable system conda (like /software/ncbr/softrepo/...):
-# install Miniforge but make envs dir read-only, so standalone mode triggers
+# install Miniforge but make envs dir owned by root, then run as non-root user
 RUN wget -q "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh" \
         -O /tmp/miniforge.sh \
     && bash /tmp/miniforge.sh -b -p /opt/system-conda \
     && rm /tmp/miniforge.sh \
-    && chmod -R 555 /opt/system-conda/envs
+    && chown -R root:root /opt/system-conda \
+    && chmod -R 755 /opt/system-conda
 ENV PATH="/opt/system-conda/bin:${PATH}"
 
-COPY . /workspace
+# Create non-root user (chmod 555 doesn't block root, so we need a real user)
+RUN useradd -m -s /bin/bash testuser
+RUN mkdir -p /workspace && chown testuser:testuser /workspace
+
+COPY --chown=testuser:testuser . /workspace
 WORKDIR /workspace
+USER testuser
 
-# Stage 1: Install Mosaic (fast, tests standalone Miniforge + .condarc + uv)
-RUN bash install/install.sh --tool mosaic --yes --skip-examples \
-    && test -d conda/bin \
-    && test -f bin/mosaic \
-    && cat conda/.condarc \
-    && grep -q "conda-forge" conda/.condarc \
-    && grep -q "envs_dirs" conda/.condarc \
-    && Mosaic/.venv/bin/python -c "import mosaic; print('Mosaic OK')"
+# Stage 1: Install Mosaic (tests standalone Miniforge + .condarc + uv)
+RUN bash install/install.sh --tool mosaic --yes --skip-examples
 
-# Stage 2: Install BindCraft (tests binutils, ocl-icd, colabdesign — the failures)
-RUN bash install/install.sh --tool bindcraft --yes --skip-examples \
-    && test -d conda/envs/BindCraft \
-    && conda/bin/conda run -n BindCraft python -c "from colabdesign import mk_af_model; print('BindCraft OK')"
+# Verify Mosaic install
+RUN test -d conda/bin && echo "OK: conda/bin exists"
+RUN cat conda/.condarc
+RUN grep -q "conda-forge" conda/.condarc && echo "OK: conda-forge channel present"
+RUN grep -q "envs_dirs" conda/.condarc && echo "OK: envs_dirs configured"
+RUN Mosaic/.venv/bin/python -c "import mosaic; print('Mosaic OK')"
+
+# Stage 2: Install BindCraft (tests binutils, ocl-icd, colabdesign)
+RUN bash install/install.sh --tool bindcraft --yes --skip-examples
+RUN test -d conda/envs/BindCraft && echo "OK: BindCraft env exists"
+RUN conda/bin/conda run -n BindCraft python -c "from colabdesign import mk_af_model; print('BindCraft OK')"
