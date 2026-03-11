@@ -1684,6 +1684,90 @@ def install_shortcut():
     print_ok(f"Shortcut installed: {shortcut}")
 
 
+# ─── Sequence → Structure prediction ─────────────────────────────────────────
+
+PREDICT_SCRIPT = Path(__file__).resolve().parent / "predict_structure.py"
+
+
+def _handle_sequence_input(run_dir: Path) -> str:
+    """
+    Handle the 'amino acid sequence' target input path.
+
+    Offers local Boltz-2 prediction (if Mosaic is installed) or directs the
+    user to the AlphaFold Server. Returns the path to the predicted PDB.
+    """
+    mosaic_python = MOSAIC_VENV / "bin" / "python"
+    has_boltz2 = mosaic_python.exists()
+
+    print()
+    if has_boltz2:
+        _, method = ask_choice(
+            "How would you like to predict the structure?",
+            [
+                "Predict locally with Boltz-2 (GPU recommended, ~2-5 min)",
+                "Use AlphaFold 3 Server (external, paste result path after)",
+            ],
+            default_index=0,
+        )
+    else:
+        method = "alphafold"
+        print_warn("Mosaic not installed — local Boltz-2 prediction unavailable.")
+        print(f"  Install with: {CYAN}bindmaster install --tool mosaic{RESET}")
+        print()
+
+    if "boltz" in method.lower():
+        return _predict_boltz2(run_dir, mosaic_python)
+
+    # AF3 server path
+    print()
+    print(f"  {BOLD}AlphaFold 3 Server:{RESET}")
+    print(f"    1. Go to {CYAN}https://alphafoldserver.com{RESET}")
+    print("    2. Paste your sequence and submit a prediction job")
+    print("    3. Download the best-ranked .cif/.pdb file")
+    print("    4. Provide the path below")
+    print()
+    return ask("  Path to predicted structure file (.pdb / .cif)", validator=validate_structure_path)
+
+
+def _predict_boltz2(run_dir: Path, mosaic_python: Path) -> str:
+    """Run Boltz-2 structure prediction from a user-provided sequence."""
+    sequence = ask("  Target amino acid sequence", validator=validate_sequence)
+    sequence = sequence.upper().strip()
+
+    target_dir = run_dir / "target"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    output_pdb = target_dir / "predicted_boltz2.pdb"
+
+    print()
+    print_step(f"Predicting structure with Boltz-2 ({len(sequence)} residues)...")
+    print(f"  Sequence: {sequence[:60]}{'...' if len(sequence) > 60 else ''}")
+    print(f"  Output:   {output_pdb}")
+    print()
+
+    proc = subprocess.run(
+        [str(mosaic_python), str(PREDICT_SCRIPT), sequence, str(output_pdb)],
+        capture_output=False,
+    )
+
+    if proc.returncode != 0:
+        print()
+        print_fail("Boltz-2 prediction failed.")
+        print(f"  You can try the AlphaFold 3 Server instead: {CYAN}https://alphafoldserver.com{RESET}")
+        print()
+        fallback = ask_yn("  Provide a structure file manually?", default=True)
+        if fallback:
+            return ask("  Path to target structure file (.pdb / .cif)", validator=validate_structure_path)
+        sys.exit(1)
+
+    if not output_pdb.exists():
+        print_fail(f"Expected output not found: {output_pdb}")
+        sys.exit(1)
+
+    print()
+    print_ok(f"Structure predicted → {output_pdb}")
+    return str(output_pdb)
+
+
 # ─── Wizard ───────────────────────────────────────────────────────────────────
 
 
@@ -1713,20 +1797,14 @@ def wizard():
     print_step("Step 2 — Target structure")
     _, input_type = ask_choice(
         "How will you provide the target structure?",
-        ["PDB or mmCIF file path", "Amino acid sequence (requires structure prediction first)"],
+        ["PDB or mmCIF file path", "Amino acid sequence (predict structure with Boltz-2 or AF3)"],
         default_index=0,
     )
 
     if "sequence" in input_type.lower():
-        print()
-        print_warn("You need to predict the structure first.")
-        print("  Recommended: ColabFold")
-        print("    1. Paste your sequence into the AlphaFold2 ColabFold notebook")
-        print("    2. Download the best-ranked .pdb file")
-        print("    3. Come back and provide the .pdb path below")
-        print()
-
-    target_pdb_src = ask("  Path to target structure file (.pdb / .cif)", validator=validate_structure_path)
+        target_pdb_src = _handle_sequence_input(run_dir)
+    else:
+        target_pdb_src = ask("  Path to target structure file (.pdb / .cif)", validator=validate_structure_path)
 
     # ── Step 3: Target details ────────────────────────────────────────────────
     print_step("Step 3 — Target details")
