@@ -876,8 +876,11 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
     """
     content = MOSAIC_HALLUCINATE_SRC.read_text()
 
+    target_pdb_path = str(cfg.get("target_pdb", ""))
+
     old_block = (
         'TARGET_SEQUENCE = "REPLACE_ME"  # target protein sequence\n'
+        'TARGET_PDB = ""  # path to target PDB (used as structural template; blank = predict from sequence)\n'
         "N_DESIGNS = 100  # Stage 1: how many designs to generate per length\n"
         "TOP_K = 5  # Stage 2: how many top designs to refold and export PDB\n"
         "MIN_LENGTH = 65  # minimum binder length (aa)\n"
@@ -886,6 +889,7 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
     )
     new_block = (
         f"TARGET_SEQUENCE = {cfg['target_sequence']!r}  # target protein sequence\n"
+        f"TARGET_PDB = {target_pdb_path!r}  # path to target PDB (structural template)\n"
         f"N_DESIGNS = {cfg.get('mosaic_n_designs', 100)}  # Stage 1: how many designs to generate per length\n"
         f"TOP_K = {cfg.get('mosaic_top_k', cfg['n_designs'])}  # Stage 2: how many top designs to refold and export PDB\n"
         f"MIN_LENGTH = {cfg.get('mosaic_min_length', cfg['min_length'])}  # minimum binder length (aa)\n"
