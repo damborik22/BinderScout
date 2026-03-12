@@ -5,6 +5,7 @@ import signal
 import json
 import sys
 
+import gemmi
 import jax
 import jax.numpy as jnp
 import equinox as eqx
@@ -27,6 +28,7 @@ from mosaic.optimizers import simplex_APGM
 # Edit manually to override after generation.
 
 TARGET_SEQUENCE = "REPLACE_ME"  # target protein sequence
+TARGET_PDB = ""  # path to target PDB (used as structural template; blank = predict from sequence)
 N_DESIGNS = 100  # Stage 1: how many designs to generate per length
 TOP_K = 5  # Stage 2: how many top designs to refold and export PDB
 MIN_LENGTH = 65  # minimum binder length (aa)
@@ -47,6 +49,21 @@ _interrupt_state = {
 # ============================
 # HELPER FUNCTIONS
 # ============================
+
+
+def _load_template_chain(pdb_path: str, chain_id: str = "A") -> gemmi.Chain | None:
+    """Load a gemmi Chain from a PDB file for use as structural template."""
+    if not pdb_path:
+        return None
+    st = gemmi.read_structure(pdb_path)
+    for chain in st[0]:
+        if chain.name == chain_id:
+            print(f"  Template loaded: {pdb_path} chain {chain_id} ({len(chain)} residues)")
+            return chain
+    # Fallback: use first chain
+    chain = st[0][0]
+    print(f"  Template loaded: {pdb_path} chain {chain.name} (requested {chain_id}, using first)")
+    return chain
 
 
 def _check_gpu():
@@ -238,6 +255,7 @@ def design(
     target_sequence: str,
     output_dir: str = "structures",
     *,
+    template_chain: gemmi.Chain | None = None,
     checkpoint_path=None,
     resume_from=None,
     min_ranking_loss=None,
@@ -304,9 +322,15 @@ def design(
     elif ss_bias == "compact":
         sp_loss = sp_loss + 0.1 * sp.DistogramRadiusOfGyration()
 
+    target_tc = TargetChain(
+        sequence=target_sequence,
+        use_msa=False,
+        template_chain=template_chain,
+    )
+
     features, _ = folder.binder_features(
         binder_length=binder_length,
-        chains=[TargetChain(sequence=target_sequence, use_msa=False)],
+        chains=[target_tc],
     )
 
     loss = NoCys(
@@ -369,7 +393,7 @@ def design(
         boltz_features, _ = folder.target_only_features(
             chains=[
                 TargetChain(sequence=seq_str, use_msa=True),
-                TargetChain(sequence=target_sequence, use_msa=True),
+                TargetChain(sequence=target_sequence, use_msa=True, template_chain=template_chain),
             ]
         )
         ranking_loss = folder.build_multisample_loss(
@@ -487,7 +511,7 @@ def design(
             boltz_features, boltz_writer = folder.target_only_features(
                 chains=[
                     TargetChain(sequence=seq_str, use_msa=True),
-                    TargetChain(sequence=target_sequence, use_msa=True),
+                    TargetChain(sequence=target_sequence, use_msa=True, template_chain=template_chain),
                 ]
             )
 
@@ -735,6 +759,13 @@ def main():
     n_designs = N_DESIGNS
     top_k = TOP_K
 
+    # Load structural template if provided (locks target conformation)
+    template_chain = _load_template_chain(TARGET_PDB) if TARGET_PDB else None
+    if template_chain:
+        print(f"  Using structural template: {TARGET_PDB}")
+    else:
+        print("  No structural template — target predicted from sequence only")
+
     if MIN_LENGTH == MAX_LENGTH:
         binder_lengths = [MIN_LENGTH]
     else:
@@ -767,6 +798,7 @@ def main():
             binder_length,
             target_sequence,
             output_dir,
+            template_chain=template_chain,
             checkpoint_path=ckpt_path,
         )
 
