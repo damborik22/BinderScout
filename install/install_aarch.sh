@@ -1487,10 +1487,11 @@ install_pxdesign() {
         fi
     fi
 
-    # Create conda env
+    # Create conda env (gcc needed for Triton JIT compilation used by deepspeed)
     print_step "Creating bindmaster_pxdesign conda environment"
     run_logged "Creating bindmaster_pxdesign env" \
         "${CONDA_CMD}" create -n bindmaster_pxdesign -y python=3.11 \
+            gcc_linux-aarch64 gxx_linux-aarch64 -c conda-forge \
         || { print_fail "Failed to create bindmaster_pxdesign env"; return 1; }
 
     # aarch64: install PyTorch from PyPI with cu130 index (no conda pytorch-cuda for aarch64)
@@ -1549,6 +1550,12 @@ install_pxdesign() {
         "${CONDA_CMD}" run -n bindmaster_pxdesign \
         pip install -q "deepspeed>=0.18" \
         || print_warn "deepspeed upgrade failed"
+
+    # Pin dm-haiku + JAX (haiku 0.0.12 is last to support jax.core.JaxprEqn)
+    run_logged "Pinning dm-haiku and JAX versions" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install -q "dm-haiku==0.0.12" "jax==0.4.35" "jaxlib==0.4.35" \
+        || print_warn "dm-haiku/JAX pin failed"
 
     # ── Post-install patches for known upstream issues ──────────────────────
     print_step "Applying PXDesign compatibility patches (aarch64)"

@@ -1140,9 +1140,10 @@ install_rfaa() {
         || { print_fail "Failed to create bindmaster_rfaa env"; return 1; }
 
     # Install RFAA dependencies (RFAA is not pip-installable; used via PYTHONPATH)
+    # DGL must be installed from the CUDA wheel repo — plain PyPI gives CPU-only
     run_logged "Installing RFAA dependencies" \
         "${CONDA_CMD}" run -n bindmaster_rfaa \
-        pip install -q hydra-core omegaconf icecream scipy numpy pandas tqdm fire assertpy deepdiff opt-einsum e3nn "dgl==1.1.3" "torchdata==0.7.1" prody openbabel-wheel \
+        pip install -q hydra-core omegaconf icecream scipy "numpy<2" pandas tqdm fire assertpy deepdiff opt-einsum e3nn ml_collections dm-tree "dgl==1.1.3+cu121" -f https://data.dgl.ai/wheels/cu121/repo.html "torchdata==0.7.1" prody openbabel-wheel \
         || print_warn "Some RFAA deps failed — may need manual install"
 
     # Install LigandMPNN
@@ -1176,6 +1177,23 @@ install_rfaa() {
             wget -q -O "${rfaa_weights_file}" \
             "http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_weights.pt" \
             || print_warn "RFAA weights download failed — retry: wget -O ${rfaa_weights_file} http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_weights.pt"
+    fi
+
+    # ── Post-install patches for known upstream issues ──────────────────────
+
+    # Patch: idealize_backbone.py — handle protein-only designs (0 ligands)
+    local idealize="${RFAA_DIR}/idealize_backbone.py"
+    if [[ -f "${idealize}" ]] && grep -q "assert len(ligands) == 1" "${idealize}"; then
+        sed -i 's/assert len(ligands) == 1.*/ligands = list(ligands)/' "${idealize}"
+        sed -i '/ligands = list(ligands)/a\    if len(ligands) == 0:\n        indep.write_pdb(outpath)\n    elif len(ligands) == 1:\n        indep.write_pdb(outpath, lig_name=ligands[0])\n    else:\n        raise ValueError(f"Found >1 ligand: {ligands}")' "${idealize}"
+        print_ok "Patched idealize_backbone.py for protein-only designs"
+    fi
+
+    # Patch: openfold residue_constants.py — numpy 2.x removed np.int alias
+    local resconst="${LIGANDMPNN_DIR}/openfold/np/residue_constants.py"
+    if [[ -f "${resconst}" ]] && grep -q "dtype=np.int)" "${resconst}"; then
+        sed -i 's/dtype=np\.int)/dtype=np.int64)/g' "${resconst}"
+        print_ok "Patched residue_constants.py: np.int → np.int64"
     fi
 
     # Smoke test
@@ -1215,11 +1233,12 @@ install_pxdesign() {
         fi
     fi
 
-    # Create conda env
+    # Create conda env (gcc for Triton JIT, cuda-nvcc for deepspeed CUDA_HOME)
     print_step "Creating bindmaster_pxdesign conda environment"
     run_logged "Creating bindmaster_pxdesign env" \
         "${CONDA_CMD}" create -n bindmaster_pxdesign -y python=3.11 \
-            "pytorch>=2.2" "pytorch-cuda=12.4" -c pytorch -c nvidia -c conda-forge \
+            "pytorch>=2.2" "pytorch-cuda=12.4" gcc_linux-64 gxx_linux-64 "cuda-nvcc=12.4" \
+            -c pytorch -c nvidia -c conda-forge \
         || { print_fail "Failed to create bindmaster_pxdesign env"; return 1; }
 
     # Install PXDesign
@@ -1266,6 +1285,12 @@ install_pxdesign() {
         "${CONDA_CMD}" run -n bindmaster_pxdesign \
         pip install -q "deepspeed>=0.18" \
         || print_warn "deepspeed upgrade failed"
+
+    # Pin dm-haiku + JAX (haiku 0.0.12 is last to support jax.core.JaxprEqn)
+    run_logged "Pinning dm-haiku and JAX versions" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign \
+        pip install -q "dm-haiku==0.0.12" "jax==0.4.35" "jaxlib==0.4.35" \
+        || print_warn "dm-haiku/JAX pin failed"
 
     # ── Post-install patches for known upstream issues ──────────────────────
     print_step "Applying PXDesign compatibility patches"
