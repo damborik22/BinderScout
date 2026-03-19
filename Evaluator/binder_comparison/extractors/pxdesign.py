@@ -26,6 +26,7 @@ from .base import SequenceExtractor
 
 _CSV_CANDIDATES = [
     "summary.csv",
+    "sequences.csv",
 ]
 
 _SEQUENCE_COL = "sequence"
