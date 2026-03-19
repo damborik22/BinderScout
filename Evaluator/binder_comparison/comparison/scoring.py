@@ -13,7 +13,7 @@ Key findings implemented here:
 3. Best composite: ipSAE_min × |ΔG/ΔSASA|  (median AP = 0.58 across 15 targets)
 4. Pre-filter: shape_complementarity > 0.62 when available (from BindCraft)
 5. ipSAE computed from PAE via Dunbrack formula (uniform 10 Å cutoff, d0_res per-residue)
-6. Ranking: agreement_count primary, ipSAE_min secondary, iptm tertiary
+6. Ranking: quality_tier primary, agreement_count secondary, ipSAE_min tertiary
 """
 
 from __future__ import annotations
@@ -570,11 +570,12 @@ def compute_agreement(df: pd.DataFrame, threshold: float = IPSAE_PASS_THRESHOLD)
 def rank_by_adaptyv_method(df: pd.DataFrame) -> pd.DataFrame:
     """Rank binders using the Adaptyv/meta-analysis hierarchy.
 
-    Sort order (all descending = better first):
-        1. agreement_count  — how many engines agree ipsae_min > 0.61
-        2. ipsae_min        — primary metric (higher = better)
-        3. iptm             — secondary (higher = better)
-        4. plddt_binder_mean — tertiary (higher = better)
+    Sort order (all ascending sort key = better first):
+        1. quality_tier      — high > medium > low > reject
+        2. agreement_count   — how many engines agree ipsae_min > 0.61
+        3. ipsae_min         — primary metric (higher = better)
+        4. iptm              — secondary (higher = better)
+        5. plddt_binder_mean — tertiary (higher = better)
 
     Adds a column 'adaptyv_rank' (1 = best).
     Rows with ipsae_valid == 1 are shown before those without.
@@ -591,12 +592,19 @@ def rank_by_adaptyv_method(df: pd.DataFrame) -> pd.DataFrame:
         sort_keys.append("_ipsae_valid_sort")
         ascending.append(True)
 
-    # Primary: agreement count (more engines agreeing = better)
+    # Primary: quality tier (high before medium before low before reject)
+    if "quality_tier" in result.columns:
+        _tier_order = {"high": 0, "medium": 1, "low": 2, "reject": 3, "unknown": 4}
+        result["_tier_sort"] = result["quality_tier"].map(_tier_order).fillna(4)
+        sort_keys.append("_tier_sort")
+        ascending.append(True)
+
+    # Secondary: agreement count (more engines agreeing = better)
     if "agreement_count" in result.columns:
         sort_keys.append("agreement_count")
         ascending.append(False)
 
-    # Secondary: ipSAE_min
+    # Tertiary: ipSAE_min
     if ipsae_col is not None:
         sort_keys.append(ipsae_col)
         ascending.append(False)
@@ -620,9 +628,10 @@ def rank_by_adaptyv_method(df: pd.DataFrame) -> pd.DataFrame:
 
     result["adaptyv_rank"] = range(1, len(result) + 1)
 
-    # Clean up temporary column
-    if "_ipsae_valid_sort" in result.columns:
-        result = result.drop(columns=["_ipsae_valid_sort"])
+    # Clean up temporary columns
+    for tmp_col in ["_ipsae_valid_sort", "_tier_sort"]:
+        if tmp_col in result.columns:
+            result = result.drop(columns=[tmp_col])
 
     return result.reset_index(drop=True)
 
