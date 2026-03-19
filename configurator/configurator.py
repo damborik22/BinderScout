@@ -1151,7 +1151,7 @@ from pathlib import Path
 
 lmpnn_dir = Path('$LMPNN_DIR')
 rows = []
-for fasta in sorted(lmpnn_dir.rglob('seqs/*.fasta')):
+for fasta in sorted(list(lmpnn_dir.rglob('seqs/*.fasta')) + list(lmpnn_dir.rglob('seqs/*.fa'))):
     with open(fasta) as f:
         for line in f:
             if line.startswith('>'):
@@ -1219,6 +1219,7 @@ for _conda_sh in \\
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
 conda activate bindmaster_pxdesign
+export CUDA_HOME="$CONDA_PREFIX"
 set -u
 
 # aarch64/Blackwell: CUDA arch list and JAX CPU-only mode
@@ -1234,7 +1235,6 @@ cd "$PXDESIGN_DIR"
 def write_run_pxdesign(path: Path, cfg: dict):
     """Generate run_pxdesign.sh for local PXDesign execution."""
     run_dir = cfg["run_dir"]
-    preset = cfg.get("pxdesign_preset", "preview")
     n_samples = cfg.get("pxdesign_n_samples", 1000)
     length_scan = cfg.get("pxdesign_length_scan", False)
 
@@ -1289,46 +1289,20 @@ for LENGTH in $(seq "$MIN_LENGTH" "$LENGTH_STEP" "$MAX_LENGTH"); do
     printf 'binder_length: %d\\ntarget:\\n  file: %s\\n  chains:\\n{chain_lines}' \\
         "$LENGTH" "$TARGET_PDB" > "$INPUT_YAML"
 
-    pxdesign pipeline \\
-        --preset {preset} \\
+    pxdesign infer \\
         --N_sample "$N_SAMPLES" \\
         --dtype bf16 \\
         -i "$INPUT_YAML" \\
         -o "$OUTPUT_DIR"
 
-    SCAN_CSV=$(find "$OUTPUT_DIR/design_outputs" -name "summary.csv" 2>/dev/null | head -1)
-    if [[ -n "$SCAN_CSV" ]]; then
-        N_DONE=$(tail -n +2 "$SCAN_CSV" | wc -l)
-        TOTAL_DESIGNS=$((TOTAL_DESIGNS + N_DONE))
-        echo "  -> ${{N_DONE}} designs at length ${{LENGTH}}"
-    fi
+    N_DESIGNS=$(find "$OUTPUT_DIR" \\( -name "*.pdb" -o -name "*.cif" \\) 2>/dev/null | wc -l)
+    TOTAL_DESIGNS=$((TOTAL_DESIGNS + N_DESIGNS))
+    echo "  -> ${{N_DESIGNS}} designs at length ${{LENGTH}}"
 done
 
 echo ""
 echo "=== Length Scan Complete ==="
 echo "  Total designs: ${{TOTAL_DESIGNS}}"
-
-# Merge all summary CSVs into one
-MERGED="$RUN_DIR/pxdesign/summary_all.csv"
-FIRST=true
-for LENGTH in $(seq "$MIN_LENGTH" "$LENGTH_STEP" "$MAX_LENGTH"); do
-    CSV=$(find "$RUN_DIR/pxdesign/outputs_len${{LENGTH}}/design_outputs" -name "summary.csv" 2>/dev/null | head -1)
-    if [[ -n "$CSV" ]]; then
-        if [[ "$FIRST" == true ]]; then
-            cat "$CSV" > "$MERGED"
-            FIRST=false
-        else
-            tail -n +2 "$CSV" >> "$MERGED"
-        fi
-    fi
-done
-
-if [[ -f "$MERGED" ]]; then
-    # Also place at top level for evaluator extractor
-    cp "$MERGED" "$RUN_DIR/pxdesign/summary.csv"
-    N_MERGED=$(tail -n +2 "$MERGED" | wc -l)
-    echo "  Merged summary: ${{MERGED}} (${{N_MERGED}} designs)"
-fi
 """
         )
     else:
@@ -1340,8 +1314,7 @@ OUTPUT_DIR="{run_dir}/pxdesign/outputs"
 
 echo "=== Running PXDesign for {cfg["name"]} ==="
 
-pxdesign pipeline \\
-    --preset {preset} \\
+pxdesign infer \\
     --N_sample {n_samples} \\
     --dtype bf16 \\
     -i "$INPUT_YAML" \\
