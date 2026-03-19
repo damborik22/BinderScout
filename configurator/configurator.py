@@ -1232,6 +1232,74 @@ cd "$PXDESIGN_DIR"
 """
 
 
+def _pxdesign_sequence_collector(run_dir: str) -> str:
+    """Return shell snippet that extracts binder sequences from PXDesign CIF outputs."""
+    return f"""
+# ============================================================
+# Collect binder sequences from CIF outputs into sequences.csv
+# ============================================================
+echo ""
+echo "=== Collecting binder sequences ==="
+python3 -c "
+import csv, re, sys
+from pathlib import Path
+
+AA3TO1 = {{
+    'ALA':'A','ARG':'R','ASN':'N','ASP':'D','CYS':'C','GLN':'Q','GLU':'E',
+    'GLY':'G','HIS':'H','ILE':'I','LEU':'L','LYS':'K','MET':'M','PHE':'F',
+    'PRO':'P','SER':'S','THR':'T','TRP':'W','TYR':'Y','VAL':'V','MSE':'M',
+}}
+
+def binder_seq_from_cif(cif_path):
+    lines = Path(cif_path).read_text().splitlines()
+    in_poly_seq = False
+    residues = {{}}
+    for line in lines:
+        if line.startswith('_entity_poly_seq.'):
+            in_poly_seq = True
+            continue
+        if in_poly_seq:
+            if line.startswith('#') or line.startswith('_') or line.startswith('loop_'):
+                in_poly_seq = False
+                continue
+            parts = line.split()
+            if len(parts) >= 4:
+                eid, mon, num = parts[0], parts[2], int(parts[3])
+                residues.setdefault(eid, []).append((num, AA3TO1.get(mon, 'X')))
+    if '2' in residues:
+        return ''.join(aa for _, aa in sorted(residues['2']))
+    return None
+
+pxd_dir = Path('{run_dir}/pxdesign')
+rows = []
+for cif in sorted(pxd_dir.rglob('predictions/*.cif')):
+    if 'global_run_0' in str(cif):
+        continue
+    seq = binder_seq_from_cif(cif)
+    if seq:
+        length_m = re.search(r'outputs_len(\\d+)', str(cif))
+        rows.append({{
+            'design_id': f'pxdesign_{{cif.stem}}',
+            'sequence': seq,
+            'length': len(seq),
+            'binder_length': length_m.group(1) if length_m else '?',
+            'source': 'pxdesign',
+        }})
+
+if not rows:
+    print('WARNING: No binder sequences extracted', file=sys.stderr)
+    sys.exit(0)
+
+out_csv = pxd_dir / 'sequences.csv'
+with open(out_csv, 'w', newline='') as f:
+    w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+    w.writeheader()
+    w.writerows(rows)
+print(f'  -> {{len(rows)}} binder sequences written to {{out_csv}}')
+"
+"""
+
+
 def write_run_pxdesign(path: Path, cfg: dict):
     """Generate run_pxdesign.sh for local PXDesign execution."""
     run_dir = cfg["run_dir"]
@@ -1321,6 +1389,10 @@ pxdesign infer \\
     -o "$OUTPUT_DIR"
 """
         )
+
+    # Append sequence extraction step (common to both modes)
+    content += _pxdesign_sequence_collector(run_dir)
+
     path.write_text(content)
     path.chmod(0o755)
 
