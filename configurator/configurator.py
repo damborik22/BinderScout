@@ -1045,7 +1045,7 @@ def write_pxdesign_yaml(path: Path, cfg: dict):
 
 
 def write_run_rfaa(path: Path, cfg: dict):
-    """Generate run_rfaa.sh — two-stage: RFAA backbones then LigandMPNN sequences."""
+    """Generate run_rfaa.sh — three-stage: RFAA backbones, chain split, then LigandMPNN sequences."""
     run_dir = cfg["run_dir"]
     conda_base = str(CONDA_BASE) if CONDA_BASE else ""
     bindmaster_dir = str(BINDMASTER_DIR)
@@ -1056,6 +1056,7 @@ def write_run_rfaa(path: Path, cfg: dict):
     lmpnn_temperature = cfg.get("lmpnn_temperature", 0.1)
     lmpnn_seqs = cfg.get("lmpnn_seqs_per_backbone", 5)
     ligand_line = f'\n    inference.ligand="{ligand}" \\' if ligand else ""
+    target_len = len(cfg.get("target_sequence", ""))
 
     content = f"""\
 #!/usr/bin/env bash
@@ -1068,6 +1069,7 @@ LIGANDMPNN_DIR="{LIGANDMPNN_DIR}"
 OUTPUT_DIR="{run_dir}/rfaa/outputs"
 LMPNN_DIR="{run_dir}/rfaa/ligandmpnn"
 TARGET_PDB="{cfg["target_pdb"]}"
+TARGET_LEN={target_len}
 
 mkdir -p "$OUTPUT_DIR" "$LMPNN_DIR"
 
@@ -1115,6 +1117,45 @@ if [[ "$BACKBONE_COUNT" -eq 0 ]]; then
 fi
 
 # ============================================================
+# Stage 1b: Split chains — RFAA outputs single-chain PDBs;
+#   split binder (chain A) from target (chain B) for LigandMPNN
+# ============================================================
+echo ""
+echo "=== Splitting binder/target chains ==="
+python3 -c "
+import os
+target_len = $TARGET_LEN
+rfaa_dir = '$OUTPUT_DIR'
+for fn in sorted(os.listdir(rfaa_dir)):
+    if not fn.endswith('.pdb'):
+        continue
+    pdb = os.path.join(rfaa_dir, fn)
+    lines = open(pdb).readlines()
+    max_res = 0
+    for line in lines:
+        if line.startswith('ATOM') or line.startswith('HETATM'):
+            res_num = int(line[22:26].strip())
+            if res_num > max_res:
+                max_res = res_num
+    binder_end = max_res - target_len
+    new_lines, ter_done = [], False
+    for line in lines:
+        if line.startswith('ATOM') or line.startswith('HETATM'):
+            res_num = int(line[22:26].strip())
+            if res_num > binder_end:
+                if not ter_done:
+                    new_lines.append('TER\n')
+                    ter_done = True
+                line = line[:21] + 'B' + line[22:]
+                new_res = res_num - binder_end
+                line = line[:22] + f'{{new_res:4d}}' + line[26:]
+        new_lines.append(line)
+    with open(pdb, 'w') as f:
+        f.writelines(new_lines)
+    print(f'  {{fn}}: binder={{binder_end}}aa chain_A, target={{target_len}}aa chain_B')
+"
+
+# ============================================================
 # Stage 2: LigandMPNN — design sequences for each backbone
 # ============================================================
 echo ""
@@ -1132,8 +1173,8 @@ for PDB_FILE in "$OUTPUT_DIR"/*.pdb; do
         --seed "$SEED" \\
         --pdb_path "$PDB_FILE" \\
         --out_folder "$LMPNN_OUT" \\
-        --model_type "ligand_mpnn" \\
-        --ligand_mpnn_use_side_chain_context 1 \\
+        --model_type "protein_mpnn" \\
+        --chains_to_design "A" \\
         --temperature {lmpnn_temperature} \\
         --number_of_batches {lmpnn_seqs}
 
@@ -1156,16 +1197,18 @@ for fasta in sorted(list(lmpnn_dir.rglob('seqs/*.fasta')) + list(lmpnn_dir.rglob
         for line in f:
             if line.startswith('>'):
                 header = line.strip()
-                seq = next(f).strip()
+                seq_line = next(f).strip()
+                # Extract binder chain only (before colon separator)
+                binder_seq = seq_line.split(':')[0]
                 conf_m = re.search(r'overall_confidence=([0-9.]+)', header)
-                lig_m = re.search(r'ligand_confidence=([0-9.]+)', header)
-                name = header.split()[0].lstrip('>')
+                name = header.split(',')[0].lstrip('>')
+                seq_id = re.search(r'id=(\\d+)', header)
+                design_id = f'{{name}}_seq{{seq_id.group(1)}}' if seq_id else name
                 rows.append({{
-                    'design_id': name,
-                    'sequence': seq,
-                    'length': len(seq),
+                    'design_id': f'rfaa_{{design_id}}',
+                    'sequence': binder_seq,
+                    'length': len(binder_seq),
                     'overall_confidence': conf_m.group(1) if conf_m else '',
-                    'ligand_confidence': lig_m.group(1) if lig_m else '',
                     'backbone_pdb': fasta.parent.parent.name,
                     'source': 'rfaa',
                 }})
@@ -1233,10 +1276,14 @@ cd "$PXDESIGN_DIR"
 
 
 def _pxdesign_sequence_collector(run_dir: str) -> str:
-    """Return shell snippet that extracts binder sequences from PXDesign CIF outputs."""
+    """Return shell snippet that extracts binder sequences from PXDesign pipeline outputs.
+
+    Pipeline mode produces sample_level_output.csv with MPNN-designed sequences
+    and AF2 evaluation scores.  Falls back to CIF parsing if no CSVs found.
+    """
     return f"""
 # ============================================================
-# Collect binder sequences from CIF outputs into sequences.csv
+# Collect binder sequences from PXDesign pipeline outputs
 # ============================================================
 echo ""
 echo "=== Collecting binder sequences ==="
@@ -1244,47 +1291,73 @@ python3 -c "
 import csv, re, sys
 from pathlib import Path
 
-AA3TO1 = {{
-    'ALA':'A','ARG':'R','ASN':'N','ASP':'D','CYS':'C','GLN':'Q','GLU':'E',
-    'GLY':'G','HIS':'H','ILE':'I','LEU':'L','LYS':'K','MET':'M','PHE':'F',
-    'PRO':'P','SER':'S','THR':'T','TRP':'W','TYR':'Y','VAL':'V','MSE':'M',
-}}
-
-def binder_seq_from_cif(cif_path):
-    lines = Path(cif_path).read_text().splitlines()
-    in_poly_seq = False
-    residues = {{}}
-    for line in lines:
-        if line.startswith('_entity_poly_seq.'):
-            in_poly_seq = True
-            continue
-        if in_poly_seq:
-            if line.startswith('#') or line.startswith('_') or line.startswith('loop_'):
-                in_poly_seq = False
-                continue
-            parts = line.split()
-            if len(parts) >= 4:
-                eid, mon, num = parts[0], parts[2], int(parts[3])
-                residues.setdefault(eid, []).append((num, AA3TO1.get(mon, 'X')))
-    if '2' in residues:
-        return ''.join(aa for _, aa in sorted(residues['2']))
-    return None
-
 pxd_dir = Path('{run_dir}/pxdesign')
 rows = []
-for cif in sorted(pxd_dir.rglob('predictions/*.cif')):
-    if 'global_run_0' in str(cif):
-        continue
-    seq = binder_seq_from_cif(cif)
-    if seq:
-        length_m = re.search(r'outputs_len(\\d+)', str(cif))
-        rows.append({{
-            'design_id': f'pxdesign_{{cif.stem}}',
-            'sequence': seq,
-            'length': len(seq),
-            'binder_length': length_m.group(1) if length_m else '?',
-            'source': 'pxdesign',
-        }})
+
+# --- Strategy 1: read sample_level_output.csv from pipeline ---
+for slcsv in sorted(pxd_dir.rglob('sample_level_output.csv')):
+    length_m = re.search(r'outputs_len(\\d+)', str(slcsv))
+    length_val = length_m.group(1) if length_m else '?'
+    with open(slcsv) as f:
+        reader = csv.DictReader(f)
+        for r in reader:
+            seq = r.get('sequence', '').strip()
+            if not seq or set(seq) == {{'X'}}:
+                continue
+            name = r.get('name', r.get('design_id', slcsv.stem))
+            rows.append({{
+                'design_id': f'pxdesign_{{name}}',
+                'sequence': seq,
+                'length': len(seq),
+                'binder_length': length_val,
+                'af2_iptm': r.get('i_pTM', r.get('af2_complex_ipTM', '')).strip('[]'),
+                'af2_plddt': r.get('pLDDT', r.get('af2_complex_pLDDT_binder', '')).strip('[]'),
+                'source': 'pxdesign',
+            }})
+
+if rows:
+    print(f'  Found {{len(rows)}} sequences from pipeline CSVs')
+else:
+    # --- Strategy 2: fall back to CIF entity_poly_seq parsing ---
+    AA3TO1 = {{
+        'ALA':'A','ARG':'R','ASN':'N','ASP':'D','CYS':'C','GLN':'Q','GLU':'E',
+        'GLY':'G','HIS':'H','ILE':'I','LEU':'L','LYS':'K','MET':'M','PHE':'F',
+        'PRO':'P','SER':'S','THR':'T','TRP':'W','TYR':'Y','VAL':'V','MSE':'M',
+    }}
+    def binder_seq_from_cif(cif_path):
+        lines = Path(cif_path).read_text().splitlines()
+        in_poly_seq = False
+        residues = {{}}
+        for line in lines:
+            if line.startswith('_entity_poly_seq.'):
+                in_poly_seq = True
+                continue
+            if in_poly_seq:
+                if line.startswith('#') or line.startswith('_') or line.startswith('loop_'):
+                    in_poly_seq = False
+                    continue
+                parts = line.split()
+                if len(parts) >= 4:
+                    eid, mon, num = parts[0], parts[2], int(parts[3])
+                    residues.setdefault(eid, []).append((num, AA3TO1.get(mon, 'X')))
+        if '2' in residues:
+            seq = ''.join(aa for _, aa in sorted(residues['2']))
+            if set(seq) != {{'X'}}:
+                return seq
+        return None
+    for cif in sorted(pxd_dir.rglob('predictions/*.cif')):
+        seq = binder_seq_from_cif(cif)
+        if seq:
+            length_m = re.search(r'outputs_len(\\d+)', str(cif))
+            rows.append({{
+                'design_id': f'pxdesign_{{cif.stem}}',
+                'sequence': seq,
+                'length': len(seq),
+                'binder_length': length_m.group(1) if length_m else '?',
+                'source': 'pxdesign',
+            }})
+    if rows:
+        print(f'  Found {{len(rows)}} sequences from CIF files (fallback)')
 
 if not rows:
     print('WARNING: No binder sequences extracted', file=sys.stderr)
@@ -1303,6 +1376,7 @@ print(f'  -> {{len(rows)}} binder sequences written to {{out_csv}}')
 def write_run_pxdesign(path: Path, cfg: dict):
     """Generate run_pxdesign.sh for local PXDesign execution."""
     run_dir = cfg["run_dir"]
+    preset = cfg.get("pxdesign_preset", "preview")
     n_samples = cfg.get("pxdesign_n_samples", 1000)
     length_scan = cfg.get("pxdesign_length_scan", False)
 
@@ -1357,7 +1431,8 @@ for LENGTH in $(seq "$MIN_LENGTH" "$LENGTH_STEP" "$MAX_LENGTH"); do
     printf 'binder_length: %d\\ntarget:\\n  file: %s\\n  chains:\\n{chain_lines}' \\
         "$LENGTH" "$TARGET_PDB" > "$INPUT_YAML"
 
-    pxdesign infer \\
+    pxdesign pipeline \\
+        --preset {preset} \\
         --N_sample "$N_SAMPLES" \\
         --dtype bf16 \\
         -i "$INPUT_YAML" \\
@@ -1382,7 +1457,8 @@ OUTPUT_DIR="{run_dir}/pxdesign/outputs"
 
 echo "=== Running PXDesign for {cfg["name"]} ==="
 
-pxdesign infer \\
+pxdesign pipeline \\
+    --preset {preset} \\
     --N_sample {n_samples} \\
     --dtype bf16 \\
     -i "$INPUT_YAML" \\
@@ -2132,9 +2208,13 @@ def wizard():
             .upper()
             or None
         )
+        # Default contig: binder (variable length) + fixed target chain
+        primary_ch = cfg["chains"].split(",")[0].strip()
+        target_len = len(cfg.get("target_sequence", ""))
+        rfaa_default_contig = f"{cfg['min_length']}-{cfg['max_length']},{primary_ch}1-{target_len},0"
         cfg["rfaa_contigs"] = ask(
-            "  Contig string (e.g. '150-150' for 150-residue binder)",
-            default=f"{cfg['min_length']}-{cfg['max_length']}",
+            f"  Contig string (binder + fixed target {primary_ch}1-{target_len})",
+            default=rfaa_default_contig,
         )
         cfg["rfaa_n_designs"] = int(
             ask(
@@ -2151,7 +2231,7 @@ def wizard():
         cfg["lmpnn_seqs_per_backbone"] = int(
             ask("  Sequences per backbone", default=5, validator=validate_int(min_val=1, max_val=100))
         )
-        cfg["lmpnn_temperature"] = float(ask("  Sampling temperature (0.05=conservative, 0.3=diverse)", default="0.1"))
+        cfg["lmpnn_temperature"] = float(ask("  Sampling temperature (0.1=conservative, 0.3=diverse)", default="0.2"))
 
     # ── Step 7: Preview ───────────────────────────────────────────────────────
     print_step("Step 7 — Preview")
