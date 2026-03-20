@@ -22,6 +22,7 @@ Target structure (.pdb / .mmcif)
        BoltzGen (Boltz-1 diffusion)
        BindCraft (AF2 + MPNN + PyRosetta)
        PXDesign (Protenix, optional)
+       Proteina-Complexa (NVIDIA flow matching, optional)
     → Evaluator:
        1. Extract sequences from all tool outputs
        2. Refold with Boltz-2 (Mosaic venv)
@@ -66,7 +67,7 @@ BindMaster/
 ```
 
 **Gitignored (created at runtime):**
-- `BindCraft/`, `BoltzGen/`, `Mosaic/`, `rf_diffusion_all_atom/`, `LigandMPNN/`, `PXDesign/` — cloned by installer
+- `BindCraft/`, `BoltzGen/`, `Mosaic/`, `rf_diffusion_all_atom/`, `LigandMPNN/`, `PXDesign/`, `Proteina-Complexa/` — cloned by installer
 - `runs/` — generated experiment directories
 - `install.log`, `install_aarch.log` — installer output
 - `refold_boltz2/` — intermediate refolding outputs
@@ -82,6 +83,7 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `Mosaic/.venv` | Mosaic | 3.12 | uv | JAX + Boltz-2 hallucination |
 | `bindmaster_rfaa` | RFAA + LigandMPNN | 3.11 | conda | All-atom diffusion (x86_64 only) |
 | `bindmaster_pxdesign` | PXDesign | 3.11 | conda | Protenix binder design + eval |
+| `Proteina-Complexa/.venv` | Proteina-Complexa | 3.12 | uv | Flow matching + test-time compute binder design |
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
 | `binder-eval-af2` | Evaluator | 3.10 | conda | AF2 refolding via ColabDesign |
 
@@ -184,6 +186,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 | **Mosaic** | JAX-based Boltz-2 gradient hallucination (no internal AF2 cross-val) | `escalante-bio/mosaic` |
 | **RFAA** | All-atom diffusion + LigandMPNN for ligand binder design | `baker-laboratory/rf_diffusion_all_atom` |
 | **PXDesign** | Protenix-based de novo binder design (diffusion + MPNN + AF2 eval) | `bytedance/PXDesign` |
+| **Proteina-Complexa** | Flow matching + inference-time optimization (beam search / MCTS) | `NVIDIA-Digital-Bio/proteina-complexa` |
 
 ### Evaluation metrics and ranking
 
@@ -234,6 +237,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
   - F6: Multi-chain binder support in BoltzGen YAML generation
 - **PXDesign** full pipeline integrated: diffusion → MPNN → AF2 complex/monomer eval → summary CSV. Works on both x86_64 and aarch64 (with automated post-install patches).
 - **RFAA** integrated for x86_64; not supported on aarch64 (DGL lacks CUDA aarch64 wheels).
+- **Proteina-Complexa** integrated: NVIDIA flow matching + inference-time optimization. Uses uv venv (separate from Mosaic). Shares AF2 weights with BindCraft. Supports single-pass, best-of-n, beam-search, and MCTS search algorithms.
 
 ### Known issues
 
@@ -245,6 +249,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - **BoltzGen pass rate is low:** In CALCA target testing, only 1/50 BoltzGen designs passed the `ipsae_min > 0.61` threshold. Sequences designed for Boltz-2 often don't cross-validate well.
 - **aarch64 BindCraft:** May fail because jaxlib CUDA conda packages are not available for aarch64.
 - **aarch64 Mosaic:** May fail because `torchtext` has no Linux aarch64 wheel.
+- **aarch64 Proteina-Complexa:** May need patches — PyTorch Geometric (PyG) and torchtext may lack aarch64 wheels. Core deps (PyTorch 2.7, JAX 0.4.29) are fine. Same approach as Mosaic: patch pyproject.toml to exclude problematic packages with `platform_machine != 'aarch64'` markers.
 - **AF2 smoke test:** Fails if `BindCraft/params/` is missing `.npz` weight files (interrupted download).
 
 ---
@@ -273,6 +278,7 @@ bindmaster install                          # interactive tool selection
 bindmaster install --tool all               # install everything
 bindmaster install --tool mosaic            # install one tool
 bindmaster install --tool all --yes --skip-examples  # non-interactive (CI)
+bindmaster install --tool proteina-complexa # install Proteina-Complexa
 bindmaster install --uninstall --tool all   # remove envs + shortcuts (preserves runs/)
 bindmaster install --standalone --tool all    # force local Miniforge install
 bindmaster install --system-conda --tool all  # use existing system conda

@@ -55,6 +55,8 @@ def run(args: argparse.Namespace) -> None:
         extract_cmd += ["--mosaic", args.mosaic]
     if args.pxdesign:
         extract_cmd += ["--pxdesign", args.pxdesign]
+    if args.proteina_complexa:
+        extract_cmd += ["--proteina-complexa", args.proteina_complexa]
     extract_cmd += ["--output", str(sequences_fasta)]
     if getattr(args, "all_mosaic_designs", False):
         extract_cmd += ["--all-mosaic-designs"]
@@ -180,6 +182,12 @@ def add_parser(subparsers) -> None:
     p.add_argument("--boltzgen", metavar="DIR", help="BoltzGen output directory")
     p.add_argument("--mosaic", metavar="DIR", help="Mosaic output directory")
     p.add_argument("--pxdesign", metavar="DIR", help="PXDesign output directory (containing summary.csv)")
+    p.add_argument(
+        "--proteina-complexa",
+        metavar="DIR",
+        dest="proteina_complexa",
+        help="Proteina-Complexa output directory (containing sequences.csv)",
+    )
     # Refolding targets
     p.add_argument("--target-seq", required=True, metavar="SEQ", help="Target protein sequence (for Boltz2 refolding)")
     p.add_argument("--target-pdb", required=True, metavar="PDB", help="Target PDB path (for AF2 refolding)")
