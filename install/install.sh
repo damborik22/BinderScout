@@ -3,7 +3,7 @@
 # Installs BindCraft, BoltzGen, and/or Mosaic protein design tools.
 #
 # Usage:
-#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|rfaa|pxdesign|all] [--cuda VERSION] [--skip-examples] [--yes]
+#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|rfaa|pxdesign|proteina-complexa|all] [--cuda VERSION] [--skip-examples] [--yes]
 #   bindmaster install [same options]
 #
 # With no --tool flag, an interactive menu lets you choose which tools to install.
@@ -32,6 +32,9 @@ LIGANDMPNN_DIR="${BINDMASTER_DIR}/LigandMPNN"
 PXDESIGN_REPO="https://github.com/bytedance/PXDesign.git"
 PXDESIGN_COMMIT="HEAD"
 PXDESIGN_DIR="${BINDMASTER_DIR}/PXDesign"
+PROTEINA_COMPLEXA_REPO="https://github.com/NVIDIA-Digital-Bio/proteina-complexa.git"
+PROTEINA_COMPLEXA_COMMIT="HEAD"
+PROTEINA_COMPLEXA_DIR="${BINDMASTER_DIR}/Proteina-Complexa"
 
 CONDA_CMD=""          # set by detect_conda: full path to mamba (preferred) or conda
 ARCH="$(uname -m)"   # x86_64 or aarch64 (e.g. DGX Spark / Grace-Hopper)
@@ -59,6 +62,7 @@ DO_MOSAIC=false
 DO_EVALUATOR=false
 DO_RFAA=false
 DO_PXDESIGN=false
+DO_PROTEINA_COMPLEXA=false
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -67,7 +71,7 @@ while [[ $# -gt 0 ]]; do
             TOOL_SPECIFIED=true
             case "${2,,}" in
                 all)
-                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_RFAA=true; DO_PXDESIGN=true ;;
+                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_RFAA=true; DO_PXDESIGN=true; DO_PROTEINA_COMPLEXA=true ;;
                 bindcraft)
                     DO_BINDCRAFT=true ;;
                 boltzgen)
@@ -80,8 +84,10 @@ while [[ $# -gt 0 ]]; do
                     DO_RFAA=true ;;
                 pxdesign)
                     DO_PXDESIGN=true ;;
+                proteina-complexa|proteina_complexa|complexa)
+                    DO_PROTEINA_COMPLEXA=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfaa, pxdesign${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfaa, pxdesign, proteina-complexa${RESET}"
                     exit 1
                     ;;
             esac
@@ -113,7 +119,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator] [--cuda VERSION] [--skip-examples] [--yes]
+Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator|rfaa|pxdesign|proteina-complexa] [--cuda VERSION] [--skip-examples] [--yes]
        $0 --uninstall --tool <tool|all> [--yes]
 
   --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
@@ -467,19 +473,25 @@ is_pxdesign_installed() {
     [[ -d "${PXDESIGN_DIR}" ]] && env_exists bindmaster_pxdesign
 }
 
+is_proteina_complexa_installed() {
+    [[ -d "${PROTEINA_COMPLEXA_DIR}" ]] && [[ -d "${PROTEINA_COMPLEXA_DIR}/.venv" ]]
+}
+
 # print_tool_status
 # Shows installed/not-installed for each tool.
 print_tool_status() {
     echo ""
     echo -e "${BOLD}=== Installed Tools ===${RESET}"
     local _status _icon
-    for _tool in BindCraft BoltzGen Mosaic Evaluator RFAA PXDesign; do
-        if "is_${_tool,,}_installed" 2>/dev/null; then
+    for _tool in BindCraft BoltzGen Mosaic Evaluator RFAA PXDesign Proteina_Complexa; do
+        local _fn="is_${_tool,,}_installed"
+        if "${_fn}" 2>/dev/null; then
             _icon="${GREEN}✓${RESET}"; _status="installed"
         else
             _icon="${RED}✗${RESET}"; _status="not installed"
         fi
-        printf "  %b  %-12s  %s\n" "${_icon}" "${_tool}" "${_status}"
+        local _display="${_tool//_/-}"
+        printf "  %b  %-20s  %s\n" "${_icon}" "${_display}" "${_status}"
     done
     echo ""
 }
@@ -496,8 +508,9 @@ select_tools_interactive() {
     local sel_ev=true
     local sel_rfaa=false
     local sel_pxd=false
+    local sel_pc=false
 
-    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "RFAA" "PXDesign")
+    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "RFAA" "PXDesign" "Proteina-Complexa")
     local descs=(
         "Binder design via AlphaFold2 (conda, Python 3.10)"
         "Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)"
@@ -505,17 +518,19 @@ select_tools_interactive() {
         "Evaluate binders: refold with Boltz-2 + AF2, ranked report (requires Mosaic)"
         "All-atom diffusion + LigandMPNN for ligand binder design (conda)"
         "Protenix-based de novo binder design (conda)"
+        "NVIDIA flow matching + test-time compute binder design (uv venv)"
     )
 
     # Check current install state once (avoid repeated conda calls in the loop)
-    local inst_bc inst_bg inst_mo inst_ev inst_rfaa inst_pxd
+    local inst_bc inst_bg inst_mo inst_ev inst_rfaa inst_pxd inst_pc
     is_bindcraft_installed && inst_bc="${GREEN}installed${RESET}" || inst_bc="${YELLOW}not installed${RESET}"
     is_boltzgen_installed  && inst_bg="${GREEN}installed${RESET}" || inst_bg="${YELLOW}not installed${RESET}"
     is_mosaic_installed    && inst_mo="${GREEN}installed${RESET}" || inst_mo="${YELLOW}not installed${RESET}"
     is_evaluator_installed && inst_ev="${GREEN}installed${RESET}" || inst_ev="${YELLOW}not installed${RESET}"
     is_rfaa_installed      && inst_rfaa="${GREEN}installed${RESET}" || inst_rfaa="${YELLOW}not installed${RESET}"
     is_pxdesign_installed  && inst_pxd="${GREEN}installed${RESET}" || inst_pxd="${YELLOW}not installed${RESET}"
-    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev" "$inst_rfaa" "$inst_pxd")
+    is_proteina_complexa_installed && inst_pc="${GREEN}installed${RESET}" || inst_pc="${YELLOW}not installed${RESET}"
+    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev" "$inst_rfaa" "$inst_pxd" "$inst_pc")
 
     # Helper: print current state
     _print_menu() {
@@ -523,15 +538,15 @@ select_tools_interactive() {
         echo -e "${BOLD}${CYAN}  Select tools to install${RESET}"
         echo -e "  Type a number to toggle selection, then press Enter when done."
         echo ""
-        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_rfaa" "$sel_pxd")
-        for i in 0 1 2 3 4 5; do
+        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_rfaa" "$sel_pxd" "$sel_pc")
+        for i in 0 1 2 3 4 5 6; do
             local box
             if [[ "${states[$i]}" == true ]]; then
                 box="${GREEN}[x]${RESET}"
             else
                 box="${RED}[ ]${RESET}"
             fi
-            printf "    %d)  %b  ${BOLD}%-12s${RESET}  %-35b  %s\n" \
+            printf "    %d)  %b  ${BOLD}%-20s${RESET}  %-35b  %s\n" \
                 $((i+1)) "$box" "${tools[$i]}" "${inst_states[$i]}" "${descs[$i]}"
         done
         echo ""
@@ -550,17 +565,18 @@ select_tools_interactive() {
             4) [[ "$sel_ev" == true ]] && sel_ev=false || sel_ev=true ;;
             5) [[ "$sel_rfaa" == true ]] && sel_rfaa=false || sel_rfaa=true ;;
             6) [[ "$sel_pxd" == true ]] && sel_pxd=false || sel_pxd=true ;;
-            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true;  sel_rfaa=true;  sel_pxd=true  ;;
-            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false; sel_rfaa=false; sel_pxd=false ;;
+            7) [[ "$sel_pc" == true ]] && sel_pc=false || sel_pc=true ;;
+            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true;  sel_rfaa=true;  sel_pxd=true;  sel_pc=true  ;;
+            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false; sel_rfaa=false; sel_pxd=false; sel_pc=false ;;
             "")
                 # Confirm: at least one must be selected
-                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false && "$sel_rfaa" == false && "$sel_pxd" == false ]]; then
+                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false && "$sel_rfaa" == false && "$sel_pxd" == false && "$sel_pc" == false ]]; then
                     echo -e "  ${RED}No tools selected. Select at least one.${RESET}"
                     continue
                 fi
                 break
                 ;;
-            *) echo -e "  ${RED}Invalid input. Enter 1–6, a, n, or press Enter.${RESET}" ;;
+            *) echo -e "  ${RED}Invalid input. Enter 1–7, a, n, or press Enter.${RESET}" ;;
         esac
     done
 
@@ -570,6 +586,7 @@ select_tools_interactive() {
     DO_EVALUATOR="$sel_ev"
     DO_RFAA="$sel_rfaa"
     DO_PXDESIGN="$sel_pxd"
+    DO_PROTEINA_COMPLEXA="$sel_pc"
 
     echo ""
     echo -e "  ${BOLD}Installing:${RESET}"
@@ -579,6 +596,7 @@ select_tools_interactive() {
     [[ "$DO_EVALUATOR" == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
     [[ "$DO_RFAA"      == true ]] && echo -e "    ${GREEN}✓${RESET} RFAA"
     [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
+    [[ "$DO_PROTEINA_COMPLEXA" == true ]] && echo -e "    ${GREEN}✓${RESET} Proteina-Complexa"
     echo ""
 
     confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
@@ -1460,6 +1478,272 @@ PXDEOF
     print_ok "PXDesign installation complete"
 }
 
+# ─── Proteina-Complexa ────────────────────────────────────────────────────────
+
+# Reuse weights already downloaded by other BindMaster tools (symlinks).
+_link_complexa_shared_weights() {
+    local cm="${PROTEINA_COMPLEXA_DIR}/community_models"
+
+    # AF2 weights from BindCraft
+    if [[ -d "${BINDCRAFT_DIR}/params" ]] && [[ ! -e "${cm}/ckpts/AF2" ]]; then
+        mkdir -p "${cm}/ckpts"
+        ln -sfn "${BINDCRAFT_DIR}/params" "${cm}/ckpts/AF2"
+        print_ok "AF2 weights → BindCraft/params (symlink)"
+    elif [[ -d "${BINDMASTER_DIR}/bindcraft-tools/af2_params" ]] && [[ ! -e "${cm}/ckpts/AF2" ]]; then
+        mkdir -p "${cm}/ckpts"
+        ln -sfn "${BINDMASTER_DIR}/bindcraft-tools/af2_params" "${cm}/ckpts/AF2"
+        print_ok "AF2 weights → bindcraft-tools/af2_params (symlink)"
+    fi
+
+    # ProteinMPNN ca_model_weights + vanilla_model_weights from PXDesign
+    if [[ -d "${PXDESIGN_DIR}/tool_weights/mpnn/ca_model_weights" ]] && [[ ! -e "${cm}/ProteinMPNN/ca_model_weights" ]]; then
+        ln -sfn "${PXDESIGN_DIR}/tool_weights/mpnn/ca_model_weights" "${cm}/ProteinMPNN/ca_model_weights"
+        ln -sfn "${PXDESIGN_DIR}/tool_weights/mpnn/vanilla_model_weights" "${cm}/ProteinMPNN/vanilla_model_weights"
+        print_ok "ProteinMPNN weights → PXDesign/tool_weights/mpnn (symlink)"
+    fi
+
+    # LigandMPNN model_params from BindMaster's LigandMPNN install
+    local lmpnn_src="${BINDMASTER_DIR}/LigandMPNN/model_params"
+    if [[ -d "${lmpnn_src}" ]] && [[ ! -e "${cm}/LigandMPNN/model_params" ]]; then
+        ln -sfn "${lmpnn_src}" "${cm}/LigandMPNN/model_params"
+        print_ok "LigandMPNN weights → LigandMPNN/model_params (symlink)"
+    fi
+}
+
+# Install foldseek and mmseqs2 static binaries into Complexa's venv.
+_install_complexa_tools() {
+    local venv_bin="${PROTEINA_COMPLEXA_DIR}/.venv/bin"
+
+    # Foldseek
+    if [[ ! -x "${venv_bin}/foldseek" ]]; then
+        print_step "Installing foldseek"
+        local tmp_dir
+        tmp_dir="$(mktemp -d)"
+        if curl -fsSL "https://mmseqs.com/foldseek/foldseek-linux-avx2.tar.gz" \
+                | tar xz -C "${tmp_dir}" 2>/dev/null; then
+            cp "${tmp_dir}/foldseek/bin/foldseek" "${venv_bin}/foldseek"
+            chmod +x "${venv_bin}/foldseek"
+            print_ok "foldseek installed → ${venv_bin}/foldseek"
+        else
+            print_warn "foldseek download failed — install manually"
+        fi
+        rm -rf "${tmp_dir}"
+    else
+        print_ok "foldseek already installed"
+    fi
+
+    # MMseqs2
+    if [[ ! -x "${venv_bin}/mmseqs" ]]; then
+        print_step "Installing mmseqs2"
+        local tmp_dir
+        tmp_dir="$(mktemp -d)"
+        if curl -fsSL "https://mmseqs.com/latest/mmseqs-linux-avx2.tar.gz" \
+                | tar xz -C "${tmp_dir}" 2>/dev/null; then
+            cp "${tmp_dir}/mmseqs/bin/mmseqs" "${venv_bin}/mmseqs"
+            chmod +x "${venv_bin}/mmseqs"
+            print_ok "mmseqs installed → ${venv_bin}/mmseqs"
+        else
+            print_warn "mmseqs download failed — install manually"
+        fi
+        rm -rf "${tmp_dir}"
+    else
+        print_ok "mmseqs already installed"
+    fi
+}
+
+# Write a complete .env file with correct local paths.
+_write_complexa_env() {
+    print_step "Configuring Proteina-Complexa .env"
+    local env_file="${PROTEINA_COMPLEXA_DIR}/.env"
+    local af2_dir=""
+
+    if [[ -d "${BINDCRAFT_DIR}/params" ]]; then
+        af2_dir="${BINDCRAFT_DIR}/params"
+    elif [[ -d "${BINDMASTER_DIR}/bindcraft-tools/af2_params" ]]; then
+        af2_dir="${BINDMASTER_DIR}/bindcraft-tools/af2_params"
+    fi
+
+    cat > "${env_file}" <<ENVEOF
+# BindMaster-generated .env for Proteina-Complexa
+LOCAL_CODE_PATH=${PROTEINA_COMPLEXA_DIR}
+LOCAL_DATA_PATH=${PROTEINA_COMPLEXA_DIR}/data
+LOCAL_CACHE_DIR=\${LOCAL_CODE_PATH}/.cache
+LOCAL_CHECKPOINT_PATH=${PROTEINA_COMPLEXA_DIR}/ckpts
+LOGURU_LEVEL=INFO
+USE_V2_COMPLEXA_ARCH=False
+COMMUNITY_MODELS_PATH=\${LOCAL_CODE_PATH}/community_models
+ESM_DIR=\${COMMUNITY_MODELS_PATH}/ckpts/ESM2
+AF2_DIR=${af2_dir:-\${COMMUNITY_MODELS_PATH}/ckpts/AF2}
+RF3_DIR=\${COMMUNITY_MODELS_PATH}/ckpts/RF3
+RF3_CKPT_PATH=\${RF3_DIR}/rf3_foundry_01_24_latest_remapped.ckpt
+UV_VENV=\${LOCAL_CODE_PATH}/.venv
+FOLDSEEK_EXEC=\${UV_VENV}/bin/foldseek
+RF3_EXEC_PATH=\${UV_VENV}/bin/rf3
+SC_EXEC=\${LOCAL_CODE_PATH}/env/docker/internal/sc
+MMSEQS_EXEC=\${UV_VENV}/bin/mmseqs
+DSSP_EXEC=\${LOCAL_CODE_PATH}/env/docker/internal/dssp
+TMOL_PATH=\${UV_VENV}/lib/python3.12/site-packages/tmol
+DATA_PATH=\${LOCAL_DATA_PATH}
+CKPT_PATH=\${LOCAL_CHECKPOINT_PATH}
+WANDB_API_KEY=
+WANDB_ENTITY=
+HF_TOKEN=
+ENVEOF
+    mkdir -p "${PROTEINA_COMPLEXA_DIR}/data"
+    print_ok "Wrote .env with local paths"
+    if [[ -n "${af2_dir}" ]]; then
+        print_ok "AF2_DIR=${af2_dir}"
+    else
+        print_warn "AF2 weights not found — install BindCraft first, or set AF2_DIR in .env"
+    fi
+}
+
+install_proteina_complexa() {
+    print_step "Installing Proteina-Complexa"
+
+    # Clone
+    print_step "Cloning Proteina-Complexa repository"
+    if [[ -d "${PROTEINA_COMPLEXA_DIR}" ]]; then
+        print_warn "Directory ${PROTEINA_COMPLEXA_DIR} already exists."
+        if confirm "Remove and reclone?"; then
+            rm -rf "${PROTEINA_COMPLEXA_DIR}" || { print_fail "Failed to remove ${PROTEINA_COMPLEXA_DIR}"; return 1; }
+        else
+            print_warn "Skipping reclone; using existing directory."
+        fi
+    fi
+    if [[ ! -d "${PROTEINA_COMPLEXA_DIR}" ]]; then
+        run_logged --retries 3 "Cloning Proteina-Complexa" \
+            git clone --depth 50 "${PROTEINA_COMPLEXA_REPO}" "${PROTEINA_COMPLEXA_DIR}" \
+            || { print_fail "Failed to clone Proteina-Complexa"; return 1; }
+        if [[ "${PROTEINA_COMPLEXA_COMMIT}" != "HEAD" ]]; then
+            git -C "${PROTEINA_COMPLEXA_DIR}" checkout "${PROTEINA_COMPLEXA_COMMIT}" --quiet \
+                || print_warn "Could not pin Proteina-Complexa to ${PROTEINA_COMPLEXA_COMMIT} — using latest"
+        fi
+    fi
+
+    # Ensure uv is available (same logic as Mosaic)
+    print_step "Checking for uv package manager"
+    if ! command -v uv &>/dev/null; then
+        print_warn "uv not found — installing via official installer"
+        curl -LsSf https://astral.sh/uv/install.sh | sh \
+            || { print_fail "Failed to install uv"; return 1; }
+        export PATH="${HOME}/.local/bin:${PATH}"
+        if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
+            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
+            print_ok "Added ~/.local/bin to PATH in ~/.bashrc"
+        fi
+    fi
+    if ! command -v uv &>/dev/null; then
+        print_fail "uv still not found after install; check PATH"
+        return 1
+    fi
+    print_ok "uv is available: $(command -v uv)"
+
+    # Build uv venv using upstream build script
+    print_step "Building Proteina-Complexa uv environment"
+
+    # Ensure a C compiler is available (cpdb-protein needs one).
+    # Prefer system gcc; fall back to conda's cross-compiler with CC/CXX.
+    if ! command -v x86_64-linux-gnu-gcc &>/dev/null && ! command -v gcc &>/dev/null; then
+        local _conda_gcc
+        _conda_gcc="$(command -v x86_64-conda-linux-gnu-gcc 2>/dev/null || true)"
+        local _conda_gxx
+        _conda_gxx="$(command -v x86_64-conda-linux-gnu-g++ 2>/dev/null || true)"
+        if [[ -n "${_conda_gcc}" ]]; then
+            export CC="${_conda_gcc}"
+            export CXX="${_conda_gxx:-${_conda_gcc}}"
+            print_ok "Using conda C compiler: ${CC}"
+        else
+            print_warn "No C compiler found — cpdb-protein may fail to build."
+            print_warn "Install gcc: sudo apt-get install build-essential  OR  conda install -c conda-forge gcc_linux-64"
+        fi
+    fi
+
+    # Ensure uv has a managed Python with C headers (system python3 often
+    # lacks python3-dev).  UV_PYTHON_PREFERENCE=only-managed makes uv pick
+    # its own standalone build that bundles Python.h.
+    if ! /usr/bin/test -f /usr/include/python3.12/Python.h 2>/dev/null; then
+        "${HOME}/.local/bin/uv" python install 3.12 2>/dev/null || true
+        export UV_PYTHON_PREFERENCE="only-managed"
+        print_ok "Using uv-managed Python 3.12 (system python3-dev not found)"
+    fi
+
+    if [[ -f "${PROTEINA_COMPLEXA_DIR}/env/build_uv_env.sh" ]]; then
+        run_logged "Building uv venv (env/build_uv_env.sh)" \
+            bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && bash env/build_uv_env.sh" \
+            || { print_fail "uv env build failed for Proteina-Complexa"; return 1; }
+    else
+        # Fallback: create venv manually if build script not present
+        print_warn "No env/build_uv_env.sh found — creating venv with uv sync"
+        run_logged "Setting up Proteina-Complexa venv (uv sync)" \
+            bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && uv sync" \
+            || { print_fail "uv sync failed for Proteina-Complexa"; return 1; }
+    fi
+
+    # Initialize and download checkpoints
+    print_step "Initializing Proteina-Complexa"
+    if [[ -x "${PROTEINA_COMPLEXA_DIR}/.venv/bin/complexa" ]]; then
+        # Generate .env file (must run from project root where .env_example lives)
+        run_logged "Running complexa init" \
+            bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && .venv/bin/complexa init" \
+            || print_warn "complexa init failed — .env may need manual setup"
+
+        # Download ALL models (Complexa + community models)
+        print_step "Downloading Proteina-Complexa checkpoints & community models"
+        run_logged --retries 2 "Downloading all models (complexa download --everything)" \
+            bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && .venv/bin/complexa download --everything" \
+            || print_warn "Model download failed — download manually with: complexa download --everything"
+    else
+        print_warn "complexa CLI not found in .venv — skipping init/download"
+    fi
+
+    # Reuse existing weights from other BindMaster tools via symlinks
+    _link_complexa_shared_weights
+
+    # Install foldseek & mmseqs2 (static binaries, no root needed)
+    _install_complexa_tools
+
+    # Configure .env with correct local paths
+    _write_complexa_env
+
+    # Smoke test
+    smoke_test "Proteina-Complexa import check" \
+        "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" -c "import proteinfoundation; print('OK')" \
+        || return 1
+
+    # Shortcut
+    print_step "Installing proteina-complexa shortcut"
+    _write_proteina_complexa_shortcut
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/complexa"
+
+    print_ok "Proteina-Complexa installation complete"
+}
+
+_write_proteina_complexa_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# Proteina-Complexa shortcut — activates the uv virtual environment"
+        echo "# and opens an interactive shell in the Proteina-Complexa directory."
+        echo ""
+        echo "PROTEINA_COMPLEXA_DIR=\"${PROTEINA_COMPLEXA_DIR}\""
+    } > "${SHORTCUTS_DIR}/complexa"
+    cat >> "${SHORTCUTS_DIR}/complexa" << 'EOF'
+
+source "${PROTEINA_COMPLEXA_DIR}/.venv/bin/activate"
+cd "${PROTEINA_COMPLEXA_DIR}"
+
+echo "Proteina-Complexa environment activated."
+echo "Working directory: ${PROTEINA_COMPLEXA_DIR}"
+echo "To run binder design:"
+echo "  complexa design configs/search_binder_local_pipeline.yaml ++run_name=test"
+echo ""
+
+exec bash
+EOF
+    chmod +x "${SHORTCUTS_DIR}/complexa"
+}
+
 # ─── Uninstall ─────────────────────────────────────────────────────────────────
 
 uninstall_tool() {
@@ -1530,6 +1814,16 @@ uninstall_tool() {
             [[ -d "${PXDESIGN_DIR}" ]] && { rm -rf "${PXDESIGN_DIR}"; print_ok "Removed ${PXDESIGN_DIR}"; }
             print_ok "PXDesign uninstalled"
             ;;
+        proteina-complexa|proteina_complexa|complexa)
+            print_step "Uninstalling Proteina-Complexa"
+            if [[ -d "${PROTEINA_COMPLEXA_DIR}/.venv" ]]; then
+                rm -rf "${PROTEINA_COMPLEXA_DIR}/.venv"
+                print_ok "Removed Proteina-Complexa .venv"
+            fi
+            rm -f "${SHORTCUTS_DIR}/complexa"
+            [[ -d "${PROTEINA_COMPLEXA_DIR}" ]] && { rm -rf "${PROTEINA_COMPLEXA_DIR}"; print_ok "Removed ${PROTEINA_COMPLEXA_DIR}"; }
+            print_ok "Proteina-Complexa uninstalled"
+            ;;
         *)
             print_fail "Unknown tool: ${tool}"
             return 1
@@ -1558,6 +1852,7 @@ main() {
         print_warn "  BindCraft: may fail — jaxlib CUDA conda packages not available for aarch64."
         print_warn "  BoltzGen:  PyTorch will be installed from PyPI (no +cuXXX suffix)."
         print_warn "  Mosaic:    may fail — torchtext has no Linux aarch64 wheel."
+        print_warn "  Proteina-Complexa: may need patches — some deps (PyG, torchtext) may lack aarch64 wheels."
     fi
 
     print_tool_status
@@ -1586,6 +1881,7 @@ main() {
         [[ "${DO_EVALUATOR}" == true ]] && { uninstall_tool evaluator  || failed_uninstalls+=("Evaluator"); }
         [[ "${DO_RFAA}"      == true ]] && { uninstall_tool rfaa      || failed_uninstalls+=("RFAA"); }
         [[ "${DO_PXDESIGN}"  == true ]] && { uninstall_tool pxdesign  || failed_uninstalls+=("PXDesign"); }
+        [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { uninstall_tool proteina-complexa || failed_uninstalls+=("Proteina-Complexa"); }
 
         # Offer to remove local Miniforge when all tools are uninstalled
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
@@ -1619,6 +1915,7 @@ main() {
     [[ "${DO_EVALUATOR}" == true ]] && (( total++ ))
     [[ "${DO_RFAA}"      == true ]] && (( total++ ))
     [[ "${DO_PXDESIGN}"  == true ]] && (( total++ ))
+    [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
@@ -1629,6 +1926,7 @@ main() {
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
     [[ "${DO_RFAA}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFAA${RESET}";      install_rfaa      || failed_tools+=("RFAA"); }
     [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
+    [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"
@@ -1655,6 +1953,7 @@ main() {
     [[ "${DO_EVALUATOR}" == true ]] && echo -e "  ${GREEN}evaluate${RESET}   — launch evaluation wizard"
     [[ "${DO_RFAA}"      == true ]] && echo -e "  ${GREEN}rfaa${RESET}       — open RFAA shell"
     [[ "${DO_PXDESIGN}"  == true ]] && echo -e "  ${GREEN}pxdesign${RESET}   — open PXDesign shell"
+    [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && echo -e "  ${GREEN}complexa${RESET}   — open Proteina-Complexa shell"
     # Add shortcuts dir to PATH in .bashrc (idempotent)
     local path_line="export PATH=\"${SHORTCUTS_DIR}:\$PATH\""
     if ! grep -qF "${SHORTCUTS_DIR}" "${HOME}/.bashrc" 2>/dev/null; then

@@ -5,6 +5,7 @@ Mosaic/
 rf_diffusion_all_atom/
 LigandMPNN/
 PXDesign/
+Proteina-Complexa/
 
 # Local Miniforge3 installation (standalone mode)
 conda/
