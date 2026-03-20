@@ -1237,7 +1237,7 @@ install_pxdesign() {
     print_step "Creating bindmaster_pxdesign conda environment"
     run_logged "Creating bindmaster_pxdesign env" \
         "${CONDA_CMD}" create -n bindmaster_pxdesign -y python=3.11 \
-            "pytorch>=2.2" "pytorch-cuda=12.4" gcc_linux-64 gxx_linux-64 "cuda-nvcc=12.4" \
+            "pytorch>=2.2" "pytorch-cuda=12.4" "gcc_linux-64<14" "gxx_linux-64<14" "cuda-nvcc=12.4" "cuda-cudart-dev=12.4" \
             -c pytorch -c nvidia -c conda-forge \
         || { print_fail "Failed to create bindmaster_pxdesign env"; return 1; }
 
@@ -1330,6 +1330,109 @@ for fn in ['tools/af2/main_af2_complex.py', 'tools/af2/main_af2_monomer.py']:
     t = t.replace('json.dump(results, f)', 'json.dump(results, f, cls=_NumpyEncoder)')
     fp.write_text(t); print(f'Patched: {fn}')
 PATCHEOF
+
+    # Patch: MPNN subprocess writes error JSON on failure (prevents JSONDecodeError)
+    run_logged "Patching pxdbench MPNN error handling" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign python << 'MPNNEOF'
+import importlib.util, pathlib
+spec = importlib.util.find_spec('pxdbench')
+if not spec or not spec.submodule_search_locations:
+    print('pxdbench not found — skipping'); exit(0)
+base = pathlib.Path(spec.submodule_search_locations[0])
+# Patch main_mpnn.py: write error JSON on exception
+mpnn = base / 'tools/protmpnn/main_mpnn.py'
+if mpnn.exists():
+    t = mpnn.read_text()
+    old = '        traceback.print_exc()\n        exit(1)'
+    new = ('        traceback.print_exc()\n'
+           '        with open(args.output, "w") as f:\n'
+           '            json.dump({"error": True, "message": str(e)}, f)\n'
+           '        exit(1)')
+    if old in t and 'error' not in t.split('traceback.print_exc')[1][:100]:
+        t = t.replace(old, new); mpnn.write_text(t); print('Patched main_mpnn.py')
+    else: print('main_mpnn.py already patched or different format')
+# Patch base.py: handle JSONDecodeError
+bp = base / 'tools/base.py'
+if bp.exists():
+    t = bp.read_text()
+    if 'JSONDecodeError' not in t:
+        old_base = '                return json.load(f)\n\n        except Exception as e:'
+        new_base = ('                result = json.load(f)\n'
+                    '            if isinstance(result, dict) and result.get("error"):\n'
+                    '                raise RuntimeError(f"Subprocess failed: {result.get(\'message\', \'unknown\')}")\n'
+                    '            return result\n\n'
+                    '        except json.JSONDecodeError:\n'
+                    '            raise RuntimeError(f"Subprocess {self.script_path} produced empty output")\n'
+                    '        except Exception as e:')
+        if old_base in t:
+            t = t.replace(old_base, new_base); bp.write_text(t); print('Patched base.py')
+        else: print('base.py format differs — manual patch may be needed')
+    else: print('base.py already patched')
+MPNNEOF
+
+    # Patch: Make ProtenixFilter import lazy in pxdbench (prevents CUDA JIT in MPNN subprocess)
+    run_logged "Patching pxdbench lazy ProtenixFilter import" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign python << 'LAZYEOF'
+import importlib.util, pathlib
+spec = importlib.util.find_spec('pxdbench')
+if not spec or not spec.submodule_search_locations:
+    print('pxdbench not found — skipping'); exit(0)
+init = pathlib.Path(spec.submodule_search_locations[0]) / 'tools/__init__.py'
+if not init.exists():
+    print('tools/__init__.py not found'); exit(0)
+t = init.read_text()
+if 'try:' in t:
+    print('Already patched'); exit(0)
+new = ('from .registry import register\n\n'
+       'try:\n'
+       '    from .ptx.ptx import ProtenixFilter\n'
+       '    register("public", ProtenixFilter)\n'
+       'except Exception:\n'
+       '    pass\n')
+init.write_text(new)
+print('Patched tools/__init__.py: lazy ProtenixFilter import')
+LAZYEOF
+
+    # Patch: Make protenix LayerNorm CUDA JIT optional (falls back to torch.nn.functional)
+    run_logged "Patching protenix LayerNorm fallback" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign python << 'LNEOF'
+import importlib.util, pathlib
+spec = importlib.util.find_spec('protenix')
+if not spec or not spec.submodule_search_locations:
+    print('protenix not found — skipping'); exit(0)
+ln = pathlib.Path(spec.submodule_search_locations[0]) / 'model/layer_norm/layer_norm.py'
+if not ln.exists():
+    print('layer_norm.py not found'); exit(0)
+t = ln.read_text()
+if 'fastfold_layer_norm_cuda = None' in t:
+    print('Already patched'); exit(0)
+# Replace the try block that hard-fails on CUDA JIT with a soft fallback
+old = 'try:\n    fastfold_layer_norm_cuda = importlib.import_module("fastfold_layer_norm_cuda")\nexcept ImportError:'
+if old not in t:
+    # Alternative: wrap entire JIT block in soft try/except
+    t = t.replace(
+        'fastfold_layer_norm_cuda = importlib.import_module("fastfold_layer_norm_cuda")',
+        'fastfold_layer_norm_cuda = None\ntry:\n    fastfold_layer_norm_cuda = importlib.import_module("fastfold_layer_norm_cuda")\nexcept ImportError:'
+    )
+# Ensure forward() has the torch.nn.functional fallback
+if 'torch.nn.functional.layer_norm' not in t:
+    old_fwd = '    def forward(self, input):\n        return FusedLayerNormAffineFunction.apply('
+    new_fwd = ('    def forward(self, input):\n'
+               '        if fastfold_layer_norm_cuda is None:\n'
+               '            return torch.nn.functional.layer_norm(\n'
+               '                input, self.normalized_shape, self.weight, self.bias, self.eps\n'
+               '            )\n'
+               '        return FusedLayerNormAffineFunction.apply(')
+    t = t.replace(old_fwd, new_fwd)
+ln.write_text(t)
+print('Patched layer_norm.py: CUDA JIT fallback to torch.nn.functional')
+LNEOF
+
+    # Install cusparse headers for CUDA JIT (optional but avoids build warnings)
+    run_logged "Installing libcusparse-dev for CUDA headers" \
+        "${CONDA_CMD}" install -n bindmaster_pxdesign -c "nvidia/label/cuda-${CUDA_VERSION}.0" \
+        libcusparse-dev -y \
+        || print_warn "libcusparse-dev install failed — CUDA JIT will use fallback"
 
     # Download weights if script exists
     if [[ -f "${PXDESIGN_DIR}/download_tool_weights.sh" ]]; then
