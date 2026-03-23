@@ -122,7 +122,7 @@ def run(args: argparse.Namespace) -> None:
     _available = [c for c in _top_cols if c in df.columns]
     top20 = df.head(20)[_available]
     write_csv(top20, output_dir / "top20_candidates.csv")
-    print(f"  top20_candidates.csv — top 20 designs with sequences")
+    print("  top20_candidates.csv — top 20 designs with sequences")
 
     # Step 5: HTML report
     generate_report(
