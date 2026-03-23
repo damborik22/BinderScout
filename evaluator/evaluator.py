@@ -434,9 +434,9 @@ def _parse_bindcraft(run_dir: Path) -> list:
                 if alias in row and "pae_bt_mean" not in row:
                     row["pae_bt_mean"] = row[alias]
                     break
-            # Prefer binder_sequence column if sequence is missing
+            # Prefer binder_sequence or Sequence column if sequence is missing
             if not row.get("sequence"):
-                row["sequence"] = row.get("binder_sequence", "")
+                row["sequence"] = row.get("Sequence", "") or row.get("binder_sequence", "")
         all_rows.extend(rows)
     if all_rows:
         _print_ok(f"BindCraft: {len(all_rows)} designs from {len(csv_files)} CSV file(s)")
