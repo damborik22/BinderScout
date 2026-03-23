@@ -747,7 +747,7 @@ def print_tree(run_dir: Path, tools_enabled: dict, cfg: dict | None = None):
         print("  │   ├── input.yaml")
         print("  │   └── outputs/")
     if tools_enabled.get("evaluator"):
-        print(f"  ├── {CYAN}evaluate/{RESET}")
+        print(f"  ├── {CYAN}comparison/{RESET}")
         print("  │   └── comparison_report/")
     scripts = []
     if tools_enabled.get("mosaic"):
@@ -1740,7 +1740,7 @@ print(f'  -> {{len(rows)}} binder sequences written to {{out_csv}}')
 def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     """Generate run_evaluate.sh — calls Evaluator/evaluate.sh with the right paths."""
     run_dir = cfg["run_dir"]
-    eval_dir = run_dir / "evaluate"
+    eval_dir = run_dir / "comparison"
     target_pdb = cfg["target_pdb"]
     target_seq = cfg.get("target_sequence", "")
 
@@ -1850,7 +1850,7 @@ def generate(cfg: dict, tools_enabled: dict):
     if tools_enabled.get("bindcraft"):
         (run_dir / "bindcraft" / "outputs").mkdir(parents=True, exist_ok=True)
     if tools_enabled.get("evaluator"):
-        (run_dir / "evaluate" / "comparison_report").mkdir(parents=True, exist_ok=True)
+        (run_dir / "comparison" / "comparison_report").mkdir(parents=True, exist_ok=True)
 
     src_struct = Path(cfg["target_pdb_src"]).expanduser().resolve()
     src_ext = src_struct.suffix.lower()
@@ -2682,7 +2682,7 @@ def cmd_status():
         elif "BindCraft" in tools:
             statuses.append("BindCraft: pending")
 
-        report_html = run_dir / "evaluate" / "comparison_report" / "report.html"
+        report_html = run_dir / "comparison" / "comparison_report" / "report.html"
         if report_html.exists():
             statuses.append("Eval: done")
         elif "Evaluator" in tools:

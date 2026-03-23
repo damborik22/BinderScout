@@ -110,6 +110,20 @@ def run(args: argparse.Namespace) -> None:
 
     write_json(summary, output_dir / "summary.json")
 
+    # Step 4b: Top-20 candidates CSV with key metrics + sequence
+    _top_cols = [
+        "binder_id", "source_tool", "sequence", "binder_length",
+        "boltz_pae_ipsae_min", "boltz_pae_iptm", "boltz_pae_bt_ipsae", "boltz_pae_tb_ipsae",
+        "af2_ipsae_min", "af2_pae_iptm",
+        "plddt_binder_mean", "plddt_binder_min", "binder_ptm",
+        "pae_bt_mean", "pae_tb_mean",
+        "agreement_count", "adaptyv_rank",
+    ]
+    _available = [c for c in _top_cols if c in df.columns]
+    top20 = df.head(20)[_available]
+    write_csv(top20, output_dir / "top20_candidates.csv")
+    print(f"  top20_candidates.csv — top 20 designs with sequences")
+
     # Step 5: HTML report
     generate_report(
         df=df,
