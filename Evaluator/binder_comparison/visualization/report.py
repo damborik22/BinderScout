@@ -84,6 +84,9 @@ _HTML_TEMPLATE = """\
   <span style="color:#f57f17">■ Medium</span> &gt;0.61 &nbsp;
   <span style="color:#e65100">■ Low</span> &gt;0.40 &nbsp;
   <span style="color:#c62828">■ Reject</span> ≤0.40
+  <br>
+  <b>agreement_count</b>: number of engines with ipSAE_min &gt; 0.61
+  &nbsp;(0 = none, 1 = Boltz-2 only, 2 = both Boltz-2 and AF2)
 </p>
 {tier_summary}
 
