@@ -894,9 +894,9 @@ runs/<name>/
 |   +-- outputs/
 |       |-- design_outputs/<task>/summary.csv
 |       +-- design_outputs/<task>/passing-*/
-|-- comparison/                (if evaluator enabled)
+|-- evaluate/                  (if evaluator enabled)
 |   |-- sequences.fasta
-|   +-- comparison_report/
+|   +-- evaluate_report/
 |-- run_mosaic.sh
 |-- run_boltzgen.sh
 |-- run_bindcraft.sh
