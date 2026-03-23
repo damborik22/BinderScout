@@ -924,10 +924,10 @@ def main():
     _print_step(f"Ranking by '{args.metric}' (best first)")
     ranked = _rank(all_rows, args.metric)
 
-    # ── Write evaluation outputs ───────────────────────────────────────────────
-    eval_dir = run_dir / "evaluation"
+    # ── Write ranking outputs ─────────────────────────────────────────────────
+    eval_dir = run_dir / "ranking"
     eval_dir.mkdir(parents=True, exist_ok=True)
-    _print_step(f"Writing evaluation outputs → {eval_dir}")
+    _print_step(f"Writing ranking outputs → {eval_dir}")
     _write_summary_csv(eval_dir / "summary.csv", ranked)
     _write_report(eval_dir / "report.txt", ranked, args.metric, args.top)
 
