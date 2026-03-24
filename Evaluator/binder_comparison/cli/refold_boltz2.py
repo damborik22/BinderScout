@@ -29,12 +29,19 @@ def run(args: argparse.Namespace) -> None:
     sequences = [seq for _, seq in entries]
     print(f"[refold-boltz2] Loaded {len(sequences)} sequences from {args.sequences}")
     print(f"[refold-boltz2] Target length: {len(args.target_seq)} aa")
+    if args.target_pdb:
+        print(f"[refold-boltz2] Template mode: target backbone constrained from {args.target_pdb}")
+    else:
+        print("[refold-boltz2] Sequence-only mode: target predicted de novo")
 
     run_boltz2_refold(
         sequences=sequences,
         target_sequence=args.target_seq,
         output_dir=args.output_dir,
         output_csv=args.output,
+        target_pdb=args.target_pdb,
+        num_samples=args.num_samples,
+        recycling_steps=args.recycling_steps,
         scripts_path=args.scripts_path,
         resume=args.resume,
     )
@@ -52,6 +59,14 @@ def add_parser(subparsers) -> None:
     )
     p.add_argument("--target-seq", required=True, metavar="SEQ", help="Target protein sequence (amino acid string)")
     p.add_argument(
+        "--target-pdb",
+        default=None,
+        metavar="PDB",
+        help="Target PDB/CIF for forced template mode. Constrains target backbone "
+        "while binder is predicted de novo. Use for targets that misfold from "
+        "sequence alone (e.g. CALCA). Omit for sequence-only mode (Adaptyv-compatible).",
+    )
+    p.add_argument(
         "--output", "-o", required=True, metavar="CSV", help="Output CSV path for metrics (e.g. boltz2_results.csv)"
     )
     p.add_argument(
@@ -59,6 +74,12 @@ def add_parser(subparsers) -> None:
         default="./refold_boltz2",
         metavar="DIR",
         help="Directory for structure files (default: ./refold_boltz2)",
+    )
+    p.add_argument(
+        "--num-samples", type=int, default=6, metavar="N", help="Number of Boltz-2 samples for metrics (default: 6)"
+    )
+    p.add_argument(
+        "--recycling-steps", type=int, default=3, metavar="N", help="Recycling steps per prediction (default: 3)"
     )
     p.add_argument(
         "--scripts-path", default=None, metavar="DIR", help="Path to scripts/ directory (auto-detected if not set)"

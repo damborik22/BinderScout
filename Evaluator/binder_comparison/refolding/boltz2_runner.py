@@ -32,6 +32,9 @@ def run_boltz2_refold(
     output_dir: str | Path,
     output_csv: str | Path,
     *,
+    target_pdb: str | Path | None = None,
+    num_samples: int = 6,
+    recycling_steps: int = 3,
     scripts_path: str | Path | None = None,
     resume: bool = False,
 ) -> None:
@@ -42,6 +45,11 @@ def run_boltz2_refold(
         target_sequence: Target protein sequence.
         output_dir:      Directory where structure files (PDB/NPY/CSV) are written.
         output_csv:      Path for the output CSV of metrics.
+        target_pdb:      Optional path to target PDB/CIF for forced template mode.
+                         When provided, the target backbone is constrained while the
+                         binder is predicted de novo.
+        num_samples:     Number of Boltz-2 samples for metrics (default: 6).
+        recycling_steps: Number of recycling steps (default: 3).
         scripts_path:    Path to the scripts/ directory containing refold_boltz2.py.
                          Defaults to <repo_root>/scripts/.
         resume:          If True, skip binders already present in existing output CSV.
@@ -58,6 +66,9 @@ def run_boltz2_refold(
         if skip_indices:
             print(f"[boltz2] Resuming — skipping {len(skip_indices)} already-completed binders")
 
+    # Resolve target_pdb to absolute path before chdir changes CWD
+    target_pdb_abs = str(Path(target_pdb).resolve()) if target_pdb else None
+
     # refold_boltz2.refold_batch writes refold_designs.csv relative to CWD.
     # Change to output_dir so the CSV lands there.
     old_cwd = os.getcwd()
@@ -70,6 +81,9 @@ def run_boltz2_refold(
             binder_sequences=sequences,
             target_sequence=target_sequence,
             output_dir="structures",
+            target_pdb=target_pdb_abs,
+            num_samples=num_samples,
+            recycling_steps=recycling_steps,
             skip_indices=skip_indices,
         )
     finally:
