@@ -7,6 +7,7 @@ import sys
 import uuid
 
 import equinox as eqx
+import gemmi
 import jax
 import jax.numpy as jnp
 import mosaic.losses.structure_prediction as sp
@@ -232,19 +233,27 @@ def refold_batch(
     target_sequence: str,
     output_dir: str = OUTPUT_DIR,
     *,
+    target_pdb: str | None = None,
+    num_samples: int = 6,
+    recycling_steps: int = 3,
     checkpoint_path: str | None = None,
     skip_indices: set[int] | None = None,
 ):
     """Refold a batch of binder sequences against a target.
 
     For each binder:
-      - Runs full metrics_loss (all 13 aux terms, recycling_steps=3, num_samples=6)
+      - Runs full metrics_loss (all 13 aux terms)
       - Runs folder.predict for PDB / PAE / pLDDT outputs
       - Appends to refold_designs.txt and refold_designs.csv
 
     Args:
-        skip_indices: Set of 1-based binder indices to skip (already completed).
-                      When resuming, pass indices read from existing CSV.
+        target_pdb:      Optional path to target PDB/CIF. When provided, the target
+                         backbone is constrained via Boltz-2 ``force: true`` template.
+                         Useful for targets that misfold from sequence alone.
+        num_samples:     Number of Boltz-2 samples for metrics (default: 6).
+        recycling_steps: Number of recycling steps (default: 3).
+        skip_indices:    Set of 1-based binder indices to skip (already completed).
+                         When resuming, pass indices read from existing CSV.
     """
     if skip_indices is None:
         skip_indices = set()
@@ -257,6 +266,14 @@ def refold_batch(
     results_ref = _interrupt_state["results"]
     _interrupt_state["checkpoint_path"] = checkpoint_path
 
+    # Load target template if --target-pdb provided (forced template mode)
+    target_template_chain = None
+    if target_pdb:
+        st = gemmi.read_structure(target_pdb)
+        target_template_chain = st[0][0]  # first model, first chain
+        n_res = sum(1 for _ in target_template_chain)
+        print(f"Target template: {target_pdb} ({n_res} residues, force=True)")
+
     folder = Boltz2()
 
     @eqx.filter_jit
@@ -265,6 +282,11 @@ def refold_batch(
 
     print(f"\nRun ID: {run_id}")
     print(f"Target length: {len(target_sequence)} aa")
+    if target_pdb:
+        print("Mode: template-constrained (target backbone forced from PDB)")
+    else:
+        print("Mode: sequence-only (target predicted de novo)")
+    print(f"Samples: {num_samples}, recycling steps: {recycling_steps}")
     print(f"Binders to refold: {len(binder_sequences)}")
     print(f"Output directory: {output_dir}\n")
 
@@ -331,7 +353,12 @@ def refold_batch(
             boltz_features, boltz_writer = folder.target_only_features(
                 chains=[
                     TargetChain(sequence=seq_str, use_msa=False),  # binder: de novo, no MSA
-                    TargetChain(sequence=target_sequence, use_msa=True),  # target: real protein, use MSA
+                    TargetChain(
+                        sequence=target_sequence,
+                        use_msa=True,
+                        template_chain=target_template_chain,
+                        force_template=target_template_chain is not None,
+                    ),
                 ]
             )
 
@@ -353,8 +380,8 @@ def refold_batch(
                     + sp.pTMEnergy()
                 ),
                 features=boltz_features,
-                recycling_steps=3,
-                num_samples=6,
+                recycling_steps=recycling_steps,
+                num_samples=num_samples,
             )
             _, aux = evaluate_loss(metrics_loss, pssm, key=jax.random.key(0))
 
@@ -394,7 +421,7 @@ def refold_batch(
                 PSSM=pssm,
                 features=boltz_features,
                 writer=boltz_writer,
-                recycling_steps=3,
+                recycling_steps=recycling_steps,
                 key=jax.random.key(0),
             )
 
@@ -551,13 +578,44 @@ def refold_batch(
 
 
 def main():
-    print("=== Boltz2 Refolding Tool (Version 5) ===\n")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Boltz2 Refolding Tool (Version 6)")
+    parser.add_argument("--target-seq", metavar="SEQ", help="Target protein sequence (skip interactive prompt)")
+    parser.add_argument("--sequences", metavar="FILE", help="FASTA file of binder sequences (skip interactive prompt)")
+    parser.add_argument(
+        "--target-pdb",
+        metavar="PDB",
+        help="Target PDB/CIF for forced template mode. Constrains target backbone "
+        "while binder is predicted de novo. Use for targets that misfold from sequence.",
+    )
+    parser.add_argument(
+        "--num-samples", type=int, default=6, metavar="N", help="Number of Boltz-2 samples (default: 6)"
+    )
+    parser.add_argument("--recycling-steps", type=int, default=3, metavar="N", help="Recycling steps (default: 3)")
+    parser.add_argument(
+        "--output-dir", default=OUTPUT_DIR, metavar="DIR", help=f"Output directory (default: {OUTPUT_DIR})"
+    )
+    parser.add_argument("--resume", action="store_true", help="Skip binders already present in existing CSV")
+    args = parser.parse_args()
+
+    print("=== Boltz2 Refolding Tool (Version 6) ===\n")
 
     _check_gpu()
     print()
 
-    target_seq = _read_target_sequence()
-    binder_candidates = _read_binder_batch()
+    # Target sequence: from CLI or interactive
+    if args.target_seq:
+        target_seq = _validate_sequence(args.target_seq, "Target")
+    else:
+        target_seq = _read_target_sequence()
+
+    # Binder sequences: from file or interactive
+    if args.sequences:
+        with open(args.sequences) as f:
+            binder_candidates = _parse_batch_input(f.read())
+    else:
+        binder_candidates = _read_binder_batch()
 
     if not binder_candidates:
         print("\nNo binder sequences provided — exiting.")
@@ -579,7 +637,14 @@ def main():
         checkpoint_path_fn=lambda: _interrupt_state["checkpoint_path"],
     )
 
-    refold_batch(binder_sequences, target_seq)
+    refold_batch(
+        binder_sequences,
+        target_seq,
+        output_dir=args.output_dir,
+        target_pdb=args.target_pdb,
+        num_samples=args.num_samples,
+        recycling_steps=args.recycling_steps,
+    )
 
 
 if __name__ == "__main__":
