@@ -30,6 +30,8 @@ def _detect_tools(repo: Path) -> dict[str, bool]:
         "BindCraft": (repo / "BindCraft" / "bindcraft_environment.yml").exists(),
         "BoltzGen": (repo / "BoltzGen" / "boltzgen" / "__init__.py").exists(),
         "Mosaic": (repo / "Mosaic" / ".venv" / "bin" / "python").exists(),
+        "RFAA": (repo / "rf_diffusion_all_atom" / "run_inference.py").exists(),
+        "PXDesign": (repo / "PXDesign" / "pxdesign").is_dir(),
     }
 
 
@@ -68,7 +70,7 @@ def _run_status_line(run_dir: Path) -> str:
     parts = []
     if (run_dir / "evaluation").is_dir():
         parts.append(f"{GREEN}evaluated{RESET}")
-    for tool in ("mosaic", "boltzgen", "bindcraft"):
+    for tool in ("mosaic", "boltzgen", "bindcraft", "rfaa", "pxdesign"):
         tool_dir = run_dir / tool
         if tool_dir.is_dir() and any(tool_dir.iterdir()):
             parts.append(tool)
@@ -330,7 +332,7 @@ def _curses_submenu_status(stdscr, repo: Path) -> None:  # type: ignore[type-arg
         stdscr.addnstr(y, 6, name, w - 20)
         # tool indicators
         info = []
-        for tool in ("mosaic", "boltzgen", "bindcraft"):
+        for tool in ("mosaic", "boltzgen", "bindcraft", "rfaa", "pxdesign"):
             td = run / tool
             if td.is_dir() and any(td.iterdir()):
                 info.append(tool)
@@ -500,7 +502,7 @@ def _simple_submenu_status(repo: Path) -> None:
         evaluated = (r / "evaluation").is_dir()
         marker = f"{GREEN}*{RESET}" if evaluated else " "
         info = []
-        for tool in ("mosaic", "boltzgen", "bindcraft"):
+        for tool in ("mosaic", "boltzgen", "bindcraft", "rfaa", "pxdesign"):
             td = r / tool
             if td.is_dir() and any(td.iterdir()):
                 info.append(tool)
