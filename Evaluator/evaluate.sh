@@ -33,6 +33,12 @@ for _conda_sh in \
     [[ -f "$_conda_sh" ]] && { source "$_conda_sh"; break; }
 done
 
+# aarch64/Blackwell: set env vars for JAX and PyTorch CUDA compilation
+if [[ "$(uname -m)" == "aarch64" ]]; then
+    export JAX_PLATFORMS=cpu
+    export TORCH_CUDA_ARCH_LIST="12.0"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- locate Mosaic venv (written by install.sh) ----------------------------

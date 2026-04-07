@@ -50,10 +50,8 @@ USAGE = f"""{BOLD}BindMaster{RESET} — GPU-accelerated protein binder design to
   evaluate   → Mosaic venv   {REPO}/evaluator/evaluator.py
 
 {BOLD}Clone:{RESET}
-  # x86_64 (default)
   git clone https://github.com/damborik22/BindMaster.git
-  # aarch64 / DGX Spark
-  git clone -b aarch64 https://github.com/damborik22/BindMaster.git
+  # aarch64 (DGX Spark): use install/install_aarch.sh instead of install.sh
 """
 
 
