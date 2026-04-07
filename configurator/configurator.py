@@ -12,6 +12,7 @@ Usage:
 import argparse
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -942,6 +943,11 @@ done
 conda activate BindCraft
 set -u
 
+# aarch64/Blackwell: JAX CUDA backend may not support sm_121
+if [[ "$(uname -m)" == "aarch64" ]]; then
+    export JAX_PLATFORMS=cpu
+fi
+
 cd "$BINDCRAFT_DIR"
 
 echo "=== Running BindCraft for {cfg["name"]} ==="
@@ -985,6 +991,11 @@ done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found — install Miniconda or Miniforge first." >&2; exit 1; }}
 conda activate BoltzGen
 set -u
+
+# aarch64/Blackwell: set CUDA arch for Triton JIT compilation
+if [[ "$(uname -m)" == "aarch64" ]]; then
+    export TORCH_CUDA_ARCH_LIST="12.0"
+fi
 
 echo "=== Running BoltzGen for {cfg["name"]} ==="
 boltzgen run "$CONFIG" \\
@@ -1073,6 +1084,12 @@ OUTPUT_DIR="{run_dir}/rfaa/outputs"
 LMPNN_DIR="{run_dir}/rfaa/ligandmpnn"
 TARGET_PDB="{cfg["target_pdb"]}"
 TARGET_LEN={target_len}
+
+# aarch64: RFAA is not supported (DGL lacks CUDA aarch64 wheels)
+if [[ "$(uname -m)" == "aarch64" ]]; then
+    echo "ERROR: RFAA is not supported on aarch64 (DGL lacks CUDA aarch64 wheels)." >&2
+    exit 1
+fi
 
 mkdir -p "$OUTPUT_DIR" "$LMPNN_DIR"
 
@@ -2171,6 +2188,8 @@ def wizard():
     print(f"  {BOLD}BindCraft{RESET} [{_tag('bindcraft')}]")
     use_bindcraft = ask_yn("  Enable BindCraft?", default=True)
     print(f"  {BOLD}RFAA{RESET}      [{_tag('rfaa')}]")
+    if platform.machine() == "aarch64":
+        print_warn("  RFAA is NOT supported on aarch64 (DGL lacks CUDA aarch64 wheels).")
     use_rfaa = ask_yn("  Enable RFDiffusionAA (ligand binder design)?", default=False)
     print(f"  {BOLD}PXDesign{RESET}  [{_tag('pxdesign_local')}] / [external import]")
     pxdesign_mode, _ = ask_choice(
