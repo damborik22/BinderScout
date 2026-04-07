@@ -15,7 +15,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 |---|---|---|
 | `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, RFAA, PXDesign, Proteina-Complexa) | bash |
 | `bindmaster configure` | Interactive wizard: target → configs → run scripts | system Python |
-| `bindmaster evaluate` | Parse outputs, rank designs, optionally re-fold with Boltz-2 and AF2 | Mosaic uv venv |
+| `bindmaster evaluate` | Parse outputs, rank designs, re-fold with Boltz-2, AF2, and Protenix (planned) | Mosaic uv venv |
 
 ### Installed tools
 
@@ -39,16 +39,20 @@ flowchart LR
     Mosaic["Mosaic\n(JAX + Boltz-2)"]
     BG["BoltzGen\n(Boltz-1)"]
     BC["BindCraft\n(AF2 + MPNN)"]
+    RFAA["RFAA + LigandMPNN\n(all-atom diffusion)"]
     PX["PXDesign\n(Protenix)"]
     PC["Proteina-Complexa\n(flow matching)"]
     Boltz2["Boltz-2\nrefolding"]
     AF2["AF2\nrefolding"]
+    Protenix["Protenix (AF3)\nrefolding (planned)"]
     Report["Report generator\nranked HTML + CSV"]
 
     Input --> Config
-    Config --> Mosaic & BG & BC & PX & PC
-    Mosaic & BG & BC & PX & PC -->|sequences| Boltz2
+    Config --> Mosaic & BG & BC & RFAA & PX & PC
+    Mosaic & BG & BC & RFAA & PX & PC -->|sequences| Boltz2
     Boltz2 --> AF2
+    AF2 -.-> Protenix
+    Protenix -.-> Report
     AF2 --> Report
 ```
 
@@ -179,6 +183,11 @@ runs/<name>/
 
 Parses design outputs from any combination of tools,
 cross-ranks all designs by a configurable metric, and writes a summary.
+
+**Refolding engines:**
+- **Boltz-2** — primary refolding engine (ipSAE scoring, DunbrackLab 2025 formula)
+- **AlphaFold2** — secondary refolding via ColabDesign (cross-validation)
+- **Protenix (AF3)** — planned third engine (standalone scripts in development, see `Evaluator/docs/plans/`)
 
 **Runs inside the Mosaic uv venv** (the only environment that has JAX + Boltz-2).
 Mosaic must be installed before running `evaluate`.
