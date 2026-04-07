@@ -21,7 +21,7 @@ The composite score rewards sequences that **both models independently** agree a
 binders. A sequence that scores well on only one model is ranked lower.
 
 **Primary metric: `ipsae_min`** — min(bt_ipSAE, tb_ipSAE), Dunbrack 2025 formula.
-Range 0–1, higher is better. Pass threshold: > 0.61.
+Range 0-1, higher is better. Pass threshold: > 0.61.
 
 ---
 
@@ -43,33 +43,27 @@ with our goals.
 curves computed on the meta-analysis data show that ipSAE_min from Boltz-1 and AF3 perform
 similarly for distinguishing binders from non-binders. Boltz-2 is a strict Pareto improvement
 over Boltz-1 (better across all benchmarks), and the Boltz-2 authors confirmed that the
-choice between models is unlikely to make a large practical difference — because all of these
-models are trained to detect different poses of the same complex, not to compare different
-complexes, which makes the task inherently hard regardless of the predictor.
+choice between models is unlikely to make a large practical difference.
 
 ---
 
 ## Installation
 
+The Evaluator is bundled inside the BindMaster repository. No separate clone needed.
+
 ### 1. Install Mosaic (Boltz-2 environment)
 
-The Boltz-2 refolding step uses the **Mosaic** environment from the
-[BindMaster-installator](https://github.com/damborik22/BindMaster-installator).
-Install it first if you haven't already:
+The Boltz-2 refolding step uses the **Mosaic** uv virtual environment:
 
 ```bash
-cd /path/to/BindMaster-installator
-bash install.sh --tool mosaic
+cd ~/BindMaster
+bindmaster install --tool mosaic
 ```
 
-This creates a self-contained uv virtual environment inside the Mosaic directory
-with JAX, Boltz-2, and all required dependencies.
-
-### 2. Install the evaluator
+### 2. Install the evaluator environments
 
 ```bash
-git clone https://github.com/damborik22/BindMaster-evaluator.git
-cd BindMaster-evaluator
+cd ~/BindMaster/Evaluator
 bash install.sh
 ```
 
@@ -79,7 +73,7 @@ and creates two additional conda environments:
 | Environment | Used for | Python |
 |-------------|----------|--------|
 | Mosaic venv (existing) | `refold-boltz2` | 3.12 |
-| `binder-eval` | `parse-seqs`, `report` | 3.10 |
+| `binder-eval` | `extract`, `report` | 3.10 |
 | `binder-eval-af2` | `refold-af2` | 3.10 |
 
 > **AF2 weights** (~4 GB) must be downloaded separately and the path set in
@@ -99,24 +93,29 @@ You need two input files:
 ### Run (single command)
 
 ```bash
-bash evaluate.sh \
+bash Evaluator/evaluate.sh \
     --sequences  sequences.fasta \
     --target-seq "MGFQKFSPF..." \
     --target-pdb target.pdb \
     --output     ./results
 ```
 
-This runs all three steps in the correct environments automatically and writes:
+This runs all steps in the correct environments automatically and writes:
 - `results/report/report.html` — interactive ranked report
 - `results/report/metrics.csv` — all metrics, ranked
 - `results/report/summary.json` — per-tool aggregate statistics
 
-### Resume a partial run
-
-If one step completed and you want to skip it on re-run:
+### Via the BindMaster CLI
 
 ```bash
-bash evaluate.sh \
+bindmaster evaluate runs/<name>
+bindmaster evaluate runs/<name> --refold 5 --target runs/<name>/target/target.pdb
+```
+
+### Resume a partial run
+
+```bash
+bash Evaluator/evaluate.sh \
     --sequences  sequences.fasta \
     --target-seq "MGFQKFSPF..." \
     --target-pdb target.pdb \
@@ -126,14 +125,15 @@ bash evaluate.sh \
 
 ### Prepare your sequences FASTA
 
-If your sequences come directly from a supported design tool, `extract` builds the FASTA
-from the tool's output directory and tags each sequence with its source:
+If your sequences come from a supported design tool, `extract` builds the FASTA
+from the tool's output directory:
 
 ```bash
 conda run -n binder-eval binder-compare extract \
     --bindcraft /path/to/bindcraft/output \
     --boltzgen  /path/to/boltzgen/output \
     --mosaic    /path/to/mosaic/output \
+    --pxdesign  /path/to/pxdesign/output \
     -o sequences.fasta
 ```
 
@@ -147,7 +147,7 @@ Otherwise, any standard FASTA works — `>id` headers are used as binder IDs.
 Reads native output directories for each supported tool, extracts sequences and metadata,
 deduplicates, and writes a combined FASTA with `binder_id` and `source` tags.
 
-Supported inputs: `--bindcraft`, `--boltzgen`, `--mosaic`, `--pxdesign`
+Supported inputs: `--bindcraft`, `--boltzgen`, `--mosaic`, `--pxdesign`, `--rfaa`, `--proteina-complexa`
 
 ### `refold-boltz2`
 Refolds each binder+target pair with Boltz-2. Calls ColabFold for MSA, then runs Boltz-2
@@ -173,85 +173,41 @@ Output: `report.html`, `metrics.csv`, `metrics_zscore.csv`, `summary.json`
 
 | Metric | Direction | Description |
 |--------|-----------|-------------|
-| `ipsae_min` | ↑ higher better | min(bt_ipSAE, tb_ipSAE) — primary ranking metric |
-| `iptm` | ↑ higher better | interface predicted TM-score (Boltz-2) |
-| `ipae` | ↓ lower better | mean interface PAE in Å |
-| `pae_bt` | ↓ lower better | binder→target PAE in Å |
-| `pae_tb` | ↓ lower better | target→binder PAE in Å |
-| `pae_bb` | ↓ lower better | intra-binder PAE in Å |
-| `plddt_binder_mean` | ↑ higher better | mean binder pLDDT [0–1] |
-| `af2_ipsae_min` | ↑ higher better | ipSAE_min computed from AF2 PAE matrices |
-| `composite_score` | ↑ higher better | weighted z-score sum across all metrics |
+| `ipsae_min` | higher = better | min(bt_ipSAE, tb_ipSAE) — primary ranking metric |
+| `iptm` | higher = better | interface predicted TM-score (Boltz-2) |
+| `ipae` | lower = better | mean interface PAE in angstroms |
+| `pae_bt` | lower = better | binder-to-target PAE |
+| `pae_tb` | lower = better | target-to-binder PAE |
+| `pae_bb` | lower = better | intra-binder PAE |
+| `plddt_binder_mean` | higher = better | mean binder pLDDT [0-1] |
+| `af2_ipsae_min` | higher = better | ipSAE_min from AF2 PAE matrices |
+| `agreement_count` | higher = better | number of engines agreeing ipsae_min > 0.61 |
 
 ### Quality tiers (based on `ipsae_min`)
+
 | Tier | Threshold |
 |------|-----------|
-| High | > 0.70 |
-| Medium | 0.61 – 0.70 |
-| Low | 0.40 – 0.61 |
-| Reject | ≤ 0.40 |
-
-### ipSAE
-Computed via Dunbrack 2025. Analogous to a TM-score for the interface — values near 1
-indicate a well-defined, confident binding geometry. `ipsae_min` uses the minimum of the
-two directional scores (binder→target and target→binder) to penalise asymmetric predictions.
+| High | > 0.80 |
+| Medium | 0.61 - 0.80 |
+| Low | 0.40 - 0.61 |
+| Reject | <= 0.40 |
 
 ---
 
-## Example (CALCA target, 216 sequences)
-
-Target: CALCA/P01258 (calcitonin), 141 aa sequence.
-
-| Tool | n | Pass rate (ipsae_min > 0.61) | Mean ipsae_min |
-|------|---|------------------------------|----------------|
-| PXDesign | 100 | **34%** | 0.544 |
-| BindCraft | 6 | 33% | 0.585 |
-| Mosaic | 60 | 27% | 0.501 |
-| BoltzGen | 50 | 2% | 0.366 |
-
-Example output files in `example/`:
-- `metrics.csv` — top 20 designs, all metrics
-- `summary.json` — per-tool aggregate statistics
-- `report.html` — full interactive ranked report
-
-BoltzGen sequences scored high under Boltz-2 natively but failed to cross-validate under
-AF2 — consistent with sequences fitted to Boltz-2's scoring landscape rather than true
-binding geometry.
-
----
-
-## Supported Input Tools
-
-| Tool | Flag | Reads from |
-|------|------|------------|
-| BindCraft | `--bindcraft` | AF2 + MPNN design output directory |
-| BoltzGen | `--boltzgen` | Boltz-2 diffusion design JSONs |
-| Mosaic | `--mosaic` | `designs.csv` output |
-| PXDesign | `--pxdesign` | Protenix-scored design outputs |
-
----
-
-## Repository Structure
+## Directory Structure
 
 ```
-evaluate.sh           # Run a full evaluation (single command entry point)
-install.sh            # Create all three conda environments
-envs/                 # Conda environment definitions (binder-eval, -boltz2, -af2)
-binder_comparison/    # Core package: CLI, extractors, refolding runners, report generator
-scripts/              # Standalone refold scripts (refold_boltz2.py, refold_af2.py)
-example/              # Example outputs from CALCA run
-docs/                 # Pipeline reference notes
-pyproject.toml
+Evaluator/
+├── evaluate.sh             # Full pipeline orchestrator (single command entry point)
+├── install.sh              # Create all conda environments
+├── run.sh                  # Legacy runner script
+├── pyproject.toml          # Package: "binder-comparison" v0.1.0
+├── binder_comparison/      # Core package: CLI, extractors, refolding, report
+├── scripts/                # Standalone refold scripts (refold_boltz2.py, refold_af2.py)
+├── envs/                   # Conda environment specs (binder-eval.yml, binder-eval-af2.yml)
+├── docs/                   # Pipeline reference, analysis notes
+└── example/                # Example outputs from CALCA run
 ```
-
----
-
-## References
-
-- ipSAE metric: Dunbrack et al. 2025
-- Boltz-2: Markov Research
-- AlphaFold2 multimer via ColabDesign
-- BindCraft: github.com/martinpacesa/BindCraft
 
 ---
 
@@ -264,37 +220,22 @@ export AF2_DATA_DIR=/path/to/af2_params
 ls "$AF2_DATA_DIR"/params_model_*.npz   # should list 5 model files
 ```
 
-If the `.npz` files are missing, download them:
-```bash
-# See https://github.com/google-deepmind/alphafold for download instructions
-```
-
 ### 2. CUDA version mismatch
-
-Symptoms: `RuntimeError: CUDA error` or JAX failing to initialise.
 
 ```bash
 nvidia-smi          # check driver CUDA version
-nvcc --version      # check toolkit version (if installed)
 ```
 
-If the driver version is too old, update your NVIDIA driver. If reinstalling the
-evaluator environments, pass the matching CUDA version:
-
-```bash
-bash install.sh   # environments are pinned to compatible CUDA versions
-```
+If the driver version is too old, update your NVIDIA driver.
 
 ### 3. `binder-eval-af2` environment not found
 
 ```bash
-conda env list                    # check if environment exists
-bash install.sh                   # re-run evaluator installer
+conda env list           # check if environment exists
+bash Evaluator/install.sh   # re-run evaluator installer
 ```
 
 ### 4. ColabDesign import error
-
-If `refold-af2` fails with an import error from ColabDesign:
 
 ```bash
 conda run -n binder-eval-af2 pip install --force-reinstall colabdesign==1.1.1
@@ -302,44 +243,20 @@ conda run -n binder-eval-af2 pip install --force-reinstall colabdesign==1.1.1
 
 ### 5. PAE file not found during report generation
 
-If `report` fails because `*_pae.npy` files are missing, the refolding step was
-interrupted before saving PAE arrays. Re-run with `--resume` to fill in the gaps:
+The refolding step was interrupted. Re-run with `--resume`:
 
 ```bash
-bash evaluate.sh \
-    --sequences sequences.fasta \
-    --target-pdb target.pdb \
-    --output ./results \
-    --resume
+bash Evaluator/evaluate.sh \
+    --sequences sequences.fasta --target-pdb target.pdb \
+    --output ./results --resume
 ```
 
 ### 6. Mosaic venv path not found
 
-The evaluator installer saves the Mosaic venv path to `envs/mosaic_venv_path`.
-If this file is missing or wrong:
-
 ```bash
-# Re-run the evaluator installer (auto-detects the venv)
-bash install.sh
-
-# Or set manually
-echo "/path/to/Mosaic/.venv" > envs/mosaic_venv_path
+bash Evaluator/install.sh     # auto-detects the venv
 ```
 
 ### 7. Duplicate CSV rows after a partial run
 
-If a refolding step was interrupted and re-run without `--resume`, the append-mode
-CSV may contain duplicate entries. Deduplicate with:
-
-```bash
-# Use --resume on re-run to skip already-completed sequences
-bash evaluate.sh --sequences sequences.fasta --target-pdb target.pdb --output ./results --resume
-
-# Or manually deduplicate an existing CSV (keeps first occurrence)
-python -c "
-import pandas as pd
-df = pd.read_csv('results/boltz2_results.csv')
-df = df.drop_duplicates(subset='sequence', keep='first')
-df.to_csv('results/boltz2_results.csv', index=False)
-"
-```
+Use `--resume` on re-run to skip already-completed sequences.
