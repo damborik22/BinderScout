@@ -162,10 +162,19 @@ def run(args: argparse.Namespace) -> None:
         print("  top20_structures/    — view_top20.pml (open in PyMOL)")
 
     # Step 5: HTML report
+    # Parse --tool-csv flags into dict
+    tool_csvs = {}
+    if args.tool_csv:
+        for spec in args.tool_csv:
+            if "=" in spec:
+                tool_name, csv_path = spec.split("=", 1)
+                tool_csvs[tool_name.strip()] = csv_path.strip()
+
     generate_report(
         df=df,
         summary=summary,
         output_path=output_dir / "report.html",
+        tool_csvs=tool_csvs or None,
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
@@ -323,4 +332,12 @@ def add_parser(subparsers) -> None:
         "automatically by refold_Version6. This flag is ignored.",
     )
     p.add_argument("--output", "-o", required=True, metavar="DIR", help="Output directory for all report files")
+    p.add_argument(
+        "--tool-csv",
+        metavar="TOOL=CSV",
+        action="append",
+        help="Tool's original output CSV for native-ranked top-10 section. "
+        "Can be specified multiple times. Example: --tool-csv mosaic=runs/mosaic/designs.csv "
+        "--tool-csv boltzgen=runs/boltzgen/outputs/final_ranked_designs/final_designs_metrics_700.csv",
+    )
     p.set_defaults(func=run)
