@@ -20,8 +20,26 @@ TOOL_COLOURS = {
     "boltzgen": "#FF9800",  # orange
     "mosaic": "#4CAF50",  # green
     "pxdesign": "#9C27B0",  # purple
+    "proteina_complexa": "#00897B",  # teal
+    "rfaa": "#D84315",  # deep orange
     "unknown": "#9E9E9E",  # grey
 }
+
+# Display names for tools
+_TOOL_DISPLAY = {
+    "mosaic": "Mosaic",
+    "pxdesign": "PXDesign",
+    "boltzgen": "BoltzGen",
+    "bindcraft": "BindCraft",
+    "proteina_complexa": "Proteina-Complexa",
+    "rfaa": "RFAA",
+}
+
+
+def _tool_display(name: str) -> str:
+    """Return the display name for a tool, defaulting to the original."""
+    return _TOOL_DISPLAY.get(name, name)
+
 
 # Per-metric display metadata: (human_label, unit_str, direction_arrow)
 # direction_arrow: "↑" = higher is better, "↓" = lower is better, "" = n/a
@@ -104,7 +122,7 @@ def plot_plddt_curves(
     ax.set_title(title)
 
     legend_handles = [
-        matplotlib.patches.Patch(color=c, label=t)
+        matplotlib.patches.Patch(color=c, label=_tool_display(t))
         for t, c in TOOL_COLOURS.items()
         if t in df.get("source_tool", pd.Series()).values
     ]
@@ -277,23 +295,42 @@ def plot_radar_chart(
             mean = tool_data.get(m, {}).get("mean", 0.0)
             raw[tool].append(float(mean) if mean is not None else 0.0)
 
-    # z-score each metric across tools
+    # z-score each metric across tools, then flip "lower is better" metrics
+    # so that outward from center always means better
     raw_array = np.array([raw[t] for t in tools])  # shape (n_tools, n_metrics)
     col_mean = raw_array.mean(axis=0)
     col_std = raw_array.std(axis=0)
     col_std[col_std == 0] = 1.0  # avoid division by zero
     z_array = (raw_array - col_mean) / col_std
 
+    # Negate "lower is better" metrics (↓) so outward = better for all
+    for mi, m in enumerate(metrics):
+        meta = METRIC_META.get(m)
+        if meta and meta[2] == "↓":
+            z_array[:, mi] *= -1
+
     for ti, tool in enumerate(tools):
         values = z_array[ti].tolist()
         values += values[:1]
         colour = TOOL_COLOURS.get(tool, TOOL_COLOURS["unknown"])
-        ax.plot(angles, values, color=colour, linewidth=2, label=tool)
+        ax.plot(angles, values, color=colour, linewidth=2, label=_tool_display(tool))
         ax.fill(angles, values, color=colour, alpha=0.15)
 
+    # Use human-readable labels, mark inverted metrics
+    tick_labels = []
+    for m in metrics:
+        meta = METRIC_META.get(m)
+        if meta:
+            label = meta[0]
+            if meta[2] == "↓":
+                label += " (inv)"
+        else:
+            label = m
+        tick_labels.append(label)
+
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(metrics, size=9)
-    ax.set_title("Tool comparison (mean z-scores)", pad=20)
+    ax.set_xticklabels(tick_labels, size=9)
+    ax.set_title("Tool comparison (outward = better)", pad=20)
     ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1))
     fig.tight_layout()
     return fig
@@ -336,7 +373,9 @@ def plot_af2_vs_boltz2_scatter(
         if "source_tool" in df.columns:
             for tool, grp in df[mask].groupby("source_tool"):
                 colour = TOOL_COLOURS.get(tool, TOOL_COLOURS["unknown"])
-                ax.scatter(b_vals[grp.index], a_vals[grp.index], color=colour, alpha=0.7, s=30, label=tool)
+                ax.scatter(
+                    b_vals[grp.index], a_vals[grp.index], color=colour, alpha=0.7, s=30, label=_tool_display(tool)
+                )
         else:
             ax.scatter(b_vals[mask], a_vals[mask], alpha=0.7, s=30)
 
@@ -432,14 +471,14 @@ def plot_metric_distributions(
             if len(vals) == 0:
                 continue
             data_per_tool.append(vals.values)
-            labels.append(tool)
+            labels.append(_tool_display(tool))
 
         if not data_per_tool:
             ax.set_visible(False)
             continue
 
         bp = ax.boxplot(data_per_tool, patch_artist=True, tick_labels=labels)
-        for patch, tool in zip(bp["boxes"], labels):
+        for patch, tool in zip(bp["boxes"], tools[: len(data_per_tool)]):
             patch.set_facecolor(TOOL_COLOURS.get(tool, TOOL_COLOURS["unknown"]))
             patch.set_alpha(0.7)
 

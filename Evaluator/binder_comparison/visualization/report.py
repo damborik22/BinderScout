@@ -17,12 +17,25 @@ import pandas as pd
 from .plots import (
     METRIC_META,
     fig_to_base64,
-    load_pae_data_from_df,
-    plot_af2_vs_boltz2_scatter,
     plot_metric_distributions,
-    plot_pae_heatmaps,
     plot_radar_chart,
 )
+
+# Display names for tools (source_tool values are lowercase internally)
+_TOOL_DISPLAY = {
+    "mosaic": "Mosaic",
+    "pxdesign": "PXDesign",
+    "boltzgen": "BoltzGen",
+    "bindcraft": "BindCraft",
+    "proteina_complexa": "Proteina-Complexa",
+    "rfaa": "RFAA",
+}
+
+
+def _tool_display(name: str) -> str:
+    """Return the display name for a tool, defaulting to the original."""
+    return _TOOL_DISPLAY.get(name, name)
+
 
 _HTML_TEMPLATE = """\
 <!DOCTYPE html>
@@ -69,44 +82,115 @@ _HTML_TEMPLATE = """\
 <h1>Binder Design Comparison Report</h1>
 
 <div class="weights">
-  <strong>Primary predictor:</strong> Boltz-2 &nbsp;(AF2 shown for cross-validation)
-  &nbsp;&nbsp;·&nbsp;&nbsp;
   <strong>Total binders:</strong> {n_binders}
   &nbsp;&nbsp;·&nbsp;&nbsp;
   {tool_counts_str}
 </div>
 
-<h2>Screening Summary (Adaptyv / Overath et al. 2025)</h2>
+<p style="font-size:0.85em;color:#555;line-height:1.6;">
+  <b>Methodology.</b>
+  All designed binder sequences are independently refolded with <b>Boltz-2</b> (primary predictor)
+  and <b>AlphaFold2</b> (cross-validation) as target–binder complexes.
+  The primary ranking metric is <b>ipSAE_min</b> — the minimum of binder→target and target→binder
+  interface Predicted Structural Alignment Error, computed using the
+  <a href="https://github.com/DunbrackLab/IPSAE" target="_blank">DunbrackLab d0<sub>res</sub> formula</a>
+  (per-residue d0, uniform 10 Å PAE cutoff for both engines).
+  This metric showed 1.4× better average precision than ipAE across 3,766 experimentally tested
+  designs in the <a href="https://doi.org/10.1101/2025.08.14.670059" target="_blank">Adaptyv/Overath et al. 2025</a>
+  benchmark. Quality tiers and the 0.61 pass threshold follow their screening methodology.
+  <b>agreement_count</b> reports how many engines (0–2) score ipSAE_min above 0.61.
+  Ranking sorts by quality tier first, then agreement count, then ipSAE_min.
+</p>
+
+<details style="margin:0.8em 0;">
+  <summary style="cursor:pointer;font-size:0.85em;color:#1565C0;font-weight:bold;">
+    Show ipSAE formula
+  </summary>
+  <div style="background:#f5f5f5;border:1px solid #ddd;border-radius:6px;padding:1em 1.5em;
+              margin:0.5em 0;font-size:0.9em;line-height:1.8;font-family:'Courier New',monospace;">
+    <div style="margin-bottom:0.6em;">
+      <b>ipSAE</b><sub>A→B</sub> = max<sub>i∈A</sub> [ pSAE<sub>i</sub> ]
+    </div>
+    <div style="margin-bottom:0.6em;">
+      pSAE<sub>i</sub> = mean<sub>j∈B, PAE<sub>ij</sub>&lt;cutoff</sub>
+      &nbsp;[ 1 / (1 + (PAE<sub>ij</sub> / d0<sub>i</sub>)²) ]
+    </div>
+    <div style="margin-bottom:0.6em;">
+      d0<sub>i</sub> = max(1.0, &nbsp;1.24 · (N<sub>cutoff,i</sub> − 15)<sup>1/3</sup> − 1.8)
+    </div>
+    <div style="margin-bottom:0.6em;">
+      N<sub>cutoff,i</sub> = |{{ j ∈ B : PAE<sub>ij</sub> &lt; cutoff }}|
+    </div>
+    <div style="border-top:1px solid #ccc;padding-top:0.5em;margin-top:0.5em;
+                font-family:'Segoe UI',sans-serif;font-size:0.9em;color:#555;">
+      <b>ipSAE_min</b> = min(ipSAE<sub>binder→target</sub>, ipSAE<sub>target→binder</sub>)
+      &nbsp;&nbsp;·&nbsp;&nbsp; cutoff = 10 Å (uniform for Boltz-2 and AF2)
+    </div>
+  </div>
+</details>
+
+<h2>Screening Summary</h2>
 <p style="font-size:0.85em;color:#555;">
-  Primary metric: <b>ipSAE_min</b> (Dunbrack formula) — 1.4× better average precision than ipAE
-  across 3,766 experimentally tested designs (Overath et al. 2025).
   Thresholds: &nbsp;<span style="color:#2e7d32">■ High</span> &gt;0.80 &nbsp;
   <span style="color:#f57f17">■ Medium</span> &gt;0.61 &nbsp;
   <span style="color:#e65100">■ Low</span> &gt;0.40 &nbsp;
   <span style="color:#c62828">■ Reject</span> ≤0.40
-  <br>
-  <b>agreement_count</b>: number of engines with ipSAE_min &gt; 0.61
-  &nbsp;(0 = none, 1 = Boltz-2 only, 2 = both Boltz-2 and AF2)
 </p>
 {tier_summary}
 
-<h2>Top 20 Binders (Adaptyv rank — ipSAE_min primary)</h2>
+<h2>Top 20 Binders</h2>
 {top_table}
+
+<table style="font-size:0.8em;border-collapse:collapse;margin:0.5em 0 1.5em 0;color:#555;">
+  <tr><td style="padding:2px 12px 2px 0;"><b>rank</b></td>
+      <td>Overall rank (quality tier → agreement → ipSAE_min → ipTM → pLDDT)</td></tr>
+  <tr><td style="padding:2px 12px 2px 0;"><b>binder_length</b></td>
+      <td>Designed binder length in amino acids</td></tr>
+  <tr><td style="padding:2px 12px 2px 0;"><b>quality_tier</b></td>
+      <td>High (&gt;0.80), Medium (&gt;0.61), Low (&gt;0.40), Reject (≤0.40) based on ipSAE_min</td></tr>
+  <tr><td style="padding:2px 12px 2px 0;"><b>agreement</b></td>
+      <td>Number of engines (0–2) with ipSAE_min &gt; 0.61</td></tr>
+  <tr><td style="padding:2px 12px 2px 0;"><b>ipSAE_min ↑</b></td>
+      <td>Primary metric — min(binder→target, target→binder) iPSAE from Boltz-2 PAE [0–1]</td></tr>
+  <tr><td style="padding:2px 12px 2px 0;"><b>AF2 ipSAE_min ↑</b></td>
+      <td>Same metric from AlphaFold2 cross-validation [0–1]</td></tr>
+  <tr><td style="padding:2px 12px 2px 0;"><b>ipTM ↑</b></td>
+      <td>Interface predicted TM-score from Boltz-2 [0–1]</td></tr>
+  <tr><td style="padding:2px 12px 2px 0;"><b>pLDDT binder ↑</b></td>
+      <td>Mean per-residue confidence of binder from Boltz-2 [0–1]</td></tr>
+</table>
 
 <h2>Per-Tool Summary Statistics</h2>
 {summary_table}
 
 <h2>Metric Distributions by Tool</h2>
 <img src="data:image/png;base64,{dist_plot}" alt="Metric distributions">
+<p style="font-size:0.8em;color:#555;line-height:1.5;margin-top:0.3em;">
+  <b>Box plot guide:</b>
+  The horizontal line inside each box is the <b>median</b>.
+  The box spans the <b>interquartile range</b> (IQR, 25th–75th percentile — the middle 50% of values).
+  Whiskers extend to the most extreme data points within 1.5× IQR from the box edges.
+  Points beyond the whiskers are <b>outliers</b>.
+  A taller box indicates greater variability across designs from that tool.
+</p>
 
 <h2>Tool Comparison (Radar Chart)</h2>
 <img src="data:image/png;base64,{radar_plot}" alt="Radar chart">
 
-<h2>AF2 vs Boltz-2 Correlation</h2>
-{correlation_callout}
-<img src="data:image/png;base64,{scatter_plot}" alt="AF2 vs Boltz2 scatter">
+{per_tool_top10}
 
-{pae_heatmap_section}
+<h2>Visual Inspection</h2>
+<p style="font-size:0.85em;color:#555;line-height:1.6;">
+  Top 20 refolded structures are available in <code>top20_structures/</code>.
+  Open the PyMOL session script to visualise all binders aligned on the target:
+</p>
+<pre style="background:#f5f5f5;padding:0.6em 1em;border-radius:4px;font-size:0.85em;display:inline-block;">
+cd report/top20_structures/
+pymol view_top20.pml</pre>
+<p style="font-size:0.85em;color:#555;">
+  Binder (chain A) is coloured by tool. Target (chain B) is grey.
+  Only rank 1 is shown initially — enable other structures in PyMOL's object panel.
+</p>
 
 <h2>Full Metrics Table</h2>
 <details>
@@ -258,15 +342,26 @@ def generate_report(
     tool_counts_str = ""
     if "source_tool" in sort_df.columns:
         counts = sort_df["source_tool"].value_counts()
-        tool_counts_str = " &nbsp;|&nbsp; ".join(f'<span class="tool-{t}">{t}: {n}</span>' for t, n in counts.items())
+        tool_counts_str = " &nbsp;|&nbsp; ".join(
+            f'<span class="tool-{t}">{_tool_display(t)}: {n}</span>' for t, n in counts.items()
+        )
 
     # Tier summary
     tier_summary = _tier_summary_to_html(sort_df)
 
-    # Top 20 table
-    display_cols = _select_display_cols(sort_df)
-    top20 = sort_df[display_cols].head(20)
-    top_table = _df_to_html(top20, colour_tool=True)
+    # Top 20 table (primary + collapsible secondary)
+    primary_cols, secondary_cols = _select_display_cols(sort_df)
+    top20_primary = sort_df[primary_cols].head(20)
+    top_table = _df_to_html(top20_primary, colour_tool=True).replace("<table>", '<table style="width:100%">', 1)
+    if secondary_cols:
+        top20_secondary = sort_df[primary_cols[:2] + secondary_cols].head(20)
+        top_table += (
+            '\n<details style="margin:0.5em 0;">'
+            '<summary style="cursor:pointer;font-size:0.85em;color:#1565C0;font-weight:bold;">'
+            "Show additional metrics for Top 20</summary>\n"
+            + _df_to_html(top20_secondary, colour_tool=True)
+            + "\n</details>"
+        )
 
     # Summary statistics table
     summary_table = _summary_to_html(summary)
@@ -274,34 +369,62 @@ def generate_report(
     # Plots
     dist_fig = plot_metric_distributions(sort_df)
     radar_fig = plot_radar_chart(summary)
-    scatter_fig = plot_af2_vs_boltz2_scatter(sort_df)
 
     dist_b64 = fig_to_base64(dist_fig)
     radar_b64 = fig_to_base64(radar_fig)
-    scatter_b64 = fig_to_base64(scatter_fig)
 
-    # Correlation callout
-    corr = _compute_af2_boltz2_r(sort_df)
-    correlation_callout = _correlation_callout_html(corr)
+    # Per-tool top 10 tables (collapsible, one per tool present in data)
+    per_tool_top10 = ""
+    if "source_tool" in sort_df.columns:
+        tools_present = sorted(sort_df["source_tool"].dropna().unique())
+        if tools_present:
+            per_tool_top10 = "<h2>Top Designs per Tool</h2>\n"
+            for tool in tools_present:
+                tool_df = sort_df[sort_df["source_tool"] == tool].head(10)
+                n = len(tool_df)
+                display_name = _tool_display(tool)
+                tool_table = _df_to_html(tool_df[primary_cols], colour_tool=True)
+                per_tool_top10 += (
+                    f'<details style="margin:0.3em 0;">'
+                    f'<summary style="cursor:pointer;font-weight:bold;">'
+                    f"{display_name} — top {n} design{'s' if n != 1 else ''}</summary>\n"
+                    f"{tool_table}\n</details>\n"
+                )
 
-    # PAE heatmaps for top-ranked binders
-    pae_heatmap_section = ""
-    if "boltz_pae_file" in sort_df.columns or "af2_pae_file" in sort_df.columns:
-        sequences, af2_pae, boltz_pae, binder_lens = load_pae_data_from_df(sort_df, max_binders=5)
-        if sequences:
-            pae_fig = plot_pae_heatmaps(sequences, af2_pae, boltz_pae, binder_lens, max_binders=5)
-            pae_b64 = fig_to_base64(pae_fig)
-            pae_heatmap_section = (
-                "<h2>PAE Heatmaps (Top-Ranked Binders)</h2>\n"
-                '<p style="font-size:0.85em;color:#555;">'
-                "White lines mark the binder/target boundary. "
-                "Low PAE (blue) in off-diagonal blocks indicates confident interface prediction."
-                "</p>\n"
-                f'<img src="data:image/png;base64,{pae_b64}" alt="PAE heatmaps">'
-            )
-
-    # Full table (all columns, collapsed)
-    full_table = _df_to_html(sort_df, max_rows=None)
+    # Full table — curated columns in ranking order
+    _full_cols = [
+        "adaptyv_rank",
+        "binder_id",
+        "source_tool",
+        "binder_length",
+        "quality_tier",
+        "agreement_count",
+        "ipsae_min",
+        "af2_ipsae_min",
+        "iptm",
+        "af2_iptm",
+        "boltz_pae_iptm",
+        "af2_pae_iptm",
+        "plddt_binder_mean",
+        "plddt_binder_min",
+        "binder_ptm",
+        "ipae",
+        "pae_bt",
+        "pae_tb",
+        "pae_bb",
+        "plddt_target_mean",
+        "intra_contact",
+        "target_contact",
+        "ipsae_dg_composite",
+        "ipsae_shape_composite",
+        "native_dG",
+        "native_dSASA",
+        "native_shape_complementarity",
+        "sequence",
+        "target_sequence",
+    ]
+    full_cols_available = [c for c in _full_cols if c in sort_df.columns]
+    full_table = _df_to_html(sort_df[full_cols_available], max_rows=None)
 
     html = _HTML_TEMPLATE.format(
         n_binders=len(sort_df),
@@ -311,9 +434,7 @@ def generate_report(
         summary_table=summary_table,
         dist_plot=dist_b64,
         radar_plot=radar_b64,
-        scatter_plot=scatter_b64,
-        correlation_callout=correlation_callout,
-        pae_heatmap_section=pae_heatmap_section,
+        per_tool_top10=per_tool_top10,
         full_table=full_table,
     )
 
@@ -323,26 +444,32 @@ def generate_report(
     print(f"[report] Written → {output_path}")
 
 
-def _select_display_cols(df: pd.DataFrame) -> list[str]:
-    """Pick a readable subset of columns for the top-20 table."""
-    preferred = [
+def _select_display_cols(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+    """Pick columns for the top-20 table: (primary, secondary).
+
+    Primary columns are always visible; secondary are in a collapsible section.
+    """
+    primary = [
         "adaptyv_rank",
         "binder_id",
         "source_tool",
+        "binder_length",
         "quality_tier",
         "agreement_count",
         "ipsae_min",
         "af2_ipsae_min",
         "iptm",
+        "plddt_binder_mean",
+    ]
+    secondary = [
         "af2_iptm",
         "boltz_pae_iptm",
         "af2_pae_iptm",
-        "ipae",
-        "plddt_binder_mean",
+        "binder_ptm",
         "plddt_binder_min",
+        "ipae",
         "pae_bt",
         "pae_tb",
-        "binder_ptm",
         "ipsae_dg_composite",
         "ipsae_shape_composite",
         "native_dG",
@@ -350,7 +477,10 @@ def _select_display_cols(df: pd.DataFrame) -> list[str]:
         "native_shape_complementarity",
         "sequence",
     ]
-    return [c for c in preferred if c in df.columns]
+    return (
+        [c for c in primary if c in df.columns],
+        [c for c in secondary if c in df.columns],
+    )
 
 
 def _tier_summary_to_html(df: pd.DataFrame) -> str:
@@ -371,7 +501,7 @@ def _tier_summary_to_html(df: pd.DataFrame) -> str:
     tools = sorted(df["source_tool"].dropna().unique()) if has_tools else []
 
     # Build header
-    tool_headers = "".join(f"<th>{t}</th>" for t in tools)
+    tool_headers = "".join(f"<th>{_tool_display(t)}</th>" for t in tools)
     header = f'<tr><th style="text-align:left;white-space:nowrap">Tier</th><th>Count</th><th>%</th>{tool_headers}</tr>'
 
     rows = []
@@ -388,6 +518,16 @@ def _tier_summary_to_html(df: pd.DataFrame) -> str:
             f'<tr><td style="text-align:left;white-space:nowrap">{tier_labels[tier]}</td>'
             f"<td><b>{n}</b></td><td>{pct:.1f}%</td>{tool_cells}</tr>"
         )
+
+    # Total row
+    total_tool_cells = ""
+    if has_tools:
+        for t in tools:
+            total_tool_cells += f"<td><b>{int((df['source_tool'] == t).sum())}</b></td>"
+    rows.append(
+        f'<tr style="border-top:2px solid #333"><td style="text-align:left"><b>Total</b></td>'
+        f"<td><b>{n_total}</b></td><td>100%</td>{total_tool_cells}</tr>"
+    )
 
     # Optional: ipsae_dg_composite summary row
     composite_note = ""
@@ -413,7 +553,7 @@ def _col_header(col: str) -> str:
     parts = [label]
     if arrow:
         parts.append(arrow)
-    suffix = f" <small>({unit})</small>" if unit else ""
+    suffix = f" <small>{unit}</small>" if unit else ""
     return " ".join(parts) + suffix
 
 
@@ -434,6 +574,8 @@ def _df_to_html(
         if val is None or (isinstance(val, float) and math.isnan(val)):
             return f"<td{cls}>—</td>"
         if isinstance(val, float):
+            if col == "binder_length":
+                return f"<td{cls}>{int(val)}</td>"
             return f"<td{cls}>{val:.4f}</td>"
         # Truncate long strings like sequences
         if isinstance(val, str) and len(val) > 20 and col in ("sequence", "target_sequence"):
@@ -451,7 +593,10 @@ def _df_to_html(
 
     rows = []
     for _, row in df.iterrows():
-        cells = "".join(fmt(c, v) for c, v in zip(df.columns, row))
+        cells = "".join(
+            fmt(c, _tool_display(v) if c == "source_tool" and isinstance(v, str) else v)
+            for c, v in zip(df.columns, row)
+        )
         if colour_tool and "source_tool" in df.columns:
             tool = row.get("source_tool", "")
             rows.append(f'<tr class="tool-{tool}">{cells}</tr>')
@@ -459,6 +604,117 @@ def _df_to_html(
             rows.append(f"<tr>{cells}</tr>")
 
     return f"<table>{header}{''.join(rows)}</table>"
+
+
+# Short plain-language descriptions for the summary table
+_METRIC_DESCRIPTION = {
+    "ipsae_min": (
+        "Interface Predicted Structural Alignment Error — TM-score-like metric computed from PAE matrix. "
+        "Measures how confidently the model predicts the binder–target interface. "
+        "This is the primary ranking metric. Higher = more likely to bind. Want >0.61 (medium), >0.80 (high)."
+    ),
+    "bt_ipsae_aux": (
+        "ipSAE in the binder→target direction, reported by the design tool during generation (not independent). "
+        "Higher = better predicted interface from binder side."
+    ),
+    "tb_ipsae_aux": (
+        "ipSAE in the target→binder direction, reported by the design tool during generation (not independent). "
+        "Higher = better predicted interface from target side."
+    ),
+    "ipsae_min_aux": (
+        "Minimum of binder→target and target→binder ipSAE from the design tool (not independent refolding). "
+        "Useful for comparison, but biased — the tool optimized for this. Higher = better."
+    ),
+    "boltz_pae_bt_ipsae": (
+        "ipSAE in the binder→target direction from independent Boltz-2 refolding. "
+        "Measures how well Boltz-2 predicts the binder contacts the target. Higher = better."
+    ),
+    "boltz_pae_tb_ipsae": (
+        "ipSAE in the target→binder direction from independent Boltz-2 refolding. "
+        "Measures how well Boltz-2 predicts the target contacts the binder. Higher = better."
+    ),
+    "boltz_pae_ipsae_min": (
+        "Primary ranking metric — ipSAE_min from independent Boltz-2 refolding (DunbrackLab formula, 10 Å cutoff). "
+        "The sequence is refolded from scratch, so this is an unbiased assessment. Want >0.61."
+    ),
+    "af2_ipsae_min": (
+        "ipSAE_min from independent AlphaFold2 refolding — cross-validation with a second prediction engine. "
+        "If both Boltz-2 and AF2 score >0.61, the design has dual-engine agreement (agreement_count = 2). "
+        "AF2 tends to score lower for computationally designed binders."
+    ),
+    "af2_bt_ipsae": (
+        "ipSAE binder→target from independent AF2 refolding. "
+        "Cross-validation metric — higher means AF2 also predicts binder contacts the target."
+    ),
+    "af2_tb_ipsae": (
+        "ipSAE target→binder from independent AF2 refolding. "
+        "Cross-validation metric — higher means AF2 also predicts target contacts the binder."
+    ),
+    "iptm": (
+        "Interface predicted TM-score from Boltz-2 — measures overall interface quality. "
+        "Higher = more confident complex prediction. Want >0.8. Note: can be inflated for AF2-designed sequences."
+    ),
+    "af2_iptm": (
+        "Interface predicted TM-score from AF2 refolding. "
+        "Low values are common for computationally designed binders — AF2 often struggles with de novo sequences."
+    ),
+    "boltz_pae_iptm": (
+        "ipTM recomputed from Boltz-2 PAE matrix (rather than model-reported value). "
+        "More consistent across runs. Higher = better."
+    ),
+    "af2_pae_iptm": (
+        "ipTM recomputed from AF2 PAE matrix. More consistent than model-reported AF2 ipTM. Higher = better."
+    ),
+    "binder_ptm": (
+        "Predicted TM-score of the binder chain alone — does the binder fold into a stable structure by itself? "
+        "Want >0.9. Low values suggest the binder may be disordered or misfolded."
+    ),
+    "plddt_binder_mean": (
+        "Average per-residue confidence (pLDDT) of the binder from Boltz-2. "
+        "Indicates how confidently each residue position is predicted. Want >0.7."
+    ),
+    "plddt_binder_min": (
+        "Lowest per-residue pLDDT in the binder — identifies the least confident residue. "
+        "Very low values (<0.4) suggest a disordered loop or poorly predicted region."
+    ),
+    "plddt_target_mean": (
+        "Average pLDDT of the target chain in the complex prediction. "
+        "Should be reasonably stable (>0.5). Very low suggests the target is not well modeled."
+    ),
+    "ipae": (
+        "Interface Predicted Aligned Error — mean PAE across the binder–target interface in Angstroms. "
+        "Lower = more confident interface. Superseded by ipSAE as a ranking metric."
+    ),
+    "af2_ipae": "Same as ipAE but from AF2 refolding. Lower = better.",
+    "pae_bt": (
+        "Mean Predicted Aligned Error from binder residues to target residues in Angstroms. "
+        "Lower = Boltz-2 is more confident about binder→target spatial arrangement."
+    ),
+    "pae_tb": (
+        "Mean PAE from target residues to binder residues. "
+        "Lower = Boltz-2 is more confident about target→binder spatial arrangement."
+    ),
+    "pae_bb": (
+        "Mean PAE within the binder chain (binder-to-binder). "
+        "Reflects internal fold confidence. Lower = well-folded binder."
+    ),
+    "agreement_count": (
+        "Number of independent prediction engines (0–2) that score ipSAE_min above the 0.61 pass threshold. "
+        "0 = neither agrees, 1 = Boltz-2 only, 2 = both Boltz-2 and AF2 agree. Want 2."
+    ),
+    "intra_contact": (
+        "Binder internal contact score — measures how tightly the binder folds. "
+        "More negative = more internal contacts = tighter, more stable fold."
+    ),
+    "target_contact": (
+        "Target contact score in complex — measures binder–target interaction extent. "
+        "More negative = more contacts at the interface = larger binding surface."
+    ),
+    "pTMEnergy": (
+        "TM-score-based energy term combining fold quality and interface prediction. "
+        "More negative = better overall prediction quality."
+    ),
+}
 
 
 def _summary_to_html(summary: dict) -> str:
@@ -470,15 +726,17 @@ def _summary_to_html(summary: dict) -> str:
     tools = list(summary.keys())
 
     # Tool name → colour class header cell
-    tool_cols = "".join(f'<th><span class="tool-{t}">{t}</span><br><small>mean ± std</small></th>' for t in tools)
-    header = f"<tr><th>Metric</th>{tool_cols}</tr>"
+    tool_cols = "".join(
+        f'<th><span class="tool-{t}">{_tool_display(t)}</span><br><small>mean ± std</small></th>' for t in tools
+    )
+    header = f'<tr><th>Metric</th>{tool_cols}<th style="text-align:left">Description</th></tr>'
 
     rows = []
     for m in metrics:
         meta = METRIC_META.get(m)
         if meta:
             label, unit, arrow = meta
-            unit_str = f" ({unit})" if unit else ""
+            unit_str = f" {unit}" if unit else ""
             arrow_str = f" {arrow}" if arrow else ""
             m_label = f"{label}{unit_str}{arrow_str}"
         else:
@@ -490,6 +748,8 @@ def _summary_to_html(summary: dict) -> str:
                 row += f"<td>{stats['mean']:.4f} ± {stats['std']:.4f}<br><small>n={stats['n']}</small></td>"
             else:
                 row += "<td>—</td>"
+        desc = _METRIC_DESCRIPTION.get(m, "")
+        row += f'<td style="font-size:0.85em;color:#666;text-align:left">{desc}</td>'
         rows.append(f"<tr>{row}</tr>")
 
     return f'<table class="stat-table">{header}{"".join(rows)}</table>'
