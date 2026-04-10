@@ -23,7 +23,7 @@ EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
 # Pinned commits for reproducible installs (x86_64 clones only; aarch64 uses bundled)
 BINDCRAFT_COMMIT="828fd9f"
 BOLTZGEN_COMMIT="da0f092"
-MOSAIC_COMMIT="dc9c4d7"
+MOSAIC_COMMIT="0599248"
 
 RFAA_REPO="https://github.com/baker-laboratory/rf_diffusion_all_atom.git"
 RFAA_DIR="${BINDMASTER_DIR}/rf_diffusion_all_atom"

@@ -6,7 +6,7 @@ Dispatches sub-commands to their respective scripts:
   (no args) → interactive TUI menu (tui/app.py)
   install   → bash install/install.sh
   configure → python configurator/configurator.py
-  evaluate  → Mosaic/.venv/bin/python evaluator/evaluator.py
+  evaluate  → Mosaic/.venv/bin/python evaluator_legacy/evaluator.py
 
 Usage:
   bindmaster                                                    Interactive menu (TUI)
@@ -47,7 +47,7 @@ USAGE = f"""{BOLD}BindMaster{RESET} — GPU-accelerated protein binder design to
 {BOLD}Environments:{RESET}
   install    → bash          {REPO}/install/install.sh
   configure  → system python {REPO}/configurator/configurator.py
-  evaluate   → Mosaic venv   {REPO}/evaluator/evaluator.py
+  evaluate   → Mosaic venv   {REPO}/evaluator_legacy/evaluator.py
 
 {BOLD}Clone:{RESET}
   git clone https://github.com/damborik22/BindMaster.git
