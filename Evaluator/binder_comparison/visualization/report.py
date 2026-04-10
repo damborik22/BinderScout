@@ -57,10 +57,12 @@ _HTML_TEMPLATE = """\
   td.num {{ text-align: right; font-variant-numeric: tabular-nums; }}
   tr:nth-child(even) {{ background: #EBF5FB; }}
   tr:hover {{ background: #CFE6F6; }}
-  .tool-bindcraft {{ color: #1565C0; font-weight: bold; }}
-  .tool-boltzgen  {{ color: #E65100; font-weight: bold; }}
-  .tool-mosaic    {{ color: #2E7D32; font-weight: bold; }}
-  .tool-pxdesign  {{ color: #7B1FA2; font-weight: bold; }}
+  .tool-bindcraft          {{ color: #1565C0; font-weight: bold; }}
+  .tool-boltzgen           {{ color: #E65100; font-weight: bold; }}
+  .tool-mosaic             {{ color: #2E7D32; font-weight: bold; }}
+  .tool-pxdesign           {{ color: #7B1FA2; font-weight: bold; }}
+  .tool-proteina_complexa  {{ color: #6D4C41; font-weight: bold; }}
+  .tool-rfaa               {{ color: #C62828; font-weight: bold; }}
   .stat-table td {{ text-align: right; font-variant-numeric: tabular-nums; }}
   .stat-table th:first-child, .stat-table td:first-child {{ text-align: left; white-space: nowrap; }}
   img {{ max-width: 100%; margin: 1em 0; border: 1px solid #ccc; border-radius: 4px; }}
