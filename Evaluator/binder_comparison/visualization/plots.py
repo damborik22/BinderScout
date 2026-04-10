@@ -20,8 +20,8 @@ TOOL_COLOURS = {
     "boltzgen": "#FF9800",  # orange
     "mosaic": "#4CAF50",  # green
     "pxdesign": "#9C27B0",  # purple
-    "proteina_complexa": "#00897B",  # teal
-    "rfaa": "#D84315",  # deep orange
+    "proteina_complexa": "#795548",  # brown
+    "rfaa": "#C62828",  # red
     "unknown": "#9E9E9E",  # grey
 }
 
