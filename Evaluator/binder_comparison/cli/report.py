@@ -135,6 +135,32 @@ def run(args: argparse.Namespace) -> None:
     write_csv(top20, output_dir / "top20_candidates.csv")
     print("  top20_candidates.csv — top 20 designs with sequences")
 
+    # Step 4c: Copy top-20 refolded PDB structures for visual inspection
+    structures_dir = output_dir / "top20_structures"
+    structures_dir.mkdir(parents=True, exist_ok=True)
+    pdb_cols = [c for c in ("boltz_pdb", "pdb") if c in df.columns]
+    n_copied = 0
+    for _, row in df.head(20).iterrows():
+        rank = int(row.get("adaptyv_rank", 0))
+        binder_id = row.get("binder_id", f"rank{rank}")
+        for col in pdb_cols:
+            src = row.get(col)
+            if src and isinstance(src, str):
+                src_path = Path(src)
+                if not src_path.is_absolute() and args.boltz2_results:
+                    src_path = Path(args.boltz2_results).resolve().parent / src
+                if src_path.exists():
+                    import shutil
+
+                    dest = structures_dir / f"rank{rank:02d}_{binder_id}.pdb"
+                    shutil.copy2(src_path, dest)
+                    n_copied += 1
+                    break
+    if n_copied:
+        print(f"  top20_structures/    — {n_copied} refolded PDB structures for visual inspection")
+        _write_pymol_script(df.head(20), structures_dir)
+        print("  top20_structures/    — view_top20.pml (open in PyMOL)")
+
     # Step 5: HTML report
     generate_report(
         df=df,
@@ -147,6 +173,113 @@ def run(args: argparse.Namespace) -> None:
     print("  metrics_zscore.csv — z-scored metrics")
     print("  summary.json       — per-tool statistics")
     print("  report.html        — interactive report")
+
+
+_TOOL_COLOURS_PYMOL = {
+    "mosaic": "green",
+    "pxdesign": "purple",
+    "boltzgen": "orange",
+    "bindcraft": "blue",
+    "proteina_complexa": "teal",
+    "rfaa": "firebrick",
+}
+
+_TOOL_DISPLAY_PYMOL = {
+    "mosaic": "Mosaic",
+    "pxdesign": "PXDesign",
+    "boltzgen": "BoltzGen",
+    "bindcraft": "BindCraft",
+    "proteina_complexa": "Proteina-Complexa",
+    "rfaa": "RFAA",
+}
+
+
+def _write_pymol_script(top_df: pd.DataFrame, structures_dir: Path) -> None:
+    """Generate a PyMOL .pml script to load and visualise top-20 refolded structures.
+
+    Boltz-2 PDBs have binder as chain A, target as chain B.
+    Each binder is coloured by source tool; target is grey.
+    Structures are aligned on the target chain for easy comparison.
+    """
+    pml_lines = [
+        "# BindMaster Evaluator — Top 20 refolded binder structures",
+        "# Open this file in PyMOL: pymol view_top20.pml",
+        "#",
+        "# Binder = chain A (coloured by tool), Target = chain B (grey)",
+        "# All structures aligned on target chain for comparison.",
+        "",
+        "bg_color white",
+        "set cartoon_fancy_helices, 1",
+        "set cartoon_smooth_loops, 1",
+        "set ray_shadow, 0",
+        "",
+    ]
+
+    pdb_files = sorted(structures_dir.glob("rank*.pdb"))
+    if not pdb_files:
+        return
+
+    loaded = []
+    for pdb in pdb_files:
+        name = pdb.stem  # e.g. rank01_mosaic_e6b3d835_7
+        pml_lines.append(f"load {pdb.name}, {name}")
+        loaded.append(name)
+
+    pml_lines.append("")
+    pml_lines.append("# Show as cartoon")
+    pml_lines.append("hide everything, all")
+    pml_lines.append("show cartoon, all")
+    pml_lines.append("")
+
+    # Colour target chain grey for all
+    pml_lines.append("# Target chain (B) in grey")
+    pml_lines.append("color grey80, chain B")
+    pml_lines.append("")
+
+    # Colour each binder by source tool
+    pml_lines.append("# Binder chain (A) coloured by source tool")
+    for _, row in top_df.iterrows():
+        rank = int(row.get("adaptyv_rank", 0))
+        binder_id = row.get("binder_id", f"rank{rank}")
+        tool = row.get("source_tool", "unknown")
+        colour = _TOOL_COLOURS_PYMOL.get(tool, "white")
+        name = f"rank{rank:02d}_{binder_id}"
+        pml_lines.append(f"color {colour}, {name} and chain A")
+
+    pml_lines.append("")
+
+    # Align all on target chain of rank01
+    if len(loaded) > 1:
+        ref = loaded[0]
+        pml_lines.append(f"# Align all structures on target chain of {ref}")
+        for name in loaded[1:]:
+            pml_lines.append(f"align {name} and chain B, {ref} and chain B")
+        pml_lines.append("")
+
+    # Initially show only rank01, disable rest
+    pml_lines.append("# Initially show only rank 1; toggle others as needed")
+    for name in loaded[1:]:
+        pml_lines.append(f"disable {name}")
+    pml_lines.append("")
+
+    # Legend as pseudoatom labels
+    pml_lines.append("# Legend")
+    tools_seen = set()
+    for _, row in top_df.iterrows():
+        tool = row.get("source_tool", "unknown")
+        if tool not in tools_seen:
+            tools_seen.add(tool)
+            display = _TOOL_DISPLAY_PYMOL.get(tool, tool)
+            colour = _TOOL_COLOURS_PYMOL.get(tool, "white")
+            pml_lines.append(f"# {display} = {colour}")
+
+    pml_lines.append("")
+    pml_lines.append("zoom all")
+    pml_lines.append("orient")
+    pml_lines.append("")
+
+    script_path = structures_dir / "view_top20.pml"
+    script_path.write_text("\n".join(pml_lines))
 
 
 def _attach_native_metrics(df: pd.DataFrame, native_csv: str) -> pd.DataFrame:
