@@ -323,6 +323,7 @@ def generate_report(
     df: pd.DataFrame,
     summary: dict,
     output_path: str | Path,
+    tool_csvs: dict[str, str | Path] | None = None,
 ) -> None:
     """Generate and write the HTML report.
 
@@ -330,6 +331,10 @@ def generate_report(
         df:            DataFrame with all metrics (after Boltz-2 promotion + statistics).
         summary:       Per-tool summary dict from compute_statistics.
         output_path:   Where to write report.html.
+        tool_csvs:     Optional mapping of tool name → path to the tool's original
+                       output CSV. When provided, the "Top Designs per Tool" section
+                       shows the first 10 rows from the tool's own ranking instead of
+                       the evaluator's ranking.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -374,20 +379,82 @@ def generate_report(
     radar_b64 = fig_to_base64(radar_fig)
 
     # Per-tool top 10 tables (collapsible, one per tool present in data)
+    # When tool_csvs is provided, read top 10 from the tool's own CSV (native ranking)
+    # and join with our binder_id via sequence matching.
     per_tool_top10 = ""
     if "source_tool" in sort_df.columns:
         tools_present = sorted(sort_df["source_tool"].dropna().unique())
         if tools_present:
-            per_tool_top10 = "<h2>Top Designs per Tool</h2>\n"
+            per_tool_top10 = (
+                "<h2>Top Designs per Tool</h2>\n"
+                '<p style="font-size:0.85em;color:#555;">'
+                "Ranked by each tool's own internal scoring (not the evaluator's ranking)."
+                "</p>\n"
+            )
+
+            # Build sequence → binder_id + adaptyv_rank lookup
+            seq_to_ids = {}
+            if "sequence" in sort_df.columns:
+                for _, row in sort_df.iterrows():
+                    seq = str(row.get("sequence", "")).strip().upper()
+                    if seq and seq not in seq_to_ids:
+                        seq_to_ids[seq] = {
+                            "binder_id": row.get("binder_id", ""),
+                            "adaptyv_rank": row.get("adaptyv_rank", ""),
+                        }
+
             for tool in tools_present:
+                display_name = _tool_display(tool)
+
+                # Try reading from tool's original CSV
+                if tool_csvs and tool in tool_csvs:
+                    csv_path = Path(tool_csvs[tool])
+                    if csv_path.exists():
+                        try:
+                            native_df = pd.read_csv(csv_path, nrows=10)
+                            # Add our binder_id by matching sequence
+                            seq_col = None
+                            for candidate in ("sequence", "Sequence", "designed_chain_sequence", "designed_sequence"):
+                                if candidate in native_df.columns:
+                                    seq_col = candidate
+                                    break
+                            if seq_col:
+                                native_df.insert(
+                                    0,
+                                    "binder_id",
+                                    native_df[seq_col]
+                                    .str.strip()
+                                    .str.upper()
+                                    .map(lambda s: seq_to_ids.get(s, {}).get("binder_id", "")),
+                                )
+                                native_df.insert(
+                                    1,
+                                    "eval_rank",
+                                    native_df[seq_col]
+                                    .str.strip()
+                                    .str.upper()
+                                    .map(lambda s: seq_to_ids.get(s, {}).get("adaptyv_rank", "")),
+                                )
+                            n = len(native_df)
+                            tool_table = _df_to_html(native_df, colour_tool=False)
+                            per_tool_top10 += (
+                                f'<details style="margin:0.3em 0;">'
+                                f'<summary style="cursor:pointer;font-weight:bold;">'
+                                f"{display_name} — top {n} (native ranking)</summary>\n"
+                                f"{tool_table}\n</details>\n"
+                            )
+                            continue
+                        except Exception:
+                            pass  # Fall through to evaluator-based ranking
+
+                # Fallback: use evaluator ranking within this tool
                 tool_df = sort_df[sort_df["source_tool"] == tool].head(10)
                 n = len(tool_df)
-                display_name = _tool_display(tool)
                 tool_table = _df_to_html(tool_df[primary_cols], colour_tool=True)
                 per_tool_top10 += (
                     f'<details style="margin:0.3em 0;">'
                     f'<summary style="cursor:pointer;font-weight:bold;">'
-                    f"{display_name} — top {n} design{'s' if n != 1 else ''}</summary>\n"
+                    f"{display_name} — top {n} (evaluator ranking)</summary>\n"
                     f"{tool_table}\n</details>\n"
                 )
 
