@@ -276,6 +276,11 @@ def refold_batch(
 
     folder = Boltz2()
 
+    # MSA caching via processing_dir is disabled for now — Boltz's process_inputs
+    # gets confused by stale data in the persistent dir. The sort-by-length fix
+    # prevents OOM, and MSA fetch is fast (~1-2 sec, cached by ColabFold CDN).
+    _processing_dir = None
+
     @eqx.filter_jit
     def evaluate_loss(loss_fn, pssm, key):
         return loss_fn(pssm, key=key)
@@ -338,14 +343,37 @@ def refold_batch(
             csv_file.flush()
         fasta_lines = []
 
-        for idx, seq_str in enumerate(binder_sequences, start=1):
+        # Sort binders by length to minimize JIT recompilations.
+        # Same-length binders reuse compiled kernels; clear caches on length change.
+        indexed_seqs = list(enumerate(binder_sequences, start=1))  # (1-based idx, seq)
+        indexed_seqs.sort(key=lambda x: len(x[1]))
+        n_todo = sum(1 for idx, _ in indexed_seqs if idx not in skip_indices)
+        n_done = 0
+        prev_length = -1
+
+        for idx, seq_str in indexed_seqs:
             if idx in skip_indices:
-                print(f"[SKIP] Binder #{idx} already completed")
                 continue
 
             binder_length = len(seq_str)
+
+            # Skip binders whose sequence matches the target — Boltz-2 requires
+            # same-sequence chains to share MSA settings, which conflicts with
+            # binder(no MSA) + target(MSA) setup
+            if seq_str.upper() == target_sequence.upper():
+                print(f"[SKIP] Binder #{idx} has same sequence as target — skipping")
+                continue
+
+            n_done += 1
+
+            # Clear JAX caches when binder length changes — prevents GPU memory
+            # fragmentation from accumulating JIT-compiled kernels for many shapes
+            if binder_length != prev_length and prev_length > 0:
+                jax.clear_caches()
+            prev_length = binder_length
+
             print(f"{'─' * 55}")
-            print(f"[{idx}/{len(binder_sequences)}] length={binder_length} aa  seq={seq_str}")
+            print(f"[{n_done}/{n_todo}] (idx={idx}) length={binder_length} aa  seq={seq_str}")
 
             seq = jnp.array([TOKENS.index(c) for c in seq_str])
             pssm = jax.nn.one_hot(seq, 20)
@@ -359,7 +387,8 @@ def refold_batch(
                         template_chain=target_template_chain,
                         force_template=target_template_chain is not None,
                     ),
-                ]
+                ],
+                processing_dir=_processing_dir,
             )
 
             # ---- Comprehensive aux metrics — all 13 loss terms ----
