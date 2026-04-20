@@ -170,11 +170,20 @@ def run(args: argparse.Namespace) -> None:
                 tool_name, csv_path = spec.split("=", 1)
                 tool_csvs[tool_name.strip()] = csv_path.strip()
 
+    # Parse --tool-pdb-dir flags into dict
+    tool_pdb_dirs = {}
+    if args.tool_pdb_dir:
+        for spec in args.tool_pdb_dir:
+            if "=" in spec:
+                tool_name, pdb_dir = spec.split("=", 1)
+                tool_pdb_dirs[tool_name.strip()] = pdb_dir.strip()
+
     generate_report(
         df=df,
         summary=summary,
         output_path=output_dir / "report.html",
         tool_csvs=tool_csvs or None,
+        tool_pdb_dirs=tool_pdb_dirs or None,
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
@@ -339,5 +348,12 @@ def add_parser(subparsers) -> None:
         help="Tool's original output CSV for native-ranked top-10 section. "
         "Can be specified multiple times. Example: --tool-csv mosaic=runs/mosaic/designs.csv "
         "--tool-csv boltzgen=runs/boltzgen/outputs/final_ranked_designs/final_designs_metrics_700.csv",
+    )
+    p.add_argument(
+        "--tool-pdb-dir",
+        metavar="TOOL=DIR",
+        action="append",
+        help="Directory containing a tool's original design PDBs/CIFs for 3D viewer in the "
+        "native top-10 section. Must be used with matching --tool-csv. Can be repeated.",
     )
     p.set_defaults(func=run)

@@ -9,6 +9,7 @@ Produces a self-contained report.html with:
 
 from __future__ import annotations
 
+import csv
 import math
 from pathlib import Path
 
@@ -181,18 +182,26 @@ _HTML_TEMPLATE = """\
 
 {per_tool_top10}
 
-<h2>Visual Inspection</h2>
+<h2>3D Structure Viewer — Top 20</h2>
 <p style="font-size:0.85em;color:#555;line-height:1.6;">
-  Top 20 refolded structures are available in <code>top20_structures/</code>.
-  Open the PyMOL session script to visualise all binders aligned on the target:
+  Click any rank button below to load that design's refolded structure.
+  Binder (chain A) is coloured by tool, target (chain B) is grey.
+  Drag to rotate, scroll to zoom, right-drag to pan.
 </p>
-<pre style="background:#f5f5f5;padding:0.6em 1em;border-radius:4px;font-size:0.85em;display:inline-block;">
+{ngl_viewer_block}
+
+<details style="margin:1em 0;">
+  <summary style="cursor:pointer;font-size:0.85em;color:#1565C0;font-weight:bold;">
+    Alternative: open in PyMOL
+  </summary>
+  <p style="font-size:0.85em;color:#555;line-height:1.6;">
+    Top 20 refolded structures are available in <code>top20_structures/</code>.
+    Open the PyMOL session script to visualise all binders aligned on the target:
+  </p>
+  <pre style="background:#f5f5f5;padding:0.6em 1em;border-radius:4px;font-size:0.85em;display:inline-block;">
 cd report/top20_structures/
 pymol view_top20.pml</pre>
-<p style="font-size:0.85em;color:#555;">
-  Binder (chain A) is coloured by tool. Target (chain B) is grey.
-  Only rank 1 is shown initially — enable other structures in PyMOL's object panel.
-</p>
+</details>
 
 <h2>Full Metrics Table</h2>
 <details>
@@ -321,11 +330,366 @@ def _correlation_callout_html(corr: dict) -> str:
     )
 
 
+_TOOL_COLOURS_NGL = {
+    "mosaic": "#4CAF50",
+    "pxdesign": "#9C27B0",
+    "boltzgen": "#FF9800",
+    "bindcraft": "#2196F3",
+    "proteina_complexa": "#00897B",
+    "rfaa": "#D84315",
+    "unknown": "#9E9E9E",
+}
+
+
+def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path) -> str:
+    """Build an NGL-based 3D viewer section for the top 20 designs.
+
+    Embeds PDB content inline so the report stays self-contained.
+    Uses NGL Viewer loaded from CDN.
+    """
+    # Collect PDBs and metadata for each top design
+    entries = []
+    for _, row in top_df.head(20).iterrows():
+        rank = int(row.get("adaptyv_rank", 0))
+        binder_id = row.get("binder_id", f"rank{rank}")
+        tool = row.get("source_tool", "unknown")
+        ipsae = row.get("ipsae_min", "")
+        iptm = row.get("iptm", "")
+        length = row.get("binder_length", "")
+
+        pdb_path = structures_dir / f"rank{rank:02d}_{binder_id}.pdb"
+        if not pdb_path.exists():
+            continue
+        pdb_text = pdb_path.read_text()
+        # Escape backticks and backslashes for JS template literal
+        pdb_js = pdb_text.replace("\\", "\\\\").replace("`", "\\`")
+        entries.append({
+            "rank": rank,
+            "binder_id": binder_id,
+            "tool": tool,
+            "tool_colour": _TOOL_COLOURS_NGL.get(tool, _TOOL_COLOURS_NGL["unknown"]),
+            "ipsae": f"{float(ipsae):.3f}" if ipsae not in ("", None) else "n/a",
+            "iptm": f"{float(iptm):.3f}" if iptm not in ("", None) else "n/a",
+            "length": str(length).rstrip(".0") if length else "?",
+            "pdb": pdb_js,
+        })
+
+    if not entries:
+        return "<p style='color:#888;'><em>No refolded structures available.</em></p>"
+
+    # Build the HTML/JS block
+    # Button row — one button per rank, coloured by tool
+    buttons_html = []
+    for e in entries:
+        buttons_html.append(
+            f'<button onclick="loadDesign({e["rank"]})" '
+            f'style="background:{e["tool_colour"]};color:white;border:none;padding:0.4em 0.7em;'
+            f'margin:0.15em;border-radius:4px;cursor:pointer;font-size:0.85em;font-weight:bold;" '
+            f'title="{_TOOL_DISPLAY.get(e["tool"], e["tool"])} — ipSAE={e["ipsae"]}, ipTM={e["iptm"]}, {e["length"]}aa">'
+            f'#{e["rank"]}</button>'
+        )
+    buttons = "\n".join(buttons_html)
+
+    # Embed PDB data as JS object
+    pdb_data_js = ",\n        ".join(
+        f'{e["rank"]}: {{"pdb": `{e["pdb"]}`, '
+        f'"tool": "{e["tool"]}", "colour": "{e["tool_colour"]}", '
+        f'"binder_id": "{e["binder_id"]}", '
+        f'"ipsae": "{e["ipsae"]}", "iptm": "{e["iptm"]}", "length": "{e["length"]}"}}'
+        for e in entries
+    )
+
+    default_rank = entries[0]["rank"]
+
+    html = f"""
+<div style="margin:1em 0;">
+  <div style="margin-bottom:0.5em;">
+    <b>Design:</b> {buttons}
+  </div>
+  <div id="ngl-info" style="font-size:0.9em;color:#333;margin-bottom:0.4em;padding:0.4em 0.8em;background:#f5f5f5;border-radius:4px;">
+    Loading...
+  </div>
+  <div id="ngl-viewer" style="width:100%;height:500px;border:1px solid #ccc;border-radius:4px;background:#000;"></div>
+  <div style="margin-top:0.4em;font-size:0.8em;color:#666;">
+    Controls: drag = rotate | scroll = zoom | right-drag = pan | double-click atom = centre
+  </div>
+</div>
+
+<script src="https://unpkg.com/ngl@2.3.1/dist/ngl.js"></script>
+<script>
+(function() {{
+  const designs = {{
+    {pdb_data_js}
+  }};
+
+  // Wait for NGL to load
+  function initWhenReady() {{
+    if (typeof NGL === 'undefined') {{
+      setTimeout(initWhenReady, 100);
+      return;
+    }}
+    const stage = new NGL.Stage("ngl-viewer", {{backgroundColor: "white"}});
+    window.addEventListener("resize", function() {{ stage.handleResize(); }}, false);
+
+    window.loadDesign = function(rank) {{
+      const design = designs[rank];
+      if (!design) return;
+
+      stage.removeAllComponents();
+      const blob = new Blob([design.pdb], {{type: "text/plain"}});
+
+      stage.loadFile(blob, {{ext: "pdb"}}).then(function(comp) {{
+        // Binder = chain A: coloured by tool
+        comp.addRepresentation("cartoon", {{
+          sele: ":A",
+          color: design.colour,
+          smoothSheet: true,
+        }});
+        // Target = chain B: grey
+        comp.addRepresentation("cartoon", {{
+          sele: ":B",
+          color: "#9E9E9E",
+          smoothSheet: true,
+        }});
+        comp.autoView();
+      }});
+
+      document.getElementById("ngl-info").innerHTML =
+        "<b>Rank #" + rank + "</b> &nbsp;·&nbsp; " + design.binder_id +
+        " &nbsp;·&nbsp; " + design.tool +
+        " &nbsp;·&nbsp; length=" + design.length + "aa" +
+        " &nbsp;·&nbsp; ipSAE=" + design.ipsae +
+        " &nbsp;·&nbsp; ipTM=" + design.iptm;
+    }};
+
+    // Load default (rank 1)
+    window.loadDesign({default_rank});
+  }}
+  initWhenReady();
+}})();
+</script>
+"""
+    return html
+
+
+def _build_per_tool_pdb_viewer(
+    tool: str,
+    tool_csv_path: Path,
+    tool_pdb_dir: Path,
+    pdb_pattern: str,
+    seq_to_ids: dict,
+    n: int = 10,
+) -> str:
+    """Build an NGL viewer for top-N designs from a tool's own native ranking.
+
+    Args:
+        tool: Tool name
+        tool_csv_path: CSV sorted by the tool's native ranking
+        tool_pdb_dir: Directory containing original design PDBs/CIFs
+        pdb_pattern: Pattern to find PDB for each design (with {name} placeholder)
+        seq_to_ids: sequence → {binder_id, adaptyv_rank} mapping
+        n: Number of top designs to show
+    """
+    entries = []
+    colour = _TOOL_COLOURS_NGL.get(tool, _TOOL_COLOURS_NGL["unknown"])
+    with open(tool_csv_path) as f:
+        for i, row in enumerate(csv.DictReader(f)):
+            if i >= n:
+                break
+            # Extract sequence and name
+            seq = ""
+            name = ""
+            for key in ("sequence", "Sequence", "designed_chain_sequence", "designed_sequence", "self_sequence"):
+                if row.get(key):
+                    seq = row[key].strip().upper()
+                    break
+            for key in ("name", "id", "Design", "design_id", "binder_id"):
+                if row.get(key):
+                    name = row[key].strip()
+                    break
+            if not seq:
+                continue
+
+            eval_info = seq_to_ids.get(seq, {})
+
+            # Find matching PDB/CIF file.
+            # Try exact name first, then strip common prefixes (e.g. "pc_0001_")
+            pdb_file = None
+            name_variants = [name] if name else []
+            if name:
+                # Strip leading "tool_NNNN_" prefix if present
+                import re as _re
+                m = _re.match(r"^([a-z]+_\d+_)(.+)$", name)
+                if m:
+                    name_variants.append(m.group(2))
+                # Try the last underscore-separated suffix
+                if "_" in name:
+                    name_variants.append(name.split("_", 1)[-1])
+
+            for variant in name_variants:
+                candidates = list(tool_pdb_dir.rglob(pdb_pattern.format(name=variant)))
+                # Prefer PDB over CIF, and non-AF2 subdir over AF2
+                candidates = sorted(candidates, key=lambda p: ("AF2" in p.parts, p.suffix != ".pdb"))
+                if candidates:
+                    pdb_file = candidates[0]
+                    break
+
+            if not pdb_file:
+                # Try by rank
+                rank_pattern = pdb_pattern.format(name=f"*{i + 1:04d}*")
+                candidates = list(tool_pdb_dir.rglob(rank_pattern))
+                if candidates:
+                    pdb_file = candidates[0]
+
+            if not pdb_file or not pdb_file.exists():
+                continue
+
+            pdb_text = pdb_file.read_text()
+            # If CIF, try to use as-is (NGL supports CIF)
+            ext = pdb_file.suffix[1:]
+            pdb_js = pdb_text.replace("\\", "\\\\").replace("`", "\\`")
+
+            entries.append({
+                "rank": i + 1,
+                "name": name or pdb_file.stem,
+                "binder_id": eval_info.get("binder_id", ""),
+                "eval_rank": eval_info.get("adaptyv_rank", ""),
+                "length": len(seq),
+                "ext": ext,
+                "pdb": pdb_js,
+            })
+
+    if not entries:
+        return ""
+
+    viewer_id = f"ngl-viewer-{tool}"
+    info_id = f"ngl-info-{tool}"
+
+    buttons_html = []
+    for e in entries:
+        title_parts = [f"{e['name']}", f"{e['length']}aa"]
+        if e["binder_id"]:
+            title_parts.append(f"eval_id={e['binder_id']}")
+        if e["eval_rank"]:
+            title_parts.append(f"eval_rank={e['eval_rank']}")
+        title = " — ".join(title_parts)
+        buttons_html.append(
+            f'<button onclick="loadDesign_{tool.replace("-", "_")}({e["rank"]})" '
+            f'style="background:{colour};color:white;border:none;padding:0.3em 0.6em;'
+            f'margin:0.1em;border-radius:3px;cursor:pointer;font-size:0.8em;" '
+            f'title="{title}">#{e["rank"]}</button>'
+        )
+
+    pdb_data_js = ",\n        ".join(
+        f'{e["rank"]}: {{"pdb": `{e["pdb"]}`, "ext": "{e["ext"]}", '
+        f'"name": "{e["name"]}", "binder_id": "{e["binder_id"]}", '
+        f'"eval_rank": "{e["eval_rank"]}", "length": {e["length"]}}}'
+        for e in entries
+    )
+    default_rank = entries[0]["rank"]
+
+    tool_id = tool.replace("-", "_")
+    html = f"""
+<div style="margin:0.8em 0;padding:0.6em;border:1px solid #ddd;border-radius:4px;background:#fafafa;">
+  <div style="margin-bottom:0.4em;">
+    {"".join(buttons_html)}
+  </div>
+  <div id="{info_id}" style="font-size:0.85em;color:#333;margin-bottom:0.3em;padding:0.3em 0.6em;background:#fff;border-radius:3px;">Click a rank button to load 3D structure</div>
+  <div id="{viewer_id}" style="width:100%;height:400px;border:1px solid #ccc;border-radius:4px;background:#000;"></div>
+</div>
+
+<script>
+(function() {{
+  const designs_{tool_id} = {{
+    {pdb_data_js}
+  }};
+  let stage_{tool_id} = null;
+  let loaded_{tool_id} = false;
+
+  function init_{tool_id}() {{
+    if (typeof NGL === 'undefined') {{
+      setTimeout(init_{tool_id}, 100);
+      return;
+    }}
+    if (stage_{tool_id}) return;  // already initialized
+    stage_{tool_id} = new NGL.Stage("{viewer_id}", {{backgroundColor: "white"}});
+    window.addEventListener("resize", function() {{
+      if (stage_{tool_id}) stage_{tool_id}.handleResize();
+    }}, false);
+
+    window.loadDesign_{tool_id} = function(rank) {{
+      const d = designs_{tool_id}[rank];
+      if (!d || !stage_{tool_id}) return;
+      stage_{tool_id}.removeAllComponents();
+      const blob = new Blob([d.pdb], {{type: "text/plain"}});
+      stage_{tool_id}.loadFile(blob, {{ext: d.ext}}).then(function(comp) {{
+        comp.addRepresentation("cartoon", {{sele: ":A", color: "{colour}", smoothSheet: true}});
+        comp.addRepresentation("cartoon", {{sele: ":B", color: "#9E9E9E", smoothSheet: true}});
+        comp.autoView();
+        stage_{tool_id}.handleResize();  // ensure visible after data load
+      }});
+      document.getElementById("{info_id}").innerHTML =
+        "<b>" + d.name + "</b> &nbsp;·&nbsp; length=" + d.length + "aa" +
+        (d.binder_id ? " &nbsp;·&nbsp; eval_id=" + d.binder_id : "") +
+        (d.eval_rank ? " &nbsp;·&nbsp; eval_rank=" + d.eval_rank : "");
+      loaded_{tool_id} = true;
+    }};
+  }}
+
+  // Init when parent details opens (NGL needs visible container)
+  // Using MutationObserver to detect when details opens
+  document.addEventListener("DOMContentLoaded", function() {{
+    const viewer = document.getElementById("{viewer_id}");
+    if (!viewer) return;
+    const details = viewer.closest("details");
+    if (details) {{
+      details.addEventListener("toggle", function() {{
+        if (details.open) {{
+          init_{tool_id}();
+          // Auto-load first design if not loaded yet
+          if (!loaded_{tool_id}) {{
+            setTimeout(function() {{ window.loadDesign_{tool_id}({default_rank}); }}, 200);
+          }} else if (stage_{tool_id}) {{
+            setTimeout(function() {{ stage_{tool_id}.handleResize(); }}, 100);
+          }}
+        }}
+      }});
+    }} else {{
+      // Not in details — init immediately
+      init_{tool_id}();
+      setTimeout(function() {{ window.loadDesign_{tool_id}({default_rank}); }}, 200);
+    }}
+  }});
+}})();
+</script>
+"""
+    return html
+
+
+# Mapping: tool → (pdb_pattern, subdir_hints) for finding native PDBs
+# Value is (glob_pattern, relative_subdirs_to_try)
+_TOOL_PDB_HINTS = {
+    # BoltzGen final designs have names like 'config_XXXX'
+    "boltzgen": ("*{name}*.cif", []),
+    # BindCraft accepted PDBs named by Design column
+    "bindcraft": ("{name}*.pdb", []),
+    # PXDesign structures are in output dirs
+    "pxdesign": ("{name}*.pdb", []),
+    # Proteina-Complexa structures
+    "proteina_complexa": ("*{name}*.pdb", []),
+    # RFAA
+    "rfaa": ("*{name}*.pdb", []),
+    # Mosaic (no PDBs when TOP_K=0)
+    "mosaic": ("*{name}*.pdb", []),
+}
+
+
 def generate_report(
     df: pd.DataFrame,
     summary: dict,
     output_path: str | Path,
     tool_csvs: dict[str, str | Path] | None = None,
+    tool_pdb_dirs: dict[str, str | Path] | None = None,
 ) -> None:
     """Generate and write the HTML report.
 
@@ -439,11 +803,25 @@ def generate_report(
                                 )
                             n = len(native_df)
                             tool_table = _df_to_html(native_df, colour_tool=False)
+
+                            # Add 3D viewer if tool_pdb_dirs provided
+                            viewer_block = ""
+                            if tool_pdb_dirs and tool in tool_pdb_dirs:
+                                pdb_dir = Path(tool_pdb_dirs[tool])
+                                if pdb_dir.exists():
+                                    pattern = _TOOL_PDB_HINTS.get(tool, ("*{name}*.pdb", []))[0]
+                                    try:
+                                        viewer_block = _build_per_tool_pdb_viewer(
+                                            tool, csv_path, pdb_dir, pattern, seq_to_ids, n=10
+                                        )
+                                    except Exception as e:
+                                        viewer_block = f"<p style='color:#888;'><em>3D viewer error: {e}</em></p>"
+
                             per_tool_top10 += (
                                 f'<details style="margin:0.3em 0;">'
                                 f'<summary style="cursor:pointer;font-weight:bold;">'
                                 f"{display_name} — top {n} (native ranking)</summary>\n"
-                                f"{tool_table}\n</details>\n"
+                                f"{tool_table}\n{viewer_block}\n</details>\n"
                             )
                             continue
                         except Exception:
@@ -495,6 +873,13 @@ def generate_report(
     full_cols_available = [c for c in _full_cols if c in sort_df.columns]
     full_table = _df_to_html(sort_df[full_cols_available], max_rows=None)
 
+    # 3D viewer for top-20 refolded structures
+    structures_dir = output_path.parent / "top20_structures"
+    if structures_dir.exists():
+        ngl_viewer_block = _build_ngl_viewer(sort_df, structures_dir)
+    else:
+        ngl_viewer_block = "<p style='color:#888;'><em>No refolded structures available.</em></p>"
+
     html = _HTML_TEMPLATE.format(
         n_binders=len(sort_df),
         tool_counts_str=tool_counts_str or "—",
@@ -504,6 +889,7 @@ def generate_report(
         dist_plot=dist_b64,
         radar_plot=radar_b64,
         per_tool_top10=per_tool_top10,
+        ngl_viewer_block=ngl_viewer_block,
         full_table=full_table,
     )
 
