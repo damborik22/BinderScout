@@ -24,7 +24,7 @@ MOSAIC_DIR="${BINDMASTER_DIR}/Mosaic"
 EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
 
 # Pinned commits for reproducible installs (same as x86_64)
-BINDCRAFT_COMMIT="828fd9f"
+BINDCRAFT_COMMIT="7cd4ace"
 BOLTZGEN_COMMIT="da0f092"
 MOSAIC_COMMIT="dc9c4d7"
 

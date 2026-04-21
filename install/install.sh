@@ -21,7 +21,7 @@ MOSAIC_DIR="${BINDMASTER_DIR}/Mosaic"
 EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
 
 # Pinned commits for reproducible installs (x86_64 clones only; aarch64 uses bundled)
-BINDCRAFT_COMMIT="828fd9f"
+BINDCRAFT_COMMIT="7cd4ace"
 BOLTZGEN_COMMIT="da0f092"
 MOSAIC_COMMIT="0599248"
 
