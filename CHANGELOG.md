@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - aarch64 run scripts auto-detect platform and set `TORCH_CUDA_ARCH_LIST` and `JAX_PLATFORMS` for Blackwell GPUs
 - RFAA platform warning in aarch64 installer (DGL lacks CUDA aarch64 wheels)
 
+### Changed
+- **BindCraft pin** `828fd9f` → `7cd4ace` (3 upstream bugfixes): graylab→west.rosettacommons.org PyRosetta wheels (x86_64), `range(11,15)→(11,16)` model-selection fix, stage-3 `onehot_plddt` init + `align_pdbs` crash guard
+
 ### Fixed
 - Configurator `ask_choice()` return value destructuring for PXDesign mode and preset selection
 - RFAA template: Python 3.12 f-string syntax replaced with 3.10-compatible `ligand_line` variable
