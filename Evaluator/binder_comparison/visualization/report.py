@@ -363,16 +363,18 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path) -> str:
         pdb_text = pdb_path.read_text()
         # Escape backticks and backslashes for JS template literal
         pdb_js = pdb_text.replace("\\", "\\\\").replace("`", "\\`")
-        entries.append({
-            "rank": rank,
-            "binder_id": binder_id,
-            "tool": tool,
-            "tool_colour": _TOOL_COLOURS_NGL.get(tool, _TOOL_COLOURS_NGL["unknown"]),
-            "ipsae": f"{float(ipsae):.3f}" if ipsae not in ("", None) else "n/a",
-            "iptm": f"{float(iptm):.3f}" if iptm not in ("", None) else "n/a",
-            "length": str(length).rstrip(".0") if length else "?",
-            "pdb": pdb_js,
-        })
+        entries.append(
+            {
+                "rank": rank,
+                "binder_id": binder_id,
+                "tool": tool,
+                "tool_colour": _TOOL_COLOURS_NGL.get(tool, _TOOL_COLOURS_NGL["unknown"]),
+                "ipsae": f"{float(ipsae):.3f}" if ipsae not in ("", None) else "n/a",
+                "iptm": f"{float(iptm):.3f}" if iptm not in ("", None) else "n/a",
+                "length": str(length).rstrip(".0") if length else "?",
+                "pdb": pdb_js,
+            }
+        )
 
     if not entries:
         return "<p style='color:#888;'><em>No refolded structures available.</em></p>"
@@ -386,7 +388,7 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path) -> str:
             f'style="background:{e["tool_colour"]};color:white;border:none;padding:0.4em 0.7em;'
             f'margin:0.15em;border-radius:4px;cursor:pointer;font-size:0.85em;font-weight:bold;" '
             f'title="{_TOOL_DISPLAY.get(e["tool"], e["tool"])} — ipSAE={e["ipsae"]}, ipTM={e["iptm"]}, {e["length"]}aa">'
-            f'#{e["rank"]}</button>'
+            f"#{e['rank']}</button>"
         )
     buttons = "\n".join(buttons_html)
 
@@ -519,6 +521,7 @@ def _build_per_tool_pdb_viewer(
             if name:
                 # Strip leading "tool_NNNN_" prefix if present
                 import re as _re
+
                 m = _re.match(r"^([a-z]+_\d+_)(.+)$", name)
                 if m:
                     name_variants.append(m.group(2))
@@ -549,15 +552,17 @@ def _build_per_tool_pdb_viewer(
             ext = pdb_file.suffix[1:]
             pdb_js = pdb_text.replace("\\", "\\\\").replace("`", "\\`")
 
-            entries.append({
-                "rank": i + 1,
-                "name": name or pdb_file.stem,
-                "binder_id": eval_info.get("binder_id", ""),
-                "eval_rank": eval_info.get("adaptyv_rank", ""),
-                "length": len(seq),
-                "ext": ext,
-                "pdb": pdb_js,
-            })
+            entries.append(
+                {
+                    "rank": i + 1,
+                    "name": name or pdb_file.stem,
+                    "binder_id": eval_info.get("binder_id", ""),
+                    "eval_rank": eval_info.get("adaptyv_rank", ""),
+                    "length": len(seq),
+                    "ext": ext,
+                    "pdb": pdb_js,
+                }
+            )
 
     if not entries:
         return ""
