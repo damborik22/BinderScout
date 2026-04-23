@@ -16,6 +16,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - **BindCraft pin** `828fd9f` → `7cd4ace` (3 upstream bugfixes): graylab→west.rosettacommons.org PyRosetta wheels (x86_64), `range(11,15)→(11,16)` model-selection fix, stage-3 `onehot_plddt` init + `align_pdbs` crash guard
 
+### Removed (Part I — AF2 refolding removal, on `refactor/af3-rfd3-ph`)
+- Evaluator AF2 refolding is gone. This is step 1 of the AF3/Protenix refactor; AF3 (aarch64-only, DGX Spark) and Protenix (universal) will provide the second engine in Parts J & K.
+- Deleted files: `Evaluator/scripts/refold_af2.py`, `Evaluator/scripts/refold_Version6.py`, `Evaluator/binder_comparison/refolding/af2_runner.py`, `Evaluator/binder_comparison/cli/refold_af2.py`, `Evaluator/envs/binder-eval-af2.yml`
+- Installer no longer creates `binder-eval-af2` conda env (uninstall path still cleans legacy installs)
+- Schema: removed 8 `af2_*` fields from `StandardisedMetrics`, 2 from `PerResidueData`; pruned `af2_*` entries from `LOWER_IS_BETTER`, `ZSCORE_METRICS`; `model_weights` default now `{"boltz2": 1.0}`
+- Scoring: deleted `add_af2_ipsae_from_files`; `compute_agreement` engine list now `[boltz_pae_ipsae_min, protenix_ipsae_min, af3_ipsae_min]` (Protenix/AF3 columns land in Parts J & K)
+- Merger: `merge_refold_results(boltz2_csv, sequences_fasta)` (dropped `af2_csv` param)
+- Report & plots: removed `_compute_af2_boltz2_r`, `_correlation_callout_html`, `plot_af2_vs_boltz2_scatter`; pruned all `af2_*` columns from display lists and tooltip map
+- Evaluator orchestration: `evaluate.sh` is now 2-step (Boltz-2 + report); `binder-compare run` is 3-step (extract + refold-boltz2 + report)
+- BindCraft's internal AF2 design path, PXDesign's internal AF2 eval, and Proteina-Complexa's AF2 cross-val **all stay** — only Evaluator AF2 refolding was removed
+
 ### Fixed
 - Configurator `ask_choice()` return value destructuring for PXDesign mode and preset selection
 - RFAA template: Python 3.12 f-string syntax replaced with 3.10-compatible `ligand_line` variable

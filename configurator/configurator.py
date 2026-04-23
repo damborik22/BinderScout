@@ -202,7 +202,7 @@ def detect_installs() -> dict:
         "mosaic": (MOSAIC_VENV / "bin" / "python").exists(),
         "evaluator": (
             (EVALUATOR_DIR / "evaluate.sh").exists()
-            and (_env_exists("binder-eval-boltz2") or _env_exists("binder-eval-af2"))
+            and _env_exists("binder-eval")
         ),
         "rfaa": _env_exists("bindmaster_rfaa"),
         "pxdesign_local": _env_exists("bindmaster_pxdesign"),
@@ -1988,7 +1988,7 @@ def run_pipeline(cfg: dict, tools_enabled: dict):
             failed.append("Proteina-Complexa")
 
     if tools_enabled.get("evaluator"):
-        print_step("Running Evaluator  (Boltz2 + AF2 refolding — this may take a while)")
+        print_step("Running Evaluator  (Boltz-2 refolding + ranked report — this may take a while)")
         rc = subprocess.run(["bash", str(run_dir / "run_evaluate.sh")]).returncode
         if rc == 0:
             print_ok("Evaluator completed")
@@ -2203,7 +2203,7 @@ def wizard():
     print(f"  {BOLD}Proteina-Complexa{RESET} [{_tag('proteina_complexa')}]")
     use_proteina_complexa = ask_yn("  Enable Proteina-Complexa (NVIDIA flow matching)?", default=False)
     print(f"  {BOLD}Evaluator{RESET} [{_tag('evaluator')}]")
-    use_evaluator = ask_yn("  Enable cross-evaluation (Boltz2 + AF2 refolding)?", default=False)
+    use_evaluator = ask_yn("  Enable cross-evaluation (Boltz-2 refolding + ranked report)?", default=False)
 
     tools_enabled = {
         "mosaic": use_mosaic,
@@ -2559,7 +2559,7 @@ def wizard():
             f"max_designs={cfg.get('complexa_n_designs')}"
         )
     if use_evaluator:
-        print(f"  {CYAN}Evaluator{RESET}:     Boltz2 + AF2 refolding → evaluate report")
+        print(f"  {CYAN}Evaluator{RESET}:     Boltz-2 refolding → ranked report")
 
     print_tree(run_dir, tools_enabled, cfg)
 
@@ -2579,7 +2579,7 @@ def wizard():
     if use_boltzgen:
         print_warn("BoltzGen downloads ~6 GB of weights on first run.")
     if use_evaluator:
-        print_warn("Evaluator runs Boltz2 + AF2 refolding (GPU recommended, ~30 min per design).")
+        print_warn("Evaluator runs Boltz-2 refolding (GPU recommended, ~30 min per design).")
 
     if ask_yn("Run the pipeline now?", default=True):
         run_pipeline(cfg, tools_enabled)
