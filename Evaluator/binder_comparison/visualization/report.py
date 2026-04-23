@@ -3,7 +3,7 @@
 Produces a self-contained report.html with:
   - Summary table (top binders by composite score)
   - Per-tool summary statistics
-  - Embedded plots (metric distributions, radar chart, AF2 vs Boltz2 scatter)
+  - Embedded plots (metric distributions, radar chart)
   - Full metrics table (collapsible)
 """
 
@@ -92,16 +92,17 @@ _HTML_TEMPLATE = """\
 
 <p style="font-size:0.85em;color:#555;line-height:1.6;">
   <b>Methodology.</b>
-  All designed binder sequences are independently refolded with <b>Boltz-2</b> (primary predictor)
-  and <b>AlphaFold2</b> (cross-validation) as target–binder complexes.
+  All designed binder sequences are independently refolded with <b>Boltz-2</b> as target–binder complexes.
+  Additional refolding engines (Protenix on x86, AlphaFold 3 on DGX Spark / aarch64) may contribute
+  to the agreement count when available.
   The primary ranking metric is <b>ipSAE_min</b> — the minimum of binder→target and target→binder
   interface Predicted Structural Alignment Error, computed using the
   <a href="https://github.com/DunbrackLab/IPSAE" target="_blank">DunbrackLab d0<sub>res</sub> formula</a>
-  (per-residue d0, uniform 10 Å PAE cutoff for both engines).
+  (per-residue d0, uniform 10 Å PAE cutoff for all engines).
   This metric showed 1.4× better average precision than ipAE across 3,766 experimentally tested
   designs in the <a href="https://doi.org/10.1101/2025.08.14.670059" target="_blank">Adaptyv/Overath et al. 2025</a>
   benchmark. Quality tiers and the 0.61 pass threshold follow their screening methodology.
-  <b>agreement_count</b> reports how many engines (0–2) score ipSAE_min above 0.61.
+  <b>agreement_count</b> reports how many refolding engines score ipSAE_min above 0.61.
   Ranking sorts by quality tier first, then agreement count, then ipSAE_min.
 </p>
 
@@ -127,7 +128,7 @@ _HTML_TEMPLATE = """\
     <div style="border-top:1px solid #ccc;padding-top:0.5em;margin-top:0.5em;
                 font-family:'Segoe UI',sans-serif;font-size:0.9em;color:#555;">
       <b>ipSAE_min</b> = min(ipSAE<sub>binder→target</sub>, ipSAE<sub>target→binder</sub>)
-      &nbsp;&nbsp;·&nbsp;&nbsp; cutoff = 10 Å (uniform for Boltz-2 and AF2)
+      &nbsp;&nbsp;·&nbsp;&nbsp; cutoff = 10 Å (uniform across all engines)
     </div>
   </div>
 </details>
@@ -152,11 +153,9 @@ _HTML_TEMPLATE = """\
   <tr><td style="padding:2px 12px 2px 0;"><b>quality_tier</b></td>
       <td>High (&gt;0.80), Medium (&gt;0.61), Low (&gt;0.40), Reject (≤0.40) based on ipSAE_min</td></tr>
   <tr><td style="padding:2px 12px 2px 0;"><b>agreement</b></td>
-      <td>Number of engines (0–2) with ipSAE_min &gt; 0.61</td></tr>
+      <td>Number of engines with ipSAE_min &gt; 0.61</td></tr>
   <tr><td style="padding:2px 12px 2px 0;"><b>ipSAE_min ↑</b></td>
       <td>Primary metric — min(binder→target, target→binder) iPSAE from Boltz-2 PAE [0–1]</td></tr>
-  <tr><td style="padding:2px 12px 2px 0;"><b>AF2 ipSAE_min ↑</b></td>
-      <td>Same metric from AlphaFold2 cross-validation [0–1]</td></tr>
   <tr><td style="padding:2px 12px 2px 0;"><b>ipTM ↑</b></td>
       <td>Interface predicted TM-score from Boltz-2 [0–1]</td></tr>
   <tr><td style="padding:2px 12px 2px 0;"><b>pLDDT binder ↑</b></td>
@@ -212,122 +211,6 @@ pymol view_top20.pml</pre>
 </body>
 </html>
 """
-
-
-def _compute_af2_boltz2_r(df: pd.DataFrame) -> dict[str, float | int]:
-    """Compute Pearson r and systematic bias between Boltz-2 and AF2 metrics."""
-    import numpy as np
-
-    result: dict[str, float | int] = {}
-    for b_col, a_col in [("ipsae_min", "af2_ipsae_min"), ("iptm", "af2_iptm")]:
-        if b_col in df.columns and a_col in df.columns:
-            b = pd.to_numeric(df[b_col], errors="coerce")
-            a = pd.to_numeric(df[a_col], errors="coerce")
-            mask = b.notna() & a.notna()
-            n = int(mask.sum())
-            if n > 2:
-                bv, av = b[mask], a[mask]
-                r = float(np.corrcoef(bv, av)[0, 1])
-                result[f"{b_col}_vs_{a_col}"] = r
-                result[f"{b_col}_vs_{a_col}_n"] = n
-                # Systematic bias: mean difference and mean absolute error
-                result[f"{b_col}_mean"] = float(bv.mean())
-                result[f"{a_col}_mean"] = float(av.mean())
-                result[f"{b_col}_vs_{a_col}_mae"] = float((bv - av).abs().mean())
-    return result
-
-
-def _correlation_callout_html(corr: dict) -> str:
-    """Render a highlighted callout box for the AF2 vs Boltz-2 correlation."""
-    if not corr:
-        return ""
-
-    r_ipsae = corr.get("ipsae_min_vs_af2_ipsae_min")
-    n_ipsae = corr.get("ipsae_min_vs_af2_ipsae_min_n", 0)
-    r_iptm = corr.get("iptm_vs_af2_iptm")
-    n_iptm = corr.get("iptm_vs_af2_iptm_n", 0)
-
-    # Pick the most representative r value for the headline
-    headline_r = None
-    if r_ipsae is not None:
-        headline_r = r_ipsae
-    if r_iptm is not None and (headline_r is None or abs(r_iptm) > abs(headline_r)):
-        headline_r = r_iptm
-
-    if headline_r is None:
-        return ""
-
-    strength = "strong" if abs(headline_r) >= 0.7 else ("moderate" if abs(headline_r) >= 0.5 else "weak")
-
-    # Headline reflects the actual data
-    if strength == "strong":
-        headline_desc = "good rank-order agreement between the two predictors."
-    elif strength == "moderate":
-        headline_desc = "moderate rank-order correlation; absolute values may differ substantially."
-    else:
-        headline_desc = "weak correlation; the two predictors disagree on binder ranking."
-
-    # Detect systematic bias
-    bias_notes = []
-    for b_col, a_col, label in [
-        ("iptm", "af2_iptm", "ipTM"),
-        ("ipsae_min", "af2_ipsae_min", "ipSAE_min"),
-    ]:
-        b_mean = corr.get(f"{b_col}_mean")
-        a_mean = corr.get(f"{a_col}_mean")
-        mae = corr.get(f"{b_col}_vs_{a_col}_mae")
-        if b_mean is not None and a_mean is not None:
-            diff = b_mean - a_mean
-            if abs(diff) > 0.15:
-                higher = "Boltz-2" if diff > 0 else "AF2"
-                bias_notes.append(
-                    f"{label}: {higher} scores systematically higher "
-                    f"(Boltz-2 mean={b_mean:.3f}, AF2 mean={a_mean:.3f}, MAE={mae:.3f})"
-                )
-
-    # Correlation color: green for strong, amber for moderate, red for weak
-    r_colors = {"strong": "#1b5e20", "moderate": "#e65100", "weak": "#c62828"}
-    r_color = r_colors[strength]
-
-    lines = []
-    if r_iptm is not None:
-        s1 = "strong" if abs(r_iptm) >= 0.7 else ("moderate" if abs(r_iptm) >= 0.5 else "weak")
-        lines.append(
-            f"<strong>ipTM:</strong> Boltz-2 vs AF2 Pearson r = "
-            f"<strong style='font-size:1.25em; color:{r_color};'>{r_iptm:+.3f}</strong> "
-            f"(n = {n_iptm}) — {s1} rank-order correlation."
-        )
-    if r_ipsae is not None:
-        s2 = "strong" if abs(r_ipsae) >= 0.7 else ("moderate" if abs(r_ipsae) >= 0.5 else "weak")
-        lines.append(f"<strong>ipSAE_min:</strong> r = {r_ipsae:+.3f} (n = {n_ipsae}) — {s2}")
-
-    if bias_notes:
-        lines.append(
-            "<br><em style='color:#c62828;'>Systematic bias detected:</em> "
-            + "; ".join(bias_notes)
-            + ".<br><small>Note: AF2 (ColabDesign, single model, 3 recycles) is typically stricter "
-            "than Boltz-2 for de novo designs. Large absolute differences are common and do not "
-            "necessarily indicate errors.</small>"
-        )
-
-    # Callout style: green for strong, amber for moderate, muted for weak
-    if strength == "strong":
-        bg, border = "#e8f5e9", "#2e7d32"
-    elif strength == "moderate":
-        bg, border = "#fff8e1", "#f57f17"
-    else:
-        bg, border = "#fbe9e7", "#c62828"
-
-    inner = "<br>".join(lines)
-    return (
-        f'<div style="background:{bg}; border-left:5px solid {border}; '
-        f'padding:0.8em 1.2em; border-radius:4px; margin:1em 0; font-size:0.95em;">'
-        f'<p style="margin:0 0 0.4em 0; font-size:1.05em;">&#x1F4CA;&nbsp;'
-        f"<strong>Boltz-2 / AF2 Cross-Validation</strong>&nbsp;"
-        f"— {headline_desc}</p>"
-        f"<p style='margin:0;'>{inner}</p>"
-        f"</div>"
-    )
 
 
 _TOOL_COLOURS_NGL = {
@@ -531,8 +414,8 @@ def _build_per_tool_pdb_viewer(
 
             for variant in name_variants:
                 candidates = list(tool_pdb_dir.rglob(pdb_pattern.format(name=variant)))
-                # Prefer PDB over CIF, and non-AF2 subdir over AF2
-                candidates = sorted(candidates, key=lambda p: ("AF2" in p.parts, p.suffix != ".pdb"))
+                # Prefer PDB over CIF
+                candidates = sorted(candidates, key=lambda p: p.suffix != ".pdb")
                 if candidates:
                     pdb_file = candidates[0]
                     break
@@ -852,11 +735,8 @@ def generate_report(
         "quality_tier",
         "agreement_count",
         "ipsae_min",
-        "af2_ipsae_min",
         "iptm",
-        "af2_iptm",
         "boltz_pae_iptm",
-        "af2_pae_iptm",
         "plddt_binder_mean",
         "plddt_binder_min",
         "binder_ptm",
@@ -917,14 +797,11 @@ def _select_display_cols(df: pd.DataFrame) -> tuple[list[str], list[str]]:
         "quality_tier",
         "agreement_count",
         "ipsae_min",
-        "af2_ipsae_min",
         "iptm",
         "plddt_binder_mean",
     ]
     secondary = [
-        "af2_iptm",
         "boltz_pae_iptm",
-        "af2_pae_iptm",
         "binder_ptm",
         "plddt_binder_min",
         "ipae",
@@ -1097,33 +974,13 @@ _METRIC_DESCRIPTION = {
         "Primary ranking metric — ipSAE_min from independent Boltz-2 refolding (DunbrackLab formula, 10 Å cutoff). "
         "The sequence is refolded from scratch, so this is an unbiased assessment. Want >0.61."
     ),
-    "af2_ipsae_min": (
-        "ipSAE_min from independent AlphaFold2 refolding — cross-validation with a second prediction engine. "
-        "If both Boltz-2 and AF2 score >0.61, the design has dual-engine agreement (agreement_count = 2). "
-        "AF2 tends to score lower for computationally designed binders."
-    ),
-    "af2_bt_ipsae": (
-        "ipSAE binder→target from independent AF2 refolding. "
-        "Cross-validation metric — higher means AF2 also predicts binder contacts the target."
-    ),
-    "af2_tb_ipsae": (
-        "ipSAE target→binder from independent AF2 refolding. "
-        "Cross-validation metric — higher means AF2 also predicts target contacts the binder."
-    ),
     "iptm": (
         "Interface predicted TM-score from Boltz-2 — measures overall interface quality. "
-        "Higher = more confident complex prediction. Want >0.8. Note: can be inflated for AF2-designed sequences."
-    ),
-    "af2_iptm": (
-        "Interface predicted TM-score from AF2 refolding. "
-        "Low values are common for computationally designed binders — AF2 often struggles with de novo sequences."
+        "Higher = more confident complex prediction. Want >0.8."
     ),
     "boltz_pae_iptm": (
         "ipTM recomputed from Boltz-2 PAE matrix (rather than model-reported value). "
         "More consistent across runs. Higher = better."
-    ),
-    "af2_pae_iptm": (
-        "ipTM recomputed from AF2 PAE matrix. More consistent than model-reported AF2 ipTM. Higher = better."
     ),
     "binder_ptm": (
         "Predicted TM-score of the binder chain alone — does the binder fold into a stable structure by itself? "
@@ -1145,7 +1002,6 @@ _METRIC_DESCRIPTION = {
         "Interface Predicted Aligned Error — mean PAE across the binder–target interface in Angstroms. "
         "Lower = more confident interface. Superseded by ipSAE as a ranking metric."
     ),
-    "af2_ipae": "Same as ipAE but from AF2 refolding. Lower = better.",
     "pae_bt": (
         "Mean Predicted Aligned Error from binder residues to target residues in Angstroms. "
         "Lower = Boltz-2 is more confident about binder→target spatial arrangement."
@@ -1159,8 +1015,9 @@ _METRIC_DESCRIPTION = {
         "Reflects internal fold confidence. Lower = well-folded binder."
     ),
     "agreement_count": (
-        "Number of independent prediction engines (0–2) that score ipSAE_min above the 0.61 pass threshold. "
-        "0 = neither agrees, 1 = Boltz-2 only, 2 = both Boltz-2 and AF2 agree. Want 2."
+        "Number of independent prediction engines that score ipSAE_min above the 0.61 pass threshold. "
+        "Currently Boltz-2 only (0 or 1); Protenix (x86) and AlphaFold 3 (aarch64 / DGX Spark) "
+        "will be added as the refactor progresses. Higher = more engines agree = stronger candidate."
     ),
     "intra_contact": (
         "Binder internal contact score — measures how tightly the binder folds. "

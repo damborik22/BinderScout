@@ -11,9 +11,10 @@ Key columns (in evaluation_results CSVs):
   - 'self_complex_pLDDT'     — AF2 pLDDT from internal eval
   - 'self_binder_scRMSD'     — binder self-consistency RMSD
 
-Note: Complexa's internal AF2 scores are used as a reward signal during
-generation. For cross-tool comparison, we re-fold everything with our
-standardised Boltz-2 and AF2 pipeline.
+Note: Complexa's internal AF2 scores (tool-internal, not Evaluator refolding)
+are used as a reward signal during generation. For cross-tool comparison, we
+re-fold every binder sequence with our standardised Boltz-2 pipeline (plus
+Protenix on x86 and AF3 on aarch64 where configured).
 """
 
 from __future__ import annotations

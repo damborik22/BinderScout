@@ -2,13 +2,11 @@
 
 For each of the 8 standardised metrics, the canonical column (e.g. ``iptm``,
 ``ipae``) is a direct copy of the corresponding ``boltz_*`` source column.
-AF2 columns (``af2_iptm``, ``af2_ipae``, etc.) remain in the DataFrame for
-cross-validation but are not used for ranking or scoring.
 
 Boltz2-exclusive metrics (IPSAE family, binder_ptm, pTMEnergy, etc.) are
 passed through unchanged under their boltz_* column names.
 
-Note: despite the module name, no ensemble averaging takes place.  This module
+Note: despite the module name, no ensemble averaging takes place. This module
 exists for historical reasons and may be renamed in a future refactor.
 """
 
