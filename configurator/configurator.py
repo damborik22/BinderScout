@@ -1468,6 +1468,17 @@ def write_run_proteina_complexa(path: Path, cfg: dict):
 
     target_input_yaml = "\n".join(target_input_lines)
 
+    # Optional Hydra overrides (each ends with ` \\` so it sits on its own
+    # continuation line in the heredoc).  Built outside the f-string to stay
+    # py310-compatible (PEP 701 nested f-string escapes are 3.12+).
+    extra_overrides = ""
+    if mcts_n_simulations is not None:
+        extra_overrides += f"\n    ++generation.search.mcts.n_simulations={mcts_n_simulations} \\"
+    if nres_nsamples is not None:
+        extra_overrides += f"\n    ++generation.dataloader.dataset.nres.nsamples={nres_nsamples} \\"
+    if refinement:
+        extra_overrides += f"\n    ++generation.refinement.algorithm={refinement} \\"
+
     content = f"""\
 #!/usr/bin/env bash
 # Run Proteina-Complexa for {cfg["name"]}
@@ -1504,9 +1515,9 @@ echo "  Binder length: {min_len}-{max_len}"
 echo "  Search algorithm: {search_algo}"
 echo "  Replicas: {replicas}"
 echo "  Max designs: {n_designs}"
-echo "  MCTS n_simulations: {mcts_n_simulations if mcts_n_simulations is not None else '(default)'}"
-echo "  Length samples (nres.nsamples): {nres_nsamples if nres_nsamples is not None else '(default)'}"
-echo "  Refinement: {refinement or '(none)'}"
+echo "  MCTS n_simulations: {mcts_n_simulations if mcts_n_simulations is not None else "(default)"}"
+echo "  Length samples (nres.nsamples): {nres_nsamples if nres_nsamples is not None else "(default)"}"
+echo "  Refinement: {refinement or "(none)"}"
 echo ""
 
 # Run Proteina-Complexa design pipeline
@@ -1517,10 +1528,7 @@ complexa design configs/search_binder_local_pipeline.yaml \\
     ++generation.dataloader.dataset.nres.high={max_len} \\
     ++generation.search.algorithm={search_algo} \\
     ++generation.search.best_of_n.replicas={replicas} \\
-    ++generation.filter.filter_samples_limit={n_designs} \\{f"""
-    ++generation.search.mcts.n_simulations={mcts_n_simulations} \\""" if mcts_n_simulations is not None else ""}{f"""
-    ++generation.dataloader.dataset.nres.nsamples={nres_nsamples} \\""" if nres_nsamples is not None else ""}{f"""
-    ++generation.refinement.algorithm={refinement} \\""" if refinement else ""}
+    ++generation.filter.filter_samples_limit={n_designs} \\{extra_overrides}
     ++targets_dict="$TARGET_YAML"
 
 echo ""
@@ -1771,7 +1779,7 @@ set -u
 echo "=== RFD3 design for {name} ==="
 echo "  Target:        $TARGET_PDB (chain B, {target_len} residues)"
 echo "  Binder length: {min_len}-{max_len}"
-echo "  Hotspots:      {hotspots_str or '(none)'}"
+echo "  Hotspots:      {hotspots_str or "(none)"}"
 echo "  Designs:       {n_designs}  (batch_size={batch_size} x n_batches={n_batches} = {batch_size * n_batches})"
 echo "  Diffusion T:   {diffusion_steps}"
 echo "  Checkpoint:    {FOUNDRY_WEIGHTS_DIR}/rfd3_latest.ckpt"
@@ -1846,9 +1854,7 @@ def write_run_protein_hunter(path: Path, cfg: dict):
     plddt_thr = cfg.get("protein_hunter_plddt_threshold", 0.7)
     percent_x = cfg.get("protein_hunter_percent_X", 80)
     gpu_id = cfg.get("protein_hunter_gpu_id", 0)
-    contact_residues = (
-        cfg.get("protein_hunter_contact_residues") or cfg.get("hotspots", "") or ""
-    ).strip()
+    contact_residues = (cfg.get("protein_hunter_contact_residues") or cfg.get("hotspots", "") or "").strip()
 
     contact_arg = f' --contact_residues "{contact_residues}"' if contact_residues else ""
 
@@ -1884,12 +1890,12 @@ set -u
 cd "$PH_DIR"
 
 echo "=== Protein-Hunter design for {name} ==="
-echo "  Target seq:    {target_seq[:50]}{'...' if len(target_seq) > 50 else ''} ({len(target_seq)} aa)"
+echo "  Target seq:    {target_seq[:50]}{"..." if len(target_seq) > 50 else ""} ({len(target_seq)} aa)"
 echo "  Binder length: {min_len}-{max_len}"
 echo "  Designs:       {n_designs}"
 echo "  Cycles:        {num_cycles}"
 echo "  MSA mode:      {msa_mode}"
-echo "  Contacts:      {contact_residues or '(none)'}"
+echo "  Contacts:      {contact_residues or "(none)"}"
 echo "  iPTM thr:      {iptm_thr}"
 echo "  Output:        $PH_OUT"
 echo ""
