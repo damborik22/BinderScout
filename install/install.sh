@@ -1452,6 +1452,14 @@ LNEOF
         "${CONDA_CMD}" run -n bindmaster_pxdesign python -c "import torch; print('PXDesign env OK')" \
         || return 1
 
+    # Install binder-compare into the PXDesign env so Protenix refolding
+    # (Part J) can run via `conda run -n bindmaster_pxdesign binder-compare refold-protenix`.
+    if [[ -d "${EVALUATOR_DIR}" ]]; then
+        run_logged "Installing binder-compare into bindmaster_pxdesign (for Protenix refold)" \
+            "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -e "${EVALUATOR_DIR}[report]" \
+            || print_warn "binder-compare install into bindmaster_pxdesign failed — Protenix refolding will be unavailable"
+    fi
+
     # Shortcut
     mkdir -p "${SHORTCUTS_DIR}"
     cat > "${SHORTCUTS_DIR}/pxdesign" << PXDEOF

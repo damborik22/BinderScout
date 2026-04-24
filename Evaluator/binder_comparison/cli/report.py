@@ -22,6 +22,7 @@ from ..comparison.ensemble import compute_ensemble_metrics
 from ..comparison.merger import merge_refold_results
 from ..comparison.scoring import (
     add_boltz_ipsae_from_files,
+    add_ipsae_from_pae_files,
     add_iptm_from_pae_files,
     apply_screening_thresholds,
     compute_agreement,
@@ -42,6 +43,8 @@ def run(args: argparse.Namespace) -> None:
     df = merge_refold_results(
         boltz2_csv=args.boltz2_results,
         sequences_fasta=args.sequences,
+        protenix_csv=args.protenix_results,
+        af3_csv=args.af3_results,
     )
 
     # Attach native metrics from BindCraft CSV if provided
@@ -64,6 +67,32 @@ def run(args: argparse.Namespace) -> None:
         print("[report] Computing Boltz-2 ipTM from PAE files…")
         df = add_iptm_from_pae_files(
             df, pae_file_col="boltz_pae_file", ordering="binder_target", prefix="boltz", base_dir=boltz_base
+        )
+
+    # Protenix: DunbrackLab ipSAE + independent ipTM from the saved PAE matrix
+    protenix_base = Path(args.protenix_results).resolve().parent if args.protenix_results else None
+    if "protenix_pae_file" in df.columns:
+        print("[report] Computing Protenix ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
+        df = add_ipsae_from_pae_files(
+            df,
+            pae_file_col="protenix_pae_file",
+            prefix="protenix",
+            ordering="target_binder",
+            base_dir=protenix_base,
+        )
+        df = add_iptm_from_pae_files(
+            df, pae_file_col="protenix_pae_file", ordering="target_binder", prefix="protenix", base_dir=protenix_base
+        )
+
+    # AF3 (aarch64 / DGX Spark): identical treatment — Part K wires this up end-to-end.
+    af3_base = Path(args.af3_results).resolve().parent if args.af3_results else None
+    if "af3_pae_file" in df.columns:
+        print("[report] Computing AF3 ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
+        df = add_ipsae_from_pae_files(
+            df, pae_file_col="af3_pae_file", prefix="af3", ordering="target_binder", base_dir=af3_base
+        )
+        df = add_iptm_from_pae_files(
+            df, pae_file_col="af3_pae_file", ordering="target_binder", prefix="af3", base_dir=af3_base
         )
 
     # Promote Boltz-2 DunbrackLab PAE-based ipsae_min as the primary ranking column.
@@ -310,6 +339,18 @@ def add_parser(subparsers) -> None:
         description=__doc__,
     )
     p.add_argument("--boltz2-results", metavar="CSV", help="Output from 'refold-boltz2' (boltz2_results.csv)")
+    p.add_argument(
+        "--protenix-results",
+        metavar="CSV",
+        help="Optional: output from 'refold-protenix' (protenix_results.csv). Adds a "
+        "second engine to the agreement_count.",
+    )
+    p.add_argument(
+        "--af3-results",
+        metavar="CSV",
+        help="Optional: output from 'refold-af3' (af3_results.csv; aarch64 / DGX "
+        "Spark only). Adds a third engine to the agreement_count.",
+    )
     p.add_argument(
         "--sequences", metavar="FASTA", help="FASTA from 'extract' step (for binder_id and source_tool tags)"
     )

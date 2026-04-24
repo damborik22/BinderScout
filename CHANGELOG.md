@@ -16,6 +16,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - **BindCraft pin** `828fd9f` → `7cd4ace` (3 upstream bugfixes): graylab→west.rosettacommons.org PyRosetta wheels (x86_64), `range(11,15)→(11,16)` model-selection fix, stage-3 `onehot_plddt` init + `align_pdbs` crash guard
 
+### Added (Part J — Protenix refolder, on `refactor/af3-rfd3-ph`)
+- **Protenix v0.5.0 as universal 2nd refolding engine** — ByteDance's open-source AlphaFold 3 reimplementation (~3-4 GB weights auto-downloaded from ByteDance TOS, runs comfortably on 24 GB GPUs).
+- New CLI: `binder-compare refold-protenix` — runs inside the existing `bindmaster_pxdesign` conda env (no new env needed).
+- New files: `Evaluator/scripts/refold_protenix.py`, `Evaluator/binder_comparison/refolding/protenix_runner.py`, `Evaluator/binder_comparison/cli/refold_protenix.py`.
+- Schema: `protenix_*` columns in `StandardisedMetrics` (iptm, ptm, ranking_score, plddt_binder_mean/min, plddt_target_mean, pae_bt/tb/bb, bt_ipsae, tb_ipsae, ipsae_min). `af3_*` counterparts also reserved for Part K. pLDDT rescaled 0-100 → 0-1 on ingest.
+- Scoring: new generic `add_ipsae_from_pae_files(df, prefix=...)` for any engine's saved PAE matrix.
+- Merger: multi-engine support — `merge_refold_results(boltz2_csv, ..., protenix_csv=..., af3_csv=...)`. Accepts any combination; outer-joins on `sequence`.
+- `compute_agreement` now sums {boltz_pae_ipsae_min, protenix_ipsae_min, af3_ipsae_min} passing the 0.61 threshold (0–3 on Spark, 0–2 on x86).
+- Orchestration:
+  - `Evaluator/evaluate.sh` auto-detects `bindmaster_pxdesign`; Protenix step runs between Boltz-2 and report unless `--skip-protenix` or env missing.
+  - `binder-compare run --protenix-env bindmaster_pxdesign` enables Protenix; omit to skip.
+  - `binder-compare report` gains `--protenix-results` and `--af3-results`.
+- Installer: PXDesign step now pip-installs `binder-compare` into `bindmaster_pxdesign` env so Protenix refolding is available after `bindmaster install --tool pxdesign`.
+- **Live smoke test passed** — 2 × 43aa random binders against 76aa ubiquitin target: inference ~12 s/design on RTX 3090, CSV + `*_pae.npy` populated, token-pair PAE extracted via `need_atom_confidence=True`, DunbrackLab ipSAE computed downstream in the report.
+
 ### Removed (Part I — AF2 refolding removal, on `refactor/af3-rfd3-ph`)
 - Evaluator AF2 refolding is gone. This is step 1 of the AF3/Protenix refactor; AF3 (aarch64-only, DGX Spark) and Protenix (universal) will provide the second engine in Parts J & K.
 - Deleted files: `Evaluator/scripts/refold_af2.py`, `Evaluator/scripts/refold_Version6.py`, `Evaluator/binder_comparison/refolding/af2_runner.py`, `Evaluator/binder_comparison/cli/refold_af2.py`, `Evaluator/envs/binder-eval-af2.yml`

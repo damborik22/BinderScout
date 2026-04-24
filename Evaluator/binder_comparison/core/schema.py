@@ -73,6 +73,36 @@ class StandardisedMetrics:
     target_contact: float | None = None  # Binder-target contacts
     pTMEnergy: float | None = None  # Boltz2 energy proxy (lower better)
 
+    # ---- Protenix v0.5.0 values (universal 2nd engine; rides bindmaster_pxdesign env) ----
+    # pLDDT is rescaled 0-100 → 0-1 on ingest so it's directly comparable to Boltz-2.
+    protenix_iptm: float | None = None
+    protenix_ptm: float | None = None
+    protenix_ranking_score: float | None = None  # 0.8*iptm + 0.2*ptm + 0.5*disorder - 100*has_clash
+    protenix_plddt_binder_mean: float | None = None
+    protenix_plddt_binder_min: float | None = None
+    protenix_plddt_target_mean: float | None = None
+    protenix_pae_bt: float | None = None
+    protenix_pae_tb: float | None = None
+    protenix_pae_bb: float | None = None
+    # DunbrackLab PAE-based ipSAE (added by report.py post-merge)
+    protenix_bt_ipsae: float | None = None
+    protenix_tb_ipsae: float | None = None
+    protenix_ipsae_min: float | None = None
+
+    # ---- AlphaFold 3 v3.0.2 values (aarch64 / DGX Spark only; wired in Part K) ----
+    af3_iptm: float | None = None
+    af3_ptm: float | None = None
+    af3_ranking_score: float | None = None
+    af3_plddt_binder_mean: float | None = None
+    af3_plddt_binder_min: float | None = None
+    af3_plddt_target_mean: float | None = None
+    af3_pae_bt: float | None = None
+    af3_pae_tb: float | None = None
+    af3_pae_bb: float | None = None
+    af3_bt_ipsae: float | None = None
+    af3_tb_ipsae: float | None = None
+    af3_ipsae_min: float | None = None
+
 
 @dataclass
 class PerResidueData:
@@ -87,6 +117,8 @@ class PerResidueData:
     binder_length: int | None = None
     boltz_plddt: np.ndarray | None = None
     boltz_pae: np.ndarray | None = None
+    protenix_pae: np.ndarray | None = None
+    af3_pae: np.ndarray | None = None
 
 
 @dataclass
@@ -149,6 +181,12 @@ LOWER_IS_BETTER = frozenset(
         "boltz_pae_bt",
         "boltz_pae_tb",
         "boltz_pae_bb",
+        "protenix_pae_bt",
+        "protenix_pae_tb",
+        "protenix_pae_bb",
+        "af3_pae_bt",
+        "af3_pae_tb",
+        "af3_pae_bb",
         "pTMEnergy",
     }
 )
@@ -198,6 +236,24 @@ ZSCORE_METRICS = list(BOLTZ2_METRIC_MAP.keys()) + [
     "boltz_pae_bt_ipsae",
     "boltz_pae_tb_ipsae",
     "boltz_pae_ipsae_min",
+    # Protenix DunbrackLab ipSAE + summary metrics
+    "protenix_iptm",
+    "protenix_ptm",
+    "protenix_ranking_score",
+    "protenix_plddt_binder_mean",
+    "protenix_bt_ipsae",
+    "protenix_tb_ipsae",
+    "protenix_ipsae_min",
+    "protenix_pae_iptm",
+    # AF3 DunbrackLab ipSAE + summary metrics (aarch64 / DGX Spark only)
+    "af3_iptm",
+    "af3_ptm",
+    "af3_ranking_score",
+    "af3_plddt_binder_mean",
+    "af3_bt_ipsae",
+    "af3_tb_ipsae",
+    "af3_ipsae_min",
+    "af3_pae_iptm",
     # ipTM computed independently from PAE matrices
     "boltz_pae_iptm",
 ]
