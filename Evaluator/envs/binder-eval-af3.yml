@@ -1,0 +1,21 @@
+name: binder-eval-af3
+# AlphaFold 3 v3.0.2 refolding step (aarch64 / DGX Spark only).
+#
+# Used for: binder-compare refold-af3
+# Platform: aarch64 (NVIDIA DGX Spark, Blackwell GB10)
+#
+# AF3 model weights must be downloaded separately:
+#   1. Request access at https://github.com/google-deepmind/alphafold3
+#   2. Download and place in ~/.alphafold3/models/  (or set AF3_MODEL_DIR)
+#
+# After creating the env, install the evaluator package:
+#   conda env create -f binder-eval-af3.yml
+#   conda run -n binder-eval-af3 pip install alphafold3 gemmi
+#   conda run -n binder-eval-af3 pip install -e <repo_root>/Evaluator/
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy>=1.24

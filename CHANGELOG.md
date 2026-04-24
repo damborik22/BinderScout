@@ -22,6 +22,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **RFAA deprecated (not deleted)**. Dropped from interactive menu and from the `--tool all` meta-tool. Still installable via `bindmaster install --tool rfaa` for reproducing existing runs. `install_rfaa()` now prints a deprecation banner pointing at RFD3 and `docs/rfaa_manual_reinstall.md`.
 - **New doc** `docs/rfaa_manual_reinstall.md` captures commit SHAs, post-install patches, and manual-reproducibility steps for long-term RFAA maintenance.
 
+### Added (Part K — AlphaFold 3 refolder, aarch64 branch)
+- **AlphaFold 3 v3.0.2** (Google DeepMind, original) as the second refolding engine on DGX Spark (aarch64 / Blackwell).
+- New CLI: `binder-compare refold-af3` — runs inside `binder-eval-af3` conda env.
+- New files: `Evaluator/scripts/refold_af3.py`, `Evaluator/binder_comparison/refolding/af3_runner.py`, `Evaluator/binder_comparison/cli/refold_af3.py`, `Evaluator/envs/binder-eval-af3.yml`.
+- AF3 invoked with `--run_data_pipeline=false` (no MSA search; de novo binder sequences have no homologs).
+- PAE ordering: [target | binder] — matches Protenix convention; `ordering="target_binder"` used in ipSAE computation.
+- pLDDT extracted from per-atom `atom_plddts` via CA atom selection (gemmi), normalised 0-100 → 0-1.
+- mmCIF output converted to PDB via gemmi for visualization pipeline compatibility.
+- `evaluate.sh` gains `--skip-af3` / `--af3-env` flags; AF3 step auto-detected via `binder-eval-af3` env presence.
+- Requires AF3 model weights (separate download, Google DeepMind terms of use).
+
 ### Added (Part J — Protenix refolder, on `refactor/af3-rfd3-ph`)
 - **Protenix v0.5.0 as universal 2nd refolding engine** — ByteDance's open-source AlphaFold 3 reimplementation (~3-4 GB weights auto-downloaded from ByteDance TOS, runs comfortably on 24 GB GPUs).
 - New CLI: `binder-compare refold-protenix` — runs inside the existing `bindmaster_pxdesign` conda env (no new env needed).
