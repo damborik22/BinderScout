@@ -22,6 +22,7 @@ TOOL_COLOURS = {
     "pxdesign": "#9C27B0",  # purple
     "proteina_complexa": "#795548",  # brown
     "rfaa": "#C62828",  # red
+    "protein_hunter": "#00838F",  # teal-cyan
     "unknown": "#9E9E9E",  # grey
 }
 
@@ -33,6 +34,7 @@ _TOOL_DISPLAY = {
     "bindcraft": "BindCraft",
     "proteina_complexa": "Proteina-Complexa",
     "rfaa": "RFAA",
+    "protein_hunter": "Protein-Hunter",
 }
 
 
