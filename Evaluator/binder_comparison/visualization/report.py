@@ -363,6 +363,30 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path) -> str:
     return html
 
 
+def _native_pdb_sort_key(tool: str, p: Path) -> tuple[int, int]:
+    """Rank a candidate PDB/CIF so the tool's own complex prediction wins.
+
+    For PXDesign: ptx_pred (Protenix refold, has pLDDT) > converted_pdbs (raw
+    diffusion, no confidence) > af2_pred (cross-validation). For other tools:
+    prefer non-AF2 paths. Within a tier, .pdb beats .cif.
+    """
+    parts_lower = [s.lower() for s in p.parts]
+
+    if tool == "pxdesign":
+        if "ptx_pred" in parts_lower:
+            tier = 0
+        elif "converted_pdbs" in parts_lower:
+            tier = 1
+        elif "af2_pred" in parts_lower:
+            tier = 2
+        else:
+            tier = 3
+    else:
+        tier = 1 if any("af2" in s for s in parts_lower) else 0
+
+    return (tier, 0 if p.suffix == ".pdb" else 1)
+
+
 def _build_per_tool_pdb_viewer(
     tool: str,
     tool_csv_path: Path,
@@ -420,8 +444,9 @@ def _build_per_tool_pdb_viewer(
 
             for variant in name_variants:
                 candidates = list(tool_pdb_dir.rglob(pdb_pattern.format(name=variant)))
-                # Prefer PDB over CIF
-                candidates = sorted(candidates, key=lambda p: p.suffix != ".pdb")
+                # Drop binder-alone files — interface view needs target present.
+                candidates = [p for p in candidates if "MONOMER_ONLY" not in p.name]
+                candidates = sorted(candidates, key=lambda p: _native_pdb_sort_key(tool, p))
                 if candidates:
                     pdb_file = candidates[0]
                     break
