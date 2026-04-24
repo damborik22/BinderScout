@@ -367,10 +367,15 @@ def _native_pdb_sort_key(tool: str, p: Path) -> tuple[int, int]:
     """Rank a candidate PDB/CIF so the tool's own complex prediction wins.
 
     For PXDesign: ptx_pred (Protenix refold, has pLDDT) > converted_pdbs (raw
-    diffusion, no confidence) > af2_pred (cross-validation). For other tools:
-    prefer non-AF2 paths. Within a tier, .pdb beats .cif.
+    diffusion, no confidence) > af2_pred (cross-validation).
+    For Proteina-Complexa: AF2/* (refolded complex with confidence) > raw
+    sample (inference/.../<design>.pdb + evaluation_results copy) > _updated
+    (Cα-only backbone). _binder.pdb is dropped upstream by _is_monomer_pdb.
+    For other tools: prefer non-AF2 paths.
+    Within a tier, .pdb beats .cif.
     """
     parts_lower = [s.lower() for s in p.parts]
+    name_lower = p.name.lower()
 
     if tool == "pxdesign":
         if "ptx_pred" in parts_lower:
@@ -381,10 +386,43 @@ def _native_pdb_sort_key(tool: str, p: Path) -> tuple[int, int]:
             tier = 2
         else:
             tier = 3
+    elif tool == "proteina_complexa":
+        if "af2" in parts_lower:
+            tier = 0
+        elif name_lower.endswith("_updated.pdb"):
+            tier = 2
+        else:
+            tier = 1
     else:
         tier = 1 if any("af2" in s for s in parts_lower) else 0
 
     return (tier, 0 if p.suffix == ".pdb" else 1)
+
+
+def _is_monomer_pdb(tool: str, p: Path) -> bool:
+    """Return True for per-tool PDB variants that strip the target chain.
+
+    These show the binder alone, which hides the interface in the report's
+    3D viewer. Drop them from the candidate pool regardless of tier.
+    """
+    name_lower = p.name.lower()
+    parts_lower = [s.lower() for s in p.parts]
+
+    # PXDesign writes <design>_MONOMER_ONLY.pdb.
+    if "monomer_only" in name_lower:
+        return True
+
+    # Proteina-Complexa emits <design>_binder.pdb (binder chain only) plus
+    # an esmfold_output/ subdir with monomer refolds.
+    if tool == "proteina_complexa":
+        if name_lower.endswith("_binder.pdb"):
+            return True
+        if "esmfold_output" in parts_lower:
+            return True
+        if any(part.endswith("_binder") for part in parts_lower):
+            return True
+
+    return False
 
 
 def _build_per_tool_pdb_viewer(
@@ -445,7 +483,7 @@ def _build_per_tool_pdb_viewer(
             for variant in name_variants:
                 candidates = list(tool_pdb_dir.rglob(pdb_pattern.format(name=variant)))
                 # Drop binder-alone files — interface view needs target present.
-                candidates = [p for p in candidates if "MONOMER_ONLY" not in p.name]
+                candidates = [p for p in candidates if not _is_monomer_pdb(tool, p)]
                 candidates = sorted(candidates, key=lambda p: _native_pdb_sort_key(tool, p))
                 if candidates:
                     pdb_file = candidates[0]
