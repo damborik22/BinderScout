@@ -2,6 +2,7 @@ from .ensemble import compute_ensemble_metrics
 from .merger import merge_refold_results
 from .scoring import (
     add_boltz_ipsae_from_files,
+    add_ipsae_from_pae_files,
     add_iptm_from_pae_files,
     apply_screening_thresholds,
     compute_agreement,
@@ -14,6 +15,7 @@ from .statistics import compute_statistics
 
 __all__ = [
     "add_boltz_ipsae_from_files",
+    "add_ipsae_from_pae_files",
     "add_iptm_from_pae_files",
     "apply_screening_thresholds",
     "compute_agreement",
