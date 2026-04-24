@@ -1,9 +1,10 @@
 #!/bin/bash
 # BindMaster Installer
-# Installs BindCraft, BoltzGen, and/or Mosaic protein design tools.
+# Installs BindCraft, BoltzGen, Mosaic, RFAA, PXDesign, Proteina-Complexa,
+# Protein-Hunter, and/or the Evaluator.
 #
 # Usage:
-#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|rfaa|pxdesign|proteina-complexa|all] [--cuda VERSION] [--skip-examples] [--yes]
+#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|rfaa|pxdesign|proteina-complexa|protein-hunter|all] [--cuda VERSION] [--skip-examples] [--yes]
 #   bindmaster install [same options]
 #
 # With no --tool flag, an interactive menu lets you choose which tools to install.
@@ -35,6 +36,17 @@ PXDESIGN_DIR="${BINDMASTER_DIR}/PXDesign"
 PROTEINA_COMPLEXA_REPO="https://github.com/NVIDIA-Digital-Bio/proteina-complexa.git"
 PROTEINA_COMPLEXA_COMMIT="HEAD"
 PROTEINA_COMPLEXA_DIR="${BINDMASTER_DIR}/Proteina-Complexa"
+PROTEIN_HUNTER_REPO="https://github.com/yehlincho/Protein-Hunter.git"
+PROTEIN_HUNTER_COMMIT="d4bd9515882c2aa81e97f3d3bf7f42247a9fe80c"
+PROTEIN_HUNTER_DIR="${BINDMASTER_DIR}/Protein-Hunter"
+# RFD3 / Foundry (Baker lab's RFdiffusion3; replaces RFAA).
+# Installed from PyPI as rc-foundry — no clone needed. Variables kept for
+# documentation + uninstall (FOUNDRY_DIR is cleaned on uninstall if present).
+# shellcheck disable=SC2034
+FOUNDRY_REPO="https://github.com/RosettaCommons/foundry.git"
+FOUNDRY_COMMIT="v0.1.9"
+FOUNDRY_DIR="${BINDMASTER_DIR}/Foundry"
+FOUNDRY_WEIGHTS_DIR="${BINDMASTER_DIR}/weights/foundry"
 
 CONDA_CMD=""          # set by detect_conda: full path to mamba (preferred) or conda
 ARCH="$(uname -m)"   # x86_64 or aarch64 (e.g. DGX Spark / Grace-Hopper)
@@ -60,9 +72,11 @@ DO_BINDCRAFT=false
 DO_BOLTZGEN=false
 DO_MOSAIC=false
 DO_EVALUATOR=false
-DO_RFAA=false
+DO_RFAA=false           # legacy — opt-in via --tool rfaa; RFD3 is the default all-atom tool
 DO_PXDESIGN=false
 DO_PROTEINA_COMPLEXA=false
+DO_PROTEIN_HUNTER=false
+DO_RFD3=false
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -71,7 +85,9 @@ while [[ $# -gt 0 ]]; do
             TOOL_SPECIFIED=true
             case "${2,,}" in
                 all)
-                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_RFAA=true; DO_PXDESIGN=true; DO_PROTEINA_COMPLEXA=true ;;
+                    # "all" installs current-generation tools. RFAA is legacy
+                    # (replaced by RFD3); opt in explicitly with --tool rfaa.
+                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true; DO_PROTEINA_COMPLEXA=true; DO_PROTEIN_HUNTER=true; DO_RFD3=true ;;
                 bindcraft)
                     DO_BINDCRAFT=true ;;
                 boltzgen)
@@ -82,12 +98,16 @@ while [[ $# -gt 0 ]]; do
                     DO_EVALUATOR=true ;;
                 rfaa)
                     DO_RFAA=true ;;
+                rfd3|foundry)
+                    DO_RFD3=true ;;
                 pxdesign)
                     DO_PXDESIGN=true ;;
                 proteina-complexa|proteina_complexa|complexa)
                     DO_PROTEINA_COMPLEXA=true ;;
+                protein-hunter|protein_hunter|phunter)
+                    DO_PROTEIN_HUNTER=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfaa, pxdesign, proteina-complexa${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfaa, rfd3, pxdesign, proteina-complexa, protein-hunter${RESET}"
                     exit 1
                     ;;
             esac
@@ -473,6 +493,14 @@ is_pxdesign_installed() {
     [[ -d "${PXDESIGN_DIR}" ]] && env_exists bindmaster_pxdesign
 }
 
+is_protein_hunter_installed() {
+    [[ -d "${PROTEIN_HUNTER_DIR}" ]] && env_exists bindmaster_protein_hunter
+}
+
+is_rfd3_installed() {
+    env_exists bindmaster_rfd3
+}
+
 is_proteina_complexa_installed() {
     [[ -d "${PROTEINA_COMPLEXA_DIR}" ]] && [[ -d "${PROTEINA_COMPLEXA_DIR}/.venv" ]]
 }
@@ -501,45 +529,50 @@ print_tool_status() {
 # DO_BINDCRAFT / DO_BOLTZGEN / DO_MOSAIC based on user choices.
 
 select_tools_interactive() {
-    # Default: all selected
+    # Default: current-generation tools selected. RFAA is legacy and not shown
+    # here; opt in with `--tool rfaa` on the CLI. RFD3 replaces it in the menu.
     local sel_bc=true
     local sel_bg=true
     local sel_mo=true
     local sel_ev=true
-    local sel_rfaa=false
+    local sel_rfd3=true
     local sel_pxd=false
     local sel_pc=false
+    local sel_ph=false
 
-    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "RFAA" "PXDesign" "Proteina-Complexa")
+    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "RFD3" "PXDesign" "Proteina-Complexa" "Protein-Hunter")
     local descs=(
         "Binder design via AlphaFold2 (conda, Python 3.10)"
         "Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)"
         "JAX-based protein design with Marimo notebooks (uv venv)"
-        "Evaluate binders: refold with Boltz-2 + AF2, ranked report (requires Mosaic)"
-        "All-atom diffusion + LigandMPNN for ligand binder design (conda)"
+        "Evaluate binders: refold with Boltz-2 (+ Protenix on x86, AF3 on aarch64), ranked report (requires Mosaic)"
+        "RFD3 / foundry — all-atom diffusion for protein + ligand + NA binders (conda, replaces RFAA)"
         "Protenix-based de novo binder design (conda)"
         "NVIDIA flow matching + test-time compute binder design (uv venv)"
+        "Protein-Hunter — Boltz/Chai hallucination: protein/cyclic/ligand/DNA/RNA binders (conda)"
     )
 
     # Check current install state once (avoid repeated conda calls in the loop)
-    local inst_bc inst_bg inst_mo inst_ev inst_rfaa inst_pxd inst_pc
+    local inst_bc inst_bg inst_mo inst_ev inst_rfd3 inst_pxd inst_pc inst_ph
     is_bindcraft_installed && inst_bc="${GREEN}installed${RESET}" || inst_bc="${YELLOW}not installed${RESET}"
     is_boltzgen_installed  && inst_bg="${GREEN}installed${RESET}" || inst_bg="${YELLOW}not installed${RESET}"
     is_mosaic_installed    && inst_mo="${GREEN}installed${RESET}" || inst_mo="${YELLOW}not installed${RESET}"
     is_evaluator_installed && inst_ev="${GREEN}installed${RESET}" || inst_ev="${YELLOW}not installed${RESET}"
-    is_rfaa_installed      && inst_rfaa="${GREEN}installed${RESET}" || inst_rfaa="${YELLOW}not installed${RESET}"
+    is_rfd3_installed      && inst_rfd3="${GREEN}installed${RESET}" || inst_rfd3="${YELLOW}not installed${RESET}"
     is_pxdesign_installed  && inst_pxd="${GREEN}installed${RESET}" || inst_pxd="${YELLOW}not installed${RESET}"
     is_proteina_complexa_installed && inst_pc="${GREEN}installed${RESET}" || inst_pc="${YELLOW}not installed${RESET}"
-    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev" "$inst_rfaa" "$inst_pxd" "$inst_pc")
+    is_protein_hunter_installed    && inst_ph="${GREEN}installed${RESET}" || inst_ph="${YELLOW}not installed${RESET}"
+    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev" "$inst_rfd3" "$inst_pxd" "$inst_pc" "$inst_ph")
 
     # Helper: print current state
     _print_menu() {
         echo ""
         echo -e "${BOLD}${CYAN}  Select tools to install${RESET}"
         echo -e "  Type a number to toggle selection, then press Enter when done."
+        echo -e "  ${YELLOW}(note: RFAA is legacy — use ${CYAN}--tool rfaa${RESET}${YELLOW} on the CLI to opt in)${RESET}"
         echo ""
-        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_rfaa" "$sel_pxd" "$sel_pc")
-        for i in 0 1 2 3 4 5 6; do
+        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_rfd3" "$sel_pxd" "$sel_pc" "$sel_ph")
+        for i in 0 1 2 3 4 5 6 7; do
             local box
             if [[ "${states[$i]}" == true ]]; then
                 box="${GREEN}[x]${RESET}"
@@ -563,20 +596,21 @@ select_tools_interactive() {
             2) [[ "$sel_bg" == true ]] && sel_bg=false || sel_bg=true ;;
             3) [[ "$sel_mo" == true ]] && sel_mo=false || sel_mo=true ;;
             4) [[ "$sel_ev" == true ]] && sel_ev=false || sel_ev=true ;;
-            5) [[ "$sel_rfaa" == true ]] && sel_rfaa=false || sel_rfaa=true ;;
+            5) [[ "$sel_rfd3" == true ]] && sel_rfd3=false || sel_rfd3=true ;;
             6) [[ "$sel_pxd" == true ]] && sel_pxd=false || sel_pxd=true ;;
             7) [[ "$sel_pc" == true ]] && sel_pc=false || sel_pc=true ;;
-            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true;  sel_rfaa=true;  sel_pxd=true;  sel_pc=true  ;;
-            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false; sel_rfaa=false; sel_pxd=false; sel_pc=false ;;
+            8) [[ "$sel_ph" == true ]] && sel_ph=false || sel_ph=true ;;
+            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true;  sel_rfd3=true;  sel_pxd=true;  sel_pc=true;  sel_ph=true  ;;
+            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false; sel_rfd3=false; sel_pxd=false; sel_pc=false; sel_ph=false ;;
             "")
                 # Confirm: at least one must be selected
-                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false && "$sel_rfaa" == false && "$sel_pxd" == false && "$sel_pc" == false ]]; then
+                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false && "$sel_rfd3" == false && "$sel_pxd" == false && "$sel_pc" == false && "$sel_ph" == false ]]; then
                     echo -e "  ${RED}No tools selected. Select at least one.${RESET}"
                     continue
                 fi
                 break
                 ;;
-            *) echo -e "  ${RED}Invalid input. Enter 1–7, a, n, or press Enter.${RESET}" ;;
+            *) echo -e "  ${RED}Invalid input. Enter 1–8, a, n, or press Enter.${RESET}" ;;
         esac
     done
 
@@ -584,9 +618,10 @@ select_tools_interactive() {
     DO_BOLTZGEN="$sel_bg"
     DO_MOSAIC="$sel_mo"
     DO_EVALUATOR="$sel_ev"
-    DO_RFAA="$sel_rfaa"
+    DO_RFD3="$sel_rfd3"
     DO_PXDESIGN="$sel_pxd"
     DO_PROTEINA_COMPLEXA="$sel_pc"
+    DO_PROTEIN_HUNTER="$sel_ph"
 
     echo ""
     echo -e "  ${BOLD}Installing:${RESET}"
@@ -594,9 +629,11 @@ select_tools_interactive() {
     [[ "$DO_BOLTZGEN"  == true ]] && echo -e "    ${GREEN}✓${RESET} BoltzGen"
     [[ "$DO_MOSAIC"    == true ]] && echo -e "    ${GREEN}✓${RESET} Mosaic"
     [[ "$DO_EVALUATOR" == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
-    [[ "$DO_RFAA"      == true ]] && echo -e "    ${GREEN}✓${RESET} RFAA"
+    [[ "$DO_RFAA"      == true ]] && echo -e "    ${YELLOW}✓ RFAA (legacy)${RESET}"
+    [[ "$DO_RFD3"      == true ]] && echo -e "    ${GREEN}✓${RESET} RFD3"
     [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
     [[ "$DO_PROTEINA_COMPLEXA" == true ]] && echo -e "    ${GREEN}✓${RESET} Proteina-Complexa"
+    [[ "$DO_PROTEIN_HUNTER" == true ]] && echo -e "    ${GREEN}✓${RESET} Protein-Hunter"
     echo ""
 
     confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
@@ -1083,23 +1120,10 @@ install_evaluator() {
         "${CONDA_CMD}" run -n binder-eval pip install -q -e "${EVALUATOR_DIR}[report]" \
         || { print_fail "Failed to install binder-compare into binder-eval"; return 1; }
 
-    # binder-eval-af2 conda env (AF2 refolding via ColabDesign)
-    print_step "Creating binder-eval-af2 conda environment (Python 3.10)"
-    if env_exists binder-eval-af2; then
-        print_warn "Conda environment 'binder-eval-af2' already exists — skipping creation."
-    else
-        run_logged "Creating binder-eval-af2 conda env" \
-            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval-af2.yml" -y \
-            || { print_fail "Failed to create binder-eval-af2 conda env"; return 1; }
-    fi
-    run_logged "Installing ColabDesign + binder-compare into binder-eval-af2" \
-        "${CONDA_CMD}" run -n binder-eval-af2 pip install -q colabdesign==1.1.1 -e "${EVALUATOR_DIR}[af2]" \
-        || { print_fail "Failed to install packages into binder-eval-af2"; return 1; }
-
-    # ColabDesign pulls CPU-only JAX by default; install CUDA plugin
-    run_logged "Installing JAX CUDA plugin into binder-eval-af2" \
-        "${CONDA_CMD}" run -n binder-eval-af2 pip install -q "jax[cuda12]" \
-        || { print_fail "Failed to install JAX CUDA plugin"; return 1; }
+    # (AF2 refolding was removed in the AF3/Protenix refactor; the
+    #  binder-eval-af2 env is no longer created. Protenix refolding will
+    #  reuse the existing bindmaster_pxdesign env; AF3 refolding lands on
+    #  aarch64 only via install_aarch.sh.)
 
     # Smoke test
     smoke_test "binder-compare --help" \
@@ -1112,7 +1136,6 @@ install_evaluator() {
     print_ok "Shortcut installed at ${SHORTCUTS_DIR}/evaluate"
 
     print_ok "Evaluator installation complete"
-    print_ok "  AF2 weights (~4 GB) must be at \$AF2_DATA_DIR — see Evaluator/docs/pipeline_reference.md"
 }
 
 _write_evaluator_shortcut() {
@@ -1133,7 +1156,12 @@ EOF
 # ─── RFAA + LigandMPNN ──────────────────────────────────────────────────────
 
 install_rfaa() {
-    print_step "Installing RFDiffusionAA + LigandMPNN"
+    print_step "Installing RFDiffusionAA + LigandMPNN (legacy)"
+    print_warn "RFAA is LEGACY in this BindMaster release."
+    print_warn "  Upstream has been dormant since 2024-03; Baker lab moved to"
+    print_warn "  RFdiffusion3 (now available via --tool rfd3)."
+    print_warn "  RFAA is kept for reproducibility of existing runs; see"
+    print_warn "  docs/rfaa_manual_reinstall.md for long-term maintenance notes."
 
     # Clone RFAA
     if [[ -d "${RFAA_DIR}" ]]; then
@@ -1466,6 +1494,14 @@ LNEOF
         "${CONDA_CMD}" run -n bindmaster_pxdesign python -c "import torch; print('PXDesign env OK')" \
         || return 1
 
+    # Install binder-compare into the PXDesign env so Protenix refolding
+    # (Part J) can run via `conda run -n bindmaster_pxdesign binder-compare refold-protenix`.
+    if [[ -d "${EVALUATOR_DIR}" ]]; then
+        run_logged "Installing binder-compare into bindmaster_pxdesign (for Protenix refold)" \
+            "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -e "${EVALUATOR_DIR}[report]" \
+            || print_warn "binder-compare install into bindmaster_pxdesign failed — Protenix refolding will be unavailable"
+    fi
+
     # Shortcut
     mkdir -p "${SHORTCUTS_DIR}"
     cat > "${SHORTCUTS_DIR}/pxdesign" << PXDEOF
@@ -1744,6 +1780,213 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/complexa"
 }
 
+# ─── RFD3 / Foundry (RosettaCommons) ─────────────────────────────────────────
+# Butcher et al. 2025. BSD-3-Clause. PyPI: `rc-foundry`. Replaces RFAA entirely
+# — no DGL, no SE3-Transformer, works on aarch64 / DGX Spark. Weights live
+# under BindMaster/weights/foundry.
+
+install_rfd3() {
+    print_step "Installing RFD3 (foundry)"
+
+    # Conda env: Py 3.12 + PyTorch 2.2+ (CUDA 12.x)
+    if env_exists bindmaster_rfd3; then
+        print_warn "Conda environment 'bindmaster_rfd3' already exists — skipping creation."
+    else
+        run_logged "Creating bindmaster_rfd3 env" \
+            "${CONDA_CMD}" create -n bindmaster_rfd3 -y python=3.12 pip \
+            -c conda-forge \
+            || { print_fail "Failed to create bindmaster_rfd3 env"; return 1; }
+    fi
+
+    # PyTorch (CUDA 12.1 wheels — works for 12.1–12.8 host drivers)
+    run_logged "Installing PyTorch (CUDA 12.1)" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 \
+        pip install -q "torch>=2.2" "torchvision" "torchaudio" --index-url https://download.pytorch.org/whl/cu121 \
+        || { print_fail "Failed to install PyTorch"; return 1; }
+
+    # foundry + rfd3 extra (PyPI package name is `rc-foundry`)
+    run_logged "Installing rc-foundry[rfd3] ${FOUNDRY_COMMIT}" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 \
+        pip install -q "rc-foundry[rfd3]==0.1.9" \
+        || { print_fail "Failed to install rc-foundry"; return 1; }
+
+    # Also install MPNN extra for post-diffusion sequence design (ProteinMPNN + LigandMPNN)
+    run_logged "Installing rc-foundry[mpnn]" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 \
+        pip install -q "rc-foundry[mpnn]==0.1.9" \
+        || print_warn "rc-foundry[mpnn] install failed — MPNN redesign step may not work"
+
+    # Download RFD3 weights to a shared location inside BindMaster
+    mkdir -p "${FOUNDRY_WEIGHTS_DIR}"
+    if [[ -n "$(ls -A "${FOUNDRY_WEIGHTS_DIR}" 2>/dev/null)" ]]; then
+        print_ok "Foundry weights dir already populated at ${FOUNDRY_WEIGHTS_DIR}"
+    else
+        run_logged "Downloading RFD3 weights (~few GB)" \
+            "${CONDA_CMD}" run -n bindmaster_rfd3 \
+            foundry install rfd3 --checkpoint-dir "${FOUNDRY_WEIGHTS_DIR}" \
+            || print_warn "RFD3 weight download failed — retry: conda run -n bindmaster_rfd3 foundry install rfd3 --checkpoint-dir ${FOUNDRY_WEIGHTS_DIR}"
+    fi
+
+    # Smoke test: rfd3 CLI help
+    smoke_test "RFD3 CLI check" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 rfd3 --help \
+        || print_warn "rfd3 CLI smoke test failed — env may need foundry weights first"
+
+    # Shortcut
+    _write_rfd3_shortcut
+
+    print_ok "RFD3 installation complete"
+    print_ok "  Usage: rfd3 design out_dir=./run inputs=config.yaml"
+}
+
+_write_rfd3_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# RFD3 shortcut — runs 'rfd3 design ...' in the bindmaster_rfd3 env."
+        echo "# With no args: opens an interactive env shell."
+        echo ""
+        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "FOUNDRY_WEIGHTS_DIR=\"${FOUNDRY_WEIGHTS_DIR}\""
+    } > "${SHORTCUTS_DIR}/rfd3"
+    cat >> "${SHORTCUTS_DIR}/rfd3" << 'EOF'
+
+# Surface the weights dir as an env var for Hydra configs that need it
+export FOUNDRY_CHECKPOINT_DIR="${FOUNDRY_WEIGHTS_DIR}"
+
+if [[ $# -eq 0 ]]; then
+    echo "RFD3 environment (bindmaster_rfd3). Weights: ${FOUNDRY_WEIGHTS_DIR}"
+    echo "Examples:"
+    echo "  rfd3 design out_dir=./run inputs=examples/ppi.yaml"
+    echo "  foundry list-installed"
+    exec "${CONDA_CMD}" run --live-stream -n bindmaster_rfd3 bash
+fi
+
+exec "${CONDA_CMD}" run --live-stream -n bindmaster_rfd3 rfd3 "$@"
+EOF
+    chmod +x "${SHORTCUTS_DIR}/rfd3"
+}
+
+# ─── Protein-Hunter ──────────────────────────────────────────────────────────
+# Cho et al. (2025) bioRxiv 10.1101/2025.10.10.681530 — Boltz-2/Chai-1 structure
+# hallucination for protein / cyclic-peptide / small-molecule / DNA / RNA binders.
+# Upstream: github.com/yehlincho/Protein-Hunter
+
+install_protein_hunter() {
+    print_step "Installing Protein-Hunter"
+
+    # Clone at pinned commit
+    if [[ -d "${PROTEIN_HUNTER_DIR}" ]]; then
+        print_ok "Protein-Hunter already cloned at ${PROTEIN_HUNTER_DIR}"
+    else
+        run_logged "Cloning Protein-Hunter" \
+            git clone --depth 50 "${PROTEIN_HUNTER_REPO}" "${PROTEIN_HUNTER_DIR}" \
+            || { print_fail "Failed to clone Protein-Hunter"; return 1; }
+        git -C "${PROTEIN_HUNTER_DIR}" checkout "${PROTEIN_HUNTER_COMMIT}" --quiet \
+            || print_warn "Could not pin Protein-Hunter to ${PROTEIN_HUNTER_COMMIT} — using latest"
+    fi
+
+    # Conda env (Python 3.10 — matches upstream setup.sh)
+    if env_exists bindmaster_protein_hunter; then
+        print_warn "Conda environment 'bindmaster_protein_hunter' already exists — skipping creation."
+    else
+        print_step "Creating bindmaster_protein_hunter conda environment (Python 3.10)"
+        run_logged "Creating bindmaster_protein_hunter env" \
+            "${CONDA_CMD}" create -n bindmaster_protein_hunter -y python=3.10 pip \
+            -c conda-forge \
+            || { print_fail "Failed to create bindmaster_protein_hunter env"; return 1; }
+    fi
+
+    # Install PyTorch (matches upstream setup.sh expectations: torch>=2.2 with CUDA)
+    run_logged "Installing PyTorch (CUDA 12.1)" \
+        "${CONDA_CMD}" run -n bindmaster_protein_hunter \
+        pip install -q "torch>=2.2" "torchvision" "torchaudio" --index-url https://download.pytorch.org/whl/cu121 \
+        || { print_fail "Failed to install PyTorch"; return 1; }
+
+    # Install vendored Boltz_PH + upstream deps
+    run_logged "Installing Protein-Hunter Python deps" \
+        "${CONDA_CMD}" run -n bindmaster_protein_hunter bash -c \
+        "cd '${PROTEIN_HUNTER_DIR}' && pip install -q -e './boltz_ph' && pip install -q matplotlib seaborn prody py3Dmol pyyaml ml_collections biopython modelcif jaxtyping pandera logmd==0.1.45 pyrosetta-installer" \
+        || print_warn "Some Protein-Hunter deps failed — may need manual follow-up"
+
+    # PyRosetta (required by boltz_ph.design at import time)
+    run_logged "Installing PyRosetta" \
+        "${CONDA_CMD}" run -n bindmaster_protein_hunter python -c \
+        "from pyrosetta_installer import download_pyrosetta; download_pyrosetta(serialization=True, skip_if_installed=True)" \
+        || print_warn "PyRosetta install failed — Protein-Hunter design will not work until this is fixed"
+
+    # Install chai-lab (from sokrypton fork pinned by Protein-Hunter upstream)
+    run_logged "Installing Chai-1 (sokrypton fork)" \
+        "${CONDA_CMD}" run -n bindmaster_protein_hunter \
+        pip install -q "git+https://github.com/sokrypton/chai-lab.git" \
+        || print_warn "chai-lab install failed — only the Boltz-2 edition of Protein-Hunter will work"
+
+    # Weight sharing: reuse LigandMPNN weights from RFAA install if present.
+    # Protein-Hunter vendors LigandMPNN source in-repo but expects model_params/ locally.
+    local ph_mpnn_dir="${PROTEIN_HUNTER_DIR}/LigandMPNN/model_params"
+    if [[ -d "${LIGANDMPNN_DIR}/model_params" && ! -d "${ph_mpnn_dir}" ]]; then
+        mkdir -p "$(dirname "${ph_mpnn_dir}")"
+        ln -sfn "${LIGANDMPNN_DIR}/model_params" "${ph_mpnn_dir}"
+        print_ok "LigandMPNN weights → ${ph_mpnn_dir} (symlink to RFAA install)"
+    elif [[ ! -d "${ph_mpnn_dir}" ]]; then
+        if [[ -f "${PROTEIN_HUNTER_DIR}/LigandMPNN/get_model_params.sh" ]]; then
+            run_logged "Downloading LigandMPNN weights (Protein-Hunter)" \
+                bash -c "cd '${PROTEIN_HUNTER_DIR}/LigandMPNN' && bash get_model_params.sh ./model_params" \
+                || print_warn "LigandMPNN weights download failed — download manually"
+        fi
+    fi
+
+    # Boltz-2 weight cache (~/.boltz) — shared with Mosaic if Mosaic populates it first.
+    # Protein-Hunter pulls Boltz-2 weights on first run; we don't pre-download here.
+
+    # Smoke test: import boltz_ph package
+    smoke_test "Protein-Hunter import check" \
+        "${CONDA_CMD}" run -n bindmaster_protein_hunter bash -c \
+        "cd '${PROTEIN_HUNTER_DIR}' && python -c 'import boltz; print(\"boltz_ph import OK\")'" \
+        || print_warn "Protein-Hunter import failed — env may still work after first-use weight download"
+
+    # Shortcut
+    _write_protein_hunter_shortcut
+
+    print_ok "Protein-Hunter installation complete"
+    print_ok "  Usage: protein-hunter  (opens env shell)"
+    print_ok "         python boltz_ph/design.py --protein_seqs TARGET --num_designs N --name JOBNAME  (direct)"
+}
+
+_write_protein_hunter_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# Protein-Hunter shortcut — activates bindmaster_protein_hunter conda env"
+        echo "# and opens an interactive shell in the Protein-Hunter directory."
+        echo ""
+        echo "PROTEIN_HUNTER_DIR=\"${PROTEIN_HUNTER_DIR}\""
+        echo "CONDA_CMD=\"${CONDA_CMD}\""
+    } > "${SHORTCUTS_DIR}/protein-hunter"
+    cat >> "${SHORTCUTS_DIR}/protein-hunter" << 'EOF'
+
+cd "${PROTEIN_HUNTER_DIR}"
+
+echo "Protein-Hunter environment (bindmaster_protein_hunter) activated."
+echo "Working directory: ${PROTEIN_HUNTER_DIR}"
+echo "Minimal protein binder run:"
+echo "  python boltz_ph/design.py --num_designs 50 --num_cycles 7 \\"
+echo "      --protein_seqs <TARGET_AA> --msa_mode mmseqs --gpu_id 0 \\"
+echo "      --name JOBNAME --min_protein_length 90 --max_protein_length 150 \\"
+echo "      --high_iptm_threshold 0.7 --percent_X 80"
+echo ""
+echo "Modalities (flags on design.py):"
+echo "  --cyclic                  cyclic peptide binder"
+echo "  --ligand_ccd CCD          small-molecule binder (CCD code)"
+echo "  --ligand_smiles 'SMILES'  small-molecule binder (SMILES)"
+echo "  --nucleic_seq SEQ --nucleic_type dna|rna    DNA / RNA binder"
+echo ""
+
+exec "${CONDA_CMD}" run --live-stream -n bindmaster_protein_hunter bash
+EOF
+    chmod +x "${SHORTCUTS_DIR}/protein-hunter"
+}
+
 # ─── Uninstall ─────────────────────────────────────────────────────────────────
 
 uninstall_tool() {
@@ -1791,7 +2034,8 @@ uninstall_tool() {
             print_step "Uninstalling Evaluator"
             env_exists binder-eval && run_logged "Removing binder-eval conda env" \
                 "${CONDA_CMD}" env remove -n binder-eval -y
-            env_exists binder-eval-af2 && run_logged "Removing binder-eval-af2 conda env" \
+            # Legacy binder-eval-af2 env (from pre-refactor installs): remove if present
+            env_exists binder-eval-af2 && run_logged "Removing legacy binder-eval-af2 conda env" \
                 "${CONDA_CMD}" env remove -n binder-eval-af2 -y
             rm -f "${EVALUATOR_DIR}/envs/mosaic_venv_path"
             rm -f "${SHORTCUTS_DIR}/evaluate"
@@ -1823,6 +2067,23 @@ uninstall_tool() {
             rm -f "${SHORTCUTS_DIR}/complexa"
             [[ -d "${PROTEINA_COMPLEXA_DIR}" ]] && { rm -rf "${PROTEINA_COMPLEXA_DIR}"; print_ok "Removed ${PROTEINA_COMPLEXA_DIR}"; }
             print_ok "Proteina-Complexa uninstalled"
+            ;;
+        protein-hunter|protein_hunter|phunter)
+            print_step "Uninstalling Protein-Hunter"
+            env_exists bindmaster_protein_hunter && run_logged "Removing bindmaster_protein_hunter env" \
+                "${CONDA_CMD}" env remove -n bindmaster_protein_hunter -y
+            rm -f "${SHORTCUTS_DIR}/protein-hunter"
+            [[ -d "${PROTEIN_HUNTER_DIR}" ]] && { rm -rf "${PROTEIN_HUNTER_DIR}"; print_ok "Removed ${PROTEIN_HUNTER_DIR}"; }
+            print_ok "Protein-Hunter uninstalled"
+            ;;
+        rfd3|foundry)
+            print_step "Uninstalling RFD3"
+            env_exists bindmaster_rfd3 && run_logged "Removing bindmaster_rfd3 env" \
+                "${CONDA_CMD}" env remove -n bindmaster_rfd3 -y
+            rm -f "${SHORTCUTS_DIR}/rfd3"
+            [[ -d "${FOUNDRY_WEIGHTS_DIR}" ]] && { rm -rf "${FOUNDRY_WEIGHTS_DIR}"; print_ok "Removed ${FOUNDRY_WEIGHTS_DIR}"; }
+            [[ -d "${FOUNDRY_DIR}" ]] && { rm -rf "${FOUNDRY_DIR}"; print_ok "Removed ${FOUNDRY_DIR}"; }
+            print_ok "RFD3 uninstalled"
             ;;
         *)
             print_fail "Unknown tool: ${tool}"
@@ -1882,6 +2143,8 @@ main() {
         [[ "${DO_RFAA}"      == true ]] && { uninstall_tool rfaa      || failed_uninstalls+=("RFAA"); }
         [[ "${DO_PXDESIGN}"  == true ]] && { uninstall_tool pxdesign  || failed_uninstalls+=("PXDesign"); }
         [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { uninstall_tool proteina-complexa || failed_uninstalls+=("Proteina-Complexa"); }
+        [[ "${DO_PROTEIN_HUNTER}" == true ]] && { uninstall_tool protein-hunter || failed_uninstalls+=("Protein-Hunter"); }
+        [[ "${DO_RFD3}"      == true ]] && { uninstall_tool rfd3      || failed_uninstalls+=("RFD3"); }
 
         # Offer to remove local Miniforge when all tools are uninstalled
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
@@ -1916,6 +2179,8 @@ main() {
     [[ "${DO_RFAA}"      == true ]] && (( total++ ))
     [[ "${DO_PXDESIGN}"  == true ]] && (( total++ ))
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && (( total++ ))
+    [[ "${DO_PROTEIN_HUNTER}" == true ]] && (( total++ ))
+    [[ "${DO_RFD3}"      == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
@@ -1924,9 +2189,11 @@ main() {
     [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
     [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
-    [[ "${DO_RFAA}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFAA${RESET}";      install_rfaa      || failed_tools+=("RFAA"); }
+    [[ "${DO_RFAA}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFAA (legacy)${RESET}"; install_rfaa || failed_tools+=("RFAA"); }
+    [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}";      install_rfd3      || failed_tools+=("RFD3"); }
     [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
+    [[ "${DO_PROTEIN_HUNTER}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Protein-Hunter${RESET}"; install_protein_hunter || failed_tools+=("Protein-Hunter"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"
@@ -1951,9 +2218,11 @@ main() {
     [[ "${DO_BOLTZGEN}"  == true ]] && echo -e "  ${GREEN}boltzgen${RESET}   — open BoltzGen shell"
     [[ "${DO_MOSAIC}"    == true ]] && echo -e "  ${GREEN}mosaic${RESET}     — open Mosaic shell"
     [[ "${DO_EVALUATOR}" == true ]] && echo -e "  ${GREEN}evaluate${RESET}   — launch evaluation wizard"
-    [[ "${DO_RFAA}"      == true ]] && echo -e "  ${GREEN}rfaa${RESET}       — open RFAA shell"
+    [[ "${DO_RFAA}"      == true ]] && echo -e "  ${YELLOW}rfaa${RESET}       — open RFAA shell ${YELLOW}(legacy)${RESET}"
+    [[ "${DO_RFD3}"      == true ]] && echo -e "  ${GREEN}rfd3${RESET}       — run RFD3 design / open env shell"
     [[ "${DO_PXDESIGN}"  == true ]] && echo -e "  ${GREEN}pxdesign${RESET}   — open PXDesign shell"
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && echo -e "  ${GREEN}complexa${RESET}   — open Proteina-Complexa shell"
+    [[ "${DO_PROTEIN_HUNTER}" == true ]] && echo -e "  ${GREEN}protein-hunter${RESET} — open Protein-Hunter shell"
     # Add shortcuts dir to PATH in .bashrc (idempotent)
     local path_line="export PATH=\"${SHORTCUTS_DIR}:\$PATH\""
     if ! grep -qF "${SHORTCUTS_DIR}" "${HOME}/.bashrc" 2>/dev/null; then

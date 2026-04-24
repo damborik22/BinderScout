@@ -4,18 +4,21 @@
 # Usage:
 #   bash evaluate.sh --sequences sequences.fasta \
 #                    --target-seq "MGFQKFSPF..." \
-#                    --target-pdb target.pdb \
 #                    --output ./results
 #
-# Both --target-seq and --target-pdb are required:
-#   --target-seq  full target amino acid sequence (for Boltz-2 complex assembly)
-#   --target-pdb  target PDB file (for AF2 multimer refolding)
+# Required:
+#   --sequences    path to FASTA (or CSV / one-per-line) with binder sequences
+#   --target-seq   full target amino acid sequence (for complex assembly)
+#   --output       output directory
 #
 # Optional:
-#   --skip-boltz2   skip Boltz-2 refolding (use existing boltz2_results.csv in output dir)
-#   --skip-af2      skip AF2 refolding     (use existing af2_results.csv in output dir)
-#   --resume        resume interrupted run — skip already-completed binders in both engines
-#   --mosaic-path   path to Mosaic repo root (for AF2's refold_Version6 module)
+#   --skip-boltz2       skip Boltz-2 refolding (use existing boltz2_results.csv)
+#   --skip-protenix     skip Protenix refolding (default: auto-detect bindmaster_pxdesign env)
+#   --protenix-env ENV  conda env for Protenix (default: bindmaster_pxdesign)
+#   --resume            resume interrupted run
+#
+# AF3 refolding (aarch64 / DGX Spark only, Part K) is driven separately by
+# `binder-compare refold-af3` and wired into the report via --af3-results.
 
 set -euo pipefail
 
@@ -56,26 +59,24 @@ fi
 
 SEQUENCES=""
 TARGET_SEQ=""
-TARGET_PDB=""
 OUTPUT=""
 SKIP_BOLTZ2=0
-SKIP_AF2=0
+SKIP_PROTENIX=0
+PROTENIX_ENV="bindmaster_pxdesign"
 RESUME=0
-MOSAIC_PATH=""
 
 # --- parse arguments -------------------------------------------------------
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --sequences)   SEQUENCES="$2";   shift 2 ;;
-        --target-seq)  TARGET_SEQ="$2";  shift 2 ;;
-        --target-pdb)  TARGET_PDB="$2";  shift 2 ;;
-        --output|-o)   OUTPUT="$2";      shift 2 ;;
-        --skip-boltz2) SKIP_BOLTZ2=1;    shift ;;
-        --skip-af2)    SKIP_AF2=1;       shift ;;
-        --resume)      RESUME=1;         shift ;;
-        --mosaic-path) MOSAIC_PATH="$2"; shift 2 ;;
+        --sequences)     SEQUENCES="$2";    shift 2 ;;
+        --target-seq)    TARGET_SEQ="$2";   shift 2 ;;
+        --output|-o)     OUTPUT="$2";       shift 2 ;;
+        --skip-boltz2)   SKIP_BOLTZ2=1;     shift ;;
+        --skip-protenix) SKIP_PROTENIX=1;   shift ;;
+        --protenix-env)  PROTENIX_ENV="$2"; shift 2 ;;
+        --resume)        RESUME=1;          shift ;;
         -h|--help)
-            sed -n '2,20p' "$0" | grep '^#' | sed 's/^# \?//'
+            sed -n '2,22p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
@@ -84,34 +85,27 @@ done
 # --- validate ---------------------------------------------------------------
 [[ -z "$SEQUENCES" ]]  && { echo "Error: --sequences required"; exit 1; }
 [[ -z "$TARGET_SEQ" ]] && { echo "Error: --target-seq required"; exit 1; }
-[[ -z "$TARGET_PDB" ]] && { echo "Error: --target-pdb required"; exit 1; }
 [[ -z "$OUTPUT" ]]     && { echo "Error: --output required"; exit 1; }
 [[ -f "$SEQUENCES" ]]  || { echo "Error: sequences file not found: $SEQUENCES"; exit 1; }
-[[ -f "$TARGET_PDB" ]] || { echo "Error: target PDB not found: $TARGET_PDB"; exit 1; }
 
 mkdir -p "$OUTPUT"
 SEQUENCES="$(realpath "$SEQUENCES")"
-TARGET_PDB="$(realpath "$TARGET_PDB")"
 OUTPUT="$(realpath "$OUTPUT")"
-
-# Convert CIF to PDB if needed (AF2 requires PDB format)
-EXT="${TARGET_PDB##*.}"
-if [[ "${EXT,,}" == "cif" || "${EXT,,}" == "mmcif" ]]; then
-    echo "[setup] Converting CIF → PDB..."
-    CONVERTED_PDB="$OUTPUT/target.pdb"
-    conda run -n binder-eval-af2 python3 -c "
-from binder_comparison.io.read import convert_cif_to_pdb
-convert_cif_to_pdb('${TARGET_PDB//\'/\'\\\'\'}', '${CONVERTED_PDB//\'/\'\\\'\'}')
-print('[setup] Converted to', '${CONVERTED_PDB//\'/\'\\\'\'}')
-"
-    TARGET_PDB="$CONVERTED_PDB"
-fi
 
 echo "=== BindMaster Evaluator ==="
 echo "Sequences : $SEQUENCES"
-echo "Target PDB: $TARGET_PDB"
 echo "Output    : $OUTPUT"
 echo ""
+
+# Auto-detect Protenix availability unless user skipped it
+if [[ $SKIP_PROTENIX -eq 0 ]]; then
+    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${PROTENIX_ENV}"; then
+        echo "[note] conda env '${PROTENIX_ENV}' not found — Protenix refolding will be skipped."
+        echo "        (install with: bindmaster install --tool pxdesign)"
+        echo ""
+        SKIP_PROTENIX=1
+    fi
+fi
 
 # --- Step 0: Normalise sequences to FASTA ----------------------------------
 FASTA="$OUTPUT/sequences.fasta"
@@ -123,12 +117,15 @@ SEQUENCES="$FASTA"
 
 # --- Step 1: Boltz-2 refolding ---------------------------------------------
 BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
+PROTENIX_CSV="$OUTPUT/protenix_results.csv"
+N_STEPS=2
+[[ $SKIP_PROTENIX -eq 0 ]] && N_STEPS=3
 
 if [[ $SKIP_BOLTZ2 -eq 1 ]]; then
-    echo "[step 1/3] Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
+    echo "[step 1/${N_STEPS}] Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
     [[ -f "$BOLTZ2_CSV" ]] || { echo "Error: $BOLTZ2_CSV not found"; exit 1; }
 else
-    echo "[step 1/3] Boltz-2 refolding  (Mosaic venv)..."
+    echo "[step 1/${N_STEPS}] Boltz-2 refolding  (Mosaic venv)..."
     BOLTZ2_RESUME_FLAG=""
     [[ $RESUME -eq 1 ]] && BOLTZ2_RESUME_FLAG="--resume"
     "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
@@ -138,32 +135,30 @@ else
         $BOLTZ2_RESUME_FLAG
 fi
 
-# --- Step 2: AF2 refolding -------------------------------------------------
-AF2_CSV="$OUTPUT/af2_results.csv"
-
-if [[ $SKIP_AF2 -eq 1 ]]; then
-    echo "[step 2/3] AF2 refolding — skipped (using existing $AF2_CSV)"
-    [[ -f "$AF2_CSV" ]] || { echo "Error: $AF2_CSV not found"; exit 1; }
-else
-    echo "[step 2/3] AF2 refolding       (binder-eval-af2)..."
-    AF2_EXTRA_FLAGS=()
-    [[ $RESUME -eq 1 ]] && AF2_EXTRA_FLAGS+=(--resume)
-    [[ -n "$MOSAIC_PATH" ]] && AF2_EXTRA_FLAGS+=(--mosaic-path "$MOSAIC_PATH")
-    conda run -n binder-eval-af2 binder-compare refold-af2 \
+# --- Step 2: Protenix refolding (optional) ---------------------------------
+if [[ $SKIP_PROTENIX -eq 0 ]]; then
+    echo "[step 2/${N_STEPS}] Protenix refolding  (conda env: ${PROTENIX_ENV})..."
+    PROTENIX_RESUME_FLAG=""
+    [[ $RESUME -eq 1 ]] && PROTENIX_RESUME_FLAG="--resume"
+    conda run -n "${PROTENIX_ENV}" binder-compare refold-protenix \
         --sequences  "$SEQUENCES" \
-        --target-pdb "$TARGET_PDB" \
-        -o           "$AF2_CSV" \
-        --output-dir "$OUTPUT/refold_af2" \
-        "${AF2_EXTRA_FLAGS[@]}"
+        --target-seq "$TARGET_SEQ" \
+        -o           "$PROTENIX_CSV" \
+        --output-dir "$OUTPUT/refold_protenix" \
+        $PROTENIX_RESUME_FLAG
 fi
 
-# --- Step 3: Report --------------------------------------------------------
-echo "[step 3/3] Generating report   (binder-eval)..."
-conda run -n binder-eval binder-compare report \
-    --boltz2-results "$BOLTZ2_CSV" \
-    --af2-results    "$AF2_CSV" \
-    --sequences      "$SEQUENCES" \
+# --- Report ----------------------------------------------------------------
+echo "[step ${N_STEPS}/${N_STEPS}] Generating report   (binder-eval)..."
+REPORT_ARGS=(
+    --boltz2-results "$BOLTZ2_CSV"
+    --sequences      "$SEQUENCES"
     -o               "$OUTPUT/report"
+)
+if [[ $SKIP_PROTENIX -eq 0 && -f "$PROTENIX_CSV" ]]; then
+    REPORT_ARGS+=(--protenix-results "$PROTENIX_CSV")
+fi
+conda run -n binder-eval binder-compare report "${REPORT_ARGS[@]}"
 
 echo ""
 echo "=== Done ==="
