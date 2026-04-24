@@ -27,6 +27,10 @@ install_aarch.log
 runs/
 refold_boltz2/
 
+# AlphaFold 3 model weights — personal, DO NOT commit
+af3.bin
+*.af3.bin*
+
 # Evaluator build / runtime artefacts
 __pycache__/
 *.egg-info/
