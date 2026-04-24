@@ -3,19 +3,21 @@
 # Run once after cloning the repository:
 #   bash install.sh
 #
-# Creates two conda environments:
+# Creates one conda environment:
 #   binder-eval     extract + report  (lightweight, no ML)
-#   binder-eval-af2 AF2 refolding     (Python 3.10, ColabDesign)
 #
-# For Boltz-2 refolding the Mosaic environment from the BindMaster-installator
+# For Boltz-2 refolding the Mosaic environment from the BindMaster installer
 # is used. Mosaic must be installed first:
-#   cd /path/to/BindMaster-installator && bash install.sh --tool mosaic
+#   cd /path/to/BindMaster && bash install/install.sh --tool mosaic
+#
+# Future refolding engines (Protenix on x86, AF3 on aarch64 / DGX Spark) are
+# installed by the main BindMaster installer's `--tool protenix` and `--tool af3`
+# flags — not here.
 #
 # Prerequisites:
 #   - conda (miniforge/miniconda)
-#   - Mosaic installed via BindMaster-installator (provides Boltz-2)
+#   - Mosaic installed via BindMaster installer (provides Boltz-2)
 #   - GPU with CUDA drivers (required for refold steps)
-#   - AF2 weights downloaded to $AF2_DATA_DIR (for refold-af2 only)
 
 set -euo pipefail
 
@@ -40,22 +42,20 @@ echo "Repo: $REPO_DIR"
 echo ""
 
 # ---------------------------------------------------------------------------
-# 0. Locate Mosaic venv (created by BindMaster-installator)
+# 0. Locate Mosaic venv (created by BindMaster installer)
 # ---------------------------------------------------------------------------
-echo "[0/3] Locating Mosaic venv (Boltz-2 environment)..."
+echo "[0/2] Locating Mosaic venv (Boltz-2 environment)..."
 
 MOSAIC_VENV=""
 
-# Check a user-supplied path first
 if [[ -n "${MOSAIC_DIR:-}" && -f "$MOSAIC_DIR/.venv/bin/python" ]]; then
     MOSAIC_VENV="$MOSAIC_DIR/.venv"
 fi
 
-# Auto-detect common locations
 if [[ -z "$MOSAIC_VENV" ]]; then
     for _candidate in \
-        "$(dirname "$REPO_DIR")/BindMaster-installator/Mosaic/.venv" \
-        "${HOME}/Documents/BindMaster/BindMaster-installator/Mosaic/.venv" \
+        "$(dirname "$REPO_DIR")/Mosaic/.venv" \
+        "${HOME}/Documents/BindMaster/Mosaic/.venv" \
         "${HOME}/BindMaster/Mosaic/.venv"; do
         if [[ -f "$_candidate/bin/python" ]]; then
             MOSAIC_VENV="$_candidate"
@@ -69,25 +69,18 @@ if [[ -z "$MOSAIC_VENV" ]]; then
     echo "  ERROR: Could not find the Mosaic virtual environment."
     echo ""
     echo "  The Boltz-2 refolding step uses the Mosaic environment"
-    echo "  created by the BindMaster-installator. Please install it first:"
+    echo "  created by the BindMaster installer. Please install it first:"
     echo ""
-    echo "    cd /path/to/BindMaster-installator"
-    echo "    bash install.sh --tool mosaic"
+    echo "    cd /path/to/BindMaster"
+    echo "    bash install/install.sh --tool mosaic"
     echo ""
     echo "  Then re-run this script, or set MOSAIC_DIR before running:"
-    echo "    MOSAIC_DIR=/path/to/BindMaster-installator/Mosaic bash install.sh"
+    echo "    MOSAIC_DIR=/path/to/BindMaster/Mosaic bash install.sh"
     echo ""
     exit 1
 fi
 
 echo "      Found Mosaic venv: $MOSAIC_VENV"
-
-# Copy refold_Version6.py (AF2 refolding module) into Mosaic root
-MOSAIC_ROOT="$(dirname "$MOSAIC_VENV")"
-if [[ -f "$REPO_DIR/scripts/refold_Version6.py" ]]; then
-    cp "$REPO_DIR/scripts/refold_Version6.py" "$MOSAIC_ROOT/refold_Version6.py"
-    echo "      Copied refold_Version6.py → $MOSAIC_ROOT/"
-fi
 
 # Install binder-compare into the Mosaic venv
 echo "      Installing binder-compare into Mosaic venv..."
@@ -103,7 +96,7 @@ echo "      Saved venv path → $REPO_DIR/envs/mosaic_venv_path"
 # ---------------------------------------------------------------------------
 # 1. binder-eval  (extract + report)
 # ---------------------------------------------------------------------------
-echo "[1/3] Creating binder-eval..."
+echo "[1/2] Creating binder-eval..."
 conda env create -f "$REPO_DIR/envs/binder-eval.yml" --yes 2>/dev/null || \
     conda env update -f "$REPO_DIR/envs/binder-eval.yml" --prune
 # shellcheck disable=SC1087
@@ -111,25 +104,16 @@ conda run -n binder-eval pip install -q -e "$REPO_DIR[report]"
 echo "      binder-compare version: $(conda run -n binder-eval binder-compare --version)"
 
 # ---------------------------------------------------------------------------
-# 2. binder-eval-af2  (AF2 refolding)
-# ---------------------------------------------------------------------------
-echo "[2/3] Creating binder-eval-af2..."
-conda env create -f "$REPO_DIR/envs/binder-eval-af2.yml" --yes 2>/dev/null || \
-    conda env update -f "$REPO_DIR/envs/binder-eval-af2.yml" --prune
-# shellcheck disable=SC1087
-conda run -n binder-eval-af2 pip install -q colabdesign==1.1.1 -e "$REPO_DIR[af2]"
-echo "      binder-compare version: $(conda run -n binder-eval-af2 binder-compare --version)"
-
-# ---------------------------------------------------------------------------
 echo ""
 echo "=== Installation complete ==="
 echo ""
 echo "  Boltz-2 (Mosaic venv): $MOSAIC_VENV"
 echo "  Extract/report:        conda env binder-eval"
-echo "  AF2 refolding:         conda env binder-eval-af2"
 echo ""
 echo "Usage:"
-echo "  bash evaluate.sh --sequences seqs.fasta --target-pdb target.pdb --output ./results"
+echo "  bash evaluate.sh --sequences seqs.fasta --target-seq SEQ --output ./results"
 echo ""
-echo "Note: AF2 weights (~4 GB) must be present at \$AF2_DATA_DIR."
-echo "      See docs/pipeline_reference.md for the expected path."
+echo "Note: additional refolding engines (Protenix on x86, AlphaFold 3 on"
+echo "      aarch64 / DGX Spark) are installed via the main BindMaster"
+echo "      installer (--tool protenix / --tool af3) and will be wired into"
+echo "      the evaluate.sh orchestrator by later refactor parts."

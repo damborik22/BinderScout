@@ -21,7 +21,9 @@ TOOL_COLOURS = {
     "mosaic": "#4CAF50",  # green
     "pxdesign": "#9C27B0",  # purple
     "proteina_complexa": "#795548",  # brown
-    "rfaa": "#C62828",  # red
+    "rfaa": "#C62828",  # red (legacy)
+    "rfd3": "#D84315",  # deep-orange (RFD3, current-gen RFAA replacement)
+    "protein_hunter": "#00838F",  # teal-cyan
     "unknown": "#9E9E9E",  # grey
 }
 
@@ -33,6 +35,8 @@ _TOOL_DISPLAY = {
     "bindcraft": "BindCraft",
     "proteina_complexa": "Proteina-Complexa",
     "rfaa": "RFAA",
+    "rfd3": "RFD3",
+    "protein_hunter": "Protein-Hunter",
 }
 
 
@@ -51,19 +55,13 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "boltz_pae_bt_ipsae": ("Boltz ipSAE B→T", "[0–1]", "↑"),
     "boltz_pae_tb_ipsae": ("Boltz ipSAE T→B", "[0–1]", "↑"),
     "boltz_pae_ipsae_min": ("Boltz ipSAE_min", "[0–1]", "↑"),
-    "af2_ipsae_min": ("AF2 ipSAE_min", "[0–1]", "↑"),
-    "af2_bt_ipsae": ("AF2 ipSAE (B→T)", "[0–1]", "↑"),
-    "af2_tb_ipsae": ("AF2 ipSAE (T→B)", "[0–1]", "↑"),
     "iptm": ("ipTM", "[0–1]", "↑"),
-    "af2_iptm": ("AF2 ipTM", "[0–1]", "↑"),
     "boltz_pae_iptm": ("Boltz ipTM (PAE)", "[0–1]", "↑"),
-    "af2_pae_iptm": ("AF2 ipTM (PAE)", "[0–1]", "↑"),
     "binder_ptm": ("Binder pTM", "[0–1]", "↑"),
     "plddt_binder_mean": ("pLDDT binder (mean)", "[0–1]", "↑"),
     "plddt_binder_min": ("pLDDT binder (min)", "[0–1]", "↑"),
     "plddt_target_mean": ("pLDDT target (mean)", "[0–1]", "↑"),
     "ipae": ("ipAE", "Å", "↓"),
-    "af2_ipae": ("AF2 ipAE", "Å", "↓"),
     "pae_bt": ("PAE (B→T)", "Å", "↓"),
     "pae_tb": ("PAE (T→B)", "Å", "↓"),
     "pae_bb": ("PAE (intra-B)", "Å", "↓"),
@@ -140,41 +138,37 @@ def plot_plddt_curves(
 
 def plot_pae_heatmaps(
     sequences: list[str],
-    af2_pae_data: dict[str, np.ndarray],
     boltz_pae_data: dict[str, np.ndarray],
     binder_lengths: dict[str, int],
     max_binders: int = 6,
 ) -> Figure:
-    """Side-by-side AF2 / Boltz2 PAE heatmaps for the top binders.
+    """Boltz-2 PAE heatmaps for the top binders.
 
-    Shows both models for each binder to make the comparison visual.
+    Additional engines (Protenix on x86, AF3 on aarch64) will be added as
+    extra columns in later refactor parts.
     """
-    seqs = [s for s in sequences if s in af2_pae_data or s in boltz_pae_data][:max_binders]
+    seqs = [s for s in sequences if s in boltz_pae_data][:max_binders]
     n = len(seqs)
     if n == 0:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No PAE data available", ha="center", va="center")
         return fig
 
-    fig, axes = plt.subplots(n, 2, figsize=(10, 3 * n), squeeze=False)
+    fig, axes = plt.subplots(n, 1, figsize=(6, 3 * n), squeeze=False)
 
     for row_i, seq in enumerate(seqs):
         L_b = binder_lengths.get(seq, 0)
-        for col_i, (label, pae_dict) in enumerate([("AF2", af2_pae_data), ("Boltz2", boltz_pae_data)]):
-            ax = axes[row_i][col_i]
-            if seq in pae_dict:
-                pae = np.array(pae_dict[seq])
-                im = ax.imshow(pae, vmin=0, vmax=30, cmap="bwr", aspect="auto")
-                if L_b > 0 and L_b < pae.shape[0]:
-                    ax.axhline(L_b - 0.5, color="white", linewidth=1)
-                    ax.axvline(L_b - 0.5, color="white", linewidth=1)
-                plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="PAE (Å)")
-            else:
-                ax.text(0.5, 0.5, "N/A", ha="center", va="center", transform=ax.transAxes)
+        ax = axes[row_i][0]
+        pae = np.array(boltz_pae_data[seq])
+        im = ax.imshow(pae, vmin=0, vmax=30, cmap="bwr", aspect="auto")
+        if L_b > 0 and L_b < pae.shape[0]:
+            ax.axhline(L_b - 0.5, color="white", linewidth=1)
+            ax.axvline(L_b - 0.5, color="white", linewidth=1)
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="PAE (Å)")
 
-            ax.set_title(f"{label} — seq {row_i + 1}")
-            ax.set_xlabel("Residue j")
-            ax.set_ylabel("Residue i")
+        ax.set_title(f"Boltz-2 — seq {row_i + 1}")
+        ax.set_xlabel("Residue j")
+        ax.set_ylabel("Residue i")
 
     fig.suptitle("PAE heatmaps (binder | target ordering)", y=1.01)
     fig.tight_layout()
@@ -184,12 +178,11 @@ def plot_pae_heatmaps(
 def load_pae_data_from_df(
     df: pd.DataFrame,
     max_binders: int = 5,
-) -> tuple[list[str], dict[str, np.ndarray], dict[str, np.ndarray], dict[str, int]]:
-    """Load PAE .npy files for top-ranked binders from DataFrame file paths.
+) -> tuple[list[str], dict[str, np.ndarray], dict[str, int]]:
+    """Load Boltz-2 PAE .npy files for top-ranked binders from DataFrame file paths.
 
-    Returns (sequences, af2_pae_data, boltz_pae_data, binder_lengths).
+    Returns (sequences, boltz_pae_data, binder_lengths).
     """
-    af2_pae_data: dict[str, np.ndarray] = {}
     boltz_pae_data: dict[str, np.ndarray] = {}
     binder_lengths: dict[str, int] = {}
     sequences: list[str] = []
@@ -199,15 +192,13 @@ def load_pae_data_from_df(
         if count >= max_binders:
             break
         seq = row.get("sequence", "")
-        if not seq or seq in af2_pae_data or seq in boltz_pae_data:
+        if not seq or seq in boltz_pae_data:
             continue
 
         L_b = row.get("binder_length")
         if pd.isna(L_b):
             L_b = len(seq)
         binder_lengths[seq] = int(L_b)
-
-        loaded_any = False
 
         # Load Boltz-2 PAE (binder|target ordering)
         boltz_path = row.get("boltz_pae_file")
@@ -216,36 +207,12 @@ def load_pae_data_from_df(
                 p = Path(str(boltz_path))
                 if p.exists():
                     boltz_pae_data[seq] = np.load(str(p))
-                    loaded_any = True
+                    sequences.append(seq)
+                    count += 1
             except Exception:
                 pass
 
-        # Load AF2 PAE (target|binder ordering → transpose to binder|target)
-        af2_path = row.get("af2_pae_file")
-        if af2_path and not pd.isna(af2_path):
-            try:
-                p = Path(str(af2_path))
-                if p.exists():
-                    pae = np.load(str(p))
-                    # Transpose from [target|binder] to [binder|target]
-                    L_t = pae.shape[0] - int(L_b)
-                    if L_t > 0:
-                        pae = np.block(
-                            [
-                                [pae[L_t:, L_t:], pae[L_t:, :L_t]],
-                                [pae[:L_t, L_t:], pae[:L_t, :L_t]],
-                            ]
-                        )
-                    af2_pae_data[seq] = pae
-                    loaded_any = True
-            except Exception:
-                pass
-
-        if loaded_any:
-            sequences.append(seq)
-            count += 1
-
-    return sequences, af2_pae_data, boltz_pae_data, binder_lengths
+    return sequences, boltz_pae_data, binder_lengths
 
 
 # ---------------------------------------------------------------------------
@@ -332,97 +299,6 @@ def plot_radar_chart(
     ax.set_xticklabels(tick_labels, size=9)
     ax.set_title("Tool comparison (outward = better)", pad=20)
     ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1))
-    fig.tight_layout()
-    return fig
-
-
-# ---------------------------------------------------------------------------
-# AF2 vs Boltz2 scatter
-# ---------------------------------------------------------------------------
-
-
-def plot_af2_vs_boltz2_scatter(
-    df: pd.DataFrame,
-    metric_pairs: list[tuple[str, str]] | None = None,
-) -> Figure:
-    """Scatter plots of AF2 vs Boltz2 values for common metrics.
-
-    Args:
-        df:           Merged DataFrame with af2_* and boltz_* columns.
-        metric_pairs: List of (boltz_col, af2_col) pairs. Defaults to iptm and ipae.
-    """
-    if metric_pairs is None:
-        metric_pairs = [
-            ("ipsae_min", "af2_ipsae_min"),  # primary — most diagnostic
-            ("iptm", "af2_iptm"),
-        ]
-
-    n = len(metric_pairs)
-    fig, axes = plt.subplots(1, n, figsize=(5 * n, 5), squeeze=False)
-
-    for i, (b_col, a_col) in enumerate(metric_pairs):
-        ax = axes[0][i]
-        if b_col not in df.columns or a_col not in df.columns:
-            ax.text(0.5, 0.5, f"Missing:\n{b_col}\n{a_col}", ha="center", va="center", transform=ax.transAxes)
-            continue
-
-        b_vals = pd.to_numeric(df[b_col], errors="coerce")
-        a_vals = pd.to_numeric(df[a_col], errors="coerce")
-        mask = b_vals.notna() & a_vals.notna()
-
-        if "source_tool" in df.columns:
-            for tool, grp in df[mask].groupby("source_tool"):
-                colour = TOOL_COLOURS.get(tool, TOOL_COLOURS["unknown"])
-                ax.scatter(
-                    b_vals[grp.index], a_vals[grp.index], color=colour, alpha=0.7, s=30, label=_tool_display(tool)
-                )
-        else:
-            ax.scatter(b_vals[mask], a_vals[mask], alpha=0.7, s=30)
-
-        # Identity line
-        if mask.sum() == 0:
-            ax.text(0.5, 0.5, "No valid data points", ha="center", va="center", transform=ax.transAxes)
-            continue
-
-        lo = min(b_vals[mask].min(), a_vals[mask].min()) * 0.95
-        hi = max(b_vals[mask].max(), a_vals[mask].max()) * 1.05
-        ax.plot([lo, hi], [lo, hi], "k--", linewidth=1, alpha=0.4)
-
-        # Pearson r — prominent boxed annotation
-        if mask.sum() > 2:
-            r = np.corrcoef(b_vals[mask], a_vals[mask])[0, 1]
-            ax.text(
-                0.05,
-                0.95,
-                f"r = {r:.3f}",
-                transform=ax.transAxes,
-                va="top",
-                fontsize=11,
-                fontweight="bold",
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="#fff9c4", edgecolor="#f57f17", linewidth=1.5),
-            )
-
-        # Axis labels: use METRIC_META if available
-        def _axis_label(col: str, role: str) -> str:
-            meta = METRIC_META.get(col)
-            if meta:
-                lbl, unit, arrow = meta
-                parts = [lbl]
-                if unit:
-                    parts.append(f"({unit})")
-                if arrow:
-                    parts.append(arrow)
-                return f"{role}: " + " ".join(parts)
-            return f"{role}: {col}"
-
-        ax.set_xlabel(_axis_label(b_col, "Boltz-2"), fontsize=9)
-        ax.set_ylabel(_axis_label(a_col, "AF2"), fontsize=9)
-        b_meta = METRIC_META.get(b_col)
-        title = b_meta[0] if b_meta else b_col.replace("_", " ")
-        ax.set_title(f"{title} — Boltz-2 vs AF2", fontsize=10)
-        if "source_tool" in df.columns:
-            ax.legend(fontsize=7)
-
     fig.tight_layout()
     return fig
 

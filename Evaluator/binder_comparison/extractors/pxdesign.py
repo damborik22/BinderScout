@@ -63,8 +63,9 @@ class PXDesignExtractor(SequenceExtractor):
             binder_id = self._make_id(row, idx)
 
             # NativeMetrics left empty: PXDesign's own af2_iptm/ptx_iptm are
-            # biased (optimised against).  Our refolding provides independent
-            # assessment via standardised Boltz-2 and AF2 metrics.
+            # biased (optimised against). Our refolding provides independent
+            # assessment via standardised Boltz-2 metrics (plus Protenix/AF3
+            # where configured).
             results.append(
                 ExtractedBinder(
                     binder_id=binder_id,

@@ -388,7 +388,6 @@ def _cif_atom_site_seq(text: str, path: Path) -> str:
 def convert_cif_to_pdb(cif_path: str | Path, pdb_path: str | Path) -> Path:
     """Convert an mmCIF file to PDB format using BioPython.
 
-    BioPython is available in the binder-eval-af2 environment (via colabdesign).
     Raises ImportError if BioPython is not installed.
     """
     from Bio.PDB import PDBIO, MMCIFParser  # type: ignore
