@@ -200,10 +200,7 @@ def detect_installs() -> dict:
         "bindcraft": _env_exists("BindCraft"),
         "boltzgen": _env_exists("BoltzGen"),
         "mosaic": (MOSAIC_VENV / "bin" / "python").exists(),
-        "evaluator": (
-            (EVALUATOR_DIR / "evaluate.sh").exists()
-            and _env_exists("binder-eval")
-        ),
+        "evaluator": ((EVALUATOR_DIR / "evaluate.sh").exists() and _env_exists("binder-eval")),
         "rfaa": _env_exists("bindmaster_rfaa"),
         "pxdesign_local": _env_exists("bindmaster_pxdesign"),
         "proteina_complexa": (PROTEINA_COMPLEXA_VENV / "bin" / "python").exists(),
