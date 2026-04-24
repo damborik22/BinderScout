@@ -546,7 +546,7 @@ select_tools_interactive() {
         "Binder design via AlphaFold2 (conda, Python 3.10)"
         "Structure generation with Boltz-1 (conda, Python 3.12)"
         "JAX-based protein design with Marimo notebooks (uv venv)"
-        "Evaluate binders: refold with Boltz-2 + AF2, ranked report (requires Mosaic)"
+        "Evaluate binders: refold with Boltz-2 (+ Protenix, AF3 on DGX Spark), ranked report (requires Mosaic)"
         "All-atom diffusion + LigandMPNN (${RED}NOT SUPPORTED on aarch64${RESET} — DGL lacks CUDA)"
         "Protenix-based de novo binder design (conda)"
     )
@@ -1326,23 +1326,9 @@ install_evaluator() {
         "${CONDA_CMD}" run -n binder-eval pip install -q -e "${EVALUATOR_DIR}[report]" \
         || { print_fail "Failed to install binder-compare into binder-eval"; return 1; }
 
-    # binder-eval-af2 conda env (AF2 refolding via ColabDesign)
-    print_step "Creating binder-eval-af2 conda environment (Python 3.10)"
-    if env_exists binder-eval-af2; then
-        print_warn "Conda environment 'binder-eval-af2' already exists — skipping creation."
-    else
-        run_logged "Creating binder-eval-af2 conda env" \
-            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval-af2.yml" -y \
-            || { print_fail "Failed to create binder-eval-af2 conda env"; return 1; }
-    fi
-    run_logged "Installing ColabDesign + binder-compare into binder-eval-af2" \
-        "${CONDA_CMD}" run -n binder-eval-af2 pip install -q "colabdesign @ git+https://github.com/sokrypton/ColabDesign.git" -e "${EVALUATOR_DIR}[af2]" \
-        || { print_fail "Failed to install packages into binder-eval-af2"; return 1; }
-
-    # JAX CUDA plugin — ColabDesign/AF2 uses JAX; on aarch64 the default jaxlib is CPU-only.
-    run_logged "Installing JAX CUDA plugin into binder-eval-af2" \
-        "${CONDA_CMD}" run -n binder-eval-af2 pip install -q "jax[cuda]" \
-        || { print_fail "Failed to install JAX CUDA plugin"; return 1; }
+    # (AF2 refolding was removed in the AF3/Protenix refactor; the
+    #  binder-eval-af2 env is no longer created. AF3 refolding on DGX
+    #  Spark / aarch64 is installed separately via `install_af3`.)
 
     # Smoke test
     smoke_test "binder-compare --help" \
@@ -1355,7 +1341,6 @@ install_evaluator() {
     print_ok "Shortcut installed at ${SHORTCUTS_DIR}/evaluate"
 
     print_ok "Evaluator installation complete"
-    print_ok "  AF2 weights (~4 GB) must be at \$AF2_DATA_DIR — see Evaluator/docs/pipeline_reference.md"
 }
 
 _write_evaluator_shortcut() {
@@ -1641,6 +1626,14 @@ PATCHEOF
         "${CONDA_CMD}" run -n bindmaster_pxdesign python -c "import torch; print('PXDesign env OK')" \
         || return 1
 
+    # Install binder-compare into the PXDesign env so Protenix refolding
+    # (Part J) can run via `conda run -n bindmaster_pxdesign binder-compare refold-protenix`.
+    if [[ -d "${EVALUATOR_DIR}" ]]; then
+        run_logged "Installing binder-compare into bindmaster_pxdesign (for Protenix refold)" \
+            "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -e "${EVALUATOR_DIR}[report]" \
+            || print_warn "binder-compare install into bindmaster_pxdesign failed — Protenix refolding will be unavailable"
+    fi
+
     # Shortcut
     mkdir -p "${SHORTCUTS_DIR}"
     cat > "${SHORTCUTS_DIR}/pxdesign" << PXDEOF
@@ -1697,7 +1690,8 @@ uninstall_tool() {
             print_step "Uninstalling Evaluator"
             env_exists binder-eval && run_logged "Removing binder-eval conda env" \
                 "${CONDA_CMD}" env remove -n binder-eval -y
-            env_exists binder-eval-af2 && run_logged "Removing binder-eval-af2 conda env" \
+            # Legacy binder-eval-af2 env (from pre-refactor installs): remove if present
+            env_exists binder-eval-af2 && run_logged "Removing legacy binder-eval-af2 conda env" \
                 "${CONDA_CMD}" env remove -n binder-eval-af2 -y
             rm -f "${EVALUATOR_DIR}/envs/mosaic_venv_path"
             rm -f "${SHORTCUTS_DIR}/evaluate"

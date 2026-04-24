@@ -26,8 +26,9 @@ Target structure (.pdb / .mmcif)
     → Evaluator:
        1. Extract sequences from all tool outputs
        2. Refold with Boltz-2 (Mosaic venv)
-       3. Refold with AF2 (ColabDesign)
-       4. Rank, score, and generate HTML report
+       3. (x86) Refold with Protenix (bindmaster_pxdesign env)  [Part J, in progress]
+       4. (aarch64 / DGX Spark) Refold with AlphaFold 3 v3.0.2 (binder-eval-af3)  [Part K, in progress]
+       5. Rank, score, and generate HTML report
 ```
 
 ### Directory layout
@@ -46,9 +47,9 @@ BindMaster/
 │   └── evaluator.py           ← lightweight evaluator (Mosaic venv, ~780 lines)
 ├── Evaluator/                 ← bundled full evaluation pipeline package
 │   ├── binder_comparison/     ← core Python package (extractors, refolding, scoring, viz)
-│   ├── scripts/               ← standalone refold scripts (refold_boltz2.py, refold_af2.py)
+│   ├── scripts/               ← standalone refold scripts (refold_boltz2.py, refold_protenix.py [todo], refold_af3.py [todo])
 │   ├── evaluate.sh            ← shell orchestrator for full 4-step pipeline
-│   ├── envs/                  ← conda env specs (binder-eval.yml, binder-eval-af2.yml)
+│   ├── envs/                  ← conda env specs (binder-eval.yml, binder-eval-af3.yml [aarch64 only, todo])
 │   ├── docs/                  ← pipeline_reference.md (metrics, known issues)
 │   └── pyproject.toml         ← package: "binder-comparison" v0.1.0
 ├── bindmaster_examples/
@@ -85,7 +86,6 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `bindmaster_pxdesign` | PXDesign | 3.11 | conda | Protenix binder design + eval |
 | `Proteina-Complexa/.venv` | Proteina-Complexa | 3.12 | uv | Flow matching + test-time compute binder design |
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
-| `binder-eval-af2` | Evaluator | 3.10 | conda | AF2 refolding via ColabDesign |
 
 The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in their correct environment — `install` runs in bash, `configure` runs in system Python, `evaluate` runs in the Mosaic `.venv` Python.
 
@@ -110,7 +110,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - **stdlib-only CLI:** `bindmaster.py` uses only stdlib so it works on any Python 3.10+ without pip installs.
 - **uv for Mosaic:** Mosaic uses `uv` instead of conda because it needs JAX with CUDA, and uv resolves this faster and more reliably.
 - **Pinned commits:** Tool repos are cloned at pinned commits (`BINDCRAFT_COMMIT`, `BOLTZGEN_COMMIT`, `MOSAIC_COMMIT`) for reproducible installs.
-- **Separate evaluator envs:** Boltz-2 refolding needs JAX (Mosaic venv), AF2 refolding needs ColabDesign (conda). These conflict, so they run in separate environments orchestrated by `evaluate.sh`.
+- **Separate evaluator envs:** Boltz-2 refolding runs in the Mosaic venv (JAX). The new Protenix refolder (Part J) rides the existing `bindmaster_pxdesign` conda env. AF3 (Part K) on DGX Spark gets its own `binder-eval-af3` env. `evaluate.sh` orchestrates all three.
 
 ---
 
@@ -147,7 +147,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - Python classes: PascalCase
 - Python variables/functions: snake_case
 - Bash constants: UPPER_CASE
-- Conda envs: BindCraft, BoltzGen, binder-eval, binder-eval-af2
+- Conda envs: BindCraft, BoltzGen, binder-eval, bindmaster_pxdesign, bindmaster_rfaa (legacy — being replaced by bindmaster_rfd3)
 
 ### Git and branching
 
@@ -190,7 +190,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 
 ### Evaluation metrics and ranking
 
-**Primary metric: `ipsae_min`** — the minimum of binder→target and target→binder iPSAE scores. Computed from PAE arrays using the DunbrackLab 2025 formula: `max_i[mean_j(1/(1+(PAE_ij/d0)²))]` (d0_res variant, uniform 10 Å PAE cutoff for both Boltz-2 and AF2). Ranking uses agreement_count (how many engines agree ipsae_min > 0.61) as primary sort, then ipsae_min desc.
+**Primary metric: `ipsae_min`** — the minimum of binder→target and target→binder iPSAE scores. Computed from PAE arrays using the DunbrackLab 2025 formula: `max_i[mean_j(1/(1+(PAE_ij/d0)²))]` (d0_res variant, uniform 10 Å PAE cutoff across all engines). Ranking uses agreement_count (how many engines agree ipsae_min > 0.61) as primary sort, then ipsae_min desc.
 
 **Direction guide:**
 - **Higher is better:** `iptm`, `bt_ipsae`, `tb_ipsae`, `ipsae_min`, `plddt_binder_mean`, `binder_ptm`
@@ -208,13 +208,13 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 ### Critical domain facts
 
 - **iptm is gameable** — AF2-designed sequences (BindCraft) tend to score high on ipTM by construction. Use `ipsae_min` as the primary ranking metric instead.
-- **AF2 vs Boltz-2 disagreement** — For short binders (~60aa), Boltz-2 may score high while AF2 scores low. This is meaningful signal, not noise. The `agreement_count` column reflects how many engines agree above the 0.61 threshold.
+- **Engine disagreement is signal, not noise** — For short binders (~60aa), different refolding engines often disagree on interface quality. The `agreement_count` column reflects how many engines pass the 0.61 threshold; higher = stronger candidate.
 - **Binder length is a main driver** — Longer binders tend to score lower on `ipsae_min` (r ≈ -0.78).
 - **Mosaic designs.csv format** — Can mix column formats between workers (old 11-col / new 13-col). The parser must handle this carefully or columns misalign. The `is_top` column marks the ~40 refolded designs out of ~800 total; extractors filter to `is_top=1` by default.
 - **Mosaic `target_sequence` placeholder** — The Mosaic template (`hallucinate_bindmaster.py`) writes `"REPLACE_ME"` as `target_sequence` when not configured. The legacy evaluator guards against using this as a real target sequence.
-- **AF2 pLDDT scale** — ColabDesign `get_plddt()` returns values in [0,1], not [0,100].
-- **PAE ordering** — Boltz-2: [binder|target]; AF2: [target|binder]. Column prefixes distinguish them (`boltz_pae_*` vs `af2_*`).
-- **Append-mode CSVs** — Both `refold_boltz2.py` and `refold_af2.py` append to CSV. If rerun after partial failure, check for duplicate `run_id` entries.
+- **pLDDT scale** — Boltz-2 returns [0,1]; AF3 native is [0,100] and is rescaled to [0,1] on ingest by the refold runner so report columns are directly comparable.
+- **PAE ordering** — Boltz-2 is native [binder|target]. AF3 is token-order so we always put target first in the input JSON, giving [target|binder] — the evaluator transposes internally. Column prefixes distinguish engines (`boltz_pae_*`, `protenix_*`, `af3_*`).
+- **Append-mode CSVs** — `refold_boltz2.py` appends to CSV. If rerun after partial failure, check for duplicate `run_id` entries.
 
 ### Lab-specific information
 
@@ -350,12 +350,8 @@ conda run -n binder-eval binder-compare extract \
 Mosaic/.venv/bin/binder-compare refold-boltz2 \
     --sequences seqs.fasta --target-seq SEQ -o boltz2.csv
 
-# Refold with AF2
-conda run -n binder-eval-af2 binder-compare refold-af2 \
-    --sequences seqs.fasta --target-pdb PDB -o af2.csv
-
-# Generate report
+# Generate report (Boltz-2 only for now; Protenix / AF3 land in Parts J & K)
 conda run -n binder-eval binder-compare report \
-    --boltz2-results boltz2.csv --af2-results af2.csv \
+    --boltz2-results boltz2.csv \
     --sequences seqs.fasta -o ./report
 ```

@@ -32,8 +32,9 @@ RMSD_BINDER_PREFILTER = 3.73  # Å, pre-filter from meta-analysis
 
 # PAE cutoff for Dunbrack ipSAE formula (Å).
 # Uniform 10 Å for all engines so that ipSAE scores are directly comparable
-# across Boltz-2 and AF2.  Overath et al. (2025) thresholds (0.61, 0.80) were
-# calibrated with a 10 Å cutoff on AF3 data.
+# across Boltz-2 and other refolders (Protenix on x86, AF3 on aarch64).
+# Overath et al. (2025) thresholds (0.61, 0.80) were calibrated with a 10 Å
+# cutoff on AF3 data.
 IPSAE_PAE_CUTOFF = 10.0
 
 
@@ -93,10 +94,10 @@ def compute_ipsae_from_pae(
         pae:           PAE matrix in Ångströms, shape [L_total, L_total].
         binder_length: Number of binder residues (L_b).
         pae_cutoff:    PAE filter threshold in Å (default: 10 Å, uniform
-                       for both Boltz-2 and AF2).
-        ordering:      'binder_target' (Boltz2 native, [binder|target]) or
-                       'target_binder' (AF2 native, [target|binder]).
-                       AF2 arrays are transposed internally to [binder|target].
+                       across engines).
+        ordering:      'binder_target' (Boltz-2 native, [binder|target]) or
+                       'target_binder' (arrays transposed internally to
+                       [binder|target]).
 
     Returns:
         dict with keys: bt_ipsae, tb_ipsae, ipsae_min, ipsae_max, ipsae_valid
@@ -113,7 +114,7 @@ def compute_ipsae_from_pae(
 
     # Normalise to [binder | target] ordering
     if ordering == "target_binder":
-        # AF2 native: [target | binder] → swap to [binder | target]
+        # [target | binder] input → swap to [binder | target]
         pae = np.block(
             [
                 [pae[L_t:, L_t:], pae[L_t:, :L_t]],  # binder-binder, binder-target
@@ -168,75 +169,6 @@ def _resolve_pae_path(
         if candidate.exists():
             return candidate
     return None
-
-
-# ---------------------------------------------------------------------------
-# AF2 ipSAE from saved PAE files
-# ---------------------------------------------------------------------------
-
-
-def add_af2_ipsae_from_files(
-    df: pd.DataFrame,
-    pae_file_col: str = "af2_pae_file",
-    binder_length_col: str = "binder_length",
-    pae_cutoff: float = IPSAE_PAE_CUTOFF,
-    base_dir: str | Path | None = None,
-) -> pd.DataFrame:
-    """Load AF2 PAE .npy files and compute ipSAE scores, adding them to df.
-
-    Adds columns: af2_bt_ipsae, af2_tb_ipsae, af2_ipsae_min, af2_ipsae_max.
-
-    AF2 PAE arrays are stored in [target | binder] ordering by refold_Version6,
-    so 'target_binder' ordering is used.
-
-    Args:
-        df:              DataFrame with AF2 refolding results.
-        pae_file_col:    Column containing paths to PAE .npy files.
-        binder_length_col: Column with binder sequence length.
-        pae_cutoff:      PAE cutoff in Å (default 10 Å, uniform across engines).
-        base_dir:        Base directory for resolving relative PAE file paths.
-    """
-    result = df.copy()
-
-    if pae_file_col not in df.columns:
-        return result
-
-    bt_ipsae_vals, tb_ipsae_vals, min_vals, max_vals = [], [], [], []
-
-    for _, row in df.iterrows():
-        pae_path = row.get(pae_file_col)
-        L_b = row.get(binder_length_col)
-
-        resolved = _resolve_pae_path(pae_path, base_dir)
-        if pd.isna(pae_path) or pd.isna(L_b) or resolved is None:
-            bt_ipsae_vals.append(np.nan)
-            tb_ipsae_vals.append(np.nan)
-            min_vals.append(np.nan)
-            max_vals.append(np.nan)
-            continue
-
-        try:
-            pae = np.load(str(resolved))
-            scores = compute_ipsae_from_pae(pae, int(L_b), pae_cutoff, ordering="target_binder")
-            bt_ipsae_vals.append(scores["bt_ipsae"])
-            tb_ipsae_vals.append(scores["tb_ipsae"])
-            min_vals.append(scores["ipsae_min"])
-            max_vals.append(scores["ipsae_max"])
-        except Exception as e:
-            import warnings
-
-            warnings.warn(f"Failed to compute AF2 ipSAE for {pae_path}: {e}")
-            bt_ipsae_vals.append(np.nan)
-            tb_ipsae_vals.append(np.nan)
-            min_vals.append(np.nan)
-            max_vals.append(np.nan)
-
-    result["af2_bt_ipsae"] = bt_ipsae_vals
-    result["af2_tb_ipsae"] = tb_ipsae_vals
-    result["af2_ipsae_min"] = min_vals
-    result["af2_ipsae_max"] = max_vals
-
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +242,82 @@ def add_boltz_ipsae_from_files(
 
 
 # ---------------------------------------------------------------------------
+# Generic PAE → DunbrackLab ipSAE loader (for Protenix, AF3, and future engines)
+# ---------------------------------------------------------------------------
+
+
+def add_ipsae_from_pae_files(
+    df: pd.DataFrame,
+    pae_file_col: str,
+    binder_length_col: str = "binder_length",
+    pae_cutoff: float = IPSAE_PAE_CUTOFF,
+    base_dir: str | Path | None = None,
+    *,
+    prefix: str,
+    ordering: str = "target_binder",
+) -> pd.DataFrame:
+    """Load saved PAE .npy files and add DunbrackLab ipSAE columns to *df*.
+
+    Engine-agnostic version of ``add_boltz_ipsae_from_files``. Adds columns
+    ``{prefix}_bt_ipsae``, ``{prefix}_tb_ipsae``, ``{prefix}_ipsae_min``,
+    ``{prefix}_ipsae_max`` where ``prefix`` is e.g. "protenix" or "af3".
+
+    Args:
+        df:              DataFrame with engine refolding results.
+        pae_file_col:    Column containing paths to PAE .npy files.
+        binder_length_col: Column with binder sequence length.
+        pae_cutoff:      PAE cutoff in Å (default 10 Å, uniform across engines).
+        base_dir:        Base directory for resolving relative PAE file paths.
+        prefix:          Output column prefix (e.g. 'protenix', 'af3').
+        ordering:        'binder_target' or 'target_binder' — how the PAE matrix
+                         is laid out. Protenix and AF3 both default to
+                         'target_binder' because we always put target first in
+                         the input JSON.
+    """
+    result = df.copy()
+
+    if pae_file_col not in df.columns:
+        return result
+
+    bt_ipsae_vals, tb_ipsae_vals, min_vals, max_vals = [], [], [], []
+
+    for _, row in df.iterrows():
+        pae_path = row.get(pae_file_col)
+        L_b = row.get(binder_length_col)
+
+        resolved = _resolve_pae_path(pae_path, base_dir)
+        if pd.isna(pae_path) or pd.isna(L_b) or resolved is None:
+            bt_ipsae_vals.append(np.nan)
+            tb_ipsae_vals.append(np.nan)
+            min_vals.append(np.nan)
+            max_vals.append(np.nan)
+            continue
+
+        try:
+            pae = np.load(str(resolved))
+            scores = compute_ipsae_from_pae(pae, int(L_b), pae_cutoff, ordering=ordering)
+            bt_ipsae_vals.append(scores["bt_ipsae"])
+            tb_ipsae_vals.append(scores["tb_ipsae"])
+            min_vals.append(scores["ipsae_min"])
+            max_vals.append(scores["ipsae_max"])
+        except Exception as e:
+            import warnings
+
+            warnings.warn(f"Failed to compute {prefix} ipSAE for {pae_path}: {e}")
+            bt_ipsae_vals.append(np.nan)
+            tb_ipsae_vals.append(np.nan)
+            min_vals.append(np.nan)
+            max_vals.append(np.nan)
+
+    result[f"{prefix}_bt_ipsae"] = bt_ipsae_vals
+    result[f"{prefix}_tb_ipsae"] = tb_ipsae_vals
+    result[f"{prefix}_ipsae_min"] = min_vals
+    result[f"{prefix}_ipsae_max"] = max_vals
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # ipTM from saved PAE files (computed independently of model-reported values)
 # ---------------------------------------------------------------------------
 
@@ -331,7 +339,7 @@ def add_iptm_from_pae_files(
         pae_file_col:    Column containing paths to PAE .npy files.
         binder_length_col: Column with binder sequence length.
         ordering:        PAE matrix ordering ('binder_target' or 'target_binder').
-        prefix:          Column name prefix ('boltz' or 'af2').
+        prefix:          Column name prefix ('boltz', 'protenix', or 'af3').
         base_dir:        Base directory for resolving relative PAE file paths.
     """
     result = df.copy()
@@ -545,14 +553,18 @@ def compute_iptm_from_pae(
 def compute_agreement(df: pd.DataFrame, threshold: float = IPSAE_PASS_THRESHOLD) -> pd.DataFrame:
     """Count how many independent refolding engines agree a design passes.
 
-    Checks each of boltz_pae_ipsae_min, af2_ipsae_min (and ipsae_min as
-    promoted column) against *threshold*.  Designs with higher agreement
-    are stronger candidates.
+    Checks each available engine column against *threshold*. Designs with
+    higher agreement are stronger candidates.
+
+    Supported engine columns (present when the corresponding refolder has run):
+      - boltz_pae_ipsae_min  (Boltz-2, always when Evaluator runs)
+      - protenix_ipsae_min   (Protenix, x86 + aarch64 when bindmaster_pxdesign env present)
+      - af3_ipsae_min        (AlphaFold 3, aarch64 / DGX Spark when weights configured)
 
     Adds column 'agreement_count' (0–N, where N = number of available engines).
     """
     result = df.copy()
-    engine_cols = ["boltz_pae_ipsae_min", "af2_ipsae_min"]
+    engine_cols = ["boltz_pae_ipsae_min", "protenix_ipsae_min", "af3_ipsae_min"]
     count = pd.Series(0, index=df.index)
     for col in engine_cols:
         if col in result.columns:
@@ -610,14 +622,14 @@ def rank_by_adaptyv_method(df: pd.DataFrame) -> pd.DataFrame:
         ascending.append(False)
 
     # Tertiary: iptm
-    for col in ["iptm", "boltz_iptm", "af2_iptm"]:
+    for col in ["iptm", "boltz_iptm"]:
         if col in result.columns:
             sort_keys.append(col)
             ascending.append(False)
             break
 
     # Quaternary: pLDDT
-    for col in ["plddt_binder_mean", "boltz_plddt_binder_mean", "af2_plddt_binder_mean"]:
+    for col in ["plddt_binder_mean", "boltz_plddt_binder_mean"]:
         if col in result.columns:
             sort_keys.append(col)
             ascending.append(False)
@@ -650,7 +662,6 @@ def _best_ipsae_col(df: pd.DataFrame) -> str | None:
     for col in [
         "ipsae_min",  # promoted DunbrackLab PAE-based (10 Å cutoff)
         "boltz_pae_ipsae_min",  # Boltz-2 PAE-based (DunbrackLab, 10 Å cutoff)
-        "af2_ipsae_min",  # AF2 PAE-based (DunbrackLab, 10 Å cutoff)
         "ipsae_min_aux",  # Mosaic aux (max aggregation, renamed)
         "boltz_ipsae_min",  # Mosaic aux (pre-rename)
     ]:

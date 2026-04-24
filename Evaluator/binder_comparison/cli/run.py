@@ -1,7 +1,8 @@
 """CLI subcommand: binder-compare run
 
-Full orchestrator: runs all four steps (extract → refold-boltz2 →
-refold-af2 → report) by spawning subprocesses in the correct environments.
+Full orchestrator: extract → refold-boltz2 → refold-protenix (optional) → report.
+AF3 refolding (aarch64 / DGX Spark only, Part K) is wired separately via the
+``--af3-results`` flag on the ``report`` subcommand.
 
 Usage:
     binder-compare run \\
@@ -9,16 +10,16 @@ Usage:
         --boltzgen   ./boltzgen_results \\
         --mosaic     ./mosaic_results \\
         --target-seq "MKTAYIAKQRQ..." \\
-        --target-pdb target.pdb \\
-        --output     ./comparison_report
+        --output     ./comparison_report \\
+        --protenix-env bindmaster_pxdesign  # omit or pass "" to skip Protenix
 
 Environment requirements:
-    Boltz2 refolding: uv venv at ~/BindMaster/mosaic/.venv  (preferred)
-                      OR conda env 'mosaic' if populated
-    AF2 refolding:    conda env 'bindcraft_pr'
-    Other steps:      any env with binder_comparison installed
+    Boltz-2 refolding:  uv venv at ~/BindMaster/Mosaic/.venv (preferred)
+                        OR conda env 'mosaic' if populated
+    Protenix refolding: conda env 'bindmaster_pxdesign' (shipped by PXDesign installer)
+    Other steps:        any env with binder_comparison installed
 
-Boltz2 environment selection (in order of precedence):
+Boltz-2 environment selection (in order of precedence):
     --boltz2-python /path/to/.venv/bin/python   (direct Python; skips conda)
     --boltz2-env    mosaic                       (conda run -n <env>)
 """
@@ -37,13 +38,13 @@ def run(args: argparse.Namespace) -> None:
 
     sequences_fasta = output_dir / "sequences.fasta"
     boltz2_csv = output_dir / "boltz2_results.csv"
-    af2_csv = output_dir / "af2_results.csv"
+    protenix_csv = output_dir / "protenix_results.csv"
 
     # ------------------------------------------------------------------
     # Step 1: Extract sequences
     # ------------------------------------------------------------------
     print("\n" + "=" * 60)
-    print("STEP 1/4 — Extracting sequences")
+    print("STEP 1/3 — Extracting sequences")
     print("=" * 60)
 
     extract_cmd = [sys.executable, "-m", "binder_comparison", "extract"]
@@ -64,11 +65,11 @@ def run(args: argparse.Namespace) -> None:
     _run_step(extract_cmd, "extract")
 
     # ------------------------------------------------------------------
-    # Step 2: Refold with Boltz2  (mosaic uv venv or conda env)
+    # Step 2: Refold with Boltz-2  (Mosaic uv venv or conda env)
     # ------------------------------------------------------------------
     boltz2_label = f"[python: {args.boltz2_python}]" if args.boltz2_python else f"[conda: {args.boltz2_env}]"
     print("\n" + "=" * 60)
-    print(f"STEP 2/4 — Boltz2 refolding  {boltz2_label}")
+    print(f"STEP 2/3 — Boltz-2 refolding  {boltz2_label}")
     print("=" * 60)
 
     _boltz2_inner = [
@@ -85,7 +86,6 @@ def run(args: argparse.Namespace) -> None:
     ] + (["--mosaic-path", args.mosaic_path] if args.mosaic_path else [])
 
     if args.boltz2_python:
-        # Direct Python path — used for uv venv (e.g. ~/BindMaster/mosaic/.venv/bin/python)
         boltz2_cmd = [args.boltz2_python, "-m", "binder_comparison"] + _boltz2_inner[1:]
     else:
         boltz2_cmd = _conda_cmd(args.boltz2_env, ["python", "-m", "binder_comparison"] + _boltz2_inner[1:])
@@ -93,41 +93,44 @@ def run(args: argparse.Namespace) -> None:
     _run_step(boltz2_cmd, "refold-boltz2")
 
     # ------------------------------------------------------------------
-    # Step 3: Refold with AF2  (bindcraft_pr env)
+    # Step 3: Refold with Protenix (optional — requires bindmaster_pxdesign env)
     # ------------------------------------------------------------------
-    print("\n" + "=" * 60)
-    print("STEP 3/4 — AF2 refolding  [conda: bindcraft_pr]")
-    print("=" * 60)
-
-    af2_cmd = _conda_cmd(
-        args.af2_env,
-        [
-            "python",
-            "-m",
-            "binder_comparison",
-            "refold-af2",
-            "--sequences",
-            str(sequences_fasta),
-            "--target-pdb",
-            args.target_pdb,
-            "--output",
-            str(af2_csv),
-            "--output-dir",
-            str(output_dir / "refold_af2"),
-            "--models",
-            args.af2_models,
-            "--num-recycles",
-            str(args.num_recycles),
-        ]
-        + (["--mosaic-path", args.mosaic_path] if args.mosaic_path else []),
-    )
-    _run_step(af2_cmd, "refold-af2")
+    run_protenix = bool(args.protenix_env)
+    if run_protenix:
+        print("\n" + "=" * 60)
+        print(f"STEP 3/4 — Protenix refolding  [conda: {args.protenix_env}]")
+        print("=" * 60)
+        protenix_cmd = _conda_cmd(
+            args.protenix_env,
+            [
+                "python",
+                "-m",
+                "binder_comparison",
+                "refold-protenix",
+                "--sequences",
+                str(sequences_fasta),
+                "--target-seq",
+                args.target_seq,
+                "--output",
+                str(protenix_csv),
+                "--output-dir",
+                str(output_dir / "refold_protenix"),
+                "--num-samples",
+                str(args.protenix_num_samples),
+                "--num-seeds",
+                str(args.protenix_num_seeds),
+            ],
+        )
+        _run_step(protenix_cmd, "refold-protenix")
+    else:
+        print("\n[run] Protenix refolding skipped (pass --protenix-env to enable).")
 
     # ------------------------------------------------------------------
     # Step 4: Report
     # ------------------------------------------------------------------
+    n_steps = 4 if run_protenix else 3
     print("\n" + "=" * 60)
-    print("STEP 4/4 — Generating comparison report")
+    print(f"STEP {n_steps}/{n_steps} — Generating comparison report")
     print("=" * 60)
 
     report_cmd = [
@@ -137,13 +140,13 @@ def run(args: argparse.Namespace) -> None:
         "report",
         "--boltz2-results",
         str(boltz2_csv),
-        "--af2-results",
-        str(af2_csv),
         "--sequences",
         str(sequences_fasta),
         "--output",
         str(output_dir / "report"),
     ]
+    if run_protenix and protenix_csv.exists():
+        report_cmd += ["--protenix-results", str(protenix_csv)]
     if args.bindcraft:
         bindcraft_dir = Path(args.bindcraft)
         final_csv = next(bindcraft_dir.glob("final_design_stats.csv"), None)
@@ -173,7 +176,7 @@ def _run_step(cmd: list[str], name: str) -> None:
 def add_parser(subparsers) -> None:
     p = subparsers.add_parser(
         "run",
-        help="Full pipeline: extract → refold-boltz2 → refold-af2 → report.",
+        help="Full pipeline: extract → refold-boltz2 → report.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
     )
@@ -189,19 +192,18 @@ def add_parser(subparsers) -> None:
         help="Proteina-Complexa output directory (containing sequences.csv)",
     )
     # Refolding targets
-    p.add_argument("--target-seq", required=True, metavar="SEQ", help="Target protein sequence (for Boltz2 refolding)")
-    p.add_argument("--target-pdb", required=True, metavar="PDB", help="Target PDB path (for AF2 refolding)")
+    p.add_argument("--target-seq", required=True, metavar="SEQ", help="Target protein sequence (for Boltz-2 refolding)")
     # Output
     p.add_argument("--output", "-o", required=True, metavar="DIR", help="Output directory for all results")
-    # Environment selection for Boltz2 refolding
+    # Environment selection for Boltz-2 refolding
     boltz2_grp = p.add_mutually_exclusive_group()
     boltz2_grp.add_argument(
         "--boltz2-python",
         default=None,
         metavar="PYTHON",
         help=(
-            "Direct Python executable for Boltz2 refolding — use this for the "
-            "uv venv (e.g. ~/BindMaster/mosaic/.venv/bin/python). "
+            "Direct Python executable for Boltz-2 refolding — use this for the "
+            "uv venv (e.g. ~/BindMaster/Mosaic/.venv/bin/python). "
             "Takes precedence over --boltz2-env."
         ),
     )
@@ -209,15 +211,7 @@ def add_parser(subparsers) -> None:
         "--boltz2-env",
         default="mosaic",
         metavar="ENV",
-        help="Conda env for Boltz2 refolding (default: mosaic)",
-    )
-    p.add_argument(
-        "--af2-env", default="bindcraft_pr", metavar="ENV", help="Conda env for AF2 refolding (default: bindcraft_pr)"
-    )
-    # Refolding options
-    p.add_argument("--af2-models", default="1", metavar="N[,N]", help="AF2 model indices (default: 1)")
-    p.add_argument(
-        "--num-recycles", type=int, default=3, metavar="N", help="Recycling iterations for both engines (default: 3)"
+        help="Conda env for Boltz-2 refolding (default: mosaic)",
     )
     p.add_argument("--mosaic-path", default=None, metavar="DIR", help="Mosaic repo path (auto-detected if not set)")
     p.add_argument(
@@ -225,4 +219,18 @@ def add_parser(subparsers) -> None:
         action="store_true",
         help="Include all Mosaic designs (default: only is_top=1 refolded designs)",
     )
+    # Protenix refolding (optional)
+    p.add_argument(
+        "--protenix-env",
+        default="",
+        metavar="ENV",
+        help=(
+            "Conda env for Protenix refolding (typically 'bindmaster_pxdesign'). "
+            "Omit or pass empty string to skip Protenix."
+        ),
+    )
+    p.add_argument(
+        "--protenix-num-samples", type=int, default=5, metavar="N", help="Protenix samples per seed (default: 5)"
+    )
+    p.add_argument("--protenix-num-seeds", type=int, default=1, metavar="N", help="Protenix random seeds (default: 1)")
     p.set_defaults(func=run)

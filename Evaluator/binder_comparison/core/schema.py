@@ -7,7 +7,17 @@ from typing import Literal
 
 import numpy as np
 
-SourceTool = Literal["bindcraft", "boltzgen", "mosaic", "pxdesign", "rfaa", "unknown"]
+SourceTool = Literal[
+    "bindcraft",
+    "boltzgen",
+    "mosaic",
+    "pxdesign",
+    "rfaa",
+    "rfd3",
+    "proteina_complexa",
+    "protein_hunter",
+    "unknown",
+]
 
 
 @dataclass
@@ -29,17 +39,16 @@ class NativeMetrics:
 
 @dataclass
 class StandardisedMetrics:
-    """Metrics produced by running both refolding engines on every binder.
+    """Metrics produced by refolding every extracted binder with Boltz-2.
 
     Every binder gets these, regardless of which tool designed it.
 
     Canonical columns (iptm, ipae, etc.) are direct copies of Boltz-2 values.
-    AF2 columns remain available for cross-validation.
-    Boltz2-exclusive metrics (IPSAE family) have no AF2 equivalent.
+    Boltz2-exclusive metrics (IPSAE family) are pass-through.
 
     Scale notes:
-    - pLDDT: expected [0, 1] for both engines
-    - PAE: expected in Ångströms for both engines
+    - pLDDT: expected [0, 1]
+    - PAE: expected in Ångströms
     - IPSAE: Boltz2-specific score, higher = better interface contact
     """
 
@@ -53,16 +62,6 @@ class StandardisedMetrics:
     plddt_binder_min: float | None = None
     plddt_target_mean: float | None = None
 
-    # ---- AF2-specific values (pre-ensemble) ----
-    af2_iptm: float | None = None
-    af2_ipae: float | None = None
-    af2_pae_bt: float | None = None
-    af2_pae_tb: float | None = None
-    af2_pae_bb: float | None = None
-    af2_plddt_binder_mean: float | None = None
-    af2_plddt_binder_min: float | None = None
-    af2_plddt_target_mean: float | None = None
-
     # ---- Boltz2-specific values (pre-ensemble) ----
     boltz_iptm: float | None = None
     boltz_ipae: float | None = None
@@ -73,7 +72,7 @@ class StandardisedMetrics:
     boltz_plddt_binder_min: float | None = None
     boltz_plddt_target_mean: float | None = None
 
-    # ---- Boltz2-exclusive (no AF2 equivalent) ----
+    # ---- Boltz2-exclusive ----
     bt_ipsae: float | None = None  # Binder→target IPSAE, 6-sample avg
     tb_ipsae: float | None = None  # Target→binder IPSAE
     ipsae_min: float | None = None  # min(bt, tb) — worst-case interface contact
@@ -84,24 +83,52 @@ class StandardisedMetrics:
     target_contact: float | None = None  # Binder-target contacts
     pTMEnergy: float | None = None  # Boltz2 energy proxy (lower better)
 
+    # ---- Protenix v0.5.0 values (universal 2nd engine; rides bindmaster_pxdesign env) ----
+    # pLDDT is rescaled 0-100 → 0-1 on ingest so it's directly comparable to Boltz-2.
+    protenix_iptm: float | None = None
+    protenix_ptm: float | None = None
+    protenix_ranking_score: float | None = None  # 0.8*iptm + 0.2*ptm + 0.5*disorder - 100*has_clash
+    protenix_plddt_binder_mean: float | None = None
+    protenix_plddt_binder_min: float | None = None
+    protenix_plddt_target_mean: float | None = None
+    protenix_pae_bt: float | None = None
+    protenix_pae_tb: float | None = None
+    protenix_pae_bb: float | None = None
+    # DunbrackLab PAE-based ipSAE (added by report.py post-merge)
+    protenix_bt_ipsae: float | None = None
+    protenix_tb_ipsae: float | None = None
+    protenix_ipsae_min: float | None = None
+
+    # ---- AlphaFold 3 v3.0.2 values (aarch64 / DGX Spark only; wired in Part K) ----
+    af3_iptm: float | None = None
+    af3_ptm: float | None = None
+    af3_ranking_score: float | None = None
+    af3_plddt_binder_mean: float | None = None
+    af3_plddt_binder_min: float | None = None
+    af3_plddt_target_mean: float | None = None
+    af3_pae_bt: float | None = None
+    af3_pae_tb: float | None = None
+    af3_pae_bb: float | None = None
+    af3_bt_ipsae: float | None = None
+    af3_tb_ipsae: float | None = None
+    af3_ipsae_min: float | None = None
+
 
 @dataclass
 class PerResidueData:
-    """Raw per-residue arrays from refolding engines.
+    """Raw per-residue arrays from the Boltz-2 refolding engine.
 
-    Both are normalised to [binder | target] ordering:
-    - Boltz2 native: [binder | target] — no change needed
-    - AF2 native: [target | binder] — must be swapped on load
+    Normalised to [binder | target] ordering (Boltz-2 native).
 
     pLDDT shape: [L_b + L_t]
     PAE shape:   [L_b + L_t, L_b + L_t]
     """
 
     binder_length: int | None = None
-    af2_plddt: np.ndarray | None = None
-    af2_pae: np.ndarray | None = None
     boltz_plddt: np.ndarray | None = None
     boltz_pae: np.ndarray | None = None
+    protenix_pae: np.ndarray | None = None
+    af3_pae: np.ndarray | None = None
 
 
 @dataclass
@@ -124,7 +151,7 @@ class MetricResult:
     standardised: StandardisedMetrics = field(default_factory=StandardisedMetrics)
     native: NativeMetrics = field(default_factory=NativeMetrics)
     per_residue: PerResidueData = field(default_factory=PerResidueData)
-    model_weights: dict[str, float] = field(default_factory=lambda: {"af2": 0.6, "boltz2": 0.4})
+    model_weights: dict[str, float] = field(default_factory=lambda: {"boltz2": 1.0})
 
     def to_flat_dict(self) -> dict:
         """Flatten all metrics into a single dict for CSV export."""
@@ -150,7 +177,7 @@ class ComparisonReport:
     summary_statistics: dict[str, dict[str, float]]  # metric → {mean, std, min, max}
     z_scores: dict[str, dict[str, float]]  # binder_id → metric → z_score
     rankings: dict[str, list[str]]  # metric → ordered binder_ids
-    model_weights: dict[str, float] = field(default_factory=lambda: {"af2": 0.6, "boltz2": 0.4})
+    model_weights: dict[str, float] = field(default_factory=lambda: {"boltz2": 1.0})
 
 
 # Metrics where lower is better (for correct ranking direction)
@@ -160,14 +187,16 @@ LOWER_IS_BETTER = frozenset(
         "pae_bt",
         "pae_tb",
         "pae_bb",
-        "af2_ipae",
-        "af2_pae_bt",
-        "af2_pae_tb",
-        "af2_pae_bb",
         "boltz_ipae",
         "boltz_pae_bt",
         "boltz_pae_tb",
         "boltz_pae_bb",
+        "protenix_pae_bt",
+        "protenix_pae_tb",
+        "protenix_pae_bb",
+        "af3_pae_bt",
+        "af3_pae_tb",
+        "af3_pae_bb",
         "pTMEnergy",
     }
 )
@@ -217,11 +246,24 @@ ZSCORE_METRICS = list(BOLTZ2_METRIC_MAP.keys()) + [
     "boltz_pae_bt_ipsae",
     "boltz_pae_tb_ipsae",
     "boltz_pae_ipsae_min",
-    # AF2 PAE-based ipSAE (DunbrackLab formula, 10 Å cutoff)
-    "af2_bt_ipsae",
-    "af2_tb_ipsae",
-    "af2_ipsae_min",
+    # Protenix DunbrackLab ipSAE + summary metrics
+    "protenix_iptm",
+    "protenix_ptm",
+    "protenix_ranking_score",
+    "protenix_plddt_binder_mean",
+    "protenix_bt_ipsae",
+    "protenix_tb_ipsae",
+    "protenix_ipsae_min",
+    "protenix_pae_iptm",
+    # AF3 DunbrackLab ipSAE + summary metrics (aarch64 / DGX Spark only)
+    "af3_iptm",
+    "af3_ptm",
+    "af3_ranking_score",
+    "af3_plddt_binder_mean",
+    "af3_bt_ipsae",
+    "af3_tb_ipsae",
+    "af3_ipsae_min",
+    "af3_pae_iptm",
     # ipTM computed independently from PAE matrices
     "boltz_pae_iptm",
-    "af2_pae_iptm",
 ]
