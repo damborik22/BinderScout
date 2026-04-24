@@ -1851,8 +1851,10 @@ _write_rfd3_shortcut() {
     } > "${SHORTCUTS_DIR}/rfd3"
     cat >> "${SHORTCUTS_DIR}/rfd3" << 'EOF'
 
-# Surface the weights dir as an env var for Hydra configs that need it
-export FOUNDRY_CHECKPOINT_DIR="${FOUNDRY_WEIGHTS_DIR}"
+# Surface the weights dir for the foundry checkpoint registry.
+# (The registry reads FOUNDRY_CHECKPOINT_DIRS / FOUNDRY_CHECKPOINTS_DIR; the
+# singular form FOUNDRY_CHECKPOINT_DIR is silently ignored.)
+export FOUNDRY_CHECKPOINT_DIRS="${FOUNDRY_WEIGHTS_DIR}"
 
 if [[ $# -eq 0 ]]; then
     echo "RFD3 environment (bindmaster_rfd3). Weights: ${FOUNDRY_WEIGHTS_DIR}"
@@ -1910,9 +1912,10 @@ install_protein_hunter() {
         || print_warn "Some Protein-Hunter deps failed — may need manual follow-up"
 
     # PyRosetta (required by boltz_ph.design at import time)
+    # pyrosetta_installer >=0.1.2 renamed download_pyrosetta -> install_pyrosetta.
     run_logged "Installing PyRosetta" \
         "${CONDA_CMD}" run -n bindmaster_protein_hunter python -c \
-        "from pyrosetta_installer import download_pyrosetta; download_pyrosetta(serialization=True, skip_if_installed=True)" \
+        "from pyrosetta_installer import install_pyrosetta; install_pyrosetta(serialization=True, skip_if_installed=True)" \
         || print_warn "PyRosetta install failed — Protein-Hunter design will not work until this is fixed"
 
     # Install chai-lab (from sokrypton fork pinned by Protein-Hunter upstream)
