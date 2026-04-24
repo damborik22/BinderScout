@@ -8,15 +8,17 @@
 #
 # Required:
 #   --sequences    path to FASTA (or CSV / one-per-line) with binder sequences
-#   --target-seq   full target amino acid sequence (for Boltz-2 complex assembly)
+#   --target-seq   full target amino acid sequence (for complex assembly)
 #   --output       output directory
 #
 # Optional:
-#   --skip-boltz2  skip Boltz-2 refolding (use existing boltz2_results.csv in output dir)
-#   --resume       resume interrupted run — skip already-completed binders
+#   --skip-boltz2       skip Boltz-2 refolding (use existing boltz2_results.csv)
+#   --skip-protenix     skip Protenix refolding (default: auto-detect bindmaster_pxdesign env)
+#   --protenix-env ENV  conda env for Protenix (default: bindmaster_pxdesign)
+#   --resume            resume interrupted run
 #
-# Future refolding engines (Protenix on x86, AlphaFold 3 on aarch64 / DGX Spark)
-# will add optional steps between Boltz-2 and the report stage.
+# AF3 refolding (aarch64 / DGX Spark only, Part K) is driven separately by
+# `binder-compare refold-af3` and wired into the report via --af3-results.
 
 set -euo pipefail
 
@@ -59,18 +61,22 @@ SEQUENCES=""
 TARGET_SEQ=""
 OUTPUT=""
 SKIP_BOLTZ2=0
+SKIP_PROTENIX=0
+PROTENIX_ENV="bindmaster_pxdesign"
 RESUME=0
 
 # --- parse arguments -------------------------------------------------------
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --sequences)   SEQUENCES="$2";   shift 2 ;;
-        --target-seq)  TARGET_SEQ="$2";  shift 2 ;;
-        --output|-o)   OUTPUT="$2";      shift 2 ;;
-        --skip-boltz2) SKIP_BOLTZ2=1;    shift ;;
-        --resume)      RESUME=1;         shift ;;
+        --sequences)     SEQUENCES="$2";    shift 2 ;;
+        --target-seq)    TARGET_SEQ="$2";   shift 2 ;;
+        --output|-o)     OUTPUT="$2";       shift 2 ;;
+        --skip-boltz2)   SKIP_BOLTZ2=1;     shift ;;
+        --skip-protenix) SKIP_PROTENIX=1;   shift ;;
+        --protenix-env)  PROTENIX_ENV="$2"; shift 2 ;;
+        --resume)        RESUME=1;          shift ;;
         -h|--help)
-            sed -n '2,20p' "$0" | grep '^#' | sed 's/^# \?//'
+            sed -n '2,22p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
@@ -91,6 +97,16 @@ echo "Sequences : $SEQUENCES"
 echo "Output    : $OUTPUT"
 echo ""
 
+# Auto-detect Protenix availability unless user skipped it
+if [[ $SKIP_PROTENIX -eq 0 ]]; then
+    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${PROTENIX_ENV}"; then
+        echo "[note] conda env '${PROTENIX_ENV}' not found — Protenix refolding will be skipped."
+        echo "        (install with: bindmaster install --tool pxdesign)"
+        echo ""
+        SKIP_PROTENIX=1
+    fi
+fi
+
 # --- Step 0: Normalise sequences to FASTA ----------------------------------
 FASTA="$OUTPUT/sequences.fasta"
 echo "[step 0] Parsing sequences → $FASTA"
@@ -101,12 +117,15 @@ SEQUENCES="$FASTA"
 
 # --- Step 1: Boltz-2 refolding ---------------------------------------------
 BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
+PROTENIX_CSV="$OUTPUT/protenix_results.csv"
+N_STEPS=2
+[[ $SKIP_PROTENIX -eq 0 ]] && N_STEPS=3
 
 if [[ $SKIP_BOLTZ2 -eq 1 ]]; then
-    echo "[step 1/2] Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
+    echo "[step 1/${N_STEPS}] Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
     [[ -f "$BOLTZ2_CSV" ]] || { echo "Error: $BOLTZ2_CSV not found"; exit 1; }
 else
-    echo "[step 1/2] Boltz-2 refolding  (Mosaic venv)..."
+    echo "[step 1/${N_STEPS}] Boltz-2 refolding  (Mosaic venv)..."
     BOLTZ2_RESUME_FLAG=""
     [[ $RESUME -eq 1 ]] && BOLTZ2_RESUME_FLAG="--resume"
     "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
@@ -116,12 +135,30 @@ else
         $BOLTZ2_RESUME_FLAG
 fi
 
-# --- Step 2: Report --------------------------------------------------------
-echo "[step 2/2] Generating report   (binder-eval)..."
-conda run -n binder-eval binder-compare report \
-    --boltz2-results "$BOLTZ2_CSV" \
-    --sequences      "$SEQUENCES" \
+# --- Step 2: Protenix refolding (optional) ---------------------------------
+if [[ $SKIP_PROTENIX -eq 0 ]]; then
+    echo "[step 2/${N_STEPS}] Protenix refolding  (conda env: ${PROTENIX_ENV})..."
+    PROTENIX_RESUME_FLAG=""
+    [[ $RESUME -eq 1 ]] && PROTENIX_RESUME_FLAG="--resume"
+    conda run -n "${PROTENIX_ENV}" binder-compare refold-protenix \
+        --sequences  "$SEQUENCES" \
+        --target-seq "$TARGET_SEQ" \
+        -o           "$PROTENIX_CSV" \
+        --output-dir "$OUTPUT/refold_protenix" \
+        $PROTENIX_RESUME_FLAG
+fi
+
+# --- Report ----------------------------------------------------------------
+echo "[step ${N_STEPS}/${N_STEPS}] Generating report   (binder-eval)..."
+REPORT_ARGS=(
+    --boltz2-results "$BOLTZ2_CSV"
+    --sequences      "$SEQUENCES"
     -o               "$OUTPUT/report"
+)
+if [[ $SKIP_PROTENIX -eq 0 && -f "$PROTENIX_CSV" ]]; then
+    REPORT_ARGS+=(--protenix-results "$PROTENIX_CSV")
+fi
+conda run -n binder-eval binder-compare report "${REPORT_ARGS[@]}"
 
 echo ""
 echo "=== Done ==="

@@ -242,6 +242,82 @@ def add_boltz_ipsae_from_files(
 
 
 # ---------------------------------------------------------------------------
+# Generic PAE → DunbrackLab ipSAE loader (for Protenix, AF3, and future engines)
+# ---------------------------------------------------------------------------
+
+
+def add_ipsae_from_pae_files(
+    df: pd.DataFrame,
+    pae_file_col: str,
+    binder_length_col: str = "binder_length",
+    pae_cutoff: float = IPSAE_PAE_CUTOFF,
+    base_dir: str | Path | None = None,
+    *,
+    prefix: str,
+    ordering: str = "target_binder",
+) -> pd.DataFrame:
+    """Load saved PAE .npy files and add DunbrackLab ipSAE columns to *df*.
+
+    Engine-agnostic version of ``add_boltz_ipsae_from_files``. Adds columns
+    ``{prefix}_bt_ipsae``, ``{prefix}_tb_ipsae``, ``{prefix}_ipsae_min``,
+    ``{prefix}_ipsae_max`` where ``prefix`` is e.g. "protenix" or "af3".
+
+    Args:
+        df:              DataFrame with engine refolding results.
+        pae_file_col:    Column containing paths to PAE .npy files.
+        binder_length_col: Column with binder sequence length.
+        pae_cutoff:      PAE cutoff in Å (default 10 Å, uniform across engines).
+        base_dir:        Base directory for resolving relative PAE file paths.
+        prefix:          Output column prefix (e.g. 'protenix', 'af3').
+        ordering:        'binder_target' or 'target_binder' — how the PAE matrix
+                         is laid out. Protenix and AF3 both default to
+                         'target_binder' because we always put target first in
+                         the input JSON.
+    """
+    result = df.copy()
+
+    if pae_file_col not in df.columns:
+        return result
+
+    bt_ipsae_vals, tb_ipsae_vals, min_vals, max_vals = [], [], [], []
+
+    for _, row in df.iterrows():
+        pae_path = row.get(pae_file_col)
+        L_b = row.get(binder_length_col)
+
+        resolved = _resolve_pae_path(pae_path, base_dir)
+        if pd.isna(pae_path) or pd.isna(L_b) or resolved is None:
+            bt_ipsae_vals.append(np.nan)
+            tb_ipsae_vals.append(np.nan)
+            min_vals.append(np.nan)
+            max_vals.append(np.nan)
+            continue
+
+        try:
+            pae = np.load(str(resolved))
+            scores = compute_ipsae_from_pae(pae, int(L_b), pae_cutoff, ordering=ordering)
+            bt_ipsae_vals.append(scores["bt_ipsae"])
+            tb_ipsae_vals.append(scores["tb_ipsae"])
+            min_vals.append(scores["ipsae_min"])
+            max_vals.append(scores["ipsae_max"])
+        except Exception as e:
+            import warnings
+
+            warnings.warn(f"Failed to compute {prefix} ipSAE for {pae_path}: {e}")
+            bt_ipsae_vals.append(np.nan)
+            tb_ipsae_vals.append(np.nan)
+            min_vals.append(np.nan)
+            max_vals.append(np.nan)
+
+    result[f"{prefix}_bt_ipsae"] = bt_ipsae_vals
+    result[f"{prefix}_tb_ipsae"] = tb_ipsae_vals
+    result[f"{prefix}_ipsae_min"] = min_vals
+    result[f"{prefix}_ipsae_max"] = max_vals
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # ipTM from saved PAE files (computed independently of model-reported values)
 # ---------------------------------------------------------------------------
 

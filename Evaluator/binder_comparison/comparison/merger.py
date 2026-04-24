@@ -1,8 +1,9 @@
-"""Merge Boltz-2 refolding results (and future Protenix / AF3 engines) into a single DataFrame.
+"""Merge refolding results from multiple engines into a single DataFrame.
 
 Column naming convention after merge:
-  - Boltz-2 columns are prefixed with ``boltz_`` (e.g. ``boltz_iptm``, ``boltz_ipae``)
-  - Future engines (Protenix, AF3) will carry ``protenix_`` / ``af3_`` prefixes
+  - Boltz-2 columns are prefixed with ``boltz_``
+  - Protenix columns are prefixed with ``protenix_``
+  - AF3 columns (Part K, aarch64) are prefixed with ``af3_``
   - ``sequence`` is the join key, present in every engine's CSV
 
 The FASTA extracted by 'binder-compare extract' is used to join the source
@@ -11,48 +12,86 @@ tool tag back onto the merged results.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import pandas as pd
 
 from ..io.read import read_csv_safe, read_fasta
 
-# Columns from Boltz-2 CSV (refold_boltz2) that should NOT be prefixed
-_BOLTZ2_PASSTHROUGH_COLS = {"sequence", "target_sequence", "binder_length", "run_id"}
+# Columns that should NOT be prefixed — passthrough identifiers shared across engines
+_PASSTHROUGH_COLS = {"sequence", "target_sequence", "binder_length", "run_id"}
 
 
 def merge_refold_results(
     boltz2_csv: str | Path | None,
     sequences_fasta: str | Path | None = None,
+    *,
+    protenix_csv: str | Path | None = None,
+    af3_csv: str | Path | None = None,
 ) -> pd.DataFrame:
-    """Load Boltz-2 results and optionally attach FASTA-extracted metadata.
+    """Outer-join refolding-engine CSVs on the ``sequence`` column.
 
     Args:
-        boltz2_csv:       Path to boltz2_results.csv from 'refold-boltz2'.
-        sequences_fasta:  Optional FASTA from 'extract'; used to attach
-                          binder_id and source_tool columns.
+        boltz2_csv:       Path to boltz2_results.csv from 'refold-boltz2' (required
+                          anchor — report needs at least one engine).
+        sequences_fasta:  Optional FASTA from 'extract'; attaches binder_id and
+                          source_tool columns.
+        protenix_csv:     Optional Protenix results (refold-protenix output).
+        af3_csv:          Optional AF3 results (refold-af3 output, aarch64 only).
 
     Returns:
-        DataFrame with all Boltz-2 metrics, ``boltz_``-prefixed for columns
-        outside the passthrough set.
+        DataFrame with per-engine prefixed columns + passthrough identifiers.
     """
-    boltz_df = _load_boltz2(boltz2_csv) if boltz2_csv else pd.DataFrame()
-    if boltz_df.empty:
-        raise ValueError("boltz2_csv is absent or empty — nothing to report on.")
+    engine_dfs: dict[str, pd.DataFrame] = {}
+    if boltz2_csv:
+        engine_dfs["boltz"] = _load_engine(boltz2_csv, "boltz")
+    if protenix_csv:
+        engine_dfs["protenix"] = _load_engine(protenix_csv, "protenix")
+    if af3_csv:
+        engine_dfs["af3"] = _load_engine(af3_csv, "af3")
 
-    merged = boltz_df.copy()
+    engine_dfs = {k: v for k, v in engine_dfs.items() if not v.empty}
+    if not engine_dfs:
+        raise ValueError("No non-empty refolding CSVs supplied — nothing to report on.")
+
+    merged: pd.DataFrame | None = None
+    for name, df in engine_dfs.items():
+        if merged is None:
+            merged = df.copy()
+        else:
+            merged = pd.merge(merged, df, on="sequence", how="outer", suffixes=("", f"_{name}_dup"))
+            # Drop accidental duplicate passthrough columns (prefer the first engine's values)
+            for col in list(merged.columns):
+                if col.endswith(f"_{name}_dup"):
+                    merged.drop(columns=[col], inplace=True)
+
+    assert merged is not None  # engine_dfs non-empty guarantee
+
+    if len(engine_dfs) > 1:
+        iptm_cols = {name: f"{name}_iptm" for name in engine_dfs}
+        present = [c for c in iptm_cols.values() if c in merged.columns]
+        if present:
+            n_total = len(merged)
+            both_mask = merged[present].notna().all(axis=1)
+            print(
+                f"[merger] {n_total} unique sequences — "
+                f"{int(both_mask.sum())} have all {len(present)} engines, "
+                + ", ".join(f"{int(merged[c].isna().sum())} missing {c.split('_')[0]}" for c in present)
+            )
+
     if sequences_fasta:
         merged = _attach_fasta_metadata(merged, sequences_fasta)
     return merged
 
 
-def _load_boltz2(path: str | Path) -> pd.DataFrame:
-    """Load and prefix Boltz-2 CSV columns with 'boltz_'."""
+def _load_engine(path: str | Path, prefix: str) -> pd.DataFrame:
+    """Load a refolding-engine CSV and prefix non-passthrough columns with ``{prefix}_``."""
     df = read_csv_safe(path)
     if df.empty:
+        warnings.warn(f"[merger] {prefix} CSV is empty: {path}")
         return df
-
-    rename = {col: f"boltz_{col}" for col in df.columns if col not in _BOLTZ2_PASSTHROUGH_COLS}
+    rename = {col: f"{prefix}_{col}" for col in df.columns if col not in _PASSTHROUGH_COLS}
     return df.rename(columns=rename)
 
 
