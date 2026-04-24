@@ -212,6 +212,7 @@ _TOOL_COLOURS_PYMOL = {
     "bindcraft": "blue",
     "proteina_complexa": "teal",
     "rfaa": "firebrick",
+    "protein_hunter": "cyan",
 }
 
 _TOOL_DISPLAY_PYMOL = {
@@ -221,6 +222,7 @@ _TOOL_DISPLAY_PYMOL = {
     "bindcraft": "BindCraft",
     "proteina_complexa": "Proteina-Complexa",
     "rfaa": "RFAA",
+    "protein_hunter": "Protein-Hunter",
 }
 
 

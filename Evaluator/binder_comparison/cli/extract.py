@@ -20,6 +20,7 @@ from ..extractors import (
     BoltzGenExtractor,
     MosaicExtractor,
     ProteinaComplexaExtractor,
+    ProteinHunterExtractor,
     PXDesignExtractor,
     RFAAExtractor,
 )
@@ -63,6 +64,13 @@ def run(args: argparse.Namespace) -> None:
     if args.proteina_complexa:
         print(f"[extract] Proteina-Complexa: {args.proteina_complexa}")
         extracted = ProteinaComplexaExtractor().extract(args.proteina_complexa)
+        print(f"  → {len(extracted)} sequences")
+        all_binders.extend(extracted)
+
+    if args.protein_hunter:
+        print(f"[extract] Protein-Hunter: {args.protein_hunter}")
+        all_runs = getattr(args, "all_protein_hunter_designs", False)
+        extracted = ProteinHunterExtractor(all_runs=all_runs).extract(args.protein_hunter)
         print(f"  → {len(extracted)} sequences")
         all_binders.extend(extracted)
 
@@ -114,11 +122,22 @@ def add_parser(subparsers) -> None:
         dest="proteina_complexa",
         help="Proteina-Complexa output directory (containing sequences.csv)",
     )
+    p.add_argument(
+        "--protein-hunter",
+        metavar="DIR",
+        dest="protein_hunter",
+        help="Protein-Hunter output directory (containing summary_high_iptm.csv)",
+    )
     p.add_argument("--output", "-o", required=True, metavar="FILE", help="Output FASTA path (e.g. sequences.fasta)")
     p.add_argument("--keep-duplicates", action="store_true", help="Do not deduplicate identical sequences across tools")
     p.add_argument(
         "--all-mosaic-designs",
         action="store_true",
         help="Include all Mosaic designs (default: only is_top=1 refolded designs)",
+    )
+    p.add_argument(
+        "--all-protein-hunter-designs",
+        action="store_true",
+        help="Include all Protein-Hunter designs (default: only summary_high_iptm.csv rows)",
     )
     p.set_defaults(func=run)
