@@ -1909,10 +1909,11 @@ install_protein_hunter() {
         "cd '${PROTEIN_HUNTER_DIR}' && pip install -q -e './boltz_ph' && pip install -q matplotlib seaborn prody py3Dmol pyyaml ml_collections biopython modelcif jaxtyping pandera logmd==0.1.45 pyrosetta-installer" \
         || print_warn "Some Protein-Hunter deps failed — may need manual follow-up"
 
-    # PyRosetta (required by boltz_ph.design at import time)
+    # PyRosetta (required by boltz_ph.design at import time).
+    # pyrosetta-installer ≥0.3 renamed download_pyrosetta → install_pyrosetta.
     run_logged "Installing PyRosetta" \
         "${CONDA_CMD}" run -n bindmaster_protein_hunter python -c \
-        "from pyrosetta_installer import download_pyrosetta; download_pyrosetta(serialization=True, skip_if_installed=True)" \
+        "from pyrosetta_installer import install_pyrosetta; install_pyrosetta(serialization=True, skip_if_installed=True)" \
         || print_warn "PyRosetta install failed — Protein-Hunter design will not work until this is fixed"
 
     # Install chai-lab (from sokrypton fork pinned by Protein-Hunter upstream)
