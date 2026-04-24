@@ -6,6 +6,7 @@ from .protein_hunter import ProteinHunterExtractor
 from .proteina_complexa import ProteinaComplexaExtractor
 from .pxdesign import PXDesignExtractor
 from .rfaa import RFAAExtractor
+from .rfd3 import RFD3Extractor
 
 __all__ = [
     "BindCraftExtractor",
@@ -15,5 +16,6 @@ __all__ = [
     "ProteinHunterExtractor",
     "ProteinaComplexaExtractor",
     "RFAAExtractor",
+    "RFD3Extractor",
     "SequenceExtractor",
 ]
