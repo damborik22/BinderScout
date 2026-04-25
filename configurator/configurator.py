@@ -1077,6 +1077,23 @@ done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
 conda activate bindmaster_pxdesign
 export CUDA_HOME="$CONDA_PREFIX"
+
+# Surface CUDA dev headers + libs for PyTorch's JIT compiler.
+# - cuda_runtime_api.h ships only under $CONDA_PREFIX/targets/x86_64-linux/include
+#   (conda-forge cuda-cudart-dev layout), not under $CONDA_PREFIX/include.
+# - cuBLAS / cuDNN / NCCL dev headers ship via the pip nvidia-*-cu12 wheels at
+#   site-packages/nvidia/<lib>/include — needed by protenix's JIT layer-norm op.
+# Without this, the first 'pxdesign pipeline' run dies with
+#   "fatal error: cuda_runtime_api.h: No such file or directory"
+# and "fatal error: cublas_v2.h: No such file or directory".
+NVIDIA_DIR="$CONDA_PREFIX/lib/python3.11/site-packages/nvidia"
+if [[ -d "$NVIDIA_DIR" ]]; then
+    NVIDIA_INC=$(ls -d "$NVIDIA_DIR"/*/include 2>/dev/null | tr '\\n' ':' | sed 's/:$//')
+    NVIDIA_LIB=$(ls -d "$NVIDIA_DIR"/*/lib 2>/dev/null | tr '\\n' ':' | sed 's/:$//')
+    export CPATH="${{NVIDIA_INC}}:$CONDA_PREFIX/targets/x86_64-linux/include${{CPATH:+:$CPATH}}"
+    export LIBRARY_PATH="${{NVIDIA_LIB}}:$CONDA_PREFIX/targets/x86_64-linux/lib${{LIBRARY_PATH:+:$LIBRARY_PATH}}"
+    export LD_LIBRARY_PATH="${{NVIDIA_LIB}}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
+fi
 set -u
 
 # aarch64/Blackwell: CUDA arch list and JAX CPU-only mode
