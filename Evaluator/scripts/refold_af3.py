@@ -207,11 +207,13 @@ def _run_single(
 
     output_dir = input_dir / "output"
 
-    # Invoke AF3 via subprocess
+    # Invoke AF3 via run_alphafold.py (official Google DeepMind entry point).
+    # The script lives in the cloned alphafold3 repo; resolve via AF3_REPO_DIR
+    # env var or default to <BindMaster>/alphafold3/.
+    af3_script = _resolve_af3_script()
     cmd = [
         sys.executable,
-        "-m",
-        "alphafold3",
+        str(af3_script),
         f"--json_path={json_path}",
         f"--model_dir={model_dir}",
         f"--output_dir={output_dir}",
@@ -220,7 +222,7 @@ def _run_single(
         f"--num_diffusion_samples={num_samples}",
     ]
 
-    print(f"  [af3] Running: {' '.join(cmd[:4])} ...")
+    print(f"  [af3] Running: {Path(cmd[1]).name} ...")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"  [af3] STDERR: {result.stderr[-500:]}" if result.stderr else "  [af3] No stderr")
@@ -354,6 +356,30 @@ def _cif_to_pdb(cif_path: Path, pdb_path: Path) -> None:
         st.write_pdb(str(pdb_path))
     except Exception as e:
         print(f"  [af3] CIF→PDB conversion failed: {e}")
+
+
+def _resolve_af3_script() -> Path:
+    """Locate run_alphafold.py from the cloned google-deepmind/alphafold3 repo."""
+    # Check AF3_REPO_DIR env var
+    env_repo = os.environ.get("AF3_REPO_DIR")
+    if env_repo:
+        script = Path(env_repo) / "run_alphafold.py"
+        if script.is_file():
+            return script
+
+    # Default: <BindMaster>/alphafold3/run_alphafold.py
+    # scripts/ is inside Evaluator/, so BindMaster root is 2 levels up
+    bindmaster_root = Path(__file__).resolve().parent.parent.parent
+    script = bindmaster_root / "alphafold3" / "run_alphafold.py"
+    if script.is_file():
+        return script
+
+    raise FileNotFoundError(
+        "Cannot find run_alphafold.py. Clone the official AF3 repo:\n"
+        "  git clone --depth 1 --branch v3.0.2 "
+        "https://github.com/google-deepmind/alphafold3.git ~/BindMaster/alphafold3\n"
+        "Or set AF3_REPO_DIR to the repo root."
+    )
 
 
 def _resolve_model_dir(override: str | None) -> str:

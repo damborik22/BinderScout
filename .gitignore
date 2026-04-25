@@ -36,3 +36,4 @@ __pycache__/
 *.egg-info/
 Evaluator/envs/mosaic_venv_path
 .venv/
+alphafold3/
