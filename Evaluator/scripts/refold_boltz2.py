@@ -5,6 +5,7 @@ import re
 import signal
 import sys
 import uuid
+from pathlib import Path
 
 import equinox as eqx
 import gemmi
@@ -276,10 +277,14 @@ def refold_batch(
 
     folder = Boltz2()
 
-    # MSA caching via processing_dir is disabled for now — Boltz's process_inputs
-    # gets confused by stale data in the persistent dir. The sort-by-length fix
-    # prevents OOM, and MSA fetch is fast (~1-2 sec, cached by ColabFold CDN).
-    _processing_dir = None
+    # Cache target MSA across all binders. Mosaic's load_features_and_structure_writer
+    # keeps processed/msa/ (CSVs keyed by sequence hash) and wipes the per-complex dirs
+    # (manifest.json, processed/structures, etc.) on each call, so the target's MSA is
+    # fetched once and reused for every binder. Without this, large refold runs flood
+    # api.colabfold.com and hit RATELIMIT, sleeping seconds between every binder.
+    _processing_dir = Path(output_dir) / "boltz_msa_cache"
+    _processing_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Boltz-2 MSA cache : {_processing_dir}")
 
     @eqx.filter_jit
     def evaluate_loss(loss_fn, pssm, key):
