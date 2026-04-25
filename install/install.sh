@@ -1856,7 +1856,7 @@ _write_rfd3_shortcut() {
     cat >> "${SHORTCUTS_DIR}/rfd3" << 'EOF'
 
 # Surface the weights dir as an env var for Hydra configs that need it
-export FOUNDRY_CHECKPOINT_DIR="${FOUNDRY_WEIGHTS_DIR}"
+export FOUNDRY_CHECKPOINT_DIRS="${FOUNDRY_WEIGHTS_DIR}"
 
 if [[ $# -eq 0 ]]; then
     echo "RFD3 environment (bindmaster_rfd3). Weights: ${FOUNDRY_WEIGHTS_DIR}"
