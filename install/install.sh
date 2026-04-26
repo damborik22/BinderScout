@@ -1332,10 +1332,18 @@ install_pxdesign() {
         pip install -q "deepspeed>=0.18" \
         || print_warn "deepspeed upgrade failed"
 
-    # Pin dm-haiku + JAX (haiku 0.0.12 is last to support jax.core.JaxprEqn)
-    run_logged "Pinning dm-haiku and JAX versions" \
+    # Pin dm-haiku + JAX with CUDA12 plugin so AF2 (ColabDesign) runs on GPU.
+    # Without [cuda12], pip pulls the CPU-only jaxlib wheel and AF2 evaluation
+    # falls back to CPU (~23 min/eval vs ~30 s on a 3090).
+    # nvidia-cuda-nvcc-cu12 is also pinned to 12.4.x because the latest 12.9.x
+    # ships as a namespace package (no __init__.py) which breaks JAX's
+    # _try_cuda_nvcc_import — pathlib.Path(cuda_nvcc.__file__).parent fails
+    # on __file__ == None.
+    # haiku 0.0.12 is the last version to support jax.core.JaxprEqn.
+    run_logged "Pinning dm-haiku and JAX (with CUDA12)" \
         "${CONDA_CMD}" run -n bindmaster_pxdesign \
-        pip install -q "dm-haiku==0.0.12" "jax==0.4.35" "jaxlib==0.4.35" \
+        pip install -q "dm-haiku==0.0.12" "jax[cuda12]==0.4.35" \
+        "nvidia-cuda-nvcc-cu12==12.4.131" \
         || print_warn "dm-haiku/JAX pin failed"
 
     # ── Post-install patches for known upstream issues ──────────────────────
