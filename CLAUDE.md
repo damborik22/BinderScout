@@ -252,6 +252,21 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - **aarch64 Proteina-Complexa:** May need patches — PyTorch Geometric (PyG) and torchtext may lack aarch64 wheels. Core deps (PyTorch 2.7, JAX 0.4.29) are fine. Same approach as Mosaic: patch pyproject.toml to exclude problematic packages with `platform_machine != 'aarch64'` markers.
 - **AF2 smoke test:** Fails if `BindCraft/params/` is missing `.npz` weight files (interrupted download).
 
+### RFD3 / foundry runtime gotchas (no automated runner yet)
+
+The configurator does not yet generate RFD3 run scripts. When writing one by
+hand, watch for these (each one bit me on the CALCA run):
+
+- **Output format.** RFD3 writes `.cif.gz` (compressed mmCIF), NOT `.pdb`. Decompress for downstream tools that need PDB.
+- **Chain IDs.** Output mmCIF labels target as chain `A` (preserved residues from the input contig) and binder as chain `B` (designed). The `label_entity_id` column shows `0`/`1`, but the actual chain IDs at `label_asym_id` are letters.
+- **MPNN CLI is `mpnn`, not `foundry mpnn`.** The `foundry` umbrella CLI only has `install` / `list-available` / `list-installed` / `clean`. Sequence design is its own console-script (`mpnn`).
+- **`mpnn` requires `--is_legacy_weights True`** when called directly (the legacy `.pt` format is what `foundry install proteinmpnn` ships).
+- **`--designed_chains` wants a JSON list of letter strings**, e.g. `'["B"]'` — not bare `B` and not `1`. Bare digits get parsed as int and rejected with `chain-id strings, got <class 'int'>`.
+- **`FOUNDRY_CHECKPOINT_DIRS` is plural-S.** Singular `FOUNDRY_CHECKPOINT_DIR` is silently ignored (foundry's `checkpoint_registry.py` reads only the plural form). Effect: `rfd3 design` aborts with `Invalid checkpoint: rfd3` even when the .ckpt sits in your weights dir.
+- **ProteinMPNN weights are NOT bundled with rfd3.** `foundry install rfd3` only fetches `rfd3_latest.ckpt` (~2.5 GB). Run `foundry install proteinmpnn` separately for the ~7 MB `proteinmpnn_v_48_020.pt` file. (For ligand binders you also need `foundry install ligandmpnn`.)
+- **Reinit warnings on weight load are benign.** `foundry.utils.weights: Failed to apply policy: 'copy' to 'model.token_initializer.chunked_pairwise_embedder.*': Falling back to policy: 'reinit'` — these come from the chunked low-memory code path that the v0.1.9 checkpoint wasn't trained with. Output structures verify clean (n_chainbreaks=0, n_clashing=0, helix_fraction~0.9 for our CALCA helix).
+- **MPNN best-of-N filter.** `mpnn --number_of_batches 5` writes 5 sequences per backbone in one `.fa` (each header tagged with `sequence_recovery=...`). To keep "best-of-5 per backbone", post-process: pick the highest-recovery sequence per file, strip the target prefix (first `len(target_seq)` chars), the remainder is the designed binder.
+
 ---
 
 ## Commands
