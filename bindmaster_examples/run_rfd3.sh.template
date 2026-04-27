@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# RFD3 (foundry) binder-design template — copy to runs/<name>/run_rfd3.sh and
+# fill the placeholders. Generated form is what the configurator will produce
+# once Part M's RFD3 wizard lands; this file is the canonical hand-written
+# pattern, exercised end-to-end on CALCA_helix (2026-04-26, 704 designs).
+#
+# Two-stage flow:
+#   1. rfd3 design ...           → backbone .cif.gz files (UNK residues)
+#   2. mpnn (foundry's CLI)      → ProteinMPNN sequences for chain B
+#                                  (5 per backbone, post-processed best-of-5)
+#
+# CLAUDE.md "RFD3 / foundry runtime gotchas" enumerates the non-obvious
+# pitfalls — the most common ones are reproduced here as comments.
+#
+# Placeholders:
+#   {{TARGET_PDB}}       Absolute path to target structure (.pdb/.cif)
+#   {{TARGET_SEQ}}       Target amino-acid sequence (used to strip the
+#                        target prefix from MPNN output)
+#   {{TARGET_CONTIG}}    e.g. "A1-32" (chain + residue range to preserve)
+#   {{BINDER_LO}}        Min binder length (e.g. 60)
+#   {{BINDER_HI}}        Max binder length (e.g. 140)
+#   {{N_BATCHES}}        Diffusion batches (88 → 704 backbones with batch=8)
+#   {{DIFF_BATCH_SIZE}}  Per-batch sample count (8 fits 24 GB on 60-140 aa;
+#                        drop to 4 if longer or smaller GPU)
+#   {{MPNN_SAMPLES}}     ProteinMPNN samples per backbone (5 = best-of-5)
+#   {{MPNN_TEMPERATURE}} ProteinMPNN sampling temperature (0.1 = field default)
+
+set -euo pipefail
+
+BASEDIR="$(cd "$(dirname "$0")" && pwd)"
+BMDIR="$(cd "$BASEDIR/../.." && pwd)"
+TARGET_PDB="{{TARGET_PDB}}"
+TARGET_SEQ="{{TARGET_SEQ}}"
+RUN_DIR="$BASEDIR/rfd3"
+DIFF_DIR="$RUN_DIR/diffusion"
+MPNN_DIR="$RUN_DIR/mpnn"
+WEIGHTS_DIR="$BMDIR/weights/foundry"
+
+mkdir -p "$DIFF_DIR" "$MPNN_DIR"
+
+# ── Conda init (works for local Miniforge3 in BindMaster/conda or system) ───
+set +u
+for _conda_sh in \
+    "$BMDIR/conda/etc/profile.d/conda.sh" \
+    "$HOME/miniforge3/etc/profile.d/conda.sh" \
+    "$HOME/miniconda3/etc/profile.d/conda.sh" \
+    "/opt/conda/etc/profile.d/conda.sh"; do
+    # shellcheck disable=SC1090
+    [[ -f "$_conda_sh" ]] && { source "$_conda_sh"; break; }
+done
+conda activate bindmaster_rfd3
+set -u
+
+# Gotcha: the env var is plural-S. Singular FOUNDRY_CHECKPOINT_DIR is silently
+# ignored and rfd3 design will abort with "Invalid checkpoint: rfd3".
+export FOUNDRY_CHECKPOINT_DIRS="$WEIGHTS_DIR"
+
+# ── Stage 1: backbone diffusion ─────────────────────────────────────────────
+echo "============================================================"
+echo "  RFD3 backbone diffusion"
+echo "  Contig: {{TARGET_CONTIG}} (preserve), binder {{BINDER_LO}}-{{BINDER_HI}} aa"
+echo "  {{N_BATCHES}} batches × {{DIFF_BATCH_SIZE}} per batch"
+echo "============================================================"
+
+INPUTS_YAML="$RUN_DIR/binder_spec.yaml"
+cat > "$INPUTS_YAML" <<EOF
+helix_binder:
+  input: ${TARGET_PDB}
+  contig: "{{TARGET_CONTIG}},/0,{{BINDER_LO}}-{{BINDER_HI}}"
+EOF
+
+rfd3 design \
+    out_dir="$DIFF_DIR" \
+    inputs="$INPUTS_YAML" \
+    n_batches={{N_BATCHES}} \
+    diffusion_batch_size={{DIFF_BATCH_SIZE}} \
+    inference_sampler.num_timesteps=200 \
+    inference_sampler.step_scale=1.5 \
+    low_memory_mode=true \
+    prevalidate_inputs=true
+
+# RFD3 outputs:
+#   <design>.cif.gz  — compressed mmCIF; chain A = preserved target, B = binder
+#   <design>.json    — sidecar with metrics (helix_fraction, n_clashing, …)
+# Chain IDs in the cif are letters (A/B); the label_entity_id column shows
+# 0/1 but those are entity IDs, NOT chain IDs.
+
+# ── Stage 2: ensure ProteinMPNN weights are installed ──────────────────────
+PROTEINMPNN_CKPT="$WEIGHTS_DIR/proteinmpnn_v_48_020.pt"
+if [[ ! -f "$PROTEINMPNN_CKPT" ]]; then
+    echo ""
+    echo "Installing ProteinMPNN weights..."
+    foundry install proteinmpnn --checkpoint-dir "$WEIGHTS_DIR"
+fi
+
+# ── Stage 3: ProteinMPNN sequence design (best-of-N per backbone) ──────────
+# Gotchas:
+#   - The CLI is `mpnn`, NOT `foundry mpnn` (foundry only has install /
+#     list-available / list-installed / clean).
+#   - --is_legacy_weights True is required when calling mpnn directly.
+#   - --designed_chains wants a JSON list of letter strings (e.g. '["B"]').
+#     Bare `B` or bare `1` get rejected with `chain-id strings, got <int>`.
+echo ""
+echo "============================================================"
+echo "  ProteinMPNN sequence design ({{MPNN_SAMPLES}} per backbone, T={{MPNN_TEMPERATURE}})"
+echo "============================================================"
+
+CIFS=("$DIFF_DIR"/*.cif.gz)
+N=${#CIFS[@]}
+DONE=0
+for CIF in "${CIFS[@]}"; do
+    NAME=$(basename "$CIF" .cif.gz)
+    OUT_FA="$MPNN_DIR/${NAME}.fa"
+    if [[ -f "$OUT_FA" ]]; then
+        DONE=$((DONE + 1))
+        continue
+    fi
+    mpnn \
+        --structure_path "$CIF" \
+        --checkpoint_path "$PROTEINMPNN_CKPT" \
+        --model_type protein_mpnn \
+        --is_legacy_weights True \
+        --out_directory "$MPNN_DIR" \
+        --name "$NAME" \
+        --designed_chains '["B"]' \
+        --temperature {{MPNN_TEMPERATURE}} \
+        --number_of_batches {{MPNN_SAMPLES}} \
+        --batch_size 1 \
+        --write_fasta True \
+        --write_structures False \
+        --seed 42 \
+        > /dev/null 2>&1 || { echo "  WARN: mpnn failed for $NAME"; continue; }
+    DONE=$((DONE + 1))
+    if (( DONE % 50 == 0 )); then
+        echo "  $DONE/$N MPNN passes done"
+    fi
+done
+
+# ── Stage 4: aggregate best-of-N per backbone, strip target prefix ─────────
+# mpnn writes one .fa per backbone with N sequences. Each sequence is
+# target+binder concatenated; strip the first len(TARGET_SEQ) chars to
+# isolate the designed binder. Pick best by sequence_recovery (header tag).
+echo ""
+echo "Aggregating best-of-N sequences..."
+
+python3 - "$MPNN_DIR" "$RUN_DIR" "$TARGET_SEQ" <<'PYEOF'
+import csv, re, sys
+from collections import Counter
+from pathlib import Path
+
+mpnn_dir = Path(sys.argv[1])
+out_dir = Path(sys.argv[2])
+target_seq = sys.argv[3]
+target_len = len(target_seq)
+
+rows = []
+for fa in sorted(mpnn_dir.glob("*.fa")):
+    candidates = []  # (recovery, full_seq, header)
+    with fa.open() as f:
+        hdr = None
+        for line in f:
+            line = line.rstrip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                hdr = line[1:]
+            elif hdr is not None:
+                m = re.search(r"sequence_recovery=([0-9.]+)", hdr)
+                rec = float(m.group(1)) if m else 0.0
+                seq = line.strip().upper()
+                if seq:
+                    candidates.append((rec, seq, hdr))
+                hdr = None
+    if not candidates:
+        continue
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    best_rec, best_full, _ = candidates[0]
+    binder_seq = best_full[target_len:]  # strip target prefix
+    rows.append({
+        "design_id": f"rfd3_{fa.stem}",
+        "sequence": binder_seq,
+        "length": len(binder_seq),
+        "backbone": fa.stem,
+        "source": "rfd3",
+        "mpnn_sequence_recovery": f"{best_rec:.4f}",
+        "n_mpnn_samples": len(candidates),
+    })
+
+(out_dir / "sequences.csv").write_text("")  # truncate
+with (out_dir / "sequences.csv").open("w", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=[
+        "design_id", "sequence", "length", "backbone", "source",
+        "mpnn_sequence_recovery", "n_mpnn_samples",
+    ])
+    w.writeheader()
+    w.writerows(rows)
+
+with (out_dir / "sequences.fasta").open("w") as fh:
+    for r in rows:
+        fh.write(f">{r['design_id']}  length={r['length']}  source=rfd3  rec={r['mpnn_sequence_recovery']}\n")
+        fh.write(f"{r['sequence']}\n")
+
+print(f"Wrote {len(rows)} best-per-backbone sequences → {out_dir}/sequences.csv")
+
+buckets = Counter(((r['length'] // 10) * 10) for r in rows)
+print("Length distribution (10 aa buckets):")
+for k in sorted(buckets):
+    print(f"  {k}-{k+9}: {buckets[k]}")
+PYEOF
+
+echo ""
+echo "=== RFD3 + MPNN design complete ==="
+echo "  Backbones (cif.gz):  $DIFF_DIR"
+echo "  MPNN .fa per design: $MPNN_DIR"
+echo "  Aggregated CSV:      $RUN_DIR/sequences.csv"
+echo "  Aggregated FASTA:    $RUN_DIR/sequences.fasta"
