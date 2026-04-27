@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# Protein-Hunter (Boltz-2 edition) binder-design template — copy to
+# runs/<name>/run_protein_hunter.sh and fill the placeholders. Generated form
+# is what the configurator will produce once the Part L PH wizard lands; this
+# file is the canonical hand-written pattern, exercised end-to-end on
+# CALCA_helix (2026-04-27, 100 designs × 7 cycles, 133 high-ipTM passes).
+#
+# Single-stage flow:
+#   boltz_ph/design.py runs N independent designs, each iterating M cycles
+#   of Boltz-2 hallucination. Best-of-cycle metrics land in
+#   summary_high_iptm.csv (passes the ipTM threshold) and the full per-cycle
+#   log in summary_all_runs.csv.
+#
+# CLAUDE.md "Protein-Hunter / boltz_ph runtime gotchas" enumerates the
+# non-obvious pitfalls — the most common ones are reproduced here as comments.
+#
+# Placeholders:
+#   {{TARGET_SEQ}}            Target amino-acid sequence (single chain — for
+#                             multi-chain targets, see boltz_ph docs)
+#   {{NAME}}                  Run name (also the output subdirectory name)
+#   {{NUM_DESIGNS}}           Independent design runs (e.g. 100)
+#   {{NUM_CYCLES}}            Hallucination cycles per design (e.g. 7)
+#   {{BINDER_LO}}             Min binder length (e.g. 60)
+#   {{BINDER_HI}}             Max binder length (e.g. 140)
+#   {{MSA_MODE}}              "single" (no MSA, fastest) or "mmseqs" (server-
+#                             side MSA via ColabFold). NOT "single_sequence".
+#   {{HIGH_IPTM_THRESHOLD}}   Pass-cutoff for summary_high_iptm.csv (e.g. 0.7)
+#   {{PERCENT_X}}             Max alanine% allowed at sequence init (e.g. 80)
+#   {{GPU_ID}}                CUDA device index (e.g. 0)
+
+set -euo pipefail
+
+BASEDIR="$(cd "$(dirname "$0")" && pwd)"
+BMDIR="$(cd "$BASEDIR/../.." && pwd)"
+PROTEIN_HUNTER_DIR="$BMDIR/Protein-Hunter"
+RUN_DIR="$BASEDIR/protein_hunter"
+TARGET_SEQ="{{TARGET_SEQ}}"
+
+mkdir -p "$RUN_DIR"
+
+# ── Conda init (works for local Miniforge3 in BindMaster/conda or system) ───
+set +u
+for _conda_sh in \
+    "$BMDIR/conda/etc/profile.d/conda.sh" \
+    "$HOME/miniforge3/etc/profile.d/conda.sh" \
+    "$HOME/miniconda3/etc/profile.d/conda.sh" \
+    "$HOME/mambaforge/etc/profile.d/conda.sh" \
+    "/opt/conda/etc/profile.d/conda.sh"; do
+    # shellcheck disable=SC1090
+    [[ -f "$_conda_sh" ]] && { source "$_conda_sh"; break; }
+done
+conda activate bindmaster_protein_hunter
+set -u
+
+# Gotcha: boltz_ph reads Boltz-2 weights + CCD library from ~/.boltz. The
+# directory must contain boltz2_conf.ckpt, boltz2_aff.ckpt, AND a fully
+# populated mols/ subdirectory (45 k .pkl files including ALA.pkl). If any
+# canonical residue .pkl is missing, design.py aborts on startup with
+# "ValueError: CCD component ALA not found!". Bootstrap with:
+#
+#   python -c "from boltz.main import download_boltz2; from pathlib import Path; \
+#              download_boltz2(cache=Path.home()/'.boltz')"
+#
+# Note: download_boltz2 requires the `cache` argument as a positional
+# pathlib.Path — passing a str silently no-ops on some versions.
+if [[ ! -f "$HOME/.boltz/mols/ALA.pkl" ]]; then
+    echo "Bootstrapping Boltz-2 cache to ~/.boltz/ ..."
+    python -c "from boltz.main import download_boltz2; from pathlib import Path; download_boltz2(cache=Path.home()/'.boltz')"
+fi
+
+cd "$PROTEIN_HUNTER_DIR"
+
+echo "============================================================"
+echo "  Protein-Hunter binder design (Boltz-2 edition)"
+echo "  Target length: ${#TARGET_SEQ} aa"
+echo "  Binder length: {{BINDER_LO}}-{{BINDER_HI}} aa"
+echo "  {{NUM_DESIGNS}} designs × {{NUM_CYCLES}} cycles"
+echo "============================================================"
+
+# Gotcha: --msa_mode accepts ONLY "single" or "mmseqs". The literal string
+# "single_sequence" is NOT a valid choice and will raise argparse error
+# "invalid choice: 'single_sequence' (choose from 'single', 'mmseqs')".
+python boltz_ph/design.py \
+    --protein_seqs "$TARGET_SEQ" \
+    --num_designs {{NUM_DESIGNS}} \
+    --num_cycles {{NUM_CYCLES}} \
+    --min_protein_length {{BINDER_LO}} \
+    --max_protein_length {{BINDER_HI}} \
+    --msa_mode {{MSA_MODE}} \
+    --high_iptm_threshold {{HIGH_IPTM_THRESHOLD}} \
+    --percent_X {{PERCENT_X}} \
+    --gpu_id {{GPU_ID}} \
+    --name {{NAME}} \
+    --save_dir "$RUN_DIR"
+
+# Output layout: design.py creates a {{NAME}}/ subdirectory under save_dir,
+# so the canonical CSV paths are:
+#   $RUN_DIR/{{NAME}}/summary_high_iptm.csv  — best-of-cycle rows passing
+#                                              the ipTM threshold (often
+#                                              > NUM_DESIGNS because every
+#                                              passing cycle gets a row)
+#   $RUN_DIR/{{NAME}}/summary_all_runs.csv   — one row per design (best
+#                                              cycle of that run; final-run
+#                                              row may be missing if no
+#                                              cycle satisfied the alanine
+#                                              cap — log says "No structure
+#                                              was generated", which is
+#                                              normal, not a failure)
+#   $RUN_DIR/{{NAME}}/*.pdb / *.yaml         — per-cycle outputs
+
+echo ""
+echo "=== Protein-Hunter design complete ==="
+echo "  Outputs:    $RUN_DIR/{{NAME}}/"
+echo "  High-ipTM:  $RUN_DIR/{{NAME}}/summary_high_iptm.csv"
+echo "  All runs:   $RUN_DIR/{{NAME}}/summary_all_runs.csv"
