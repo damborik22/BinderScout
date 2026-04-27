@@ -28,7 +28,7 @@ import pandas as pd
 from ..core.schema import ExtractedBinder, NativeMetrics
 from .base import SequenceExtractor
 
-_CSV_CANDIDATES = ["results.csv", "designs.csv", "rfd3_designs.csv", "summary.csv"]
+_CSV_CANDIDATES = ["sequences.csv", "results.csv", "designs.csv", "rfd3_designs.csv", "summary.csv"]
 _SEQUENCE_COLS = ("sequence", "Sequence", "designed_sequence", "binder_sequence")
 
 
