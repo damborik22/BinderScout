@@ -1599,12 +1599,16 @@ _install_complexa_tools() {
 _write_complexa_env() {
     print_step "Configuring Proteina-Complexa .env"
     local env_file="${PROTEINA_COMPLEXA_DIR}/.env"
-    local af2_dir=""
 
-    if [[ -d "${BINDCRAFT_DIR}/params" ]]; then
-        af2_dir="${BINDCRAFT_DIR}/params"
-    elif [[ -d "${BINDMASTER_DIR}/bindcraft-tools/af2_params" ]]; then
-        af2_dir="${BINDMASTER_DIR}/bindcraft-tools/af2_params"
+    # PC expects AF2 weights at community_models/ckpts/AF2/ (populated by
+    # _link_complexa_shared_weights earlier via symlink to BindCraft/params).
+    local af2_dir="${PROTEINA_COMPLEXA_DIR}/community_models/ckpts/AF2"
+    if [[ ! -d "${af2_dir}" || -z "$(ls -A "${af2_dir}" 2>/dev/null)" ]]; then
+        if [[ -d "${BINDCRAFT_DIR}/params" ]]; then
+            af2_dir="${BINDCRAFT_DIR}/params"
+        elif [[ -d "${BINDMASTER_DIR}/bindcraft-tools/af2_params" ]]; then
+            af2_dir="${BINDMASTER_DIR}/bindcraft-tools/af2_params"
+        fi
     fi
 
     cat > "${env_file}" <<ENVEOF
@@ -1617,7 +1621,7 @@ LOGURU_LEVEL=INFO
 USE_V2_COMPLEXA_ARCH=False
 COMMUNITY_MODELS_PATH=\${LOCAL_CODE_PATH}/community_models
 ESM_DIR=\${COMMUNITY_MODELS_PATH}/ckpts/ESM2
-AF2_DIR=${af2_dir:-\${COMMUNITY_MODELS_PATH}/ckpts/AF2}
+AF2_DIR=${af2_dir}
 RF3_DIR=\${COMMUNITY_MODELS_PATH}/ckpts/RF3
 RF3_CKPT_PATH=\${RF3_DIR}/rf3_foundry_01_24_latest_remapped.ckpt
 UV_VENV=\${LOCAL_CODE_PATH}/.venv
