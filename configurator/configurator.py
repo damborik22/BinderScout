@@ -1415,7 +1415,10 @@ def write_run_all(path: Path, cfg: dict, tools_enabled: dict):
         lines += [
             'echo "=== Step: PXDesign ==="',
             '"$RUN_DIR/run_pxdesign.sh"',
-            'check_outputs "$RUN_DIR/pxdesign/outputs" "PXDesign"',
+            # In length-scan mode the script writes per-length outputs_lenN/ dirs
+            # and aggregates into sequences.csv — pxdesign/outputs/ never exists.
+            # Check the unified CSV like the other tools do.
+            'check_outputs "$RUN_DIR/pxdesign/sequences.csv" "PXDesign"',
             "",
         ]
 
