@@ -65,6 +65,8 @@ class ProteinHunterExtractor(SequenceExtractor):
 
         results: list[ExtractedBinder] = []
         for idx, row in df.iterrows():
+            if pd.isna(row["sequence"]):
+                continue
             seq = str(row["sequence"]).strip().upper()
             if not self._validate_sequence(seq):
                 warnings.warn(f"Protein-Hunter row {idx}: invalid sequence — skipping")
@@ -96,6 +98,12 @@ class ProteinHunterExtractor(SequenceExtractor):
 
         results: list[ExtractedBinder] = []
         for idx, row in df.iterrows():
+            # Empty best_seq means "No structure was generated for run N (no
+            # eligible best design)" — pandas reads it as NaN; without this
+            # guard, str(NaN).upper() yields "NAN", which slips past the
+            # amino-acid validator (N, A, N are all valid residues).
+            if pd.isna(row[seq_col]):
+                continue
             seq = str(row[seq_col]).strip().upper()
             if not self._validate_sequence(seq):
                 continue
