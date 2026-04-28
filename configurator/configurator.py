@@ -1048,6 +1048,72 @@ def write_pxdesign_yaml(path: Path, cfg: dict):
     path.write_text("\n".join(lines) + "\n")
 
 
+def _settings_json_block(
+    *,
+    tool: str,
+    settings_dir_var: str,
+    conda_env: str,
+    version_dict_inner: str,
+    target_dict_inner: str,
+    design_params_inner: str,
+    extra_env_inner: str = "",
+    gpu_id_var: str = "0",
+) -> str:
+    """Return a bash snippet that writes a self-describing settings.json before the design step.
+
+    Implements the convention from CLAUDE.md > Conventions > "Per-run settings.json".
+    Caller must have already activated the conda env (so `python` is on PATH and
+    `git -C "{BINDMASTER_DIR}" rev-parse HEAD` works).
+
+    Parameters are bash snippets (not full strings) because each tool's version /
+    target / design_params dicts have tool-specific keys.  The block resolves
+    GIT_SHA / GIT_BRANCH / GPU_NAME / GPU_MEM / PY_VER as bash variables which
+    can be referenced inside the inner strings.
+
+    Args:
+        tool: Tool name to record under the "tool" key.
+        settings_dir_var: Bash variable name (without $) holding the directory
+            where settings.json should be written, e.g. "RUN_DIR" → "$RUN_DIR/settings.json".
+        conda_env: Name of the conda env, recorded under env.conda_env.
+        version_dict_inner: Inner JSON for the "version" object (no surrounding braces).
+        target_dict_inner: Inner JSON for the "target" object.
+        design_params_inner: Inner JSON for the "design_params" object.
+        extra_env_inner: Optional extra bash setup before the heredoc (e.g. tool repo SHA).
+        gpu_id_var: GPU index for nvidia-smi -i (default "0").
+    """
+    return f"""
+# ── Persist exact run settings to ${settings_dir_var}/settings.json ─────────
+# Convention (CLAUDE.md "Per-run settings.json"): every tool run writes a
+# self-describing settings.json into its output subdir BEFORE launching the
+# design step, so future sessions can audit `cat <tool>/settings.json` instead
+# of grepping run.log.
+GIT_SHA=$(git -C "{BINDMASTER_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git -C "{BINDMASTER_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i {gpu_id_var} 2>/dev/null | head -1)
+GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i {gpu_id_var} 2>/dev/null | head -1)
+PY_VER=$(python -c 'import sys;print(".".join(map(str,sys.version_info[:3])))' 2>/dev/null || echo "unknown"){extra_env_inner}
+cat > "${settings_dir_var}/settings.json" <<SETTINGS_JSON_EOF
+{{
+  "tool": "{tool}",
+  "started_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "version": {{{version_dict_inner}
+  }},
+  "target": {{{target_dict_inner}
+  }},
+  "design_params": {{{design_params_inner}
+  }},
+  "env": {{
+    "conda_env": "{conda_env}",
+    "python": "$PY_VER",
+    "gpu_id": {gpu_id_var},
+    "gpu_name": "$GPU_NAME",
+    "gpu_memory_mib": $GPU_MEM
+  }}
+}}
+SETTINGS_JSON_EOF
+"""
+
+
 def _pxdesign_conda_header(cfg: dict) -> str:
     """Return the common bash header for PXDesign run scripts (conda init + env vars)."""
     conda_base = str(CONDA_BASE) if CONDA_BASE else ""
@@ -1262,6 +1328,8 @@ print(f'  -> {{len(rows)}} binder sequences written to {{out_csv}}')
 def write_run_pxdesign(path: Path, cfg: dict):
     """Generate run_pxdesign.sh for local PXDesign execution."""
     run_dir = cfg["run_dir"]
+    name = cfg["name"]
+    target_seq = cfg.get("target_sequence", "")
     preset = cfg.get("pxdesign_preset", "preview")
     n_samples = cfg.get("pxdesign_n_samples", 1000)
     length_scan = cfg.get("pxdesign_length_scan", False)
@@ -1269,14 +1337,49 @@ def write_run_pxdesign(path: Path, cfg: dict):
 
     header = _pxdesign_conda_header(cfg)
 
+    # Build settings.json design_params (mode-specific).
     if length_scan:
         min_len = cfg.get("pxdesign_min_length", 40)
         max_len = cfg.get("pxdesign_max_length", 140)
         step = cfg.get("pxdesign_length_step", 20)
-        target_pdb = cfg["target_pdb"]
         chains_str = cfg.get("pxdesign_chains", cfg.get("chains", "A"))
-        chain_ids = [c.strip() for c in chains_str.split(",")]
         hotspots_str = cfg.get("pxdesign_hotspots", "") or cfg.get("hotspots", "") or ""
+        params_inner = f"""
+    "preset": "{preset}",
+    "length_scan": true,
+    "min_length": {min_len},
+    "max_length": {max_len},
+    "length_step": {step},
+    "n_samples_per_length": {n_samples},
+    "top_per_length": {top_per_length},
+    "chains": "{chains_str}",
+    "hotspots": "{hotspots_str}\""""
+    else:
+        params_inner = f"""
+    "preset": "{preset}",
+    "length_scan": false,
+    "n_samples": {n_samples},
+    "binder_length": {cfg.get("pxdesign_binder_length", "null")}"""
+
+    settings_block = _settings_json_block(
+        tool="pxdesign",
+        settings_dir_var="SETTINGS_DIR",
+        conda_env="bindmaster_pxdesign",
+        version_dict_inner="""
+    "bindmaster_git_sha": "$GIT_SHA",
+    "bindmaster_git_branch": "$GIT_BRANCH",
+    "pxdesign_repo_git_sha": "$PXDESIGN_SHA\"""",
+        target_dict_inner=f"""
+    "name": "{name}",
+    "sequence": "{target_seq}",
+    "length": {len(target_seq)}""",
+        design_params_inner=params_inner,
+        extra_env_inner=f'\nPXDESIGN_SHA=$(git -C "{PXDESIGN_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")',
+    )
+
+    if length_scan:
+        target_pdb = cfg["target_pdb"]
+        chain_ids = [c.strip() for c in chains_str.split(",")]
         hotspot_list = parse_hotspots(hotspots_str) if hotspots_str.strip() else []
 
         # Build YAML chain lines
@@ -1288,20 +1391,22 @@ def write_run_pxdesign(path: Path, cfg: dict):
             else:
                 chain_lines += f"    {cid}: all\\n"
 
-        content = (
-            header
-            + f"""
+        body_setup = f"""
 RUN_DIR="{run_dir}"
 TARGET_PDB="{target_pdb}"
-
+SETTINGS_DIR="$RUN_DIR/pxdesign"
+mkdir -p "$SETTINGS_DIR"
+"""
+        body_workload = f"""
 MIN_LENGTH={min_len}
 MAX_LENGTH={max_len}
 LENGTH_STEP={step}
 N_SAMPLES={n_samples}
 
-echo "=== PXDesign Length Scan for {cfg["name"]} ==="
+echo "=== PXDesign Length Scan for {name} ==="
 echo "  Lengths: ${{MIN_LENGTH}} to ${{MAX_LENGTH}} (step ${{LENGTH_STEP}})"
 echo "  Samples per length: ${{N_SAMPLES}}"
+echo "  Settings persisted: $SETTINGS_DIR/settings.json"
 
 TOTAL_DESIGNS=0
 
@@ -1334,15 +1439,18 @@ echo ""
 echo "=== Length Scan Complete ==="
 echo "  Total designs: ${{TOTAL_DESIGNS}}"
 """
-        )
+        content = header + body_setup + settings_block + body_workload
     else:
-        content = (
-            header
-            + f"""
-INPUT_YAML="{run_dir}/pxdesign/input.yaml"
-OUTPUT_DIR="{run_dir}/pxdesign/outputs"
-
-echo "=== Running PXDesign for {cfg["name"]} ==="
+        body_setup = f"""
+RUN_DIR="{run_dir}"
+SETTINGS_DIR="$RUN_DIR/pxdesign"
+INPUT_YAML="$RUN_DIR/pxdesign/input.yaml"
+OUTPUT_DIR="$RUN_DIR/pxdesign/outputs"
+mkdir -p "$SETTINGS_DIR"
+"""
+        body_workload = f"""
+echo "=== Running PXDesign for {name} ==="
+echo "  Settings persisted: $SETTINGS_DIR/settings.json"
 
 pxdesign pipeline \\
     --preset {preset} \\
@@ -1351,7 +1459,7 @@ pxdesign pipeline \\
     -i "$INPUT_YAML" \\
     -o "$OUTPUT_DIR"
 """
-        )
+        content = header + body_setup + settings_block + body_workload
 
     # Append sequence extraction step (common to both modes)
     content += _pxdesign_sequence_collector(run_dir, top_per_length=top_per_length)
@@ -1499,24 +1607,59 @@ def write_run_proteina_complexa(path: Path, cfg: dict):
     if refinement:
         extra_overrides += f"\n    ++generation.refinement.algorithm={refinement} \\"
 
-    content = f"""\
+    name = cfg["name"]
+    target_seq = cfg.get("target_sequence", "")
+
+    settings_block = _settings_json_block(
+        tool="proteina-complexa",
+        settings_dir_var="SETTINGS_DIR",
+        conda_env="(uv venv: Proteina-Complexa/.venv)",
+        version_dict_inner="""
+    "bindmaster_git_sha": "$GIT_SHA",
+    "bindmaster_git_branch": "$GIT_BRANCH",
+    "complexa_repo_git_sha": "$COMPLEXA_SHA\"""",
+        target_dict_inner=f"""
+    "name": "{name}",
+    "pdb": "{target_pdb}",
+    "sequence": "{target_seq}",
+    "length": {len(target_seq)},
+    "chains": "{chains_str}",
+    "hotspots": "{hotspots_str}\"""",
+        design_params_inner=f"""
+    "search_algorithm": "{search_algo}",
+    "replicas": {replicas},
+    "min_binder_length": {min_len},
+    "max_binder_length": {max_len},
+    "filter_samples_limit": {n_designs},
+    "mcts_n_simulations": {mcts_n_simulations if mcts_n_simulations is not None else "null"},
+    "nres_nsamples": {nres_nsamples if nres_nsamples is not None else "null"},
+    "refinement": {f'"{refinement}"' if refinement else "null"}""",
+        extra_env_inner=f'\nCOMPLEXA_SHA=$(git -C "{PROTEINA_COMPLEXA_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")',
+    )
+
+    content = (
+        f"""\
 #!/usr/bin/env bash
-# Run Proteina-Complexa for {cfg["name"]}
+# Run Proteina-Complexa for {name}
 # Generated by BindMaster Configurator
 set -euo pipefail
 
 PROTEINA_COMPLEXA_DIR="{PROTEINA_COMPLEXA_DIR}"
 RUN_DIR="{run_dir}"
+SETTINGS_DIR="$RUN_DIR/proteina_complexa"
+mkdir -p "$SETTINGS_DIR"
 
 # Activate Proteina-Complexa uv venv
 source "${{PROTEINA_COMPLEXA_DIR}}/.venv/bin/activate"
 cd "${{PROTEINA_COMPLEXA_DIR}}"
-
-echo "=== Running Proteina-Complexa for {cfg["name"]} ==="
+"""
+        + settings_block
+        + f"""
+echo "=== Running Proteina-Complexa for {name} ==="
+echo "  Settings persisted: $SETTINGS_DIR/settings.json"
 
 # Write custom target definition
 TARGET_YAML="$RUN_DIR/proteina_complexa/target_bindmaster.yaml"
-mkdir -p "$RUN_DIR/proteina_complexa"
 cat > "$TARGET_YAML" << 'TARGETEOF'
 target_dict_cfg:
   bindmaster_{cfg["name"]}:
@@ -1645,6 +1788,7 @@ with open(out_csv, 'w', newline='') as f:
 print(f'  -> {{len(rows)}} binder sequences written to {{out_csv}}')
 "
 """
+    )
 
     path.write_text(content)
     path.chmod(0o755)
@@ -1699,7 +1843,38 @@ def write_run_rfd3(path: Path, cfg: dict):
 
     name = cfg["name"]
 
-    content = f"""\
+    settings_block = _settings_json_block(
+        tool="rfd3",
+        settings_dir_var="RFD3_DIR",
+        conda_env="bindmaster_rfd3",
+        version_dict_inner="""
+    "bindmaster_git_sha": "$GIT_SHA",
+    "bindmaster_git_branch": "$GIT_BRANCH",
+    "rfd3_pkg_version": "$RFD3_VER\"""",
+        target_dict_inner=f"""
+    "name": "{name}",
+    "pdb": "{target_pdb}",
+    "sequence": "{target_seq}",
+    "length": {target_len},
+    "primary_chain": "{primary_chain}\"""",
+        design_params_inner=f"""
+    "contig": "{primary_chain}1-{target_len},/0,{min_len}-{max_len}",
+    "binder_min_length": {min_len},
+    "binder_max_length": {max_len},
+    "n_designs": {n_designs},
+    "n_batches": {n_batches},
+    "diffusion_batch_size": {batch_size},
+    "num_timesteps": {diffusion_steps},
+    "step_scale": {step_scale},
+    "low_memory_mode": true,
+    "mpnn_samples": {mpnn_samples},
+    "mpnn_temperature": {mpnn_temperature},
+    "select_hotspots": "{select_hotspots_str}\"""",
+        extra_env_inner='\nRFD3_VER=$(python -c \'import importlib.metadata;print(importlib.metadata.version("rfd3"))\' 2>/dev/null || echo "unknown")',
+    )
+
+    content = (
+        f"""\
 #!/usr/bin/env bash
 # Run RFdiffusion3 (foundry) + ProteinMPNN for {name}
 # Generated by BindMaster Configurator (mirrors bindmaster_examples/run_rfd3.sh.template).
@@ -1745,7 +1920,9 @@ conda activate bindmaster_rfd3
 # "Invalid checkpoint: rfd3" even with the .ckpt sitting in the weights dir).
 export FOUNDRY_CHECKPOINT_DIRS="$WEIGHTS_DIR"
 set -u
-
+"""
+        + settings_block
+        + f"""
 # ── Stage 1: backbone diffusion ─────────────────────────────────────────────
 # Contig: target first (preserved residues), then chain break (/0), then binder
 # length range. RFD3 labels the preserved chain as A and the designed chain as B.
@@ -1903,12 +2080,23 @@ echo "  MPNN .fa per design: $MPNN_DIR"
 echo "  Aggregated CSV:      $RFD3_DIR/sequences.csv"
 echo "  Aggregated FASTA:    $RFD3_DIR/sequences.fasta"
 """
+    )
     path.write_text(content)
     path.chmod(0o755)
 
 
 def write_run_protein_hunter(path: Path, cfg: dict):
-    """Generate run_protein_hunter.sh — Boltz-2 protein binder design (Protein-Hunter)."""
+    """Generate run_protein_hunter.sh — Boltz-2 protein binder design (Protein-Hunter).
+
+    Mirrors bindmaster_examples/run_protein_hunter.sh.template (the canonical
+    CALCA-validated pattern). See CLAUDE.md "Protein-Hunter / boltz_ph runtime
+    gotchas" for the non-obvious bits:
+      - --msa_mode accepts only "single" / "mmseqs" (NOT "single_sequence").
+      - Boltz-2 cache must live at ~/.boltz with mols/ALA.pkl present;
+        bootstrap with download_boltz2(cache=Path.home()/'.boltz').
+      - design.py creates a {name}/ subdirectory under save_dir; canonical
+        outputs are at <save_dir>/{name}/summary_high_iptm.csv and summary_all_runs.csv.
+    """
     run_dir = cfg["run_dir"]
     name = cfg["name"]
     target_seq = cfg.get("target_sequence", "")
@@ -1928,16 +2116,43 @@ def write_run_protein_hunter(path: Path, cfg: dict):
 
     contact_arg = f' --contact_residues "{contact_residues}"' if contact_residues else ""
 
-    content = f"""\
+    settings_block = _settings_json_block(
+        tool="protein-hunter",
+        settings_dir_var="PH_DIR_OUT",
+        conda_env="bindmaster_protein_hunter",
+        version_dict_inner="""
+    "bindmaster_git_sha": "$GIT_SHA",
+    "bindmaster_git_branch": "$GIT_BRANCH",
+    "tool_repo_git_sha": "$PH_SHA\"""",
+        target_dict_inner=f"""
+    "name": "{name}",
+    "sequence": "{target_seq}",
+    "length": {len(target_seq)}""",
+        design_params_inner=f"""
+    "num_designs": {n_designs},
+    "num_cycles": {num_cycles},
+    "min_protein_length": {min_len},
+    "max_protein_length": {max_len},
+    "msa_mode": "{msa_mode}",
+    "high_iptm_threshold": {iptm_thr},
+    "high_plddt_threshold": {plddt_thr},
+    "percent_X": {percent_x},
+    "contact_residues": "{contact_residues}\"""",
+        extra_env_inner=f'\nPH_SHA=$(git -C "{PROTEIN_HUNTER_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")',
+        gpu_id_var=str(gpu_id),
+    )
+
+    content = (
+        f"""\
 #!/usr/bin/env bash
 # Run Protein-Hunter (Boltz-2 binder design with cycle optimization) for {name}
-# Generated by BindMaster Configurator
+# Generated by BindMaster Configurator (mirrors bindmaster_examples/run_protein_hunter.sh.template).
 set -euo pipefail
 
 RUN_DIR="{run_dir}"
 PH_DIR="{PROTEIN_HUNTER_DIR}"
-PH_OUT="$RUN_DIR/protein_hunter/outputs"
-mkdir -p "$PH_OUT"
+PH_DIR_OUT="$RUN_DIR/protein_hunter"
+mkdir -p "$PH_DIR_OUT"
 
 # Robust conda init
 set +u
@@ -1951,14 +2166,29 @@ for _conda_sh in \\
     "${{HOME}}/anaconda3/etc/profile.d/conda.sh" \\
     "/opt/conda/etc/profile.d/conda.sh" \\
     "/opt/miniforge3/etc/profile.d/conda.sh"; do
+    # shellcheck disable=SC1090
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
 conda activate bindmaster_protein_hunter
 set -u
 
-cd "$PH_DIR"
+# Gotcha: boltz_ph reads Boltz-2 weights + CCD library from ~/.boltz. The
+# directory must contain boltz2_conf.ckpt, boltz2_aff.ckpt, AND a fully
+# populated mols/ subdirectory (45 k .pkl files including ALA.pkl). If any
+# canonical residue .pkl is missing, design.py aborts on startup with
+# "ValueError: CCD component ALA not found!".  download_boltz2 requires the
+# `cache` argument as a positional pathlib.Path — passing a str silently
+# no-ops on some versions.
+if [[ ! -f "$HOME/.boltz/mols/ALA.pkl" ]]; then
+    echo "Bootstrapping Boltz-2 cache to ~/.boltz/ ..."
+    python -c "from boltz.main import download_boltz2; from pathlib import Path; download_boltz2(cache=Path.home()/'.boltz')"
+fi
 
+cd "$PH_DIR"
+"""
+        + settings_block
+        + f"""
 echo "=== Protein-Hunter design for {name} ==="
 echo "  Target seq:    {target_seq[:50]}{"..." if len(target_seq) > 50 else ""} ({len(target_seq)} aa)"
 echo "  Binder length: {min_len}-{max_len}"
@@ -1967,9 +2197,13 @@ echo "  Cycles:        {num_cycles}"
 echo "  MSA mode:      {msa_mode}"
 echo "  Contacts:      {contact_residues or "(none)"}"
 echo "  iPTM thr:      {iptm_thr}"
-echo "  Output:        $PH_OUT"
+echo "  Output:        $PH_DIR_OUT"
+echo "  Settings:      $PH_DIR_OUT/settings.json"
 echo ""
 
+# Gotcha: --msa_mode accepts ONLY "single" or "mmseqs". The literal string
+# "single_sequence" is NOT a valid choice and will raise argparse error
+# "invalid choice: 'single_sequence' (choose from 'single', 'mmseqs')".
 python boltz_ph/design.py \\
     --gpu_id {gpu_id} \\
     --name "{name}" \\
@@ -1982,49 +2216,95 @@ python boltz_ph/design.py \\
     --high_iptm_threshold {iptm_thr} \\
     --high_plddt_threshold {plddt_thr} \\
     --percent_X {percent_x} \\
-    --save_dir "$PH_OUT"{contact_arg}
+    --save_dir "$PH_DIR_OUT"{contact_arg}
+
+# Output layout: design.py creates {{name}}/ subdir under --save_dir, so the
+# canonical CSV paths are:
+#   $PH_DIR_OUT/{name}/summary_high_iptm.csv  — best-of-cycle rows passing
+#                                                the iPTM threshold (often
+#                                                > num_designs because every
+#                                                passing cycle gets a row)
+#   $PH_DIR_OUT/{name}/summary_all_runs.csv   — one row per design
 
 echo ""
 echo "=== Collecting Protein-Hunter binder sequences ==="
-python3 - "$PH_OUT" "$RUN_DIR/protein_hunter/sequences.csv" "{name}" <<'PYEOF'
-import csv, json, sys
+python3 - "$PH_DIR_OUT" "$RUN_DIR/protein_hunter/sequences.csv" "{name}" <<'PYEOF'
+import csv, sys
 from pathlib import Path
+
 out_dir, csv_path, run_name = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 AA3TO1 = {{
     "ALA":"A","ARG":"R","ASN":"N","ASP":"D","CYS":"C","GLN":"Q","GLU":"E",
     "GLY":"G","HIS":"H","ILE":"I","LEU":"L","LYS":"K","MET":"M","PHE":"F",
     "PRO":"P","SER":"S","THR":"T","TRP":"W","TYR":"Y","VAL":"V","MSE":"M",
 }}
-rows = []
-# Strategy 1: prefer JSON / FASTA summaries that Protein-Hunter writes per design.
-for fasta in sorted(out_dir.rglob("*.fasta")):
-    try:
-        text = fasta.read_text().splitlines()
-        seq_lines, header = [], None
-        for line in text:
-            if line.startswith(">"):
-                if seq_lines:
-                    rows.append({{
-                        "design_id": f"ph_{{header or fasta.stem}}",
-                        "sequence": "".join(seq_lines),
-                        "length": len("".join(seq_lines)),
-                        "source": "protein_hunter",
-                    }})
-                header = line[1:].split()[0] if len(line) > 1 else fasta.stem
-                seq_lines = []
-            elif line.strip():
-                seq_lines.append(line.strip())
-        if seq_lines:
-            rows.append({{
-                "design_id": f"ph_{{header or fasta.stem}}",
-                "sequence": "".join(seq_lines),
-                "length": len("".join(seq_lines)),
-                "source": "protein_hunter",
-            }})
-    except Exception:
-        pass
 
-# Strategy 2: fall back to extracting binder sequences from PDB outputs (chain A or first chain).
+rows = []
+
+def _row(design_id, seq, **extras):
+    if not seq:
+        return None
+    if all(c == "X" for c in seq):
+        return None
+    return {{
+        "design_id": f"ph_{{design_id}}",
+        "sequence": seq,
+        "length": len(seq),
+        "source": "protein_hunter",
+        **extras,
+    }}
+
+# Strategy 1: prefer summary_high_iptm.csv (canonical PH "best-of-cycle" filter).
+for csv_file in [out_dir / run_name / "summary_high_iptm.csv", out_dir / run_name / "summary_all_runs.csv"]:
+    if csv_file.exists():
+        with csv_file.open() as f:
+            reader = csv.DictReader(f)
+            for r in reader:
+                seq_field = (r.get("best_seq") or r.get("sequence") or r.get("designed_seq") or "").strip().upper()
+                if not seq_field or seq_field.lower() == "nan":
+                    continue
+                design_id = r.get("design_id") or r.get("name") or r.get("run_id") or f"{{csv_file.stem}}_{{len(rows)}}"
+                cycle = r.get("cycle", "")
+                iptm = r.get("iptm") or r.get("i_ptm") or r.get("high_iptm") or ""
+                plddt = r.get("plddt") or r.get("pLDDT") or r.get("high_plddt") or ""
+                row = _row(
+                    design_id,
+                    seq_field,
+                    cycle=cycle,
+                    iptm=iptm,
+                    plddt=plddt,
+                    csv_source=csv_file.name,
+                )
+                if row is not None:
+                    rows.append(row)
+        if rows:
+            print(f"  Found {{len(rows)}} sequences in {{csv_file.name}}")
+            break
+
+# Strategy 2: fall back to FASTA glob (older boltz_ph layouts).
+if not rows:
+    for fasta in sorted(out_dir.rglob("*.fasta")):
+        try:
+            text = fasta.read_text().splitlines()
+            seq_lines, header = [], None
+            for line in text:
+                if line.startswith(">"):
+                    if seq_lines:
+                        row = _row(header or fasta.stem, "".join(seq_lines))
+                        if row is not None:
+                            rows.append(row)
+                    header = line[1:].split()[0] if len(line) > 1 else fasta.stem
+                    seq_lines = []
+                elif line.strip():
+                    seq_lines.append(line.strip())
+            if seq_lines:
+                row = _row(header or fasta.stem, "".join(seq_lines))
+                if row is not None:
+                    rows.append(row)
+        except Exception:
+            pass
+
+# Strategy 3: fall back to extracting binder sequences from PDB outputs.
 if not rows:
     for pdb in sorted(out_dir.rglob("*.pdb")):
         seen = {{}}
@@ -2041,20 +2321,16 @@ if not rows:
                 key = (line[22:26].strip(), line[26].strip())
                 if key not in seen:
                     seen[key] = AA3TO1.get(line[17:20].strip().upper(), "X")
-        seq = "".join(seen.values())
-        if seq and set(seq) != {{"X"}}:
-            rows.append({{
-                "design_id": f"ph_{{pdb.stem}}",
-                "sequence": seq,
-                "length": len(seq),
-                "source": "protein_hunter",
-            }})
+        row = _row(pdb.stem, "".join(seen.values()))
+        if row is not None:
+            rows.append(row)
 
 if not rows:
     print("WARNING: no Protein-Hunter binder sequences found", file=sys.stderr)
     sys.exit(0)
 
-# De-duplicate by sequence.
+# De-duplicate by sequence (PH summary CSVs may include the same sequence
+# across multiple cycles).
 seen_seq = set()
 unique = []
 for r in rows:
@@ -2070,6 +2346,7 @@ with open(csv_path, "w", newline="") as f:
 print(f"  -> {{len(unique)}} unique sequences written to {{csv_path}}")
 PYEOF
 """
+    )
     path.write_text(content)
     path.chmod(0o755)
 
@@ -2240,7 +2517,7 @@ def generate(cfg: dict, tools_enabled: dict):
         write_run_rfd3(run_dir / "run_rfd3.sh", cfg)
 
     if tools_enabled.get("protein_hunter"):
-        (run_dir / "protein_hunter" / "outputs").mkdir(parents=True, exist_ok=True)
+        (run_dir / "protein_hunter").mkdir(parents=True, exist_ok=True)
         write_run_protein_hunter(run_dir / "run_protein_hunter.sh", cfg)
 
     if tools_enabled.get("evaluator"):
