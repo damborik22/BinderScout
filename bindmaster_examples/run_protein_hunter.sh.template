@@ -70,11 +70,56 @@ fi
 
 cd "$PROTEIN_HUNTER_DIR"
 
+# ── Persist exact run settings to $RUN_DIR/settings.json ────────────────────
+# Convention (CLAUDE.md "Per-run settings.json"): every tool run writes a
+# self-describing settings.json into its output subdir BEFORE launching the
+# design step, so future sessions can audit `cat protein_hunter/settings.json`
+# instead of grepping run.log.
+GIT_SHA=$(git -C "$BMDIR" rev-parse HEAD 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git -C "$BMDIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+PH_SHA=$(git -C "$PROTEIN_HUNTER_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i {{GPU_ID}} 2>/dev/null | head -1)
+GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i {{GPU_ID}} 2>/dev/null | head -1)
+PY_VER=$(python -c 'import sys;print(".".join(map(str,sys.version_info[:3])))' 2>/dev/null)
+cat > "$RUN_DIR/settings.json" <<JSON
+{
+  "tool": "protein-hunter",
+  "started_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "version": {
+    "bindmaster_git_sha": "$GIT_SHA",
+    "bindmaster_git_branch": "$GIT_BRANCH",
+    "tool_repo_git_sha": "$PH_SHA"
+  },
+  "target": {
+    "name": "{{NAME}}",
+    "sequence": "$TARGET_SEQ",
+    "length": ${#TARGET_SEQ}
+  },
+  "design_params": {
+    "num_designs": {{NUM_DESIGNS}},
+    "num_cycles": {{NUM_CYCLES}},
+    "min_protein_length": {{BINDER_LO}},
+    "max_protein_length": {{BINDER_HI}},
+    "msa_mode": "{{MSA_MODE}}",
+    "high_iptm_threshold": {{HIGH_IPTM_THRESHOLD}},
+    "percent_X": {{PERCENT_X}}
+  },
+  "env": {
+    "conda_env": "bindmaster_protein_hunter",
+    "python": "$PY_VER",
+    "gpu_id": {{GPU_ID}},
+    "gpu_name": "$GPU_NAME",
+    "gpu_memory_mib": $GPU_MEM
+  }
+}
+JSON
+
 echo "============================================================"
 echo "  Protein-Hunter binder design (Boltz-2 edition)"
 echo "  Target length: ${#TARGET_SEQ} aa"
 echo "  Binder length: {{BINDER_LO}}-{{BINDER_HI}} aa"
 echo "  {{NUM_DESIGNS}} designs × {{NUM_CYCLES}} cycles"
+echo "  Settings persisted: $RUN_DIR/settings.json"
 echo "============================================================"
 
 # Gotcha: --msa_mode accepts ONLY "single" or "mmseqs". The literal string
