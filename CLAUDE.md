@@ -149,6 +149,41 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - Bash constants: UPPER_CASE
 - Conda envs: BindCraft, BoltzGen, binder-eval, bindmaster_pxdesign, bindmaster_rfaa (legacy — being replaced by bindmaster_rfd3)
 
+### Per-run `settings.json` (reproducibility convention)
+
+Every tool run script MUST write a `settings.json` into its tool output subdir
+(`runs/<name>/<tool>/settings.json`) **before** the design step starts. This
+is how future sessions answer "what params produced these designs" without
+grepping through `run.log` or trusting the parent run script (which may have
+been edited since the run).
+
+Required keys:
+
+```json
+{
+  "tool":         "<tool-name>",
+  "started_at":   "<ISO-8601 UTC>",
+  "version":      { "bindmaster_git_sha": "...", "bindmaster_git_branch": "...", "tool_repo_git_sha or tool_pkg_version": "..." },
+  "target":       { "name": "...", "sequence": "...", "length": N },
+  "design_params":{ ... tool-specific CLI flags ... },
+  "env":          { "conda_env": "...", "python": "...", "gpu_id": N, "gpu_name": "...", "gpu_memory_mib": N }
+}
+```
+
+Implementation: write the JSON via a `cat > $RUN_DIR/settings.json <<JSON …
+JSON` heredoc immediately after conda activation but **before** launching
+the heavy workload. Capture `git rev-parse HEAD` of both the BindMaster repo
+and the tool's repo (or its installed package version), plus
+`nvidia-smi --query-gpu=name,memory.total`. The shipped templates
+`bindmaster_examples/run_rfd3.sh.template` and
+`bindmaster_examples/run_protein_hunter.sh.template` are the canonical
+examples — copy that block when adding a new tool's run script.
+
+When relaunching the same tool with different parameters (e.g. PH at 700×5
+then 700×7), back up the previous output dir to a versioned name like
+`protein_hunter_v2_700x5/` so the side-by-side `settings.json` files document
+the parameter sweep.
+
 ### Git and branching
 
 - **Primary branch:** `master` (x86_64)
