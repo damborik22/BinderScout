@@ -55,11 +55,57 @@ set -u
 # ignored and rfd3 design will abort with "Invalid checkpoint: rfd3".
 export FOUNDRY_CHECKPOINT_DIRS="$WEIGHTS_DIR"
 
+# ── Persist exact run settings to $RUN_DIR/settings.json ────────────────────
+# Convention (CLAUDE.md "Per-run settings.json"): every tool run writes a
+# self-describing settings.json into its output subdir BEFORE launching the
+# design step.
+GIT_SHA=$(git -C "$BMDIR" rev-parse HEAD 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git -C "$BMDIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i 0 2>/dev/null | head -1)
+GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i 0 2>/dev/null | head -1)
+PY_VER=$(python -c 'import sys;print(".".join(map(str,sys.version_info[:3])))' 2>/dev/null)
+RFD3_VER=$(python -c 'import importlib.metadata;print(importlib.metadata.version("rfd3"))' 2>/dev/null || echo "unknown")
+cat > "$RUN_DIR/settings.json" <<JSON
+{
+  "tool": "rfd3",
+  "started_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "version": {
+    "bindmaster_git_sha": "$GIT_SHA",
+    "bindmaster_git_branch": "$GIT_BRANCH",
+    "rfd3_pkg_version": "$RFD3_VER"
+  },
+  "target": {
+    "pdb": "$TARGET_PDB",
+    "sequence": "$TARGET_SEQ",
+    "length": ${#TARGET_SEQ}
+  },
+  "design_params": {
+    "contig": "{{TARGET_CONTIG}},/0,{{BINDER_LO}}-{{BINDER_HI}}",
+    "binder_min": {{BINDER_LO}},
+    "binder_max": {{BINDER_HI}},
+    "n_batches": {{N_BATCHES}},
+    "diffusion_batch_size": {{DIFF_BATCH_SIZE}},
+    "num_timesteps": 200,
+    "step_scale": 1.5,
+    "low_memory_mode": true,
+    "mpnn_samples": {{MPNN_SAMPLES}},
+    "mpnn_temperature": {{MPNN_TEMPERATURE}}
+  },
+  "env": {
+    "conda_env": "bindmaster_rfd3",
+    "python": "$PY_VER",
+    "gpu_name": "$GPU_NAME",
+    "gpu_memory_mib": $GPU_MEM
+  }
+}
+JSON
+
 # ── Stage 1: backbone diffusion ─────────────────────────────────────────────
 echo "============================================================"
 echo "  RFD3 backbone diffusion"
 echo "  Contig: {{TARGET_CONTIG}} (preserve), binder {{BINDER_LO}}-{{BINDER_HI}} aa"
 echo "  {{N_BATCHES}} batches × {{DIFF_BATCH_SIZE}} per batch"
+echo "  Settings persisted: $RUN_DIR/settings.json"
 echo "============================================================"
 
 INPUTS_YAML="$RUN_DIR/binder_spec.yaml"
