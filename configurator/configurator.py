@@ -1649,9 +1649,17 @@ RUN_DIR="{run_dir}"
 SETTINGS_DIR="$RUN_DIR/proteina_complexa"
 mkdir -p "$SETTINGS_DIR"
 
-# Activate Proteina-Complexa uv venv
+# Activate Proteina-Complexa uv venv + initialize env.sh.
+# Without `complexa init uv` + `source env.sh`, every CLI call dies on
+# "Environment not initialized. Run: complexa init <uv|docker>; source env.sh".
+# `complexa init` is idempotent (`--force` regenerates env.sh from .env).
 source "${{PROTEINA_COMPLEXA_DIR}}/.venv/bin/activate"
 cd "${{PROTEINA_COMPLEXA_DIR}}"
+if [[ ! -f env.sh ]]; then
+    complexa init uv --force
+fi
+# shellcheck disable=SC1091
+source env.sh
 """
         + settings_block
         + f"""
