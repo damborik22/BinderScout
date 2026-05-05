@@ -990,6 +990,17 @@ install_mosaic() {
     fi
     print_ok "uv is available: $(command -v uv)"
 
+    # Patch: pin grpcio-tools>=1.60 in override-dependencies.
+    # Mosaic 0599248+ pulls flax 0.12.7 → orbax-checkpoint 0.11.37 → grpcio-tools==1.48.2,
+    # whose setup.py imports pkg_resources without declaring setuptools as a build dep.
+    # uv 0.5+ strict isolation rejects that, so the build fails with ModuleNotFoundError.
+    # Forcing a modern grpcio-tools (which declares its build deps correctly) avoids it.
+    local mosaic_pyproject="${MOSAIC_DIR}/pyproject.toml"
+    if [[ -f "${mosaic_pyproject}" ]] && ! grep -q "grpcio-tools" "${mosaic_pyproject}"; then
+        sed -i 's/^\(override-dependencies = \[[^]]*\)\]/\1, "grpcio-tools>=1.60"]/' "${mosaic_pyproject}" \
+            && print_ok "Patched Mosaic pyproject.toml: override grpcio-tools>=1.60"
+    fi
+
     # Create virtual environment with JAX CUDA support
     print_step "Running uv sync --group jax-cuda (creates .venv/ inside Mosaic/)"
     run_logged "Setting up Mosaic venv (uv sync --group jax-cuda)" \
