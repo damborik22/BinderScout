@@ -1747,11 +1747,15 @@ install_proteina_complexa() {
             bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && .venv/bin/complexa init" \
             || print_warn "complexa init failed — .env may need manual setup"
 
-        # Download ALL models (Complexa + community models)
+        # Download ALL models (Complexa + community models).
+        # Activate the venv first: `complexa download` shells out to
+        # `python script_utils/download/download_esm_model.py`, which
+        # picks the venv's transformers only when `.venv/bin` is on PATH.
+        # shellcheck disable=SC1091
         print_step "Downloading Proteina-Complexa checkpoints & community models"
         run_logged --retries 2 "Downloading all models (complexa download --everything)" \
-            bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && .venv/bin/complexa download --everything" \
-            || print_warn "Model download failed — download manually with: complexa download --everything"
+            bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && source .venv/bin/activate && complexa download --everything" \
+            || print_warn "Model download failed — download manually with: source .venv/bin/activate && complexa download --everything"
     else
         print_warn "complexa CLI not found in .venv — skipping init/download"
     fi
