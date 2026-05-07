@@ -1927,6 +1927,13 @@ conda activate bindmaster_rfd3
 # Singular FOUNDRY_CHECKPOINT_DIR is silently ignored (rfd3 design then aborts with
 # "Invalid checkpoint: rfd3" even with the .ckpt sitting in the weights dir).
 export FOUNDRY_CHECKPOINT_DIRS="$WEIGHTS_DIR"
+# Avoid VRAM fragmentation on 24 GB cards: with diffusion_batch_size=10 and
+# low_memory_mode=true, peak live allocation is ~15 GiB but PyTorch reserves
+# another ~6 GiB unallocated, pushing the next 3 GiB allocation over the cliff
+# mid-run (BM4 RTX 3090 OOMed on its 7th batch on the 2VDY run).
+# expandable_segments lets the allocator hand back reserved-but-unallocated
+# memory instead of fragmenting forever.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 set -u
 """
         + settings_block
