@@ -20,6 +20,8 @@ from .plots import (
     fig_to_base64,
     plot_metric_distributions,
     plot_radar_chart,
+    plot_radar_per_engine,
+    plot_radar_per_engine_uniform_selection,
 )
 
 # Display names for tools (source_tool values are lowercase internally)
@@ -34,10 +36,46 @@ _TOOL_DISPLAY = {
     "protein_hunter": "Protein-Hunter",
 }
 
+# Primary reference link per tool. Points at the canonical repository used by
+# the BindMaster installer (so the link matches the code the user actually
+# ran). Swap to a paper URL once each method is published.
+_TOOL_LINKS = {
+    # BindCraft — Pacesa et al. (Nature 2025), repo at martinpacesa/BindCraft
+    "bindcraft": "https://github.com/martinpacesa/BindCraft",
+    # BoltzGen — diffusion-based binder generator (installer pin)
+    "boltzgen": "https://github.com/HannesStark/boltzgen",
+    # Mosaic — escalante-bio JAX/Boltz-2 hallucinator
+    "mosaic": "https://github.com/escalante-bio/mosaic",
+    # PXDesign — ByteDance Protenix-based binder design
+    "pxdesign": "https://github.com/bytedance/PXDesign",
+    # Proteina-Complexa — NVIDIA flow-matching binder design
+    "proteina_complexa": "https://github.com/NVIDIA-Digital-Bio/proteina-complexa",
+    # RFAA — RFdiffusion-all-atom for ligand-aware binder design
+    "rfaa": "https://github.com/baker-laboratory/rf_diffusion_all_atom",
+    # RFD3 — RFdiffusion3 / foundry
+    "rfd3": "https://github.com/RosettaCommons/RFdiffusion",
+    # Protein-Hunter — Cho et al. 2025, bioRxiv preprint
+    "protein_hunter": "https://doi.org/10.1101/2025.10.10.681530",
+}
 
-def _tool_display(name: str) -> str:
-    """Return the display name for a tool, defaulting to the original."""
-    return _TOOL_DISPLAY.get(name, name)
+
+def _tool_display(name: str, *, link: bool = False) -> str:
+    """Return the display label for a tool.
+
+    Emits a plain string by default. Pass ``link=True`` to wrap the label
+    in an ``<a>`` tag pointing at the tool's primary reference (paper or
+    repository) — used only by the top counts banner so links don't repeat
+    on every tool mention in tables/section headings.
+    """
+    label = _TOOL_DISPLAY.get(name, name)
+    if not link:
+        return label
+    url = _TOOL_LINKS.get(name)
+    if not url:
+        return label
+    # target=_blank + rel=noopener for safe new-tab navigation; inherit colour
+    # so the existing ``.tool-<name>`` class still tints the link.
+    return f'<a href="{url}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted;">{label}</a>'
 
 
 _HTML_TEMPLATE = """\
@@ -60,6 +98,13 @@ _HTML_TEMPLATE = """\
   td.num {{ text-align: right; font-variant-numeric: tabular-nums; }}
   tr:nth-child(even) {{ background: #EBF5FB; }}
   tr:hover {{ background: #CFE6F6; }}
+  /* Selected-design button in any 3D Structure Viewer (top-20 + per-tool top-10) */
+  [class*="design-btn"].active,
+  [class^="design-btn"].active {{
+    box-shadow: 0 0 0 3px #000, 0 0 6px rgba(0,0,0,0.35);
+    transform: scale(1.08);
+    filter: brightness(0.85);
+  }}
   .tool-bindcraft          {{ color: #1565C0; font-weight: bold; }}
   .tool-boltzgen           {{ color: #E65100; font-weight: bold; }}
   .tool-mosaic             {{ color: #2E7D32; font-weight: bold; }}
@@ -96,9 +141,11 @@ _HTML_TEMPLATE = """\
 
 <p style="font-size:0.85em;color:#555;line-height:1.6;">
   <b>Methodology.</b>
-  All designed binder sequences are independently refolded with <b>Boltz-2</b> as target–binder complexes.
-  Additional refolding engines (Protenix on x86, AlphaFold 3 on DGX Spark / aarch64) may contribute
-  to the agreement count when available.
+  All designed binder sequences are independently re-folded as target–binder complexes by one or
+  more refolding engines — currently <b>Boltz-2</b>, <b>Protenix</b> (x86) and <b>AlphaFold 3</b>
+  (DGX Spark / aarch64). The <b>primary engine</b> (chosen via <code>--primary-engine</code>;
+  default <code>boltz</code>) provides the structure used for ranking; the other engines, when
+  present, vote in the agreement count as independent cross-validators.
   The primary ranking metric is <b>ipSAE_min</b> — the minimum of binder→target and target→binder
   interface Predicted Structural Alignment Error, computed using the
   <a href="https://github.com/DunbrackLab/IPSAE" target="_blank">DunbrackLab d0<sub>res</sub> formula</a>
@@ -144,6 +191,8 @@ _HTML_TEMPLATE = """\
   <span style="color:#e65100">■ Low</span> &gt;0.40 &nbsp;
   <span style="color:#c62828">■ Reject</span> ≤0.40
 </p>
+{engine_threshold_legend}
+{agreement_summary}
 {tier_summary}
 
 <h2>Top 20 Binders</h2>
@@ -166,8 +215,13 @@ _HTML_TEMPLATE = """\
       <td>Mean per-residue confidence of binder from Boltz-2 [0–1]</td></tr>
 </table>
 
-<h2>Per-Tool Summary Statistics</h2>
-{summary_table}
+<details style="margin:1em 0;">
+  <summary style="cursor:pointer;font-size:1.5em;color:#1a5276;font-weight:bold;
+           border-bottom:2px solid #CFE6F6;padding-bottom:4px;margin-bottom:0.5em;">
+    Per-Tool Summary Statistics <span style="font-size:0.65em;color:#888;font-weight:normal;">(click to expand)</span>
+  </summary>
+  {summary_table}
+</details>
 
 <h2>Metric Distributions by Tool</h2>
 <img src="data:image/png;base64,{dist_plot}" alt="Metric distributions">
@@ -181,15 +235,27 @@ _HTML_TEMPLATE = """\
 </p>
 
 <h2>Tool Comparison (Radar Chart)</h2>
-<img src="data:image/png;base64,{radar_plot}" alt="Radar chart">
+<p style="font-size:0.85em;color:#555;margin:0.2em 0 0.6em 0;">
+  Each panel: per-tool top-10 ranked by <b>that engine's own ipSAE_min</b>.
+</p>
+<img src="data:image/png;base64,{radar_plot}" alt="Per-engine radar (each panel ranks per-tool top-10 independently)">
+
+{radar_fixed_block}
 
 {per_tool_top10}
 
-<h2>3D Structure Viewer — Top 20</h2>
+<h2>3D Structure Viewer — Top 20
+  <span style="background:#0277bd;color:white;padding:2px 10px;border-radius:4px;
+        font-size:0.7em;font-weight:bold;vertical-align:middle;margin-left:0.4em;">
+    REFOLDED · {primary_engine_label}
+  </span>
+</h2>
 <p style="font-size:0.85em;color:#555;line-height:1.6;">
-  Click any rank button below to load that design's refolded structure.
-  Binder (chain A) is coloured by tool, target (chain B) is grey.
-  Drag to rotate, scroll to zoom, right-drag to pan.
+  Structures shown here are <b>{primary_engine_label} re-folds</b> of each
+  design's sequence — the structures used for ranking (primary engine).
+  Independent of the design tool. Click any rank button below to load. Binder
+  (chain A) is coloured by tool, target (chain B) is grey. Drag to rotate,
+  scroll to zoom, right-drag to pan.
 </p>
 {ngl_viewer_block}
 
@@ -230,13 +296,14 @@ _TOOL_COLOURS_NGL = {
 }
 
 
-def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path) -> str:
+def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path, target_seq: str | None = None) -> str:
     """Build an NGL-based 3D viewer section for the top 20 designs.
 
-    Embeds PDB content inline so the report stays self-contained.
-    Uses NGL Viewer loaded from CDN.
+    Embeds PDB/CIF content inline so the report stays self-contained.
+    Uses NGL Viewer loaded from CDN. Accepts whichever extension the
+    primary-engine PDB copier produced (.pdb or .cif).
     """
-    # Collect PDBs and metadata for each top design
+    # Collect PDBs/CIFs and metadata for each top design
     entries = []
     for _, row in top_df.head(20).iterrows():
         rank = int(row.get("adaptyv_rank", 0))
@@ -246,10 +313,20 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path) -> str:
         iptm = row.get("iptm", "")
         length = row.get("binder_length", "")
 
-        pdb_path = structures_dir / f"rank{rank:02d}_{binder_id}.pdb"
-        if not pdb_path.exists():
+        # Search for the structure file with whichever extension was copied.
+        pdb_path = None
+        for ext in (".pdb", ".cif"):
+            candidate = structures_dir / f"rank{rank:02d}_{binder_id}{ext}"
+            if candidate.exists():
+                pdb_path = candidate
+                break
+        if pdb_path is None:
             continue
-        pdb_text = pdb_path.read_text()
+        raw_text = pdb_path.read_text()
+        raw_ext = pdb_path.suffix[1:]  # 'pdb' or 'cif'
+        # Normalize to PDB with letter chain IDs (handles BG/PXD numeric chains)
+        pdb_text, struct_ext, _ = _normalize_struct_to_pdb(raw_text, raw_ext)
+        binder_chain, target_chain = _pick_binder_target_chains(pdb_text, struct_ext, target_seq)
         # Escape backticks and backslashes for JS template literal
         pdb_js = pdb_text.replace("\\", "\\\\").replace("`", "\\`")
         entries.append(
@@ -257,6 +334,9 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path) -> str:
                 "rank": rank,
                 "binder_id": binder_id,
                 "tool": tool,
+                "ext": struct_ext,
+                "binder_chain": binder_chain,
+                "target_chain": target_chain,
                 "tool_colour": _TOOL_COLOURS_NGL.get(tool, _TOOL_COLOURS_NGL["unknown"]),
                 "ipsae": f"{float(ipsae):.3f}" if ipsae not in ("", None) else "n/a",
                 "iptm": f"{float(iptm):.3f}" if iptm not in ("", None) else "n/a",
@@ -273,9 +353,10 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path) -> str:
     buttons_html = []
     for e in entries:
         buttons_html.append(
-            f'<button onclick="loadDesign({e["rank"]})" '
+            f'<button id="design-btn-{e["rank"]}" class="design-btn" onclick="loadDesign({e["rank"]})" '
             f'style="background:{e["tool_colour"]};color:white;border:none;padding:0.4em 0.7em;'
-            f'margin:0.15em;border-radius:4px;cursor:pointer;font-size:0.85em;font-weight:bold;" '
+            f'margin:0.15em;border-radius:4px;cursor:pointer;font-size:0.85em;font-weight:bold;'
+            f'transition:transform 0.1s,filter 0.1s,box-shadow 0.1s;" '
             f'title="{_TOOL_DISPLAY.get(e["tool"], e["tool"])} — ipSAE={e["ipsae"]}, ipTM={e["iptm"]}, {e["length"]}aa">'
             f"#{e['rank']}</button>"
         )
@@ -283,8 +364,9 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path) -> str:
 
     # Embed PDB data as JS object
     pdb_data_js = ",\n        ".join(
-        f'{e["rank"]}: {{"pdb": `{e["pdb"]}`, '
+        f'{e["rank"]}: {{"pdb": `{e["pdb"]}`, "ext": "{e["ext"]}", '
         f'"tool": "{e["tool"]}", "colour": "{e["tool_colour"]}", '
+        f'"binder_chain": "{e["binder_chain"]}", "target_chain": "{e["target_chain"]}", '
         f'"binder_id": "{e["binder_id"]}", '
         f'"ipsae": "{e["ipsae"]}", "iptm": "{e["iptm"]}", "length": "{e["length"]}"}}'
         for e in entries
@@ -329,16 +411,16 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path) -> str:
       stage.removeAllComponents();
       const blob = new Blob([design.pdb], {{type: "text/plain"}});
 
-      stage.loadFile(blob, {{ext: "pdb"}}).then(function(comp) {{
-        // Binder = chain A: coloured by tool
+      stage.loadFile(blob, {{ext: design.ext || "pdb"}}).then(function(comp) {{
+        // Binder chain (detected by sequence): coloured by tool
         comp.addRepresentation("cartoon", {{
-          sele: ":A",
+          sele: ":" + design.binder_chain,
           color: design.colour,
           smoothSheet: true,
         }});
-        // Target = chain B: grey
+        // Target chain (detected by sequence): grey
         comp.addRepresentation("cartoon", {{
-          sele: ":B",
+          sele: ":" + design.target_chain,
           color: "#9E9E9E",
           smoothSheet: true,
         }});
@@ -351,6 +433,13 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path) -> str:
         " &nbsp;·&nbsp; length=" + design.length + "aa" +
         " &nbsp;·&nbsp; ipSAE=" + design.ipsae +
         " &nbsp;·&nbsp; ipTM=" + design.iptm;
+
+      // Mark the clicked button as the active selection
+      document.querySelectorAll(".design-btn.active").forEach(function(b) {{
+        b.classList.remove("active");
+      }});
+      const btn = document.getElementById("design-btn-" + rank);
+      if (btn) btn.classList.add("active");
     }};
 
     // Load default (rank 1)
@@ -425,6 +514,405 @@ def _is_monomer_pdb(tool: str, p: Path) -> bool:
     return False
 
 
+def _build_per_tool_refold_viewer(
+    tool: str,
+    tool_df: pd.DataFrame,
+    boltz2_results_dir: Path | None,
+    n: int = 10,
+    primary_engine: str = "boltz",
+    target_seq: str | None = None,
+) -> str:
+    """3D viewer for a tool's top-N picks using the **refolded** PDBs of the primary engine.
+
+    Used by the "Top Designs per Tool" fallback path (no --tool-csv supplied).
+    Picks the primary-engine PDB column when available (af3_pdb/cif for AF3,
+    boltz_pdb otherwise). Binder vs target chain is detected per-design by
+    matching the target sequence.
+    """
+    colour = _TOOL_COLOURS_NGL.get(tool, _TOOL_COLOURS_NGL["unknown"])
+    # Engine-specific PDB column preference (mirrors cli/report.py _ENGINE_PDB_PRIORITY)
+    _PRI: dict[str, list[str]] = {
+        "af3":      ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"],
+        "protenix": ["protenix_pdb", "protenix_cif", "boltz_pdb", "pdb"],
+        "boltz":    ["boltz_pdb", "pdb"],
+    }
+    pdb_cols = [c for c in _PRI.get(primary_engine, ["boltz_pdb", "pdb"]) if c in tool_df.columns]
+    if not pdb_cols:
+        return ""
+    entries = []
+    for i, (_, row) in enumerate(tool_df.head(n).iterrows()):
+        src = None
+        for col in pdb_cols:
+            v = row.get(col)
+            if isinstance(v, str) and v:
+                src = v; break
+        if not src:
+            continue
+        src_path = Path(src)
+        if not src_path.is_absolute() and boltz2_results_dir is not None:
+            src_path = boltz2_results_dir / src
+        if not src_path.exists():
+            continue
+        try:
+            raw_text = src_path.read_text()
+        except Exception:
+            continue
+        raw_ext = src_path.suffix.lstrip(".") or "pdb"
+        pdb_text, ext, _ = _normalize_struct_to_pdb(raw_text, raw_ext)
+        binder_chain, target_chain = _pick_binder_target_chains(pdb_text, ext, target_seq)
+        pdb_js = pdb_text.replace("\\", "\\\\").replace("`", "\\`")
+        binder_id = str(row.get("binder_id", ""))
+        length = row.get("binder_length", "")
+        ipsae = row.get("ipsae_min", "")
+        iptm = row.get("iptm", "")
+        entries.append({
+            "rank": i + 1,
+            "binder_id": binder_id,
+            "name": binder_id or f"rank{i+1}",
+            "length": int(length) if pd.notna(length) and length != "" else 0,
+            "ipsae": f"{float(ipsae):.3f}" if ipsae not in ("", None) and pd.notna(ipsae) else "n/a",
+            "iptm": f"{float(iptm):.3f}" if iptm not in ("", None) and pd.notna(iptm) else "n/a",
+            "ext": ext,
+            "binder_chain": binder_chain,
+            "target_chain": target_chain,
+            "pdb": pdb_js,
+        })
+    if not entries:
+        return ""
+    viewer_id = f"ngl-refold-viewer-{tool}"
+    info_id = f"ngl-refold-info-{tool}"
+    tool_id = tool.replace("-", "_") + "_refold"
+    btn_class = f"design-btn-refold-{tool}"
+    buttons_html = []
+    for e in entries:
+        title = f"{e['name']} — {e['length']}aa — ipSAE={e['ipsae']}, ipTM={e['iptm']}"
+        buttons_html.append(
+            f'<button id="design-btn-refold-{tool}-{e["rank"]}" class="{btn_class}" '
+            f'onclick="loadDesign_{tool_id}({e["rank"]})" '
+            f'style="background:{colour};color:white;border:none;padding:0.3em 0.6em;'
+            f'margin:0.1em;border-radius:3px;cursor:pointer;font-size:0.8em;'
+            f'transition:transform 0.1s,filter 0.1s,box-shadow 0.1s;" '
+            f'title="{title}">#{e["rank"]}</button>'
+        )
+    pdb_data_js = ",\n        ".join(
+        f'{e["rank"]}: {{"pdb": `{e["pdb"]}`, "ext": "{e["ext"]}", '
+        f'"binder_chain": "{e["binder_chain"]}", "target_chain": "{e["target_chain"]}", '
+        f'"name": "{e["name"]}", "binder_id": "{e["binder_id"]}", '
+        f'"ipsae": "{e["ipsae"]}", "iptm": "{e["iptm"]}", "length": {e["length"]}}}'
+        for e in entries
+    )
+    default_rank = entries[0]["rank"]
+    _engine_label = {"af3": "AlphaFold 3", "protenix": "Protenix", "boltz": "Boltz-2"}.get(primary_engine, primary_engine.upper())
+    html = f"""
+<div style="margin:0.6em 0;padding:0.6em;border:1px solid #ddd;border-radius:4px;background:#fafafa;">
+  <div style="font-size:0.78em;margin-bottom:0.3em;">
+    <span style="background:#0277bd;color:white;padding:1px 8px;border-radius:3px;
+                 font-weight:bold;">REFOLDED · {_engine_label}</span>
+    <span style="color:#555;margin-left:0.4em;">
+      structure shown is the {_engine_label} re-fold; binder/target chain detected per design
+    </span>
+  </div>
+  <div style="margin-bottom:0.4em;">{"".join(buttons_html)}</div>
+  <div id="{info_id}" style="font-size:0.85em;color:#333;margin-bottom:0.3em;padding:0.3em 0.6em;background:#fff;border-radius:3px;">Click a rank button to load 3D structure</div>
+  <div id="{viewer_id}" style="width:100%;height:380px;border:1px solid #ccc;border-radius:4px;background:#000;"></div>
+</div>
+
+<script>
+(function() {{
+  const designs_{tool_id} = {{
+    {pdb_data_js}
+  }};
+  let stage_{tool_id} = null;
+  let loaded_{tool_id} = false;
+
+  function init_{tool_id}() {{
+    if (typeof NGL === 'undefined') {{ setTimeout(init_{tool_id}, 100); return; }}
+    if (stage_{tool_id}) return;
+    stage_{tool_id} = new NGL.Stage("{viewer_id}", {{backgroundColor: "white"}});
+    window.addEventListener("resize", function() {{ if (stage_{tool_id}) stage_{tool_id}.handleResize(); }}, false);
+
+    window.loadDesign_{tool_id} = function(rank) {{
+      const d = designs_{tool_id}[rank];
+      if (!d || !stage_{tool_id}) return;
+      stage_{tool_id}.removeAllComponents();
+      const blob = new Blob([d.pdb], {{type: "text/plain"}});
+      stage_{tool_id}.loadFile(blob, {{ext: d.ext}}).then(function(comp) {{
+        comp.addRepresentation("cartoon", {{sele: ":" + d.binder_chain, color: "{colour}", smoothSheet: true}});
+        comp.addRepresentation("cartoon", {{sele: ":" + d.target_chain, color: "#9E9E9E", smoothSheet: true}});
+        comp.autoView();
+        stage_{tool_id}.handleResize();
+      }});
+      document.getElementById("{info_id}").innerHTML =
+        "<b>" + d.name + "</b> &nbsp;·&nbsp; length=" + d.length + "aa" +
+        " &nbsp;·&nbsp; ipSAE=" + d.ipsae + " &nbsp;·&nbsp; ipTM=" + d.iptm;
+      document.querySelectorAll(".{btn_class}.active").forEach(function(b) {{ b.classList.remove("active"); }});
+      const btn = document.getElementById("design-btn-refold-{tool}-" + rank);
+      if (btn) btn.classList.add("active");
+      loaded_{tool_id} = true;
+    }};
+  }}
+
+  document.addEventListener("DOMContentLoaded", function() {{
+    const viewer = document.getElementById("{viewer_id}");
+    if (!viewer) return;
+    const details = viewer.closest("details");
+    if (details) {{
+      details.addEventListener("toggle", function() {{
+        if (details.open) {{
+          init_{tool_id}();
+          if (!loaded_{tool_id}) {{
+            setTimeout(function() {{ window.loadDesign_{tool_id}({default_rank}); }}, 200);
+          }} else if (stage_{tool_id}) {{
+            setTimeout(function() {{ stage_{tool_id}.handleResize(); }}, 100);
+          }}
+        }}
+      }});
+    }} else {{
+      init_{tool_id}();
+      setTimeout(function() {{ window.loadDesign_{tool_id}({default_rank}); }}, 200);
+    }}
+  }});
+}})();
+</script>
+"""
+    return html
+
+
+_AA3 = {
+    "ALA":"A","ARG":"R","ASN":"N","ASP":"D","CYS":"C","GLU":"E","GLN":"Q",
+    "GLY":"G","HIS":"H","ILE":"I","LEU":"L","LYS":"K","MET":"M","PHE":"F",
+    "PRO":"P","SER":"S","THR":"T","TRP":"W","TYR":"Y","VAL":"V",
+}
+
+
+def _pdb_chains(path: Path) -> dict[str, str]:
+    """Read ATOM records from a PDB and return {chain_id: single-letter-sequence}."""
+    chains: dict[str, list[tuple[int, str]]] = {}
+    try:
+        with path.open() as f:
+            for line in f:
+                if not line.startswith("ATOM"):
+                    continue
+                if line[12:16].strip() != "CA":
+                    continue
+                resname = line[17:20].strip()
+                aa = _AA3.get(resname)
+                if not aa:
+                    continue
+                chain_id = line[21]
+                resseq = int(line[22:26])
+                chains.setdefault(chain_id, []).append((resseq, aa))
+    except (OSError, ValueError):
+        return {}
+    # Deduplicate by resseq, sort, join.
+    out = {}
+    for c, residues in chains.items():
+        seen: dict[int, str] = {}
+        for rs, aa in residues:
+            seen.setdefault(rs, aa)
+        out[c] = "".join(aa for _, aa in sorted(seen.items()))
+    return out
+
+
+def _struct_chains(text: str, ext: str) -> dict[str, str]:
+    """Parse a PDB- or CIF-formatted string and return {chain_id: 1-letter sequence}.
+
+    Used to figure out which chain is the target vs binder when the assignment
+    is not the Boltz-2 default (binder=A, target=B). Robust against unknown
+    residues by skipping them.
+    """
+    if ext == "cif":
+        # Minimal CIF parse: walk the atom_site loop for label_atom_id=CA rows.
+        chains: dict[str, list[tuple[int, str]]] = {}
+        in_loop = False
+        cols: list[str] = []
+        loop_lines: list[str] = []
+        for raw in text.splitlines():
+            line = raw.rstrip()
+            if line.startswith("loop_"):
+                in_loop = True; cols = []; loop_lines = []
+                continue
+            if in_loop and line.startswith("_atom_site."):
+                cols.append(line.split(".",1)[1])
+                continue
+            if in_loop and cols and (not line or line.startswith("#") or line.startswith("loop_") or line.startswith("_") or line.startswith("data_")):
+                in_loop = False
+                cols = []
+                continue
+            if in_loop and cols and line and not line.startswith("#"):
+                loop_lines.append(line)
+        if not (cols and loop_lines):
+            return {}
+        try:
+            i_atom = cols.index("label_atom_id")
+            i_comp = cols.index("label_comp_id")
+            i_chain = cols.index("label_asym_id") if "label_asym_id" in cols else cols.index("auth_asym_id")
+            i_seq  = cols.index("label_seq_id")  if "label_seq_id"  in cols else cols.index("auth_seq_id")
+        except ValueError:
+            return {}
+        for line in loop_lines:
+            toks = line.split()
+            if len(toks) <= max(i_atom, i_comp, i_chain, i_seq):
+                continue
+            if toks[i_atom].strip('"') != "CA":
+                continue
+            aa = _AA3.get(toks[i_comp].strip('"'))
+            if not aa:
+                continue
+            ch = toks[i_chain].strip('"')
+            try:
+                rs = int(toks[i_seq])
+            except ValueError:
+                continue
+            chains.setdefault(ch, []).append((rs, aa))
+        out: dict[str, str] = {}
+        for c, residues in chains.items():
+            seen: dict[int, str] = {}
+            for rs, aa in residues:
+                seen.setdefault(rs, aa)
+            out[c] = "".join(aa for _, aa in sorted(seen.items()))
+        return out
+    # PDB fallback: reuse _pdb_chains' inner logic on text
+    chains2: dict[str, list[tuple[int, str]]] = {}
+    for line in text.splitlines():
+        if not line.startswith("ATOM"):
+            continue
+        if line[12:16].strip() != "CA":
+            continue
+        aa = _AA3.get(line[17:20].strip())
+        if not aa:
+            continue
+        try:
+            rs = int(line[22:26])
+        except ValueError:
+            continue
+        chains2.setdefault(line[21], []).append((rs, aa))
+    out2: dict[str, str] = {}
+    for c, residues in chains2.items():
+        seen2: dict[int, str] = {}
+        for rs, aa in residues:
+            seen2.setdefault(rs, aa)
+        out2[c] = "".join(aa for _, aa in sorted(seen2.items()))
+    return out2
+
+
+def _normalize_struct_to_pdb(text: str, ext: str) -> tuple[str, str, dict[str, str]]:
+    """Convert any structure (PDB or CIF) to PDB text with letter chain IDs.
+
+    Returns (pdb_text, "pdb", chain_map) where chain_map is original→letter.
+    Falls back to original (text, ext, identity-map) if gemmi is unavailable
+    or parsing fails. BoltzGen CIFs use numeric chain IDs (`1`, `2`) that
+    NGL Viewer's selection language can't address; PDB output renames them
+    to A, B so the binder/target selectors work.
+    """
+    try:
+        import gemmi  # local import — keeps module importable without gemmi
+    except ImportError:
+        return text, ext, {}
+    try:
+        if ext == "cif":
+            block = gemmi.cif.read_string(text).sole_block()
+            structure = gemmi.make_structure_from_block(block)
+        else:
+            structure = gemmi.read_pdb_string(text)
+    except Exception:
+        return text, ext, {}
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    chain_map: dict[str, str] = {}
+    for model in structure:
+        idx = 0
+        for chain in model:
+            old = chain.name
+            if old in chain_map:
+                chain.name = chain_map[old]
+                continue
+            if idx >= len(letters):
+                break
+            new = letters[idx]
+            chain_map[old] = new
+            chain.name = new
+            idx += 1
+        break  # first model only
+    try:
+        pdb_text = structure.make_pdb_string()
+    except AttributeError:
+        # older gemmi
+        import io
+        buf = io.StringIO()
+        structure.write_pdb(buf)
+        pdb_text = buf.getvalue()
+    return pdb_text, "pdb", chain_map
+
+
+def _pick_binder_target_chains(
+    text: str, ext: str, target_seq: str | None,
+) -> tuple[str, str]:
+    """Return (binder_chain, target_chain). Detects target chain by sequence match.
+
+    Falls back to (A, B) — the Boltz-2 default — when the structure has only
+    one chain or can't be parsed.
+    """
+    if not target_seq:
+        return "A", "B"
+    chains = _struct_chains(text, ext)
+    if not chains:
+        return "A", "B"
+    target_up = target_seq.upper().strip()
+    matches = [c for c, s in chains.items() if s == target_up]
+    if len(matches) == 1:
+        target_chain = matches[0]
+        others = [c for c in chains if c != target_chain]
+        if len(others) == 1:
+            return others[0], target_chain
+    # No exact match — try by length (target len is short, usually 32 here)
+    target_len = len(target_up)
+    by_len = [(c, abs(len(s) - target_len)) for c, s in chains.items()]
+    by_len.sort(key=lambda x: x[1])
+    if by_len and by_len[0][1] <= 5 and len(chains) >= 2:
+        target_chain = by_len[0][0]
+        others = [c for c in chains if c != target_chain]
+        if others:
+            return others[0], target_chain
+    return "A", "B"
+
+
+_PC_SEQ_INDEX_CACHE: dict[str, dict[str, Path]] = {}
+
+
+def _pc_seq_to_pdb_index(pdb_dir: Path, target_sequence: str | None = None) -> dict[str, Path]:
+    """Build a {binder_sequence -> AF2-refold complex PDB} index for Proteina-Complexa.
+
+    Prefers ``AF2/*_self_seq_0_model1.pdb`` (post-MPNN AF2 refold, full sidechains)
+    over ``*_updated.pdb`` (CA-only flow-matching backbone) so the 3D viewer
+    shows actual side chains. Falls back to ``*_updated.pdb`` only when the
+    AF2 file is missing for a given design.
+    """
+    key = str(pdb_dir.resolve())
+    if key in _PC_SEQ_INDEX_CACHE:
+        return _PC_SEQ_INDEX_CACHE[key]
+    target_up = (target_sequence or "").upper().strip()
+    index: dict[str, Path] = {}
+
+    def _add(path: Path) -> None:
+        chains = _pdb_chains(path)
+        if not chains:
+            return
+        for _cid, seq in chains.items():
+            if target_up and seq == target_up:
+                continue
+            # First-seen-wins; full-atom AF2 file always preferred because we
+            # iterate AF2 PDBs before any *_updated.pdb fallback.
+            index.setdefault(seq, path)
+
+    for pdb in pdb_dir.rglob("AF2/*_self_seq_0_model1.pdb"):
+        _add(pdb)
+    # Fallback: any CA-only *_updated.pdb whose sequence we haven't seen yet.
+    for pdb in pdb_dir.rglob("*_updated.pdb"):
+        _add(pdb)
+    _PC_SEQ_INDEX_CACHE[key] = index
+    return index
+
+
 def _build_per_tool_pdb_viewer(
     tool: str,
     tool_csv_path: Path,
@@ -432,6 +920,7 @@ def _build_per_tool_pdb_viewer(
     pdb_pattern: str,
     seq_to_ids: dict,
     n: int = 10,
+    target_seq: str | None = None,
 ) -> str:
     """Build an NGL viewer for top-N designs from a tool's own native ranking.
 
@@ -442,6 +931,7 @@ def _build_per_tool_pdb_viewer(
         pdb_pattern: Pattern to find PDB for each design (with {name} placeholder)
         seq_to_ids: sequence → {binder_id, adaptyv_rank} mapping
         n: Number of top designs to show
+        target_seq: target sequence for per-design binder/target chain detection
     """
     entries = []
     colour = _TOOL_COLOURS_NGL.get(tool, _TOOL_COLOURS_NGL["unknown"])
@@ -464,6 +954,63 @@ def _build_per_tool_pdb_viewer(
                 continue
 
             eval_info = seq_to_ids.get(seq, {})
+
+            # Tool-specific direct-path resolution: PXDesign rows carry
+            # __source_file + chosen_struct_path columns that point exactly at
+            # the design's CIF — no glob needed.
+            direct_pdb = None
+            sf = row.get("__source_file")
+            cs = row.get("chosen_struct_path")
+            if sf and cs:
+                from pathlib import Path as _Path
+                p = _Path(sf).parent / cs
+                if p.exists():
+                    direct_pdb = p
+            if direct_pdb is not None:
+                raw_ext = direct_pdb.suffix[1:] or "pdb"
+                raw_text = direct_pdb.read_text()
+                pdb_text, ext, _ = _normalize_struct_to_pdb(raw_text, raw_ext)
+                bch, tch = _pick_binder_target_chains(pdb_text, ext, target_seq or row.get("target_sequence"))
+                pdb_js = pdb_text.replace("\\", "\\\\").replace("`", "\\`")
+                entries.append({
+                    "rank": i + 1,
+                    "name": name or direct_pdb.stem,
+                    "binder_id": eval_info.get("binder_id", ""),
+                    "eval_rank": eval_info.get("adaptyv_rank", ""),
+                    "length": len(seq),
+                    "ext": ext,
+                    "binder_chain": bch,
+                    "target_chain": tch,
+                    "pdb": pdb_js,
+                })
+                continue  # next CSV row
+
+            # Tool-specific sequence-based resolution: Proteina-Complexa PDBs
+            # live under raw_evaluation_results/.../job_<X>/job_<X>_updated.pdb
+            # with names that don't match the top-700 CSV's pc_top_N aliases.
+            # Build a sequence → PDB index on first hit (cached per dir).
+            if tool == "proteina_complexa":
+                # target sequence: try to read from row.get("target_sequence") or skip
+                target_seq_guess = row.get("target_sequence") or ""
+                idx = _pc_seq_to_pdb_index(tool_pdb_dir, target_seq_guess)
+                hit = idx.get(seq)
+                if hit is not None and hit.exists():
+                    raw_text = hit.read_text()
+                    pdb_text, _ext, _ = _normalize_struct_to_pdb(raw_text, hit.suffix[1:] or "pdb")
+                    bch, tch = _pick_binder_target_chains(pdb_text, "pdb", target_seq or target_seq_guess)
+                    pdb_js = pdb_text.replace("\\", "\\\\").replace("`", "\\`")
+                    entries.append({
+                        "rank": i + 1,
+                        "name": name or hit.stem,
+                        "binder_id": eval_info.get("binder_id", ""),
+                        "eval_rank": eval_info.get("adaptyv_rank", ""),
+                        "length": len(seq),
+                        "ext": "pdb",
+                        "binder_chain": bch,
+                        "target_chain": tch,
+                        "pdb": pdb_js,
+                    })
+                    continue
 
             # Find matching PDB/CIF file.
             # Try exact name first, then strip common prefixes (e.g. "pc_0001_")
@@ -490,8 +1037,10 @@ def _build_per_tool_pdb_viewer(
                     break
 
             if not pdb_file:
-                # Try by rank
-                rank_pattern = pdb_pattern.format(name=f"*{i + 1:04d}*")
+                # Try by rank — sanitize to avoid '**NNNN**' (invalid glob).
+                # Use the pattern's extension only and wrap with single '*'.
+                ext_for_rank = pdb_pattern.rsplit(".", 1)[-1] if "." in pdb_pattern else "pdb"
+                rank_pattern = f"*{i + 1:04d}*.{ext_for_rank}"
                 candidates = list(tool_pdb_dir.rglob(rank_pattern))
                 if candidates:
                     pdb_file = candidates[0]
@@ -499,9 +1048,11 @@ def _build_per_tool_pdb_viewer(
             if not pdb_file or not pdb_file.exists():
                 continue
 
-            pdb_text = pdb_file.read_text()
-            # If CIF, try to use as-is (NGL supports CIF)
-            ext = pdb_file.suffix[1:]
+            raw_text = pdb_file.read_text()
+            raw_ext = pdb_file.suffix[1:]
+            # Normalize CIF -> PDB with letter chain IDs (BG/PXD use numeric chain ids)
+            pdb_text, ext, _ = _normalize_struct_to_pdb(raw_text, raw_ext)
+            bch, tch = _pick_binder_target_chains(pdb_text, ext, target_seq or row.get("target_sequence"))
             pdb_js = pdb_text.replace("\\", "\\\\").replace("`", "\\`")
 
             entries.append(
@@ -512,6 +1063,8 @@ def _build_per_tool_pdb_viewer(
                     "eval_rank": eval_info.get("adaptyv_rank", ""),
                     "length": len(seq),
                     "ext": ext,
+                    "binder_chain": bch,
+                    "target_chain": tch,
                     "pdb": pdb_js,
                 }
             )
@@ -531,14 +1084,17 @@ def _build_per_tool_pdb_viewer(
             title_parts.append(f"eval_rank={e['eval_rank']}")
         title = " — ".join(title_parts)
         buttons_html.append(
-            f'<button onclick="loadDesign_{tool.replace("-", "_")}({e["rank"]})" '
+            f'<button id="design-btn-{tool}-{e["rank"]}" class="design-btn-{tool}" '
+            f'onclick="loadDesign_{tool.replace("-", "_")}({e["rank"]})" '
             f'style="background:{colour};color:white;border:none;padding:0.3em 0.6em;'
-            f'margin:0.1em;border-radius:3px;cursor:pointer;font-size:0.8em;" '
+            f'margin:0.1em;border-radius:3px;cursor:pointer;font-size:0.8em;'
+            f'transition:transform 0.1s,filter 0.1s,box-shadow 0.1s;" '
             f'title="{title}">#{e["rank"]}</button>'
         )
 
     pdb_data_js = ",\n        ".join(
         f'{e["rank"]}: {{"pdb": `{e["pdb"]}`, "ext": "{e["ext"]}", '
+        f'"binder_chain": "{e.get("binder_chain","A")}", "target_chain": "{e.get("target_chain","B")}", '
         f'"name": "{e["name"]}", "binder_id": "{e["binder_id"]}", '
         f'"eval_rank": "{e["eval_rank"]}", "length": {e["length"]}}}'
         for e in entries
@@ -548,6 +1104,13 @@ def _build_per_tool_pdb_viewer(
     tool_id = tool.replace("-", "_")
     html = f"""
 <div style="margin:0.8em 0;padding:0.6em;border:1px solid #ddd;border-radius:4px;background:#fafafa;">
+  <div style="font-size:0.78em;margin-bottom:0.3em;">
+    <span style="background:#2e7d32;color:white;padding:1px 8px;border-radius:3px;
+                 font-weight:bold;">NATIVE DESIGN PDB</span>
+    <span style="color:#555;margin-left:0.4em;">
+      original structure as produced by the design tool (not refolded)
+    </span>
+  </div>
   <div style="margin-bottom:0.4em;">
     {"".join(buttons_html)}
   </div>
@@ -580,8 +1143,8 @@ def _build_per_tool_pdb_viewer(
       stage_{tool_id}.removeAllComponents();
       const blob = new Blob([d.pdb], {{type: "text/plain"}});
       stage_{tool_id}.loadFile(blob, {{ext: d.ext}}).then(function(comp) {{
-        comp.addRepresentation("cartoon", {{sele: ":A", color: "{colour}", smoothSheet: true}});
-        comp.addRepresentation("cartoon", {{sele: ":B", color: "#9E9E9E", smoothSheet: true}});
+        comp.addRepresentation("cartoon", {{sele: ":" + d.binder_chain, color: "{colour}", smoothSheet: true}});
+        comp.addRepresentation("cartoon", {{sele: ":" + d.target_chain, color: "#9E9E9E", smoothSheet: true}});
         comp.autoView();
         stage_{tool_id}.handleResize();  // ensure visible after data load
       }});
@@ -589,6 +1152,12 @@ def _build_per_tool_pdb_viewer(
         "<b>" + d.name + "</b> &nbsp;·&nbsp; length=" + d.length + "aa" +
         (d.binder_id ? " &nbsp;·&nbsp; eval_id=" + d.binder_id : "") +
         (d.eval_rank ? " &nbsp;·&nbsp; eval_rank=" + d.eval_rank : "");
+      // Mark the clicked button as the active selection (scoped to this tool's buttons)
+      document.querySelectorAll(".design-btn-{tool}.active").forEach(function(b) {{
+        b.classList.remove("active");
+      }});
+      const btn = document.getElementById("design-btn-{tool}-" + rank);
+      if (btn) btn.classList.add("active");
       loaded_{tool_id} = true;
     }};
   }}
@@ -623,6 +1192,19 @@ def _build_per_tool_pdb_viewer(
     return html
 
 
+# Per-tool native sort column for the "Top Designs per Tool" fallback path
+# (used when --tool-csv isn't provided so we can't read the original CSV).
+# Each column listed must be present in the merged metrics.csv we hand to the report.
+_TOOL_NATIVE_SORT: dict[str, str] = {
+    "mosaic":   "ipsae_min_aux",                # Mosaic Boltz-2 internal loss signal
+    "boltzgen": "native_bg_design_ipsae_min",   # BoltzGen's own design_ipsae_min (per INVESTIGATION §5)
+}
+_TOOL_NATIVE_SORT_DIR: dict[str, str] = {
+    "mosaic":   "desc",
+    "boltzgen": "desc",
+}
+
+
 # Mapping: tool → (pdb_pattern, subdir_hints) for finding native PDBs
 # Value is (glob_pattern, relative_subdirs_to_try)
 _TOOL_PDB_HINTS = {
@@ -647,6 +1229,8 @@ def generate_report(
     output_path: str | Path,
     tool_csvs: dict[str, str | Path] | None = None,
     tool_pdb_dirs: dict[str, str | Path] | None = None,
+    boltz2_results_dir: str | Path | None = None,
+    primary_engine: str = "boltz",
 ) -> None:
     """Generate and write the HTML report.
 
@@ -661,6 +1245,16 @@ def generate_report(
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    boltz2_results_dir = Path(boltz2_results_dir) if boltz2_results_dir else None
+
+    # Extract the target sequence (constant across all rows in a single campaign)
+    # so the 3D viewers can detect binder vs target chain per design instead of
+    # relying on the brittle "chain A = binder" assumption.
+    target_seq: str | None = None
+    if "target_sequence" in df.columns:
+        vals = df["target_sequence"].dropna().astype(str).str.upper().str.strip()
+        if len(vals) and vals.iloc[0]:
+            target_seq = vals.iloc[0]
 
     sort_df = df.copy()
     if "adaptyv_rank" in sort_df.columns:
@@ -671,11 +1265,14 @@ def generate_report(
     if "source_tool" in sort_df.columns:
         counts = sort_df["source_tool"].value_counts()
         tool_counts_str = " &nbsp;|&nbsp; ".join(
-            f'<span class="tool-{t}">{_tool_display(t)}: {n}</span>' for t, n in counts.items()
+            f'<span class="tool-{t}">{_tool_display(t, link=True)}: {n}</span>' for t, n in counts.items()
         )
 
     # Tier summary
     tier_summary = _tier_summary_to_html(sort_df)
+    # Engine threshold legend + cross-engine agreement summary
+    engine_threshold_legend = _engine_threshold_legend_html(sort_df)
+    agreement_summary = _agreement_summary_html(sort_df)
 
     # Top 20 table (primary + collapsible secondary)
     primary_cols, secondary_cols = _select_display_cols(sort_df)
@@ -696,10 +1293,25 @@ def generate_report(
 
     # Plots
     dist_fig = plot_metric_distributions(sort_df)
-    radar_fig = plot_radar_chart(summary)
+    # Per-engine radar (top-10 per tool by that engine's ipSAE), one polar
+    # subplot per available engine. Falls back to legacy radar if df lacks
+    # the per-engine PAE-ipsae columns.
+    try:
+        radar_fig = plot_radar_per_engine(sort_df, top_n=10)
+    except Exception:  # pragma: no cover - defensive
+        radar_fig = plot_radar_chart(summary)
+    # Second radar: fixed per-tool selection by *our refold rank* (primary engine),
+    # then measure each engine on the same designs.
+    try:
+        radar_fixed_fig = plot_radar_per_engine_uniform_selection(
+            sort_df, primary_engine=primary_engine, top_n=10
+        )
+    except Exception:  # pragma: no cover - defensive
+        radar_fixed_fig = None
 
     dist_b64 = fig_to_base64(dist_fig)
     radar_b64 = fig_to_base64(radar_fig)
+    radar_fixed_b64 = fig_to_base64(radar_fixed_fig) if radar_fixed_fig is not None else ""
 
     # Per-tool top 10 tables (collapsible, one per tool present in data)
     # When tool_csvs is provided, read top 10 from the tool's own CSV (native ranking)
@@ -709,9 +1321,13 @@ def generate_report(
         tools_present = sorted(sort_df["source_tool"].dropna().unique())
         if tools_present:
             per_tool_top10 = (
-                "<h2>Top Designs per Tool</h2>\n"
+                '<h2>Top Designs per Tool '
+                '<span style="background:#1565C0;color:white;padding:2px 10px;'
+                'border-radius:4px;font-size:0.7em;font-weight:bold;vertical-align:middle;'
+                'margin-left:0.4em;">NATIVE TOOL RANKING</span></h2>\n'
                 '<p style="font-size:0.85em;color:#555;">'
-                "Ranked by each tool's own internal scoring (not the evaluator's ranking)."
+                "Each tool's top designs ranked by <b>that tool's own internal scoring</b> "
+                "(not the evaluator's cross-engine ranking)."
                 "</p>\n"
             )
 
@@ -742,13 +1358,11 @@ def generate_report(
                                     seq_col = candidate
                                     break
                             if seq_col:
+                                # First two cols: native (tool) rank + evaluator rank.
                                 native_df.insert(
                                     0,
-                                    "binder_id",
-                                    native_df[seq_col]
-                                    .str.strip()
-                                    .str.upper()
-                                    .map(lambda s: seq_to_ids.get(s, {}).get("binder_id", "")),
+                                    "native_rank",
+                                    range(1, len(native_df) + 1),
                                 )
                                 native_df.insert(
                                     1,
@@ -757,6 +1371,14 @@ def generate_report(
                                     .str.strip()
                                     .str.upper()
                                     .map(lambda s: seq_to_ids.get(s, {}).get("adaptyv_rank", "")),
+                                )
+                                native_df.insert(
+                                    2,
+                                    "binder_id",
+                                    native_df[seq_col]
+                                    .str.strip()
+                                    .str.upper()
+                                    .map(lambda s: seq_to_ids.get(s, {}).get("binder_id", "")),
                                 )
                             n = len(native_df)
                             tool_table = _df_to_html(native_df, colour_tool=False)
@@ -769,10 +1391,50 @@ def generate_report(
                                     pattern = _TOOL_PDB_HINTS.get(tool, ("*{name}*.pdb", []))[0]
                                     try:
                                         viewer_block = _build_per_tool_pdb_viewer(
-                                            tool, csv_path, pdb_dir, pattern, seq_to_ids, n=10
+                                            tool, csv_path, pdb_dir, pattern, seq_to_ids,
+                                            n=10, target_seq=target_seq,
                                         )
                                     except Exception as e:
                                         viewer_block = f"<p style='color:#888;'><em>3D viewer error: {e}</em></p>"
+
+                            # Fallback: if no native PDB viewer was produced (no tool_pdb_dir,
+                            # PDBs not found by pattern, or empty result), show refolded
+                            # Boltz-2 structures for the same designs that are in the table.
+                            if not viewer_block:
+                                try:
+                                    if "binder_id" in native_df.columns:
+                                        ids_in_top = [
+                                            str(b) for b in native_df["binder_id"].fillna("").tolist() if b
+                                        ]
+                                    else:
+                                        ids_in_top = []
+                                    if ids_in_top and "binder_id" in sort_df.columns:
+                                        # preserve native ranking order
+                                        refold_df = (
+                                            sort_df[sort_df["binder_id"].isin(ids_in_top)]
+                                            .set_index("binder_id")
+                                            .reindex(ids_in_top)
+                                            .reset_index()
+                                            .dropna(subset=["sequence"])
+                                            .head(10)
+                                        )
+                                    else:
+                                        refold_df = sort_df[sort_df["source_tool"] == tool].head(10)
+                                    if not refold_df.empty:
+                                        viewer_block = _build_per_tool_refold_viewer(
+                                            tool, refold_df, boltz2_results_dir,
+                                            n=10, primary_engine=primary_engine, target_seq=target_seq,
+                                        )
+                                        if viewer_block:
+                                            _eng = {"af3":"AlphaFold 3","protenix":"Protenix","boltz":"Boltz-2"}.get(primary_engine, primary_engine.upper())
+                                            viewer_block = (
+                                                "<p style='font-size:0.8em;color:#888;margin:0.2em 0;'>"
+                                                "<em>Original design PDBs not found for this tool — "
+                                                f"showing refolded {_eng} structures instead.</em></p>"
+                                                + viewer_block
+                                            )
+                                except Exception as e:
+                                    viewer_block = f"<p style='color:#888;'><em>3D viewer error: {e}</em></p>"
 
                             per_tool_top10 += (
                                 f'<details style="margin:0.3em 0;">'
@@ -784,15 +1446,59 @@ def generate_report(
                         except Exception:
                             pass  # Fall through to evaluator-based ranking
 
-                # Fallback: use evaluator ranking within this tool
-                tool_df = sort_df[sort_df["source_tool"] == tool].head(10)
+                # Fallback: use a per-tool native column when available;
+                # else fall back to the evaluator's ranking within this tool.
+                tool_only = sort_df[sort_df["source_tool"] == tool].copy()
+                native_sort_col = _TOOL_NATIVE_SORT.get(tool)
+                native_sort_dir = _TOOL_NATIVE_SORT_DIR.get(tool, "desc")
+                used_native = False
+                if native_sort_col and native_sort_col in tool_only.columns:
+                    vals = pd.to_numeric(tool_only[native_sort_col], errors="coerce")
+                    if vals.notna().any():
+                        ascending = native_sort_dir == "asc"
+                        tool_only = tool_only.assign(_sort=vals).sort_values(
+                            "_sort", ascending=ascending, na_position="last"
+                        ).drop(columns=["_sort"])
+                        used_native = True
+                tool_df = tool_only.head(10)
                 n = len(tool_df)
-                tool_table = _df_to_html(tool_df[primary_cols], colour_tool=True)
+                # If native sort applied, surface its column so it's visible in the table
+                cols_for_table = list(primary_cols)
+                if used_native and native_sort_col not in cols_for_table:
+                    cols_for_table = cols_for_table + [native_sort_col]
+                cols_for_table = [c for c in cols_for_table if c in tool_df.columns]
+                tool_table = _df_to_html(tool_df[cols_for_table], colour_tool=True)
+                # 3D viewer using refolded Boltz-2 PDBs (works for Mosaic etc.
+                # without needing --tool-csv/--tool-pdb-dir flags)
+                refold_viewer = ""
+                try:
+                    refold_viewer = _build_per_tool_refold_viewer(
+                        tool, tool_df, boltz2_results_dir,
+                        n=10, primary_engine=primary_engine, target_seq=target_seq,
+                    )
+                except Exception as e:  # pragma: no cover - defensive
+                    refold_viewer = (
+                        f"<p style='color:#888;'><em>3D viewer error: {e}</em></p>"
+                    )
+                if used_native:
+                    badge = (
+                        f'<span style="background:#1565C0;color:white;padding:1px 6px;'
+                        f'border-radius:3px;font-size:0.75em;margin-left:0.4em;">NATIVE RANK</span>'
+                        f'<span style="font-size:0.8em;color:#555;margin-left:0.4em;">'
+                        f"sorted by <code>{native_sort_col}</code> ({native_sort_dir})</span>"
+                    )
+                    label = f"{display_name} — top {n}{badge}"
+                else:
+                    label = (
+                        f"{display_name} — top {n} "
+                        f'<span style="font-size:0.8em;color:#888;">(evaluator ranking; '
+                        f"no native column available)</span>"
+                    )
                 per_tool_top10 += (
                     f'<details style="margin:0.3em 0;">'
                     f'<summary style="cursor:pointer;font-weight:bold;">'
-                    f"{display_name} — top {n} (evaluator ranking)</summary>\n"
-                    f"{tool_table}\n</details>\n"
+                    f"{label}</summary>\n"
+                    f"{tool_table}\n{refold_viewer}\n</details>\n"
                 )
 
     # Full table — curated columns in ranking order
@@ -830,21 +1536,42 @@ def generate_report(
     # 3D viewer for top-20 refolded structures
     structures_dir = output_path.parent / "top20_structures"
     if structures_dir.exists():
-        ngl_viewer_block = _build_ngl_viewer(sort_df, structures_dir)
+        ngl_viewer_block = _build_ngl_viewer(sort_df, structures_dir, target_seq=target_seq)
     else:
         ngl_viewer_block = "<p style='color:#888;'><em>No refolded structures available.</em></p>"
+
+    engine_label_map = {"af3": "AlphaFold 3", "protenix": "Protenix", "boltz": "Boltz-2"}
+    primary_engine_label = engine_label_map.get(primary_engine, primary_engine.upper())
+
+    _pri_engine_label = engine_label_map.get(primary_engine, primary_engine.upper())
+    if radar_fixed_b64:
+        radar_fixed_block = (
+            f'<h2>Tool Comparison — Same designs across engines</h2>\n'
+            f'<p style="font-size:0.85em;color:#555;margin:0.2em 0 0.6em 0;">'
+            f'Per-tool top-10 selected <b>once</b> by the {_pri_engine_label} refold rank '
+            f'(our primary), then each panel shows how the same 10 designs per tool score '
+            f'on the other engines. Useful for spotting engine disagreement on our actual ranked picks.'
+            f'</p>\n'
+            f'<img src="data:image/png;base64,{radar_fixed_b64}" alt="Per-engine radar with fixed selection">'
+        )
+    else:
+        radar_fixed_block = ""
 
     html = _HTML_TEMPLATE.format(
         n_binders=len(sort_df),
         tool_counts_str=tool_counts_str or "—",
+        engine_threshold_legend=engine_threshold_legend,
+        agreement_summary=agreement_summary,
         tier_summary=tier_summary,
         top_table=top_table,
         summary_table=summary_table,
         dist_plot=dist_b64,
         radar_plot=radar_b64,
+        radar_fixed_block=radar_fixed_block,
         per_tool_top10=per_tool_top10,
         ngl_viewer_block=ngl_viewer_block,
         full_table=full_table,
+        primary_engine_label=primary_engine_label,
     )
 
     with output_path.open("w", encoding="utf-8") as fh:
@@ -866,6 +1593,9 @@ def _select_display_cols(df: pd.DataFrame) -> tuple[list[str], list[str]]:
         "quality_tier",
         "agreement_count",
         "ipsae_min",
+        "boltz_pae_ipsae_min",
+        "protenix_pae_ipsae_min",
+        "af3_pae_ipsae_min",
         "iptm",
         "plddt_binder_mean",
     ]
@@ -878,6 +1608,7 @@ def _select_display_cols(df: pd.DataFrame) -> tuple[list[str], list[str]]:
         "pae_tb",
         "ipsae_dg_composite",
         "ipsae_shape_composite",
+        "native_bg_design_ipsae_min",  # BoltzGen's own ipSAE (per-tool native rank)
         "native_dG",
         "native_dSASA",
         "native_shape_complementarity",
@@ -887,6 +1618,38 @@ def _select_display_cols(df: pd.DataFrame) -> tuple[list[str], list[str]]:
         [c for c in primary if c in df.columns],
         [c for c in secondary if c in df.columns],
     )
+
+
+def _engine_threshold_legend_html(df: pd.DataFrame) -> str:
+    """One-line legend showing per-engine thresholds in effect for this report."""
+    rows = []
+    for engine, col, label in (
+        ("boltz",    "boltz_pae_ipsae_min",    "Boltz-2 ≥ 0.61"),
+        ("protenix", "protenix_pae_ipsae_min", "Protenix ≥ 0.61"),
+        ("af3",      "af3_pae_ipsae_min",      "AF3 ≥ 0.61"),
+        ("af2",      "af2_pae_ipsae_min",      "AF2 ≥ 0.30 <i>(informational; mis-calibrated on short targets)</i>"),
+    ):
+        if col in df.columns:
+            rows.append(label)
+    if not rows:
+        return ""
+    return ("<p style='font-size:0.85em;color:#555;'>"
+            "<b>Per-engine cutoffs:</b> &nbsp;" + "&nbsp; · &nbsp;".join(rows) + "</p>")
+
+
+def _agreement_summary_html(df: pd.DataFrame) -> str:
+    """Cross-engine agreement breakdown."""
+    if "agreement_count" not in df.columns:
+        return ""
+    parts = ["<details open style='margin:0.5em 0;'>",
+             "<summary style='cursor:pointer;font-weight:bold;'>Cross-engine agreement</summary>",
+             "<table class='stat-table' style='margin-top:0.5em;'>",
+             "<tr><th>engines passing</th><th>designs</th></tr>"]
+    ac = pd.to_numeric(df["agreement_count"], errors="coerce").fillna(0).astype(int)
+    for k in sorted(ac.unique(), reverse=True):
+        parts.append(f"<tr><td><b>{k}</b></td><td>{int((ac == k).sum())}</td></tr>")
+    parts.append("</table></details>")
+    return "\n".join(parts)
 
 
 def _tier_summary_to_html(df: pd.DataFrame) -> str:

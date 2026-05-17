@@ -73,12 +73,28 @@ class BoltzGenExtractor(SequenceExtractor):
             else:
                 binder_id = f"boltzgen_{stem}_{idx}"
 
+            # Surface BoltzGen's own ipSAE_min (ρ = +0.84 with refold) and final_rank.
+            # See INVESTIGATION_RANKING_DISCREPANCY.md §5.
+            native = NativeMetrics()
+            for col in ("design_ipsae_min", "ipsae_min", "design_ipsae", "ipsae_min_top10"):
+                if col in row.index and pd.notna(row[col]):
+                    try:
+                        native.bg_design_ipsae_min = float(row[col])
+                    except (TypeError, ValueError):
+                        pass
+                    break
+            if "final_rank" in row.index and pd.notna(row["final_rank"]):
+                try:
+                    native.bg_final_rank = int(row["final_rank"])
+                except (TypeError, ValueError):
+                    pass
+
             results.append(
                 ExtractedBinder(
                     binder_id=binder_id,
                     sequence=seq,
                     source_tool="boltzgen",
-                    native=NativeMetrics(),
+                    native=native,
                 )
             )
 
