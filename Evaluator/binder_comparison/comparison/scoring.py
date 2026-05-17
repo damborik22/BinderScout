@@ -378,28 +378,72 @@ def add_iptm_from_pae_files(
 # ---------------------------------------------------------------------------
 
 
-def apply_screening_thresholds(df: pd.DataFrame) -> pd.DataFrame:
+# Per-engine iPSAE thresholds — calibrated for the DunbrackLab 2025 formula at 10 Å cutoff.
+# AF2 caps low on short targets (per INVESTIGATION_RANKING_DISCREPANCY.md §6); kept informational.
+DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {
+    "boltz": IPSAE_PASS_THRESHOLD,    # 0.61
+    "protenix": IPSAE_PASS_THRESHOLD, # 0.61
+    "af3": IPSAE_PASS_THRESHOLD,      # 0.61 — DunbrackLab cutoff was tuned for AF3
+    "af2": 0.30,                       # informational only; AF2 distribution caps low
+}
+
+# Map engine key → DunbrackLab PAE-derived ipsae_min column.
+# NOTE: Boltz uses the prefixed `boltz_pae_*` columns (special add_boltz_ipsae_from_files
+# pipeline), while Protenix/AF3/AF2 use plain `<engine>_ipsae_min` (from add_ipsae_from_pae_files).
+_ENGINE_IPSAE_COLS: dict[str, str] = {
+    "boltz": "boltz_pae_ipsae_min",
+    "protenix": "protenix_ipsae_min",
+    "af3": "af3_ipsae_min",
+    "af2": "af2_ipsae_min",
+}
+
+
+def apply_screening_thresholds(
+    df: pd.DataFrame,
+    primary_engine: str = "boltz",
+    engine_thresholds: dict[str, float] | None = None,
+) -> pd.DataFrame:
     """Add Boolean screening flags and quality tier column.
 
-    Flags added:
-        passes_ipsae_filter   : ipsae_min > 0.61 (primary computational screen)
-        passes_ipsae_strict   : ipsae_min > 0.80 (high-confidence binders)
+    Per-engine flags added (when the corresponding PAE-derived ipsae column is present):
+        passes_boltz_filter, passes_protenix_filter, passes_af3_filter
+        passes_af2_filter_informational  (AF2 uses a relaxed 0.30 cutoff; informational only)
+
+    Aggregate flags (derived from `primary_engine` so existing reports still work):
+        passes_ipsae_filter   : primary engine's ipsae_min > its threshold
+        passes_ipsae_strict   : primary engine's ipsae_min > 0.80 (high-confidence)
+
+    Other:
         passes_shape_prefilter: native_shape_complementarity > 0.62 (when available)
 
-    Tier column (quality_tier):
-        'high'    : ipsae_min > 0.80
-        'medium'  : ipsae_min > 0.61
-        'low'     : ipsae_min > 0.40
-        'reject'  : ipsae_min <= 0.40 or NaN
+    Tier column (quality_tier) is derived from the **primary engine's** ipsae_min:
+        'high'    : > 0.80
+        'medium'  : > 0.61
+        'low'     : > 0.40
+        'reject'  : <= 0.40 or NaN
     """
     result = df.copy()
+    thresholds = {**DEFAULT_ENGINE_THRESHOLDS, **(engine_thresholds or {})}
 
-    # Determine best available ipsae_min column
-    ipsae_col = _best_ipsae_col(result)
+    # Per-engine pass flags (one per engine actually present in the data)
+    for engine, col in _ENGINE_IPSAE_COLS.items():
+        if col not in result.columns:
+            continue
+        thr = thresholds.get(engine, IPSAE_PASS_THRESHOLD)
+        vals = pd.to_numeric(result[col], errors="coerce")
+        flag = f"passes_af2_filter_informational" if engine == "af2" else f"passes_{engine}_filter"
+        result[flag] = vals > thr
 
-    if ipsae_col is not None:
-        vals = pd.to_numeric(result[ipsae_col], errors="coerce")
-        result["passes_ipsae_filter"] = vals > IPSAE_PASS_THRESHOLD
+    # Primary-engine column for tier / aggregate flags
+    primary_col = _ENGINE_IPSAE_COLS.get(primary_engine, _ENGINE_IPSAE_COLS["boltz"])
+    if primary_col not in result.columns:
+        # fall back to best-available ipsae column (preserves legacy reports)
+        primary_col = _best_ipsae_col(result)
+
+    if primary_col is not None:
+        vals = pd.to_numeric(result[primary_col], errors="coerce")
+        primary_thr = thresholds.get(primary_engine, IPSAE_PASS_THRESHOLD)
+        result["passes_ipsae_filter"] = vals > primary_thr
         result["passes_ipsae_strict"] = vals > IPSAE_HIGH_THRESHOLD
 
         def _tier(v):
@@ -407,7 +451,7 @@ def apply_screening_thresholds(df: pd.DataFrame) -> pd.DataFrame:
                 return "reject"
             if v > IPSAE_HIGH_THRESHOLD:
                 return "high"
-            if v > IPSAE_PASS_THRESHOLD:
+            if v > primary_thr:
                 return "medium"
             if v > IPSAE_MIN_THRESHOLD:
                 return "low"
@@ -550,26 +594,34 @@ def compute_iptm_from_pae(
 # ---------------------------------------------------------------------------
 
 
-def compute_agreement(df: pd.DataFrame, threshold: float = IPSAE_PASS_THRESHOLD) -> pd.DataFrame:
+def compute_agreement(
+    df: pd.DataFrame,
+    threshold: float = IPSAE_PASS_THRESHOLD,
+    engine_thresholds: dict[str, float] | None = None,
+) -> pd.DataFrame:
     """Count how many independent refolding engines agree a design passes.
 
-    Checks each available engine column against *threshold*. Designs with
-    higher agreement are stronger candidates.
+    Uses per-engine thresholds (defaulting to *threshold* for backward compat
+    when `engine_thresholds` not supplied). AF2 is **excluded** from the count
+    because its DunbrackLab distribution is mis-calibrated on short targets
+    (see INVESTIGATION_RANKING_DISCREPANCY.md §6).
 
-    Supported engine columns (present when the corresponding refolder has run):
-      - boltz_pae_ipsae_min  (Boltz-2, always when Evaluator runs)
-      - protenix_ipsae_min   (Protenix, x86 + aarch64 when bindmaster_pxdesign env present)
-      - af3_ipsae_min        (AlphaFold 3, aarch64 / DGX Spark when weights configured)
-
-    Adds column 'agreement_count' (0–N, where N = number of available engines).
+    Adds column 'agreement_count' (0–3: Boltz-2, Protenix, AF3 over their thresholds).
     """
     result = df.copy()
-    engine_cols = ["boltz_pae_ipsae_min", "protenix_ipsae_min", "af3_ipsae_min"]
+    thresholds = {**DEFAULT_ENGINE_THRESHOLDS, **(engine_thresholds or {})}
+    engine_cols = {
+        "boltz": "boltz_pae_ipsae_min",
+        "protenix": "protenix_ipsae_min",
+        "af3": "af3_ipsae_min",
+    }
+
     count = pd.Series(0, index=df.index)
-    for col in engine_cols:
+    for engine, col in engine_cols.items():
         if col in result.columns:
             vals = pd.to_numeric(result[col], errors="coerce")
-            count += (vals > threshold).astype(int)
+            thr = thresholds.get(engine, threshold)
+            count += (vals > thr).fillna(False).astype(int)
     result["agreement_count"] = count
     return result
 
