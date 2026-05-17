@@ -156,7 +156,7 @@ else
     echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding  (Mosaic venv)..."
     BOLTZ2_RESUME_FLAG=""
     [[ $RESUME -eq 1 ]] && BOLTZ2_RESUME_FLAG="--resume"
-    "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
+    env -u JAX_PLATFORMS "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
         --sequences  "$SEQUENCES" \
         --target-seq "$TARGET_SEQ" \
         -o           "$BOLTZ2_CSV" \
@@ -183,7 +183,7 @@ if [[ $SKIP_AF3 -eq 0 ]]; then
     echo "[step ${STEP}/${N_STEPS}] AF3 refolding       (conda env: ${AF3_ENV})..."
     AF3_RESUME_FLAG=""
     [[ $RESUME -eq 1 ]] && AF3_RESUME_FLAG="--resume"
-    conda run -n "${AF3_ENV}" binder-compare refold-af3 \
+    env -u JAX_PLATFORMS conda run -n "${AF3_ENV}" binder-compare refold-af3 \
         --sequences  "$SEQUENCES" \
         --target-seq "$TARGET_SEQ" \
         -o           "$AF3_CSV" \
@@ -198,6 +198,7 @@ REPORT_ARGS=(
     --boltz2-results "$BOLTZ2_CSV"
     --sequences      "$SEQUENCES"
     -o               "$OUTPUT/report"
+    --primary-engine "$PRIMARY_ENGINE"
 )
 if [[ $SKIP_PROTENIX -eq 0 && -f "$PROTENIX_CSV" ]]; then
     REPORT_ARGS+=(--protenix-results "$PROTENIX_CSV")
@@ -205,7 +206,18 @@ fi
 if [[ $SKIP_AF3 -eq 0 && -f "$AF3_CSV" ]]; then
     REPORT_ARGS+=(--af3-results "$AF3_CSV")
 fi
-REPORT_ARGS+=(--primary-engine "$PRIMARY_ENGINE")
+
+# Auto-discover per-tool native CSVs so per-tool top-10 sections use native rank.
+# Scans the `runs/` sibling of $OUTPUT (and $OUTPUT itself) by default.
+_DISCOVER_PY="$SCRIPT_DIR/scripts/discover_tool_csvs.py"
+_RUNS_BASE="$(dirname "$(realpath "$OUTPUT")")"
+if [[ -f "$_DISCOVER_PY" && -d "$_RUNS_BASE" ]]; then
+    echo "[discover] scanning $_RUNS_BASE for per-tool native CSVs..."
+    while IFS= read -r _line; do
+        [[ -n "$_line" ]] && REPORT_ARGS+=("$_line")
+    done < <("$MOSAIC_VENV/bin/python" "$_DISCOVER_PY" "$_RUNS_BASE" 2>/dev/null)
+fi
+
 conda run -n binder-eval binder-compare report "${REPORT_ARGS[@]}"
 
 echo ""
