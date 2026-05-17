@@ -3,9 +3,10 @@
 Loads metrics.csv, rejoins per-tool native metrics where possible, and
 emits the data needed for the markdown report. Re-run safely.
 """
-
 from __future__ import annotations
 
+import os
+import sys
 import json
 from pathlib import Path
 
@@ -99,7 +100,6 @@ def join_boltzgen(df):
     bg = df[df["source_tool"] == "boltzgen"].copy()
     p = RUN_DIR / "boltzgen/outputs/final_ranked_designs/final_designs_metrics_700.csv"
     native = pd.read_csv(p)
-
     # binder_id format: boltzgen_config_NNNN_rRANK  -> strip 'boltzgen_' and trailing '_r\d+'
     def keyfn(bid):
         s = bid[len("boltzgen_") :] if bid.startswith("boltzgen_") else bid
@@ -219,11 +219,7 @@ def build_correlation_table(df):
     ]
     rows.append(_one_tool(bc_merged, "bindcraft", "native_i_pTM", asc_native=False, refold_metrics=bc_metrics_for_corr))
     # Also BindCraft by native_rank (since rank is fundamental)
-    rows.append(
-        _one_tool(
-            bc_merged, "bindcraft (by native_rank)", "native_rank", asc_native=True, refold_metrics=bc_metrics_for_corr
-        )
-    )
+    rows.append(_one_tool(bc_merged, "bindcraft (by native_rank)", "native_rank", asc_native=True, refold_metrics=bc_metrics_for_corr))
 
     # BoltzGen
     bg_merged, _ = join_boltzgen(df)
@@ -239,11 +235,7 @@ def build_correlation_table(df):
     ]
     rows.append(_one_tool(bg_merged, "boltzgen", "native_rank", asc_native=True, refold_metrics=bg_metrics_for_corr))
     # Cross-check vs BoltzGen's own native ipSAE
-    rows.append(
-        _one_tool(
-            bg_merged, "boltzgen (by d2t_iptm)", "native_d2t_iptm", asc_native=False, refold_metrics=bg_metrics_for_corr
-        )
-    )
+    rows.append(_one_tool(bg_merged, "boltzgen (by d2t_iptm)", "native_d2t_iptm", asc_native=False, refold_metrics=bg_metrics_for_corr))
 
     # PXDesign
     px_merged, _ = join_pxdesign(df)
@@ -256,9 +248,7 @@ def build_correlation_table(df):
         ("plddt_binder_mean", "plddt_binder_mean"),
         ("binder_length", "binder_length"),
     ]
-    rows.append(
-        _one_tool(px_merged, "pxdesign", "native_af2_iptm", asc_native=False, refold_metrics=px_metrics_for_corr)
-    )
+    rows.append(_one_tool(px_merged, "pxdesign", "native_af2_iptm", asc_native=False, refold_metrics=px_metrics_for_corr))
 
     # Mosaic (no recoverable native)
     mo_merged, _ = join_mosaic(df)
@@ -271,15 +261,7 @@ def build_correlation_table(df):
         ("plddt_binder_mean", "plddt_binder_mean"),
         ("binder_length", "binder_length"),
     ]
-    rows.append(
-        _one_tool(
-            mo_merged,
-            "mosaic (by ipsae_min_aux proxy)",
-            "ipsae_min_aux",
-            asc_native=False,
-            refold_metrics=mo_metrics_for_corr,
-        )
-    )
+    rows.append(_one_tool(mo_merged, "mosaic (by ipsae_min_aux proxy)", "ipsae_min_aux", asc_native=False, refold_metrics=mo_metrics_for_corr))
 
     # Proteina-Complexa: no recoverable native; use iptm as proxy
     pc_merged, _ = join_proteina_complexa(df)
@@ -291,11 +273,7 @@ def build_correlation_table(df):
         ("plddt_binder_mean", "plddt_binder_mean"),
         ("binder_length", "binder_length"),
     ]
-    rows.append(
-        _one_tool(
-            pc_merged, "proteina_complexa (by iptm proxy)", "iptm", asc_native=False, refold_metrics=pc_metrics_for_corr
-        )
-    )
+    rows.append(_one_tool(pc_merged, "proteina_complexa (by iptm proxy)", "iptm", asc_native=False, refold_metrics=pc_metrics_for_corr))
 
     return pd.DataFrame(rows), tool_data
 
@@ -316,13 +294,9 @@ def _one_tool(df_tool, label, native_col, *, asc_native, refold_metrics):
     # Top-N agreement: native rank "best" vs refold metric best
     # use boltz_pae_ipsae_min as the canonical refold metric
     for n in (5, 10, 20):
-        agree, _valid_n = top_n_agreement(
-            df_tool,
-            native_col,
-            "boltz_pae_ipsae_min",
-            n,
-            ascending_native=asc_native,
-            ascending_refold=False,
+        agree, valid_n = top_n_agreement(
+            df_tool, native_col, "boltz_pae_ipsae_min", n,
+            ascending_native=asc_native, ascending_refold=False,
         )
         out[f"top{n}_overlap_pct"] = round(agree * 100, 1) if pd.notna(agree) else np.nan
     return out
@@ -389,7 +363,7 @@ def find_top20_outliers(df, tool_data):
         single_only = (pd.notna(b) and b > 0.61) and not (pd.notna(a) and a > 0.61)
         if agree and not (very_short and low_complex):
             return "likely_real"
-        if single_only and (very_short or low_complex or big_asym):
+        if (single_only and (very_short or low_complex or big_asym)):
             return "likely_artifact"
         return "inconclusive"
 
@@ -416,19 +390,11 @@ def boltzgen_deep_dive(df, bg_merged):
     # Top-5 by BG internal ipsae_min
     if "native_bg_ipsae_min" in bg_merged.columns:
         top5_native = bg_merged.dropna(subset=["native_bg_ipsae_min"]).nlargest(5, "native_bg_ipsae_min")
-        cols_top = [
-            c
-            for c in ["binder_id", "native_bg_ipsae_min", "boltz_pae_ipsae_min", "af2_ipsae_min"]
-            if c in top5_native.columns
-        ]
+        cols_top = [c for c in ["binder_id", "native_bg_ipsae_min", "boltz_pae_ipsae_min", "af2_ipsae_min"] if c in top5_native.columns]
         out["top5_by_native_bg_ipsae"] = top5_native[cols_top].to_dict(orient="records")
     # Bottom-5 by Boltz refold ipsae_min (within BG)
     bot5 = bg_merged.dropna(subset=["boltz_pae_ipsae_min"]).nsmallest(5, "boltz_pae_ipsae_min")
-    cols_bot = [
-        c
-        for c in ["binder_id", "native_bg_ipsae_min", "boltz_pae_ipsae_min", "af2_ipsae_min", "native_rank"]
-        if c in bot5.columns
-    ]
+    cols_bot = [c for c in ["binder_id", "native_bg_ipsae_min", "boltz_pae_ipsae_min", "af2_ipsae_min", "native_rank"] if c in bot5.columns]
     out["bot5_by_boltz_ipsae"] = bot5[cols_bot].to_dict(orient="records")
     # Overall stats
     out["n_bg_designs"] = len(bg_merged)
@@ -460,40 +426,26 @@ def main():
     top20 = find_top20_outliers(df, tool_data)
     top20_path = OUT_DIR / "top20_outliers.csv"
     keep = [
-        "binder_id",
-        "source_tool",
-        "binder_length",
-        "sequence",
-        "boltz_pae_ipsae_min",
-        "af2_ipsae_min",
-        "ipsae_min_aux",
+        "binder_id", "source_tool", "binder_length", "sequence",
+        "boltz_pae_ipsae_min", "af2_ipsae_min", "ipsae_min_aux",
         "ipsae_max_min_asym",
-        "low_complexity_frac",
-        "hydrophobic_frac",
-        "net_charge",
-        "native_pct",
-        "below_median_native",
-        "verdict",
+        "low_complexity_frac", "hydrophobic_frac", "net_charge",
+        "native_pct", "below_median_native", "verdict",
     ]
     top20[keep].to_csv(top20_path, index=False)
-    print("\nTop-20 outliers verdict counts:")
+    print(f"\nTop-20 outliers verdict counts:")
     print(top20["verdict"].value_counts().to_string())
     print(f" -> {top20_path}")
 
     # BoltzGen deep dive
     bg_dive = boltzgen_deep_dive(df, tool_data["boltzgen"])
     bg_dive_path = OUT_DIR / "boltzgen_deep_dive.json"
-
     # Convert numpy types for JSON
     def cv(o):
-        if isinstance(o, np.integer):
-            return int(o)
-        if isinstance(o, np.floating):
-            return float(o)
-        if isinstance(o, np.ndarray):
-            return o.tolist()
+        if isinstance(o, (np.integer,)): return int(o)
+        if isinstance(o, (np.floating,)): return float(o)
+        if isinstance(o, (np.ndarray,)): return o.tolist()
         return o
-
     serial = json.loads(json.dumps(bg_dive, default=cv))
     with open(bg_dive_path, "w") as fh:
         json.dump(serial, fh, indent=2, default=cv)
