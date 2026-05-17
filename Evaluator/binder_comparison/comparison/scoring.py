@@ -381,10 +381,10 @@ def add_iptm_from_pae_files(
 # Per-engine iPSAE thresholds — calibrated for the DunbrackLab 2025 formula at 10 Å cutoff.
 # AF2 caps low on short targets (per INVESTIGATION_RANKING_DISCREPANCY.md §6); kept informational.
 DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {
-    "boltz": IPSAE_PASS_THRESHOLD,    # 0.61
-    "protenix": IPSAE_PASS_THRESHOLD, # 0.61
-    "af3": IPSAE_PASS_THRESHOLD,      # 0.61 — DunbrackLab cutoff was tuned for AF3
-    "af2": 0.30,                       # informational only; AF2 distribution caps low
+    "boltz": IPSAE_PASS_THRESHOLD,  # 0.61
+    "protenix": IPSAE_PASS_THRESHOLD,  # 0.61
+    "af3": IPSAE_PASS_THRESHOLD,  # 0.61 — DunbrackLab cutoff was tuned for AF3
+    "af2": 0.30,  # informational only; AF2 distribution caps low
 }
 
 # Map engine key → DunbrackLab PAE-derived ipsae_min column.
@@ -431,7 +431,7 @@ def apply_screening_thresholds(
             continue
         thr = thresholds.get(engine, IPSAE_PASS_THRESHOLD)
         vals = pd.to_numeric(result[col], errors="coerce")
-        flag = f"passes_af2_filter_informational" if engine == "af2" else f"passes_{engine}_filter"
+        flag = "passes_af2_filter_informational" if engine == "af2" else f"passes_{engine}_filter"
         result[flag] = vals > thr
 
     # Primary-engine column for tier / aggregate flags
