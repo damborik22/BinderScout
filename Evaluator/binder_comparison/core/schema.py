@@ -35,6 +35,11 @@ class NativeMetrics:
     hbonds_interface: float | None = None  # H-bond count at interface (higher better)
     hbonds_pct: float | None = None  # H-bonds as % of interface residues
     mpnn_recovery: float | None = None  # MPNN sequence recovery score
+    # BoltzGen-specific native ranking (per INVESTIGATION_RANKING_DISCREPANCY.md §5):
+    # `design_ipsae_min` is BG's own ipSAE from internal Boltz-1; ρ to Boltz-2 refold ipSAE = +0.84,
+    # whereas `final_rank` is a composite (diversity+pTM+hbond+RMSD) with ρ = -0.15 to refold ipSAE.
+    bg_design_ipsae_min: float | None = None  # BoltzGen's own ipSAE_min (use as native rank)
+    bg_final_rank: int | None = None  # BoltzGen's composite ranking (informational only)
 
 
 @dataclass

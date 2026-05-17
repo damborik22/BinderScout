@@ -220,6 +220,237 @@ def load_pae_data_from_df(
 # ---------------------------------------------------------------------------
 
 
+_ENGINE_RADAR_METRICS: dict[str, list[tuple[str, str, str]]] = {
+    # engine_key -> list of (df_col, label, direction)  direction: "↑" or "↓"
+    # Column naming: boltz uses `boltz_pae_*`; protenix/af3 use `<engine>_*` (no _pae_).
+    "boltz": [
+        ("boltz_pae_ipsae_min",   "ipSAE_min",       "↑"),
+        ("boltz_pae_iptm",        "ipTM",            "↑"),
+        ("plddt_binder_mean",     "pLDDT binder",    "↑"),
+        ("binder_ptm",            "binder pTM",      "↑"),
+        ("boltz_pae_bt_mean",     "PAE b→t",         "↓"),
+        ("boltz_pae_tb_mean",     "PAE t→b",         "↓"),
+    ],
+    "protenix": [
+        ("protenix_ipsae_min",         "ipSAE_min",    "↑"),
+        ("protenix_iptm",              "ipTM",         "↑"),
+        ("protenix_plddt_binder_mean", "pLDDT binder", "↑"),
+        ("protenix_pae_bt",            "PAE b→t",      "↓"),
+        ("protenix_pae_tb",            "PAE t→b",      "↓"),
+    ],
+    "af3": [
+        ("af3_ipsae_min",         "ipSAE_min",     "↑"),
+        ("af3_iptm",              "ipTM",          "↑"),
+        ("af3_plddt_binder_mean", "pLDDT binder",  "↑"),
+        ("af3_pae_bt",            "PAE b→t",       "↓"),
+        ("af3_pae_tb",            "PAE t→b",       "↓"),
+    ],
+}
+
+# Canonical per-engine ipsae column for the radar's tool-top-N ranking.
+# Mirrors scoring._ENGINE_IPSAE_COLS but kept inline so plots.py has no
+# cross-package import.
+_ENGINE_RANK_COLS: dict[str, str] = {
+    "boltz":    "boltz_pae_ipsae_min",
+    "protenix": "protenix_ipsae_min",
+    "af3":      "af3_ipsae_min",
+}
+
+_ENGINE_DISPLAY = {"boltz": "Boltz-2", "protenix": "Protenix", "af3": "AF3"}
+
+
+def plot_radar_per_engine(df: pd.DataFrame, top_n: int = 10) -> Figure:
+    """One radar per available refold engine, each showing per-tool **top-N** mean
+    (so the chart reflects "tool at its best", not full-pool average).
+
+    Per-engine ranking column = `<engine>_pae_ipsae_min`. Engines whose ipSAE
+    column isn't present in *df* are skipped entirely. Tools with fewer than 3
+    designs in their engine-specific top-N (after dropna) are excluded from
+    that engine's panel.
+    """
+    if "source_tool" not in df.columns:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No source_tool column — radar skipped", ha="center", va="center")
+        return fig
+
+    # Which engines actually have data?
+    active_engines = []
+    for e, metrics in _ENGINE_RADAR_METRICS.items():
+        rank_col = _ENGINE_RANK_COLS.get(e)
+        if (
+            rank_col
+            and rank_col in df.columns
+            and pd.to_numeric(df[rank_col], errors="coerce").notna().any()
+            and any(m[0] in df.columns for m in metrics)
+        ):
+            active_engines.append(e)
+    if not active_engines:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No per-engine ipSAE columns — radar skipped", ha="center", va="center")
+        return fig
+
+    n_panels = len(active_engines)
+    fig, axes = plt.subplots(
+        1, n_panels,
+        figsize=(7 * n_panels, 7),
+        subplot_kw=dict(polar=True),
+    )
+    if n_panels == 1:
+        axes = [axes]
+
+    all_legend_handles: dict[str, object] = {}
+    for ax, engine in zip(axes, active_engines):
+        rank_col = _ENGINE_RANK_COLS[engine]
+        # per-tool top-N by this engine's ipsae_min
+        per_tool_top: dict[str, pd.DataFrame] = {}
+        for tool, gdf in df.groupby("source_tool"):
+            vals = pd.to_numeric(gdf[rank_col], errors="coerce")
+            top = gdf.assign(_rk=vals).dropna(subset=["_rk"]).nlargest(top_n, "_rk").drop(columns=["_rk"])
+            if len(top) >= 3:
+                per_tool_top[str(tool)] = top
+        tools = sorted(per_tool_top.keys())
+        if not tools:
+            ax.text(0.5, 0.5, f"No data for {_ENGINE_DISPLAY[engine]}", ha="center", va="center")
+            ax.set_title(_ENGINE_DISPLAY[engine])
+            continue
+
+        # Collect per-engine metrics, restrict to columns actually present
+        metric_specs = [m for m in _ENGINE_RADAR_METRICS[engine] if m[0] in df.columns]
+        n_metrics = len(metric_specs)
+        angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False).tolist() + [0.0]
+
+        # tool x metric mean array
+        raw_array = np.array([
+            [pd.to_numeric(per_tool_top[t][col], errors="coerce").mean() for col, _, _ in metric_specs]
+            for t in tools
+        ])
+        # z-score across tools per metric (column-wise)
+        col_mean = np.nanmean(raw_array, axis=0)
+        col_std = np.nanstd(raw_array, axis=0)
+        col_std[col_std == 0] = 1.0
+        z_array = (raw_array - col_mean) / col_std
+        # Flip "lower is better" so outward = better for all
+        for mi, (_, _, direction) in enumerate(metric_specs):
+            if direction == "↓":
+                z_array[:, mi] *= -1
+        z_array = np.nan_to_num(z_array, nan=0.0)
+
+        for ti, tool in enumerate(tools):
+            values = z_array[ti].tolist() + [z_array[ti, 0]]
+            colour = TOOL_COLOURS.get(tool, TOOL_COLOURS["unknown"])
+            line, = ax.plot(angles, values, color=colour, linewidth=2, label=_tool_display(tool))
+            ax.fill(angles, values, color=colour, alpha=0.12)
+            all_legend_handles.setdefault(tool, line)
+
+        labels = [lbl if d == "↑" else f"{lbl} (inv)" for _, lbl, d in metric_specs]
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(labels, size=8)
+        ax.set_title(f"{_ENGINE_DISPLAY[engine]} — top-{top_n} per tool", pad=14)
+
+    # Single shared legend below
+    if all_legend_handles:
+        fig.legend(
+            handles=list(all_legend_handles.values()),
+            labels=list(all_legend_handles.keys()),
+            loc="lower center",
+            ncol=min(len(all_legend_handles), 8),
+            bbox_to_anchor=(0.5, -0.02),
+            frameon=False,
+        )
+    fig.suptitle("Per-tool radar (outward = better; z-scored within engine)", y=1.02)
+    fig.tight_layout()
+    return fig
+
+
+def plot_radar_per_engine_uniform_selection(
+    df: pd.DataFrame,
+    primary_engine: str = "af3",
+    top_n: int = 10,
+) -> Figure:
+    """Per-engine radar where every panel shows the SAME per-tool top-N selection,
+    chosen by the evaluator's **primary refold rank** (``<primary_engine>_pae_ipsae_min``
+    or fallback to ``adaptyv_rank``). Useful to see engine *agreement* on the same
+    designs the evaluator promoted, rather than each engine's own "favorites".
+    """
+    if "source_tool" not in df.columns:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No source_tool column — radar skipped", ha="center", va="center")
+        return fig
+
+    # Pick the per-tool top-N ONCE, using the primary engine's column
+    pri_col = _ENGINE_RANK_COLS.get(primary_engine, "boltz_pae_ipsae_min")
+    fallback_col = "adaptyv_rank"
+    per_tool_top: dict[str, pd.DataFrame] = {}
+    for tool, gdf in df.groupby("source_tool"):
+        if pri_col in gdf.columns and pd.to_numeric(gdf[pri_col], errors="coerce").notna().any():
+            ranked = gdf.assign(_rk=pd.to_numeric(gdf[pri_col], errors="coerce")).dropna(subset=["_rk"]).nlargest(top_n, "_rk").drop(columns=["_rk"])
+        elif fallback_col in gdf.columns:
+            ranked = gdf.assign(_rk=pd.to_numeric(gdf[fallback_col], errors="coerce")).dropna(subset=["_rk"]).nsmallest(top_n, "_rk").drop(columns=["_rk"])
+        else:
+            ranked = gdf.head(top_n)
+        if len(ranked) >= 3:
+            per_tool_top[str(tool)] = ranked
+
+    if not per_tool_top:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "Not enough data per tool — radar skipped", ha="center", va="center")
+        return fig
+
+    active_engines = [
+        e for e in _ENGINE_RADAR_METRICS
+        if any(m[0] in df.columns for m in _ENGINE_RADAR_METRICS[e])
+    ]
+    if not active_engines:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No engine metric columns present", ha="center", va="center")
+        return fig
+
+    n_panels = len(active_engines)
+    fig, axes = plt.subplots(1, n_panels, figsize=(7 * n_panels, 7), subplot_kw=dict(polar=True))
+    if n_panels == 1:
+        axes = [axes]
+
+    pri_label = _ENGINE_DISPLAY.get(primary_engine, primary_engine.upper())
+    tools = sorted(per_tool_top.keys())
+    all_legend: dict[str, object] = {}
+    for ax, engine in zip(axes, active_engines):
+        metric_specs = [m for m in _ENGINE_RADAR_METRICS[engine] if m[0] in df.columns]
+        n_metrics = len(metric_specs)
+        angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False).tolist() + [0.0]
+        raw_array = np.array([
+            [pd.to_numeric(per_tool_top[t][col], errors="coerce").mean() for col, _, _ in metric_specs]
+            for t in tools
+        ])
+        col_mean = np.nanmean(raw_array, axis=0)
+        col_std = np.nanstd(raw_array, axis=0)
+        col_std[col_std == 0] = 1.0
+        z_array = (raw_array - col_mean) / col_std
+        for mi, (_, _, direction) in enumerate(metric_specs):
+            if direction == "↓":
+                z_array[:, mi] *= -1
+        z_array = np.nan_to_num(z_array, nan=0.0)
+        for ti, tool in enumerate(tools):
+            values = z_array[ti].tolist() + [z_array[ti, 0]]
+            colour = TOOL_COLOURS.get(tool, TOOL_COLOURS["unknown"])
+            line, = ax.plot(angles, values, color=colour, linewidth=2, label=_tool_display(tool))
+            ax.fill(angles, values, color=colour, alpha=0.12)
+            all_legend.setdefault(tool, line)
+        labels = [lbl if d == "↑" else f"{lbl} (inv)" for _, lbl, d in metric_specs]
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(labels, size=8)
+        ax.set_title(f"{_ENGINE_DISPLAY[engine]} metrics on {pri_label}-top-{top_n}", pad=14)
+
+    if all_legend:
+        fig.legend(
+            handles=list(all_legend.values()), labels=list(all_legend.keys()),
+            loc="lower center", ncol=min(len(all_legend), 8),
+            bbox_to_anchor=(0.5, -0.02), frameon=False,
+        )
+    fig.suptitle(f"Per-tool radar — fixed selection: top-{top_n} per tool by {pri_label} refold rank (z-scored within each engine)", y=1.02)
+    fig.tight_layout()
+    return fig
+
+
 def plot_radar_chart(
     summary: dict,
     metrics: list[str] | None = None,

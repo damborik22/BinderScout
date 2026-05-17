@@ -95,10 +95,21 @@ def run(args: argparse.Namespace) -> None:
             df, pae_file_col="af3_pae_file", ordering="target_binder", prefix="af3", base_dir=af3_base
         )
 
-    # Promote Boltz-2 DunbrackLab PAE-based ipsae_min as the primary ranking column.
-    if "boltz_pae_ipsae_min" in df.columns:
+    # Promote the chosen engine's DunbrackLab PAE-based ipsae_min as the primary ranking column.
+    # Column naming differs across engines: boltz uses boltz_pae_ipsae_min, others use
+    # <engine>_ipsae_min (no _pae_ prefix) — see scoring._ENGINE_IPSAE_COLS for the canonical map.
+    from ..comparison.scoring import _ENGINE_IPSAE_COLS as _EICOLS
+    primary_engine = getattr(args, "primary_engine", "boltz") or "boltz"
+    primary_col = _EICOLS.get(primary_engine, f"{primary_engine}_ipsae_min")
+    if primary_col in df.columns and pd.to_numeric(df[primary_col], errors="coerce").notna().any():
+        df["ipsae_min"] = df[primary_col]
+        print(f"[report] Using {primary_col} as primary ipsae_min for ranking")
+    elif "boltz_pae_ipsae_min" in df.columns:
         df["ipsae_min"] = df["boltz_pae_ipsae_min"]
-        print("[report] Using boltz_pae_ipsae_min as primary ipsae_min for ranking")
+        print(
+            f"[report] WARNING: requested primary engine '{primary_engine}' has no PAE-derived ipsae_min "
+            f"(missing column {primary_col}); falling back to boltz_pae_ipsae_min"
+        )
 
     # Step 3: Statistics + z-scores
     print("[report] Computing statistics…")
@@ -107,10 +118,19 @@ def run(args: argparse.Namespace) -> None:
     summary = stats["summary"]
 
     # Step 3b: Adaptyv scoring pipeline (Overath et al. 2025 methodology)
-    print("[report] Applying Adaptyv screening thresholds (ipSAE_min > 0.61)…")
-    df = apply_screening_thresholds(df)
+    # Per-engine thresholds — falls back to defaults (0.61 across active engines, 0.30 AF2 info).
+    engine_thresholds: dict[str, float] = {}
+    for engine, attr in (("boltz", "threshold_boltz"), ("protenix", "threshold_protenix"),
+                        ("af3", "threshold_af3"), ("af2", "threshold_af2")):
+        val = getattr(args, attr, None)
+        if val is not None:
+            engine_thresholds[engine] = val
+    if engine_thresholds:
+        print(f"[report] Per-engine thresholds overridden: {engine_thresholds}")
+    print(f"[report] Applying screening thresholds (primary engine: {primary_engine})…")
+    df = apply_screening_thresholds(df, primary_engine=primary_engine, engine_thresholds=engine_thresholds)
     df = compute_composite_scores(df)
-    df = compute_agreement(df)
+    df = compute_agreement(df, engine_thresholds=engine_thresholds)
     df = rank_by_adaptyv_method(df)
 
     df = df.sort_values(["adaptyv_rank"], ascending=[True]).reset_index(drop=True)
@@ -130,7 +150,10 @@ def run(args: argparse.Namespace) -> None:
         "source_tool",
         "sequence",
         "binder_length",
+        "ipsae_min",
         "boltz_pae_ipsae_min",
+        "protenix_pae_ipsae_min",
+        "af3_pae_ipsae_min",
         "boltz_pae_iptm",
         "boltz_pae_bt_ipsae",
         "boltz_pae_tb_ipsae",
@@ -140,6 +163,10 @@ def run(args: argparse.Namespace) -> None:
         "pae_bt_mean",
         "pae_tb_mean",
         "agreement_count",
+        "passes_boltz_filter",
+        "passes_protenix_filter",
+        "passes_af3_filter",
+        "native_bg_design_ipsae_min",
         "adaptyv_rank",
     ]
     _available = [c for c in _top_cols if c in df.columns]
@@ -147,10 +174,19 @@ def run(args: argparse.Namespace) -> None:
     write_csv(top20, output_dir / "top20_candidates.csv")
     print("  top20_candidates.csv — top 20 designs with sequences")
 
-    # Step 4c: Copy top-20 refolded PDB structures for visual inspection
+    # Step 4c: Copy top-20 refolded PDB structures for visual inspection.
+    # Prefer the *primary engine's* PDB so the viewer shows the structure
+    # that was actually used for ranking. Fall back through the engine
+    # priority order when a particular engine's file is missing.
+    _ENGINE_PDB_PRIORITY: dict[str, list[str]] = {
+        "af3":      ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"],
+        "protenix": ["protenix_pdb", "protenix_cif", "boltz_pdb", "pdb"],
+        "boltz":    ["boltz_pdb", "pdb"],
+    }
+    pdb_cols = [c for c in _ENGINE_PDB_PRIORITY.get(primary_engine, ["boltz_pdb", "pdb"]) if c in df.columns]
+    print(f"[report] Top-20 3D viewer source = {primary_engine} (column preference: {pdb_cols})")
     structures_dir = output_dir / "top20_structures"
     structures_dir.mkdir(parents=True, exist_ok=True)
-    pdb_cols = [c for c in ("boltz_pdb", "pdb") if c in df.columns]
     n_copied = 0
     for _, row in df.head(20).iterrows():
         rank = int(row.get("adaptyv_rank", 0))
@@ -163,8 +199,9 @@ def run(args: argparse.Namespace) -> None:
                     src_path = Path(args.boltz2_results).resolve().parent / src
                 if src_path.exists():
                     import shutil
-
-                    dest = structures_dir / f"rank{rank:02d}_{binder_id}.pdb"
+                    # Preserve the source extension (.cif → .cif, .pdb → .pdb)
+                    ext = src_path.suffix or ".pdb"
+                    dest = structures_dir / f"rank{rank:02d}_{binder_id}{ext}"
                     shutil.copy2(src_path, dest)
                     n_copied += 1
                     break
@@ -196,6 +233,8 @@ def run(args: argparse.Namespace) -> None:
         output_path=output_dir / "report.html",
         tool_csvs=tool_csvs or None,
         tool_pdb_dirs=tool_pdb_dirs or None,
+        boltz2_results_dir=Path(args.boltz2_results).resolve().parent if args.boltz2_results else None,
+        primary_engine=primary_engine,
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
@@ -362,6 +401,18 @@ def add_parser(subparsers) -> None:
         "--native-metrics", metavar="CSV", help="BindCraft final_design_stats.csv to attach dG/dSASA/ShapeComp"
     )
     p.add_argument("--output", "-o", required=True, metavar="DIR", help="Output directory for all report files")
+    p.add_argument(
+        "--primary-engine",
+        choices=["boltz", "protenix", "af3"],
+        default="boltz",
+        help="Which engine's DunbrackLab PAE-based ipsae_min to use as the primary ranking metric "
+        "(default: boltz). Falls back to boltz if the chosen engine's PAE files are missing.",
+    )
+    # Per-engine iPSAE thresholds (defaults from scoring.DEFAULT_ENGINE_THRESHOLDS)
+    p.add_argument("--threshold-boltz",    type=float, default=None, help="Boltz-2 ipsae_min pass threshold (default 0.61)")
+    p.add_argument("--threshold-protenix", type=float, default=None, help="Protenix ipsae_min pass threshold (default 0.61)")
+    p.add_argument("--threshold-af3",      type=float, default=None, help="AF3 ipsae_min pass threshold (default 0.61, DunbrackLab-calibrated)")
+    p.add_argument("--threshold-af2",      type=float, default=None, help="AF2 informational threshold (default 0.30; AF2 mis-calibrated for short targets — not counted in agreement)")
     p.add_argument(
         "--tool-csv",
         metavar="TOOL=CSV",
