@@ -99,7 +99,6 @@ def run(args: argparse.Namespace) -> None:
     # Column naming differs across engines: boltz uses boltz_pae_ipsae_min, others use
     # <engine>_ipsae_min (no _pae_ prefix) — see scoring._ENGINE_IPSAE_COLS for the canonical map.
     from ..comparison.scoring import _ENGINE_IPSAE_COLS as _EICOLS
-
     primary_engine = getattr(args, "primary_engine", "boltz") or "boltz"
     primary_col = _EICOLS.get(primary_engine, f"{primary_engine}_ipsae_min")
     if primary_col in df.columns and pd.to_numeric(df[primary_col], errors="coerce").notna().any():
@@ -121,12 +120,8 @@ def run(args: argparse.Namespace) -> None:
     # Step 3b: Adaptyv scoring pipeline (Overath et al. 2025 methodology)
     # Per-engine thresholds — falls back to defaults (0.61 across active engines, 0.30 AF2 info).
     engine_thresholds: dict[str, float] = {}
-    for engine, attr in (
-        ("boltz", "threshold_boltz"),
-        ("protenix", "threshold_protenix"),
-        ("af3", "threshold_af3"),
-        ("af2", "threshold_af2"),
-    ):
+    for engine, attr in (("boltz", "threshold_boltz"), ("protenix", "threshold_protenix"),
+                        ("af3", "threshold_af3"), ("af2", "threshold_af2")):
         val = getattr(args, attr, None)
         if val is not None:
             engine_thresholds[engine] = val
@@ -184,9 +179,9 @@ def run(args: argparse.Namespace) -> None:
     # that was actually used for ranking. Fall back through the engine
     # priority order when a particular engine's file is missing.
     _ENGINE_PDB_PRIORITY: dict[str, list[str]] = {
-        "af3": ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"],
+        "af3":      ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"],
         "protenix": ["protenix_pdb", "protenix_cif", "boltz_pdb", "pdb"],
-        "boltz": ["boltz_pdb", "pdb"],
+        "boltz":    ["boltz_pdb", "pdb"],
     }
     pdb_cols = [c for c in _ENGINE_PDB_PRIORITY.get(primary_engine, ["boltz_pdb", "pdb"]) if c in df.columns]
     print(f"[report] Top-20 3D viewer source = {primary_engine} (column preference: {pdb_cols})")
@@ -204,7 +199,6 @@ def run(args: argparse.Namespace) -> None:
                     src_path = Path(args.boltz2_results).resolve().parent / src
                 if src_path.exists():
                     import shutil
-
                     # Preserve the source extension (.cif → .cif, .pdb → .pdb)
                     ext = src_path.suffix or ".pdb"
                     dest = structures_dir / f"rank{rank:02d}_{binder_id}{ext}"
@@ -256,6 +250,7 @@ _TOOL_COLOURS_PYMOL = {
     "boltzgen": "orange",
     "bindcraft": "blue",
     "proteina_complexa": "teal",
+    "rfaa": "firebrick",
     "rfd3": "tv_orange",
     "protein_hunter": "cyan",
 }
@@ -266,6 +261,7 @@ _TOOL_DISPLAY_PYMOL = {
     "boltzgen": "BoltzGen",
     "bindcraft": "BindCraft",
     "proteina_complexa": "Proteina-Complexa",
+    "rfaa": "RFAA",
     "rfd3": "RFD3",
     "protein_hunter": "Protein-Hunter",
 }
@@ -413,24 +409,10 @@ def add_parser(subparsers) -> None:
         "(default: boltz). Falls back to boltz if the chosen engine's PAE files are missing.",
     )
     # Per-engine iPSAE thresholds (defaults from scoring.DEFAULT_ENGINE_THRESHOLDS)
-    p.add_argument(
-        "--threshold-boltz", type=float, default=None, help="Boltz-2 ipsae_min pass threshold (default 0.61)"
-    )
-    p.add_argument(
-        "--threshold-protenix", type=float, default=None, help="Protenix ipsae_min pass threshold (default 0.61)"
-    )
-    p.add_argument(
-        "--threshold-af3",
-        type=float,
-        default=None,
-        help="AF3 ipsae_min pass threshold (default 0.61, DunbrackLab-calibrated)",
-    )
-    p.add_argument(
-        "--threshold-af2",
-        type=float,
-        default=None,
-        help="AF2 informational threshold (default 0.30; AF2 mis-calibrated for short targets — not counted in agreement)",
-    )
+    p.add_argument("--threshold-boltz",    type=float, default=None, help="Boltz-2 ipsae_min pass threshold (default 0.61)")
+    p.add_argument("--threshold-protenix", type=float, default=None, help="Protenix ipsae_min pass threshold (default 0.61)")
+    p.add_argument("--threshold-af3",      type=float, default=None, help="AF3 ipsae_min pass threshold (default 0.61, DunbrackLab-calibrated)")
+    p.add_argument("--threshold-af2",      type=float, default=None, help="AF2 informational threshold (default 0.30; AF2 mis-calibrated for short targets — not counted in agreement)")
     p.add_argument(
         "--tool-csv",
         metavar="TOOL=CSV",
