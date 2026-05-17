@@ -189,21 +189,25 @@ def _run_single(
     job_name = f"af3_{idx:04d}"
 
     # Build AF3 input JSON — target first (chain A), binder second (chain B)
-    # to match Protenix convention ([target | binder] PAE ordering)
+    # to match Protenix convention ([target | binder] PAE ordering).
+    # Open-source AF3 dialect: single object (not wrapped in list — that
+    # signals AlphaFold Server format).
     af3_input = {
         "name": job_name,
         "modelSeeds": list(range(1, num_seeds + 1)),
         "sequences": [
-            {"protein": {"id": "A", "sequence": target_seq}},
-            {"protein": {"id": "B", "sequence": binder_seq}},
+            {"protein": {"id": "A", "sequence": target_seq, "unpairedMsa": "", "pairedMsa": "", "templates": []}},
+            {"protein": {"id": "B", "sequence": binder_seq, "unpairedMsa": "", "pairedMsa": "", "templates": []}},
         ],
+        "dialect": "alphafold3",
+        "version": 4,
     }
 
     # Write input JSON to temp file
     input_dir = predictions_root / job_name
     input_dir.mkdir(parents=True, exist_ok=True)
     json_path = input_dir / "input.json"
-    json_path.write_text(json.dumps([af3_input], indent=2))
+    json_path.write_text(json.dumps(af3_input, indent=2))
 
     output_dir = input_dir / "output"
 

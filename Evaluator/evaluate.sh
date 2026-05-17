@@ -146,7 +146,7 @@ else
     echo "[step ${CUR_STEP}/${N_STEPS}] Boltz-2 refolding  (Mosaic venv)..."
     BOLTZ2_RESUME_FLAG=""
     [[ $RESUME -eq 1 ]] && BOLTZ2_RESUME_FLAG="--resume"
-    "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
+    env -u JAX_PLATFORMS "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
         --sequences  "$SEQUENCES" \
         --target-seq "$TARGET_SEQ" \
         -o           "$BOLTZ2_CSV" \
@@ -154,7 +154,10 @@ else
 fi
 
 # --- Step 2: Protenix refolding (optional) ---------------------------------
-if [[ $SKIP_PROTENIX -eq 0 ]]; then
+# PATCHED 2026-05-14 (live-edit): Protenix forced off for the top-700 CALCA run.
+# Bash re-reads scripts as it executes, so the running evaluate.sh will see
+# this when Boltz-2 finishes and the parent advances past line ~156.
+if false; then  # was: if [[ $SKIP_PROTENIX -eq 0 ]]; then
     CUR_STEP=$((CUR_STEP + 1))
     echo "[step ${CUR_STEP}/${N_STEPS}] Protenix refolding  (conda env: ${PROTENIX_ENV})..."
     PROTENIX_RESUME_FLAG=""
@@ -166,6 +169,7 @@ if [[ $SKIP_PROTENIX -eq 0 ]]; then
         --output-dir "$OUTPUT/refold_protenix" \
         $PROTENIX_RESUME_FLAG
 fi
+echo "[step --] Protenix skipped (live-patched 2026-05-14 for CALCA top-700)"
 
 # --- Step N-1: AF3 refolding (aarch64 / DGX Spark) -------------------------
 if [[ $SKIP_AF3 -eq 0 ]]; then
@@ -173,7 +177,7 @@ if [[ $SKIP_AF3 -eq 0 ]]; then
     echo "[step ${CUR_STEP}/${N_STEPS}] AF3 refolding        (conda env: ${AF3_ENV})..."
     AF3_RESUME_FLAG=""
     [[ $RESUME -eq 1 ]] && AF3_RESUME_FLAG="--resume"
-    conda run -n "${AF3_ENV}" binder-compare refold-af3 \
+    env -u JAX_PLATFORMS conda run -n "${AF3_ENV}" binder-compare refold-af3 \
         --sequences  "$SEQUENCES" \
         --target-seq "$TARGET_SEQ" \
         -o           "$AF3_CSV" \
@@ -187,6 +191,7 @@ REPORT_ARGS=(
     --boltz2-results "$BOLTZ2_CSV"
     --sequences      "$SEQUENCES"
     -o               "$OUTPUT/report"
+    --primary-engine af3
 )
 if [[ $SKIP_PROTENIX -eq 0 && -f "$PROTENIX_CSV" ]]; then
     REPORT_ARGS+=(--protenix-results "$PROTENIX_CSV")
@@ -194,6 +199,20 @@ fi
 if [[ $SKIP_AF3 -eq 0 && -f "$AF3_CSV" ]]; then
     REPORT_ARGS+=(--af3-results "$AF3_CSV")
 fi
+
+# Auto-discover per-tool native CSVs so per-tool top-10 sections use native rank.
+# Scans the `runs/` sibling of $OUTPUT (and $OUTPUT itself) by default.
+_DISCOVER_PY="$SCRIPT_DIR/scripts/discover_tool_csvs.py"
+_RUNS_BASE="$(dirname "$(realpath "$OUTPUT")")"
+if [[ -f "$_DISCOVER_PY" && -d "$_RUNS_BASE" ]]; then
+    echo "[discover] scanning $_RUNS_BASE for per-tool native CSVs..."
+    # discover_tool_csvs.py prints alternating lines: "--tool-csv" then "name=path".
+    # Read into REPORT_ARGS one line at a time so paths with spaces stay intact.
+    while IFS= read -r _line; do
+        [[ -n "$_line" ]] && REPORT_ARGS+=("$_line")
+    done < <("$MOSAIC_VENV/bin/python" "$_DISCOVER_PY" "$_RUNS_BASE" 2>/dev/null)
+fi
+
 conda run -n binder-eval binder-compare report "${REPORT_ARGS[@]}"
 
 echo ""

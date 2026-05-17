@@ -385,10 +385,8 @@ def refold_batch(
                         sequence=target_sequence,
                         use_msa=True,
                         template_chain=target_template_chain,
-                        force_template=target_template_chain is not None,
                     ),
                 ],
-                processing_dir=_processing_dir,
             )
 
             # ---- Comprehensive aux metrics — all 13 loss terms ----
