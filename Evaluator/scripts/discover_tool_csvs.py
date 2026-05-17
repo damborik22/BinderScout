@@ -12,6 +12,7 @@ overrides an older one.
 Usage:
     python discover_tool_csvs.py <base_dir> [<base_dir>...]
 """
+
 from __future__ import annotations
 
 import sys
@@ -21,19 +22,22 @@ from pathlib import Path
 # First-match-wins WITHIN a tool's pattern list; mtime-newest wins ACROSS
 # multiple matches.
 _TOOL_PATTERNS: dict[str, list[str]] = {
-    "bindcraft":         ["**/bindcraft_default/outputs/final_design_stats.csv",
-                          "**/bindcraft/outputs/final_design_stats.csv"],
-    "boltzgen":          ["**/boltzgen/outputs/final_ranked_designs/final_designs_metrics_*.csv",
-                          "**/boltzgen/outputs/**/final_designs_metrics_*.csv"],
-    "mosaic":            ["**/mosaic/designs.csv"],
-    "pxdesign":          ["**/pxdesign/pxdesign_top700.csv",   # SPARK-style pre-ranked top-N
-                          "**/pxdesign/summary.csv"],
-    "rfd3":              ["**/rfd3/rfd3_top700.csv",
-                          "**/rfd3/sequences.csv"],
-    "proteina_complexa": ["**/proteina_complexa/proteina_complexa_top700.csv",
-                          "**/proteina_complexa/sequences.csv"],
-    "protein_hunter":    ["**/protein_hunter_merged/protein_hunter_top700.csv",
-                          "**/protein_hunter_*/summary_all_runs.csv"],
+    "bindcraft": ["**/bindcraft_default/outputs/final_design_stats.csv", "**/bindcraft/outputs/final_design_stats.csv"],
+    "boltzgen": [
+        "**/boltzgen/outputs/final_ranked_designs/final_designs_metrics_*.csv",
+        "**/boltzgen/outputs/**/final_designs_metrics_*.csv",
+    ],
+    "mosaic": ["**/mosaic/designs.csv"],
+    "pxdesign": [
+        "**/pxdesign/pxdesign_top700.csv",  # SPARK-style pre-ranked top-N
+        "**/pxdesign/summary.csv",
+    ],
+    "rfd3": ["**/rfd3/rfd3_top700.csv", "**/rfd3/sequences.csv"],
+    "proteina_complexa": ["**/proteina_complexa/proteina_complexa_top700.csv", "**/proteina_complexa/sequences.csv"],
+    "protein_hunter": [
+        "**/protein_hunter_merged/protein_hunter_top700.csv",
+        "**/protein_hunter_*/summary_all_runs.csv",
+    ],
 }
 
 # tool → list of directory glob patterns to look for native design PDBs/CIFs.
@@ -43,17 +47,19 @@ _TOOL_PATTERNS: dict[str, list[str]] = {
 # PDBs typically live on BM1 and aren't copied to BM5; the refold viewer
 # handles those cases.
 _TOOL_PDB_DIR_PATTERNS: dict[str, list[str]] = {
-    "bindcraft":         ["**/bindcraft_default/outputs/Accepted",
-                          "**/bindcraft_default/outputs/MPNN",
-                          "**/bindcraft/outputs/Accepted"],
-    "boltzgen":          ["**/boltzgen/outputs/final_ranked_designs/final_*_designs",
-                          "**/boltzgen/outputs/final_ranked_designs"],
-    "pxdesign":          ["**/pxdesign"],     # has nested outputs_len*/ subdirs; per-tool viewer rglobs
-    "proteina_complexa": ["**/proteina_complexa/raw_evaluation_results",
-                          "**/proteina_complexa"],
-    "rfd3":              ["**/rfd3"],
-    "protein_hunter":    ["**/protein_hunter_merged",
-                          "**/protein_hunter_*"],
+    "bindcraft": [
+        "**/bindcraft_default/outputs/Accepted",
+        "**/bindcraft_default/outputs/MPNN",
+        "**/bindcraft/outputs/Accepted",
+    ],
+    "boltzgen": [
+        "**/boltzgen/outputs/final_ranked_designs/final_*_designs",
+        "**/boltzgen/outputs/final_ranked_designs",
+    ],
+    "pxdesign": ["**/pxdesign"],  # has nested outputs_len*/ subdirs; per-tool viewer rglobs
+    "proteina_complexa": ["**/proteina_complexa/raw_evaluation_results", "**/proteina_complexa"],
+    "rfd3": ["**/rfd3"],
+    "protein_hunter": ["**/protein_hunter_merged", "**/protein_hunter_*"],
 }
 
 
