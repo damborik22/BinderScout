@@ -17,8 +17,9 @@ bin/
 install.log
 install_aarch.log
 
-# Claude Code internal files
-.claude/
+# Claude Code internal files (settings, history, etc.) — but DO track .claude/skills/
+.claude/*
+!.claude/skills/
 
 # Docker build cache / test artifacts
 .docker-iidfile
