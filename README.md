@@ -15,7 +15,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 |---|---|---|
 | `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3; RFAA opt-in legacy) | bash |
 | `bindmaster configure` | Interactive wizard: target → configs → run scripts | system Python |
-| `bindmaster evaluate` | Parse tool outputs, refold with Boltz-2 + Protenix (and AF3 on aarch64, Part K planned), rank, generate HTML report | Mosaic uv venv |
+| `bindmaster evaluate` | Parse tool outputs, refold with Boltz-2 (everywhere) and AF3 v3.0.2 (any host with ≥100 GB GPU memory — DGX Spark, H200, …), rank, generate HTML report | Mosaic uv venv |
 
 ### Installed tools
 
@@ -52,9 +52,8 @@ flowchart LR
     Extract["Extractors\n(one per tool → unified FASTA)"]
 
     subgraph Refold["Refolding engines (independent cross-validation)"]
-        Boltz2["Boltz-2\n(Mosaic venv, live, all platforms)"]
-        Protenix["Protenix v0.5.0\n(bindmaster_pxdesign env, live, x86_64)"]
-        AF3["AF3 v3.0.2\n(binder-eval-af3 env, Part K planned, aarch64 only)"]
+        Boltz2["Boltz-2\n(Mosaic venv)"]
+        AF3["AF3 v3.0.2\n(binder-eval-af3 env, needs ≥100 GB GPU memory)"]
     end
 
     Report["Report generator\nranked HTML + CSV\n(agreement_count, ipsae_min)"]
@@ -63,14 +62,12 @@ flowchart LR
     Config --> Design
     Design -->|tool-specific outputs| Extract
     Extract -->|FASTA of binders| Boltz2
-    Boltz2 --> Protenix
-    Protenix --> Report
-    Boltz2 -.-> AF3
-    AF3 -.-> Report
+    Extract -->|FASTA of binders| AF3
     Boltz2 --> Report
+    AF3 --> Report
 ```
 
-The dotted edges are planned (Part K AF3 refolding for DGX Spark). RFAA is omitted from the diagram because it is deprecated and not part of the default `run_all.sh`; install it explicitly to reproduce older runs.
+RFAA is omitted from the diagram because it is deprecated and not part of the default `run_all.sh`; install it explicitly to reproduce older runs. Protenix v0.5.0 is wired into the Evaluator code (Part J) but not part of the canonical Boltz-2 + AF3 pipeline shown above — see CLAUDE.md if you want to enable it.
 
 ---
 
@@ -89,14 +86,16 @@ BindMaster/
 │   └── evaluator.py            ← lightweight output parser + Boltz-2 re-fold
 ├── Evaluator/                  ← bundled full evaluation pipeline package
 │   ├── binder_comparison/      ← core Python package (extractors, refolding, scoring)
-│   ├── scripts/                ← standalone refold scripts (refold_boltz2.py, refold_protenix.py; refold_af3.py planned, Part K)
+│   ├── scripts/                ← standalone refold scripts (refold_boltz2.py, refold_protenix.py)
 │   ├── docs/                   ← pipeline reference, analysis notes
-│   └── envs/                   ← conda env specs (binder-eval; binder-eval-af3 [aarch64 only, Part K, todo])
+│   └── envs/                   ← conda env specs (binder-eval, binder-eval-af3 [needs ≥100 GB GPU memory])
+├── .claude/
+│   └── skills/                 ← Claude Code skills (bindmaster-orchestrator, bindmaster-worker)
 ├── scripts/                    ← helper install scripts (RFAA, PXDesign)
 ├── tests/                      ← unit + integration tests
 ├── examples/                   ← example scripts (RFAA, PXDesign)
 ├── tui/                        ← interactive TUI menu (in development)
-├── docs/                       ← development plans and archived plans
+├── docs/                       ← development plans, completed plans, environments reference, scientific notes
 ├── bindmaster_examples/        ← canonical run-script templates (Mosaic hallucination, RFD3, Protein-Hunter)
 ├── tools/
 │   └── aarch64/                ← pre-built ARM64 binaries (dssp, DAlphaBall)
@@ -105,7 +104,7 @@ BindMaster/
 └── runs/                       ← generated run folders (gitignored)
 ```
 
-Tool directories (`BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/`, `rf_diffusion_all_atom/`, `LigandMPNN/`) are cloned by the installer and gitignored. RFD3 has no clone — it is pip-installed (`rc-foundry`) into `bindmaster_rfd3` and stores weights at `weights/foundry/`.
+Tool directories (`BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/`, `rf_diffusion_all_atom/`, `LigandMPNN/`) are cloned by the installer and gitignored. RFD3 has no clone — it is pip-installed (`rc-foundry`) into `bindmaster_rfd3` and stores weights at `weights/foundry/`. AF3 v3.0.2 refolding runs in its own `binder-eval-af3` conda env on any host with ≥100 GB GPU memory (DGX Spark today; H200 / GH200 should also work); `refold_af3.py` is the canonical wrapper.
 
 ---
 
@@ -211,15 +210,16 @@ Each per-tool run script writes a `runs/<name>/<tool>/settings.json` capturing t
 Parses design outputs from any combination of tools,
 cross-ranks all designs by a configurable metric, and writes a summary.
 
-**Refolding engines:**
+**Refolding engines (canonical pipeline):**
 
-| Engine | CLI subcommand | Env | Platform | Status |
-|---|---|---|---|---|
-| **Boltz-2** | `binder-compare refold-boltz2` | Mosaic `.venv` | x86 + aarch64 | Live — primary refolder, ipSAE scoring (DunbrackLab 2025 formula) |
-| **Protenix v0.5.0** | `binder-compare refold-protenix` | `bindmaster_pxdesign` conda | x86_64 | Live — ByteDance's open-source AF3 reimplementation; no separate env required |
-| **AF3 v3.0.2** | `binder-compare refold-af3` | `binder-eval-af3` conda | aarch64 only | Planned (Part K) — schema columns reserved, runner not yet shipped |
+| Engine | CLI subcommand | Env | Where it runs |
+|---|---|---|---|
+| **Boltz-2** | `binder-compare refold-boltz2` | Mosaic `.venv` | Anywhere with a 24 GB GPU |
+| **AF3 v3.0.2** | `binder-compare refold-af3` | `binder-eval-af3` conda | Any host with ≥100 GB GPU memory — DGX Spark (aarch64), H200 (x86_64), GH200, etc. Full AF3 inference doesn't fit on consumer 24 GB GPUs. |
 
-Cross-engine columns are namespaced (`boltz_pae_*`, `protenix_*`, `af3_*`). The `agreement_count` column (0–3 on Spark, 0–2 on x86) counts engines whose `ipsae_min > 0.61` and is the primary tiebreaker after `ipsae_min`. Boltz-2 must run first because it produces the canonical sequence list the other engines refold; Protenix is auto-detected by `evaluate.sh` when `bindmaster_pxdesign` exists and can be skipped with `--skip-protenix`.
+Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`). The `agreement_count` column (0–2 wherever AF3 is available, 0–1 otherwise) counts engines whose `ipsae_min > 0.61` and is the primary tiebreaker after `ipsae_min`. Both engines compute iPSAE via the DunbrackLab 2025 formula. AF3 produces token-order PAE which the evaluator transposes to match Boltz-2's `[binder|target]` order.
+
+> Protenix v0.5.0 (`binder-compare refold-protenix`) is wired into the Evaluator package as an optional 3rd engine but is **not part of our canonical evaluation** — we run Boltz-2 + AF3. Enable it explicitly via `evaluate.sh` if you want the extra signal.
 
 #### Run-directory mode
 
@@ -335,7 +335,7 @@ Both branches: `bindmaster install` or `bash install/install.sh`.
 - **Protein-Hunter**: **Not supported on aarch64** — PyRosetta has no aarch64 wheels. The installer prints a warning and skips it.
 - **RFD3**: Fully supported on aarch64 — `rc-foundry` is pip-installed, no DGL dependency.
 - **RFAA**: **Not supported on aarch64.** DGL (Deep Graph Library) has no CUDA-enabled aarch64 wheels; the SE3-Transformer requires DGL CUDA operations. Use RFD3 instead.
-- **AF3 refolding (Part K)**: Planned aarch64-only feature — `binder-eval-af3` env + `refold_af3.py` to be added in a future release. The `af3_*` schema columns and `--af3-results` report flag are already in place.
+- **AF3 refolding**: Live on aarch64 / DGX Spark via the `binder-eval-af3` conda env and `binder-compare refold-af3`. Not aarch64-exclusive — AF3 runs anywhere with ≥100 GB GPU memory (an H200, GH200, etc. should work too); DGX Spark is just our primary host because Spark is where the unified memory headroom lives.
 
 ---
 
