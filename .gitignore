@@ -6,6 +6,7 @@ rf_diffusion_all_atom/
 LigandMPNN/
 PXDesign/
 Proteina-Complexa/
+Protein-Hunter/
 
 # Local Miniforge3 installation (standalone mode)
 conda/
