@@ -2,9 +2,9 @@
 
 ## Overview
 
-BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. It wraps three independent design tools (BindCraft, BoltzGen, Mosaic) behind a single CLI (`bindmaster`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders.
+BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. It wraps seven independent design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the legacy RFAA, behind a single CLI (`bindmaster`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders.
 
-**Current status:** v0.7.0 (Part H complete). Active development on the `master` branch. The `aarch64` branch tracks DGX Spark / Grace-Hopper support and is periodically rebased from master.
+**Current status:** v0.7.0 + Parts I, J, L, M landed on `[Unreleased]`. Latest milestones: Evaluator AF2 refolding removed (Part I), Protenix v0.5.0 wired up as universal 2nd refolding engine (Part J), Protein-Hunter installed and configurable (Part L), RFD3 installed and configurable (Part M). Active development on `master`; `aarch64` branch tracks DGX Spark / Grace-Hopper and is periodically rebased.
 
 **Repository:** `github.com/damborik22/BindMaster`
 
@@ -84,18 +84,21 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ```
 Target structure (.pdb / .mmcif)
   → Configurator wizard (interactive, generates configs + run scripts)
-    → Design tools run in sequence:
-       Mosaic (JAX + Boltz-2 hallucination)
-       BoltzGen (Boltz-1 diffusion)
-       BindCraft (AF2 + MPNN + PyRosetta)
-       PXDesign (Protenix, optional)
-       Proteina-Complexa (NVIDIA flow matching, optional)
+    → Design tools run in sequence (configurable per run):
+       Mosaic               (JAX + Boltz-2 hallucination)
+       BoltzGen             (Boltz-1 diffusion)
+       BindCraft            (AF2 + MPNN + PyRosetta)
+       PXDesign             (Protenix + MPNN + AF2 eval)
+       Proteina-Complexa    (NVIDIA flow matching + ITO)
+       Protein-Hunter       (Boltz-2 / Chai-1; 6 modalities: protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA)
+       RFD3                 (RosettaCommons foundry diffusion + ProteinMPNN)
+       [RFAA               (LigandMPNN; deprecated, opt-in only via --tool rfaa)]
     → Evaluator:
-       1. Extract sequences from all tool outputs
-       2. Refold with Boltz-2 (Mosaic venv)
-       3. (x86) Refold with Protenix (bindmaster_pxdesign env)  [Part J, in progress]
-       4. (aarch64 / DGX Spark) Refold with AlphaFold 3 v3.0.2 (binder-eval-af3)  [Part K, in progress]
-       5. Rank, score, and generate HTML report
+       1. Extract sequences from all tool outputs (one extractor per tool)
+       2. Refold with Boltz-2 (Mosaic venv)                                    [live, all platforms]
+       3. (x86) Refold with Protenix v0.5.0 (bindmaster_pxdesign env)          [live, Part J]
+       4. (aarch64 / DGX Spark) Refold with AlphaFold 3 v3.0.2 (binder-eval-af3 env) [Part K, planned]
+       5. Rank by agreement_count then ipsae_min; generate HTML + CSV report
 ```
 
 ### Directory layout
@@ -114,13 +117,15 @@ BindMaster/
 │   └── evaluator.py           ← lightweight evaluator (Mosaic venv, ~780 lines)
 ├── Evaluator/                 ← bundled full evaluation pipeline package
 │   ├── binder_comparison/     ← core Python package (extractors, refolding, scoring, viz)
-│   ├── scripts/               ← standalone refold scripts (refold_boltz2.py, refold_protenix.py [todo], refold_af3.py [todo])
-│   ├── evaluate.sh            ← shell orchestrator for full 4-step pipeline
-│   ├── envs/                  ← conda env specs (binder-eval.yml, binder-eval-af3.yml [aarch64 only, todo])
+│   ├── scripts/               ← standalone refold scripts (refold_boltz2.py, refold_protenix.py; refold_af3.py planned, Part K)
+│   ├── evaluate.sh            ← shell orchestrator (extract → refold-boltz2 → refold-protenix → report)
+│   ├── envs/                  ← conda env specs (binder-eval.yml; binder-eval-af3.yml [aarch64 only, Part K, planned])
 │   ├── docs/                  ← pipeline_reference.md (metrics, known issues)
 │   └── pyproject.toml         ← package: "binder-comparison" v0.1.0
-├── bindmaster_examples/
-│   └── hallucinate_bindmaster.py  ← Mosaic template (copied into Mosaic/ on install)
+├── bindmaster_examples/       ← canonical run-script templates
+│   ├── hallucinate_bindmaster.py     ← Mosaic template (copied into Mosaic/ on install)
+│   ├── run_rfd3.sh.template          ← RFD3 two-stage (backbone diffusion + MPNN)
+│   └── run_protein_hunter.sh.template ← Protein-Hunter Boltz-2 hallucination
 ├── tools/
 │   └── aarch64/               ← pre-built ARM64 binaries (DAlphaBall, dssp)
 ├── .github/workflows/ci.yml  ← shellcheck + ruff + Docker build
@@ -128,14 +133,15 @@ BindMaster/
 ├── Dockerfile.test            ← CUDA 12.4, Ubuntu 22.04, Miniforge
 ├── docker-entrypoint.sh       ← container init (conda, HOME setup)
 ├── ruff.toml                  ← Python linting/formatting config
-├── STAGES.md                  ← implementation milestones (Parts A–G)
+├── STAGES.md                  ← implementation milestones (Parts A–H; later parts live in CHANGELOG)
 ├── CONTRIBUTING.md            ← dev setup, PR conventions
 ├── CHANGELOG.md               ← Keep a Changelog format
 └── LICENSE                    ← MIT
 ```
 
 **Gitignored (created at runtime):**
-- `BindCraft/`, `BoltzGen/`, `Mosaic/`, `rf_diffusion_all_atom/`, `LigandMPNN/`, `PXDesign/`, `Proteina-Complexa/` — cloned by installer
+- `BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/`, `rf_diffusion_all_atom/`, `LigandMPNN/` — cloned by installer
+- `weights/foundry/` — RFD3 / ProteinMPNN / LigandMPNN checkpoints fetched by `foundry install` (no clone dir; `rc-foundry` is pip-installed into `bindmaster_rfd3`)
 - `runs/` — generated experiment directories
 - `install.log`, `install_aarch.log` — installer output
 - `refold_boltz2/` — intermediate refolding outputs
@@ -149,10 +155,13 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `BindCraft` | BindCraft | 3.10 | conda | AF2 + MPNN + PyRosetta binder design |
 | `BoltzGen` | BoltzGen | 3.12 | conda | Boltz-1 diffusion-based generation |
 | `Mosaic/.venv` | Mosaic | 3.12 | uv | JAX + Boltz-2 hallucination |
-| `bindmaster_rfaa` | RFAA + LigandMPNN | 3.11 | conda | All-atom diffusion (x86_64 only) |
-| `bindmaster_pxdesign` | PXDesign | 3.11 | conda | Protenix binder design + eval |
+| `bindmaster_pxdesign` | PXDesign | 3.11 | conda | Protenix binder design + eval; ALSO hosts the Evaluator Protenix refolder (Part J) |
 | `Proteina-Complexa/.venv` | Proteina-Complexa | 3.12 | uv | Flow matching + test-time compute binder design |
+| `bindmaster_protein_hunter` | Protein-Hunter | 3.10 | conda | Boltz-2 / Chai-1 hallucination, 6 modalities |
+| `bindmaster_rfd3` | RFD3 (`rc-foundry`) | 3.12 | conda | RosettaCommons foundry diffusion + ProteinMPNN |
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
+| `binder-eval-af3` | AF3 refolder | 3.10 | conda | AlphaFold 3 v3.0.2 refolding (aarch64 only, Part K, planned) |
+| `bindmaster_rfaa` *(deprecated)* | RFAA + LigandMPNN | 3.11 | conda | All-atom diffusion (x86_64 only; superseded by RFD3, opt-in via `--tool rfaa`) |
 
 The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in their correct environment — `install` runs in bash, `configure` runs in system Python, `evaluate` runs in the Mosaic `.venv` Python.
 
@@ -168,7 +177,10 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 **aarch64 specifics:**
 - BindCraft ARM64 binaries (`DAlphaBall.gcc`, `dssp`) bundled in `tools/aarch64/`
 - BoltzGen: PyTorch installed from PyPI (no `+cuXXX` suffix needed)
-- Mosaic: `esmj` excluded (no aarch64 wheel)
+- Mosaic: `esmj` excluded (no aarch64 wheel); `torchtext` also may fail
+- RFD3: fully supported on aarch64 (no DGL dependency; pip-installs cleanly)
+- Protein-Hunter: NOT supported on aarch64 (PyRosetta has no aarch64 wheels)
+- RFAA: NOT supported on aarch64 (DGL has no CUDA aarch64 wheels)
 - Pre-cached AF2 weights path: `Documents/OLD/BindMaster/bindcraft-tools`
 
 ### Design decisions and WHY
@@ -177,7 +189,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - **stdlib-only CLI:** `bindmaster.py` uses only stdlib so it works on any Python 3.10+ without pip installs.
 - **uv for Mosaic:** Mosaic uses `uv` instead of conda because it needs JAX with CUDA, and uv resolves this faster and more reliably.
 - **Pinned commits:** Tool repos are cloned at pinned commits (`BINDCRAFT_COMMIT`, `BOLTZGEN_COMMIT`, `MOSAIC_COMMIT`) for reproducible installs.
-- **Separate evaluator envs:** Boltz-2 refolding runs in the Mosaic venv (JAX). The new Protenix refolder (Part J) rides the existing `bindmaster_pxdesign` conda env. AF3 (Part K) on DGX Spark gets its own `binder-eval-af3` env. `evaluate.sh` orchestrates all three.
+- **Separate evaluator envs:** Boltz-2 refolding runs in the Mosaic venv (JAX). The Protenix refolder (Part J, live) rides the existing `bindmaster_pxdesign` conda env — no new env. AF3 (Part K, planned) on DGX Spark will get its own `binder-eval-af3` env. `evaluate.sh` orchestrates Boltz-2 and Protenix today and will gain AF3 in Part K.
 
 ---
 
@@ -214,7 +226,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - Python classes: PascalCase
 - Python variables/functions: snake_case
 - Bash constants: UPPER_CASE
-- Conda envs: BindCraft, BoltzGen, binder-eval, bindmaster_pxdesign, bindmaster_rfaa (legacy — being replaced by bindmaster_rfd3)
+- Conda envs: BindCraft, BoltzGen, binder-eval, bindmaster_pxdesign, bindmaster_protein_hunter, bindmaster_rfd3; bindmaster_rfaa (deprecated, opt-in only); binder-eval-af3 (planned, Part K)
 
 ### Per-run `settings.json` (reproducibility convention)
 
@@ -286,9 +298,11 @@ the parameter sweep.
 | **BindCraft** | AF2 hallucination + MPNN sequence design + PyRosetta filtering | `martinpacesa/BindCraft` |
 | **BoltzGen** | Boltz-1 structure diffusion + flow matching for binder generation | `HannesStark/boltzgen` |
 | **Mosaic** | JAX-based Boltz-2 gradient hallucination (no internal AF2 cross-val) | `escalante-bio/mosaic` |
-| **RFAA** | All-atom diffusion + LigandMPNN for ligand binder design | `baker-laboratory/rf_diffusion_all_atom` |
 | **PXDesign** | Protenix-based de novo binder design (diffusion + MPNN + AF2 eval) | `bytedance/PXDesign` |
 | **Proteina-Complexa** | Flow matching + inference-time optimization (beam search / MCTS) | `NVIDIA-Digital-Bio/proteina-complexa` |
+| **Protein-Hunter** | Boltz-2 / Chai-1 hallucination; 6 modalities (protein, cyclic, ligand CCD, ligand SMILES, DNA, RNA) | Cho et al. 2025 |
+| **RFD3** | RosettaCommons foundry diffusion (RFdiffusion3) + ProteinMPNN; BSD-3, commercial-use OK | `RosettaCommons/foundry` (`rc-foundry` on PyPI) |
+| ~~RFAA~~ *(deprecated)* | All-atom diffusion + LigandMPNN for ligand binder design; superseded by RFD3 | `baker-laboratory/rf_diffusion_all_atom` |
 
 ### Evaluation metrics and ranking
 
@@ -331,14 +345,18 @@ the parameter sweep.
 
 ### Active work and recent decisions
 
-- **Parts A–H complete** (see STAGES.md). Latest work was Part H (standalone installer for server-friendly operation).
-- **Mosaic is_top filter** (`6bfbc4f`): Both `MosaicExtractor` and legacy `_parse_mosaic()` now default to extracting only `is_top=1` designs. `--all-mosaic-designs` flag added to `binder-compare extract`, `binder-compare run`, and `bindmaster evaluate`. The `REPLACE_ME` target_sequence placeholder is now guarded in the legacy evaluator's CSV fallback path.
-- **Standalone mode** (`Part H`): Installer auto-detects whether system conda is writable. If not, downloads Miniforge3 into `BindMaster/conda/` and creates all environments locally. Shortcuts go to `BindMaster/bin/` instead of `~/.local/bin/`. `--standalone` forces this; `--system-conda` opts out. All generated run scripts and Evaluator shell scripts search local conda first.
+- **Parts A–H complete** (see STAGES.md); **Parts I, J, L, M landed on `[Unreleased]`** (see CHANGELOG). Part K is the only Roadmap item still open.
+- **Part I — AF2 refolding removed from Evaluator.** Deleted `refold_af2.py`, `af2_runner.py`, `binder-eval-af2.yml`; pruned all `af2_*` schema fields and report plots. BindCraft / PXDesign / Proteina-Complexa still use AF2 internally — only the Evaluator's AF2 refolding step was removed.
+- **Part J — Protenix v0.5.0 live as universal 2nd refolding engine.** `binder-compare refold-protenix` runs inside the existing `bindmaster_pxdesign` conda env (no new env). Schema: `protenix_*` columns plus reserved `af3_*` for Part K. `evaluate.sh` auto-detects `bindmaster_pxdesign` and runs Protenix between Boltz-2 and report (skippable with `--skip-protenix`).
+- **Part K — AF3 v3.0.2 refolding** (aarch64 / DGX Spark only) — schema columns + `--af3-results` report flag are in place; runner (`refold_af3.py`) and `binder-eval-af3` conda env still TODO.
+- **Part L — Protein-Hunter** installable via `bindmaster install --tool protein-hunter` (x86 only; aarch64 blocked by PyRosetta). Conda env `bindmaster_protein_hunter`, vendored Boltz-2 + LigandMPNN + Chai-1 (sokrypton fork). New `ProteinHunterExtractor` reads `summary_high_iptm.csv` by default (`--all-protein-hunter-designs` for all runs). Configurator generates `run_protein_hunter.sh`.
+- **Part M — RFD3** installable via `bindmaster install --tool rfd3` (x86 + aarch64). Conda env `bindmaster_rfd3`, `rc-foundry[rfd3,mpnn]` from PyPI, weights at `weights/foundry/`. New `RFD3Extractor`. Configurator generates `run_rfd3.sh`. **RFAA deprecated** — dropped from the interactive menu and from `--tool all`; still installable via `bindmaster install --tool rfaa` for reproducing existing runs. `docs/rfaa_manual_reinstall.md` captures commit SHAs and post-install patches for long-term maintenance.
+- **Standalone mode** (Part H, v0.7.0): Installer auto-detects whether system conda is writable. If not, downloads Miniforge3 into `BindMaster/conda/` and creates all environments locally. Shortcuts go to `BindMaster/bin/` instead of `~/.local/bin/`. `--standalone` forces this; `--system-conda` opts out. All generated run scripts and Evaluator shell scripts search local conda first.
+- **Mosaic is_top filter**: Both `MosaicExtractor` and legacy `_parse_mosaic()` default to extracting only `is_top=1` designs. `--all-mosaic-designs` flag exposed on `binder-compare extract`, `binder-compare run`, and `bindmaster evaluate`. The `REPLACE_ME` target_sequence placeholder is guarded in the legacy evaluator's CSV fallback path.
 - **Deferred items:**
   - F2: `--headless` mode for configurator (accept JSON config, skip prompts)
   - F6: Multi-chain binder support in BoltzGen YAML generation
 - **PXDesign** full pipeline integrated: diffusion → MPNN → AF2 complex/monomer eval → summary CSV. Works on both x86_64 and aarch64 (with automated post-install patches).
-- **RFAA** integrated for x86_64; not supported on aarch64 (DGL lacks CUDA aarch64 wheels).
 - **Proteina-Complexa** integrated: NVIDIA flow matching + inference-time optimization. Uses uv venv (separate from Mosaic). Shares AF2 weights with BindCraft. Supports single-pass, best-of-n, beam-search, and MCTS search algorithms.
 
 ### Known issues
@@ -354,10 +372,12 @@ the parameter sweep.
 - **aarch64 Proteina-Complexa:** May need patches — PyTorch Geometric (PyG) and torchtext may lack aarch64 wheels. Core deps (PyTorch 2.7, JAX 0.4.29) are fine. Same approach as Mosaic: patch pyproject.toml to exclude problematic packages with `platform_machine != 'aarch64'` markers.
 - **AF2 smoke test:** Fails if `BindCraft/params/` is missing `.npz` weight files (interrupted download).
 
-### RFD3 / foundry runtime gotchas (no automated runner yet)
+### RFD3 / foundry runtime gotchas
 
-The configurator does not yet generate RFD3 run scripts. When writing one by
-hand, watch for these (each one bit me on the CALCA run):
+The configurator now generates `run_rfd3.sh` from
+`bindmaster_examples/run_rfd3.sh.template`. The gotchas below still apply —
+they live in the template and bit me on the CALCA run before being encoded
+there:
 
 - **Output format.** RFD3 writes `.cif.gz` (compressed mmCIF), NOT `.pdb`. Decompress for downstream tools that need PDB.
 - **Chain IDs.** Output mmCIF labels target as chain `A` (preserved residues from the input contig) and binder as chain `B` (designed). The `label_entity_id` column shows `0`/`1`, but the actual chain IDs at `label_asym_id` are letters.
@@ -371,10 +391,12 @@ hand, watch for these (each one bit me on the CALCA run):
 - **24 GB Ampere OOM mid-run from fragmentation, not capacity.** With `diffusion_batch_size=10 low_memory_mode=true`, peak live allocation is ~15 GiB but PyTorch reserves another ~6 GiB unallocated. Around batch 7 the next 3 GiB alloc fails even though the live working set fits 24 GiB easily. Fix: `export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` before launching `rfd3 design`. The configurator's `write_run_rfd3` and `bindmaster_examples/run_rfd3.sh.template` set this. (BM4 2VDY run: died at batch 7 of try-1; relaunched with this env var, completed all 20 batches cleanly in 23 h.)
 - **`Found N existing example IDs` is informational, not skip-behavior.** RFD3 prints this at startup when example IDs already exist in `out_dir`, but it then re-runs all `n_batches` anyway and overwrites the existing files. There is no built-in resume — if a run crashes mid-way, expect a full re-run, not a delta. (Workaround if you only want the missing slice: move the completed `<id>.cif.gz`/`<id>.json` pairs aside, run with smaller `n_designs`, then put them back.)
 
-### Protein-Hunter / boltz_ph runtime gotchas (no automated runner yet)
+### Protein-Hunter / boltz_ph runtime gotchas
 
-The configurator does not yet generate Protein-Hunter run scripts. When writing
-one by hand, watch for these (each one bit me on the CALCA run):
+The configurator now generates `run_protein_hunter.sh` from
+`bindmaster_examples/run_protein_hunter.sh.template`. The gotchas below
+still apply — they live in the template and bit me on the CALCA run before
+being encoded there:
 
 - **`--msa_mode` valid values are `single` or `mmseqs`** — NOT `single_sequence`. The literal `single_sequence` raises `argparse: invalid choice`. `single` is the no-MSA mode (fastest, what we used on CALCA); `mmseqs` calls the ColabFold server.
 - **Boltz-2 cache must live at `~/.boltz/`** with three things: `boltz2_conf.ckpt` (~2.3 GB), `boltz2_aff.ckpt` (~2.1 GB), and a populated `mols/` directory (~45 k .pkl files). If `mols/ALA.pkl` is missing, `design.py` aborts on startup with `ValueError: CCD component ALA not found!` — the canonical-residue tokenizer probes the directory for every standard amino acid.
@@ -407,10 +429,13 @@ export PATH="$(pwd)/bin:$PATH"
 
 ```bash
 bindmaster install                          # interactive tool selection
-bindmaster install --tool all               # install everything
+bindmaster install --tool all               # install all current-generation tools (RFAA excluded)
 bindmaster install --tool mosaic            # install one tool
 bindmaster install --tool all --yes --skip-examples  # non-interactive (CI)
 bindmaster install --tool proteina-complexa # install Proteina-Complexa
+bindmaster install --tool protein-hunter    # install Protein-Hunter (Part L)
+bindmaster install --tool rfd3              # install RFD3 / foundry (Part M)
+bindmaster install --tool rfaa              # install legacy RFAA (opt-in only)
 bindmaster install --uninstall --tool all   # remove envs + shortcuts (preserves runs/)
 bindmaster install --standalone --tool all    # force local Miniforge install
 bindmaster install --system-conda --tool all  # use existing system conda
@@ -474,7 +499,10 @@ docker run --rm -it bindmaster-test bash
 ```bash
 # Extract sequences from all tool outputs (Mosaic: is_top=1 only by default)
 conda run -n binder-eval binder-compare extract \
-    --bindcraft DIR --boltzgen DIR --mosaic DIR -o seqs.fasta
+    --bindcraft DIR --boltzgen DIR --mosaic DIR \
+    --pxdesign DIR --proteina-complexa DIR \
+    --protein-hunter DIR --rfd3 DIR \
+    -o seqs.fasta
 # To include all Mosaic designs (not just refolded):
 #   binder-compare extract --mosaic DIR --all-mosaic-designs -o seqs.fasta
 
@@ -482,8 +510,17 @@ conda run -n binder-eval binder-compare extract \
 Mosaic/.venv/bin/binder-compare refold-boltz2 \
     --sequences seqs.fasta --target-seq SEQ -o boltz2.csv
 
-# Generate report (Boltz-2 only for now; Protenix / AF3 land in Parts J & K)
+# Refold with Protenix v0.5.0 (Part J, x86_64) — runs in PXDesign env
+conda run -n bindmaster_pxdesign binder-compare refold-protenix \
+    --sequences seqs.fasta --target-seq SEQ -o protenix.csv
+
+# (Part K, aarch64 only — not shipped yet)
+# conda run -n binder-eval-af3 binder-compare refold-af3 \
+#     --sequences seqs.fasta --target-seq SEQ -o af3.csv
+
+# Generate report (any subset of refold outputs can be passed)
 conda run -n binder-eval binder-compare report \
     --boltz2-results boltz2.csv \
+    --protenix-results protenix.csv \
     --sequences seqs.fasta -o ./report
 ```
