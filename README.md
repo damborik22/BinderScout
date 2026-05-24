@@ -15,7 +15,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 |---|---|---|
 | `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, RFAA, PXDesign, Proteina-Complexa) | bash |
 | `bindmaster configure` | Interactive wizard: target → configs → run scripts | system Python |
-| `bindmaster evaluate` | Parse outputs, rank designs, re-fold with Boltz-2, AF2, and Protenix (planned) | Mosaic uv venv |
+| `bindmaster evaluate` | Parse outputs, rank designs, re-fold with Boltz-2 (live), Protenix (Part J, in progress), AF3 (Part K, aarch64) | Mosaic uv venv |
 
 ### Installed tools
 
@@ -42,18 +42,19 @@ flowchart LR
     RFAA["RFAA + LigandMPNN\n(all-atom diffusion)"]
     PX["PXDesign\n(Protenix)"]
     PC["Proteina-Complexa\n(flow matching)"]
-    Boltz2["Boltz-2\nrefolding"]
-    AF2["AF2\nrefolding"]
-    Protenix["Protenix (AF3)\nrefolding (planned)"]
+    Boltz2["Boltz-2\nrefolding (live)"]
+    Protenix["Protenix\nrefolding (Part J, in progress)"]
+    AF3["AF3 v3.0.2\nrefolding (Part K, aarch64)"]
     Report["Report generator\nranked HTML + CSV"]
 
     Input --> Config
     Config --> Mosaic & BG & BC & RFAA & PX & PC
     Mosaic & BG & BC & RFAA & PX & PC -->|sequences| Boltz2
-    Boltz2 --> AF2
-    AF2 -.-> Protenix
+    Boltz2 --> Report
+    Boltz2 -.-> Protenix
+    Boltz2 -.-> AF3
     Protenix -.-> Report
-    AF2 --> Report
+    AF3 -.-> Report
 ```
 
 ---
@@ -73,9 +74,9 @@ BindMaster/
 │   └── evaluator.py            ← lightweight output parser + Boltz-2 re-fold
 ├── Evaluator/                  ← bundled full evaluation pipeline package
 │   ├── binder_comparison/      ← core Python package (extractors, refolding, scoring)
-│   ├── scripts/                ← standalone refold scripts (Boltz-2, AF2)
+│   ├── scripts/                ← standalone refold scripts (refold_boltz2.py; refold_protenix.py [Part J, todo], refold_af3.py [Part K, todo])
 │   ├── docs/                   ← pipeline reference, analysis notes
-│   └── envs/                   ← conda env specs (binder-eval, binder-eval-af2)
+│   └── envs/                   ← conda env specs (binder-eval; binder-eval-af3 [aarch64 only, Part K, todo])
 ├── scripts/                    ← helper install scripts (RFAA, PXDesign)
 ├── tests/                      ← unit + integration tests
 ├── examples/                   ← example scripts (RFAA, PXDesign)
@@ -185,12 +186,13 @@ Parses design outputs from any combination of tools,
 cross-ranks all designs by a configurable metric, and writes a summary.
 
 **Refolding engines:**
-- **Boltz-2** — primary refolding engine (ipSAE scoring, DunbrackLab 2025 formula)
-- **AlphaFold2** — secondary refolding via ColabDesign (cross-validation)
-- **Protenix (AF3)** — planned third engine (standalone scripts in development, see `Evaluator/docs/plans/`)
+- **Boltz-2** — primary refolding engine (ipSAE scoring, DunbrackLab 2025 formula). Live.
+- **Protenix v0.5.0** — second engine on x86_64 (Part J, in progress). ByteDance's open-source AF3 reimplementation. Runs in the existing `bindmaster_pxdesign` conda env (no new env needed).
+- **AlphaFold 3 v3.0.2** — third engine on aarch64 / DGX Spark only (Part K, in progress). Runs in a dedicated `binder-eval-af3` conda env.
 
-**Runs inside the Mosaic uv venv** (the only environment that has JAX + Boltz-2).
-Mosaic must be installed before running `evaluate`.
+Cross-engine columns are namespaced (`boltz_pae_*`, `protenix_*`, `af3_*`). `agreement_count` (0–3 on Spark, 0–2 on x86) counts engines that pass the `ipsae_min > 0.61` threshold and is the primary tiebreaker after `ipsae_min`.
+
+Boltz-2 runs inside the Mosaic uv venv (the only environment with JAX + Boltz-2 wired up). Mosaic must be installed before running `evaluate`.
 
 #### Run-directory mode
 
@@ -298,12 +300,13 @@ Both branches: `bindmaster install` or `bash install/install.sh`.
 
 ### aarch64 notes
 
-- **BindCraft**: ARM64 binaries (`DAlphaBall.gcc`, `dssp`) bundled in `tools/aarch64/` — copied automatically.
-- **BoltzGen**: `pip install torch==2.5.1` (aarch64 PyPI wheels include CUDA).
-- **Mosaic**: `esmj` excluded on aarch64 (no wheel available).
+- **BindCraft**: ARM64 binaries (`DAlphaBall.gcc`, `dssp`) bundled in `tools/aarch64/` — copied automatically. May fail at smoke-test time because jaxlib CUDA conda packages are not yet available for aarch64.
+- **BoltzGen**: PyTorch installed from PyPI without `+cuXXX` suffix (aarch64 wheels already include CUDA).
+- **Mosaic**: `esmj` excluded (no aarch64 wheel). `torchtext` may also fail (no Linux aarch64 wheel).
 - **RFAA**: **Not supported on aarch64.** DGL (Deep Graph Library) has no CUDA-enabled aarch64 wheels; the SE3-Transformer requires DGL CUDA operations. Use x86_64 for RFAA.
-- **PXDesign**: Full pipeline works on aarch64/Blackwell. The installer applies automatic patches for CUDA arch compatibility (sm_120), JSON serialization, and dataloader config.
-- **Proteina-Complexa**: Not yet ported to aarch64. See `docs/plans.md` for the porting plan.
+- **PXDesign**: Full pipeline works on aarch64/Blackwell. The installer applies automatic patches for CUDA arch compatibility (sm_120), JSON serialization (`NumpyEncoder`), and dataloader (`num_workers`) config.
+- **Proteina-Complexa**: May need patches — PyTorch Geometric and `torchtext` may lack aarch64 wheels. Core deps (PyTorch 2.7, JAX 0.4.29) are fine. Same approach as Mosaic: mark missing packages with `platform_machine != 'aarch64'` in `pyproject.toml`.
+- **AF3 refolding (Part K)**: Planned aarch64-only feature — `binder-eval-af3` env + `refold_af3.py` to be added in a future release.
 
 ---
 
