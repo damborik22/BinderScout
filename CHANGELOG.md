@@ -22,8 +22,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **RFAA deprecated (not deleted)**. Dropped from interactive menu and from the `--tool all` meta-tool. Still installable via `bindmaster install --tool rfaa` for reproducing existing runs. `install_rfaa()` now prints a deprecation banner pointing at RFD3 and `docs/rfaa_manual_reinstall.md`.
 - **New doc** `docs/rfaa_manual_reinstall.md` captures commit SHAs, post-install patches, and manual-reproducibility steps for long-term RFAA maintenance.
 
-### Added (Part J — Protenix refolder, on `refactor/af3-rfd3-ph`)
-- **Protenix v0.5.0 as universal 2nd refolding engine** — ByteDance's open-source AlphaFold 3 reimplementation (~3-4 GB weights auto-downloaded from ByteDance TOS, runs comfortably on 24 GB GPUs).
+### Added (Part K — AF3 v3.0.2 refolder, canonical 2nd engine)
+- **AlphaFold 3 v3.0.2 as the canonical 2nd refolding engine on big-VRAM hardware** (DGX Spark, H200, any host with >100 GB unified or device memory — full AF3 inference does not fit on consumer 24 GB GPUs).
+- New CLI: `binder-compare refold-af3` — runs inside the dedicated `binder-eval-af3` conda env (separate from the BindCraft / Mosaic / PXDesign envs so PyTorch + JAX versions don't fight).
+- Schema: `af3_*` columns in `StandardisedMetrics` (iptm, ptm, ranking_score, plddt_binder_mean/min, plddt_target_mean, pae_bt/tb/bb, bt_ipsae, tb_ipsae, ipsae_min). pLDDT rescaled 0-100 → 0-1 on ingest. PAE transposed from AF3 token-order to `[binder|target]` to match Boltz-2.
+- `binder-compare report` gains `--af3-results` flag.
+- `Evaluator/evaluate.sh` runs Boltz-2 + AF3 by default on hosts that have the `binder-eval-af3` env.
+
+### Added (Part J — Protenix refolder, optional fallback, on `refactor/af3-rfd3-ph`)
+- **Protenix v0.5.0 as optional 3rd refolding engine for smaller GPUs** — ByteDance's open-source AlphaFold 3 reimplementation (~3-4 GB weights auto-downloaded from ByteDance TOS, runs comfortably on 24 GB GPUs). Not part of the canonical Boltz-2 + AF3 pipeline; opt in when AF3 isn't an option.
 - New CLI: `binder-compare refold-protenix` — runs inside the existing `bindmaster_pxdesign` conda env (no new env needed).
 - New files: `Evaluator/scripts/refold_protenix.py`, `Evaluator/binder_comparison/refolding/protenix_runner.py`, `Evaluator/binder_comparison/cli/refold_protenix.py`.
 - Schema: `protenix_*` columns in `StandardisedMetrics` (iptm, ptm, ranking_score, plddt_binder_mean/min, plddt_target_mean, pae_bt/tb/bb, bt_ipsae, tb_ipsae, ipsae_min). `af3_*` counterparts also reserved for Part K. pLDDT rescaled 0-100 → 0-1 on ingest.
@@ -38,7 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Live smoke test passed** — 2 × 43aa random binders against 76aa ubiquitin target: inference ~12 s/design on RTX 3090, CSV + `*_pae.npy` populated, token-pair PAE extracted via `need_atom_confidence=True`, DunbrackLab ipSAE computed downstream in the report.
 
 ### Removed (Part I — AF2 refolding removal, on `refactor/af3-rfd3-ph`)
-- Evaluator AF2 refolding is gone. This is step 1 of the AF3/Protenix refactor; AF3 (aarch64-only, DGX Spark) and Protenix (universal) will provide the second engine in Parts J & K.
+- Evaluator AF2 refolding is gone. This is step 1 of the AF3/Protenix refactor; AF3 (Part K) becomes the canonical 2nd engine on big-VRAM hardware (Spark / H200), with Protenix (Part J) as the optional fallback for 24 GB GPUs.
 - Deleted files: `Evaluator/scripts/refold_af2.py`, `Evaluator/scripts/refold_Version6.py`, `Evaluator/binder_comparison/refolding/af2_runner.py`, `Evaluator/binder_comparison/cli/refold_af2.py`, `Evaluator/envs/binder-eval-af2.yml`
 - Installer no longer creates `binder-eval-af2` conda env (uninstall path still cleans legacy installs)
 - Schema: removed 8 `af2_*` fields from `StandardisedMetrics`, 2 from `PerResidueData`; pruned `af2_*` entries from `LOWER_IS_BETTER`, `ZSCORE_METRICS`; `model_weights` default now `{"boltz2": 1.0}`
