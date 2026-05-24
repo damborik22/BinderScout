@@ -15,8 +15,7 @@ conda/
 bin/
 
 # Installer logs — ephemeral, can be large
-install.log
-install_aarch.log
+install*.log
 
 # Claude Code internal files (settings, history, etc.) — but DO track .claude/skills/
 .claude/*
