@@ -475,8 +475,8 @@ Don't let the campaign drift past these. The wet-lab cost dominates total projec
 - `references/tools/` — engine knowledge per tool (the 10-tool DB: bindcraft, boltzgen, mosaic, proteina-complexa, protein-hunter, pxdesign, rfd3 + boltz2, protenix, alphafold3)
 - `references/tools/README.md` — cross-method bias matrix, philosophy, file index
 - `references/learnings.md` — empirical campaign lessons (formerly §9), distilled from 2VDY and earlier
-- `references/evaluation.md` — local cross-engine refold + iPSAE merge + ranking recipe (refolders called as code on Spark) *[to be written]*
-- `bindmaster-worker/` — sibling skill for the per-machine execution layer *[to be written]*
+- `references/evaluation.md` — local cross-engine refold + iPSAE merge + ranking recipe (refolders called as code on Spark)
+- `bindmaster-worker/` — sibling skill for the per-machine execution layer
 - `CLAUDE.md` (BindMaster repo root) — codebase reference, design decisions, conventions, per-tool gotchas
 - `STAGES.md` — pipeline implementation milestones
 - `bindmaster_examples/run_*.sh.template` — canonical patterns for tool run scripts
