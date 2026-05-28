@@ -2461,15 +2461,15 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
 
     # Engine selection flags (skip flags omit engines NOT selected)
     if not cfg.get("use_boltz", True):
-        lines.append('    --skip-boltz2 \\')
+        lines.append("    --skip-boltz2 \\")
     if not cfg.get("use_protenix", False):
-        lines.append('    --skip-protenix \\')
+        lines.append("    --skip-protenix \\")
     if not cfg.get("use_af3", False):
-        lines.append('    --skip-af3 \\')
+        lines.append("    --skip-af3 \\")
 
     primary = cfg.get("primary_engine", "boltz")
     lines += [
-        f'    --primary-engine {primary} \\',
+        f"    --primary-engine {primary} \\",
         "    --resume",
         "",
     ]

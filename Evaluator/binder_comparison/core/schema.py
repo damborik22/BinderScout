@@ -21,12 +21,16 @@ SourceTool = Literal[
 
 @dataclass
 class NativeMetrics:
-    """Tool-specific metrics not reproducible via standardised refolding.
+    """Design-time metrics produced by the source tool itself.
 
-    Currently populated only for BindCraft sequences, which go through
-    PyRosetta relaxation and interface analysis during design.
+    Each tool's `extract()` populates the fields prefixed by its name. The
+    serialization in `MetricResult.to_flat_dict()` adds `native_` to every
+    column, so e.g. `mosaic_ipsae_min_design` becomes `native_mosaic_ipsae_min_design`
+    in the final CSV. This lets us compare "what the design tool thinks about
+    its own output" vs "what the refold engines say" side by side.
     """
 
+    # ---- BindCraft (PyRosetta interface analysis) ----
     dG: float | None = None  # Rosetta interface energy (lower better)
     dSASA: float | None = None  # Buried surface area Å² (higher better)
     shape_complementarity: float | None = None  # Geometric interface fit 0–1 (higher better)
@@ -34,11 +38,54 @@ class NativeMetrics:
     hbonds_interface: float | None = None  # H-bond count at interface (higher better)
     hbonds_pct: float | None = None  # H-bonds as % of interface residues
     mpnn_recovery: float | None = None  # MPNN sequence recovery score
-    # BoltzGen-specific native ranking (per INVESTIGATION_RANKING_DISCREPANCY.md §5):
-    # `design_ipsae_min` is BG's own ipSAE from internal Boltz-1; ρ to Boltz-2 refold ipSAE = +0.84,
-    # whereas `final_rank` is a composite (diversity+pTM+hbond+RMSD) with ρ = -0.15 to refold ipSAE.
-    bg_design_ipsae_min: float | None = None  # BoltzGen's own ipSAE_min (use as native rank)
-    bg_final_rank: int | None = None  # BoltzGen's composite ranking (informational only)
+
+    # ---- BoltzGen (Boltz-1 internal eval) ----
+    # `bg_design_ipsae_min` is BG's own ipSAE; ρ vs Boltz-2 refold ipSAE = +0.84.
+    # `bg_final_rank` is a composite (diversity+pTM+hbond+RMSD); ρ vs refold ipSAE = -0.15.
+    # See INVESTIGATION_RANKING_DISCREPANCY.md §5.
+    bg_design_ipsae_min: float | None = None
+    bg_final_rank: int | None = None
+
+    # ---- Mosaic (design-time Boltz-2 from hallucination objective) ----
+    mosaic_ranking_loss: float | None = None  # Primary native rank (loss; lower better)
+    mosaic_iptm_design: float | None = None  # Design-time ipTM (from iptm_aux column)
+    mosaic_ipsae_min_design: float | None = None  # Design-time ipsae_min
+    mosaic_bt_iptm: float | None = None  # Directional binder→target pTM
+    mosaic_binder_ptm: float | None = None  # Binder monomer pTM
+    mosaic_plddt_aux: float | None = None  # Design-time pLDDT (avg)
+
+    # ---- PXDesign (AF2-IG + Protenix internal eval) ----
+    # `pxdesign_protenix_iptm` overlaps with the evaluator's Part-J Protenix refold,
+    # since PXDesign uses the same Protenix v0.5.0 internally. Both columns are kept
+    # because PXDesign's run is biased toward its own designs.
+    pxdesign_composite_score: float | None = None  # PXDesign's internal ranking
+    pxdesign_af2_iptm: float | None = None
+    pxdesign_af2_ipae: float | None = None  # PAE (lower better)
+    pxdesign_protenix_iptm: float | None = None
+    pxdesign_sequence_recovery: float | None = None  # MPNN recovery
+
+    # ---- Proteina-Complexa (AF2 self-eval during generation reward phase) ----
+    complexa_self_iptm: float | None = None  # self_complex_i_pTM
+    complexa_self_ipae: float | None = None  # self_complex_i_pAE (lower better)
+    complexa_self_plddt: float | None = None  # self_complex_pLDDT
+    complexa_self_scrmsd: float | None = None  # Self-consistency RMSD (lower better)
+    complexa_af2_reward: float | None = None  # AF2 reward (if used as reward model)
+    complexa_rf3_reward: float | None = None  # RF3 reward (if used as reward model)
+
+    # ---- Protein-Hunter (per-cycle Boltz-2 from hallucination loop) ----
+    # `iptm_cycle` is per-row; `iptm_best` is the best across cycles for that run.
+    protein_hunter_iptm_cycle: float | None = None
+    protein_hunter_iptm_best: float | None = None
+    protein_hunter_plddt: float | None = None
+    protein_hunter_sequence_recovery: float | None = None
+
+    # ---- RFD3 (foundry structural metadata + MPNN recovery) ----
+    # RFD3 produces backbones; the "metrics" are structural integrity checks rather
+    # than predictive confidence scores like the others.
+    rfd3_n_chainbreaks: int | None = None
+    rfd3_n_clashing: int | None = None
+    rfd3_helix_fraction: float | None = None
+    rfd3_sequence_recovery: float | None = None
 
 
 @dataclass

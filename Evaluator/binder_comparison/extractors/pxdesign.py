@@ -31,6 +31,24 @@ _CSV_CANDIDATES = [
 
 _SEQUENCE_COL = "sequence"
 
+# Schema field name → PXDesign CSV column name
+_NATIVE_COL_MAP = {
+    "pxdesign_composite_score": "composite_score",
+    "pxdesign_af2_iptm": "af2_iptm",
+    "pxdesign_af2_ipae": "af2_ipae",
+    "pxdesign_protenix_iptm": "ptx_iptm",
+    "pxdesign_sequence_recovery": "sequence_recovery",
+}
+
+
+def _safe_float(val) -> float | None:
+    if pd.isna(val) or val == "":
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
 
 class PXDesignExtractor(SequenceExtractor):
     """Extract binder sequences from PXDesign summary.csv."""
@@ -62,20 +80,29 @@ class PXDesignExtractor(SequenceExtractor):
 
             binder_id = self._make_id(row, idx)
 
-            # NativeMetrics left empty: PXDesign's own af2_iptm/ptx_iptm are
-            # biased (optimised against). Our refolding provides independent
-            # assessment via standardised Boltz-2 metrics (plus Protenix/AF3
-            # where configured).
+            # PXDesign's own af2_iptm / ptx_iptm are biased (optimised against),
+            # so they are recorded as NativeMetrics for side-by-side comparison
+            # with independent refolding (Boltz-2 / AF3 / Protenix).
+            native = self._extract_native(row)
             results.append(
                 ExtractedBinder(
                     binder_id=binder_id,
                     sequence=seq,
                     source_tool="pxdesign",
-                    native=NativeMetrics(),
+                    native=native,
                 )
             )
 
         return results
+
+    def _extract_native(self, row: pd.Series) -> NativeMetrics:
+        values: dict[str, float | None] = {}
+        for schema_field, csv_col in _NATIVE_COL_MAP.items():
+            if csv_col in row.index:
+                values[schema_field] = _safe_float(row[csv_col])
+            else:
+                values[schema_field] = None
+        return NativeMetrics(**values)
 
     def _find_csv(self, input_dir: Path) -> Path | None:
         for name in _CSV_CANDIDATES:

@@ -30,6 +30,15 @@ _CSV_CANDIDATES = [
 _SEQUENCE_COL = "sequence"
 _IS_TOP_COL = "is_top"
 
+_NATIVE_COL_MAP = {
+    "mosaic_ranking_loss": "ranking_loss",
+    "mosaic_iptm_design": "iptm_aux",
+    "mosaic_ipsae_min_design": "ipsae_min",
+    "mosaic_bt_iptm": "bt_iptm",
+    "mosaic_binder_ptm": "binder_ptm",
+    "mosaic_plddt_aux": "plddt_aux",
+}
+
 
 def _read_mosaic_csv(path: Path) -> pd.DataFrame:
     """Read a Mosaic designs.csv that may have rows with varying column counts.
@@ -103,13 +112,14 @@ class MosaicExtractor(SequenceExtractor):
                 continue
 
             binder_id = self._make_id(row, idx)
+            native = self._extract_native(row)
 
             results.append(
                 ExtractedBinder(
                     binder_id=binder_id,
                     sequence=seq,
                     source_tool="mosaic",
-                    native=NativeMetrics(),
+                    native=native,
                 )
             )
 
@@ -134,3 +144,21 @@ class MosaicExtractor(SequenceExtractor):
         if has_worker:
             return f"mosaic_{row['worker_id']}"
         return f"mosaic_{fallback_idx}"
+
+    def _extract_native(self, row: pd.Series) -> NativeMetrics:
+        def _get(col: str) -> float | None:
+            if col in row.index and pd.notna(row[col]):
+                try:
+                    return float(row[col])
+                except (TypeError, ValueError):
+                    return None
+            return None
+
+        return NativeMetrics(
+            mosaic_ranking_loss=_get(_NATIVE_COL_MAP["mosaic_ranking_loss"]),
+            mosaic_iptm_design=_get(_NATIVE_COL_MAP["mosaic_iptm_design"]),
+            mosaic_ipsae_min_design=_get(_NATIVE_COL_MAP["mosaic_ipsae_min_design"]),
+            mosaic_bt_iptm=_get(_NATIVE_COL_MAP["mosaic_bt_iptm"]),
+            mosaic_binder_ptm=_get(_NATIVE_COL_MAP["mosaic_binder_ptm"]),
+            mosaic_plddt_aux=_get(_NATIVE_COL_MAP["mosaic_plddt_aux"]),
+        )

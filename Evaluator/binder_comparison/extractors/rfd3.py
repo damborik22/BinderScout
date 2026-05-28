@@ -31,6 +31,27 @@ from .base import SequenceExtractor
 _CSV_CANDIDATES = ["sequences.csv", "results.csv", "designs.csv", "rfd3_designs.csv", "summary.csv"]
 _SEQUENCE_COLS = ("sequence", "Sequence", "designed_sequence", "binder_sequence")
 
+_NATIVE_COL_MAP = {
+    "rfd3_n_chainbreaks": "n_chainbreaks",
+    "rfd3_n_clashing": "n_clashing",
+    "rfd3_helix_fraction": "helix_fraction",
+    "rfd3_sequence_recovery": "sequence_recovery",
+}
+
+
+def _safe_float(val) -> float | None:
+    if pd.isna(val) or val == "":
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_int(val) -> int | None:
+    f = _safe_float(val)
+    return None if f is None else int(f)
+
 
 class RFD3Extractor(SequenceExtractor):
     """Extract binder sequences from an RFD3 / foundry output directory."""
@@ -73,10 +94,23 @@ class RFD3Extractor(SequenceExtractor):
                     binder_id=self._make_id(row, int(idx)),
                     sequence=seq,
                     source_tool="rfd3",
-                    native=NativeMetrics(),
+                    native=self._extract_native(row),
                 )
             )
         return results
+
+    def _extract_native(self, row: pd.Series) -> NativeMetrics:
+        def _get(col: str):
+            if col in row.index:
+                return row.get(col)
+            return None
+
+        return NativeMetrics(
+            rfd3_n_chainbreaks=_safe_int(_get(_NATIVE_COL_MAP["rfd3_n_chainbreaks"])),
+            rfd3_n_clashing=_safe_int(_get(_NATIVE_COL_MAP["rfd3_n_clashing"])),
+            rfd3_helix_fraction=_safe_float(_get(_NATIVE_COL_MAP["rfd3_helix_fraction"])),
+            rfd3_sequence_recovery=_safe_float(_get(_NATIVE_COL_MAP["rfd3_sequence_recovery"])),
+        )
 
     def _extract_from_fasta(self, input_dir: Path) -> list[ExtractedBinder]:
         from ..io.read import read_fasta
