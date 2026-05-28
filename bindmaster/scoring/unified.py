@@ -20,7 +20,6 @@ class ToolOrigin(str, Enum):
     BINDCRAFT = "bindcraft"
     BOLTZGEN = "boltzgen"
     MOSAIC = "mosaic"
-    RFAA = "rfaa"
     PXDESIGN = "pxdesign"
 
 
@@ -64,7 +63,7 @@ class BinderScore:
     passes_protenix_basic: bool | None = None
     passes_protenix_strict: bool | None = None
 
-    # --- Ligand-specific (RFDiffusionAA only) ---
+    # --- Ligand-specific ---
     ligand_ccd_code: str | None = None
     ligand_contact_residues: int | None = None
 
@@ -147,24 +146,3 @@ def from_pxdesign_record(
     )
 
 
-def from_rfaa_result(
-    pdb_path: str,
-    ligand_ccd: str,
-    contact_residues: int,
-    target_name: str,
-    binder_length: int,
-    design_id: str,
-) -> BinderScore:
-    """
-    Create a BinderScore for an RFAA-generated backbone.
-    Note: RFAA backbones have NO scoring — composite will be None.
-    """
-    return BinderScore(
-        design_id=design_id,
-        origin=ToolOrigin.RFAA,
-        pdb_path=pdb_path,
-        target_name=target_name,
-        binder_length=binder_length,
-        ligand_ccd_code=ligand_ccd,
-        ligand_contact_residues=contact_residues,
-    )

@@ -22,7 +22,6 @@ from ..extractors import (
     ProteinaComplexaExtractor,
     ProteinHunterExtractor,
     PXDesignExtractor,
-    RFAAExtractor,
     RFD3Extractor,
 )
 from ..io.write import write_fasta
@@ -53,12 +52,6 @@ def run(args: argparse.Namespace) -> None:
     if args.pxdesign:
         print(f"[extract] PXDesign: {args.pxdesign}")
         extracted = PXDesignExtractor().extract(args.pxdesign)
-        print(f"  → {len(extracted)} sequences")
-        all_binders.extend(extracted)
-
-    if args.rfaa:
-        print(f"[extract] RFAA: {args.rfaa}")
-        extracted = RFAAExtractor().extract(args.rfaa)
         print(f"  → {len(extracted)} sequences")
         all_binders.extend(extracted)
 
@@ -122,8 +115,7 @@ def add_parser(subparsers) -> None:
     p.add_argument("--boltzgen", metavar="DIR", help="BoltzGen output directory")
     p.add_argument("--mosaic", metavar="DIR", help="Mosaic output directory (containing designs.csv)")
     p.add_argument("--pxdesign", metavar="DIR", help="PXDesign output directory (containing summary.csv)")
-    p.add_argument("--rfaa", metavar="DIR", help="RFAA output directory (legacy — RFD3 preferred)")
-    p.add_argument("--rfd3", metavar="DIR", help="RFD3 / foundry output directory (replaces RFAA)")
+    p.add_argument("--rfd3", metavar="DIR", help="RFD3 / foundry output directory")
     p.add_argument(
         "--proteina-complexa",
         metavar="DIR",

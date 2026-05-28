@@ -1,10 +1,10 @@
 #!/bin/bash
 # BindMaster Installer
-# Installs BindCraft, BoltzGen, Mosaic, RFAA, PXDesign, Proteina-Complexa,
-# Protein-Hunter, and/or the Evaluator.
+# Installs BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa,
+# Protein-Hunter, RFD3, and/or the Evaluator. AF3 is opt-in (--tool af3).
 #
 # Usage:
-#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|rfaa|pxdesign|proteina-complexa|protein-hunter|all] [--cuda VERSION] [--skip-examples] [--yes]
+#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|af3|all] [--cuda VERSION] [--skip-examples] [--yes]
 #   bindmaster install [same options]
 #
 # With no --tool flag, an interactive menu lets you choose which tools to install.
@@ -26,10 +26,6 @@ BINDCRAFT_COMMIT="7cd4ace"
 BOLTZGEN_COMMIT="da0f092"
 MOSAIC_COMMIT="0599248"
 
-RFAA_REPO="https://github.com/baker-laboratory/rf_diffusion_all_atom.git"
-RFAA_DIR="${BINDMASTER_DIR}/rf_diffusion_all_atom"
-LIGANDMPNN_REPO="https://github.com/dauparas/LigandMPNN.git"
-LIGANDMPNN_DIR="${BINDMASTER_DIR}/LigandMPNN"
 PXDESIGN_REPO="https://github.com/bytedance/PXDesign.git"
 PXDESIGN_COMMIT="HEAD"
 PXDESIGN_DIR="${BINDMASTER_DIR}/PXDesign"
@@ -39,7 +35,7 @@ PROTEINA_COMPLEXA_DIR="${BINDMASTER_DIR}/Proteina-Complexa"
 PROTEIN_HUNTER_REPO="https://github.com/yehlincho/Protein-Hunter.git"
 PROTEIN_HUNTER_COMMIT="d4bd9515882c2aa81e97f3d3bf7f42247a9fe80c"
 PROTEIN_HUNTER_DIR="${BINDMASTER_DIR}/Protein-Hunter"
-# RFD3 / Foundry (Baker lab's RFdiffusion3; replaces RFAA).
+# RFD3 / Foundry (Baker lab's RFdiffusion3, BSD-3, commercial-use OK).
 # Installed from PyPI as rc-foundry — no clone needed. Variables kept for
 # documentation + uninstall (FOUNDRY_DIR is cleaned on uninstall if present).
 # shellcheck disable=SC2034
@@ -72,12 +68,14 @@ DO_BINDCRAFT=false
 DO_BOLTZGEN=false
 DO_MOSAIC=false
 DO_EVALUATOR=false
-DO_RFAA=false           # legacy — opt-in via --tool rfaa; RFD3 is the default all-atom tool
 DO_PXDESIGN=false
 DO_PROTEINA_COMPLEXA=false
 DO_PROTEIN_HUNTER=false
 DO_RFD3=false
 DO_AF3=false            # opt-in via --tool af3 (>=100 GB GPU memory required; weights not bundled)
+
+# Note: legacy RFAA support was removed entirely (see CHANGELOG).
+# Use RFD3 (--tool rfd3) for all-atom diffusion-based binder design.
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -86,8 +84,6 @@ while [[ $# -gt 0 ]]; do
             TOOL_SPECIFIED=true
             case "${2,,}" in
                 all)
-                    # "all" installs current-generation tools. RFAA is legacy
-                    # (replaced by RFD3); opt in explicitly with --tool rfaa.
                     DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true; DO_PROTEINA_COMPLEXA=true; DO_PROTEIN_HUNTER=true; DO_RFD3=true ;;
                 bindcraft)
                     DO_BINDCRAFT=true ;;
@@ -97,8 +93,6 @@ while [[ $# -gt 0 ]]; do
                     DO_MOSAIC=true ;;
                 evaluator)
                     DO_EVALUATOR=true ;;
-                rfaa)
-                    DO_RFAA=true ;;
                 rfd3|foundry)
                     DO_RFD3=true ;;
                 pxdesign)
@@ -110,7 +104,7 @@ while [[ $# -gt 0 ]]; do
                 af3|alphafold3|alphafold)
                     DO_AF3=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfaa, rfd3, pxdesign, proteina-complexa, protein-hunter, af3${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfd3, pxdesign, proteina-complexa, protein-hunter, af3${RESET}"
                     exit 1
                     ;;
             esac
@@ -151,7 +145,6 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes]
                                        protein-hunter, rfd3
                   bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3
                                        install one current-generation tool
-                  rfaa                 legacy RFDiffusionAA — opt-in only; replaced by rfd3
                   af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
                                        requires >=100 GB GPU memory (H200/GH200/Spark)
                                        and gated AF3 weights you obtain from
@@ -498,10 +491,6 @@ is_evaluator_installed() {
     [[ -d "${EVALUATOR_DIR}" ]] && [[ -f "${EVALUATOR_DIR}/envs/mosaic_venv_path" ]]
 }
 
-is_rfaa_installed() {
-    [[ -d "${RFAA_DIR}" ]] && env_exists bindmaster_rfaa
-}
-
 is_pxdesign_installed() {
     [[ -d "${PXDESIGN_DIR}" ]] && env_exists bindmaster_pxdesign
 }
@@ -524,7 +513,7 @@ print_tool_status() {
     echo ""
     echo -e "${BOLD}=== Installed Tools ===${RESET}"
     local _status _icon
-    for _tool in BindCraft BoltzGen Mosaic Evaluator RFAA PXDesign Proteina_Complexa; do
+    for _tool in BindCraft BoltzGen Mosaic Evaluator PXDesign Proteina_Complexa; do
         local _fn="is_${_tool,,}_installed"
         if "${_fn}" 2>/dev/null; then
             _icon="${GREEN}✓${RESET}"; _status="installed"
@@ -542,8 +531,8 @@ print_tool_status() {
 # DO_BINDCRAFT / DO_BOLTZGEN / DO_MOSAIC based on user choices.
 
 select_tools_interactive() {
-    # Default: current-generation tools selected. RFAA is legacy and not shown
-    # here; opt in with `--tool rfaa` on the CLI. RFD3 replaces it in the menu.
+    # Default: current-generation tools selected. AF3 is opt-in
+    # (--tool af3 on the CLI) due to its >=100 GB GPU memory requirement.
     local sel_bc=true
     local sel_bg=true
     local sel_mo=true
@@ -558,8 +547,8 @@ select_tools_interactive() {
         "Binder design via AlphaFold2 (conda, Python 3.10)"
         "Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)"
         "JAX-based protein design with Marimo notebooks (uv venv)"
-        "Evaluate binders: refold with Boltz-2 (+ Protenix on x86, AF3 on aarch64), ranked report (requires Mosaic)"
-        "RFD3 / foundry — all-atom diffusion for protein + ligand + NA binders (conda, replaces RFAA)"
+        "Evaluate binders: refold with Boltz-2 (+ Protenix, AF3 if installed), ranked report (requires Mosaic)"
+        "RFD3 / foundry — all-atom diffusion for protein + ligand + NA binders (conda)"
         "Protenix-based de novo binder design (conda)"
         "NVIDIA flow matching + test-time compute binder design (uv venv)"
         "Protein-Hunter — Boltz/Chai hallucination: protein/cyclic/ligand/DNA/RNA binders (conda)"
@@ -582,7 +571,6 @@ select_tools_interactive() {
         echo ""
         echo -e "${BOLD}${CYAN}  Select tools to install${RESET}"
         echo -e "  Type a number to toggle selection, then press Enter when done."
-        echo -e "  ${YELLOW}(note: RFAA is legacy — use ${CYAN}--tool rfaa${RESET}${YELLOW} on the CLI to opt in)${RESET}"
         echo ""
         local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_rfd3" "$sel_pxd" "$sel_pc" "$sel_ph")
         for i in 0 1 2 3 4 5 6 7; do
@@ -642,7 +630,6 @@ select_tools_interactive() {
     [[ "$DO_BOLTZGEN"  == true ]] && echo -e "    ${GREEN}✓${RESET} BoltzGen"
     [[ "$DO_MOSAIC"    == true ]] && echo -e "    ${GREEN}✓${RESET} Mosaic"
     [[ "$DO_EVALUATOR" == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
-    [[ "$DO_RFAA"      == true ]] && echo -e "    ${YELLOW}✓ RFAA (legacy)${RESET}"
     [[ "$DO_RFD3"      == true ]] && echo -e "    ${GREEN}✓${RESET} RFD3"
     [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
     [[ "$DO_PROTEINA_COMPLEXA" == true ]] && echo -e "    ${GREEN}✓${RESET} Proteina-Complexa"
@@ -1178,113 +1165,6 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/evaluate"
 }
 
-# ─── RFAA + LigandMPNN ──────────────────────────────────────────────────────
-
-install_rfaa() {
-    print_step "Installing RFDiffusionAA + LigandMPNN (legacy)"
-    print_warn "RFAA is LEGACY in this BindMaster release."
-    print_warn "  Upstream has been dormant since 2024-03; Baker lab moved to"
-    print_warn "  RFdiffusion3 (now available via --tool rfd3)."
-    print_warn "  RFAA is kept for reproducibility of existing runs; see"
-    print_warn "  docs/rfaa_manual_reinstall.md for long-term maintenance notes."
-
-    # Clone RFAA
-    if [[ -d "${RFAA_DIR}" ]]; then
-        print_ok "RFAA already cloned at ${RFAA_DIR}"
-    else
-        run_logged "Cloning RFAA" \
-            git clone "${RFAA_REPO}" "${RFAA_DIR}" \
-            || { print_fail "Failed to clone RFAA"; return 1; }
-    fi
-
-    # Init submodules
-    run_logged "RFAA submodules" \
-        bash -c "cd '${RFAA_DIR}' && git submodule init && git submodule update" \
-        || print_warn "RFAA submodule init failed (may not have submodules)"
-
-    # Create conda env
-    print_step "Creating bindmaster_rfaa conda environment"
-    run_logged "Creating bindmaster_rfaa env" \
-        "${CONDA_CMD}" create -n bindmaster_rfaa -y python=3.11 \
-            "pytorch>=2.2" "pytorch-cuda=12.4" gcc_linux-64 gxx_linux-64 \
-            -c pytorch -c nvidia -c conda-forge \
-        || { print_fail "Failed to create bindmaster_rfaa env"; return 1; }
-
-    # Install RFAA dependencies (RFAA is not pip-installable; used via PYTHONPATH)
-    # DGL must be installed from the CUDA wheel repo — plain PyPI gives CPU-only
-    run_logged "Installing RFAA dependencies" \
-        "${CONDA_CMD}" run -n bindmaster_rfaa \
-        pip install -q hydra-core omegaconf icecream scipy "numpy<2" pandas tqdm fire assertpy deepdiff opt-einsum e3nn ml_collections dm-tree "dgl==1.1.3+cu121" -f https://data.dgl.ai/wheels/cu121/repo.html "torchdata==0.7.1" prody openbabel-wheel \
-        || print_warn "Some RFAA deps failed — may need manual install"
-
-    # Install LigandMPNN
-    if [[ -d "${LIGANDMPNN_DIR}" ]]; then
-        print_ok "LigandMPNN already cloned at ${LIGANDMPNN_DIR}"
-    else
-        run_logged "Cloning LigandMPNN" \
-            git clone "${LIGANDMPNN_REPO}" "${LIGANDMPNN_DIR}" \
-            || { print_fail "Failed to clone LigandMPNN"; return 1; }
-    fi
-
-    print_ok "LigandMPNN cloned (used via PYTHONPATH, not pip-installable)"
-
-    # Download LigandMPNN weights
-    if [[ -d "${LIGANDMPNN_DIR}/model_params" ]]; then
-        print_ok "LigandMPNN weights already present"
-    else
-        run_logged "Downloading LigandMPNN weights" \
-            bash -c "cd '${LIGANDMPNN_DIR}' && bash get_model_params.sh ./model_params" \
-            || print_warn "LigandMPNN weights download failed — download manually later"
-    fi
-
-    # Download RFAA weights
-    local rfaa_weights="${RFAA_DIR}/weights"
-    local rfaa_weights_file="${rfaa_weights}/RFDiffusionAA_paper_weights.pt"
-    if [[ -f "${rfaa_weights_file}" ]]; then
-        print_ok "RFAA weights already present"
-    else
-        mkdir -p "${rfaa_weights}"
-        run_logged "Downloading RFAA weights" \
-            wget -q -O "${rfaa_weights_file}" \
-            "http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_weights.pt" \
-            || print_warn "RFAA weights download failed — retry: wget -O ${rfaa_weights_file} http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_weights.pt"
-    fi
-
-    # ── Post-install patches for known upstream issues ──────────────────────
-
-    # Patch: idealize_backbone.py — handle protein-only designs (0 ligands)
-    local idealize="${RFAA_DIR}/idealize_backbone.py"
-    if [[ -f "${idealize}" ]] && grep -q "assert len(ligands) == 1" "${idealize}"; then
-        sed -i 's/assert len(ligands) == 1.*/ligands = list(ligands)/' "${idealize}"
-        sed -i '/ligands = list(ligands)/a\    if len(ligands) == 0:\n        indep.write_pdb(outpath)\n    elif len(ligands) == 1:\n        indep.write_pdb(outpath, lig_name=ligands[0])\n    else:\n        raise ValueError(f"Found >1 ligand: {ligands}")' "${idealize}"
-        print_ok "Patched idealize_backbone.py for protein-only designs"
-    fi
-
-    # Patch: openfold residue_constants.py — numpy 2.x removed np.int alias
-    local resconst="${LIGANDMPNN_DIR}/openfold/np/residue_constants.py"
-    if [[ -f "${resconst}" ]] && grep -q "dtype=np.int)" "${resconst}"; then
-        sed -i 's/dtype=np\.int)/dtype=np.int64)/g' "${resconst}"
-        print_ok "Patched residue_constants.py: np.int → np.int64"
-    fi
-
-    # Smoke test
-    smoke_test "RFAA import check" \
-        "${CONDA_CMD}" run -n bindmaster_rfaa python -c "import torch; print('RFAA env OK')" \
-        || return 1
-
-    # Shortcut
-    mkdir -p "${SHORTCUTS_DIR}"
-    cat > "${SHORTCUTS_DIR}/rfaa" << RFAAEOF
-#!/bin/bash
-# BindMaster RFAA shortcut — adds RFAA + LigandMPNN to PYTHONPATH
-export PYTHONPATH="${RFAA_DIR}:${LIGANDMPNN_DIR}\${PYTHONPATH:+:\$PYTHONPATH}"
-exec ${CONDA_CMD} run -n bindmaster_rfaa bash
-RFAAEOF
-    chmod +x "${SHORTCUTS_DIR}/rfaa"
-
-    print_ok "RFAA + LigandMPNN installation complete"
-}
-
 # ─── PXDesign ────────────────────────────────────────────────────────────────
 
 install_pxdesign() {
@@ -1535,6 +1415,150 @@ LNEOF
             || print_warn "binder-compare install into bindmaster_pxdesign failed — Protenix refolding will be unavailable"
     fi
 
+    # ── Conda env activate.d hook for CUDA-header CPATH + CUTLASS_PATH ──────
+    #
+    # Protenix's `fastfold_layer_norm_cuda` extension and DeepSpeed4Science's
+    # `DS4Sci_EvoformerAttention` kernel are both JIT-compiled at first import.
+    # The conda env already installs `cuda-cudart-dev` and pip-side `nvidia-*`
+    # wheels, but those put their headers under non-standard paths:
+    #   - $CONDA_PREFIX/targets/x86_64-linux/include/        (cuda-cudart-dev)
+    #   - $CONDA_PREFIX/lib/python3.11/site-packages/nvidia/<lib>/include/  (pip nvidia-*)
+    # The JIT build only searches $CONDA_PREFIX/include by default, so it
+    # fails on cuda_runtime_api.h, cublas_v2.h, cusolverDn.h, etc.
+    #
+    # DS4Sci EvoformerAttention additionally needs NVIDIA CUTLASS v3.5.1
+    # headers (header-only library at ~/cutlass).
+    #
+    # This activate.d hook sets CPATH (preserving existing) and CUTLASS_PATH
+    # whenever the env is activated, with CONDA_BACKUP_ for clean deactivation.
+    # Permanent fix for the protenix+DS4Sci JIT trap that bit the ApoE4
+    # BinderScout / PXDesign-BM4 campaign 2026-05-27 / 2026-05-28.
+    print_step "Setting up CUDA-header CPATH + CUTLASS_PATH activate.d hook"
+
+    # Clone CUTLASS v3.5.1 (header-only, ~150 MB) if not already present.
+    local CUTLASS_DIR="${HOME}/cutlass"
+    if [[ -d "${CUTLASS_DIR}/include/cutlass" ]]; then
+        print_ok "CUTLASS already present at ${CUTLASS_DIR}"
+    else
+        run_logged "Cloning NVIDIA CUTLASS v3.5.1 (header-only)" \
+            git clone --depth 1 --branch v3.5.1 \
+            https://github.com/NVIDIA/cutlass.git "${CUTLASS_DIR}" \
+            || print_warn "CUTLASS clone failed — DS4Sci_EvoformerAttention JIT will not work"
+    fi
+
+    # Resolve the conda env prefix so we can write activate.d/deactivate.d.
+    local PXD_ENV_PREFIX
+    PXD_ENV_PREFIX=$("${CONDA_CMD}" run -n bindmaster_pxdesign printenv CONDA_PREFIX 2>/dev/null)
+    if [[ -z "${PXD_ENV_PREFIX}" || ! -d "${PXD_ENV_PREFIX}" ]]; then
+        print_warn "Could not resolve bindmaster_pxdesign CONDA_PREFIX — skipping activate.d hook"
+    else
+        mkdir -p "${PXD_ENV_PREFIX}/etc/conda/activate.d" \
+                 "${PXD_ENV_PREFIX}/etc/conda/deactivate.d"
+
+        cat > "${PXD_ENV_PREFIX}/etc/conda/activate.d/bindmaster_pxd_headers.sh" << 'ACTEOF'
+# BindMaster: expose CUDA + nvidia-* headers + CUTLASS to JIT builds.
+# Written by install/install.sh (install_pxdesign). Permanent fix for the
+# protenix fastfold_layer_norm_cuda + DS4Sci_EvoformerAttention JIT-compile traps
+# documented in the ApoE4 BinderScout campaign (2026-05-27/28).
+if [ -n "${CPATH:-}" ]; then
+    export CONDA_BACKUP_CPATH="${CPATH}"
+fi
+_BM_NVIDIA_INC_ROOT="${CONDA_PREFIX}/lib/python3.11/site-packages/nvidia"
+_BM_CPATH_PARTS="${CONDA_PREFIX}/targets/x86_64-linux/include"
+for _bm_sub in cublas cuda_cupti cuda_nvcc cuda_nvrtc cuda_runtime cudnn cufft curand cusolver cusparse nccl nvjitlink nvtx; do
+    if [ -d "${_BM_NVIDIA_INC_ROOT}/${_bm_sub}/include" ]; then
+        _BM_CPATH_PARTS="${_BM_CPATH_PARTS}:${_BM_NVIDIA_INC_ROOT}/${_bm_sub}/include"
+    fi
+done
+export CPATH="${_BM_CPATH_PARTS}${CPATH:+:${CPATH}}"
+unset _BM_NVIDIA_INC_ROOT _BM_CPATH_PARTS _bm_sub
+
+if [ -n "${CUTLASS_PATH:-}" ]; then
+    export CONDA_BACKUP_CUTLASS_PATH="${CUTLASS_PATH}"
+fi
+if [ -d "${HOME}/cutlass/include/cutlass" ]; then
+    export CUTLASS_PATH="${HOME}/cutlass"
+fi
+ACTEOF
+
+        cat > "${PXD_ENV_PREFIX}/etc/conda/deactivate.d/bindmaster_pxd_headers.sh" << 'DEACTEOF'
+# BindMaster: restore CPATH / CUTLASS_PATH on deactivation.
+if [ -n "${CONDA_BACKUP_CPATH:-}" ]; then
+    export CPATH="${CONDA_BACKUP_CPATH}"
+    unset CONDA_BACKUP_CPATH
+else
+    unset CPATH
+fi
+if [ -n "${CONDA_BACKUP_CUTLASS_PATH:-}" ]; then
+    export CUTLASS_PATH="${CONDA_BACKUP_CUTLASS_PATH}"
+    unset CONDA_BACKUP_CUTLASS_PATH
+else
+    unset CUTLASS_PATH
+fi
+DEACTEOF
+        print_ok "Wrote activate.d/deactivate.d hooks (CPATH + CUTLASS_PATH)"
+    fi
+
+    # ── Create missing unversioned dev .so symlinks ─────────────────────────
+    #
+    # conda-forge's `libcurand`, `libcusolver`, `libcufft`, etc. ship only the
+    # versioned shared objects (libcurand.so.10, libcurand.so.10.3.5.147). The
+    # dev symlink `libcurand.so` (which the linker `-lcurand` looks for) is in
+    # the matching `lib*-dev` packages which the env does not currently pull
+    # in. Without it, DeepSpeed4Science evoformer_attn JIT-link fails with
+    # `ld: cannot find -lcurand`. Create the unversioned symlinks for every
+    # lib*.so.<MAJOR> in $CONDA_PREFIX/lib.
+    # Permanent fix for the linker trap that bit the ApoE4 BinderScout
+    # campaign 2026-05-28 (DS4Sci evoformer_attn JIT-link).
+    if [[ -n "${PXD_ENV_PREFIX:-}" && -d "${PXD_ENV_PREFIX}/lib" ]]; then
+        print_step "Creating missing unversioned .so dev symlinks in env lib/"
+        local _bm_so_created=0
+        local _so _base _name _unver
+        shopt -s nullglob
+        for _so in "${PXD_ENV_PREFIX}"/lib/lib*.so.*; do
+            [[ -L "$_so" || -f "$_so" ]] || continue
+            _base=$(basename "$_so")
+            # Only single .so.<digits> segments (libfoo.so.10), NOT libfoo.so.10.3.5.147.
+            case "$_base" in
+                *.so.[0-9]|*.so.[0-9][0-9]|*.so.[0-9][0-9][0-9]) ;;
+                *) continue ;;
+            esac
+            _name=${_base%.so.*}
+            _unver="${PXD_ENV_PREFIX}/lib/${_name}.so"
+            if [[ ! -e "$_unver" ]]; then
+                ln -s "$_base" "$_unver"
+                _bm_so_created=$((_bm_so_created + 1))
+            fi
+        done
+        shopt -u nullglob
+        print_ok "Created ${_bm_so_created} unversioned .so dev symlinks"
+    fi
+
+    # Smoke test: confirm both JIT kernels can be loaded under the env.
+    # This catches missing CUTLASS or missing CUDA headers at install time
+    # instead of 5 h into a sweep.
+    run_logged "PXDesign JIT-kernel smoke test (protenix layer_norm + DS4Sci EvoformerAttention)" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign python - << 'JITEOF'
+import sys
+try:
+    import protenix  # triggers fastfold_layer_norm_cuda JIT compile
+    import torch
+    from deepspeed.ops.deepspeed4science import DS4Sci_EvoformerAttention
+    # DS4Sci_EvoformerAttention asserts seq_len > 16; use 32.
+    B, N, S, H, D = 1, 4, 32, 4, 8
+    q = torch.randn(B, N, S, H, D, device="cuda", dtype=torch.bfloat16)
+    k = q.clone(); v = q.clone()
+    b0 = torch.zeros(B, N, 1, 1, S, device="cuda", dtype=torch.bfloat16)
+    b1 = torch.zeros(B, 1, H, S, S, device="cuda", dtype=torch.bfloat16)
+    _ = DS4Sci_EvoformerAttention(q, k, v, [b0, b1])
+    print("JIT smoke OK: protenix import + DS4Sci EvoformerAttention compiled and ran.")
+except Exception as e:
+    print(f"JIT smoke FAILED: {type(e).__name__}: {e}", file=sys.stderr)
+    raise
+JITEOF
+    # Soft-fail: print_warn if smoke fails (installer still completes; user
+    # can rerun PXDesign installation after fixing the underlying issue).
+
     # Shortcut
     mkdir -p "${SHORTCUTS_DIR}"
     cat > "${SHORTCUTS_DIR}/pxdesign" << PXDEOF
@@ -1571,12 +1595,6 @@ _link_complexa_shared_weights() {
         print_ok "ProteinMPNN weights → PXDesign/tool_weights/mpnn (symlink)"
     fi
 
-    # LigandMPNN model_params from BindMaster's LigandMPNN install
-    local lmpnn_src="${BINDMASTER_DIR}/LigandMPNN/model_params"
-    if [[ -d "${lmpnn_src}" ]] && [[ ! -e "${cm}/LigandMPNN/model_params" ]]; then
-        ln -sfn "${lmpnn_src}" "${cm}/LigandMPNN/model_params"
-        print_ok "LigandMPNN weights → LigandMPNN/model_params (symlink)"
-    fi
 }
 
 # Install foldseek and mmseqs2 static binaries into Complexa's venv.
@@ -1822,7 +1840,7 @@ EOF
 }
 
 # ─── RFD3 / Foundry (RosettaCommons) ─────────────────────────────────────────
-# Butcher et al. 2025. BSD-3-Clause. PyPI: `rc-foundry`. Replaces RFAA entirely
+# Butcher et al. 2025. BSD-3-Clause. PyPI: `rc-foundry`.
 # — no DGL, no SE3-Transformer, works on aarch64 / DGX Spark. Weights live
 # under BindMaster/weights/foundry.
 
@@ -1965,19 +1983,12 @@ install_protein_hunter() {
         pip install -q "git+https://github.com/sokrypton/chai-lab.git" \
         || print_warn "chai-lab install failed — only the Boltz-2 edition of Protein-Hunter will work"
 
-    # Weight sharing: reuse LigandMPNN weights from RFAA install if present.
-    # Protein-Hunter vendors LigandMPNN source in-repo but expects model_params/ locally.
+    # Protein-Hunter vendors LigandMPNN source in-repo and downloads weights into model_params/.
     local ph_mpnn_dir="${PROTEIN_HUNTER_DIR}/LigandMPNN/model_params"
-    if [[ -d "${LIGANDMPNN_DIR}/model_params" && ! -d "${ph_mpnn_dir}" ]]; then
-        mkdir -p "$(dirname "${ph_mpnn_dir}")"
-        ln -sfn "${LIGANDMPNN_DIR}/model_params" "${ph_mpnn_dir}"
-        print_ok "LigandMPNN weights → ${ph_mpnn_dir} (symlink to RFAA install)"
-    elif [[ ! -d "${ph_mpnn_dir}" ]]; then
-        if [[ -f "${PROTEIN_HUNTER_DIR}/LigandMPNN/get_model_params.sh" ]]; then
-            run_logged "Downloading LigandMPNN weights (Protein-Hunter)" \
-                bash -c "cd '${PROTEIN_HUNTER_DIR}/LigandMPNN' && bash get_model_params.sh ./model_params" \
-                || print_warn "LigandMPNN weights download failed — download manually"
-        fi
+    if [[ ! -d "${ph_mpnn_dir}" ]] && [[ -f "${PROTEIN_HUNTER_DIR}/LigandMPNN/get_model_params.sh" ]]; then
+        run_logged "Downloading LigandMPNN weights (Protein-Hunter)" \
+            bash -c "cd '${PROTEIN_HUNTER_DIR}/LigandMPNN' && bash get_model_params.sh ./model_params" \
+            || print_warn "LigandMPNN weights download failed — download manually"
     fi
 
     # Boltz-2 weight cache (~/.boltz) — shared with Mosaic if Mosaic populates it first.
@@ -2180,15 +2191,6 @@ uninstall_tool() {
             rm -f "${SHORTCUTS_DIR}/evaluate"
             print_ok "Evaluator uninstalled"
             ;;
-        rfaa)
-            print_step "Uninstalling RFAA"
-            env_exists bindmaster_rfaa && run_logged "Removing bindmaster_rfaa conda env" \
-                "${CONDA_CMD}" env remove -n bindmaster_rfaa -y
-            rm -f "${SHORTCUTS_DIR}/rfaa"
-            [[ -d "${RFAA_DIR}" ]] && { rm -rf "${RFAA_DIR}"; print_ok "Removed ${RFAA_DIR}"; }
-            [[ -d "${LIGANDMPNN_DIR}" ]] && { rm -rf "${LIGANDMPNN_DIR}"; print_ok "Removed ${LIGANDMPNN_DIR}"; }
-            print_ok "RFAA uninstalled"
-            ;;
         pxdesign)
             print_step "Uninstalling PXDesign"
             env_exists bindmaster_pxdesign && run_logged "Removing bindmaster_pxdesign conda env" \
@@ -2287,7 +2289,6 @@ main() {
         [[ "${DO_BOLTZGEN}"  == true ]] && { uninstall_tool boltzgen   || failed_uninstalls+=("BoltzGen");  }
         [[ "${DO_MOSAIC}"    == true ]] && { uninstall_tool mosaic     || failed_uninstalls+=("Mosaic");    }
         [[ "${DO_EVALUATOR}" == true ]] && { uninstall_tool evaluator  || failed_uninstalls+=("Evaluator"); }
-        [[ "${DO_RFAA}"      == true ]] && { uninstall_tool rfaa      || failed_uninstalls+=("RFAA"); }
         [[ "${DO_PXDESIGN}"  == true ]] && { uninstall_tool pxdesign  || failed_uninstalls+=("PXDesign"); }
         [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { uninstall_tool proteina-complexa || failed_uninstalls+=("Proteina-Complexa"); }
         [[ "${DO_PROTEIN_HUNTER}" == true ]] && { uninstall_tool protein-hunter || failed_uninstalls+=("Protein-Hunter"); }
@@ -2324,7 +2325,6 @@ main() {
     [[ "${DO_BOLTZGEN}"  == true ]] && (( total++ ))
     [[ "${DO_MOSAIC}"    == true ]] && (( total++ ))
     [[ "${DO_EVALUATOR}" == true ]] && (( total++ ))
-    [[ "${DO_RFAA}"      == true ]] && (( total++ ))
     [[ "${DO_PXDESIGN}"  == true ]] && (( total++ ))
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && (( total++ ))
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && (( total++ ))
@@ -2338,7 +2338,6 @@ main() {
     [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
     [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
-    [[ "${DO_RFAA}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFAA (legacy)${RESET}"; install_rfaa || failed_tools+=("RFAA"); }
     [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}";      install_rfd3      || failed_tools+=("RFD3"); }
     [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
@@ -2368,7 +2367,6 @@ main() {
     [[ "${DO_BOLTZGEN}"  == true ]] && echo -e "  ${GREEN}boltzgen${RESET}   — open BoltzGen shell"
     [[ "${DO_MOSAIC}"    == true ]] && echo -e "  ${GREEN}mosaic${RESET}     — open Mosaic shell"
     [[ "${DO_EVALUATOR}" == true ]] && echo -e "  ${GREEN}evaluate${RESET}   — launch evaluation wizard"
-    [[ "${DO_RFAA}"      == true ]] && echo -e "  ${YELLOW}rfaa${RESET}       — open RFAA shell ${YELLOW}(legacy)${RESET}"
     [[ "${DO_RFD3}"      == true ]] && echo -e "  ${GREEN}rfd3${RESET}       — run RFD3 design / open env shell"
     [[ "${DO_PXDESIGN}"  == true ]] && echo -e "  ${GREEN}pxdesign${RESET}   — open PXDesign shell"
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && echo -e "  ${GREEN}complexa${RESET}   — open Proteina-Complexa shell"

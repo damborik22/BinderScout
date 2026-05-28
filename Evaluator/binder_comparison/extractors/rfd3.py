@@ -1,7 +1,7 @@
 """RFD3 (foundry) sequence extractor.
 
-RFD3 (RosettaCommons/foundry, Butcher et al. 2025) replaces RFAA. The Hydra-
-driven `rfd3 design` CLI writes per-trajectory outputs beneath the out_dir,
+RFD3 (RosettaCommons/foundry, Butcher et al. 2025) is BindMaster's all-atom
+diffusion tool. The Hydra-driven `rfd3 design` CLI writes per-trajectory outputs beneath the out_dir,
 typically including PDB files and a results manifest.
 
 This extractor is defensive about the exact layout (the foundry output schema

@@ -32,7 +32,6 @@ bindmaster install --tool all
 | `BindCraft` | BindCraft AF2 + MPNN design | 3.10 |
 | `BoltzGen` | BoltzGen Boltz-1 design | 3.12 |
 | Mosaic `.venv` (uv) | Mosaic hallucination + Boltz-2 refolding | 3.12 |
-| `bindmaster_rfaa` | RFAA + LigandMPNN | 3.11 |
 | `bindmaster_pxdesign` | PXDesign (Protenix) | 3.11 |
 | Proteina-Complexa `.venv` (uv) | Flow matching binder design | 3.12 |
 | `binder-eval` | Evaluator extract + report | 3.10 |
