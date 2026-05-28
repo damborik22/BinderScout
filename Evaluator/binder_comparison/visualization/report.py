@@ -1228,6 +1228,7 @@ def generate_report(
     tool_pdb_dirs: dict[str, str | Path] | None = None,
     boltz2_results_dir: str | Path | None = None,
     primary_engine: str = "boltz",
+    top_per_tool: int = 10,
 ) -> None:
     """Generate and write the HTML report.
 
@@ -1294,13 +1295,15 @@ def generate_report(
     # subplot per available engine. Falls back to legacy radar if df lacks
     # the per-engine PAE-ipsae columns.
     try:
-        radar_fig = plot_radar_per_engine(sort_df, top_n=10)
+        radar_fig = plot_radar_per_engine(sort_df, top_n=top_per_tool)
     except Exception:  # pragma: no cover - defensive
         radar_fig = plot_radar_chart(summary)
     # Second radar: fixed per-tool selection by *our refold rank* (primary engine),
     # then measure each engine on the same designs.
     try:
-        radar_fixed_fig = plot_radar_per_engine_uniform_selection(sort_df, primary_engine=primary_engine, top_n=10)
+        radar_fixed_fig = plot_radar_per_engine_uniform_selection(
+            sort_df, primary_engine=primary_engine, top_n=top_per_tool
+        )
     except Exception:  # pragma: no cover - defensive
         radar_fixed_fig = None
 
@@ -1414,10 +1417,10 @@ def generate_report(
                                             .reindex(ids_in_top)
                                             .reset_index()
                                             .dropna(subset=["sequence"])
-                                            .head(10)
+                                            .head(top_per_tool)
                                         )
                                     else:
-                                        refold_df = sort_df[sort_df["source_tool"] == tool].head(10)
+                                        refold_df = sort_df[sort_df["source_tool"] == tool].head(top_per_tool)
                                     if not refold_df.empty:
                                         viewer_block = _build_per_tool_refold_viewer(
                                             tool,
@@ -1467,7 +1470,7 @@ def generate_report(
                             .drop(columns=["_sort"])
                         )
                         used_native = True
-                tool_df = tool_only.head(10)
+                tool_df = tool_only.head(top_per_tool)
                 n = len(tool_df)
                 # If native sort applied, surface its column so it's visible in the table
                 cols_for_table = list(primary_cols)
@@ -1483,7 +1486,7 @@ def generate_report(
                         tool,
                         tool_df,
                         boltz2_results_dir,
-                        n=10,
+                        n=top_per_tool,
                         primary_engine=primary_engine,
                         target_seq=target_seq,
                     )
