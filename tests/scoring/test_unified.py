@@ -32,19 +32,6 @@ def test_composite_missing_ipae():
     assert score.composite_score is not None
 
 
-def test_composite_no_metrics():
-    """RFAA backbones have no score — should return None."""
-    score = BinderScore(
-        design_id="rfaa_001",
-        origin=ToolOrigin.RFAA,
-        pdb_path="rfaa_out.pdb",
-        target_name="7v11",
-        binder_length=150,
-        ligand_ccd_code="OQO",
-    )
-    assert score.composite_score is None
-
-
 def test_from_pxdesign_record():
     record = {
         "af2_iptm": 0.72,

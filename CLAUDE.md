@@ -2,7 +2,7 @@
 
 ## Overview
 
-BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. It wraps seven independent design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the legacy RFAA, behind a single CLI (`bindmaster`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders.
+BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. It wraps seven independent design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) behind a single CLI (`bindmaster`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders.
 
 **Current status:** v0.7.0 + Parts I, J, K, L, M landed on `[Unreleased]`. Latest milestones: Evaluator AF2 refolding removed (Part I), AF3 v3.0.2 stood up as the canonical 2nd refolding engine on big-VRAM hardware (Part K — Spark / H200, >100 GB unified memory), Protenix v0.5.0 retained as an optional alternative for smaller GPUs (Part J — 24 GB OK), Protein-Hunter installed and configurable (Part L), RFD3 installed and configurable (Part M). Active development on `master`; `aarch64` branch tracks DGX Spark / Grace-Hopper and is periodically rebased.
 
@@ -92,7 +92,6 @@ Target structure (.pdb / .mmcif)
        Proteina-Complexa    (NVIDIA flow matching + ITO)
        Protein-Hunter       (Boltz-2 / Chai-1; 6 modalities: protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA)
        RFD3                 (RosettaCommons foundry diffusion + ProteinMPNN)
-       [RFAA               (LigandMPNN; deprecated, opt-in only via --tool rfaa)]
     → Evaluator (canonical pipeline = Boltz-2 + AF3):
        1. Extract sequences from all tool outputs (one extractor per tool)
        2. Refold with Boltz-2 (Mosaic venv)                                    [live, all platforms]
@@ -140,8 +139,8 @@ BindMaster/
 ```
 
 **Gitignored (created at runtime):**
-- `BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/`, `rf_diffusion_all_atom/`, `LigandMPNN/` — cloned by installer
-- `weights/foundry/` — RFD3 / ProteinMPNN / LigandMPNN checkpoints fetched by `foundry install` (no clone dir; `rc-foundry` is pip-installed into `bindmaster_rfd3`)
+- `BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/` — cloned by installer
+- `weights/foundry/` — RFD3 / ProteinMPNN checkpoints fetched by `foundry install` (no clone dir; `rc-foundry` is pip-installed into `bindmaster_rfd3`)
 - `runs/` — generated experiment directories
 - `install.log`, `install_aarch.log` — installer output
 - `refold_boltz2/` — intermediate refolding outputs
@@ -161,7 +160,6 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `bindmaster_rfd3` | RFD3 (`rc-foundry`) | 3.12 | conda | RosettaCommons foundry diffusion + ProteinMPNN |
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
 | `binder-eval-af3` | AF3 refolder | 3.10 | conda | AlphaFold 3 v3.0.2 refolding — **canonical 2nd engine** (Part K, live on Spark / H200 / >100 GB VRAM hardware) |
-| `bindmaster_rfaa` *(deprecated)* | RFAA + LigandMPNN | 3.11 | conda | All-atom diffusion (x86_64 only; superseded by RFD3, opt-in via `--tool rfaa`) |
 
 The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in their correct environment — `install` runs in bash, `configure` runs in system Python, `evaluate` runs in the Mosaic `.venv` Python.
 
@@ -180,7 +178,6 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - Mosaic: `esmj` excluded (no aarch64 wheel); `torchtext` also may fail
 - RFD3: fully supported on aarch64 (no DGL dependency; pip-installs cleanly)
 - Protein-Hunter: NOT supported on aarch64 (PyRosetta has no aarch64 wheels)
-- RFAA: NOT supported on aarch64 (DGL has no CUDA aarch64 wheels)
 - Pre-cached AF2 weights path: `Documents/OLD/BindMaster/bindcraft-tools`
 
 ### Design decisions and WHY
@@ -226,7 +223,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - Python classes: PascalCase
 - Python variables/functions: snake_case
 - Bash constants: UPPER_CASE
-- Conda envs: BindCraft, BoltzGen, binder-eval, binder-eval-af3 (canonical 2nd refold engine, Spark / H200), bindmaster_pxdesign, bindmaster_protein_hunter, bindmaster_rfd3; bindmaster_rfaa (deprecated, opt-in only)
+- Conda envs: BindCraft, BoltzGen, binder-eval, binder-eval-af3 (canonical 2nd refold engine, Spark / H200), bindmaster_pxdesign, bindmaster_protein_hunter, bindmaster_rfd3
 
 ### Per-run `settings.json` (reproducibility convention)
 
@@ -302,7 +299,6 @@ the parameter sweep.
 | **Proteina-Complexa** | Flow matching + inference-time optimization (beam search / MCTS) | `NVIDIA-Digital-Bio/proteina-complexa` |
 | **Protein-Hunter** | Boltz-2 / Chai-1 hallucination; 6 modalities (protein, cyclic, ligand CCD, ligand SMILES, DNA, RNA) | Cho et al. 2025 |
 | **RFD3** | RosettaCommons foundry diffusion (RFdiffusion3) + ProteinMPNN; BSD-3, commercial-use OK | `RosettaCommons/foundry` (`rc-foundry` on PyPI) |
-| ~~RFAA~~ *(deprecated)* | All-atom diffusion + LigandMPNN for ligand binder design; superseded by RFD3 | `baker-laboratory/rf_diffusion_all_atom` |
 
 ### Evaluation metrics and ranking
 
@@ -349,8 +345,8 @@ the parameter sweep.
 - **Part I — AF2 refolding removed from Evaluator.** Deleted `refold_af2.py`, `af2_runner.py`, `binder-eval-af2.yml`; pruned all `af2_*` schema fields and report plots. BindCraft / PXDesign / Proteina-Complexa still use AF2 internally — only the Evaluator's AF2 refolding step was removed.
 - **Part K — AF3 v3.0.2 is the canonical 2nd refolding engine.** Runs in its own `binder-eval-af3` conda env on DGX Spark, H200, or any host with >100 GB unified / device memory (full AF3 inference doesn't fit on consumer 24 GB GPUs). Schema: `af3_*` columns in `StandardisedMetrics`; pLDDT rescaled 0–100 → 0–1 on ingest; PAE transposed from token-order to `[binder|target]` to match Boltz-2.
 - **Part J — Protenix v0.5.0 as the optional fallback refolder.** `binder-compare refold-protenix` runs inside the existing `bindmaster_pxdesign` conda env (no new env). ByteDance's open-source AF3 reimplementation, ~3–4 GB weights, fits 24 GB GPUs — useful when AF3 isn't an option. Schema: `protenix_*` columns. Opt-in via `evaluate.sh` flags; **not part of the default Boltz-2 + AF3 pipeline.**
-- **Part L — Protein-Hunter** installable via `bindmaster install --tool protein-hunter` (x86 only; aarch64 blocked by PyRosetta). Conda env `bindmaster_protein_hunter`, vendored Boltz-2 + LigandMPNN + Chai-1 (sokrypton fork). New `ProteinHunterExtractor` reads `summary_high_iptm.csv` by default (`--all-protein-hunter-designs` for all runs). Configurator generates `run_protein_hunter.sh`.
-- **Part M — RFD3** installable via `bindmaster install --tool rfd3` (x86 + aarch64). Conda env `bindmaster_rfd3`, `rc-foundry[rfd3,mpnn]` from PyPI, weights at `weights/foundry/`. New `RFD3Extractor`. Configurator generates `run_rfd3.sh`. **RFAA deprecated** — dropped from the interactive menu and from `--tool all`; still installable via `bindmaster install --tool rfaa` for reproducing existing runs. `docs/rfaa_manual_reinstall.md` captures commit SHAs and post-install patches for long-term maintenance.
+- **Part L — Protein-Hunter** installable via `bindmaster install --tool protein-hunter` (x86 only; aarch64 blocked by PyRosetta). Conda env `bindmaster_protein_hunter`, vendored Boltz-2 + Chai-1 (sokrypton fork). New `ProteinHunterExtractor` reads `summary_high_iptm.csv` by default (`--all-protein-hunter-designs` for all runs). Configurator generates `run_protein_hunter.sh`.
+- **Part M — RFD3** installable via `bindmaster install --tool rfd3` (x86 + aarch64). Conda env `bindmaster_rfd3`, `rc-foundry[rfd3,mpnn]` from PyPI, weights at `weights/foundry/`. New `RFD3Extractor`. Configurator generates `run_rfd3.sh`.
 - **Standalone mode** (Part H, v0.7.0): Installer auto-detects whether system conda is writable. If not, downloads Miniforge3 into `BindMaster/conda/` and creates all environments locally. Shortcuts go to `BindMaster/bin/` instead of `~/.local/bin/`. `--standalone` forces this; `--system-conda` opts out. All generated run scripts and Evaluator shell scripts search local conda first.
 - **Mosaic is_top filter**: Both `MosaicExtractor` and legacy `_parse_mosaic()` default to extracting only `is_top=1` designs. `--all-mosaic-designs` flag exposed on `binder-compare extract`, `binder-compare run`, and `bindmaster evaluate`. The `REPLACE_ME` target_sequence placeholder is guarded in the legacy evaluator's CSV fallback path.
 - **Deferred items:**
@@ -361,7 +357,6 @@ the parameter sweep.
 
 ### Known issues
 
-- **aarch64 RFAA:** Not supported. DGL (Deep Graph Library) has no CUDA-enabled aarch64 wheels. The SE3-Transformer requires DGL CUDA operations. The installer shows a warning but still installs dependencies. Use x86_64 for RFAA.
 - **PXDesign site-packages patches:** The installer applies post-install patches to `protenix` (CUDA arch), `pxdbench` (NumpyEncoder), and `configs_infer.py` (num_workers). These patches are reapplied on each install but would be lost if packages are upgraded manually.
 - **PXDesign requirements.txt:** Pins `torch==2.3.1` (CPU-only from PyPI). The installer force-reinstalls PyTorch with CUDA after requirements.txt. Do not run `pip install -r requirements.txt` manually without reinstalling PyTorch afterward.
 - **Mosaic `is_top` filtering:** Both extractors (Evaluator package `MosaicExtractor` and legacy `evaluator.py`) now default to `is_top=1` rows only (~40 refolded designs instead of all ~800). Use `--all-mosaic-designs` to override. The `target_sequence` CSV fallback also skips `"REPLACE_ME"` placeholders.
@@ -429,13 +424,12 @@ export PATH="$(pwd)/bin:$PATH"
 
 ```bash
 bindmaster install                          # interactive tool selection
-bindmaster install --tool all               # install all current-generation tools (RFAA excluded)
+bindmaster install --tool all               # install all current-generation tools
 bindmaster install --tool mosaic            # install one tool
 bindmaster install --tool all --yes --skip-examples  # non-interactive (CI)
 bindmaster install --tool proteina-complexa # install Proteina-Complexa
 bindmaster install --tool protein-hunter    # install Protein-Hunter (Part L)
 bindmaster install --tool rfd3              # install RFD3 / foundry (Part M)
-bindmaster install --tool rfaa              # install legacy RFAA (opt-in only)
 bindmaster install --uninstall --tool all   # remove envs + shortcuts (preserves runs/)
 bindmaster install --standalone --tool all    # force local Miniforge install
 bindmaster install --system-conda --tool all  # use existing system conda

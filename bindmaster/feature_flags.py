@@ -6,12 +6,11 @@ All new integrations default to DISABLED.
 Set via environment variables or config file.
 
 Usage:
-    export BINDMASTER_ENABLE_RFAA=true
     export BINDMASTER_ENABLE_PXDESIGN=true
 
 Or in Python:
     from bindmaster.feature_flags import flags
-    if flags.rfaa_enabled:
+    if flags.pxdesign_enabled:
         ...
 """
 
@@ -24,7 +23,6 @@ class FeatureFlags:
     """Immutable feature flag set. Read once at import time."""
 
     # New tool integrations — default OFF
-    rfaa_enabled: bool = False
     pxdesign_enabled: bool = False
 
     # Unified scoring — default OFF (uses per-tool scoring when False)
@@ -45,7 +43,6 @@ class FeatureFlags:
             return val in ("1", "true", "yes", "on")
 
         return cls(
-            rfaa_enabled=_bool("BINDMASTER_ENABLE_RFAA"),
             pxdesign_enabled=_bool("BINDMASTER_ENABLE_PXDESIGN"),
             unified_scoring_enabled=_bool("BINDMASTER_ENABLE_UNIFIED_SCORING"),
             parallel_campaigns_enabled=_bool("BINDMASTER_ENABLE_PARALLEL_CAMPAIGNS"),

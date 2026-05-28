@@ -147,7 +147,7 @@ Otherwise, any standard FASTA works — `>id` headers are used as binder IDs.
 Reads native output directories for each supported tool, extracts sequences and metadata,
 deduplicates, and writes a combined FASTA with `binder_id` and `source` tags.
 
-Supported inputs: `--bindcraft`, `--boltzgen`, `--mosaic`, `--pxdesign`, `--rfaa`, `--proteina-complexa`
+Supported inputs: `--bindcraft`, `--boltzgen`, `--mosaic`, `--pxdesign`, `--proteina-complexa`
 
 ### `refold-boltz2`
 Refolds each binder+target pair with Boltz-2. Calls ColabFold for MSA, then runs Boltz-2

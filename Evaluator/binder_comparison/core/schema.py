@@ -12,7 +12,6 @@ SourceTool = Literal[
     "boltzgen",
     "mosaic",
     "pxdesign",
-    "rfaa",
     "rfd3",
     "proteina_complexa",
     "protein_hunter",
