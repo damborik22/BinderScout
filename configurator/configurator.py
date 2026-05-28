@@ -3143,6 +3143,16 @@ def wizard():
                 validator=validate_int(min_val=1, max_val=64),
             )
         )
+        print(f"  {YELLOW}Per-tool overrides (Enter = keep global default):{RESET}")
+        cfg["rfd3_min_length"] = int(
+            ask("  Min binder length", default=min_length, validator=validate_int(min_val=10, max_val=500))
+        )
+        cfg["rfd3_max_length"] = int(
+            ask("  Max binder length", default=max_length, validator=validate_int(min_val=10, max_val=500))
+        )
+        cfg["rfd3_n_designs"] = int(
+            ask("  Number of backbone designs", default=n_designs, validator=validate_int(min_val=1, max_val=10000))
+        )
 
     if use_protein_hunter:
         print_step("Step 6h — Protein-Hunter settings")
@@ -3162,6 +3172,16 @@ def wizard():
             default_index=0,
         )
         cfg["protein_hunter_msa_mode"] = ph_msa.split(" — ")[0].strip()
+        print(f"  {YELLOW}Per-tool overrides (Enter = keep global default):{RESET}")
+        cfg["protein_hunter_min_length"] = int(
+            ask("  Min binder length", default=min_length, validator=validate_int(min_val=10, max_val=500))
+        )
+        cfg["protein_hunter_max_length"] = int(
+            ask("  Max binder length", default=max_length, validator=validate_int(min_val=10, max_val=500))
+        )
+        cfg["protein_hunter_n_designs"] = int(
+            ask("  Number of designs", default=n_designs, validator=validate_int(min_val=1, max_val=10000))
+        )
 
     # ── Step 7: Preview ───────────────────────────────────────────────────────
     print_step("Step 7 — Preview")
