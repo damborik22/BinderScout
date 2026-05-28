@@ -12,13 +12,13 @@
 #   --output       output directory
 #
 # Optional:
-#   --skip-boltz2       skip Boltz-2 refolding (use existing boltz2_results.csv)
-#   --skip-protenix     skip Protenix refolding (default: auto-detect bindmaster_pxdesign env)
-#   --protenix-env ENV  conda env for Protenix (default: bindmaster_pxdesign)
-#   --resume            resume interrupted run
-#
-# AF3 refolding (aarch64 / DGX Spark only, Part K) is driven separately by
-# `binder-compare refold-af3` and wired into the report via --af3-results.
+#   --skip-boltz2          skip Boltz-2 refolding (use existing boltz2_results.csv)
+#   --skip-protenix        skip Protenix refolding (default: auto-detect bindmaster_pxdesign env)
+#   --protenix-env ENV     conda env for Protenix (default: bindmaster_pxdesign)
+#   --skip-af3             skip AF3 refolding (default: auto-detect binder-eval-af3 env)
+#   --af3-env ENV          conda env for AF3 (default: binder-eval-af3)
+#   --primary-engine ENG   primary ranking engine: boltz | protenix | af3 (default: boltz)
+#   --resume               resume interrupted run
 
 set -euo pipefail
 
@@ -63,18 +63,30 @@ OUTPUT=""
 SKIP_BOLTZ2=0
 SKIP_PROTENIX=0
 PROTENIX_ENV="bindmaster_pxdesign"
+SKIP_AF3=0
+AF3_ENV="binder-eval-af3"
+PRIMARY_ENGINE="boltz"
 RESUME=0
 
 # --- parse arguments -------------------------------------------------------
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --sequences)     SEQUENCES="$2";    shift 2 ;;
-        --target-seq)    TARGET_SEQ="$2";   shift 2 ;;
-        --output|-o)     OUTPUT="$2";       shift 2 ;;
-        --skip-boltz2)   SKIP_BOLTZ2=1;     shift ;;
-        --skip-protenix) SKIP_PROTENIX=1;   shift ;;
-        --protenix-env)  PROTENIX_ENV="$2"; shift 2 ;;
-        --resume)        RESUME=1;          shift ;;
+        --sequences)      SEQUENCES="$2";    shift 2 ;;
+        --target-seq)     TARGET_SEQ="$2";   shift 2 ;;
+        --output|-o)      OUTPUT="$2";       shift 2 ;;
+        --skip-boltz2)    SKIP_BOLTZ2=1;     shift ;;
+        --skip-protenix)  SKIP_PROTENIX=1;   shift ;;
+        --protenix-env)   PROTENIX_ENV="$2"; shift 2 ;;
+        --skip-af3)       SKIP_AF3=1;        shift ;;
+        --af3-env)        AF3_ENV="$2";      shift 2 ;;
+        --primary-engine)
+            PRIMARY_ENGINE="$2"
+            case "$PRIMARY_ENGINE" in
+                boltz|protenix|af3) ;;
+                *) echo "Error: --primary-engine must be one of: boltz, protenix, af3 (got '$PRIMARY_ENGINE')" >&2; exit 1 ;;
+            esac
+            shift 2 ;;
+        --resume)         RESUME=1;          shift ;;
         -h|--help)
             sed -n '2,22p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0 ;;
@@ -107,6 +119,16 @@ if [[ $SKIP_PROTENIX -eq 0 ]]; then
     fi
 fi
 
+# Auto-detect AF3 availability unless user skipped it
+if [[ $SKIP_AF3 -eq 0 ]]; then
+    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${AF3_ENV}"; then
+        echo "[note] conda env '${AF3_ENV}' not found — AF3 refolding will be skipped."
+        echo "        (requires >100 GB unified/device memory; see Evaluator/envs/binder-eval-af3.yml)"
+        echo ""
+        SKIP_AF3=1
+    fi
+fi
+
 # --- Step 0: Normalise sequences to FASTA ----------------------------------
 FASTA="$OUTPUT/sequences.fasta"
 echo "[step 0] Parsing sequences → $FASTA"
@@ -118,14 +140,20 @@ SEQUENCES="$FASTA"
 # --- Step 1: Boltz-2 refolding ---------------------------------------------
 BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
 PROTENIX_CSV="$OUTPUT/protenix_results.csv"
-N_STEPS=2
-[[ $SKIP_PROTENIX -eq 0 ]] && N_STEPS=3
+AF3_CSV="$OUTPUT/af3_results.csv"
+
+# Step counter: 1 (report) + 1 per engine not skipped
+N_STEPS=1  # report
+[[ $SKIP_BOLTZ2 -eq 0 ]]   && (( N_STEPS++ ))
+[[ $SKIP_PROTENIX -eq 0 ]] && (( N_STEPS++ ))
+[[ $SKIP_AF3 -eq 0 ]]      && (( N_STEPS++ ))
+STEP=1
 
 if [[ $SKIP_BOLTZ2 -eq 1 ]]; then
-    echo "[step 1/${N_STEPS}] Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
+    echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
     [[ -f "$BOLTZ2_CSV" ]] || { echo "Error: $BOLTZ2_CSV not found"; exit 1; }
 else
-    echo "[step 1/${N_STEPS}] Boltz-2 refolding  (Mosaic venv)..."
+    echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding  (Mosaic venv)..."
     BOLTZ2_RESUME_FLAG=""
     [[ $RESUME -eq 1 ]] && BOLTZ2_RESUME_FLAG="--resume"
     "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
@@ -134,10 +162,11 @@ else
         -o           "$BOLTZ2_CSV" \
         $BOLTZ2_RESUME_FLAG
 fi
+(( STEP++ ))
 
 # --- Step 2: Protenix refolding (optional) ---------------------------------
 if [[ $SKIP_PROTENIX -eq 0 ]]; then
-    echo "[step 2/${N_STEPS}] Protenix refolding  (conda env: ${PROTENIX_ENV})..."
+    echo "[step ${STEP}/${N_STEPS}] Protenix refolding  (conda env: ${PROTENIX_ENV})..."
     PROTENIX_RESUME_FLAG=""
     [[ $RESUME -eq 1 ]] && PROTENIX_RESUME_FLAG="--resume"
     conda run -n "${PROTENIX_ENV}" binder-compare refold-protenix \
@@ -146,10 +175,25 @@ if [[ $SKIP_PROTENIX -eq 0 ]]; then
         -o           "$PROTENIX_CSV" \
         --output-dir "$OUTPUT/refold_protenix" \
         $PROTENIX_RESUME_FLAG
+    (( STEP++ ))
+fi
+
+# --- Step 3: AF3 refolding (optional) --------------------------------------
+if [[ $SKIP_AF3 -eq 0 ]]; then
+    echo "[step ${STEP}/${N_STEPS}] AF3 refolding       (conda env: ${AF3_ENV})..."
+    AF3_RESUME_FLAG=""
+    [[ $RESUME -eq 1 ]] && AF3_RESUME_FLAG="--resume"
+    conda run -n "${AF3_ENV}" binder-compare refold-af3 \
+        --sequences  "$SEQUENCES" \
+        --target-seq "$TARGET_SEQ" \
+        -o           "$AF3_CSV" \
+        --output-dir "$OUTPUT/refold_af3" \
+        $AF3_RESUME_FLAG
+    (( STEP++ ))
 fi
 
 # --- Report ----------------------------------------------------------------
-echo "[step ${N_STEPS}/${N_STEPS}] Generating report   (binder-eval)..."
+echo "[step ${STEP}/${N_STEPS}] Generating report   (binder-eval)..."
 REPORT_ARGS=(
     --boltz2-results "$BOLTZ2_CSV"
     --sequences      "$SEQUENCES"
@@ -158,6 +202,10 @@ REPORT_ARGS=(
 if [[ $SKIP_PROTENIX -eq 0 && -f "$PROTENIX_CSV" ]]; then
     REPORT_ARGS+=(--protenix-results "$PROTENIX_CSV")
 fi
+if [[ $SKIP_AF3 -eq 0 && -f "$AF3_CSV" ]]; then
+    REPORT_ARGS+=(--af3-results "$AF3_CSV")
+fi
+REPORT_ARGS+=(--primary-engine "$PRIMARY_ENGINE")
 conda run -n binder-eval binder-compare report "${REPORT_ARGS[@]}"
 
 echo ""
