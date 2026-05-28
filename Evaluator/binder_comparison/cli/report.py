@@ -45,6 +45,7 @@ def run(args: argparse.Namespace) -> None:
         sequences_fasta=args.sequences,
         protenix_csv=args.protenix_results,
         af3_csv=args.af3_results,
+        esmfold2_csv=args.esmfold2_results,
     )
 
     # Attach native metrics from BindCraft CSV if provided
@@ -395,8 +396,14 @@ def add_parser(subparsers) -> None:
     p.add_argument(
         "--af3-results",
         metavar="CSV",
-        help="Optional: output from 'refold-af3' (af3_results.csv; aarch64 / DGX "
-        "Spark only). Adds a third engine to the agreement_count.",
+        help="Optional: output from 'refold-af3' (af3_results.csv). Adds a third engine "
+        "to the agreement_count.",
+    )
+    p.add_argument(
+        "--esmfold2-results",
+        metavar="CSV",
+        help="Optional: output from 'refold-esmfold2' (esmfold2_results.csv). Currently "
+        "merged into metrics but not yet counted in agreement_count.",
     )
     p.add_argument(
         "--sequences", metavar="FASTA", help="FASTA from 'extract' step (for binder_id and source_tool tags)"
@@ -407,7 +414,7 @@ def add_parser(subparsers) -> None:
     p.add_argument("--output", "-o", required=True, metavar="DIR", help="Output directory for all report files")
     p.add_argument(
         "--primary-engine",
-        choices=["boltz", "protenix", "af3"],
+        choices=["boltz", "protenix", "af3", "esmfold2"],
         default="boltz",
         help="Which engine's DunbrackLab PAE-based ipsae_min to use as the primary ranking metric "
         "(default: boltz). Falls back to boltz if the chosen engine's PAE files are missing.",
