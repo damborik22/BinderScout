@@ -281,7 +281,6 @@ _TOOL_COLOURS_PYMOL = {
     "boltzgen": "orange",
     "bindcraft": "blue",
     "proteina_complexa": "teal",
-    "rfaa": "firebrick",
     "rfd3": "tv_orange",
     "protein_hunter": "cyan",
 }
@@ -292,7 +291,6 @@ _TOOL_DISPLAY_PYMOL = {
     "boltzgen": "BoltzGen",
     "bindcraft": "BindCraft",
     "proteina_complexa": "Proteina-Complexa",
-    "rfaa": "RFAA",
     "rfd3": "RFD3",
     "protein_hunter": "Protein-Hunter",
 }

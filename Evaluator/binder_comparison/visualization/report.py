@@ -31,7 +31,6 @@ _TOOL_DISPLAY = {
     "boltzgen": "BoltzGen",
     "bindcraft": "BindCraft",
     "proteina_complexa": "Proteina-Complexa",
-    "rfaa": "RFAA",
     "rfd3": "RFD3",
     "protein_hunter": "Protein-Hunter",
 }
@@ -50,8 +49,6 @@ _TOOL_LINKS = {
     "pxdesign": "https://github.com/bytedance/PXDesign",
     # Proteina-Complexa — NVIDIA flow-matching binder design
     "proteina_complexa": "https://github.com/NVIDIA-Digital-Bio/proteina-complexa",
-    # RFAA — RFdiffusion-all-atom for ligand-aware binder design
-    "rfaa": "https://github.com/baker-laboratory/rf_diffusion_all_atom",
     # RFD3 — RFdiffusion3 / foundry
     "rfd3": "https://github.com/RosettaCommons/RFdiffusion",
     # Protein-Hunter — Cho et al. 2025, bioRxiv preprint
@@ -110,7 +107,6 @@ _HTML_TEMPLATE = """\
   .tool-mosaic             {{ color: #2E7D32; font-weight: bold; }}
   .tool-pxdesign           {{ color: #7B1FA2; font-weight: bold; }}
   .tool-proteina_complexa  {{ color: #6D4C41; font-weight: bold; }}
-  .tool-rfaa               {{ color: #C62828; font-weight: bold; }}
   .tool-rfd3               {{ color: #D84315; font-weight: bold; }}
   .tool-protein_hunter     {{ color: #00838F; font-weight: bold; }}
   .stat-table td {{ text-align: right; font-variant-numeric: tabular-nums; }}
@@ -289,7 +285,6 @@ _TOOL_COLOURS_NGL = {
     "boltzgen": "#FF9800",
     "bindcraft": "#2196F3",
     "proteina_complexa": "#00897B",
-    "rfaa": "#C62828",
     "rfd3": "#D84315",
     "protein_hunter": "#00838F",
     "unknown": "#9E9E9E",
@@ -1220,8 +1215,6 @@ _TOOL_PDB_HINTS = {
     "pxdesign": ("{name}*.pdb", []),
     # Proteina-Complexa structures
     "proteina_complexa": ("*{name}*.pdb", []),
-    # RFAA
-    "rfaa": ("*{name}*.pdb", []),
     # Mosaic (no PDBs when TOP_K=0)
     "mosaic": ("*{name}*.pdb", []),
 }
