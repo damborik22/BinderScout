@@ -1,10 +1,11 @@
 #!/bin/bash
 # BindMaster Installer
 # Installs BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa,
-# Protein-Hunter, RFD3, and/or the Evaluator. AF3 is opt-in (--tool af3).
+# Protein-Hunter, RFD3, and/or the Evaluator. AF3 and ESMFold2 are opt-in
+# (--tool af3 / --tool esmfold2).
 #
 # Usage:
-#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|af3|all] [--cuda VERSION] [--skip-examples] [--yes]
+#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|af3|esmfold2|all] [--cuda VERSION] [--skip-examples] [--yes]
 #   bindmaster install [same options]
 #
 # With no --tool flag, an interactive menu lets you choose which tools to install.
@@ -73,6 +74,7 @@ DO_PROTEINA_COMPLEXA=false
 DO_PROTEIN_HUNTER=false
 DO_RFD3=false
 DO_AF3=false            # opt-in via --tool af3 (>=100 GB GPU memory required; weights not bundled)
+DO_ESMFOLD2=false       # opt-in via --tool esmfold2 (lightweight 4th refold engine; no gated weights)
 
 # Note: legacy RFAA support was removed entirely (see CHANGELOG).
 # Use RFD3 (--tool rfd3) for all-atom diffusion-based binder design.
@@ -103,8 +105,10 @@ while [[ $# -gt 0 ]]; do
                     DO_PROTEIN_HUNTER=true ;;
                 af3|alphafold3|alphafold)
                     DO_AF3=true ;;
+                esmfold2|esm|esmfold)
+                    DO_ESMFOLD2=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfd3, pxdesign, proteina-complexa, protein-hunter, af3${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfd3, pxdesign, proteina-complexa, protein-hunter, af3, esmfold2${RESET}"
                     exit 1
                     ;;
             esac
@@ -149,6 +153,8 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes]
                                        requires >=100 GB GPU memory (H200/GH200/Spark)
                                        and gated AF3 weights you obtain from
                                        https://github.com/google-deepmind/alphafold3
+                  esmfold2             ESMFold2 refolder — opt-in only;
+                                       lightweight 4th refold engine, no gated weights
   --cuda        CUDA version for conda package resolution (default: 12.4).
   --skip-examples
                 Do not prompt to run bundled examples after install.
@@ -635,6 +641,7 @@ select_tools_interactive() {
     [[ "$DO_PROTEINA_COMPLEXA" == true ]] && echo -e "    ${GREEN}✓${RESET} Proteina-Complexa"
     [[ "$DO_PROTEIN_HUNTER" == true ]] && echo -e "    ${GREEN}✓${RESET} Protein-Hunter"
     [[ "$DO_AF3" == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; >=100 GB GPU; weights required)${RESET}"
+    [[ "$DO_ESMFOLD2" == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (opt-in refolder)"
     echo ""
 
     confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
@@ -2137,6 +2144,87 @@ AF3EOF
     chmod +x "${SHORTCUTS_DIR}/af3"
 }
 
+# ─── ESMFold2 (refolder, opt-in) ────────────────────────────────────────────
+
+install_esmfold2() {
+    print_step "Installing ESMFold2 refolder (binder-eval-esmfold2 env)"
+    ensure_conda_in_path
+
+    # Evaluator dir must exist (bundled in monorepo)
+    if [[ ! -d "${EVALUATOR_DIR}" ]]; then
+        print_fail "Evaluator directory not found at ${EVALUATOR_DIR}"
+        print_warn "It should be bundled in the repository. Try re-cloning BindMaster."
+        return 1
+    fi
+    if [[ ! -f "${EVALUATOR_DIR}/envs/binder-eval-esmfold2.yml" ]]; then
+        print_fail "Env spec not found at ${EVALUATOR_DIR}/envs/binder-eval-esmfold2.yml"
+        return 1
+    fi
+
+    # Create binder-eval-esmfold2 conda env
+    print_step "Creating binder-eval-esmfold2 conda environment"
+    if env_exists binder-eval-esmfold2; then
+        print_warn "Conda environment 'binder-eval-esmfold2' already exists — skipping creation."
+    else
+        run_logged "Creating binder-eval-esmfold2 conda env" \
+            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval-esmfold2.yml" -y \
+            || { print_fail "Failed to create binder-eval-esmfold2 conda env"; return 1; }
+    fi
+
+    # Install ESMFold2 producer + gemmi (structure I/O used by refold_esmfold2.py)
+    run_logged "Installing esmfold + gemmi into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q esmfold gemmi \
+        || { print_fail "Failed to install esmfold + gemmi (check PyPI access)"; return 1; }
+
+    # Install binder-compare into the env so 'binder-compare refold-esmfold2' works
+    run_logged "Installing binder-compare into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q -e "${EVALUATOR_DIR}[report]" \
+        || { print_fail "Failed to install binder-compare into binder-eval-esmfold2"; return 1; }
+
+    # Smoke test — just the CLI parses (no weights needed for --help)
+    smoke_test "binder-compare refold-esmfold2 --help" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 binder-compare refold-esmfold2 --help \
+        || return 1
+
+    # Shortcut
+    print_step "Installing esmfold2 shortcut"
+    _write_esmfold2_shortcut
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/esmfold2"
+
+    echo ""
+    print_ok "ESMFold2 weights are open-source and download on first use via the HuggingFace cache."
+    print_ok "  Default model: ${BOLD}fast${RESET} (~1 GB)"
+    print_ok "  Switch via:    --esmfold2-model full  (larger, MSA-capable; ~3-5 GB)"
+    echo ""
+
+    print_ok "ESMFold2 refolder installation complete"
+}
+
+_write_esmfold2_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# BindMaster ESMFold2 shortcut — runs 'binder-compare refold-esmfold2 ...' in the"
+        echo "# binder-eval-esmfold2 env. With no args: opens an interactive env shell."
+        echo ""
+        echo "CONDA_CMD=\"${CONDA_CMD}\""
+    } > "${SHORTCUTS_DIR}/esmfold2"
+    cat >> "${SHORTCUTS_DIR}/esmfold2" << 'ESMFOLD2EOF'
+
+if [ "$#" -eq 0 ]; then
+    echo "ESMFold2 env (binder-eval-esmfold2) activated."
+    echo "Usage:"
+    echo "  binder-compare refold-esmfold2 --sequences seqs.fasta --target-seq SEQ -o esmfold2.csv"
+    echo "  (Default model: fast; switch via --esmfold2-model full)"
+    echo ""
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-esmfold2 bash
+else
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-esmfold2 binder-compare refold-esmfold2 "$@"
+fi
+ESMFOLD2EOF
+    chmod +x "${SHORTCUTS_DIR}/esmfold2"
+}
+
 # ─── Uninstall ─────────────────────────────────────────────────────────────────
 
 uninstall_tool() {
@@ -2234,6 +2322,13 @@ uninstall_tool() {
             print_warn "AF3 model weights (if any) at ~/.alphafold3/models or \$AF3_MODEL_DIR were NOT removed."
             print_ok "AF3 refolder uninstalled"
             ;;
+        esmfold2|esm|esmfold)
+            print_step "Uninstalling ESMFold2 refolder"
+            env_exists binder-eval-esmfold2 && run_logged "Removing binder-eval-esmfold2 conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-esmfold2 -y
+            rm -f "${SHORTCUTS_DIR}/esmfold2"
+            print_ok "ESMFold2 refolder uninstalled"
+            ;;
         *)
             print_fail "Unknown tool: ${tool}"
             return 1
@@ -2294,6 +2389,7 @@ main() {
         [[ "${DO_PROTEIN_HUNTER}" == true ]] && { uninstall_tool protein-hunter || failed_uninstalls+=("Protein-Hunter"); }
         [[ "${DO_RFD3}"      == true ]] && { uninstall_tool rfd3      || failed_uninstalls+=("RFD3"); }
         [[ "${DO_AF3}"       == true ]] && { uninstall_tool af3       || failed_uninstalls+=("AF3"); }
+        [[ "${DO_ESMFOLD2}"  == true ]] && { uninstall_tool esmfold2  || failed_uninstalls+=("ESMFold2"); }
 
         # Offer to remove local Miniforge when all tools are uninstalled
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
@@ -2330,6 +2426,7 @@ main() {
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && (( total++ ))
     [[ "${DO_RFD3}"      == true ]] && (( total++ ))
     [[ "${DO_AF3}"       == true ]] && (( total++ ))
+    [[ "${DO_ESMFOLD2}"  == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
@@ -2343,6 +2440,7 @@ main() {
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Protein-Hunter${RESET}"; install_protein_hunter || failed_tools+=("Protein-Hunter"); }
     [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
+    [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"

@@ -17,7 +17,10 @@
 #   --protenix-env ENV     conda env for Protenix (default: bindmaster_pxdesign)
 #   --skip-af3             skip AF3 refolding (default: auto-detect binder-eval-af3 env)
 #   --af3-env ENV          conda env for AF3 (default: binder-eval-af3)
-#   --primary-engine ENG   primary ranking engine: boltz | protenix | af3 (default: boltz)
+#   --skip-esmfold2        skip ESMFold2 refolding (default: auto-detect binder-eval-esmfold2 env)
+#   --esmfold2-env ENV     conda env for ESMFold2 (default: binder-eval-esmfold2)
+#   --esmfold2-model V     ESMFold2 checkpoint: fast | full (default: fast)
+#   --primary-engine ENG   primary ranking engine: boltz | protenix | af3 | esmfold2 (default: boltz)
 #   --resume               resume interrupted run
 
 set -euo pipefail
@@ -65,6 +68,9 @@ SKIP_PROTENIX=0
 PROTENIX_ENV="bindmaster_pxdesign"
 SKIP_AF3=0
 AF3_ENV="binder-eval-af3"
+SKIP_ESMFOLD2=0
+ESMFOLD2_ENV="binder-eval-esmfold2"
+ESMFOLD2_MODEL="fast"
 PRIMARY_ENGINE="boltz"
 RESUME=0
 
@@ -79,16 +85,19 @@ while [[ $# -gt 0 ]]; do
         --protenix-env)   PROTENIX_ENV="$2"; shift 2 ;;
         --skip-af3)       SKIP_AF3=1;        shift ;;
         --af3-env)        AF3_ENV="$2";      shift 2 ;;
+        --skip-esmfold2)  SKIP_ESMFOLD2=1;   shift ;;
+        --esmfold2-env)   ESMFOLD2_ENV="$2"; shift 2 ;;
+        --esmfold2-model) ESMFOLD2_MODEL="$2"; shift 2 ;;
         --primary-engine)
             PRIMARY_ENGINE="$2"
             case "$PRIMARY_ENGINE" in
-                boltz|protenix|af3) ;;
-                *) echo "Error: --primary-engine must be one of: boltz, protenix, af3 (got '$PRIMARY_ENGINE')" >&2; exit 1 ;;
+                boltz|protenix|af3|esmfold2) ;;
+                *) echo "Error: --primary-engine must be one of: boltz, protenix, af3, esmfold2 (got '$PRIMARY_ENGINE')" >&2; exit 1 ;;
             esac
             shift 2 ;;
         --resume)         RESUME=1;          shift ;;
         -h|--help)
-            sed -n '2,22p' "$0" | grep '^#' | sed 's/^# \?//'
+            sed -n '2,25p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
@@ -129,6 +138,16 @@ if [[ $SKIP_AF3 -eq 0 ]]; then
     fi
 fi
 
+# Auto-detect ESMFold2 availability unless user skipped it
+if [[ $SKIP_ESMFOLD2 -eq 0 ]]; then
+    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${ESMFOLD2_ENV}"; then
+        echo "[note] conda env '${ESMFOLD2_ENV}' not found — ESMFold2 refolding will be skipped."
+        echo "        (install with: bindmaster install --tool esmfold2; see Evaluator/envs/binder-eval-esmfold2.yml)"
+        echo ""
+        SKIP_ESMFOLD2=1
+    fi
+fi
+
 # --- Step 0: Normalise sequences to FASTA ----------------------------------
 FASTA="$OUTPUT/sequences.fasta"
 echo "[step 0] Parsing sequences → $FASTA"
@@ -141,12 +160,14 @@ SEQUENCES="$FASTA"
 BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
 PROTENIX_CSV="$OUTPUT/protenix_results.csv"
 AF3_CSV="$OUTPUT/af3_results.csv"
+ESMFOLD2_CSV="$OUTPUT/esmfold2_results.csv"
 
 # Step counter: 1 (report) + 1 per engine not skipped
 N_STEPS=1  # report
 [[ $SKIP_BOLTZ2 -eq 0 ]]   && (( N_STEPS++ ))
 [[ $SKIP_PROTENIX -eq 0 ]] && (( N_STEPS++ ))
 [[ $SKIP_AF3 -eq 0 ]]      && (( N_STEPS++ ))
+[[ $SKIP_ESMFOLD2 -eq 0 ]] && (( N_STEPS++ ))
 STEP=1
 
 if [[ $SKIP_BOLTZ2 -eq 1 ]]; then
@@ -192,6 +213,21 @@ if [[ $SKIP_AF3 -eq 0 ]]; then
     (( STEP++ ))
 fi
 
+# --- Step 4: ESMFold2 refolding (optional) ---------------------------------
+if [[ $SKIP_ESMFOLD2 -eq 0 ]]; then
+    echo "[step ${STEP}/${N_STEPS}] ESMFold2 refolding  (conda env: ${ESMFOLD2_ENV})..."
+    ESMFOLD2_RESUME_FLAG=""
+    [[ $RESUME -eq 1 ]] && ESMFOLD2_RESUME_FLAG="--resume"
+    conda run -n "${ESMFOLD2_ENV}" binder-compare refold-esmfold2 \
+        --sequences  "$SEQUENCES" \
+        --target-seq "$TARGET_SEQ" \
+        -o           "$ESMFOLD2_CSV" \
+        --output-dir "$OUTPUT/refold_esmfold2" \
+        --model      "${ESMFOLD2_MODEL}" \
+        $ESMFOLD2_RESUME_FLAG
+    (( STEP++ ))
+fi
+
 # --- Report ----------------------------------------------------------------
 echo "[step ${STEP}/${N_STEPS}] Generating report   (binder-eval)..."
 REPORT_ARGS=(
@@ -204,6 +240,9 @@ if [[ $SKIP_PROTENIX -eq 0 && -f "$PROTENIX_CSV" ]]; then
 fi
 if [[ $SKIP_AF3 -eq 0 && -f "$AF3_CSV" ]]; then
     REPORT_ARGS+=(--af3-results "$AF3_CSV")
+fi
+if [[ $SKIP_ESMFOLD2 -eq 0 && -f "$ESMFOLD2_CSV" ]]; then
+    REPORT_ARGS+=(--esmfold2-results "$ESMFOLD2_CSV")
 fi
 REPORT_ARGS+=(--primary-engine "$PRIMARY_ENGINE")
 conda run -n binder-eval binder-compare report "${REPORT_ARGS[@]}"

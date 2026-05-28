@@ -394,6 +394,7 @@ _ENGINE_IPSAE_COLS: dict[str, str] = {
     "boltz": "boltz_pae_ipsae_min",
     "protenix": "protenix_ipsae_min",
     "af3": "af3_ipsae_min",
+    "esmfold2": "esmfold2_ipsae_min",
     "af2": "af2_ipsae_min",
 }
 
