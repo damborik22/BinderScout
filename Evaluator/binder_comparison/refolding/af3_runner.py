@@ -1,0 +1,152 @@
+"""AlphaFold 3 refolding runner.
+
+Wraps scripts/refold_af3.refold_batch() to evaluate a batch of
+binder sequences against a target using AlphaFold 3 v3.0.2
+(Google DeepMind, original implementation).
+
+Must be run in the ``binder-eval-af3`` conda env (aarch64 / DGX Spark):
+
+    conda run -n binder-eval-af3 binder-compare refold-af3 ...
+
+Output CSV columns (from refold_af3, pLDDT rescaled to 0-1):
+    run_id, idx, sequence, target_sequence, binder_length,
+    iptm, ptm, ranking_score,
+    plddt_binder_mean, plddt_binder_min, plddt_target_mean,
+    pae_bt_mean, pae_tb_mean, pae_bb_mean, pae_overall_mean, pae_max,
+    cif, pdb, pae_file
+
+Array ordering: refold_af3 places target first (chain A) and binder second
+(chain B) in the AF3 input JSON.  The PAE .npy files use [target | binder]
+ordering — scoring.py reads with ``ordering="target_binder"`` to compute
+ipSAE, matching the Protenix convention.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+
+def run_af3_refold(
+    sequences: list[str],
+    target_sequence: str,
+    output_dir: str | Path,
+    output_csv: str | Path,
+    *,
+    num_seeds: int = 1,
+    num_samples: int = 5,
+    model_dir: str | Path | None = None,
+    scripts_path: str | Path | None = None,
+    resume: bool = False,
+) -> None:
+    """Refold *sequences* against *target_sequence* using AlphaFold 3.
+
+    Args:
+        sequences:       Binder amino acid strings.
+        target_sequence: Target protein sequence.
+        output_dir:      Directory where AF3 output (predictions/, *.npy)
+                         is written.
+        output_csv:      Path for the metrics CSV.
+        num_seeds:       Number of random seeds (default: 1).
+        num_samples:     AF3 diffusion samples per seed (default: 5).
+        model_dir:       AF3 model parameters directory.  Auto-detected from
+                         ``AF3_MODEL_DIR`` env var or default paths if None.
+        scripts_path:    Override path to scripts/ (auto-detected).
+        resume:          If True, skip binders with rows already in output_csv.
+    """
+    output_dir = Path(output_dir).resolve()
+    output_csv = Path(output_csv).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    scripts_dir = _resolve_scripts_path(scripts_path)
+
+    skip_indices: set[int] = set()
+    if resume and output_csv.exists():
+        skip_indices = _load_completed_indices(output_csv)
+        if skip_indices:
+            print(f"[af3] Resuming — skipping {len(skip_indices)} already-completed binders")
+
+    old_cwd = os.getcwd()
+    os.chdir(output_dir)
+    try:
+        sys.path.insert(0, str(scripts_dir))
+        from refold_af3 import refold_batch
+
+        refold_batch(
+            binder_sequences=sequences,
+            target_sequence=target_sequence,
+            output_dir=output_dir,
+            output_csv=output_csv,
+            num_seeds=num_seeds,
+            num_samples=num_samples,
+            model_dir=str(model_dir) if model_dir else None,
+            skip_indices=skip_indices,
+        )
+    finally:
+        os.chdir(old_cwd)
+
+    if not output_csv.exists():
+        raise FileNotFoundError(f"Expected refold_af3 to write {output_csv} but it was not found.")
+
+    _absolutize_csv_paths(output_csv, output_dir, ["cif", "pdb", "pae_file"])
+    print(f"[af3] Results → {output_csv}")
+
+
+def _load_completed_indices(csv_path: Path) -> set[int]:
+    """Read existing CSV and return a set of already-populated 1-based indices."""
+    if not csv_path.exists():
+        return set()
+    try:
+        import csv
+
+        indices: set[int] = set()
+        with csv_path.open() as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                idx_val = row.get("idx")
+                if idx_val is not None:
+                    try:
+                        indices.add(int(idx_val))
+                    except ValueError:
+                        continue
+        return indices
+    except Exception:
+        return set()
+
+
+def _absolutize_csv_paths(csv_path: Path, base_dir: Path, path_cols: list[str]) -> None:
+    """Rewrite relative path columns in a CSV to absolute using *base_dir*."""
+    import csv as csv_mod
+
+    rows: list[dict[str, str]] = []
+    fieldnames: list[str] | None = None
+    with csv_path.open() as f:
+        reader = csv_mod.DictReader(f)
+        fieldnames = reader.fieldnames
+        for row in reader:
+            for col in path_cols:
+                val = row.get(col, "")
+                if val and not Path(val).is_absolute():
+                    row[col] = str((base_dir / val).resolve())
+            rows.append(row)
+
+    if fieldnames is None:
+        return
+    with csv_path.open("w", newline="") as f:
+        writer = csv_mod.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _resolve_scripts_path(override: str | Path | None) -> Path:
+    if override is not None:
+        p = Path(override)
+        if not p.exists():
+            raise FileNotFoundError(f"scripts path not found: {p}")
+        return p
+    repo_root = Path(__file__).parent.parent.parent
+    candidate = repo_root / "scripts"
+    if candidate.exists():
+        return candidate
+    raise FileNotFoundError(f"Could not locate scripts directory at {candidate}. Pass --scripts-path explicitly.")

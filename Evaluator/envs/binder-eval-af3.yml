@@ -1,0 +1,23 @@
+name: binder-eval-af3
+# AlphaFold 3 v3.0.2 refolding step.
+#
+# Used for: binder-compare refold-af3
+# Platform: any host with >=100 GB GPU memory — H200 (x86_64), GH200, DGX Spark
+#           (aarch64). Full AF3 inference does not fit on consumer 24 GB GPUs.
+#
+# AF3 model weights must be downloaded separately (gated by Google DeepMind):
+#   1. Request access at https://github.com/google-deepmind/alphafold3
+#   2. Place the model parameters at ~/.alphafold3/models/ (or set AF3_MODEL_DIR).
+#
+# The BindMaster installer (`bindmaster install --tool af3`) creates this env
+# and runs the pip installs below. If installing manually:
+#   conda env create -f binder-eval-af3.yml
+#   conda run -n binder-eval-af3 pip install alphafold3 gemmi
+#   conda run -n binder-eval-af3 pip install -e <repo_root>/Evaluator/[report]
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+  - numpy>=1.24
