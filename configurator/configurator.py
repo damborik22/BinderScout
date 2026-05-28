@@ -3129,16 +3129,6 @@ def wizard():
 
     if use_rfd3:
         print_step("Step 6g — RFD3 settings")
-        print(f"  {YELLOW}Per-tool overrides (Enter = keep global default):{RESET}")
-        cfg["rfd3_min_length"] = int(
-            ask("  Min binder length", default=min_length, validator=validate_int(min_val=10, max_val=500))
-        )
-        cfg["rfd3_max_length"] = int(
-            ask("  Max binder length", default=max_length, validator=validate_int(min_val=10, max_val=500))
-        )
-        cfg["rfd3_n_designs"] = int(
-            ask("  Number of backbone designs", default=n_designs, validator=validate_int(min_val=1, max_val=10000))
-        )
         cfg["rfd3_batch_size"] = int(
             ask(
                 "  Diffusion batch size (10 fits 24 GB; drop to 4 for longer binders)",
@@ -3156,16 +3146,6 @@ def wizard():
 
     if use_protein_hunter:
         print_step("Step 6h — Protein-Hunter settings")
-        print(f"  {YELLOW}Per-tool overrides (Enter = keep global default):{RESET}")
-        cfg["protein_hunter_min_length"] = int(
-            ask("  Min binder length", default=min_length, validator=validate_int(min_val=10, max_val=500))
-        )
-        cfg["protein_hunter_max_length"] = int(
-            ask("  Max binder length", default=max_length, validator=validate_int(min_val=10, max_val=500))
-        )
-        cfg["protein_hunter_n_designs"] = int(
-            ask("  Number of designs", default=n_designs, validator=validate_int(min_val=1, max_val=10000))
-        )
         cfg["protein_hunter_num_cycles"] = int(
             ask(
                 "  Boltz-2 hallucination cycles per design (7 = CALCA-validated)",
