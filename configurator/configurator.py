@@ -204,6 +204,7 @@ def detect_installs() -> dict:
         "proteina_complexa": (PROTEINA_COMPLEXA_VENV / "bin" / "python").exists(),
         "rfd3": _env_exists("bindmaster_rfd3") and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
         "protein_hunter": _env_exists("bindmaster_protein_hunter") and PROTEIN_HUNTER_DIR.exists(),
+        "af3": _env_exists("binder-eval-af3"),
     }
 
 
@@ -885,7 +886,7 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
         f"TARGET_SEQUENCE = {cfg['target_sequence']!r}  # target protein sequence\n"
         f"TARGET_PDB = {target_pdb_path!r}  # path to target PDB (structural template)\n"
         f"N_DESIGNS = {cfg.get('mosaic_n_designs', 100)}  # Stage 1: how many designs to generate per length\n"
-        f"TOP_K = {cfg.get('mosaic_top_k', cfg['n_designs'])}  # Stage 2: how many top designs to refold and export PDB\n"
+        f"TOP_K = {cfg.get('mosaic_top_k', min(5, cfg['n_designs']))}  # Stage 2: how many top designs to refold and export PDB\n"
         f"MIN_LENGTH = {cfg.get('mosaic_min_length', cfg['min_length'])}  # minimum binder length (aa)\n"
         f"MAX_LENGTH = {cfg.get('mosaic_max_length', cfg['max_length'])}  # maximum binder length (aa)\n"
         f"LENGTH_STEP = {cfg.get('mosaic_length_step', 5)}  # step between scanned lengths; set MIN=MAX for a single length"
@@ -1835,7 +1836,7 @@ def write_run_rfd3(path: Path, cfg: dict):
     min_len = cfg.get("rfd3_min_length", cfg.get("min_length", 60))
     max_len = cfg.get("rfd3_max_length", cfg.get("max_length", 150))
     n_designs = cfg.get("rfd3_n_designs", cfg.get("n_designs", 50))
-    batch_size = cfg.get("rfd3_batch_size", 8)
+    batch_size = cfg.get("rfd3_batch_size", 10)
     # Round n_batches up so at least n_designs samples are produced.
     n_batches = max(1, -(-n_designs // batch_size))
     diffusion_steps = cfg.get("rfd3_diffusion_steps", 200)
@@ -2121,8 +2122,8 @@ def write_run_protein_hunter(path: Path, cfg: dict):
     n_designs = cfg.get("protein_hunter_n_designs", cfg.get("n_designs", 50))
     min_len = cfg.get("protein_hunter_min_length", cfg.get("min_length", 60))
     max_len = cfg.get("protein_hunter_max_length", cfg.get("max_length", 150))
-    num_cycles = cfg.get("protein_hunter_num_cycles", 5)
-    msa_mode = cfg.get("protein_hunter_msa_mode", "mmseqs")
+    num_cycles = cfg.get("protein_hunter_num_cycles", 7)
+    msa_mode = cfg.get("protein_hunter_msa_mode", "single")
     iptm_thr = cfg.get("protein_hunter_iptm_threshold", 0.7)
     plddt_thr = cfg.get("protein_hunter_plddt_threshold", 0.7)
     percent_x = cfg.get("protein_hunter_percent_X", 80)
@@ -2370,7 +2371,6 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     """Generate run_evaluate.sh — calls Evaluator/evaluate.sh with the right paths."""
     run_dir = cfg["run_dir"]
     eval_dir = run_dir / "evaluate"
-    target_pdb = cfg["target_pdb"]
     target_seq = cfg.get("target_sequence", "")
 
     # Collect design output directories the evaluator should scan
@@ -2389,6 +2389,10 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         design_dirs.append(("--pxdesign", cfg["pxdesign_output_dir"]))
     if tools_enabled.get("proteina_complexa"):
         design_dirs.append(("--proteina-complexa", str(run_dir / "proteina_complexa")))
+    if tools_enabled.get("protein_hunter"):
+        design_dirs.append(("--protein-hunter", str(run_dir / "protein_hunter")))
+    if tools_enabled.get("rfd3"):
+        design_dirs.append(("--rfd3", str(run_dir / "rfd3" / "outputs")))
 
     # Build the evaluate.sh invocation
     eval_sh = EVALUATOR_DIR / "evaluate.sh"
@@ -2451,10 +2455,21 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         f'echo "=== Running Evaluator for {cfg["name"]} ==="',
         'bash "$EVAL_SCRIPT" \\',
         '    --sequences "$SEQUENCES" \\',
-        f'    --target-pdb "{target_pdb}" \\',
         f'    --target-seq "{target_seq}" \\',
         '    --output "$OUTPUT_DIR" \\',
-        f'    --mosaic-path "{MOSAIC_DIR}" \\',
+    ]
+
+    # Engine selection flags (skip flags omit engines NOT selected)
+    if not cfg.get("use_boltz", True):
+        lines.append('    --skip-boltz2 \\')
+    if not cfg.get("use_protenix", False):
+        lines.append('    --skip-protenix \\')
+    if not cfg.get("use_af3", False):
+        lines.append('    --skip-af3 \\')
+
+    primary = cfg.get("primary_engine", "boltz")
+    lines += [
+        f'    --primary-engine {primary} \\',
         "    --resume",
         "",
     ]
@@ -2805,8 +2820,52 @@ def wizard():
     use_pxdesign_import = pxdesign_mode == 2
     print(f"  {BOLD}Proteina-Complexa{RESET} [{_tag('proteina_complexa')}]")
     use_proteina_complexa = ask_yn("  Enable Proteina-Complexa (NVIDIA flow matching)?", default=False)
+    print(f"  {BOLD}Protein-Hunter{RESET} [{_tag('protein_hunter')}]")
+    use_protein_hunter = ask_yn("  Enable Protein-Hunter (Boltz-2 / Chai-1 hallucination)?", default=False)
+    print(f"  {BOLD}RFD3{RESET} [{_tag('rfd3')}]")
+    use_rfd3 = ask_yn("  Enable RFD3 (RosettaCommons foundry diffusion + ProteinMPNN)?", default=False)
     print(f"  {BOLD}Evaluator{RESET} [{_tag('evaluator')}]")
-    use_evaluator = ask_yn("  Enable cross-evaluation (Boltz-2 refolding + ranked report)?", default=False)
+    use_evaluator = ask_yn("  Enable cross-evaluation (refolding + ranked report)?", default=False)
+
+    # ── Refolding engine selection ──
+    use_boltz = use_protenix = use_af3 = False
+    primary_engine = "boltz"
+    if use_evaluator:
+        print(f"  {BOLD}Refolding engines for evaluation{RESET}")
+        engines_available = []
+        if installed.get("mosaic"):
+            engines_available.append(("boltz", "Boltz-2 (Mosaic venv)", True))
+        else:
+            print(f"    Boltz-2: {RED}requires Mosaic install{RESET} — skipped")
+        if installed.get("pxdesign_local"):
+            engines_available.append(("protenix", "Protenix v0.5.0 (PXDesign env)", False))
+        else:
+            print(f"    Protenix: {RED}requires PXDesign install{RESET} — skipped")
+        if installed.get("af3"):
+            engines_available.append(("af3", "AlphaFold 3 v3.0.2 (binder-eval-af3 env)", False))
+        else:
+            print(f"    AF3: {RED}requires binder-eval-af3 env{RESET} — skipped")
+        for key, label, default_on in engines_available:
+            ans = ask_yn(f"    Use {label}?", default=default_on)
+            if key == "boltz":
+                use_boltz = ans
+            elif key == "protenix":
+                use_protenix = ans
+            elif key == "af3":
+                use_af3 = ans
+        # Require at least one engine
+        if not (use_boltz or use_protenix or use_af3):
+            print_warn("No refolding engine selected — Evaluator disabled.")
+            use_evaluator = False
+        else:
+            # If >1 engine, pick primary
+            selected = [k for k, on in (("boltz", use_boltz), ("protenix", use_protenix), ("af3", use_af3)) if on]
+            if len(selected) > 1:
+                default_idx = selected.index("boltz") if "boltz" in selected else 0
+                idx, _ = ask_choice("    Primary engine for ranking", selected, default_index=default_idx)
+                primary_engine = selected[idx]
+            else:
+                primary_engine = selected[0]
 
     tools_enabled = {
         "mosaic": use_mosaic,
@@ -2816,11 +2875,18 @@ def wizard():
         "pxdesign_local": use_pxdesign_local,
         "pxdesign_import": use_pxdesign_import,
         "proteina_complexa": use_proteina_complexa,
+        "protein_hunter": use_protein_hunter,
+        "rfd3": use_rfd3,
         "evaluator": use_evaluator,
+        "use_boltz": use_boltz,
+        "use_protenix": use_protenix,
+        "use_af3": use_af3,
+        "primary_engine": primary_engine,
     }
 
     # Evaluator is post-processing — don't count it as the sole tool
-    design_tools = {k: v for k, v in tools_enabled.items() if k != "evaluator"}
+    _meta_keys = {"evaluator", "use_boltz", "use_protenix", "use_af3", "primary_engine"}
+    design_tools = {k: v for k, v in tools_enabled.items() if k not in _meta_keys}
     if not any(design_tools.values()) and not use_evaluator:
         print_warn("No tools enabled — nothing to generate. Exiting.")
         sys.exit(0)
@@ -2841,6 +2907,10 @@ def wizard():
         "advanced_preset": "default_4stage_multimer",
         "boltzgen_mode": "protein",
         "boltzgen_intermediate": 10000,
+        "use_boltz": use_boltz,
+        "use_protenix": use_protenix,
+        "use_af3": use_af3,
+        "primary_engine": primary_engine,
     }
 
     if use_bindcraft:
@@ -2910,7 +2980,11 @@ def wizard():
             ask("  Designs to generate (Stage 1)", default=100, validator=validate_int(min_val=1))
         )
         cfg["mosaic_top_k"] = int(
-            ask("  Top designs to refold (TOP_K)", default=n_designs, validator=validate_int(min_val=0))
+            ask(
+                "  Top designs to refold (best-of-N for Stage 2)",
+                default=min(5, n_designs),
+                validator=validate_int(min_val=0),
+            )
         )
         cfg["mosaic_min_length"] = int(
             ask("  Min binder length", default=min_length, validator=validate_int(min_val=1, max_val=500))
