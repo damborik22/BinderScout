@@ -52,6 +52,14 @@ def run(args: argparse.Namespace) -> None:
     if args.native_metrics:
         df = _attach_native_metrics(df, args.native_metrics)
 
+    # Auto-detect the sidecar native_metrics.csv that 'extract' wrote next to
+    # the sequences FASTA. Carries per-tool design-time metrics for all tools
+    # (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter,
+    # RFD3) so the final report shows "what the tool said about its own design"
+    # next to the cross-validation refold metrics.
+    if args.sequences:
+        df = _attach_native_metrics_sidecar(df, args.sequences)
+
     # Step 2: Promote Boltz-2 as primary predictor
     print("[report] Promoting Boltz-2 metrics as primary…")
     df = compute_ensemble_metrics(df)
@@ -242,6 +250,7 @@ def run(args: argparse.Namespace) -> None:
         tool_pdb_dirs=tool_pdb_dirs or None,
         boltz2_results_dir=Path(args.boltz2_results).resolve().parent if args.boltz2_results else None,
         primary_engine=primary_engine,
+        top_per_tool=args.top_per_tool,
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
@@ -379,6 +388,36 @@ def _attach_native_metrics(df: pd.DataFrame, native_csv: str) -> pd.DataFrame:
     return pd.merge(df, native_sub, on="sequence", how="left")
 
 
+def _attach_native_metrics_sidecar(df: pd.DataFrame, sequences_fasta: str) -> pd.DataFrame:
+    """Left-join the per-binder native metrics CSV that 'extract' writes next
+    to its FASTA output. Expected at ``<fasta_stem>_native_metrics.csv``.
+
+    Drops fully-empty native_ columns (so e.g. RFD3-only runs don't surface
+    empty mosaic_* columns in the final report).
+    """
+    fasta_path = Path(sequences_fasta)
+    sidecar = fasta_path.with_name(fasta_path.stem + "_native_metrics.csv")
+    if not sidecar.exists():
+        return df
+
+    native_df = pd.read_csv(sidecar)
+    if native_df.empty or "sequence" not in native_df.columns:
+        return df
+
+    # Drop columns that are entirely empty in this extraction run; saves the
+    # downstream report from listing 25 mostly-NaN columns when only 3 tools
+    # were used.
+    native_cols = [c for c in native_df.columns if c.startswith("native_")]
+    keep_cols = ["sequence"] + [c for c in native_cols if native_df[c].notna().any()]
+    if len(keep_cols) <= 1:
+        return df  # nothing to add
+
+    native_sub = native_df[keep_cols].copy()
+    native_sub["sequence"] = native_sub["sequence"].str.strip().str.upper()
+    print(f"[report] Attaching {len(keep_cols) - 1} native metric column(s) from {sidecar.name}")
+    return pd.merge(df, native_sub, on="sequence", how="left")
+
+
 def add_parser(subparsers) -> None:
     p = subparsers.add_parser(
         "report",
@@ -396,8 +435,7 @@ def add_parser(subparsers) -> None:
     p.add_argument(
         "--af3-results",
         metavar="CSV",
-        help="Optional: output from 'refold-af3' (af3_results.csv). Adds a third engine "
-        "to the agreement_count.",
+        help="Optional: output from 'refold-af3' (af3_results.csv). Adds a third engine to the agreement_count.",
     )
     p.add_argument(
         "--esmfold2-results",
@@ -439,10 +477,19 @@ def add_parser(subparsers) -> None:
         help="AF2 informational threshold (default 0.30; AF2 mis-calibrated for short targets — not counted in agreement)",
     )
     p.add_argument(
+        "--top-per-tool",
+        type=int,
+        default=10,
+        metavar="N",
+        help="How many designs to surface per tool in the per-tool native-ranked sections of the "
+        "report (radar plots + per-tool tables + per-tool 3D viewers). Default 10. Increase if "
+        "you want to inspect more of each tool's native top picks.",
+    )
+    p.add_argument(
         "--tool-csv",
         metavar="TOOL=CSV",
         action="append",
-        help="Tool's original output CSV for native-ranked top-10 section. "
+        help="Tool's original output CSV for native-ranked top-N section. "
         "Can be specified multiple times. Example: --tool-csv mosaic=runs/mosaic/designs.csv "
         "--tool-csv boltzgen=runs/boltzgen/outputs/final_ranked_designs/final_designs_metrics_700.csv",
     )

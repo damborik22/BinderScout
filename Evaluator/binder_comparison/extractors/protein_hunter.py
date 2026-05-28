@@ -13,8 +13,10 @@ Default: read ``summary_high_iptm.csv`` (already filtered by ipTM + %X — track
 the Mosaic ``is_top=1`` pattern). Pass ``all_runs=True`` to return every
 ``best_seq`` from ``summary_all_runs.csv`` instead.
 
-Note: Protein-Hunter has no PyRosetta interface metrics; NativeMetrics is empty.
-      Cross-validation metrics come from the standardised refolding pipeline
+Note: Protein-Hunter has no PyRosetta interface metrics. NativeMetrics is
+      populated with the per-row Boltz-2 design-time values from the CSV
+      (iptm / best_iptm / plddt / sequence_recovery). Cross-validation
+      metrics still come from the standardised refolding pipeline
       (Boltz-2 / Protenix / AF3).
 """
 
@@ -30,6 +32,27 @@ from .base import SequenceExtractor
 
 _HIGH_IPTM_CSV = "summary_high_iptm.csv"
 _ALL_RUNS_CSV = "summary_all_runs.csv"
+
+# schema field name → Protein-Hunter CSV column name.
+# Column availability differs between the two summary CSVs:
+#   summary_high_iptm.csv → iptm, plddt, sequence_recovery (no best_iptm)
+#   summary_all_runs.csv  → best_iptm, best_plddt (no per-cycle iptm/plddt)
+# Missing columns stay None per row via _safe_float.
+_NATIVE_COL_MAP = {
+    "protein_hunter_iptm_cycle": "iptm",
+    "protein_hunter_iptm_best": "best_iptm",
+    "protein_hunter_plddt": "plddt",
+    "protein_hunter_sequence_recovery": "sequence_recovery",
+}
+
+
+def _safe_float(val) -> float | None:
+    if pd.isna(val) or val == "":
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
 
 
 class ProteinHunterExtractor(SequenceExtractor):
@@ -76,7 +99,7 @@ class ProteinHunterExtractor(SequenceExtractor):
                     binder_id=self._make_id(row, int(idx)),
                     sequence=seq,
                     source_tool="protein_hunter",
-                    native=NativeMetrics(),
+                    native=self._extract_native(row),
                 )
             )
         return results
@@ -112,7 +135,7 @@ class ProteinHunterExtractor(SequenceExtractor):
                     binder_id=self._make_id(row, int(idx)),
                     sequence=seq,
                     source_tool="protein_hunter",
-                    native=NativeMetrics(),
+                    native=self._extract_native(row),
                 )
             )
         return results
@@ -132,3 +155,17 @@ class ProteinHunterExtractor(SequenceExtractor):
         if pd.notna(run_id):
             return f"protein_hunter_{run_id}"
         return f"protein_hunter_{fallback_idx}"
+
+    def _extract_native(self, row: pd.Series) -> NativeMetrics:
+        """Populate NativeMetrics from per-row Protein-Hunter CSV columns.
+
+        Defensive: `row.get(col)` returns None when the column is absent (which
+        differs between summary_high_iptm.csv and summary_all_runs.csv), and
+        _safe_float passes None through as None.
+        """
+        return NativeMetrics(
+            protein_hunter_iptm_cycle=_safe_float(row.get(_NATIVE_COL_MAP["protein_hunter_iptm_cycle"])),
+            protein_hunter_iptm_best=_safe_float(row.get(_NATIVE_COL_MAP["protein_hunter_iptm_best"])),
+            protein_hunter_plddt=_safe_float(row.get(_NATIVE_COL_MAP["protein_hunter_plddt"])),
+            protein_hunter_sequence_recovery=_safe_float(row.get(_NATIVE_COL_MAP["protein_hunter_sequence_recovery"])),
+        )

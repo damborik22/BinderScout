@@ -64,5 +64,3 @@ class TestParsePxdesign:
         rows = ev._parse_pxdesign(run_dir)
         assert len(rows) == 1
         assert rows[0]["sequence"] == ""
-
-

@@ -33,6 +33,24 @@ _CSV_CANDIDATES = [
 
 _SEQUENCE_COL = "sequence"
 
+_NATIVE_COL_MAP = {
+    "complexa_self_iptm": "self_complex_i_pTM",
+    "complexa_self_ipae": "self_complex_i_pAE",
+    "complexa_self_plddt": "self_complex_pLDDT",
+    "complexa_self_scrmsd": "self_binder_scRMSD",
+    "complexa_af2_reward": "af2_reward",
+    "complexa_rf3_reward": "rf3_reward",
+}
+
+
+def _safe_float(val) -> float | None:
+    if pd.isna(val) or val == "":
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
 
 class ProteinaComplexaExtractor(SequenceExtractor):
     """Extract binder sequences from Proteina-Complexa outputs."""
@@ -63,17 +81,33 @@ class ProteinaComplexaExtractor(SequenceExtractor):
                 continue
 
             binder_id = self._make_id(row, idx)
+            native = self._extract_native(row)
 
             results.append(
                 ExtractedBinder(
                     binder_id=binder_id,
                     sequence=seq,
                     source_tool="proteina_complexa",
-                    native=NativeMetrics(),
+                    native=native,
                 )
             )
 
         return results
+
+    def _extract_native(self, row: pd.Series) -> NativeMetrics:
+        def _get(col: str) -> float | None:
+            if col in row.index:
+                return _safe_float(row.get(col))
+            return None
+
+        return NativeMetrics(
+            complexa_self_iptm=_get(_NATIVE_COL_MAP["complexa_self_iptm"]),
+            complexa_self_ipae=_get(_NATIVE_COL_MAP["complexa_self_ipae"]),
+            complexa_self_plddt=_get(_NATIVE_COL_MAP["complexa_self_plddt"]),
+            complexa_self_scrmsd=_get(_NATIVE_COL_MAP["complexa_self_scrmsd"]),
+            complexa_af2_reward=_get(_NATIVE_COL_MAP["complexa_af2_reward"]),
+            complexa_rf3_reward=_get(_NATIVE_COL_MAP["complexa_rf3_reward"]),
+        )
 
     def _find_csv(self, input_dir: Path) -> Path | None:
         for name in _CSV_CANDIDATES:
