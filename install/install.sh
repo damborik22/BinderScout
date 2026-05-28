@@ -77,6 +77,7 @@ DO_PXDESIGN=false
 DO_PROTEINA_COMPLEXA=false
 DO_PROTEIN_HUNTER=false
 DO_RFD3=false
+DO_AF3=false            # opt-in via --tool af3 (>=100 GB GPU memory required; weights not bundled)
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -106,8 +107,10 @@ while [[ $# -gt 0 ]]; do
                     DO_PROTEINA_COMPLEXA=true ;;
                 protein-hunter|protein_hunter|phunter)
                     DO_PROTEIN_HUNTER=true ;;
+                af3|alphafold3|alphafold)
+                    DO_AF3=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfaa, rfd3, pxdesign, proteina-complexa, protein-hunter${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfaa, rfd3, pxdesign, proteina-complexa, protein-hunter, af3${RESET}"
                     exit 1
                     ;;
             esac
@@ -139,10 +142,20 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--tool all|bindcraft|boltzgen|mosaic|evaluator|rfaa|pxdesign|proteina-complexa] [--cuda VERSION] [--skip-examples] [--yes]
+Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes]
        $0 --uninstall --tool <tool|all> [--yes]
 
   --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
+                  all                  current-generation tools: bindcraft, boltzgen,
+                                       mosaic, evaluator, pxdesign, proteina-complexa,
+                                       protein-hunter, rfd3
+                  bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3
+                                       install one current-generation tool
+                  rfaa                 legacy RFDiffusionAA — opt-in only; replaced by rfd3
+                  af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
+                                       requires >=100 GB GPU memory (H200/GH200/Spark)
+                                       and gated AF3 weights you obtain from
+                                       https://github.com/google-deepmind/alphafold3
   --cuda        CUDA version for conda package resolution (default: 12.4).
   --skip-examples
                 Do not prompt to run bundled examples after install.
@@ -634,6 +647,7 @@ select_tools_interactive() {
     [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
     [[ "$DO_PROTEINA_COMPLEXA" == true ]] && echo -e "    ${GREEN}✓${RESET} Proteina-Complexa"
     [[ "$DO_PROTEIN_HUNTER" == true ]] && echo -e "    ${GREEN}✓${RESET} Protein-Hunter"
+    [[ "$DO_AF3" == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; >=100 GB GPU; weights required)${RESET}"
     echo ""
 
     confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
@@ -2017,6 +2031,101 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/protein-hunter"
 }
 
+# ─── AlphaFold 3 (refolder, opt-in) ─────────────────────────────────────────
+
+install_af3() {
+    print_step "Installing AlphaFold 3 v3.0.2 refolder (binder-eval-af3 env)"
+    ensure_conda_in_path
+
+    # Soft VRAM check — installer doesn't have to run on the same host the eval will use,
+    # so we only warn (a head node may have no GPU at all).
+    local gpu_mem_mib=""
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        gpu_mem_mib="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')"
+    fi
+    if [[ -n "${gpu_mem_mib}" && "${gpu_mem_mib}" -lt 100000 ]]; then
+        print_warn "Detected GPU has ${gpu_mem_mib} MiB memory (<100 GiB)."
+        print_warn "  Full AF3 inference will OOM on consumer 24 GB GPUs."
+        print_warn "  Install will proceed — refold-af3 will only run on H200 / GH200 / DGX Spark."
+    fi
+
+    # Evaluator dir must exist (bundled in monorepo)
+    if [[ ! -d "${EVALUATOR_DIR}" ]]; then
+        print_fail "Evaluator directory not found at ${EVALUATOR_DIR}"
+        print_warn "It should be bundled in the repository. Try re-cloning BindMaster."
+        return 1
+    fi
+    if [[ ! -f "${EVALUATOR_DIR}/envs/binder-eval-af3.yml" ]]; then
+        print_fail "Env spec not found at ${EVALUATOR_DIR}/envs/binder-eval-af3.yml"
+        return 1
+    fi
+
+    # Create binder-eval-af3 conda env (Python 3.12, see env yml)
+    print_step "Creating binder-eval-af3 conda environment (Python 3.12)"
+    if env_exists binder-eval-af3; then
+        print_warn "Conda environment 'binder-eval-af3' already exists — skipping creation."
+    else
+        run_logged "Creating binder-eval-af3 conda env" \
+            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval-af3.yml" -y \
+            || { print_fail "Failed to create binder-eval-af3 conda env"; return 1; }
+    fi
+
+    # Install AF3 producer + gemmi (structure I/O used by refold_af3.py)
+    run_logged "Installing alphafold3 + gemmi into binder-eval-af3" \
+        "${CONDA_CMD}" run -n binder-eval-af3 pip install -q alphafold3 gemmi \
+        || { print_fail "Failed to install alphafold3 + gemmi (check PyPI access)"; return 1; }
+
+    # Install binder-compare into the env so 'binder-compare refold-af3' works
+    run_logged "Installing binder-compare into binder-eval-af3" \
+        "${CONDA_CMD}" run -n binder-eval-af3 pip install -q -e "${EVALUATOR_DIR}[report]" \
+        || { print_fail "Failed to install binder-compare into binder-eval-af3"; return 1; }
+
+    # Smoke test — just the CLI parses (no weights needed for --help)
+    smoke_test "binder-compare refold-af3 --help" \
+        "${CONDA_CMD}" run -n binder-eval-af3 binder-compare refold-af3 --help \
+        || return 1
+
+    # Shortcut
+    print_step "Installing af3 shortcut"
+    _write_af3_shortcut
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/af3"
+
+    # Weights — NOT bundled; user obtains from Google DeepMind themselves.
+    echo ""
+    print_warn "AF3 model weights are NOT bundled with this installer."
+    print_warn "  Request access:  https://github.com/google-deepmind/alphafold3"
+    print_warn "  Place at:        ~/.alphafold3/models/"
+    print_warn "  Or set:          export AF3_MODEL_DIR=/your/path/to/models"
+    echo ""
+
+    print_ok "AF3 refolder installation complete"
+}
+
+_write_af3_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# BindMaster AF3 shortcut — runs 'binder-compare refold-af3 ...' in the"
+        echo "# binder-eval-af3 env. With no args: opens an interactive env shell."
+        echo ""
+        echo "CONDA_CMD=\"${CONDA_CMD}\""
+    } > "${SHORTCUTS_DIR}/af3"
+    cat >> "${SHORTCUTS_DIR}/af3" << 'AF3EOF'
+
+if [ "$#" -eq 0 ]; then
+    echo "AF3 env (binder-eval-af3) activated."
+    echo "Usage:"
+    echo "  binder-compare refold-af3 --sequences seqs.fasta --target-seq SEQ -o af3.csv"
+    echo "  (AF3 weights expected at ~/.alphafold3/models/ or \$AF3_MODEL_DIR)"
+    echo ""
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-af3 bash
+else
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-af3 binder-compare refold-af3 "$@"
+fi
+AF3EOF
+    chmod +x "${SHORTCUTS_DIR}/af3"
+}
+
 # ─── Uninstall ─────────────────────────────────────────────────────────────────
 
 uninstall_tool() {
@@ -2115,6 +2224,14 @@ uninstall_tool() {
             [[ -d "${FOUNDRY_DIR}" ]] && { rm -rf "${FOUNDRY_DIR}"; print_ok "Removed ${FOUNDRY_DIR}"; }
             print_ok "RFD3 uninstalled"
             ;;
+        af3|alphafold3|alphafold)
+            print_step "Uninstalling AlphaFold 3 refolder"
+            env_exists binder-eval-af3 && run_logged "Removing binder-eval-af3 conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-af3 -y
+            rm -f "${SHORTCUTS_DIR}/af3"
+            print_warn "AF3 model weights (if any) at ~/.alphafold3/models or \$AF3_MODEL_DIR were NOT removed."
+            print_ok "AF3 refolder uninstalled"
+            ;;
         *)
             print_fail "Unknown tool: ${tool}"
             return 1
@@ -2175,6 +2292,7 @@ main() {
         [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { uninstall_tool proteina-complexa || failed_uninstalls+=("Proteina-Complexa"); }
         [[ "${DO_PROTEIN_HUNTER}" == true ]] && { uninstall_tool protein-hunter || failed_uninstalls+=("Protein-Hunter"); }
         [[ "${DO_RFD3}"      == true ]] && { uninstall_tool rfd3      || failed_uninstalls+=("RFD3"); }
+        [[ "${DO_AF3}"       == true ]] && { uninstall_tool af3       || failed_uninstalls+=("AF3"); }
 
         # Offer to remove local Miniforge when all tools are uninstalled
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
@@ -2211,6 +2329,7 @@ main() {
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && (( total++ ))
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && (( total++ ))
     [[ "${DO_RFD3}"      == true ]] && (( total++ ))
+    [[ "${DO_AF3}"       == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
@@ -2224,6 +2343,7 @@ main() {
     [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Protein-Hunter${RESET}"; install_protein_hunter || failed_tools+=("Protein-Hunter"); }
+    [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"
