@@ -384,6 +384,7 @@ DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {
     "boltz": IPSAE_PASS_THRESHOLD,  # 0.61
     "protenix": IPSAE_PASS_THRESHOLD,  # 0.61
     "af3": IPSAE_PASS_THRESHOLD,  # 0.61 — DunbrackLab cutoff was tuned for AF3
+    "esmfold2": IPSAE_PASS_THRESHOLD,  # 0.61 — same cutoff until empirical calibration suggests otherwise
     "af2": 0.30,  # informational only; AF2 distribution caps low
 }
 
@@ -394,6 +395,7 @@ _ENGINE_IPSAE_COLS: dict[str, str] = {
     "boltz": "boltz_pae_ipsae_min",
     "protenix": "protenix_ipsae_min",
     "af3": "af3_ipsae_min",
+    "esmfold2": "esmfold2_ipsae_min",
     "af2": "af2_ipsae_min",
 }
 
@@ -606,7 +608,7 @@ def compute_agreement(
     because its DunbrackLab distribution is mis-calibrated on short targets
     (see INVESTIGATION_RANKING_DISCREPANCY.md §6).
 
-    Adds column 'agreement_count' (0–3: Boltz-2, Protenix, AF3 over their thresholds).
+    Adds column 'agreement_count' (0–4: Boltz-2, Protenix, AF3, ESMFold2 over their thresholds).
     """
     result = df.copy()
     thresholds = {**DEFAULT_ENGINE_THRESHOLDS, **(engine_thresholds or {})}
@@ -614,6 +616,7 @@ def compute_agreement(
         "boltz": "boltz_pae_ipsae_min",
         "protenix": "protenix_ipsae_min",
         "af3": "af3_ipsae_min",
+        "esmfold2": "esmfold2_ipsae_min",
     }
 
     count = pd.Series(0, index=df.index)
