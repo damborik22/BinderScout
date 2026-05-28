@@ -7,20 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **RFAA** (RFDiffusionAA + LigandMPNN): new design tool in installer, configurator, and evaluator (x86_64 only)
 - **PXDesign** (Protenix): full pipeline support — diffusion, MPNN sequence design, AF2 complex/monomer evaluation
 - Post-install patches in both installers for PXDesign upstream issues (NumpyEncoder, num_workers, CUDA arch, ColabDesign, deepspeed, JAX pin)
 - aarch64 run scripts auto-detect platform and set `TORCH_CUDA_ARCH_LIST` and `JAX_PLATFORMS` for Blackwell GPUs
-- RFAA platform warning in aarch64 installer (DGL lacks CUDA aarch64 wheels)
 
 ### Changed
 - **BindCraft pin** `828fd9f` → `7cd4ace` (3 upstream bugfixes): graylab→west.rosettacommons.org PyRosetta wheels (x86_64), `range(11,15)→(11,16)` model-selection fix, stage-3 `onehot_plddt` init + `align_pdbs` crash guard
 
+### Removed
+- **RFAA fully removed.** RFDiffusionAA + LigandMPNN install path, the `bindmaster_rfaa` conda env, the `--tool rfaa` flag in both installers, the RFAA extractor in the Evaluator package, the `--rfaa` flag on `binder-compare extract`, the `_parse_rfaa()` legacy parser, the `bindmaster.tools.rfaa` Python package, the `bindmaster_examples/`-equivalent test scripts, the `bin/rfaa` shortcut, the `rf_diffusion_all_atom/` and `LigandMPNN/` cloned repos, and `docs/rfaa_manual_reinstall.md`. Use RFD3 (`--tool rfd3`) for all-atom diffusion-based binder design instead. Git history retains the recipe if anyone ever needs to reproduce an old RFAA result.
+
 ### Added (Parts L + M — Protein-Hunter & RFD3, on `refactor/af3-rfd3-ph`)
 - **Part L — Protein-Hunter** (Cho et al. 2025) installable via `bindmaster install --tool protein-hunter` (x86 only; aarch64 blocked by pyrosetta). Conda env `bindmaster_protein_hunter` (Py 3.10), vendored Boltz-2 + LigandMPNN + Chai-1 (sokrypton fork), shortcut `bin/protein-hunter`. New Evaluator extractor reads `summary_high_iptm.csv` by default (`--all-protein-hunter-designs` for all runs). Supports all 6 modalities via upstream `design.py` flags (protein / cyclic / ligand-CCD / ligand-SMILES / DNA / RNA). `SourceTool` Literal + tool colors/displays extended.
 - **Part M — RFD3 (RosettaCommons/foundry v0.1.9)** installable via `bindmaster install --tool rfd3`. Conda env `bindmaster_rfd3` (Py 3.12), `rc-foundry[rfd3,mpnn]` from PyPI, weights at `BindMaster/weights/foundry/`. BSD-3-Clause, commercial-use OK, works on aarch64 (no DGL). Shortcut `bin/rfd3` runs `rfd3 design ...` or opens an env shell. New `RFD3Extractor` with defensive CSV/FASTA parsing. Tool colors/displays added.
-- **RFAA deprecated (not deleted)**. Dropped from interactive menu and from the `--tool all` meta-tool. Still installable via `bindmaster install --tool rfaa` for reproducing existing runs. `install_rfaa()` now prints a deprecation banner pointing at RFD3 and `docs/rfaa_manual_reinstall.md`.
-- **New doc** `docs/rfaa_manual_reinstall.md` captures commit SHAs, post-install patches, and manual-reproducibility steps for long-term RFAA maintenance.
 
 ### Added (Part K — AF3 v3.0.2 refolder, canonical 2nd engine)
 - **AlphaFold 3 v3.0.2 as the canonical 2nd refolding engine on big-VRAM hardware** (DGX Spark, H200, any host with >100 GB unified or device memory — full AF3 inference does not fit on consumer 24 GB GPUs).
