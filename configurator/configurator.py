@@ -3127,6 +3127,62 @@ def wizard():
             validator=validate_chains,
         )
 
+    if use_rfd3:
+        print_step("Step 6g — RFD3 settings")
+        print(f"  {YELLOW}Per-tool overrides (Enter = keep global default):{RESET}")
+        cfg["rfd3_min_length"] = int(
+            ask("  Min binder length", default=min_length, validator=validate_int(min_val=10, max_val=500))
+        )
+        cfg["rfd3_max_length"] = int(
+            ask("  Max binder length", default=max_length, validator=validate_int(min_val=10, max_val=500))
+        )
+        cfg["rfd3_n_designs"] = int(
+            ask("  Number of backbone designs", default=n_designs, validator=validate_int(min_val=1, max_val=10000))
+        )
+        cfg["rfd3_batch_size"] = int(
+            ask(
+                "  Diffusion batch size (10 fits 24 GB; drop to 4 for longer binders)",
+                default=10,
+                validator=validate_int(min_val=1, max_val=64),
+            )
+        )
+        cfg["rfd3_mpnn_samples"] = int(
+            ask(
+                "  ProteinMPNN sequences per backbone (best-of-N)",
+                default=5,
+                validator=validate_int(min_val=1, max_val=64),
+            )
+        )
+
+    if use_protein_hunter:
+        print_step("Step 6h — Protein-Hunter settings")
+        print(f"  {YELLOW}Per-tool overrides (Enter = keep global default):{RESET}")
+        cfg["protein_hunter_min_length"] = int(
+            ask("  Min binder length", default=min_length, validator=validate_int(min_val=10, max_val=500))
+        )
+        cfg["protein_hunter_max_length"] = int(
+            ask("  Max binder length", default=max_length, validator=validate_int(min_val=10, max_val=500))
+        )
+        cfg["protein_hunter_n_designs"] = int(
+            ask("  Number of designs", default=n_designs, validator=validate_int(min_val=1, max_val=10000))
+        )
+        cfg["protein_hunter_num_cycles"] = int(
+            ask(
+                "  Boltz-2 hallucination cycles per design (7 = CALCA-validated)",
+                default=7,
+                validator=validate_int(min_val=1, max_val=20),
+            )
+        )
+        _, ph_msa = ask_choice(
+            "  MSA mode",
+            [
+                "single — no MSA, fastest (recommended for de-novo binders)",
+                "mmseqs — fetch MSA from ColabFold server (slower)",
+            ],
+            default_index=0,
+        )
+        cfg["protein_hunter_msa_mode"] = ph_msa.split(" — ")[0].strip()
+
     # ── Step 7: Preview ───────────────────────────────────────────────────────
     print_step("Step 7 — Preview")
     print(f"  {CYAN}Run folder{RESET}:    {run_dir}")
@@ -3176,8 +3232,35 @@ def wizard():
             f"length={pc_min}–{pc_max}  "
             f"max_designs={cfg.get('complexa_n_designs')}"
         )
+    if use_rfd3:
+        r_min = cfg.get("rfd3_min_length", min_length)
+        r_max = cfg.get("rfd3_max_length", max_length)
+        r_n = cfg.get("rfd3_n_designs", n_designs)
+        print(
+            f"  {CYAN}RFD3{RESET}:          length={r_min}–{r_max}  "
+            f"designs={r_n}  batch={cfg.get('rfd3_batch_size', 10)}  "
+            f"mpnn_samples={cfg.get('rfd3_mpnn_samples', 5)}"
+        )
+    if use_protein_hunter:
+        ph_min = cfg.get("protein_hunter_min_length", min_length)
+        ph_max = cfg.get("protein_hunter_max_length", max_length)
+        ph_n = cfg.get("protein_hunter_n_designs", n_designs)
+        print(
+            f"  {CYAN}Protein-Hunter{RESET}: length={ph_min}–{ph_max}  designs={ph_n}  "
+            f"cycles={cfg.get('protein_hunter_num_cycles', 7)}  "
+            f"msa={cfg.get('protein_hunter_msa_mode', 'single')}"
+        )
     if use_evaluator:
-        print(f"  {CYAN}Evaluator{RESET}:     Boltz-2 refolding → ranked report")
+        engines = []
+        if cfg.get("use_boltz"):
+            engines.append("Boltz-2")
+        if cfg.get("use_protenix"):
+            engines.append("Protenix")
+        if cfg.get("use_af3"):
+            engines.append("AF3")
+        engines_str = " + ".join(engines) if engines else "Boltz-2"
+        primary = cfg.get("primary_engine", "boltz")
+        print(f"  {CYAN}Evaluator{RESET}:     {engines_str}  |  primary={primary}  → ranked report")
 
     print_tree(run_dir, tools_enabled, cfg)
 
