@@ -45,6 +45,7 @@ def run(args: argparse.Namespace) -> None:
         sequences_fasta=args.sequences,
         protenix_csv=args.protenix_results,
         af3_csv=args.af3_results,
+        esmfold2_csv=args.esmfold2_results,
     )
 
     # Attach native metrics from BindCraft CSV if provided
@@ -95,6 +96,25 @@ def run(args: argparse.Namespace) -> None:
             df, pae_file_col="af3_pae_file", ordering="target_binder", prefix="af3", base_dir=af3_base
         )
 
+    # ESMFold2 (biohub): same convention as AF3/Protenix — target first in input, so PAE is target_binder.
+    esmfold2_base = Path(args.esmfold2_results).resolve().parent if args.esmfold2_results else None
+    if "esmfold2_pae_file" in df.columns:
+        print("[report] Computing ESMFold2 ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
+        df = add_ipsae_from_pae_files(
+            df,
+            pae_file_col="esmfold2_pae_file",
+            prefix="esmfold2",
+            ordering="target_binder",
+            base_dir=esmfold2_base,
+        )
+        df = add_iptm_from_pae_files(
+            df,
+            pae_file_col="esmfold2_pae_file",
+            ordering="target_binder",
+            prefix="esmfold2",
+            base_dir=esmfold2_base,
+        )
+
     # Promote the chosen engine's DunbrackLab PAE-based ipsae_min as the primary ranking column.
     # Column naming differs across engines: boltz uses boltz_pae_ipsae_min, others use
     # <engine>_ipsae_min (no _pae_ prefix) — see scoring._ENGINE_IPSAE_COLS for the canonical map.
@@ -125,6 +145,7 @@ def run(args: argparse.Namespace) -> None:
         ("boltz", "threshold_boltz"),
         ("protenix", "threshold_protenix"),
         ("af3", "threshold_af3"),
+        ("esmfold2", "threshold_esmfold2"),
         ("af2", "threshold_af2"),
     ):
         val = getattr(args, attr, None)
@@ -159,9 +180,11 @@ def run(args: argparse.Namespace) -> None:
         "boltz_pae_ipsae_min",
         "protenix_pae_ipsae_min",
         "af3_pae_ipsae_min",
+        "esmfold2_ipsae_min",
         "boltz_pae_iptm",
         "boltz_pae_bt_ipsae",
         "boltz_pae_tb_ipsae",
+        "esmfold2_pae_iptm",
         "plddt_binder_mean",
         "plddt_binder_min",
         "binder_ptm",
@@ -171,6 +194,7 @@ def run(args: argparse.Namespace) -> None:
         "passes_boltz_filter",
         "passes_protenix_filter",
         "passes_af3_filter",
+        "passes_esmfold2_filter",
         "native_bg_design_ipsae_min",
         "adaptyv_rank",
     ]
@@ -186,6 +210,7 @@ def run(args: argparse.Namespace) -> None:
     _ENGINE_PDB_PRIORITY: dict[str, list[str]] = {
         "af3": ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"],
         "protenix": ["protenix_pdb", "protenix_cif", "boltz_pdb", "pdb"],
+        "esmfold2": ["esmfold2_pdb", "esmfold2_cif", "boltz_pdb", "pdb"],
         "boltz": ["boltz_pdb", "pdb"],
     }
     pdb_cols = [c for c in _ENGINE_PDB_PRIORITY.get(primary_engine, ["boltz_pdb", "pdb"]) if c in df.columns]
@@ -401,6 +426,12 @@ def add_parser(subparsers) -> None:
         "Spark only). Adds a third engine to the agreement_count.",
     )
     p.add_argument(
+        "--esmfold2-results",
+        metavar="CSV",
+        help="Optional: output from 'refold-esmfold2' (esmfold2_results.csv). "
+        "Adds a fourth engine to the agreement_count.",
+    )
+    p.add_argument(
         "--sequences", metavar="FASTA", help="FASTA from 'extract' step (for binder_id and source_tool tags)"
     )
     p.add_argument(
@@ -409,7 +440,7 @@ def add_parser(subparsers) -> None:
     p.add_argument("--output", "-o", required=True, metavar="DIR", help="Output directory for all report files")
     p.add_argument(
         "--primary-engine",
-        choices=["boltz", "protenix", "af3"],
+        choices=["boltz", "protenix", "af3", "esmfold2"],
         default="boltz",
         help="Which engine's DunbrackLab PAE-based ipsae_min to use as the primary ranking metric "
         "(default: boltz). Falls back to boltz if the chosen engine's PAE files are missing.",
@@ -426,6 +457,12 @@ def add_parser(subparsers) -> None:
         type=float,
         default=None,
         help="AF3 ipsae_min pass threshold (default 0.61, DunbrackLab-calibrated)",
+    )
+    p.add_argument(
+        "--threshold-esmfold2",
+        type=float,
+        default=None,
+        help="ESMFold2 ipsae_min pass threshold (default 0.61, using the shared DunbrackLab cutoff)",
     )
     p.add_argument(
         "--threshold-af2",

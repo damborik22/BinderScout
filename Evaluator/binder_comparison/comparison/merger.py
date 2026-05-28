@@ -4,6 +4,7 @@ Column naming convention after merge:
   - Boltz-2 columns are prefixed with ``boltz_``
   - Protenix columns are prefixed with ``protenix_``
   - AF3 columns (Part K, aarch64) are prefixed with ``af3_``
+  - ESMFold2 columns (biohub) are prefixed with ``esmfold2_``
   - ``sequence`` is the join key, present in every engine's CSV
 
 The FASTA extracted by 'binder-compare extract' is used to join the source
@@ -29,6 +30,7 @@ def merge_refold_results(
     *,
     protenix_csv: str | Path | None = None,
     af3_csv: str | Path | None = None,
+    esmfold2_csv: str | Path | None = None,
 ) -> pd.DataFrame:
     """Outer-join refolding-engine CSVs on the ``sequence`` column.
 
@@ -39,6 +41,7 @@ def merge_refold_results(
                           source_tool columns.
         protenix_csv:     Optional Protenix results (refold-protenix output).
         af3_csv:          Optional AF3 results (refold-af3 output, aarch64 only).
+        esmfold2_csv:     Optional ESMFold2 results (refold-esmfold2 output).
 
     Returns:
         DataFrame with per-engine prefixed columns + passthrough identifiers.
@@ -50,6 +53,8 @@ def merge_refold_results(
         engine_dfs["protenix"] = _load_engine(protenix_csv, "protenix")
     if af3_csv:
         engine_dfs["af3"] = _load_engine(af3_csv, "af3")
+    if esmfold2_csv:
+        engine_dfs["esmfold2"] = _load_engine(esmfold2_csv, "esmfold2")
 
     engine_dfs = {k: v for k, v in engine_dfs.items() if not v.empty}
     if not engine_dfs:
