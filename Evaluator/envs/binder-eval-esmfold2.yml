@@ -1,0 +1,43 @@
+name: binder-eval-esmfold2
+# ESMFold2 (biohub) — 4th refolding engine for the Evaluator.
+#
+# Used for: binder-compare refold-esmfold2
+# Platforms: aarch64 (DGX Spark / Blackwell GB10) — also works on x86_64
+#            though the master branch keeps the env yml separately.
+#
+# Model: biohub/ESMFold2-Fast (single-sequence, default) or biohub/ESMFold2
+# (larger, MSA-capable).  Weights are downloaded on first use via the
+# HuggingFace cache (~/.cache/huggingface/hub) — count on ~1 GB for Fast,
+# ~3-5 GB for the full model.
+#
+# After creating the env, install the heavy pip deps and the evaluator
+# package:
+#
+#   conda env create -f binder-eval-esmfold2.yml
+#
+#   # aarch64 / Blackwell — cu130 wheels
+#   conda run -n binder-eval-esmfold2 pip install \
+#       --index-url https://download.pytorch.org/whl/cu130 \
+#       torch
+#
+#   # x86_64 — pick the cu124 (or matching) wheel index instead
+#   # conda run -n binder-eval-esmfold2 pip install \
+#   #     --index-url https://download.pytorch.org/whl/cu124 torch
+#
+#   conda run -n binder-eval-esmfold2 pip install \
+#       'transformers>=4.50' gemmi safetensors
+#
+#   # biohub/esm provides the ESMFold2InputBuilder + chain dataclasses.
+#   # Pinned commit per the official model card.  PyPI release coming soon.
+#   conda run -n binder-eval-esmfold2 pip install \
+#       'esm @ git+https://github.com/Biohub/esm.git@c94ed8d'
+#
+#   # Finally install binder-compare so the CLI subcommand is on PATH.
+#   conda run -n binder-eval-esmfold2 pip install -e <repo_root>/Evaluator/
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+  - numpy>=1.24
