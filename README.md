@@ -15,9 +15,9 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 | Component | What it does | Runs in |
 |---|---|---|
-| `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) | bash |
+| `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) and opt-in eval engines (AF3, ESMFold2, SoluProt) | bash |
 | `bindmaster configure` | Interactive wizard: target → configs → run scripts | system Python |
-| `bindmaster evaluate` | Parse tool outputs, refold with Boltz-2 (everywhere) and AF3 v3.0.2 (any host with ≥100 GB GPU memory — DGX Spark, H200, …), rank, generate HTML report | Mosaic uv venv |
+| `bindmaster evaluate` | Parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / Protenix / AF3 / ESMFold2, rank by `agreement_count` × `ipsae_min`, generate HTML report | Mosaic uv venv |
 
 ### Installed tools
 
@@ -33,6 +33,18 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 > Each tool runs in its own isolated environment. Environments must not be mixed.
 
+### Evaluator engines & filters
+
+The evaluator (`bindmaster evaluate` / `binder-compare`) runs on top of the design tools. Boltz-2 rides the Mosaic venv; Protenix rides the PXDesign env; AF3 and ESMFold2 have their own opt-in envs. SoluProt is a sequence-only solubility screen that runs **before** refolding so unsoluble designs can be dropped from the FASTA without burning GPU time.
+
+| Engine / filter | Role | Environment | Platform | Opt-in flag |
+|---|---|---|---|---|
+| **Boltz-2** | Primary refold engine; default ranking reference | `Mosaic/.venv` (rides Mosaic install) | x86_64 + aarch64 | (auto) |
+| **Protenix v0.5.0** | Optional 2nd refold engine; ByteDance AF3 re-impl | `bindmaster_pxdesign` (rides PXDesign install) | x86_64 + aarch64 | (auto-detect) |
+| **AlphaFold 3 v3.0.2** | Optional 3rd refold engine; canonical 2nd opinion on big-VRAM hosts | conda env `binder-eval-af3` (Python 3.10, gated weights) | x86_64 + aarch64; needs ≥100 GB GPU memory | `--tool af3` |
+| **ESMFold2** | Optional 4th refold engine; lightweight, no gated weights | conda env `binder-eval-esmfold2` (Python 3.10) | x86_64 + aarch64 | `--tool esmfold2` |
+| **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.1) | x86_64 only (USEARCH x86 binary; aarch64 deferred — see [docs/PLAN_soluprot_integration.md](docs/PLAN_soluprot_integration.md)) | `--tool soluprot` |
+
 ### Architecture
 
 ```mermaid
@@ -40,35 +52,93 @@ flowchart LR
     Input["Target structure\n(.pdb / .mmcif)"]
     Config["Configurator\nwizard → run scripts"]
 
-    subgraph Design["Design tools (run in parallel via run_all.sh)"]
+    subgraph Design["Design tools (configurator domain — run via run_all.sh)"]
         BC["BindCraft\n(AF2 + MPNN + PyRosetta)"]
         BG["BoltzGen\n(Boltz-1 diffusion)"]
-        Mosaic["Mosaic\n(JAX + Boltz-2 hallucination)"]
+        MosaicT["Mosaic\n(JAX + Boltz-2 hallucination)"]
         PX["PXDesign\n(Protenix + MPNN + AF2 eval)"]
         PC["Proteina-Complexa\n(flow matching + ITO)"]
-        PH["Protein-Hunter\n(Boltz-2, 6 modalities)"]
-        RFD3["RFD3\n(foundry diffusion + MPNN)"]
+        PH["Protein-Hunter\n(Boltz-2 / Chai-1, 6 modalities)"]
+        RFD3T["RFD3\n(foundry diffusion + MPNN)"]
     end
 
-    Extract["Extractors\n(one per tool → unified FASTA)"]
+    Extract["Extractors\n(one per tool →\nunified FASTA +\nnative_metrics.csv sidecar)"]
 
-    subgraph Refold["Refolding engines (independent cross-validation)"]
-        Boltz2["Boltz-2\n(Mosaic venv)"]
-        AF3["AF3 v3.0.2\n(binder-eval-af3 env, needs ≥100 GB GPU memory)"]
+    SoluProt["SoluProt 1.0\n(sequence-only solubility screen,\nbinder-eval-soluprot env;\nx86 only, opt-in)"]
+
+    Drop[("Drop\nbelow threshold\n(--soluprot-filter)")]
+
+    subgraph Refold["Refolding engines (evaluator domain — independent cross-validation)"]
+        Boltz2["Boltz-2\n(Mosaic venv;\nprimary engine)"]
+        Protenix["Protenix v0.5.0\n(bindmaster_pxdesign;\nfits 24 GB GPU)"]
+        AF3["AF3 v3.0.2\n(binder-eval-af3;\nneeds ≥100 GB GPU)"]
+        ESMFold2["ESMFold2\n(binder-eval-esmfold2;\nlightweight, no gated weights)"]
     end
 
-    Report["Report generator\nranked HTML + CSV\n(agreement_count, ipsae_min)"]
+    Report["Report generator\nranked HTML + CSV\n(adaptyv_rank → quality_tier →\nagreement_count → ipsae_min;\nnative_* columns from extract)"]
 
     Input --> Config
     Config --> Design
     Design -->|tool-specific outputs| Extract
-    Extract -->|FASTA of binders| Boltz2
-    Extract -->|FASTA of binders| AF3
+    Extract -->|FASTA of binders| SoluProt
+    SoluProt -->|filtered FASTA<br/>(if --soluprot-filter)| Drop
+    SoluProt -->|FASTA + soluprot_results.csv| Boltz2
+    SoluProt --> Protenix
+    SoluProt --> AF3
+    SoluProt --> ESMFold2
     Boltz2 --> Report
+    Protenix --> Report
     AF3 --> Report
+    ESMFold2 --> Report
 ```
 
-Protenix v0.5.0 is wired into the Evaluator code (Part J) but not part of the canonical Boltz-2 + AF3 pipeline shown above — see CLAUDE.md if you want to enable it.
+Three of the four refolding engines are opt-in (Protenix auto-detects from a PXDesign install; AF3 and ESMFold2 are explicit `--tool` flags). SoluProt is fully opt-in and acts as a filter, never as a re-ranker — its `soluprot_score` and `soluprot_passes` columns show up in `metrics.csv` alongside the refold scores so users can sort on them if they want.
+
+### Components at a glance
+
+```mermaid
+flowchart TB
+    classDef gen fill:#bbdefb,stroke:#1976d2,color:#0d47a1
+    classDef eng fill:#c8e6c9,stroke:#388e3c,color:#1b5e20
+    classDef opt fill:#fff9c4,stroke:#fbc02d,color:#5d4037
+    classDef cli fill:#e1bee7,stroke:#7b1fa2,color:#311b92
+    classDef arti fill:#cfd8dc,stroke:#455a64,color:#212121
+
+    CLI["bindmaster\n(unified CLI, stdlib only)"]:::cli
+
+    CLI -->|install| InstallSh["install.sh\n(x86) / install_aarch.sh\n(aarch64 / DGX Spark)"]
+    CLI -->|configure| Configurator["configurator/\nconfigurator.py\n(5-step wizard)"]
+    CLI -->|evaluate| EvaluateSh["Evaluator/\nevaluate.sh\n(orchestrator)"]
+
+    subgraph GenEnvs["Design-tool environments (one per tool)"]
+        EnvBC["BindCraft<br/>(conda, py3.10)"]:::gen
+        EnvBG["BoltzGen<br/>(conda, py3.12)"]:::gen
+        EnvMo["Mosaic/.venv<br/>(uv, py3.12)"]:::gen
+        EnvPX["bindmaster_pxdesign<br/>(conda, py3.11)"]:::gen
+        EnvPC["Proteina-Complexa/.venv<br/>(uv, py3.12)"]:::gen
+        EnvPH["bindmaster_protein_hunter<br/>(conda, py3.10)"]:::gen
+        EnvRF["bindmaster_rfd3<br/>(conda, py3.12)"]:::gen
+    end
+
+    subgraph EvalEnvs["Evaluator-side environments"]
+        EnvEv["binder-eval<br/>(conda, py3.10) — extract + report"]:::eng
+        EnvAF3["binder-eval-af3<br/>(conda, py3.10) — AF3 v3.0.2"]:::opt
+        EnvESM["binder-eval-esmfold2<br/>(conda, py3.10) — ESMFold2"]:::opt
+        EnvSP["binder-eval-soluprot<br/>(conda, py3.7) — SoluProt 1.0"]:::opt
+    end
+
+    subgraph Artifacts["Per-run artifacts"]
+        Runs["runs/&lt;name&gt;/\n├── target/\n├── &lt;tool&gt;/        # one per enabled tool\n│   └── settings.json\n├── evaluate/\n│   ├── sequences.fasta\n│   ├── sequences_native_metrics.csv\n│   ├── boltz2_results.csv\n│   ├── protenix_results.csv      (opt)\n│   ├── af3_results.csv           (opt)\n│   ├── esmfold2_results.csv      (opt)\n│   ├── soluprot_results.csv      (opt)\n│   └── report/\n│       ├── metrics.csv\n│       ├── top20_candidates.csv\n│       ├── top20_structures/\n│       └── report.html\n├── run_&lt;tool&gt;.sh\n├── run_evaluate.sh\n└── run_all.sh"]:::arti
+    end
+
+    InstallSh -->|creates| GenEnvs
+    InstallSh -->|creates| EvalEnvs
+    Configurator -->|writes| Runs
+    EvaluateSh -->|orchestrates| Runs
+    EvaluateSh -->|conda run -n …| EvalEnvs
+```
+
+Solid blue boxes are the seven design tools' isolated environments; green / yellow boxes are the four evaluator environments (the three yellow ones are opt-in via `--tool af3 / esmfold2 / soluprot`). The grey panel shows the per-run output layout the configurator generates and `evaluate.sh` fills in.
 
 ---
 
@@ -136,6 +206,7 @@ bindmaster evaluate runs/<name>
 
 ```
 bindmaster install   [--tool bindcraft|boltzgen|mosaic|pxdesign|proteina-complexa|protein-hunter|rfd3|all]
+                     [--tool af3|esmfold2|soluprot]    # opt-in evaluator engines / filter
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
 bindmaster configure [options passed through to configurator.py]
 bindmaster evaluate  <run-dir> [--metric METRIC] [--top N] [--refold N] [--target PDB] [--all-mosaic-designs]
@@ -149,7 +220,8 @@ Options:
 
 | Flag | Description |
 |---|---|
-| `--tool all\|bindcraft\|boltzgen\|mosaic\|pxdesign\|proteina-complexa\|protein-hunter\|rfd3` | Which tool(s) to install. Omit for interactive menu. |
+| `--tool all\|bindcraft\|boltzgen\|mosaic\|pxdesign\|proteina-complexa\|protein-hunter\|rfd3` | Which design tool(s) to install. Omit for interactive menu. |
+| `--tool af3\|esmfold2\|soluprot` | Opt-in evaluator tools. `af3` = AlphaFold 3 v3.0.2 (≥100 GB GPU, gated weights). `esmfold2` = ESMFold2 lightweight refolder. `soluprot` = solubility screen (x86 only; TMHMM + USEARCH downloads required). None of these are in `--tool all`. |
 | `--cuda VERSION` | CUDA version for conda package resolution (default: 12.4) |
 | `--skip-examples` | Do not prompt to run bundled examples after install |
 | `--standalone` | Force local Miniforge3 install (no system conda needed) |
