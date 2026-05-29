@@ -1,11 +1,13 @@
-[![CI](https://github.com/damborik22/BindMaster/actions/workflows/ci.yml/badge.svg)](https://github.com/damborik22/BindMaster/actions/workflows/ci.yml)
+[![CI](https://github.com/damborik22/BinderScout/actions/workflows/ci.yml/badge.svg)](https://github.com/damborik22/BinderScout/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20x86__64%20%7C%20aarch64-lightgrey.svg)]()
 
-# BindMaster
+# BinderScout
 
 A unified toolkit for GPU-accelerated protein binder design — installer, configurator, and evaluator in one repository.
+
+> **Renamed from *BindMaster*.** This project was developed under the internal working name *BindMaster* and is now being released as **BinderScout**. The codebase still uses `bindmaster` in many places — the CLI command (`bindmaster install`, `bindmaster configure`, `bindmaster evaluate`), several conda env names (`bindmaster_pxdesign`, `bindmaster_protein_hunter`, `bindmaster_rfd3`), file and directory names (`bindmaster_examples/`, `bindmaster.py`), and environment variables (`BINDMASTER_*`). These are equivalent to the new name and will be migrated incrementally; functional behavior is unchanged. The GitHub remote is now `damborik22/BinderScout` (the old `damborik22/BindMaster` URL redirects).
 
 ---
 
