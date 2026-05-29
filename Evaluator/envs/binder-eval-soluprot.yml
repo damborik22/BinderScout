@@ -1,0 +1,39 @@
+name: binder-eval-soluprot
+# SoluProt 1.0 — sequence-only solubility screen (Hon et al. 2021,
+# Bioinformatics 37(1):23–28, Loschmidt Lab, Masaryk University).
+#
+# Used for: binder-compare filter-soluprot
+# Platform: x86_64 (USEARCH binary is x86 only; aarch64 support is deferred).
+#
+# SoluProt is NOT redistributed with BinderScout. The installer
+# (`bindmaster install --tool soluprot`) fetches the standalone bundle
+# (soluprot.zip) from
+#   https://loschmidt.chemi.muni.cz/soluprot/?page=download
+# and unpacks it into Evaluator/tools/soluprot/. The user must also
+# obtain TMHMM 2.0 (DTU registration required) and USEARCH (drive5.com;
+# 32-bit free for academic use) themselves — the installer prints both
+# URLs if either binary is missing.
+#
+# Citation owed in any publication that uses SoluProt scores:
+#   Hon, J., Marusiak, M., Martinek, T., et al. (2021). "SoluProt:
+#   prediction of soluble protein expression in Escherichia coli."
+#   Bioinformatics 37(1), 23–28.
+#
+# License: free for academic use; commercial use via Enantis
+# (enantis@enantis.com).
+#
+# Versions are pinned to SoluProt 1.0's documented requirements.
+# Python 3.7 is old; if you need to share this env with newer code, run
+# the SoluProt step in this env and feed the CSV into the other steps
+# rather than upgrading.
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.7
+  - scikit-learn=0.20.1
+  - biopython=1.74
+  - pandas
+  - tqdm
+  - perl    # TMHMM is a Perl program
+  - pip
