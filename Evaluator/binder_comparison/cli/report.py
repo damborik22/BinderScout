@@ -60,6 +60,13 @@ def run(args: argparse.Namespace) -> None:
     if args.sequences:
         df = _attach_native_metrics_sidecar(df, args.sequences)
 
+    # SoluProt: sequence-only solubility screen output. Left-joined onto df
+    # by sequence — adds native_soluprot_score (0–1 probability) and
+    # native_soluprot_passes (bool, score >= threshold used at scoring time).
+    # Not part of agreement_count; this is a screen, not a re-ranker.
+    if args.soluprot_results:
+        df = _attach_soluprot_results(df, args.soluprot_results)
+
     # Step 2: Promote Boltz-2 as primary predictor
     print("[report] Promoting Boltz-2 metrics as primary…")
     df = compute_ensemble_metrics(df)
@@ -415,7 +422,38 @@ def _attach_native_metrics_sidecar(df: pd.DataFrame, sequences_fasta: str) -> pd
     native_sub = native_df[keep_cols].copy()
     native_sub["sequence"] = native_sub["sequence"].str.strip().str.upper()
     print(f"[report] Attaching {len(keep_cols) - 1} native metric column(s) from {sidecar.name}")
-    return pd.merge(df, native_sub, on="sequence", how="left")
+    df = pd.merge(df, native_sub, on="sequence", how="left")
+    return df
+
+
+def _attach_soluprot_results(df: pd.DataFrame, soluprot_csv: str) -> pd.DataFrame:
+    """Left-join SoluProt's per-sequence solubility output. The runner writes
+    ``sequence, soluprot_score, soluprot_passes, soluprot_threshold`` (plus an
+    optional leading ``binder_id``). We rename score and passes to the
+    ``native_`` prefix so they live alongside the other design-time metrics in
+    the final CSV; the threshold column rides through as ``soluprot_threshold``
+    for traceability (which threshold the pass-flag was computed against).
+    """
+    sp_path = Path(soluprot_csv)
+    if not sp_path.exists():
+        print(f"[report] [warn] SoluProt CSV not found at {sp_path} — skipping")
+        return df
+    sp_df = pd.read_csv(sp_path)
+    if sp_df.empty or "sequence" not in sp_df.columns:
+        return df
+
+    rename = {}
+    if "soluprot_score" in sp_df.columns:
+        rename["soluprot_score"] = "native_soluprot_score"
+    if "soluprot_passes" in sp_df.columns:
+        rename["soluprot_passes"] = "native_soluprot_passes"
+    keep = ["sequence", *rename.keys()]
+    if "soluprot_threshold" in sp_df.columns:
+        keep.append("soluprot_threshold")
+    sp_sub = sp_df[keep].rename(columns=rename).copy()
+    sp_sub["sequence"] = sp_sub["sequence"].str.strip().str.upper()
+    print(f"[report] Attaching SoluProt scores from {sp_path.name}")
+    return pd.merge(df, sp_sub, on="sequence", how="left")
 
 
 def add_parser(subparsers) -> None:
@@ -442,6 +480,13 @@ def add_parser(subparsers) -> None:
         metavar="CSV",
         help="Optional: output from 'refold-esmfold2' (esmfold2_results.csv). Currently "
         "merged into metrics but not yet counted in agreement_count.",
+    )
+    p.add_argument(
+        "--soluprot-results",
+        metavar="CSV",
+        help="Optional: output from 'filter-soluprot' (soluprot_results.csv). Adds "
+        "native_soluprot_score and native_soluprot_passes columns. SoluProt is a "
+        "screen, not a re-ranker; the ranking hierarchy is unchanged.",
     )
     p.add_argument(
         "--sequences", metavar="FASTA", help="FASTA from 'extract' step (for binder_id and source_tool tags)"

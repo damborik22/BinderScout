@@ -20,6 +20,12 @@
 #   --skip-esmfold2        skip ESMFold2 refolding (default: auto-detect binder-eval-esmfold2 env)
 #   --esmfold2-env ENV     conda env for ESMFold2 (default: binder-eval-esmfold2)
 #   --esmfold2-model V     ESMFold2 checkpoint: fast | full (default: fast)
+#   --skip-soluprot        skip SoluProt solubility screen (default: auto-detect binder-eval-soluprot env)
+#   --soluprot-env ENV     conda env for SoluProt (default: binder-eval-soluprot)
+#   --soluprot-threshold N pass threshold for soluprot_score (default: 0.5; paper value)
+#   --soluprot-filter      drop sequences scoring below the threshold from FASTA BEFORE
+#                          refolding — saves GPU time on designs we wouldn't pursue.
+#                          Off by default; the score still lands in the report either way.
 #   --primary-engine ENG   primary ranking engine: boltz | protenix | af3 | esmfold2 (default: boltz)
 #   --resume               resume interrupted run
 
@@ -71,6 +77,10 @@ AF3_ENV="binder-eval-af3"
 SKIP_ESMFOLD2=0
 ESMFOLD2_ENV="binder-eval-esmfold2"
 ESMFOLD2_MODEL="fast"
+SKIP_SOLUPROT=0
+SOLUPROT_ENV="binder-eval-soluprot"
+SOLUPROT_THRESHOLD=0.5
+SOLUPROT_FILTER=0
 PRIMARY_ENGINE="boltz"
 RESUME=0
 
@@ -88,6 +98,10 @@ while [[ $# -gt 0 ]]; do
         --skip-esmfold2)  SKIP_ESMFOLD2=1;   shift ;;
         --esmfold2-env)   ESMFOLD2_ENV="$2"; shift 2 ;;
         --esmfold2-model) ESMFOLD2_MODEL="$2"; shift 2 ;;
+        --skip-soluprot)     SKIP_SOLUPROT=1;          shift ;;
+        --soluprot-env)      SOLUPROT_ENV="$2";        shift 2 ;;
+        --soluprot-threshold) SOLUPROT_THRESHOLD="$2"; shift 2 ;;
+        --soluprot-filter)   SOLUPROT_FILTER=1;        shift ;;
         --primary-engine)
             PRIMARY_ENGINE="$2"
             case "$PRIMARY_ENGINE" in
@@ -97,7 +111,7 @@ while [[ $# -gt 0 ]]; do
             shift 2 ;;
         --resume)         RESUME=1;          shift ;;
         -h|--help)
-            sed -n '2,25p' "$0" | grep '^#' | sed 's/^# \?//'
+            sed -n '2,32p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
@@ -148,6 +162,16 @@ if [[ $SKIP_ESMFOLD2 -eq 0 ]]; then
     fi
 fi
 
+# Auto-detect SoluProt availability unless user skipped it
+if [[ $SKIP_SOLUPROT -eq 0 ]]; then
+    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${SOLUPROT_ENV}"; then
+        echo "[note] conda env '${SOLUPROT_ENV}' not found — SoluProt solubility screen will be skipped."
+        echo "        (install with: bindmaster install --tool soluprot; x86 only)"
+        echo ""
+        SKIP_SOLUPROT=1
+    fi
+fi
+
 # --- Step 0: Normalise sequences to FASTA ----------------------------------
 FASTA="$OUTPUT/sequences.fasta"
 echo "[step 0] Parsing sequences → $FASTA"
@@ -161,14 +185,70 @@ BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
 PROTENIX_CSV="$OUTPUT/protenix_results.csv"
 AF3_CSV="$OUTPUT/af3_results.csv"
 ESMFOLD2_CSV="$OUTPUT/esmfold2_results.csv"
+SOLUPROT_CSV="$OUTPUT/soluprot_results.csv"
 
-# Step counter: 1 (report) + 1 per engine not skipped
+# Step counter: 1 (report) + 1 per engine not skipped + 1 if SoluProt ran
 N_STEPS=1  # report
 [[ $SKIP_BOLTZ2 -eq 0 ]]   && (( N_STEPS++ ))
 [[ $SKIP_PROTENIX -eq 0 ]] && (( N_STEPS++ ))
 [[ $SKIP_AF3 -eq 0 ]]      && (( N_STEPS++ ))
 [[ $SKIP_ESMFOLD2 -eq 0 ]] && (( N_STEPS++ ))
+[[ $SKIP_SOLUPROT -eq 0 ]] && (( N_STEPS++ ))
 STEP=1
+
+# --- Step 0.5: SoluProt solubility screen (optional, runs before refolding) ─
+# Runs before any refold engine so --soluprot-filter can drop sub-threshold
+# sequences and save GPU time. The score lands in the report either way.
+if [[ $SKIP_SOLUPROT -eq 0 ]]; then
+    echo "[step ${STEP}/${N_STEPS}] SoluProt screen     (conda env: ${SOLUPROT_ENV}, threshold: ${SOLUPROT_THRESHOLD})..."
+    conda run -n "${SOLUPROT_ENV}" binder-compare filter-soluprot \
+        --sequences "$SEQUENCES" \
+        -o          "$SOLUPROT_CSV" \
+        --threshold "$SOLUPROT_THRESHOLD"
+
+    if [[ $SOLUPROT_FILTER -eq 1 ]]; then
+        # Hard filter: rewrite the FASTA, keeping only sequences whose
+        # soluprot_passes==1 row in the CSV. Saves refold time downstream.
+        FILTERED_FASTA="$OUTPUT/sequences.soluble.fasta"
+        conda run -n binder-eval python - "$SOLUPROT_CSV" "$SEQUENCES" "$FILTERED_FASTA" <<'PY'
+import csv, sys
+csv_path, fasta_in, fasta_out = sys.argv[1], sys.argv[2], sys.argv[3]
+soluble: set[str] = set()
+with open(csv_path) as fh:
+    for row in csv.DictReader(fh):
+        if row.get("soluprot_passes") in ("1", "True", "true"):
+            seq = (row.get("sequence") or "").strip().upper()
+            if seq:
+                soluble.add(seq)
+n_in = n_kept = 0
+header, body = None, []
+def flush(out):
+    global n_in, n_kept
+    if header is None:
+        return
+    n_in += 1
+    seq = "".join(body).strip().upper()
+    if seq in soluble:
+        out.write(header)
+        for line in body:
+            out.write(line)
+        n_kept += 1
+with open(fasta_in) as fh_in, open(fasta_out, "w") as fh_out:
+    for line in fh_in:
+        if line.startswith(">"):
+            flush(fh_out)
+            header = line
+            body = []
+        else:
+            body.append(line)
+    flush(fh_out)
+print(f"[soluprot-filter] kept {n_kept} of {n_in} sequences (threshold {soluble and 'configured' or 'n/a'})", file=sys.stderr)
+PY
+        SEQUENCES="$FILTERED_FASTA"
+        echo "[soluprot-filter] downstream refolding will run on $SEQUENCES"
+    fi
+    (( STEP++ ))
+fi
 
 if [[ $SKIP_BOLTZ2 -eq 1 ]]; then
     echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
@@ -243,6 +323,9 @@ if [[ $SKIP_AF3 -eq 0 && -f "$AF3_CSV" ]]; then
 fi
 if [[ $SKIP_ESMFOLD2 -eq 0 && -f "$ESMFOLD2_CSV" ]]; then
     REPORT_ARGS+=(--esmfold2-results "$ESMFOLD2_CSV")
+fi
+if [[ $SKIP_SOLUPROT -eq 0 && -f "$SOLUPROT_CSV" ]]; then
+    REPORT_ARGS+=(--soluprot-results "$SOLUPROT_CSV")
 fi
 REPORT_ARGS+=(--primary-engine "$PRIMARY_ENGINE")
 conda run -n binder-eval binder-compare report "${REPORT_ARGS[@]}"
