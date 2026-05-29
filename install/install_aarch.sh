@@ -64,6 +64,7 @@ DO_EVALUATOR=false
 DO_PXDESIGN=false
 DO_AF3=false            # opt-in via --tool af3 (gated weights; not in --tool all)
 DO_ESMFOLD2=false       # opt-in via --tool esmfold2 (lightweight 4th refold engine; no gated weights)
+DO_SOLUPROT=false       # opt-in via --tool soluprot — USEARCH x86-only; install_soluprot() refuses on aarch64
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -87,8 +88,10 @@ while [[ $# -gt 0 ]]; do
                     DO_AF3=true ;;
                 esmfold2|esm|esmfold)
                     DO_ESMFOLD2=true ;;
+                soluprot|solu|solubility)
+                    DO_SOLUPROT=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, pxdesign, af3, esmfold2${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, pxdesign, af3, esmfold2, soluprot${RESET}"
                     exit 1
                     ;;
             esac
@@ -138,6 +141,10 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
                                        https://github.com/google-deepmind/alphafold3
                   esmfold2             ESMFold2 refolder — opt-in only;
                                        lightweight 4th refold engine, no gated weights
+                  soluprot             SoluProt solubility screen — opt-in but NOT
+                                       supported on aarch64 (USEARCH dep is x86 only).
+                                       Install on an x86 host with --tool soluprot
+                                       and rsync the score CSVs over for the report.
   --tools-dir   Path to pre-cached resources (AF2 weights, ARM64 binaries).
                 Default: <repo>/../../OLD/BindMaster/bindcraft-tools
   --cuda        CUDA version (default: 13.0). Only 13.0 has been tested on DGX Spark (GB10).
@@ -621,6 +628,7 @@ select_tools_interactive() {
     [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
     [[ "$DO_AF3"       == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; weights required)${RESET}"
     [[ "$DO_ESMFOLD2"  == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (opt-in refolder)"
+    [[ "$DO_SOLUPROT"  == true ]] && echo -e "    ${YELLOW}✓ SoluProt (opt-in solubility screen; aarch64 unsupported — will error out)${RESET}"
     echo ""
 
     confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
@@ -1787,11 +1795,41 @@ uninstall_tool() {
             rm -f "${SHORTCUTS_DIR}/esmfold2"
             print_ok "ESMFold2 refolder uninstalled"
             ;;
+        soluprot|solu|solubility)
+            print_step "Uninstalling SoluProt solubility screen"
+            env_exists binder-eval-soluprot && run_logged "Removing binder-eval-soluprot conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-soluprot -y
+            rm -f "${SHORTCUTS_DIR}/soluprot"
+            local _solu_dir="${EVALUATOR_DIR}/tools/soluprot"
+            if [[ -d "${_solu_dir}" ]]; then
+                rm -rf "${_solu_dir}"
+                print_ok "Removed ${_solu_dir}"
+            fi
+            print_ok "SoluProt solubility screen uninstalled"
+            ;;
         *)
             print_fail "Unknown tool: ${tool}"
             return 1
             ;;
     esac
+}
+
+# ─── SoluProt (sequence-only solubility screen, x86 only — refuses on aarch64) ─
+
+install_soluprot() {
+    print_step "Installing SoluProt 1.0 (aarch64)"
+
+    # USEARCH 32-bit is the gating dep here — it ships only as a Linux x86
+    # binary. The plan (docs/PLAN_soluprot_integration.md §"Open questions")
+    # is to mark aarch64 unsupported for the first cut and revisit if Spark
+    # users actually want SoluProt; either a Python reimpl of the USEARCH
+    # identity step (lifts the limitation) or graceful-skip of the
+    # USEARCH-derived feature (one of 96 — paper doesn't quantify the cost).
+    print_fail "SoluProt's USEARCH dependency is an x86 binary; aarch64 is NOT supported."
+    print_warn "  Run \`bindmaster install --tool soluprot\` on an x86 host instead, then"
+    print_warn "  rsync the score CSV into this Spark for the report step."
+    print_warn "  Details + future workaround: docs/PLAN_soluprot_integration.md"
+    return 1
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -1837,6 +1875,7 @@ main() {
         [[ "${DO_PXDESIGN}"  == true ]] && { uninstall_tool pxdesign  || failed_uninstalls+=("PXDesign"); }
         [[ "${DO_AF3}"       == true ]] && { uninstall_tool af3       || failed_uninstalls+=("AF3"); }
         [[ "${DO_ESMFOLD2}"  == true ]] && { uninstall_tool esmfold2  || failed_uninstalls+=("ESMFold2"); }
+        [[ "${DO_SOLUPROT}"  == true ]] && { uninstall_tool soluprot  || failed_uninstalls+=("SoluProt"); }
 
         # Offer to remove local Miniforge when all tools are uninstalled
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
@@ -1871,6 +1910,7 @@ main() {
     [[ "${DO_PXDESIGN}"  == true ]] && (( total++ ))
     [[ "${DO_AF3}"       == true ]] && (( total++ ))
     [[ "${DO_ESMFOLD2}"  == true ]] && (( total++ ))
+    [[ "${DO_SOLUPROT}"  == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
@@ -1882,6 +1922,7 @@ main() {
     [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
     [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
     [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
+    [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; install_soluprot || failed_tools+=("SoluProt"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"
