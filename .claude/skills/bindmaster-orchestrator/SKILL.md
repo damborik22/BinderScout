@@ -66,14 +66,21 @@ On Spark (the orchestrator's home):
 
 ```
 ~/dev/BindMaster/                              ← cloned repo
+~/dev/BindMaster/bindmaster (CLI on $PATH)     ← unified entrypoint: `bindmaster install|configure|evaluate`
 ~/.claude/skills/bindmaster-orchestrator/      ← this skill
 ~/.claude/skills/bindmaster-worker/            ← sibling skill (used when Spark drives a remote worker)
-Mosaic/.venv/                                  ← Boltz-2 refold env
+Mosaic/.venv/                                  ← Boltz-2 refold env (also hosts `binder-compare`)
 bindmaster_pxdesign/                           ← Protenix refold env (Part J)
-binder-eval-af3/                               ← AlphaFold 3 refold env (Part K, aarch64)
+binder-eval-af3/                               ← AlphaFold 3 refold env (Part K)
 ~/eval_workdir/                                ← local refold scratch
 ~/.claude/.../memory/MEMORY.md                 ← persistent cross-session lessons
 ```
+
+The three CLI verbs that matter campaign-side:
+
+- `bindmaster install --tool <tool>` — provisions or verifies a tool's env (worker pre-flight; orchestrator uses it to stand Spark up after a fresh clone). Standalone Miniforge auto-detect handles servers without writable system conda.
+- `bindmaster configure` — interactive 5-step wizard. Workers use it to translate an assignment into a run dir; orchestrator rarely needs it directly. `bindmaster configure --status` lists runs and completion state, `--archive <run>` tars a run dir.
+- `bindmaster evaluate <run-dir>` — runs the full Evaluator pipeline (extract → refold-boltz2 → refold-af3 → report). This is the canonical entry point for Phase 3' below. Under the hood it calls `Evaluator/evaluate.sh`; advanced flags (specific refold engines, SoluProt pre-filter, top-N per tool) are documented there.
 
 On each worker machine (BM2, BM4, Clara, others):
 
@@ -228,11 +235,10 @@ When a run finishes (whether success, failure, or planned kill):
 
 Once enough tools have returned tarballs to constitute a pool worth merging:
 
-1. Stage all returned tarballs under `~/eval_workdir/<TARGET>/` on Spark.
-2. Run cross-engine refold: Boltz-2 (default), Protenix (Part J), AlphaFold 3 (Part K, aarch64 only). All three are local conda envs; call them as code, not jobs. See `references/evaluation.md` for the recipe.
-3. Apply the iPSAE merge: DunbrackLab 2025 `d0_res` variant, uniform 10 Å PAE cutoff, four-tier classification (High > 0.80, Medium 0.61–0.80, Low 0.40–0.61, Reject ≤ 0.40).
-4. Rank by `agreement_count` desc, then `ipsae_min` desc.
-5. Each tool's native metrics are preserved alongside the cross-method comparator — the evaluator is an unbiased judge across methods, not a replacement for any tool's native ranking.
+1. **Stage** all returned tarballs under `~/eval_workdir/<TARGET>/` on Spark and untar each into a per-tool subdir (`bindcraft/`, `mosaic/`, …) so the unpacked layout matches what `bindmaster configure` would have produced for a local run.
+2. **Run the canonical pipeline** with `bindmaster evaluate ~/eval_workdir/<TARGET>` — this dispatches `Evaluator/evaluate.sh`, which extracts sequences from every tool's outputs (preserves each tool's native metrics in a sidecar CSV — see `extractors/*.py`), refolds with Boltz-2 (Mosaic venv) and AF3 v3.0.2 (`binder-eval-af3` env) as the canonical 2nd engine, optionally Protenix v0.5.0 (24 GB-friendly fallback in `bindmaster_pxdesign`) and ESMFold2, then produces HTML + CSV reports under `~/eval_workdir/<TARGET>/report/`. Pass `--refold N --target <pdb>` when you want refolding of bare sequences without a run dir. The Boltz-2-only fast path is `bindmaster evaluate <run-dir>`; the full Boltz-2 + AF3 ranking is what wet-lab decisions hinge on, so default to that on Spark / any host with >100 GB unified memory. The detailed CLI recipe (including which env hosts which step and the `--all-mosaic-designs` / `--soluprot-filter` knobs) lives in `references/evaluation.md`; only drop down to raw `conda run -n … binder-compare …` calls when `evaluate.sh` doesn't fit the deviation you need (e.g. mid-run partial reruns after a refold crash).
+3. **iPSAE merge semantics (what the pipeline applies).** DunbrackLab 2025 `d0_res` variant, uniform 10 Å PAE cutoff, four-tier classification: High > 0.80, Medium 0.61–0.80, Low 0.40–0.61, Reject ≤ 0.40. Ranking is `agreement_count` desc (how many engines pass Medium), then `ipsae_min` desc.
+4. **Native-metrics preservation.** Each tool's design-time metrics (`mosaic_ranking_loss`, `bg_design_ipsae_min`, `complexa_self_iptm`, …) ride alongside the cross-method comparator in the report — the evaluator is an unbiased judge across methods, not a replacement for any tool's native ranking. If the user wants more than the report's top-N, the `native_*` columns are how to drill into a tool's own ranking opinion.
 
 ---
 
@@ -416,7 +422,8 @@ Routine ops you can do without confirming (orchestrator side):
 - Write/update assignment docs in CLUSTER/
 - Add a queued row to PROGRESS for a new run idea
 - Tar a finished run and copy to RESULTS/ (when orchestrator is also doing worker duty)
-- Run local cross-engine refold on Spark for designs already in RESULTS/
+- Run local cross-engine refold on Spark for designs already in RESULTS/ — `bindmaster evaluate` is the canonical entry point and is safe to launch without confirmation when the input has already been staged. (Caveat: any refold that would lock the GPU for >2 h still falls under §8's "always pause" list.)
+- Run `bindmaster install --tool <tool>` on Spark to stand up or repair a refold env when one is missing or broken — idempotent on healthy envs.
 
 Always pause and ask before:
 - **Killing a running job** (`scancel`, `kill`). Irreversible — even if it looks stuck. Could be 2 minutes from finishing.

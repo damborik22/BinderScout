@@ -83,7 +83,7 @@ If any section is missing, missing detail, or references a file that doesn't exi
 
 Run these checks before touching anything. See `references/pre-flight.md` for full commands.
 
-- **Conda env / venv exists.** The assignment names the env (e.g. `BindCraft`, `Mosaic/.venv`, `bindmaster_pxdesign`, `bindmaster_rfd3`, `bindmaster_protein_hunter`). Activate it; verify the tool's CLI runs.
+- **Conda env / venv exists.** The assignment names the env (e.g. `BindCraft`, `Mosaic/.venv`, `bindmaster_pxdesign`, `bindmaster_rfd3`, `bindmaster_protein_hunter`). Activate it; verify the tool's CLI runs. If the env is missing, the canonical way to create it is `bindmaster install --tool <tool> --yes` (BindMaster's CLI installer — handles standalone Miniforge if no system conda is writable, applies the per-tool post-install patches PXDesign / aarch64 / etc. need, fetches pinned commits, and pins versions to BindMaster's `<TOOL>_COMMIT` records). Re-running install on an existing env is a no-op for already-built environments, so it doubles as a "verify install is sound" check. Do NOT hand-build envs from upstream READMEs — the installer encodes patches that the upstream docs miss.
 - **GPU available and right class.** `nvidia-smi`. Confirm memory matches what the assignment expects (24 GB / 48 GB / 80+ GB). See `references/troubleshooting.md` §OOM-thresholds — 24 GB cards have hard ceilings on BindCraft length and some tools just won't fit large targets.
 - **Disk space.** `df -h ~/runs` and the muni-disk mount. Budget 50-200 GB per run depending on tool.
 - **BindMaster repo is at the pinned commit.**
@@ -132,11 +132,11 @@ Each tool has its own way of receiving the target structure. The assignment's "S
 
 ### 4.3 Generate the run script
 
-**Use the template from `bindmaster_examples/run_<tool>.sh.template`. Do not hand-write.**
+**Preferred path: `bindmaster configure`** — BindMaster's 5-step interactive wizard. It (a) writes the target_settings JSON into the right per-tool location, (b) generates the run script from `bindmaster_examples/run_<tool>.sh.template` with the settings filled in, (c) writes the per-run `settings.json` reproducibility manifest the campaign relies on, and (d) creates a single `run_all.sh` to dispatch enabled tools. Use this whenever the assignment's settings map cleanly to the wizard's flow. The wizard's output lives at `~/runs/<TARGET>-<machine>-<tool>/` — same convention this skill assumes for the run dir.
 
-This is non-negotiable. The templates encode the JAX / PyRosetta env traps (`LD_LIBRARY_PATH`, `LD_PRELOAD`, `set +u`) that have cost the campaign days. See `references/troubleshooting.md` §6.
+**Fall-back path: hand-copy the template.** If the assignment specifies a setting the wizard doesn't expose (e.g. an experimental flag, a non-stock filter preset), copy `bindmaster_examples/run_<tool>.sh.template` directly to `~/runs/<TARGET>-<machine>-<tool>/run.sh` and edit. Do not hand-write a run script from scratch — the templates encode the JAX / PyRosetta env traps (`LD_LIBRARY_PATH`, `LD_PRELOAD`, `set +u`) that have cost the campaign days. See `references/troubleshooting.md` §6.
 
-Copy the template, fill in the parameters from the assignment's settings table, save to `~/runs/<TARGET>-<machine>-<tool>/run.sh`.
+Either path: never edit run scripts under an old run dir to re-launch a new variant. Configure (or hand-copy the template) into a fresh `~/runs/.../` so the prior `settings.json` + outputs stay intact as audit trail.
 
 ### 4.4 Submit
 
