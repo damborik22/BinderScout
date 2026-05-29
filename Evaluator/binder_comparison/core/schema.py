@@ -73,10 +73,15 @@ class NativeMetrics:
     complexa_rf3_reward: float | None = None  # RF3 reward (if used as reward model)
 
     # ---- Protein-Hunter (per-cycle Boltz-2 from hallucination loop) ----
-    # `iptm_cycle` is per-row; `iptm_best` is the best across cycles for that run.
+    # `iptm_cycle` / `plddt` are per-row (cycle of `summary_high_iptm.csv`);
+    # `iptm_best` / `plddt_best` are the run-level aggregates merged in from
+    # `summary_all_runs.csv` (joined by run_id). PH does not compute MPNN
+    # sequence recovery, so `sequence_recovery` stays None — it's listed
+    # for symmetry with the other tools.
     protein_hunter_iptm_cycle: float | None = None
     protein_hunter_iptm_best: float | None = None
     protein_hunter_plddt: float | None = None
+    protein_hunter_plddt_best: float | None = None
     protein_hunter_sequence_recovery: float | None = None
 
     # ---- RFD3 (foundry structural metadata + MPNN recovery) ----
