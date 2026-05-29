@@ -205,6 +205,7 @@ def detect_installs() -> dict:
         "rfd3": _env_exists("bindmaster_rfd3") and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
         "protein_hunter": _env_exists("bindmaster_protein_hunter") and PROTEIN_HUNTER_DIR.exists(),
         "af3": _env_exists("binder-eval-af3"),
+        "esmfold2": _env_exists("binder-eval-esmfold2"),
         "soluprot": _env_exists("binder-eval-soluprot"),
     }
 
@@ -2467,6 +2468,8 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         lines.append("    --skip-protenix \\")
     if not cfg.get("use_af3", False):
         lines.append("    --skip-af3 \\")
+    if not cfg.get("use_esmfold2", False):
+        lines.append("    --skip-esmfold2 \\")
 
     # SoluProt is a screen, not an engine. When enabled it runs before the
     # refold steps; --soluprot-filter drops sub-threshold designs from the
@@ -2840,7 +2843,7 @@ def wizard():
     use_evaluator = ask_yn("  Enable cross-evaluation (refolding + ranked report)?", default=False)
 
     # ── Refolding engine selection ──
-    use_boltz = use_protenix = use_af3 = False
+    use_boltz = use_protenix = use_af3 = use_esmfold2 = False
     primary_engine = "boltz"
     if use_evaluator:
         print(f"  {BOLD}Refolding engines for evaluation{RESET}")
@@ -2857,6 +2860,10 @@ def wizard():
             engines_available.append(("af3", "AlphaFold 3 v3.0.2 (binder-eval-af3 env)", False))
         else:
             print(f"    AF3: {RED}requires binder-eval-af3 env{RESET} — skipped")
+        if installed.get("esmfold2"):
+            engines_available.append(("esmfold2", "ESMFold2 (binder-eval-esmfold2 env)", False))
+        else:
+            print(f"    ESMFold2: {RED}requires binder-eval-esmfold2 env{RESET} — skipped")
         for key, label, default_on in engines_available:
             ans = ask_yn(f"    Use {label}?", default=default_on)
             if key == "boltz":
@@ -2865,13 +2872,24 @@ def wizard():
                 use_protenix = ans
             elif key == "af3":
                 use_af3 = ans
+            elif key == "esmfold2":
+                use_esmfold2 = ans
         # Require at least one engine
-        if not (use_boltz or use_protenix or use_af3):
+        if not (use_boltz or use_protenix or use_af3 or use_esmfold2):
             print_warn("No refolding engine selected — Evaluator disabled.")
             use_evaluator = False
         else:
             # If >1 engine, pick primary
-            selected = [k for k, on in (("boltz", use_boltz), ("protenix", use_protenix), ("af3", use_af3)) if on]
+            selected = [
+                k
+                for k, on in (
+                    ("boltz", use_boltz),
+                    ("protenix", use_protenix),
+                    ("af3", use_af3),
+                    ("esmfold2", use_esmfold2),
+                )
+                if on
+            ]
             if len(selected) > 1:
                 default_idx = selected.index("boltz") if "boltz" in selected else 0
                 idx, _ = ask_choice("    Primary engine for ranking", selected, default_index=default_idx)
@@ -2917,6 +2935,7 @@ def wizard():
         "use_boltz": use_boltz,
         "use_protenix": use_protenix,
         "use_af3": use_af3,
+        "use_esmfold2": use_esmfold2,
         "primary_engine": primary_engine,
         "use_soluprot": use_soluprot,
         "soluprot_threshold": soluprot_threshold,
@@ -2929,6 +2948,7 @@ def wizard():
         "use_boltz",
         "use_protenix",
         "use_af3",
+        "use_esmfold2",
         "primary_engine",
         "use_soluprot",
         "soluprot_threshold",
@@ -2958,6 +2978,7 @@ def wizard():
         "use_boltz": use_boltz,
         "use_protenix": use_protenix,
         "use_af3": use_af3,
+        "use_esmfold2": use_esmfold2,
         "primary_engine": primary_engine,
         "use_soluprot": use_soluprot,
         "soluprot_threshold": soluprot_threshold,
