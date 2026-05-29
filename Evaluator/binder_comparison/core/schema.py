@@ -87,6 +87,13 @@ class NativeMetrics:
     rfd3_helix_fraction: float | None = None
     rfd3_sequence_recovery: float | None = None
 
+    # ---- SoluProt (sequence-only E. coli solubility screen, Hon et al. 2021) ----
+    # Not a refold engine; runs before refolding and adds a probability that the
+    # designed sequence will express solubly. Used as a filter to drop sequences
+    # we wouldn't pursue experimentally, not as a re-ranker.
+    soluprot_score: float | None = None  # 0–1 probability (higher = more soluble)
+    soluprot_passes: bool | None = None  # score >= threshold used when scoring ran
+
 
 @dataclass
 class StandardisedMetrics:
