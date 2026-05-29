@@ -81,7 +81,7 @@ flowchart LR
     Config --> Design
     Design -->|tool-specific outputs| Extract
     Extract -->|FASTA of binders| SoluProt
-    SoluProt -->|filtered FASTA<br/>(if --soluprot-filter)| Drop
+    SoluProt -->|"filtered FASTA — only with --soluprot-filter"| Drop
     SoluProt -->|FASTA + soluprot_results.csv| Boltz2
     SoluProt --> Protenix
     SoluProt --> AF3
