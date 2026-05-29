@@ -205,6 +205,7 @@ def detect_installs() -> dict:
         "rfd3": _env_exists("bindmaster_rfd3") and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
         "protein_hunter": _env_exists("bindmaster_protein_hunter") and PROTEIN_HUNTER_DIR.exists(),
         "af3": _env_exists("binder-eval-af3"),
+        "soluprot": _env_exists("binder-eval-soluprot"),
     }
 
 
@@ -2467,6 +2468,17 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     if not cfg.get("use_af3", False):
         lines.append("    --skip-af3 \\")
 
+    # SoluProt is a screen, not an engine. When enabled it runs before the
+    # refold steps; --soluprot-filter drops sub-threshold designs from the
+    # FASTA so the refold engines never see them.
+    if not cfg.get("use_soluprot", False):
+        lines.append("    --skip-soluprot \\")
+    else:
+        threshold = cfg.get("soluprot_threshold", 0.5)
+        lines.append(f"    --soluprot-threshold {threshold} \\")
+        if cfg.get("soluprot_filter", False):
+            lines.append("    --soluprot-filter \\")
+
     primary = cfg.get("primary_engine", "boltz")
     lines += [
         f"    --primary-engine {primary} \\",
@@ -2867,6 +2879,30 @@ def wizard():
             else:
                 primary_engine = selected[0]
 
+    # ── SoluProt solubility screen (filter, not engine) ──
+    # Sits before the refold engines — when --soluprot-filter is on, designs
+    # below the threshold are dropped from the FASTA so the refold engines
+    # never spend GPU on them. SoluProt is a screen; it does NOT participate
+    # in ranking.
+    use_soluprot = False
+    soluprot_threshold = 0.5
+    soluprot_filter = False
+    if use_evaluator and installed.get("soluprot"):
+        print(f"  {BOLD}SoluProt solubility screen{RESET} (sequence-only filter, no GPU)")
+        use_soluprot = ask_yn("    Use SoluProt to score solubility?", default=True)
+        if use_soluprot:
+            soluprot_threshold = float(
+                ask(
+                    "    Pass threshold (paper default 0.5; lower for short binders)",
+                    default=0.5,
+                    validator=lambda v: True if 0.0 <= float(v) <= 1.0 else "must be 0.0–1.0",
+                )
+            )
+            soluprot_filter = ask_yn(
+                "    Drop sub-threshold designs BEFORE refolding (saves GPU)?",
+                default=True,
+            )
+
     tools_enabled = {
         "mosaic": use_mosaic,
         "boltzgen": use_boltzgen,
@@ -2882,10 +2918,22 @@ def wizard():
         "use_protenix": use_protenix,
         "use_af3": use_af3,
         "primary_engine": primary_engine,
+        "use_soluprot": use_soluprot,
+        "soluprot_threshold": soluprot_threshold,
+        "soluprot_filter": soluprot_filter,
     }
 
     # Evaluator is post-processing — don't count it as the sole tool
-    _meta_keys = {"evaluator", "use_boltz", "use_protenix", "use_af3", "primary_engine"}
+    _meta_keys = {
+        "evaluator",
+        "use_boltz",
+        "use_protenix",
+        "use_af3",
+        "primary_engine",
+        "use_soluprot",
+        "soluprot_threshold",
+        "soluprot_filter",
+    }
     design_tools = {k: v for k, v in tools_enabled.items() if k not in _meta_keys}
     if not any(design_tools.values()) and not use_evaluator:
         print_warn("No tools enabled — nothing to generate. Exiting.")
@@ -2911,6 +2959,9 @@ def wizard():
         "use_protenix": use_protenix,
         "use_af3": use_af3,
         "primary_engine": primary_engine,
+        "use_soluprot": use_soluprot,
+        "soluprot_threshold": soluprot_threshold,
+        "soluprot_filter": soluprot_filter,
     }
 
     if use_bindcraft:
