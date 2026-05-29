@@ -16,12 +16,16 @@ Handles two output layouts:
    - ``total_reward``: scalar reward used by the search; we expose as
      ``complexa_af2_reward`` (renaming is informational only — for MCTS or
      beam-search runs the reward composition may differ).
-   - ``af2folding_plddt`` / ``af2folding_pae`` / ``af2folding_i_pae`` /
-     ``af2folding_i_ptm_log`` / ``af2folding_rmsd``: per-sample scores from
-     the AF2-folding reward block. These are reward-shaped (often
-     normalised or log-transformed), NOT raw pLDDT / PAE values; they're
-     still useful for ranking within a single run but should not be
-     compared directly to other engines' raw values.
+   - ``af2folding_*`` columns: per-sample AF2-folding scores. The ``_log``
+     suffix is a naming convention from NVIDIA's logging pipeline ("this
+     value is logged to output"), NOT log-transformation. For most metrics
+     the ``_log`` and non-``_log`` columns are byte-identical raw values.
+     The exception is ``af2folding_plddt`` vs ``af2folding_plddt_log``:
+     the non-``_log`` is reward-shaped (≈ ``1 - plddt``) while the
+     ``_log`` version is the raw pLDDT in [0, 1]. We therefore prefer
+     ``_log`` candidates everywhere so the schema always carries the raw
+     value. (Same reasoning applies to ``af2folding_i_ptm_log`` — only the
+     ``_log`` column is written for that metric.)
    - ``pdb_path`` and ``metadata_tag``: used to derive a stable binder_id.
 
 The legacy column names (``self_complex_*``) are preserved as the first
@@ -59,9 +63,11 @@ _RESTYPES = "ARNDCQEGHILKMFPSTWYV"
 # field stays None — same behavior as the other extractors.
 _NATIVE_COL_MAP: dict[str, tuple[str, ...]] = {
     "complexa_self_iptm": ("self_complex_i_pTM", "af2folding_i_ptm_log"),
-    "complexa_self_ipae": ("self_complex_i_pAE", "af2folding_i_pae"),
-    "complexa_self_plddt": ("self_complex_pLDDT", "af2folding_plddt"),
-    "complexa_self_scrmsd": ("self_binder_scRMSD", "af2folding_rmsd"),
+    "complexa_self_ipae": ("self_complex_i_pAE", "af2folding_i_pae_log", "af2folding_i_pae"),
+    # plddt: prefer the _log column — see module docstring. The non-_log
+    # variant is reward-shaped (≈ 1 - plddt) and would mis-rank designs.
+    "complexa_self_plddt": ("self_complex_pLDDT", "af2folding_plddt_log"),
+    "complexa_self_scrmsd": ("self_binder_scRMSD", "af2folding_rmsd_log", "af2folding_rmsd"),
     "complexa_af2_reward": ("af2_reward", "total_reward"),
     "complexa_rf3_reward": ("rf3_reward",),
 }

@@ -16,10 +16,18 @@ may tighten up in future releases):
 
 Sequences designed post-diffusion by RFD3's integrated ``foundry/models/mpnn``
 pass (ProteinMPNN / LigandMPNN) live in the same directory.
+
+Structural QC metrics — ``n_chainbreaks``, ``n_clashing`` (sum of side-chain
+and backbone interresidue clashes), ``helix_fraction`` — are NOT in the CSV.
+They live in per-design JSON sidecars under ``<csv_dir>/diffusion/`` named
+``binder_spec_<design_id_without_rfd3_prefix>.json``. The CSV value (if any)
+wins; otherwise we fall back to the JSON sidecar — that mirrors how foundry
+versions sometimes start emitting fields directly in the CSV.
 """
 
 from __future__ import annotations
 
+import json
 import warnings
 from pathlib import Path
 
@@ -37,10 +45,14 @@ _NATIVE_COL_MAP = {
     "rfd3_helix_fraction": ("helix_fraction",),
     "rfd3_sequence_recovery": ("sequence_recovery", "mpnn_sequence_recovery"),
 }
-# NOTE: chainbreaks / clashing / helix_fraction live in per-design JSON sidecars
-# alongside the CSV, not in the CSV itself. Wiring those would require reading
-# each design's JSON separately — tracked as a follow-up to the native-metrics
-# preservation work (see docs/PLAN_soluprot_integration.md commit history).
+
+# Per-design JSON sidecars live under <csv_dir>/diffusion/.
+_SIDECAR_SUBDIR = "diffusion"
+# Within each sidecar JSON, the structural QC metrics live under data["metrics"].
+# The two n_clashing sub-keys use dot notation in the JSON ("n_clashing.x")
+# rather than nested dicts, so we look them up as flat strings.
+_SIDECAR_CLASH_SC = "n_clashing.interresidue_clashes_w_sidechain"
+_SIDECAR_CLASH_BB = "n_clashing.interresidue_clashes_w_backbone"
 
 
 def _safe_float(val) -> float | None:
@@ -93,18 +105,47 @@ class RFD3Extractor(SequenceExtractor):
             seq = str(row[seq_col]).strip().upper()
             if not self._validate_sequence(seq):
                 continue
+            sidecar = self._read_sidecar(csv_path, row)
             results.append(
                 ExtractedBinder(
                     binder_id=self._make_id(row, int(idx)),
                     sequence=seq,
                     source_tool="rfd3",
-                    native=self._extract_native(row),
+                    native=self._extract_native(row, sidecar),
                 )
             )
         return results
 
-    def _extract_native(self, row: pd.Series) -> NativeMetrics:
-        def _get(candidates: tuple[str, ...]):
+    def _read_sidecar(self, csv_path: Path, row: pd.Series) -> dict:
+        """Read the per-design JSON sidecar's `metrics` block.
+
+        The CSV's `design_id` column looks like
+        ``rfd3_binder_spec_<name>_<idx>_model_<m>``; the matching JSON is
+        ``<csv_dir>/diffusion/binder_spec_<name>_<idx>_model_<m>.json``.
+        Returns ``{}`` when no sidecar is available so callers can treat
+        missing-fields uniformly.
+        """
+        design_id = str(row.get("design_id", "")) if "design_id" in row.index else ""
+        if not design_id:
+            return {}
+        stem = design_id.removeprefix("rfd3_")
+        candidate = csv_path.parent / _SIDECAR_SUBDIR / f"{stem}.json"
+        if not candidate.exists():
+            # Be tolerant of layout drift — fall back to a recursive search.
+            hits = list(csv_path.parent.rglob(f"{stem}.json"))
+            if not hits:
+                return {}
+            candidate = hits[0]
+        try:
+            data = json.loads(candidate.read_text())
+            return data.get("metrics", {}) or {}
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _extract_native(self, row: pd.Series, sidecar: dict | None = None) -> NativeMetrics:
+        sidecar = sidecar or {}
+
+        def _from_csv(candidates: tuple[str, ...]):
             # Each schema field maps to a tuple of alternative CSV column names.
             # First match wins; absent columns return None.
             for col in candidates:
@@ -112,11 +153,27 @@ class RFD3Extractor(SequenceExtractor):
                     return row.get(col)
             return None
 
+        # CSV wins when present (some foundry versions emit these directly);
+        # otherwise fall back to the JSON sidecar.
+        chainbreaks_csv = _from_csv(_NATIVE_COL_MAP["rfd3_n_chainbreaks"])
+        chainbreaks = chainbreaks_csv if chainbreaks_csv is not None else sidecar.get("n_chainbreaks")
+
+        clashing_csv = _from_csv(_NATIVE_COL_MAP["rfd3_n_clashing"])
+        if clashing_csv is not None:
+            clashing = clashing_csv
+        else:
+            sc = sidecar.get(_SIDECAR_CLASH_SC)
+            bb = sidecar.get(_SIDECAR_CLASH_BB)
+            clashing = None if (sc is None and bb is None) else (sc or 0) + (bb or 0)
+
+        helix_csv = _from_csv(_NATIVE_COL_MAP["rfd3_helix_fraction"])
+        helix = helix_csv if helix_csv is not None else sidecar.get("helix_fraction")
+
         return NativeMetrics(
-            rfd3_n_chainbreaks=_safe_int(_get(_NATIVE_COL_MAP["rfd3_n_chainbreaks"])),
-            rfd3_n_clashing=_safe_int(_get(_NATIVE_COL_MAP["rfd3_n_clashing"])),
-            rfd3_helix_fraction=_safe_float(_get(_NATIVE_COL_MAP["rfd3_helix_fraction"])),
-            rfd3_sequence_recovery=_safe_float(_get(_NATIVE_COL_MAP["rfd3_sequence_recovery"])),
+            rfd3_n_chainbreaks=_safe_int(chainbreaks),
+            rfd3_n_clashing=_safe_int(clashing),
+            rfd3_helix_fraction=_safe_float(helix),
+            rfd3_sequence_recovery=_safe_float(_from_csv(_NATIVE_COL_MAP["rfd3_sequence_recovery"])),
         )
 
     def _extract_from_fasta(self, input_dir: Path) -> list[ExtractedBinder]:
