@@ -31,13 +31,15 @@ _CSV_CANDIDATES = [
 
 _SEQUENCE_COL = "sequence"
 
-# Schema field name → PXDesign CSV column name
+# Schema field name → PXDesign CSV column name(s). Multiple candidates per field
+# tolerate the column-name drift PXDesign has between releases (e.g. af2_ipae
+# vs. af2_ipAE — different versions, different casing).
 _NATIVE_COL_MAP = {
-    "pxdesign_composite_score": "composite_score",
-    "pxdesign_af2_iptm": "af2_iptm",
-    "pxdesign_af2_ipae": "af2_ipae",
-    "pxdesign_protenix_iptm": "ptx_iptm",
-    "pxdesign_sequence_recovery": "sequence_recovery",
+    "pxdesign_composite_score": ("composite_score",),
+    "pxdesign_af2_iptm": ("af2_iptm",),
+    "pxdesign_af2_ipae": ("af2_ipae", "af2_ipAE"),
+    "pxdesign_protenix_iptm": ("ptx_iptm",),
+    "pxdesign_sequence_recovery": ("sequence_recovery",),
 }
 
 
@@ -97,9 +99,15 @@ class PXDesignExtractor(SequenceExtractor):
 
     def _extract_native(self, row: pd.Series) -> NativeMetrics:
         values: dict[str, float | None] = {}
-        for schema_field, csv_col in _NATIVE_COL_MAP.items():
-            if csv_col in row.index:
-                values[schema_field] = _safe_float(row[csv_col])
+        for schema_field, csv_cols in _NATIVE_COL_MAP.items():
+            # Try each candidate column name; first match wins.
+            picked = None
+            for csv_col in csv_cols:
+                if csv_col in row.index:
+                    picked = csv_col
+                    break
+            if picked is not None:
+                values[schema_field] = _safe_float(row[picked])
             else:
                 values[schema_field] = None
         return NativeMetrics(**values)

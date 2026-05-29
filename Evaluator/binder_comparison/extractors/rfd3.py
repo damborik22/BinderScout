@@ -32,11 +32,15 @@ _CSV_CANDIDATES = ["sequences.csv", "results.csv", "designs.csv", "rfd3_designs.
 _SEQUENCE_COLS = ("sequence", "Sequence", "designed_sequence", "binder_sequence")
 
 _NATIVE_COL_MAP = {
-    "rfd3_n_chainbreaks": "n_chainbreaks",
-    "rfd3_n_clashing": "n_clashing",
-    "rfd3_helix_fraction": "helix_fraction",
-    "rfd3_sequence_recovery": "sequence_recovery",
+    "rfd3_n_chainbreaks": ("n_chainbreaks",),
+    "rfd3_n_clashing": ("n_clashing",),
+    "rfd3_helix_fraction": ("helix_fraction",),
+    "rfd3_sequence_recovery": ("sequence_recovery", "mpnn_sequence_recovery"),
 }
+# NOTE: chainbreaks / clashing / helix_fraction live in per-design JSON sidecars
+# alongside the CSV, not in the CSV itself. Wiring those would require reading
+# each design's JSON separately — tracked as a follow-up to the native-metrics
+# preservation work (see docs/PLAN_soluprot_integration.md commit history).
 
 
 def _safe_float(val) -> float | None:
@@ -100,9 +104,12 @@ class RFD3Extractor(SequenceExtractor):
         return results
 
     def _extract_native(self, row: pd.Series) -> NativeMetrics:
-        def _get(col: str):
-            if col in row.index:
-                return row.get(col)
+        def _get(candidates: tuple[str, ...]):
+            # Each schema field maps to a tuple of alternative CSV column names.
+            # First match wins; absent columns return None.
+            for col in candidates:
+                if col in row.index:
+                    return row.get(col)
             return None
 
         return NativeMetrics(
