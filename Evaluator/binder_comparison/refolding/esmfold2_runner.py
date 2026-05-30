@@ -33,7 +33,7 @@ def run_esmfold2_refold(
     output_dir: str | Path,
     output_csv: str | Path,
     *,
-    model_name: str = "fast",
+    model_name: str = "full",
     num_loops: int = 3,
     num_sampling_steps: int = 50,
     num_diffusion_samples: int = 1,
