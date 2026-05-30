@@ -44,7 +44,7 @@ def refold_batch(
     output_dir: str | os.PathLike,
     output_csv: str | os.PathLike,
     *,
-    model_name: str = "fast",
+    model_name: str = "full",
     num_loops: int = 3,
     num_sampling_steps: int = 50,
     num_diffusion_samples: int = 1,
@@ -114,6 +114,35 @@ def refold_batch(
                 fh.flush()
                 _free_torch_cache()
                 continue
+
+            # fold() returns a LIST when num_diffusion_samples > 1 (single result only when ==1).
+            # Collapse to the best sample (highest iptm, then ptm, then mean pLDDT) so the
+            # single-result extraction below works. Without this, getattr(list, "pae") is always
+            # None and every multi-sample run silently writes an empty row.
+            if isinstance(result, (list, tuple)):
+                if not result:
+                    print(f"[esmfold2] No samples returned for #{idx}; recording empty row.")
+                    writer.writerow(_empty_row(idx, binder_seq, target_sequence))
+                    fh.flush()
+                    _free_torch_cache()
+                    continue
+
+                def _rank_sample(r):
+                    for attr in ("iptm", "ptm"):
+                        v = getattr(r, attr, None)
+                        if v is not None:
+                            try:
+                                return float(v)
+                            except (TypeError, ValueError):
+                                pass
+                    arr = _to_numpy(getattr(r, "plddt", None))
+                    return float(arr.mean()) if arr is not None and arr.size else float("-inf")
+
+                best = max(result, key=_rank_sample)
+                print(
+                    f"[esmfold2] #{idx}: {len(result)} diffusion samples → kept best (score {_rank_sample(best):.4f})"
+                )
+                result = best
 
             try:
                 pae = _to_numpy(getattr(result, "pae", None))
@@ -440,7 +469,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True, help="Output CSV path")
     parser.add_argument("--output-dir", default="./refold_esmfold2", help="Directory for structures + PAE .npy files")
     parser.add_argument(
-        "--model", default="fast", choices=sorted(_MODEL_IDS), help="ESMFold2 checkpoint (default fast)"
+        "--model", default="full", choices=sorted(_MODEL_IDS), help="ESMFold2 checkpoint (default full)"
     )
     parser.add_argument("--num-loops", type=int, default=3)
     parser.add_argument("--num-sampling-steps", type=int, default=50)

@@ -70,9 +70,10 @@ def add_parser(subparsers) -> None:
     )
     p.add_argument(
         "--model",
-        default="fast",
+        default="full",
         choices=("fast", "full"),
-        help="ESMFold2 checkpoint: 'fast' (biohub/ESMFold2-Fast, default) or 'full' (biohub/ESMFold2)",
+        help="ESMFold2 checkpoint: 'full' (biohub/ESMFold2, default — larger, MSA-capable, "
+        "more accurate) or 'fast' (biohub/ESMFold2-Fast, single-sequence, speed-optimized)",
     )
     p.add_argument("--num-loops", type=int, default=3, metavar="N", help="Recycling loops (default: 3)")
     p.add_argument(

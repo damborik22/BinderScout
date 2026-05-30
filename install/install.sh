@@ -1131,6 +1131,26 @@ install_evaluator() {
         uv pip install --python "${MOSAIC_VENV}/bin/python" -q -e "${EVALUATOR_DIR}[boltz2]" \
         || { print_fail "Failed to install binder-compare into Mosaic venv"; return 1; }
 
+    # Force a CUDA build of PyTorch into the Mosaic venv. PyTorch is only a *transitive* dep
+    # here (pulled in by the `boltz` package for the Boltz-2 refold); uv resolves it to the
+    # CPU-only PyPI wheel by default, so `boltz predict` later dies with "No supported gpu
+    # backend found". Mosaic's actual engine is JAX (own CUDA), so this stays invisible until
+    # the torch-based Boltz-2 refold runs on GPU. uv --torch-backend=auto detects the driver and
+    # picks the matching cuXXX wheel — do NOT hard-code an index (torch 2.7.x dropped cu124).
+    # Non-fatal: if it fails, Boltz-2 refold simply falls back to CPU. Mirrors the PXDesign
+    # force-CUDA-torch reinstall (see CLAUDE.md known issues).
+    if command -v nvidia-smi >/dev/null 2>&1 \
+       && ! "${MOSAIC_VENV}/bin/python" -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+        local _tver _tspec
+        _tver=$("${MOSAIC_VENV}/bin/python" -c "import torch;print(torch.__version__.split('+')[0])" 2>/dev/null || echo "")
+        _tspec="torch"; [[ -n "${_tver}" ]] && _tspec="torch==${_tver}"
+        print_step "Installing CUDA PyTorch into Mosaic venv (${_tspec}, driver-auto)"
+        run_logged "Force-installing CUDA torch into Mosaic venv" \
+            uv pip install --python "${MOSAIC_VENV}/bin/python" --torch-backend=auto --reinstall-package torch "${_tspec}" \
+            || print_warn "Could not install CUDA torch into Mosaic venv — Boltz-2 refold will run on CPU."
+        "${MOSAIC_VENV}/bin/python" -c "import torch;print('  Mosaic venv torch:', torch.__version__, '| cuda', torch.cuda.is_available())" 2>/dev/null || true
+    fi
+
     # Save the venv path so evaluate.sh can find it
     mkdir -p "${EVALUATOR_DIR}/envs"
     echo "${MOSAIC_VENV}" > "${EVALUATOR_DIR}/envs/mosaic_venv_path"
@@ -2181,10 +2201,23 @@ install_esmfold2() {
             || { print_fail "Failed to create binder-eval-esmfold2 conda env"; return 1; }
     fi
 
-    # Install ESMFold2 producer + gemmi (structure I/O used by refold_esmfold2.py)
-    run_logged "Installing esmfold + gemmi into binder-eval-esmfold2" \
-        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q esmfold gemmi \
-        || { print_fail "Failed to install esmfold + gemmi (check PyPI access)"; return 1; }
+    # Install the ESMFold2 runtime deps (canonical list lives in the env yml header).
+    # NOTE: there is NO `esmfold` PyPI package. The runtime is transformers' ESMFold2Model
+    # + biohub's `esm` SDK (ESMFold2InputBuilder + the ProteinInput/StructurePredictionInput
+    # dataclasses) + gemmi for CIF→PDB. refold_esmfold2.py imports exactly these.
+    local _torch_index="https://download.pytorch.org/whl/cu124"
+    [[ "$(uname -m)" == "aarch64" ]] && _torch_index="https://download.pytorch.org/whl/cu130"
+    run_logged "Installing torch (${_torch_index##*/}) into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q --index-url "$_torch_index" torch \
+        || { print_fail "Failed to install torch into binder-eval-esmfold2"; return 1; }
+    run_logged "Installing transformers + gemmi + safetensors into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'transformers>=4.50' gemmi safetensors \
+        || { print_fail "Failed to install transformers/gemmi/safetensors into binder-eval-esmfold2"; return 1; }
+    # biohub/esm: ESMFold2InputBuilder + chain dataclasses. Pinned commit per the HF model
+    # card (no PyPI release yet). If this 404s/changes upstream, update the ref in the yml header too.
+    run_logged "Installing biohub esm SDK into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'esm @ git+https://github.com/Biohub/esm.git@c94ed8d' \
+        || { print_fail "Failed to install biohub esm SDK (check network / git access)"; return 1; }
 
     # Install binder-compare into the env so 'binder-compare refold-esmfold2' works
     run_logged "Installing binder-compare into binder-eval-esmfold2" \
@@ -2203,8 +2236,8 @@ install_esmfold2() {
 
     echo ""
     print_ok "ESMFold2 weights are open-source and download on first use via the HuggingFace cache."
-    print_ok "  Default model: ${BOLD}fast${RESET} (~1 GB)"
-    print_ok "  Switch via:    --esmfold2-model full  (larger, MSA-capable; ~3-5 GB)"
+    print_ok "  Default model: ${BOLD}full${RESET} (biohub/ESMFold2, MSA-capable, more accurate; ~3-5 GB)"
+    print_ok "  Switch via:    --esmfold2-model fast  (single-sequence, speed-optimized; ~1 GB)"
     echo ""
 
     print_ok "ESMFold2 refolder installation complete"
