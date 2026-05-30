@@ -991,11 +991,12 @@ if [[ "$(uname -m)" == "aarch64" ]]; then
 fi
 
 echo "=== Running BoltzGen for {cfg["name"]} ==="
-boltzgen run "$CONFIG" \\
+"$CONDA_PREFIX/bin/boltzgen" run "$CONFIG" \\
     --output "$OUTPUT_DIR" \\
     --protocol protein-anything \\
     --num_designs {cfg["boltzgen_intermediate"]} \\
-    --budget {cfg["n_designs"]}
+    --budget {cfg["n_designs"]} \\
+    --use_kernels false
 """
     path.write_text(content)
     path.chmod(0o755)
@@ -1960,7 +1961,7 @@ echo "  Diffusion:     T={diffusion_steps}, step_scale={step_scale}"
 echo "  Checkpoint:    $WEIGHTS_DIR/rfd3_latest.ckpt"
 echo ""
 
-rfd3 design \\
+"$CONDA_PREFIX/bin/rfd3" design \\
     out_dir="$DIFF_DIR" \\
     inputs="$INPUTS_YAML" \\
     n_batches={n_batches} \\
@@ -1979,7 +1980,7 @@ PROTEINMPNN_CKPT="$WEIGHTS_DIR/proteinmpnn_v_48_020.pt"
 if [[ ! -f "$PROTEINMPNN_CKPT" ]]; then
     echo ""
     echo "Installing ProteinMPNN weights..."
-    foundry install proteinmpnn --checkpoint-dir "$WEIGHTS_DIR"
+    "$CONDA_PREFIX/bin/foundry" install proteinmpnn --checkpoint-dir "$WEIGHTS_DIR"
 fi
 
 # ── Stage 3: ProteinMPNN sequence design (best-of-{mpnn_samples} per backbone) ──
@@ -2005,7 +2006,7 @@ for CIF in "${{CIFS[@]}}"; do
         DONE=$((DONE + 1))
         continue
     fi
-    mpnn \\
+    "$CONDA_PREFIX/bin/mpnn" \\
         --structure_path "$CIF" \\
         --checkpoint_path "$PROTEINMPNN_CKPT" \\
         --model_type protein_mpnn \\
