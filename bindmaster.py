@@ -7,12 +7,14 @@ Dispatches sub-commands to their respective scripts:
   install   → bash install/install.sh
   configure → python configurator/configurator.py
   evaluate  → Mosaic/.venv/bin/python evaluator_legacy/evaluator.py
+  nodes     → python nodes/status.py
 
 Usage:
   bindmaster                                                    Interactive menu (TUI)
   bindmaster install   [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples]
   bindmaster configure [options passed through to configurator.py]
   bindmaster evaluate  <run-dir> [--metric METRIC] [--top N] [--refold N]
+  bindmaster nodes     [--json] [--config PATH] [--timeout SEC]
   bindmaster --help
 """
 
@@ -36,6 +38,7 @@ USAGE = f"""{BOLD}BindMaster{RESET} — GPU-accelerated protein binder design to
   bindmaster install   [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples]
   bindmaster configure [options passed through]
   bindmaster evaluate  <run-dir> [--metric METRIC] [--top N] [--refold N]
+  bindmaster nodes     [--json] [--config PATH] [--timeout SEC]
   bindmaster --help
 
 {BOLD}Commands:{RESET}
@@ -43,11 +46,13 @@ USAGE = f"""{BOLD}BindMaster{RESET} — GPU-accelerated protein binder design to
   {CYAN}install{RESET}    Install BindCraft, BoltzGen, and/or Mosaic
   {CYAN}configure{RESET}  Interactive wizard to set up a run (target, tools, parameters)
   {CYAN}evaluate{RESET}   Parse outputs, rank designs, optionally re-fold top candidates
+  {CYAN}nodes{RESET}      Show GPU/process status across configured hosts (ssh + nvidia-smi)
 
 {BOLD}Environments:{RESET}
   install    → bash          {REPO}/install/install.sh
   configure  → system python {REPO}/configurator/configurator.py
   evaluate   → Mosaic venv   {REPO}/evaluator_legacy/evaluator.py
+  nodes      → system python {REPO}/nodes/status.py
 
 {BOLD}Clone:{RESET}
   git clone https://github.com/damborik22/BindMaster.git
@@ -113,6 +118,13 @@ def _dispatch(cmd: str, args: list) -> None:
             sys.exit(1)
         print(f"{BOLD}BindMaster → evaluate{RESET}")
         os.execv(str(MOSAIC_VENV_PYTHON), [str(MOSAIC_VENV_PYTHON), str(script)] + args)
+
+    elif cmd == "nodes":
+        script = REPO / "nodes" / "status.py"
+        if not script.exists():
+            print(f"{RED}✗ nodes/status.py not found: {script}{RESET}", file=sys.stderr)
+            sys.exit(1)
+        os.execv(sys.executable, [sys.executable, str(script)] + args)
 
     else:
         print(f"{RED}✗ Unknown command: {cmd!r}{RESET}", file=sys.stderr)
