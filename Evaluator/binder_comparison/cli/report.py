@@ -181,6 +181,7 @@ def run(args: argparse.Namespace) -> None:
         "protenix_pae_ipsae_min",
         "af3_pae_ipsae_min",
         "esmfold2_ipsae_min",
+        "esmfold2_chain_iptm_interface",
         "boltz_pae_iptm",
         "boltz_pae_bt_ipsae",
         "boltz_pae_tb_ipsae",

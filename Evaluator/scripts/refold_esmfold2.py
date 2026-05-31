@@ -96,7 +96,7 @@ def refold_batch(
 
         for idx, binder_seq in jobs:
             binder_len = len(binder_seq)
-            print(f"[esmfold2] Binder #{idx}  length={binder_len} aa")
+            print(f"[esmfold2] Binder #{idx}  length={binder_len} aa", flush=True)
 
             try:
                 result = build_fn(
@@ -109,28 +109,41 @@ def refold_batch(
                     seed=seed,
                 )
             except Exception as exc:
-                print(f"[esmfold2] ERROR on binder #{idx}: {exc}")
+                print(f"[esmfold2] ERROR on binder #{idx}: {exc}", flush=True)
                 writer.writerow(_empty_row(idx, binder_seq, target_sequence))
                 fh.flush()
                 _free_torch_cache()
                 continue
+
+            # ESMFold2 returns a list of MolecularComplexResult when
+            # num_diffusion_samples > 1 — pick the sample with the highest iptm
+            # (AF3-style ranking). Single-sample runs return one object directly.
+            if isinstance(result, (list, tuple)):
+                if not result:
+                    print(f"[esmfold2] Empty result list for #{idx}", flush=True)
+                    writer.writerow(_empty_row(idx, binder_seq, target_sequence))
+                    fh.flush()
+                    _free_torch_cache()
+                    continue
+                result = max(result, key=lambda x: _scalar(getattr(x, "iptm", float("nan"))) or float("-inf"))
 
             try:
                 pae = _to_numpy(getattr(result, "pae", None))
                 plddt = _to_numpy(getattr(result, "plddt", None))
                 iptm = _scalar(getattr(result, "iptm", float("nan")))
                 ptm = _scalar(getattr(result, "ptm", float("nan")))
+                pair_iptm_mat = _to_numpy(getattr(result, "pair_chains_iptm", None))
                 complex_obj = getattr(result, "complex", None)
                 cif_str = complex_obj.to_mmcif() if complex_obj is not None else None
             except Exception as exc:
-                print(f"[esmfold2] ERROR extracting outputs for #{idx}: {exc}")
+                print(f"[esmfold2] ERROR extracting outputs for #{idx}: {exc}", flush=True)
                 writer.writerow(_empty_row(idx, binder_seq, target_sequence))
                 fh.flush()
                 _free_torch_cache()
                 continue
 
             if pae is None or pae.size == 0:
-                print(f"[esmfold2] No PAE returned for #{idx}; recording empty row.")
+                print(f"[esmfold2] No PAE returned for #{idx}; recording empty row.", flush=True)
                 writer.writerow(_empty_row(idx, binder_seq, target_sequence))
                 fh.flush()
                 _free_torch_cache()
@@ -139,7 +152,10 @@ def refold_batch(
             # Sanity-log PAE units once (DunbrackLab 10 Å cutoff assumes Å).
             if not pae_units_logged:
                 pae_units_logged = True
-                print(f"  [esmfold2] PAE range (binder #{idx}): min={float(pae.min()):.3f}  max={float(pae.max()):.3f}")
+                print(
+                    f"  [esmfold2] PAE range (binder #{idx}): min={float(pae.min()):.3f}  max={float(pae.max()):.3f}",
+                    flush=True,
+                )
 
             plddt_per_res = _normalise_plddt(plddt)
 
@@ -157,6 +173,7 @@ def refold_batch(
             plddt_binder = plddt_per_res[target_len:] if plddt_per_res.size else plddt_per_res
 
             pae_split = _split_pae(pae, target_len, binder_len)
+            chain_iptm = _split_chain_iptm(pair_iptm_mat)
 
             row = {
                 "run_id": f"esmfold2_{idx:04d}",
@@ -166,6 +183,11 @@ def refold_batch(
                 "binder_length": str(binder_len),
                 "iptm": _fmt(iptm),
                 "ptm": _fmt(ptm),
+                "chain_iptm_tt": _fmt(chain_iptm["tt"]),
+                "chain_iptm_tb": _fmt(chain_iptm["tb"]),
+                "chain_iptm_bt": _fmt(chain_iptm["bt"]),
+                "chain_iptm_bb": _fmt(chain_iptm["bb"]),
+                "chain_iptm_interface": _fmt(chain_iptm["interface"]),
                 "plddt_binder_mean": _fmt(float(plddt_binder.mean())) if plddt_binder.size else "",
                 "plddt_binder_min": _fmt(float(plddt_binder.min())) if plddt_binder.size else "",
                 "plddt_target_mean": _fmt(float(plddt_target.mean())) if plddt_target.size else "",
@@ -180,9 +202,10 @@ def refold_batch(
             }
 
             print(
-                f"  iptm={iptm:.4f}  ptm={ptm:.4f}  "
+                f"  iptm={iptm:.4f}  chain_iptm_interface={chain_iptm['interface']:.4f}  "
                 f"plddt_binder={float(plddt_binder.mean()) if plddt_binder.size else float('nan'):.3f}  "
-                f"pae_bt={pae_split['bt_mean']:.2f}  pae_tb={pae_split['tb_mean']:.2f}"
+                f"pae_bt={pae_split['bt_mean']:.2f}  pae_tb={pae_split['tb_mean']:.2f}",
+                flush=True,
             )
             writer.writerow(row)
             fh.flush()
@@ -332,6 +355,28 @@ def _normalise_plddt(plddt: np.ndarray | None) -> np.ndarray:
     return arr
 
 
+def _split_chain_iptm(pair_iptm: np.ndarray | None) -> dict[str, float]:
+    """Extract per-chain-pair iptm values from the result.pair_chains_iptm matrix.
+
+    For a 2-chain complex (target=A first, binder=B second), the matrix is 2x2:
+        [[AA, AB],
+         [BA, BB]]
+    We expose the four entries plus a symmetric interface score (mean of AB and BA).
+    """
+    keys = ("tt", "tb", "bt", "bb", "interface")
+    nan_out = {k: float("nan") for k in keys}
+    if pair_iptm is None:
+        return nan_out
+    arr = np.asarray(pair_iptm)
+    if arr.ndim != 2 or arr.shape != (2, 2):
+        return nan_out
+    tt = float(arr[0, 0])
+    tb = float(arr[0, 1])
+    bt = float(arr[1, 0])
+    bb = float(arr[1, 1])
+    return {"tt": tt, "tb": tb, "bt": bt, "bb": bb, "interface": float((tb + bt) / 2.0)}
+
+
 def _split_pae(pae: np.ndarray, target_len: int, binder_len: int) -> dict[str, float]:
     """Summarise a PAE matrix into bt/tb/bb/overall/max scalars.
 
@@ -387,6 +432,11 @@ def _csv_fieldnames() -> list[str]:
         "binder_length",
         "iptm",
         "ptm",
+        "chain_iptm_tt",
+        "chain_iptm_tb",
+        "chain_iptm_bt",
+        "chain_iptm_bb",
+        "chain_iptm_interface",
         "plddt_binder_mean",
         "plddt_binder_min",
         "plddt_target_mean",
