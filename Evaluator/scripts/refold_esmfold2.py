@@ -149,6 +149,16 @@ def refold_batch(
                 plddt = _to_numpy(getattr(result, "plddt", None))
                 iptm = _scalar(getattr(result, "iptm", float("nan")))
                 ptm = _scalar(getattr(result, "ptm", float("nan")))
+                # pair_chains_iptm is a [n_chains, n_chains] matrix; its off-diagonal is the
+                # explicit target<->binder interface iPTM, which is the meaningful interface
+                # number for a binder (the scalar `iptm` is chain-averaged and can be diluted).
+                _pc = _to_numpy(getattr(result, "pair_chains_iptm", None))
+                iptm_pair = iptm_pair_min = float("nan")
+                if _pc is not None and _pc.ndim == 2 and _pc.shape[0] >= 2 and _pc.shape[1] >= 2:
+                    _off = [float(_pc[a, b]) for a in range(_pc.shape[0]) for b in range(_pc.shape[1]) if a != b]
+                    if _off:
+                        iptm_pair = max(_off)
+                        iptm_pair_min = min(_off)
                 complex_obj = getattr(result, "complex", None)
                 cif_str = complex_obj.to_mmcif() if complex_obj is not None else None
             except Exception as exc:
@@ -195,6 +205,8 @@ def refold_batch(
                 "binder_length": str(binder_len),
                 "iptm": _fmt(iptm),
                 "ptm": _fmt(ptm),
+                "iptm_pair": _fmt(iptm_pair),
+                "iptm_pair_min": _fmt(iptm_pair_min),
                 "plddt_binder_mean": _fmt(float(plddt_binder.mean())) if plddt_binder.size else "",
                 "plddt_binder_min": _fmt(float(plddt_binder.min())) if plddt_binder.size else "",
                 "plddt_target_mean": _fmt(float(plddt_target.mean())) if plddt_target.size else "",
@@ -416,6 +428,8 @@ def _csv_fieldnames() -> list[str]:
         "binder_length",
         "iptm",
         "ptm",
+        "iptm_pair",
+        "iptm_pair_min",
         "plddt_binder_mean",
         "plddt_binder_min",
         "plddt_target_mean",

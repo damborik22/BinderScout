@@ -1131,25 +1131,13 @@ install_evaluator() {
         uv pip install --python "${MOSAIC_VENV}/bin/python" -q -e "${EVALUATOR_DIR}[boltz2]" \
         || { print_fail "Failed to install binder-compare into Mosaic venv"; return 1; }
 
-    # Force a CUDA build of PyTorch into the Mosaic venv. PyTorch is only a *transitive* dep
-    # here (pulled in by the `boltz` package for the Boltz-2 refold); uv resolves it to the
-    # CPU-only PyPI wheel by default, so `boltz predict` later dies with "No supported gpu
-    # backend found". Mosaic's actual engine is JAX (own CUDA), so this stays invisible until
-    # the torch-based Boltz-2 refold runs on GPU. uv --torch-backend=auto detects the driver and
-    # picks the matching cuXXX wheel — do NOT hard-code an index (torch 2.7.x dropped cu124).
-    # Non-fatal: if it fails, Boltz-2 refold simply falls back to CPU. Mirrors the PXDesign
-    # force-CUDA-torch reinstall (see CLAUDE.md known issues).
-    if command -v nvidia-smi >/dev/null 2>&1 \
-       && ! "${MOSAIC_VENV}/bin/python" -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
-        local _tver _tspec
-        _tver=$("${MOSAIC_VENV}/bin/python" -c "import torch;print(torch.__version__.split('+')[0])" 2>/dev/null || echo "")
-        _tspec="torch"; [[ -n "${_tver}" ]] && _tspec="torch==${_tver}"
-        print_step "Installing CUDA PyTorch into Mosaic venv (${_tspec}, driver-auto)"
-        run_logged "Force-installing CUDA torch into Mosaic venv" \
-            uv pip install --python "${MOSAIC_VENV}/bin/python" --torch-backend=auto --reinstall-package torch "${_tspec}" \
-            || print_warn "Could not install CUDA torch into Mosaic venv — Boltz-2 refold will run on CPU."
-        "${MOSAIC_VENV}/bin/python" -c "import torch;print('  Mosaic venv torch:', torch.__version__, '| cuda', torch.cuda.is_available())" 2>/dev/null || true
-    fi
+    # DO NOT force a CUDA build of PyTorch into this venv. Mosaic's engine is JAX (jax-cuda),
+    # and the campaign's Boltz-2 refold (`binder-compare refold-boltz2`) is JAX as well — both
+    # use the GPU via jax-cuda. A CUDA torch wheel hard-pins `nvidia-cudnn-cu12==9.7.x`, but
+    # jaxlib (>=0.10) requires `nvidia-cudnn-cu12>=9.8`, so installing CUDA torch SILENTLY BREAKS
+    # JAX here ("RET_CHECK failure ... dnn_support != nullptr"). The transitive CPU torch wheel
+    # (via boltz) is correct and harmless. If a torch-based `boltz predict` on GPU is ever needed
+    # (e.g. homodimers, which refold-boltz2 skips), put it in a SEPARATE env — never this one.
 
     # Save the venv path so evaluate.sh can find it
     mkdir -p "${EVALUATOR_DIR}/envs"
