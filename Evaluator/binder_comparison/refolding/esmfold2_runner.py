@@ -10,9 +10,16 @@ Must be run in the ``binder-eval-esmfold2`` conda env:
 Output CSV columns (pLDDT auto-rescaled to 0-1):
     run_id, idx, sequence, target_sequence, binder_length,
     iptm, ptm,
+    chain_iptm_tt, chain_iptm_tb, chain_iptm_bt, chain_iptm_bb, chain_iptm_interface,
     plddt_binder_mean, plddt_binder_min, plddt_target_mean,
     pae_bt_mean, pae_tb_mean, pae_bb_mean, pae_overall_mean, pae_max,
     cif, pdb, pae_file
+
+``chain_iptm_*`` columns are sourced directly from the ESMFold2 model
+output (``result.pair_chains_iptm``).  ``chain_iptm_interface`` is the
+mean of the off-diagonal entries (target→binder and binder→target) and
+is the cleanest per-design interface confidence signal — much less
+sensitive to PAE-scale calibration than the post-hoc DunbrackLab ipSAE.
 
 Array ordering: refold_esmfold2 places target first (chain A) and binder
 second (chain B) in the ``ESMFold2InputBuilder`` ``StructurePredictionInput``.
