@@ -161,6 +161,19 @@ This keeps the Spark refold load flat as the generated pool grows. (ApoE4 2026-0
 
 ---
 
+## 12. Never put CUDA PyTorch in the Mosaic (JAX) venv — it silently breaks JAX
+**[Likely portable]** — dependency fact
+
+The Mosaic venv is JAX-first: both Mosaic design and the `refold-boltz2` refolder are JAX/jax-cuda and use the GPU via JAX, *not* torch. PyTorch is only a transitive **CPU** dep (via `boltz`). Do NOT "upgrade" it to a CUDA build:
+
+- A CUDA torch wheel (e.g. `2.7.1+cu128`) hard-pins `nvidia-cudnn-cu12==9.7.x`, but jaxlib (>=0.10) requires `nvidia-cudnn-cu12>=9.8`. They cannot coexist — installing CUDA torch drags cuDNN below JAX's floor and JAX dies at runtime with `RET_CHECK failure ... dnn_support != nullptr` (XLA can't init cuDNN). **The break is silent:** `jax.devices()` still lists the GPU; only an actual op fails.
+- This bit the ApoE4 campaign: a CUDA-torch install (to run torch `boltz predict` for a homodimer) broke `refold-boltz2`. Fix = revert torch to CPU + restore cuDNN ≥9.8 — cleanest is re-run `bindmaster install --tool mosaic`, which `uv sync`s the venv back to its lock.
+- If you genuinely need torch-on-GPU (e.g. `boltz predict` for a homodimer, which `refold-boltz2` skips because binder==target), do it in a **separate** env, never the Mosaic venv.
+
+**Applies to:** `install/install.sh` (install_mosaic must NOT force CUDA torch), `tools/mosaic.md`, `tools/boltz2.md`.
+
+---
+
 ## When to add a new learning
 
 - The lesson would change behavior in a future campaign
