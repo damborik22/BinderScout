@@ -14,8 +14,11 @@ binder is chain B.  This matches Protenix convention so the same
 pLDDT is rescaled from AF3 native 0–100 to 0–1 so downstream code can
 compare engines on the same scale.
 
-AF3 is invoked with ``--run_data_pipeline=false`` (no MSA/template search)
-because binder sequences are de novo with no evolutionary homologs.
+Target MSA: cached once per batch via
+``binder_comparison.refolding.target_msa.get_target_msa`` (ColabFold API +
+on-disk cache).  Set ``use_msa=False`` to fall back to single-sequence
+mode (matches the pre-MSA behaviour of earlier runs).  Binder MSA is
+always empty — de novo binders have no homologs.
 """
 
 from __future__ import annotations
@@ -41,6 +44,8 @@ def refold_batch(
     num_samples: int = 5,
     model_dir: str | None = None,
     skip_indices: set[int] | None = None,
+    use_msa: bool = True,
+    msa_cache_dir: str | os.PathLike | None = None,
 ) -> None:
     """Refold each binder against target using AlphaFold 3; write metrics CSV.
 
@@ -63,9 +68,23 @@ def refold_batch(
         print("[af3] Nothing to do (all indices skipped).")
         return
 
+    # Fetch / load the target MSA once for the whole batch.
+    target_msa = ""
+    if use_msa:
+        try:
+            from binder_comparison.refolding.target_msa import get_target_msa
+
+            target_msa = get_target_msa(target_sequence, cache_dir=msa_cache_dir)
+            n_seqs = target_msa.count(">")
+            print(f"[af3] Target MSA loaded: {n_seqs} sequences, {len(target_msa)} bytes")
+        except Exception as exc:
+            print(f"[af3] WARNING: could not fetch target MSA ({exc}); falling back to single-sequence mode")
+            target_msa = ""
+
     print(
         f"[af3] Running {len(jobs)} binder(s) with {num_samples} sample(s) "
-        f"per seed × {num_seeds} seed(s)  [model_dir={model_dir}]"
+        f"per seed × {num_seeds} seed(s)  [model_dir={model_dir}, "
+        f"target_msa={'on' if target_msa else 'off'}]"
     )
 
     # Process one binder at a time so partial results are saved incrementally.
@@ -88,6 +107,7 @@ def refold_batch(
                     idx=idx,
                     binder_seq=binder_seq,
                     target_seq=target_sequence,
+                    target_msa=target_msa,
                     predictions_root=predictions_root,
                     model_dir=model_dir,
                     num_seeds=num_seeds,
@@ -180,12 +200,18 @@ def _run_single(
     idx: int,
     binder_seq: str,
     target_seq: str,
+    target_msa: str,
     predictions_root: Path,
     model_dir: str,
     num_seeds: int,
     num_samples: int,
 ) -> dict | None:
-    """Run AF3 on a single binder-target pair and return parsed outputs."""
+    """Run AF3 on a single binder-target pair and return parsed outputs.
+
+    If *target_msa* is a non-empty A3M string it is embedded in the input JSON
+    so AF3 sees evolutionary context for the target without running its own
+    data pipeline.  The binder MSA is always empty (de novo design).
+    """
     job_name = f"af3_{idx:04d}"
 
     # Build AF3 input JSON — target first (chain A), binder second (chain B)
@@ -196,7 +222,15 @@ def _run_single(
         "name": job_name,
         "modelSeeds": list(range(1, num_seeds + 1)),
         "sequences": [
-            {"protein": {"id": "A", "sequence": target_seq, "unpairedMsa": "", "pairedMsa": "", "templates": []}},
+            {
+                "protein": {
+                    "id": "A",
+                    "sequence": target_seq,
+                    "unpairedMsa": target_msa,
+                    "pairedMsa": "",
+                    "templates": [],
+                }
+            },
             {"protein": {"id": "B", "sequence": binder_seq, "unpairedMsa": "", "pairedMsa": "", "templates": []}},
         ],
         "dialect": "alphafold3",
@@ -486,6 +520,8 @@ if __name__ == "__main__":
     parser.add_argument("--num-seeds", type=int, default=1)
     parser.add_argument("--num-samples", type=int, default=5)
     parser.add_argument("--resume", action="store_true", help="Skip binders already in output CSV")
+    parser.add_argument("--no-msa", action="store_true", help="Disable target MSA (single-sequence mode)")
+    parser.add_argument("--msa-cache-dir", default=None, help="Override MSA cache directory")
     args = parser.parse_args()
 
     seqs: list[str] = []
@@ -519,4 +555,6 @@ if __name__ == "__main__":
         num_seeds=args.num_seeds,
         num_samples=args.num_samples,
         skip_indices=skip,
+        use_msa=not args.no_msa,
+        msa_cache_dir=args.msa_cache_dir,
     )

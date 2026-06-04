@@ -40,6 +40,8 @@ def run_esmfold2_refold(
     seed: int = 0,
     scripts_path: str | Path | None = None,
     resume: bool = False,
+    use_msa: bool = True,
+    msa_cache_dir: str | Path | None = None,
 ) -> None:
     """Refold *sequences* against *target_sequence* using ESMFold2.
 
@@ -56,6 +58,9 @@ def run_esmfold2_refold(
         seed:                  Random seed (default 0).
         scripts_path:          Override path to scripts/ (auto-detected).
         resume:                If True, skip binders already in output_csv.
+        use_msa:               If True (default), fetch + cache the target MSA and
+                               attach it to the target chain. False = single-sequence.
+        msa_cache_dir:         Override MSA cache directory.
     """
     output_dir = Path(output_dir).resolve()
     output_csv = Path(output_csv).resolve()
@@ -86,6 +91,8 @@ def run_esmfold2_refold(
             num_diffusion_samples=num_diffusion_samples,
             seed=seed,
             skip_indices=skip_indices,
+            use_msa=use_msa,
+            msa_cache_dir=str(msa_cache_dir) if msa_cache_dir else None,
         )
     finally:
         os.chdir(old_cwd)

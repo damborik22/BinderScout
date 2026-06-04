@@ -50,11 +50,18 @@ def refold_batch(
     num_diffusion_samples: int = 1,
     seed: int = 0,
     skip_indices: set[int] | None = None,
+    use_msa: bool = True,
+    msa_cache_dir: str | os.PathLike | None = None,
 ) -> None:
     """Refold each binder against *target_sequence* using ESMFold2.
 
     The PAE matrix is saved as a sidecar ``.npy``; the predicted complex is
     written as both CIF (native) and PDB (gemmi-converted).
+
+    Target MSA: when *use_msa* is True the target's MSA is fetched once (cached
+    on disk via ``binder_comparison.refolding.target_msa``) and attached to the
+    target chain so ESMFold2 sees evolutionary context.  Binder MSA is always
+    empty (de novo design).
     """
     skip_indices = skip_indices or set()
     out_dir = Path(output_dir).resolve()
@@ -79,7 +86,23 @@ def refold_batch(
         f"diffusion_samples={num_diffusion_samples}, seed={seed})"
     )
 
-    model, build_fn = _load_model_and_builder(repo_id)
+    # Fetch / load target MSA once for the whole batch (None = single-sequence mode)
+    target_msa_obj = None
+    if use_msa:
+        try:
+            import io as _io
+
+            from binder_comparison.refolding.target_msa import get_target_msa
+            from esm.utils.msa.msa import MSA as _MSA
+
+            a3m_str = get_target_msa(target_sequence, cache_dir=msa_cache_dir)
+            target_msa_obj = _MSA.from_a3m(_io.StringIO(a3m_str))
+            print(f"[esmfold2] Target MSA loaded: {a3m_str.count('>')} sequences", flush=True)
+        except Exception as exc:
+            print(f"[esmfold2] WARNING: could not fetch target MSA ({exc}); single-sequence mode", flush=True)
+            target_msa_obj = None
+
+    model, build_fn = _load_model_and_builder(repo_id, target_msa=target_msa_obj)
 
     fieldnames = _csv_fieldnames()
     csv_path = Path(output_csv).resolve()
@@ -237,11 +260,13 @@ def refold_batch(
 # ---------------------------------------------------------------------------
 
 
-def _load_model_and_builder(repo_id: str):
+def _load_model_and_builder(repo_id: str, *, target_msa=None):
     """Import ESMFold2, instantiate the model on CUDA, and return a fold callable.
 
     The fold callable encapsulates the ``ProteinInput`` + ``StructurePredictionInput``
     + ``ESMFold2InputBuilder().fold(...)`` pattern documented on the HF model card.
+    *target_msa* (when provided) is an ``esm.utils.msa.msa.MSA`` attached to the
+    target chain so the model sees evolutionary context.
     """
     try:
         import torch
@@ -290,7 +315,7 @@ def _load_model_and_builder(repo_id: str):
     ) -> Any:
         spi = StructurePredictionInput(
             sequences=[
-                ProteinInput(id="A", sequence=target_seq),
+                ProteinInput(id="A", sequence=target_seq, msa=target_msa),
                 ProteinInput(id="B", sequence=binder_seq),
             ]
         )
@@ -490,6 +515,8 @@ if __name__ == "__main__":
     parser.add_argument("--num-diffusion-samples", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--resume", action="store_true", help="Skip binders already in output CSV")
+    parser.add_argument("--no-msa", action="store_true", help="Disable target MSA (single-sequence mode)")
+    parser.add_argument("--msa-cache-dir", default=None, help="Override MSA cache directory")
     args = parser.parse_args()
 
     seqs: list[str] = []
@@ -527,4 +554,6 @@ if __name__ == "__main__":
         num_diffusion_samples=args.num_diffusion_samples,
         seed=args.seed,
         skip_indices=skip,
+        use_msa=not args.no_msa,
+        msa_cache_dir=args.msa_cache_dir,
     )
