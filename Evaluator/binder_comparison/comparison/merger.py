@@ -40,7 +40,7 @@ def merge_refold_results(
         sequences_fasta:  Optional FASTA from 'extract'; attaches binder_id and
                           source_tool columns.
         protenix_csv:     Optional Protenix results (refold-protenix output).
-        af3_csv:          Optional AF3 results (refold-af3 output, aarch64 only).
+        af3_csv:          Optional AF3 results (refold-af3 output).
         esmfold2_csv:     Optional ESMFold2 results (refold-esmfold2 output).
 
     Returns:

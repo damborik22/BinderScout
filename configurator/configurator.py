@@ -205,6 +205,8 @@ def detect_installs() -> dict:
         "rfd3": _env_exists("bindmaster_rfd3") and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
         "protein_hunter": _env_exists("bindmaster_protein_hunter") and PROTEIN_HUNTER_DIR.exists(),
         "af3": _env_exists("binder-eval-af3"),
+        "esmfold2": _env_exists("binder-eval-esmfold2"),
+        "soluprot": _env_exists("binder-eval-soluprot"),
     }
 
 
@@ -989,11 +991,12 @@ if [[ "$(uname -m)" == "aarch64" ]]; then
 fi
 
 echo "=== Running BoltzGen for {cfg["name"]} ==="
-boltzgen run "$CONFIG" \\
+"$CONDA_PREFIX/bin/boltzgen" run "$CONFIG" \\
     --output "$OUTPUT_DIR" \\
     --protocol protein-anything \\
     --num_designs {cfg["boltzgen_intermediate"]} \\
-    --budget {cfg["n_designs"]}
+    --budget {cfg["n_designs"]} \\
+    --use_kernels false
 """
     path.write_text(content)
     path.chmod(0o755)
@@ -1958,7 +1961,7 @@ echo "  Diffusion:     T={diffusion_steps}, step_scale={step_scale}"
 echo "  Checkpoint:    $WEIGHTS_DIR/rfd3_latest.ckpt"
 echo ""
 
-rfd3 design \\
+"$CONDA_PREFIX/bin/rfd3" design \\
     out_dir="$DIFF_DIR" \\
     inputs="$INPUTS_YAML" \\
     n_batches={n_batches} \\
@@ -1977,7 +1980,7 @@ PROTEINMPNN_CKPT="$WEIGHTS_DIR/proteinmpnn_v_48_020.pt"
 if [[ ! -f "$PROTEINMPNN_CKPT" ]]; then
     echo ""
     echo "Installing ProteinMPNN weights..."
-    foundry install proteinmpnn --checkpoint-dir "$WEIGHTS_DIR"
+    "$CONDA_PREFIX/bin/foundry" install proteinmpnn --checkpoint-dir "$WEIGHTS_DIR"
 fi
 
 # ── Stage 3: ProteinMPNN sequence design (best-of-{mpnn_samples} per backbone) ──
@@ -2003,7 +2006,7 @@ for CIF in "${{CIFS[@]}}"; do
         DONE=$((DONE + 1))
         continue
     fi
-    mpnn \\
+    "$CONDA_PREFIX/bin/mpnn" \\
         --structure_path "$CIF" \\
         --checkpoint_path "$PROTEINMPNN_CKPT" \\
         --model_type protein_mpnn \\
@@ -2461,15 +2464,28 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
 
     # Engine selection flags (skip flags omit engines NOT selected)
     if not cfg.get("use_boltz", True):
-        lines.append('    --skip-boltz2 \\')
+        lines.append("    --skip-boltz2 \\")
     if not cfg.get("use_protenix", False):
-        lines.append('    --skip-protenix \\')
+        lines.append("    --skip-protenix \\")
     if not cfg.get("use_af3", False):
-        lines.append('    --skip-af3 \\')
+        lines.append("    --skip-af3 \\")
+    if not cfg.get("use_esmfold2", False):
+        lines.append("    --skip-esmfold2 \\")
+
+    # SoluProt is a screen, not an engine. When enabled it runs before the
+    # refold steps; --soluprot-filter drops sub-threshold designs from the
+    # FASTA so the refold engines never see them.
+    if not cfg.get("use_soluprot", False):
+        lines.append("    --skip-soluprot \\")
+    else:
+        threshold = cfg.get("soluprot_threshold", 0.5)
+        lines.append(f"    --soluprot-threshold {threshold} \\")
+        if cfg.get("soluprot_filter", False):
+            lines.append("    --soluprot-filter \\")
 
     primary = cfg.get("primary_engine", "boltz")
     lines += [
-        f'    --primary-engine {primary} \\',
+        f"    --primary-engine {primary} \\",
         "    --resume",
         "",
     ]
@@ -2828,7 +2844,7 @@ def wizard():
     use_evaluator = ask_yn("  Enable cross-evaluation (refolding + ranked report)?", default=False)
 
     # ── Refolding engine selection ──
-    use_boltz = use_protenix = use_af3 = False
+    use_boltz = use_protenix = use_af3 = use_esmfold2 = False
     primary_engine = "boltz"
     if use_evaluator:
         print(f"  {BOLD}Refolding engines for evaluation{RESET}")
@@ -2845,6 +2861,10 @@ def wizard():
             engines_available.append(("af3", "AlphaFold 3 v3.0.2 (binder-eval-af3 env)", False))
         else:
             print(f"    AF3: {RED}requires binder-eval-af3 env{RESET} — skipped")
+        if installed.get("esmfold2"):
+            engines_available.append(("esmfold2", "ESMFold2 (binder-eval-esmfold2 env)", False))
+        else:
+            print(f"    ESMFold2: {RED}requires binder-eval-esmfold2 env{RESET} — skipped")
         for key, label, default_on in engines_available:
             ans = ask_yn(f"    Use {label}?", default=default_on)
             if key == "boltz":
@@ -2853,19 +2873,54 @@ def wizard():
                 use_protenix = ans
             elif key == "af3":
                 use_af3 = ans
+            elif key == "esmfold2":
+                use_esmfold2 = ans
         # Require at least one engine
-        if not (use_boltz or use_protenix or use_af3):
+        if not (use_boltz or use_protenix or use_af3 or use_esmfold2):
             print_warn("No refolding engine selected — Evaluator disabled.")
             use_evaluator = False
         else:
             # If >1 engine, pick primary
-            selected = [k for k, on in (("boltz", use_boltz), ("protenix", use_protenix), ("af3", use_af3)) if on]
+            selected = [
+                k
+                for k, on in (
+                    ("boltz", use_boltz),
+                    ("protenix", use_protenix),
+                    ("af3", use_af3),
+                    ("esmfold2", use_esmfold2),
+                )
+                if on
+            ]
             if len(selected) > 1:
                 default_idx = selected.index("boltz") if "boltz" in selected else 0
                 idx, _ = ask_choice("    Primary engine for ranking", selected, default_index=default_idx)
                 primary_engine = selected[idx]
             else:
                 primary_engine = selected[0]
+
+    # ── SoluProt solubility screen (filter, not engine) ──
+    # Sits before the refold engines — when --soluprot-filter is on, designs
+    # below the threshold are dropped from the FASTA so the refold engines
+    # never spend GPU on them. SoluProt is a screen; it does NOT participate
+    # in ranking.
+    use_soluprot = False
+    soluprot_threshold = 0.5
+    soluprot_filter = False
+    if use_evaluator and installed.get("soluprot"):
+        print(f"  {BOLD}SoluProt solubility screen{RESET} (sequence-only filter, no GPU)")
+        use_soluprot = ask_yn("    Use SoluProt to score solubility?", default=True)
+        if use_soluprot:
+            soluprot_threshold = float(
+                ask(
+                    "    Pass threshold (paper default 0.5; lower for short binders)",
+                    default=0.5,
+                    validator=lambda v: True if 0.0 <= float(v) <= 1.0 else "must be 0.0–1.0",
+                )
+            )
+            soluprot_filter = ask_yn(
+                "    Drop sub-threshold designs BEFORE refolding (saves GPU)?",
+                default=True,
+            )
 
     tools_enabled = {
         "mosaic": use_mosaic,
@@ -2881,11 +2936,25 @@ def wizard():
         "use_boltz": use_boltz,
         "use_protenix": use_protenix,
         "use_af3": use_af3,
+        "use_esmfold2": use_esmfold2,
         "primary_engine": primary_engine,
+        "use_soluprot": use_soluprot,
+        "soluprot_threshold": soluprot_threshold,
+        "soluprot_filter": soluprot_filter,
     }
 
     # Evaluator is post-processing — don't count it as the sole tool
-    _meta_keys = {"evaluator", "use_boltz", "use_protenix", "use_af3", "primary_engine"}
+    _meta_keys = {
+        "evaluator",
+        "use_boltz",
+        "use_protenix",
+        "use_af3",
+        "use_esmfold2",
+        "primary_engine",
+        "use_soluprot",
+        "soluprot_threshold",
+        "soluprot_filter",
+    }
     design_tools = {k: v for k, v in tools_enabled.items() if k not in _meta_keys}
     if not any(design_tools.values()) and not use_evaluator:
         print_warn("No tools enabled — nothing to generate. Exiting.")
@@ -2910,7 +2979,11 @@ def wizard():
         "use_boltz": use_boltz,
         "use_protenix": use_protenix,
         "use_af3": use_af3,
+        "use_esmfold2": use_esmfold2,
         "primary_engine": primary_engine,
+        "use_soluprot": use_soluprot,
+        "soluprot_threshold": soluprot_threshold,
+        "soluprot_filter": soluprot_filter,
     }
 
     if use_bindcraft:

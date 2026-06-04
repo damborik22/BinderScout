@@ -1,10 +1,11 @@
 #!/bin/bash
 # BindMaster Installer
 # Installs BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa,
-# Protein-Hunter, RFD3, and/or the Evaluator. AF3 is opt-in (--tool af3).
+# Protein-Hunter, RFD3, and/or the Evaluator. AF3 and ESMFold2 are opt-in
+# (--tool af3 / --tool esmfold2).
 #
 # Usage:
-#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|af3|all] [--cuda VERSION] [--skip-examples] [--yes]
+#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|af3|esmfold2|all] [--cuda VERSION] [--skip-examples] [--yes]
 #   bindmaster install [same options]
 #
 # With no --tool flag, an interactive menu lets you choose which tools to install.
@@ -73,6 +74,8 @@ DO_PROTEINA_COMPLEXA=false
 DO_PROTEIN_HUNTER=false
 DO_RFD3=false
 DO_AF3=false            # opt-in via --tool af3 (>=100 GB GPU memory required; weights not bundled)
+DO_ESMFOLD2=false       # opt-in via --tool esmfold2 (lightweight 4th refold engine; no gated weights)
+DO_SOLUPROT=false       # opt-in via --tool soluprot (sequence-only E. coli solubility screen; x86 only — USEARCH dep)
 
 # Note: legacy RFAA support was removed entirely (see CHANGELOG).
 # Use RFD3 (--tool rfd3) for all-atom diffusion-based binder design.
@@ -103,8 +106,12 @@ while [[ $# -gt 0 ]]; do
                     DO_PROTEIN_HUNTER=true ;;
                 af3|alphafold3|alphafold)
                     DO_AF3=true ;;
+                esmfold2|esm|esmfold)
+                    DO_ESMFOLD2=true ;;
+                soluprot|solu|solubility)
+                    DO_SOLUPROT=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfd3, pxdesign, proteina-complexa, protein-hunter, af3${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfd3, pxdesign, proteina-complexa, protein-hunter, af3, esmfold2, soluprot${RESET}"
                     exit 1
                     ;;
             esac
@@ -149,6 +156,14 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes]
                                        requires >=100 GB GPU memory (H200/GH200/Spark)
                                        and gated AF3 weights you obtain from
                                        https://github.com/google-deepmind/alphafold3
+                  esmfold2             ESMFold2 refolder — opt-in only;
+                                       lightweight 4th refold engine, no gated weights
+                  soluprot             SoluProt 1.0 solubility screen — opt-in only;
+                                       sequence-only, no GPU, no refolding. x86 only
+                                       (USEARCH dep is x86 binary). TMHMM (DTU
+                                       registration) and USEARCH (drive5.com) downloads
+                                       are required and the installer prints the URLs
+                                       if either is missing post-install.
   --cuda        CUDA version for conda package resolution (default: 12.4).
   --skip-examples
                 Do not prompt to run bundled examples after install.
@@ -635,6 +650,8 @@ select_tools_interactive() {
     [[ "$DO_PROTEINA_COMPLEXA" == true ]] && echo -e "    ${GREEN}✓${RESET} Proteina-Complexa"
     [[ "$DO_PROTEIN_HUNTER" == true ]] && echo -e "    ${GREEN}✓${RESET} Protein-Hunter"
     [[ "$DO_AF3" == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; >=100 GB GPU; weights required)${RESET}"
+    [[ "$DO_ESMFOLD2" == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (opt-in refolder)"
+    [[ "$DO_SOLUPROT" == true ]] && echo -e "    ${GREEN}✓${RESET} SoluProt 1.0 (opt-in solubility screen)"
     echo ""
 
     confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
@@ -1113,6 +1130,14 @@ install_evaluator() {
     run_logged "pip install binder-compare into Mosaic venv" \
         uv pip install --python "${MOSAIC_VENV}/bin/python" -q -e "${EVALUATOR_DIR}[boltz2]" \
         || { print_fail "Failed to install binder-compare into Mosaic venv"; return 1; }
+
+    # DO NOT force a CUDA build of PyTorch into this venv. Mosaic's engine is JAX (jax-cuda),
+    # and the campaign's Boltz-2 refold (`binder-compare refold-boltz2`) is JAX as well — both
+    # use the GPU via jax-cuda. A CUDA torch wheel hard-pins `nvidia-cudnn-cu12==9.7.x`, but
+    # jaxlib (>=0.10) requires `nvidia-cudnn-cu12>=9.8`, so installing CUDA torch SILENTLY BREAKS
+    # JAX here ("RET_CHECK failure ... dnn_support != nullptr"). The transitive CPU torch wheel
+    # (via boltz) is correct and harmless. If a torch-based `boltz predict` on GPU is ever needed
+    # (e.g. homodimers, which refold-boltz2 skips), put it in a SEPARATE env — never this one.
 
     # Save the venv path so evaluate.sh can find it
     mkdir -p "${EVALUATOR_DIR}/envs"
@@ -2137,6 +2162,243 @@ AF3EOF
     chmod +x "${SHORTCUTS_DIR}/af3"
 }
 
+# ─── ESMFold2 (refolder, opt-in) ────────────────────────────────────────────
+
+install_esmfold2() {
+    print_step "Installing ESMFold2 refolder (binder-eval-esmfold2 env)"
+    ensure_conda_in_path
+
+    # Evaluator dir must exist (bundled in monorepo)
+    if [[ ! -d "${EVALUATOR_DIR}" ]]; then
+        print_fail "Evaluator directory not found at ${EVALUATOR_DIR}"
+        print_warn "It should be bundled in the repository. Try re-cloning BindMaster."
+        return 1
+    fi
+    if [[ ! -f "${EVALUATOR_DIR}/envs/binder-eval-esmfold2.yml" ]]; then
+        print_fail "Env spec not found at ${EVALUATOR_DIR}/envs/binder-eval-esmfold2.yml"
+        return 1
+    fi
+
+    # Create binder-eval-esmfold2 conda env
+    print_step "Creating binder-eval-esmfold2 conda environment"
+    if env_exists binder-eval-esmfold2; then
+        print_warn "Conda environment 'binder-eval-esmfold2' already exists — skipping creation."
+    else
+        run_logged "Creating binder-eval-esmfold2 conda env" \
+            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval-esmfold2.yml" -y \
+            || { print_fail "Failed to create binder-eval-esmfold2 conda env"; return 1; }
+    fi
+
+    # Install the ESMFold2 runtime deps (canonical list lives in the env yml header).
+    # NOTE: there is NO `esmfold` PyPI package. The runtime is transformers' ESMFold2Model
+    # + biohub's `esm` SDK (ESMFold2InputBuilder + the ProteinInput/StructurePredictionInput
+    # dataclasses) + gemmi for CIF→PDB. refold_esmfold2.py imports exactly these.
+    local _torch_index="https://download.pytorch.org/whl/cu124"
+    [[ "$(uname -m)" == "aarch64" ]] && _torch_index="https://download.pytorch.org/whl/cu130"
+    run_logged "Installing torch (${_torch_index##*/}) into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q --index-url "$_torch_index" torch \
+        || { print_fail "Failed to install torch into binder-eval-esmfold2"; return 1; }
+    run_logged "Installing transformers + gemmi + safetensors into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'transformers>=4.50' gemmi safetensors \
+        || { print_fail "Failed to install transformers/gemmi/safetensors into binder-eval-esmfold2"; return 1; }
+    # biohub/esm: ESMFold2InputBuilder + chain dataclasses. Pinned commit per the HF model
+    # card (no PyPI release yet). If this 404s/changes upstream, update the ref in the yml header too.
+    run_logged "Installing biohub esm SDK into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'esm @ git+https://github.com/Biohub/esm.git@c94ed8d' \
+        || { print_fail "Failed to install biohub esm SDK (check network / git access)"; return 1; }
+
+    # Install binder-compare into the env so 'binder-compare refold-esmfold2' works
+    run_logged "Installing binder-compare into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q -e "${EVALUATOR_DIR}[report]" \
+        || { print_fail "Failed to install binder-compare into binder-eval-esmfold2"; return 1; }
+
+    # Smoke test — just the CLI parses (no weights needed for --help)
+    smoke_test "binder-compare refold-esmfold2 --help" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 binder-compare refold-esmfold2 --help \
+        || return 1
+
+    # Shortcut
+    print_step "Installing esmfold2 shortcut"
+    _write_esmfold2_shortcut
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/esmfold2"
+
+    echo ""
+    print_ok "ESMFold2 weights are open-source and download on first use via the HuggingFace cache."
+    print_ok "  Default model: ${BOLD}full${RESET} (biohub/ESMFold2, MSA-capable, more accurate; ~3-5 GB)"
+    print_ok "  Switch via:    --esmfold2-model fast  (single-sequence, speed-optimized; ~1 GB)"
+    echo ""
+
+    print_ok "ESMFold2 refolder installation complete"
+}
+
+_write_esmfold2_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# BindMaster ESMFold2 shortcut — runs 'binder-compare refold-esmfold2 ...' in the"
+        echo "# binder-eval-esmfold2 env. With no args: opens an interactive env shell."
+        echo ""
+        echo "CONDA_CMD=\"${CONDA_CMD}\""
+    } > "${SHORTCUTS_DIR}/esmfold2"
+    cat >> "${SHORTCUTS_DIR}/esmfold2" << 'ESMFOLD2EOF'
+
+if [ "$#" -eq 0 ]; then
+    echo "ESMFold2 env (binder-eval-esmfold2) activated."
+    echo "Usage:"
+    echo "  binder-compare refold-esmfold2 --sequences seqs.fasta --target-seq SEQ -o esmfold2.csv"
+    echo "  (Default model: fast; switch via --esmfold2-model full)"
+    echo ""
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-esmfold2 bash
+else
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-esmfold2 binder-compare refold-esmfold2 "$@"
+fi
+ESMFOLD2EOF
+    chmod +x "${SHORTCUTS_DIR}/esmfold2"
+}
+
+# ─── SoluProt (sequence-only solubility screen, opt-in) ───────────────────────
+
+# Where SoluProt's distribution lands. Kept inside Evaluator/tools/ so the
+# Python runner's default _resolve_scripts_path() finds it without env vars.
+SOLUPROT_DIR="${EVALUATOR_DIR}/tools/soluprot"
+SOLUPROT_ZIP_URL="https://loschmidt.chemi.muni.cz/soluprot/api/download/soluprot.zip"
+
+install_soluprot() {
+    print_step "Installing SoluProt 1.0 solubility screen (binder-eval-soluprot env)"
+    ensure_conda_in_path
+
+    # SoluProt depends on USEARCH which ships as an x86 binary only.
+    # See docs/PLAN_soluprot_integration.md §"Open questions" for the
+    # decision to mark aarch64 as unsupported for the first cut.
+    if [[ "${ARCH}" == "aarch64" ]]; then
+        print_fail "SoluProt's USEARCH dependency is an x86 binary; aarch64 is not supported."
+        print_warn "  Track docs/PLAN_soluprot_integration.md for the planned workaround."
+        return 1
+    fi
+
+    if [[ ! -d "${EVALUATOR_DIR}" ]]; then
+        print_fail "Evaluator directory not found at ${EVALUATOR_DIR}"
+        return 1
+    fi
+    if [[ ! -f "${EVALUATOR_DIR}/envs/binder-eval-soluprot.yml" ]]; then
+        print_fail "Env spec not found at ${EVALUATOR_DIR}/envs/binder-eval-soluprot.yml"
+        return 1
+    fi
+
+    # 1. Create the conda env (Python 3.7 + pinned old sklearn — slow first time).
+    print_step "Creating binder-eval-soluprot conda environment (Python 3.7)"
+    if env_exists binder-eval-soluprot; then
+        print_warn "Conda environment 'binder-eval-soluprot' already exists — skipping creation."
+    else
+        run_logged "Creating binder-eval-soluprot conda env" \
+            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval-soluprot.yml" -y \
+            || { print_fail "Failed to create binder-eval-soluprot conda env"; return 1; }
+    fi
+
+    # 2. Fetch and unpack SoluProt's distribution.
+    mkdir -p "${SOLUPROT_DIR}"
+    local zip_path="${SOLUPROT_DIR}/soluprot.zip"
+    if [[ -f "${SOLUPROT_DIR}/soluprot.py" ]] \
+        || [[ -f "${SOLUPROT_DIR}/predict_solubility.py" ]] \
+        || [[ -f "${SOLUPROT_DIR}/predict.py" ]]; then
+        print_ok "SoluProt distribution already present at ${SOLUPROT_DIR}"
+    else
+        print_step "Downloading SoluProt 1.0 from ${SOLUPROT_ZIP_URL}"
+        if ! run_logged "Downloading soluprot.zip" \
+            curl -fsSL -o "${zip_path}" "${SOLUPROT_ZIP_URL}"; then
+            print_fail "Failed to download SoluProt from Loschmidt Lab."
+            print_warn "  Manual download:  https://loschmidt.chemi.muni.cz/soluprot/?page=download"
+            print_warn "  Unpack into:      ${SOLUPROT_DIR}"
+            return 1
+        fi
+        if ! run_logged "Unpacking soluprot.zip" \
+            unzip -q -o "${zip_path}" -d "${SOLUPROT_DIR}"; then
+            print_fail "Failed to unpack soluprot.zip — is 'unzip' installed?"
+            return 1
+        fi
+        # Move any single nested directory up so soluprot.py is at the top.
+        local nested
+        nested="$(find "${SOLUPROT_DIR}" -mindepth 1 -maxdepth 1 -type d | head -1)"
+        if [[ -n "${nested}" ]] && [[ -f "${nested}/soluprot.py" || -f "${nested}/predict_solubility.py" ]]; then
+            mv "${nested}"/* "${SOLUPROT_DIR}/"
+            rmdir "${nested}" 2>/dev/null || true
+        fi
+        rm -f "${zip_path}"
+    fi
+
+    # 3. Check TMHMM. We cannot redistribute it; the user gets a registration URL.
+    if [[ ! -x "${SOLUPROT_DIR}/tmhmm-2.0/bin/tmhmm" ]] \
+        && ! command -v tmhmm >/dev/null 2>&1; then
+        echo ""
+        print_warn "TMHMM 2.0 is not installed. SoluProt needs it for transmembrane features."
+        print_warn "  Request access:  https://services.healthtech.dtu.dk/services/TMHMM-2.0/"
+        print_warn "  Unpack to:       ${SOLUPROT_DIR}/tmhmm-2.0/"
+        print_warn "  Or add to PATH:  the runner finds 'tmhmm' on PATH as a fallback."
+        echo ""
+    fi
+
+    # 4. Check USEARCH. 32-bit academic build is free; 64-bit needs a paid licence.
+    if [[ ! -x "${SOLUPROT_DIR}/usearch" ]] \
+        && ! command -v usearch >/dev/null 2>&1; then
+        echo ""
+        print_warn "USEARCH is not installed. SoluProt needs it for the E. coli identity feature."
+        print_warn "  Download (32-bit, free for academic):  https://drive5.com/usearch/"
+        print_warn "  Place at:                              ${SOLUPROT_DIR}/usearch  (chmod +x)"
+        print_warn "  Or add 'usearch' to PATH; the runner finds it as a fallback."
+        echo ""
+    fi
+
+    # 5. Make `binder-compare filter-soluprot` available in the env.
+    run_logged "Installing binder-compare into binder-eval-soluprot" \
+        "${CONDA_CMD}" run -n binder-eval-soluprot pip install -q -e "${EVALUATOR_DIR}[report]" \
+        || { print_fail "Failed to install binder-compare into binder-eval-soluprot"; return 1; }
+
+    # 6. Smoke test the CLI (does NOT actually score anything; just exercises argparse).
+    smoke_test "binder-compare filter-soluprot --help" \
+        "${CONDA_CMD}" run -n binder-eval-soluprot binder-compare filter-soluprot --help \
+        || return 1
+
+    # 7. Shortcut
+    print_step "Installing soluprot shortcut"
+    _write_soluprot_shortcut
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/soluprot"
+
+    echo ""
+    print_ok "SoluProt distribution at ${SOLUPROT_DIR}"
+    print_ok "  Citation:    Hon et al. 2021, Bioinformatics 37(1):23-28"
+    print_ok "  License:     free for academic; commercial via Enantis (enantis@enantis.com)"
+    print_ok "  Threshold:   0.5 (paper default; consider tuning for binder-length sequences)"
+    echo ""
+
+    print_ok "SoluProt solubility screen installation complete"
+}
+
+_write_soluprot_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# BindMaster SoluProt shortcut — runs 'binder-compare filter-soluprot ...' in the"
+        echo "# binder-eval-soluprot env. With no args: opens an interactive env shell."
+        echo ""
+        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "export SOLUPROT_HOME=\"${SOLUPROT_DIR}\""
+    } > "${SHORTCUTS_DIR}/soluprot"
+    cat >> "${SHORTCUTS_DIR}/soluprot" << 'SOLUPROTEOF'
+
+if [ "$#" -eq 0 ]; then
+    echo "SoluProt env (binder-eval-soluprot) activated."
+    echo "Usage:"
+    echo "  binder-compare filter-soluprot --sequences seqs.fasta -o soluprot.csv [--threshold 0.5]"
+    echo "  (Default threshold: 0.5 -- the SoluProt paper value.)"
+    echo ""
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-soluprot bash
+else
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-soluprot binder-compare filter-soluprot "$@"
+fi
+SOLUPROTEOF
+    chmod +x "${SHORTCUTS_DIR}/soluprot"
+}
+
 # ─── Uninstall ─────────────────────────────────────────────────────────────────
 
 uninstall_tool() {
@@ -2234,6 +2496,25 @@ uninstall_tool() {
             print_warn "AF3 model weights (if any) at ~/.alphafold3/models or \$AF3_MODEL_DIR were NOT removed."
             print_ok "AF3 refolder uninstalled"
             ;;
+        esmfold2|esm|esmfold)
+            print_step "Uninstalling ESMFold2 refolder"
+            env_exists binder-eval-esmfold2 && run_logged "Removing binder-eval-esmfold2 conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-esmfold2 -y
+            rm -f "${SHORTCUTS_DIR}/esmfold2"
+            print_ok "ESMFold2 refolder uninstalled"
+            ;;
+        soluprot|solu|solubility)
+            print_step "Uninstalling SoluProt solubility screen"
+            env_exists binder-eval-soluprot && run_logged "Removing binder-eval-soluprot conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-soluprot -y
+            rm -f "${SHORTCUTS_DIR}/soluprot"
+            local _solu_dir="${EVALUATOR_DIR}/tools/soluprot"
+            if [[ -d "${_solu_dir}" ]]; then
+                rm -rf "${_solu_dir}"
+                print_ok "Removed ${_solu_dir} (script, TMHMM, USEARCH)"
+            fi
+            print_ok "SoluProt solubility screen uninstalled"
+            ;;
         *)
             print_fail "Unknown tool: ${tool}"
             return 1
@@ -2294,6 +2575,8 @@ main() {
         [[ "${DO_PROTEIN_HUNTER}" == true ]] && { uninstall_tool protein-hunter || failed_uninstalls+=("Protein-Hunter"); }
         [[ "${DO_RFD3}"      == true ]] && { uninstall_tool rfd3      || failed_uninstalls+=("RFD3"); }
         [[ "${DO_AF3}"       == true ]] && { uninstall_tool af3       || failed_uninstalls+=("AF3"); }
+        [[ "${DO_ESMFOLD2}"  == true ]] && { uninstall_tool esmfold2  || failed_uninstalls+=("ESMFold2"); }
+        [[ "${DO_SOLUPROT}"  == true ]] && { uninstall_tool soluprot  || failed_uninstalls+=("SoluProt"); }
 
         # Offer to remove local Miniforge when all tools are uninstalled
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
@@ -2330,6 +2613,8 @@ main() {
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && (( total++ ))
     [[ "${DO_RFD3}"      == true ]] && (( total++ ))
     [[ "${DO_AF3}"       == true ]] && (( total++ ))
+    [[ "${DO_ESMFOLD2}"  == true ]] && (( total++ ))
+    [[ "${DO_SOLUPROT}"  == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
@@ -2343,6 +2628,8 @@ main() {
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Protein-Hunter${RESET}"; install_protein_hunter || failed_tools+=("Protein-Hunter"); }
     [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
+    [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
+    [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; install_soluprot || failed_tools+=("SoluProt"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"
