@@ -39,6 +39,8 @@ def run_af3_refold(
     model_dir: str | Path | None = None,
     scripts_path: str | Path | None = None,
     resume: bool = False,
+    use_msa: bool = True,
+    msa_cache_dir: str | Path | None = None,
 ) -> None:
     """Refold *sequences* against *target_sequence* using AlphaFold 3.
 
@@ -54,6 +56,10 @@ def run_af3_refold(
                          ``AF3_MODEL_DIR`` env var or default paths if None.
         scripts_path:    Override path to scripts/ (auto-detected).
         resume:          If True, skip binders with rows already in output_csv.
+        use_msa:         If True (default), fetch + cache target MSA via the
+                         ColabFold server and embed it in AF3's input JSON.
+                         Binder MSA always empty.
+        msa_cache_dir:   Override MSA cache directory.
     """
     output_dir = Path(output_dir).resolve()
     output_csv = Path(output_csv).resolve()
@@ -82,6 +88,8 @@ def run_af3_refold(
             num_samples=num_samples,
             model_dir=str(model_dir) if model_dir else None,
             skip_indices=skip_indices,
+            use_msa=use_msa,
+            msa_cache_dir=str(msa_cache_dir) if msa_cache_dir else None,
         )
     finally:
         os.chdir(old_cwd)

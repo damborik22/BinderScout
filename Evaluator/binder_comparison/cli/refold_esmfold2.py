@@ -41,6 +41,8 @@ def run(args: argparse.Namespace) -> None:
         seed=args.seed,
         scripts_path=args.scripts_path,
         resume=args.resume,
+        use_msa=not args.no_msa,
+        msa_cache_dir=args.msa_cache_dir,
     )
 
 
@@ -86,4 +88,15 @@ def add_parser(subparsers) -> None:
         "--scripts-path", default=None, metavar="DIR", help="Path to scripts/ directory (auto-detected if not set)"
     )
     p.add_argument("--resume", action="store_true", help="Skip binders already present in existing output CSV")
+    p.add_argument(
+        "--no-msa",
+        action="store_true",
+        help="Disable target MSA (single-sequence mode; matches pre-MSA behaviour)",
+    )
+    p.add_argument(
+        "--msa-cache-dir",
+        default=None,
+        metavar="DIR",
+        help="MSA cache directory (default: $BINDMASTER_MSA_CACHE or ~/.cache/bindmaster/target_msa)",
+    )
     p.set_defaults(func=run)
