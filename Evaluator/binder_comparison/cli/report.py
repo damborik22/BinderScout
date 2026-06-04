@@ -27,7 +27,9 @@ from ..comparison.scoring import (
     apply_screening_thresholds,
     compute_agreement,
     compute_composite_scores,
+    compute_consensus_iptm,
     rank_by_adaptyv_method,
+    rank_by_consensus_iptm,
 )
 from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
@@ -157,9 +159,20 @@ def run(args: argparse.Namespace) -> None:
     df = apply_screening_thresholds(df, primary_engine=primary_engine, engine_thresholds=engine_thresholds)
     df = compute_composite_scores(df)
     df = compute_agreement(df, engine_thresholds=engine_thresholds)
-    df = rank_by_adaptyv_method(df)
 
-    df = df.sort_values(["adaptyv_rank"], ascending=[True]).reset_index(drop=True)
+    # Consensus iPTM = max of per-engine PAE-recomputed iptms. Benchmark-validated
+    # (ProteinBase 4-target, exhaustive 297-combo search) as the best deployable
+    # binder-vs-non-binder score. Always computed; selectable as the ranking metric.
+    df = compute_consensus_iptm(df)
+    df = rank_by_adaptyv_method(df)
+    df = rank_by_consensus_iptm(df)
+
+    rank_by = getattr(args, "rank_by", "adaptyv") or "adaptyv"
+    if rank_by == "consensus_iptm":
+        print("[report] Ranking by consensus_iptm (max engine iptm — benchmark-validated binder filter)")
+        df = df.sort_values(["consensus_rank"], ascending=[True]).reset_index(drop=True)
+    else:
+        df = df.sort_values(["adaptyv_rank"], ascending=[True]).reset_index(drop=True)
 
     # Step 4: Write outputs
     write_csv(df, output_dir / "metrics.csv")
@@ -176,6 +189,8 @@ def run(args: argparse.Namespace) -> None:
         "source_tool",
         "sequence",
         "binder_length",
+        "consensus_iptm",
+        "consensus_iptm_n",
         "ipsae_min",
         "boltz_pae_ipsae_min",
         "protenix_pae_ipsae_min",
@@ -443,6 +458,14 @@ def add_parser(subparsers) -> None:
         default="boltz",
         help="Which engine's DunbrackLab PAE-based ipsae_min to use as the primary ranking metric "
         "(default: boltz). Falls back to boltz if the chosen engine's PAE files are missing.",
+    )
+    p.add_argument(
+        "--rank-by",
+        choices=["adaptyv", "consensus_iptm"],
+        default="adaptyv",
+        help="Ranking method for the report. 'adaptyv' (default) = quality_tier → agreement_count → "
+        "ipsae_min. 'consensus_iptm' = max engine iptm (benchmark-validated binder-vs-non-binder filter; "
+        "see docs/plans.md Part N). Both ranks are always written as columns (adaptyv_rank, consensus_rank).",
     )
     # Per-engine iPSAE thresholds (defaults from scoring.DEFAULT_ENGINE_THRESHOLDS)
     p.add_argument(
