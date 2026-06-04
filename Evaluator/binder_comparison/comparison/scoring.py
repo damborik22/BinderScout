@@ -384,6 +384,7 @@ DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {
     "boltz": IPSAE_PASS_THRESHOLD,  # 0.61
     "protenix": IPSAE_PASS_THRESHOLD,  # 0.61
     "af3": IPSAE_PASS_THRESHOLD,  # 0.61 — DunbrackLab cutoff was tuned for AF3
+    "esmfold2": IPSAE_PASS_THRESHOLD,  # 0.61 — same cutoff until empirical calibration suggests otherwise
     "af2": 0.30,  # informational only; AF2 distribution caps low
 }
 
@@ -607,7 +608,7 @@ def compute_agreement(
     because its DunbrackLab distribution is mis-calibrated on short targets
     (see INVESTIGATION_RANKING_DISCREPANCY.md §6).
 
-    Adds column 'agreement_count' (0–3: Boltz-2, Protenix, AF3 over their thresholds).
+    Adds column 'agreement_count' (0–4: Boltz-2, Protenix, AF3, ESMFold2 over their thresholds).
     """
     result = df.copy()
     thresholds = {**DEFAULT_ENGINE_THRESHOLDS, **(engine_thresholds or {})}
@@ -615,6 +616,7 @@ def compute_agreement(
         "boltz": "boltz_pae_ipsae_min",
         "protenix": "protenix_ipsae_min",
         "af3": "af3_ipsae_min",
+        "esmfold2": "esmfold2_ipsae_min",
     }
 
     count = pd.Series(0, index=df.index)
@@ -625,6 +627,81 @@ def compute_agreement(
             count += (vals > thr).fillna(False).astype(int)
     result["agreement_count"] = count
     return result
+
+
+# ---------------------------------------------------------------------------
+# Consensus iPTM — benchmark-validated cross-engine binding score
+# ---------------------------------------------------------------------------
+
+# Per-engine PAE-recomputed iptm columns (engine-independent, directly comparable —
+# computed by add_iptm_from_pae_files). These are preferred over raw model-reported
+# iptm because each engine reports iptm on a slightly different convention.
+_ENGINE_IPTM_COLS: list[str] = [
+    "boltz_pae_iptm",
+    "af3_pae_iptm",
+    "esmfold2_pae_iptm",
+    "protenix_pae_iptm",
+]
+
+
+def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
+    """Add a ``consensus_iptm`` column = max of the per-engine PAE-recomputed iptms.
+
+    Across the ProteinBase 4-target benchmark (Nipah / EGFR / IL7R / PD-L1, n=175),
+    an exhaustive 297-combination search found that the row-wise **max** of the
+    engine iptms is the best *deployable, parameter-free* binder-vs-non-binder
+    score (macro ROC AUC ≈ 0.75 — at or above the best single engine, and above any
+    leave-one-target-out cross-validated fitted model). The intuition: because the
+    most-predictive engine differs per target, "trust whichever engine is most
+    confident" lands on the right one each time.
+
+    NOTE: this scores *binder vs non-binder*; the same benchmark showed it does **not**
+    rank affinity among binders (see docs/plans.md Part N — that needs interface ΔG).
+
+    Adds:
+        consensus_iptm     — max over available {engine}_pae_iptm columns (NaN if none).
+        consensus_iptm_n   — how many engines contributed (0–4).
+    """
+    result = df.copy()
+    present = [c for c in _ENGINE_IPTM_COLS if c in result.columns]
+    if not present:
+        result["consensus_iptm"] = np.nan
+        result["consensus_iptm_n"] = 0
+        return result
+    numeric = result[present].apply(pd.to_numeric, errors="coerce")
+    result["consensus_iptm"] = numeric.max(axis=1)
+    result["consensus_iptm_n"] = numeric.notna().sum(axis=1).astype(int)
+    return result
+
+
+def rank_by_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
+    """Rank by ``consensus_iptm`` (max-iptm) descending; benchmark-validated binder filter.
+
+    Sort order (better first):
+        1. consensus_iptm    — max engine iptm (higher = more likely a binder)
+        2. agreement_count   — engines agreeing ipsae_min > threshold (tiebreak)
+        3. plddt_binder_mean — fold confidence (tiebreak)
+
+    Adds a column ``consensus_rank`` (1 = best). Does not modify ``adaptyv_rank``;
+    the two rankings coexist so the report can offer either.
+    """
+    result = df.copy()
+    if "consensus_iptm" not in result.columns:
+        result = compute_consensus_iptm(result)
+
+    sort_keys, ascending = ["consensus_iptm"], [False]
+    if "agreement_count" in result.columns:
+        sort_keys.append("agreement_count")
+        ascending.append(False)
+    for col in ("plddt_binder_mean", "boltz_plddt_binder_mean"):
+        if col in result.columns:
+            sort_keys.append(col)
+            ascending.append(False)
+            break
+
+    result = result.sort_values(sort_keys, ascending=ascending, na_position="last")
+    result["consensus_rank"] = range(1, len(result) + 1)
+    return result.reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------

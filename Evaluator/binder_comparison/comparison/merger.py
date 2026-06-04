@@ -4,6 +4,7 @@ Column naming convention after merge:
   - Boltz-2 columns are prefixed with ``boltz_``
   - Protenix columns are prefixed with ``protenix_``
   - AF3 columns (Part K, aarch64) are prefixed with ``af3_``
+  - ESMFold2 columns (biohub) are prefixed with ``esmfold2_``
   - ``sequence`` is the join key, present in every engine's CSV
 
 The FASTA extracted by 'binder-compare extract' is used to join the source
