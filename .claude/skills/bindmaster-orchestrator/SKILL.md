@@ -231,6 +231,15 @@ When a run finishes (whether success, failure, or planned kill):
 6. **Orchestrator merges on next read** — integrates worker entry into canonical sections.
 7. **Don't delete the worker-side copy** until the user confirms the muni-disk archive is readable.
 
+**Phase 3.5 — Per-tool unification (orchestrator-local, on Spark).**
+
+If a tool ran in multiple sessions across machines or configs (BindCraft on 2VDY ran 8 productive sessions across BM2, Clara L40S ×3, Clara H200 ×2, 2VDY_0002, Clara 109936), the cross-engine refold cannot ingest those archives separately — they must be consolidated and re-ranked by the tool's **native** primary criterion (see `references/learnings.md` learning 13 for the per-tool lookup). Two outputs:
+
+- **D1 — per-sequence ranked CSV**: every accept (every MPNN entry for BindCraft, every id_gen for PC, …) sorted by the tool's native primary metric desc.
+- **D2 — per-backbone ranked CSV**: 1 best entry per unique trajectory (deduplicate by `(source_run, trajectory_id)`). **D2 is the canonical input to the cross-engine refold's "top N per tool" step.**
+
+For BindCraft specifically: trajectory_id is the `_l<L>_s<seed>` prefix of `Design`, stripping the `_mpnn<N>` suffix. For tools with native 1-design-per-trajectory (PXDesign, PC, Mosaic) D1 and D2 are identical. Output `RESULTS/<TARGET>_<tool>_unified/` with both CSVs, a `Ranked_top50/` PDB subdir, and a one-page `unification_summary.md` (counts per source, iPTM distribution, top-10 table). The orchestrator writes a Python script (one per tool) — there is no `binder-compare` subcommand for this yet; conventions are in `references/learnings.md` and the per-tool reference docs.
+
 **Phase 3' — Campaign-level evaluation (orchestrator-local, on Spark).**
 
 Once enough tools have returned tarballs to constitute a pool worth merging:
@@ -299,6 +308,33 @@ Pre-commit. Examples that worked on 2VDY:
 
 Document the kill criterion in the kickoff doc, not just in your head.
 
+**Sharpen for A/B siblings:** the soft form ("kill if 0 after N trajectories") let Clara H200 100953 burn 6.6 days for 0 accepts because the sibling-A/B signal was already decisive at day 2 (Clara L40S 100039 sibling: 0/60 on the same defaults preset). Better criterion form for paired A/B: **"if the sibling has ≥ K accepts at time T and yours has 0, kill at T."** The point of the A/B is to test the hypothesis, not to wait for asymptotic data. K=3, T=2d is a reasonable default for BindCraft-class yields.
+
+### 5.7 Hotspots-on probe (named pattern)
+
+**Before linear scale-up of a plateaued tool, run a single hotspots-on probe.** If the distribution shifts, the scale-up math changes by orders of magnitude.
+
+2VDY example: PC at no-hotspots aggregate (n=400) gave 0.75 % ≥ 0.85 iPTM. The pessimistic scale-up estimate was ~62 days H200 for 50 designs ≥ 0.85. A single 10 h hotspots-on probe (115830) yielded **50/100 at ≥ 0.85** (50 %, 67× the rate). The campaign-level deliverable for PC was achieved in one overnight run instead of weeks.
+
+The pattern:
+1. You have a tool whose distribution plateaus below the threshold you care about.
+2. Cost-of-scale-up looks prohibitive at the current rate.
+3. **Before committing to scale, flip hotspots ON** — one config-change run on the same machine.
+4. If the new distribution lifts substantially, the scale-up plan is now cheap. If not, you've spent 10 h and learned hotspots aren't the lever.
+
+**Caveat — not every tool benefits.** Check tool support first:
+
+| Tool | Hotspots support | 2VDY observation |
+|---|---|---|
+| PC (Proteina-Complexa) | ✓ (`complexa target add --hotspot-residues`) | 67× lift on ≥ 0.85 rate |
+| PXDesign | ✓ (config) | used throughout, worked |
+| PH (Protein-Hunter) | ✓ (target side) | did not test on 2VDY |
+| RFD3 | ✓ (contig) | did not test on 2VDY |
+| Mosaic | ✗ (no API) | gradient hallucination only |
+| BindCraft AF2 hallucination | ✓ (`target_hotspot_residues` field) | **broke trajectory pLDDT on 2VDY** — 10/10 BM2 trajectories failed pre-MPNN, BM4 ran 9 days with hotspots ON and got 0/203 accepts. Scattered hotspots across distant secondary-structure elements can't all be satisfied by AF2 gradient hallucination. Hotspots ON is target-dependent for BindCraft. |
+
+Rule: don't extrapolate hotspot-on success from one tool to another. Each tool has its own coupling between the hotspot constraint and the search dynamics.
+
 ---
 
 ## 6. Decision-making heuristics
@@ -355,6 +391,16 @@ Each later step builds on what's known to work from earlier ones.
 ### 6.7 Propose, don't decide silently
 
 The orchestrator's "decide best settings for each tool" job is real, but the decision authority stays with the user. The pattern: read `references/tools/<tool>.md` for the engine constraints + `references/learnings.md` for campaign-tested empirical lessons, propose the settings with rationale and cost model, then let the user confirm before any compute commits. Never silently spend GPU on the orchestrator's own judgement.
+
+### 6.8 Sequences vs unique backbones — clarify the count semantic upfront
+
+When the user says "we want 50 designs," **clarify whether that means 50 sequences or 50 unique backbones** before scaling up.
+
+BindCraft default (`max_mpnn_sequences=3` in V4 advanced) saves up to 3 MPNN sequences per backbone. On 2VDY this meant 56 BindCraft "accepts" came from only ~30 unique backbones — a 3× gap between sequence count and backbone count. If the user's goal is structural diversity, you need backbones not sequences. If the user's goal is sequence diversity for the cross-engine refold (legitimate — different sequences on the same backbone may have different refold-engine scores), sequences count.
+
+Operational implication for new BindCraft runs: if the user means backbones, **patch the V4 advanced preset `max_mpnn_sequences: 3 → 1`** before launch. Each accept then equals one unique backbone, AND the per-trajectory validation phase runs ~3× fewer AF2 calls (~15–20 % total speedup). Tools with native 1-design-per-trajectory (PXDesign, PC, Mosaic) don't have this trap.
+
+Downstream consequence: if you ran BindCraft with `max_mpnn=3`, the cross-engine refold's "top N per tool" rule will pull N sequences which may include ≤ N/3 unique backbones. Refolding 3 sequences from the same backbone is partially wasted compute — they share most of the structure. **Unification phase (§4 Phase 3.5) handles this** by producing both a per-sequence (D1) and per-backbone (D2) ranked CSV; the refold consumes D2 by default.
 
 ---
 

@@ -174,6 +174,31 @@ The Mosaic venv is JAX-first: both Mosaic design and the `refold-boltz2` refolde
 
 ---
 
+## 13. Each tool's native ranking criterion (for per-tool unification)
+**[Likely portable]** — fact
+
+For the Phase 3.5 unification step (SKILL.md §4), each tool needs to be re-ranked across its sessions using **the tool's own primary criterion**, not an orchestrator-invented composite. Inventing a composite contaminates the per-tool view that the cross-engine refold then re-evaluates. Use what the tool itself uses.
+
+Verified per-tool primary sort (from source where available):
+
+| Tool | Primary sort | Source file | Source-code reference |
+|---|---|---|---|
+| **BindCraft** | `Average_i_pTM` desc | `bindcraft/outputs/final_design_stats.csv` | `BindCraft/functions/generic_utils.py` — `design_df.sort_values('Average_i_pTM', ascending=False)` |
+| **Proteina-Complexa** | `i_pTM` desc | `evaluation_results/binder_results_*.csv` | PC's own evaluator emits this as primary |
+| **Protein-Hunter** | best-of-cycle `iPTM` desc | `summary_high_iptm.csv` (already filtered ≥ threshold) | PH writes one row per passing cycle, sorted natively |
+| **PXDesign** | `af2_iptm` desc | `pxdesign/sequences.csv` | PXDesign's `sequences.csv` is pre-ranked by AF2 ipTM |
+| **Mosaic** | `iPTM` desc on `is_top=1` rows | `designs.csv` filtered `is_top=1` | Mosaic Stage-2 marks top-K per length as `is_top=1` |
+| **BoltzGen** | tool's per-protocol `ranking` column | `final_designs.csv` | varies by protocol (nano CDR vs protein-anything) |
+| **RFD3** | composite: MPNN `sequence_recovery` × interface score | manually computed | no native ranking script; backbone-best-of-5 MPNN already filtered |
+
+**No composites by default.** BindCraft has no native tiebreaker; adding `Average_pLDDT` desc as a deterministic secondary is fine but document the addition explicitly in the unification's `summary.md` so downstream readers know what's faithful and what's added.
+
+**Important:** these rankings are **per-tool, not cross-tool**. A BindCraft sequence at `Average_i_pTM 0.84` is not directly comparable to a PC sample at `i_pTM 0.84` — different scoring engines (see learning 5). Unification produces tool-native rankings; the cross-engine refold then re-evaluates everyone on a common basis.
+
+**Applies to:** SKILL.md §4 (Phase 3.5 — Per-tool unification). New tools added to BindMaster should document their primary sort here.
+
+---
+
 ## When to add a new learning
 
 - The lesson would change behavior in a future campaign
