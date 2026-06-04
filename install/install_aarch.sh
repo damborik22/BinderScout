@@ -7,7 +7,7 @@
 # read from TOOLS_DIR to avoid redundant downloads.
 #
 # Usage:
-#   bash install/install_aarch.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|af3|all] [--tools-dir PATH] [--skip-examples]
+#   bash install/install_aarch.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|af3|esmfold2|all] [--tools-dir PATH] [--skip-examples]
 #
 # --tools-dir: path to pre-cached resources. Defaults to the sibling
 #              Documents/OLD/BindMaster/bindcraft-tools directory.
@@ -63,6 +63,8 @@ DO_MOSAIC=false
 DO_EVALUATOR=false
 DO_PXDESIGN=false
 DO_AF3=false            # opt-in via --tool af3 (gated weights; not in --tool all)
+DO_ESMFOLD2=false       # opt-in via --tool esmfold2 (lightweight 4th refold engine; no gated weights)
+DO_SOLUPROT=false       # opt-in via --tool soluprot — USEARCH x86-only; install_soluprot() refuses on aarch64
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -84,8 +86,12 @@ while [[ $# -gt 0 ]]; do
                     DO_PXDESIGN=true ;;
                 af3|alphafold3|alphafold)
                     DO_AF3=true ;;
+                esmfold2|esm|esmfold)
+                    DO_ESMFOLD2=true ;;
+                soluprot|solu|solubility)
+                    DO_SOLUPROT=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, pxdesign, af3${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, pxdesign, af3, esmfold2, soluprot${RESET}"
                     exit 1
                     ;;
             esac
@@ -133,6 +139,12 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
                   af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
                                        gated AF3 weights you obtain from
                                        https://github.com/google-deepmind/alphafold3
+                  esmfold2             ESMFold2 refolder — opt-in only;
+                                       lightweight 4th refold engine, no gated weights
+                  soluprot             SoluProt solubility screen — opt-in but NOT
+                                       supported on aarch64 (USEARCH dep is x86 only).
+                                       Install on an x86 host with --tool soluprot
+                                       and rsync the score CSVs over for the report.
   --tools-dir   Path to pre-cached resources (AF2 weights, ARM64 binaries).
                 Default: <repo>/../../OLD/BindMaster/bindcraft-tools
   --cuda        CUDA version (default: 13.0). Only 13.0 has been tested on DGX Spark (GB10).
@@ -615,6 +627,8 @@ select_tools_interactive() {
     [[ "$DO_EVALUATOR" == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
     [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
     [[ "$DO_AF3"       == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; weights required)${RESET}"
+    [[ "$DO_ESMFOLD2"  == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (opt-in refolder)"
+    [[ "$DO_SOLUPROT"  == true ]] && echo -e "    ${YELLOW}✓ SoluProt (opt-in solubility screen; aarch64 unsupported — will error out)${RESET}"
     echo ""
 
     confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
@@ -1632,6 +1646,81 @@ AF3EOF
     chmod +x "${SHORTCUTS_DIR}/af3"
 }
 
+# ─── ESMFold2 (refolder, opt-in) ────────────────────────────────────────────
+
+install_esmfold2() {
+    print_step "Installing ESMFold2 refolder (binder-eval-esmfold2 env)"
+    ensure_conda_in_path
+
+    if [[ ! -d "${EVALUATOR_DIR}" ]]; then
+        print_fail "Evaluator directory not found at ${EVALUATOR_DIR}"
+        return 1
+    fi
+    if [[ ! -f "${EVALUATOR_DIR}/envs/binder-eval-esmfold2.yml" ]]; then
+        print_fail "Env spec not found at ${EVALUATOR_DIR}/envs/binder-eval-esmfold2.yml"
+        return 1
+    fi
+
+    print_step "Creating binder-eval-esmfold2 conda environment"
+    if env_exists binder-eval-esmfold2; then
+        print_warn "Conda environment 'binder-eval-esmfold2' already exists — skipping creation."
+    else
+        run_logged "Creating binder-eval-esmfold2 conda env" \
+            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval-esmfold2.yml" -y \
+            || { print_fail "Failed to create binder-eval-esmfold2 conda env"; return 1; }
+    fi
+
+    # esmfold + gemmi (producer side). ESMFold2 has linux aarch64 wheels.
+    run_logged "Installing esmfold + gemmi into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q esmfold gemmi \
+        || { print_fail "Failed to install esmfold + gemmi (check PyPI access and aarch64 wheel availability)"; return 1; }
+
+    run_logged "Installing binder-compare into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q -e "${EVALUATOR_DIR}[report]" \
+        || { print_fail "Failed to install binder-compare into binder-eval-esmfold2"; return 1; }
+
+    smoke_test "binder-compare refold-esmfold2 --help" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 binder-compare refold-esmfold2 --help \
+        || return 1
+
+    print_step "Installing esmfold2 shortcut"
+    _write_esmfold2_shortcut
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/esmfold2"
+
+    echo ""
+    print_ok "ESMFold2 weights are open-source and download on first use via the HuggingFace cache."
+    print_ok "  Default model: ${BOLD}fast${RESET} (~1 GB)"
+    print_ok "  Switch via:    --esmfold2-model full  (larger, MSA-capable; ~3-5 GB)"
+    echo ""
+
+    print_ok "ESMFold2 refolder installation complete"
+}
+
+_write_esmfold2_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# BindMaster ESMFold2 shortcut — runs 'binder-compare refold-esmfold2 ...' in the"
+        echo "# binder-eval-esmfold2 env. With no args: opens an interactive env shell."
+        echo ""
+        echo "CONDA_CMD=\"${CONDA_CMD}\""
+    } > "${SHORTCUTS_DIR}/esmfold2"
+    cat >> "${SHORTCUTS_DIR}/esmfold2" << 'ESMFOLD2EOF'
+
+if [ "$#" -eq 0 ]; then
+    echo "ESMFold2 env (binder-eval-esmfold2) activated."
+    echo "Usage:"
+    echo "  binder-compare refold-esmfold2 --sequences seqs.fasta --target-seq SEQ -o esmfold2.csv"
+    echo "  (Default model: fast; switch via --esmfold2-model full)"
+    echo ""
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-esmfold2 bash
+else
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-esmfold2 binder-compare refold-esmfold2 "$@"
+fi
+ESMFOLD2EOF
+    chmod +x "${SHORTCUTS_DIR}/esmfold2"
+}
+
 # ─── Uninstall ─────────────────────────────────────────────────────────────────
 
 uninstall_tool() {
@@ -1699,11 +1788,48 @@ uninstall_tool() {
             print_warn "AF3 model weights (if any) at ~/.alphafold3/models or \$AF3_MODEL_DIR were NOT removed."
             print_ok "AF3 refolder uninstalled"
             ;;
+        esmfold2|esm|esmfold)
+            print_step "Uninstalling ESMFold2 refolder"
+            env_exists binder-eval-esmfold2 && run_logged "Removing binder-eval-esmfold2 conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-esmfold2 -y
+            rm -f "${SHORTCUTS_DIR}/esmfold2"
+            print_ok "ESMFold2 refolder uninstalled"
+            ;;
+        soluprot|solu|solubility)
+            print_step "Uninstalling SoluProt solubility screen"
+            env_exists binder-eval-soluprot && run_logged "Removing binder-eval-soluprot conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-soluprot -y
+            rm -f "${SHORTCUTS_DIR}/soluprot"
+            local _solu_dir="${EVALUATOR_DIR}/tools/soluprot"
+            if [[ -d "${_solu_dir}" ]]; then
+                rm -rf "${_solu_dir}"
+                print_ok "Removed ${_solu_dir}"
+            fi
+            print_ok "SoluProt solubility screen uninstalled"
+            ;;
         *)
             print_fail "Unknown tool: ${tool}"
             return 1
             ;;
     esac
+}
+
+# ─── SoluProt (sequence-only solubility screen, x86 only — refuses on aarch64) ─
+
+install_soluprot() {
+    print_step "Installing SoluProt 1.0 (aarch64)"
+
+    # USEARCH 32-bit is the gating dep here — it ships only as a Linux x86
+    # binary. The plan (docs/PLAN_soluprot_integration.md §"Open questions")
+    # is to mark aarch64 unsupported for the first cut and revisit if Spark
+    # users actually want SoluProt; either a Python reimpl of the USEARCH
+    # identity step (lifts the limitation) or graceful-skip of the
+    # USEARCH-derived feature (one of 96 — paper doesn't quantify the cost).
+    print_fail "SoluProt's USEARCH dependency is an x86 binary; aarch64 is NOT supported."
+    print_warn "  Run \`bindmaster install --tool soluprot\` on an x86 host instead, then"
+    print_warn "  rsync the score CSV into this Spark for the report step."
+    print_warn "  Details + future workaround: docs/PLAN_soluprot_integration.md"
+    return 1
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -1748,6 +1874,8 @@ main() {
         [[ "${DO_EVALUATOR}" == true ]] && { uninstall_tool evaluator  || failed_uninstalls+=("Evaluator"); }
         [[ "${DO_PXDESIGN}"  == true ]] && { uninstall_tool pxdesign  || failed_uninstalls+=("PXDesign"); }
         [[ "${DO_AF3}"       == true ]] && { uninstall_tool af3       || failed_uninstalls+=("AF3"); }
+        [[ "${DO_ESMFOLD2}"  == true ]] && { uninstall_tool esmfold2  || failed_uninstalls+=("ESMFold2"); }
+        [[ "${DO_SOLUPROT}"  == true ]] && { uninstall_tool soluprot  || failed_uninstalls+=("SoluProt"); }
 
         # Offer to remove local Miniforge when all tools are uninstalled
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
@@ -1781,6 +1909,8 @@ main() {
     [[ "${DO_EVALUATOR}" == true ]] && (( total++ ))
     [[ "${DO_PXDESIGN}"  == true ]] && (( total++ ))
     [[ "${DO_AF3}"       == true ]] && (( total++ ))
+    [[ "${DO_ESMFOLD2}"  == true ]] && (( total++ ))
+    [[ "${DO_SOLUPROT}"  == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
@@ -1791,6 +1921,8 @@ main() {
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
     [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
     [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
+    [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
+    [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; install_soluprot || failed_tools+=("SoluProt"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"

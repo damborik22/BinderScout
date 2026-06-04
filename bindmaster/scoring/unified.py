@@ -144,5 +144,3 @@ def from_pxdesign_record(
         passes_protenix_basic=record.get("passes_protenix_basic"),
         passes_protenix_strict=record.get("passes_protenix_strict"),
     )
-
-

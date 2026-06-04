@@ -92,11 +92,13 @@ Target structure (.pdb / .mmcif)
        Proteina-Complexa    (NVIDIA flow matching + ITO)
        Protein-Hunter       (Boltz-2 / Chai-1; 6 modalities: protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA)
        RFD3                 (RosettaCommons foundry diffusion + ProteinMPNN)
-    → Evaluator (canonical pipeline = Boltz-2 + AF3):
+    → Evaluator (canonical pipeline = Boltz-2 + AF3; SoluProt optional screen):
        1. Extract sequences from all tool outputs (one extractor per tool)
+       1.5. (optional) Screen with SoluProt 1.0 (binder-eval-soluprot env)     [live, x86 only; --soluprot-filter drops sub-threshold designs from FASTA before refold]
        2. Refold with Boltz-2 (Mosaic venv)                                    [live, all platforms]
        3. Refold with AlphaFold 3 v3.0.2 (binder-eval-af3 env)                 [live, canonical 2nd engine — Spark / H200 / >100 GB VRAM]
        4. (optional) Refold with Protenix v0.5.0 (bindmaster_pxdesign env)     [live, fits 24 GB GPUs — opt-in]
+       4.5 (optional) Refold with ESMFold2 (binder-eval-esmfold2 env)          [live, lightweight 4th engine; not yet in agreement_count]
        5. Rank by agreement_count then ipsae_min; generate HTML + CSV report
 ```
 
@@ -160,6 +162,8 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `bindmaster_rfd3` | RFD3 (`rc-foundry`) | 3.12 | conda | RosettaCommons foundry diffusion + ProteinMPNN |
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
 | `binder-eval-af3` | AF3 refolder | 3.10 | conda | AlphaFold 3 v3.0.2 refolding — **canonical 2nd engine** (Part K, live on Spark / H200 / >100 GB VRAM hardware) |
+| `binder-eval-esmfold2` | ESMFold2 refolder | 3.10 | conda | Optional 4th refold engine (biohub); lightweight, no gated weights |
+| `binder-eval-soluprot` | SoluProt screen | 3.7 | conda | Sequence-only *E. coli* solubility filter (Hon et al. 2021); x86 only (USEARCH dep). NOT a refold engine; runs before refolding; `--soluprot-filter` drops sub-threshold designs before any GPU work |
 
 The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in their correct environment — `install` runs in bash, `configure` runs in system Python, `evaluate` runs in the Mosaic `.venv` Python.
 
@@ -430,6 +434,8 @@ bindmaster install --tool all --yes --skip-examples  # non-interactive (CI)
 bindmaster install --tool proteina-complexa # install Proteina-Complexa
 bindmaster install --tool protein-hunter    # install Protein-Hunter (Part L)
 bindmaster install --tool rfd3              # install RFD3 / foundry (Part M)
+bindmaster install --tool esmfold2          # install ESMFold2 refolder (opt-in eval engine)
+bindmaster install --tool soluprot          # install SoluProt screen (opt-in eval filter; x86 only)
 bindmaster install --uninstall --tool all   # remove envs + shortcuts (preserves runs/)
 bindmaster install --standalone --tool all    # force local Miniforge install
 bindmaster install --system-conda --tool all  # use existing system conda

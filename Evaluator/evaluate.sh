@@ -14,12 +14,18 @@
 # Optional:
 #   --skip-boltz2          skip Boltz-2 refolding (use existing boltz2_results.csv)
 #   --skip-protenix        skip Protenix refolding (default: auto-detect bindmaster_pxdesign env)
-#   --skip-af3             skip AF3 refolding (default: auto-detect binder-eval-af3 env)
-#   --skip-esmfold2        skip ESMFold2 refolding (default: auto-detect binder-eval-esmfold2 env)
 #   --protenix-env ENV     conda env for Protenix (default: bindmaster_pxdesign)
+#   --skip-af3             skip AF3 refolding (default: auto-detect binder-eval-af3 env)
 #   --af3-env ENV          conda env for AF3 (default: binder-eval-af3)
+#   --skip-esmfold2        skip ESMFold2 refolding (default: auto-detect binder-eval-esmfold2 env)
 #   --esmfold2-env ENV     conda env for ESMFold2 (default: binder-eval-esmfold2)
-#   --esmfold2-model V     ESMFold2 checkpoint: fast (default) | full
+#   --esmfold2-model V     ESMFold2 checkpoint: fast | full (default: fast)
+#   --skip-soluprot        skip SoluProt solubility screen (default: auto-detect binder-eval-soluprot env)
+#   --soluprot-env ENV     conda env for SoluProt (default: binder-eval-soluprot)
+#   --soluprot-threshold N pass threshold for soluprot_score (default: 0.5; paper value)
+#   --soluprot-filter      drop sequences scoring below the threshold from FASTA BEFORE
+#                          refolding — saves GPU time on designs we wouldn't pursue.
+#                          Off by default; the score still lands in the report either way.
 #   --primary-engine ENG   primary ranking engine: boltz | protenix | af3 | esmfold2 (default: boltz)
 #   --resume               resume interrupted run
 
@@ -65,29 +71,37 @@ TARGET_SEQ=""
 OUTPUT=""
 SKIP_BOLTZ2=0
 SKIP_PROTENIX=0
-SKIP_AF3=0
-SKIP_ESMFOLD2=0
 PROTENIX_ENV="bindmaster_pxdesign"
+SKIP_AF3=0
 AF3_ENV="binder-eval-af3"
+SKIP_ESMFOLD2=0
 ESMFOLD2_ENV="binder-eval-esmfold2"
 ESMFOLD2_MODEL="fast"
+SKIP_SOLUPROT=0
+SOLUPROT_ENV="binder-eval-soluprot"
+SOLUPROT_THRESHOLD=0.5
+SOLUPROT_FILTER=0
 PRIMARY_ENGINE="boltz"
 RESUME=0
 
 # --- parse arguments -------------------------------------------------------
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --sequences)      SEQUENCES="$2";       shift 2 ;;
-        --target-seq)     TARGET_SEQ="$2";      shift 2 ;;
-        --output|-o)      OUTPUT="$2";          shift 2 ;;
-        --skip-boltz2)    SKIP_BOLTZ2=1;        shift ;;
-        --skip-protenix)  SKIP_PROTENIX=1;      shift ;;
-        --skip-af3)       SKIP_AF3=1;           shift ;;
-        --skip-esmfold2)  SKIP_ESMFOLD2=1;      shift ;;
-        --protenix-env)   PROTENIX_ENV="$2";    shift 2 ;;
-        --af3-env)        AF3_ENV="$2";         shift 2 ;;
-        --esmfold2-env)   ESMFOLD2_ENV="$2";    shift 2 ;;
-        --esmfold2-model) ESMFOLD2_MODEL="$2";  shift 2 ;;
+        --sequences)      SEQUENCES="$2";    shift 2 ;;
+        --target-seq)     TARGET_SEQ="$2";   shift 2 ;;
+        --output|-o)      OUTPUT="$2";       shift 2 ;;
+        --skip-boltz2)    SKIP_BOLTZ2=1;     shift ;;
+        --skip-protenix)  SKIP_PROTENIX=1;   shift ;;
+        --protenix-env)   PROTENIX_ENV="$2"; shift 2 ;;
+        --skip-af3)       SKIP_AF3=1;        shift ;;
+        --af3-env)        AF3_ENV="$2";      shift 2 ;;
+        --skip-esmfold2)  SKIP_ESMFOLD2=1;   shift ;;
+        --esmfold2-env)   ESMFOLD2_ENV="$2"; shift 2 ;;
+        --esmfold2-model) ESMFOLD2_MODEL="$2"; shift 2 ;;
+        --skip-soluprot)     SKIP_SOLUPROT=1;          shift ;;
+        --soluprot-env)      SOLUPROT_ENV="$2";        shift 2 ;;
+        --soluprot-threshold) SOLUPROT_THRESHOLD="$2"; shift 2 ;;
+        --soluprot-filter)   SOLUPROT_FILTER=1;        shift ;;
         --primary-engine)
             PRIMARY_ENGINE="$2"
             case "$PRIMARY_ENGINE" in
@@ -95,9 +109,9 @@ while [[ $# -gt 0 ]]; do
                 *) echo "Error: --primary-engine must be one of: boltz, protenix, af3, esmfold2 (got '$PRIMARY_ENGINE')" >&2; exit 1 ;;
             esac
             shift 2 ;;
-        --resume)         RESUME=1;             shift ;;
+        --resume)         RESUME=1;          shift ;;
         -h|--help)
-            sed -n '2,26p' "$0" | grep '^#' | sed 's/^# \?//'
+            sed -n '2,32p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
@@ -142,9 +156,19 @@ fi
 if [[ $SKIP_ESMFOLD2 -eq 0 ]]; then
     if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${ESMFOLD2_ENV}"; then
         echo "[note] conda env '${ESMFOLD2_ENV}' not found — ESMFold2 refolding will be skipped."
-        echo "        (install with: conda env create -f Evaluator/envs/binder-eval-esmfold2.yml)"
+        echo "        (install with: bindmaster install --tool esmfold2; see Evaluator/envs/binder-eval-esmfold2.yml)"
         echo ""
         SKIP_ESMFOLD2=1
+    fi
+fi
+
+# Auto-detect SoluProt availability unless user skipped it
+if [[ $SKIP_SOLUPROT -eq 0 ]]; then
+    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${SOLUPROT_ENV}"; then
+        echo "[note] conda env '${SOLUPROT_ENV}' not found — SoluProt solubility screen will be skipped."
+        echo "        (install with: bindmaster install --tool soluprot; x86 only)"
+        echo ""
+        SKIP_SOLUPROT=1
     fi
 fi
 
@@ -161,14 +185,70 @@ BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
 PROTENIX_CSV="$OUTPUT/protenix_results.csv"
 AF3_CSV="$OUTPUT/af3_results.csv"
 ESMFOLD2_CSV="$OUTPUT/esmfold2_results.csv"
+SOLUPROT_CSV="$OUTPUT/soluprot_results.csv"
 
-# Step counter: 1 (report) + 1 per engine not skipped
+# Step counter: 1 (report) + 1 per engine not skipped + 1 if SoluProt ran
 N_STEPS=1  # report
 [[ $SKIP_BOLTZ2 -eq 0 ]]   && (( N_STEPS++ ))
 [[ $SKIP_PROTENIX -eq 0 ]] && (( N_STEPS++ ))
 [[ $SKIP_AF3 -eq 0 ]]      && (( N_STEPS++ ))
 [[ $SKIP_ESMFOLD2 -eq 0 ]] && (( N_STEPS++ ))
+[[ $SKIP_SOLUPROT -eq 0 ]] && (( N_STEPS++ ))
 STEP=1
+
+# --- Step 0.5: SoluProt solubility screen (optional, runs before refolding) ─
+# Runs before any refold engine so --soluprot-filter can drop sub-threshold
+# sequences and save GPU time. The score lands in the report either way.
+if [[ $SKIP_SOLUPROT -eq 0 ]]; then
+    echo "[step ${STEP}/${N_STEPS}] SoluProt screen     (conda env: ${SOLUPROT_ENV}, threshold: ${SOLUPROT_THRESHOLD})..."
+    conda run -n "${SOLUPROT_ENV}" binder-compare filter-soluprot \
+        --sequences "$SEQUENCES" \
+        -o          "$SOLUPROT_CSV" \
+        --threshold "$SOLUPROT_THRESHOLD"
+
+    if [[ $SOLUPROT_FILTER -eq 1 ]]; then
+        # Hard filter: rewrite the FASTA, keeping only sequences whose
+        # soluprot_passes==1 row in the CSV. Saves refold time downstream.
+        FILTERED_FASTA="$OUTPUT/sequences.soluble.fasta"
+        conda run -n binder-eval python - "$SOLUPROT_CSV" "$SEQUENCES" "$FILTERED_FASTA" <<'PY'
+import csv, sys
+csv_path, fasta_in, fasta_out = sys.argv[1], sys.argv[2], sys.argv[3]
+soluble: set[str] = set()
+with open(csv_path) as fh:
+    for row in csv.DictReader(fh):
+        if row.get("soluprot_passes") in ("1", "True", "true"):
+            seq = (row.get("sequence") or "").strip().upper()
+            if seq:
+                soluble.add(seq)
+n_in = n_kept = 0
+header, body = None, []
+def flush(out):
+    global n_in, n_kept
+    if header is None:
+        return
+    n_in += 1
+    seq = "".join(body).strip().upper()
+    if seq in soluble:
+        out.write(header)
+        for line in body:
+            out.write(line)
+        n_kept += 1
+with open(fasta_in) as fh_in, open(fasta_out, "w") as fh_out:
+    for line in fh_in:
+        if line.startswith(">"):
+            flush(fh_out)
+            header = line
+            body = []
+        else:
+            body.append(line)
+    flush(fh_out)
+print(f"[soluprot-filter] kept {n_kept} of {n_in} sequences (threshold {soluble and 'configured' or 'n/a'})", file=sys.stderr)
+PY
+        SEQUENCES="$FILTERED_FASTA"
+        echo "[soluprot-filter] downstream refolding will run on $SEQUENCES"
+    fi
+    (( STEP++ ))
+fi
 
 if [[ $SKIP_BOLTZ2 -eq 1 ]]; then
     echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
@@ -177,7 +257,7 @@ else
     echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding  (Mosaic venv)..."
     BOLTZ2_RESUME_FLAG=""
     [[ $RESUME -eq 1 ]] && BOLTZ2_RESUME_FLAG="--resume"
-    env -u JAX_PLATFORMS "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
+    "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
         --sequences  "$SEQUENCES" \
         --target-seq "$TARGET_SEQ" \
         -o           "$BOLTZ2_CSV" \
@@ -204,7 +284,7 @@ if [[ $SKIP_AF3 -eq 0 ]]; then
     echo "[step ${STEP}/${N_STEPS}] AF3 refolding       (conda env: ${AF3_ENV})..."
     AF3_RESUME_FLAG=""
     [[ $RESUME -eq 1 ]] && AF3_RESUME_FLAG="--resume"
-    env -u JAX_PLATFORMS conda run -n "${AF3_ENV}" binder-compare refold-af3 \
+    conda run -n "${AF3_ENV}" binder-compare refold-af3 \
         --sequences  "$SEQUENCES" \
         --target-seq "$TARGET_SEQ" \
         -o           "$AF3_CSV" \
@@ -215,10 +295,10 @@ fi
 
 # --- Step 4: ESMFold2 refolding (optional) ---------------------------------
 if [[ $SKIP_ESMFOLD2 -eq 0 ]]; then
-    echo "[step ${STEP}/${N_STEPS}] ESMFold2 refolding  (conda env: ${ESMFOLD2_ENV}, model: ${ESMFOLD2_MODEL})..."
+    echo "[step ${STEP}/${N_STEPS}] ESMFold2 refolding  (conda env: ${ESMFOLD2_ENV})..."
     ESMFOLD2_RESUME_FLAG=""
     [[ $RESUME -eq 1 ]] && ESMFOLD2_RESUME_FLAG="--resume"
-    env -u JAX_PLATFORMS conda run -n "${ESMFOLD2_ENV}" binder-compare refold-esmfold2 \
+    conda run -n "${ESMFOLD2_ENV}" binder-compare refold-esmfold2 \
         --sequences  "$SEQUENCES" \
         --target-seq "$TARGET_SEQ" \
         -o           "$ESMFOLD2_CSV" \
@@ -234,7 +314,6 @@ REPORT_ARGS=(
     --boltz2-results "$BOLTZ2_CSV"
     --sequences      "$SEQUENCES"
     -o               "$OUTPUT/report"
-    --primary-engine "$PRIMARY_ENGINE"
 )
 if [[ $SKIP_PROTENIX -eq 0 && -f "$PROTENIX_CSV" ]]; then
     REPORT_ARGS+=(--protenix-results "$PROTENIX_CSV")
@@ -245,18 +324,10 @@ fi
 if [[ $SKIP_ESMFOLD2 -eq 0 && -f "$ESMFOLD2_CSV" ]]; then
     REPORT_ARGS+=(--esmfold2-results "$ESMFOLD2_CSV")
 fi
-
-# Auto-discover per-tool native CSVs so per-tool top-10 sections use native rank.
-# Scans the `runs/` sibling of $OUTPUT (and $OUTPUT itself) by default.
-_DISCOVER_PY="$SCRIPT_DIR/scripts/discover_tool_csvs.py"
-_RUNS_BASE="$(dirname "$(realpath "$OUTPUT")")"
-if [[ -f "$_DISCOVER_PY" && -d "$_RUNS_BASE" ]]; then
-    echo "[discover] scanning $_RUNS_BASE for per-tool native CSVs..."
-    while IFS= read -r _line; do
-        [[ -n "$_line" ]] && REPORT_ARGS+=("$_line")
-    done < <("$MOSAIC_VENV/bin/python" "$_DISCOVER_PY" "$_RUNS_BASE" 2>/dev/null)
+if [[ $SKIP_SOLUPROT -eq 0 && -f "$SOLUPROT_CSV" ]]; then
+    REPORT_ARGS+=(--soluprot-results "$SOLUPROT_CSV")
 fi
-
+REPORT_ARGS+=(--primary-engine "$PRIMARY_ENGINE")
 conda run -n binder-eval binder-compare report "${REPORT_ARGS[@]}"
 
 echo ""

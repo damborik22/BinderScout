@@ -103,6 +103,40 @@ def run(args: argparse.Namespace) -> None:
     write_fasta(sequences, output, headers=headers, tags=tags)
     print(f"[extract] Written → {output}")
 
+    # Sidecar: per-binder native (design-time) metrics. The report step
+    # auto-detects this file next to the FASTA and left-joins onto the merged
+    # refold results so the final CSV / HTML show "what the tool said about
+    # its own design" next to "what the refold engines say".
+    _write_native_metrics_sidecar(all_binders, output)
+
+
+def _write_native_metrics_sidecar(binders: list[ExtractedBinder], fasta_path: Path) -> None:
+    """Write a CSV next to the extracted FASTA with one row per binder containing
+    `sequence`, `source_tool`, `binder_id`, and every NativeMetrics field
+    (column-named `native_<field>` to match `MetricResult.to_flat_dict()`).
+    """
+    from dataclasses import asdict
+
+    from ..core.schema import NativeMetrics
+
+    sidecar = fasta_path.with_name(fasta_path.stem + "_native_metrics.csv")
+    field_names = list(NativeMetrics.__dataclass_fields__)
+
+    import csv
+
+    with sidecar.open("w", newline="") as fh:
+        writer = csv.writer(fh)
+        header = ["sequence", "source_tool", "binder_id"] + [f"native_{f}" for f in field_names]
+        writer.writerow(header)
+        for b in binders:
+            native_d = asdict(b.native)
+            row = [b.sequence, b.source_tool, b.binder_id]
+            for f in field_names:
+                v = native_d.get(f)
+                row.append("" if v is None else v)
+            writer.writerow(row)
+    print(f"[extract] Native metrics → {sidecar}")
+
 
 def add_parser(subparsers) -> None:
     p = subparsers.add_parser(

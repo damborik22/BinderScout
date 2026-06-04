@@ -120,6 +120,60 @@ Format: `"Compute: <wall> GPU-time on <node-id>."` Wrap up the campaign with a t
 
 ---
 
+## 9. BindMaster `bin/` wrappers fail non-interactively
+**[Likely portable] [Worker-side]**
+
+The `~/BindMaster/bin/<tool>` shortcuts work interactively but break under SLURM / nohup / any non-TTY shell, in two distinct ways:
+
+- **`mamba run` wrappers** (e.g. `rfd3`) materialize a `/tmp/mambaXXXX` script whose `exec --` line dies on some bash builds: `exec: --: invalid option` (Clara Rocky 9.6 / bash 5.1.8; ApoE4 SLURM 119818 died in 1 s).
+- **Interactive wrappers** (e.g. `boltzgen`) `source` conda, `cd`, print a banner, then `exec bash` with **no `$@` relay** — under SLURM stdin closes, the wrapper exits rc=0 with zero work (ApoE4 119820 silent no-op).
+
+**Fix:** after `conda activate <env>`, call **`"$CONDA_PREFIX/bin/<tool>"`** (absolute env binary, bypasses the PATH-shadowing wrapper). Note `conda activate` does not guarantee the env bin precedes `~/BindMaster/bin` in PATH — verified on Clara that `which rfd3` still resolved to the wrapper post-activate. `$CONDA_PREFIX/bin/<tool>` is unambiguous.
+
+**Applies to tool entries:** `tools/rfd3.md`, `tools/boltzgen.md`, and any tool whose run script calls the tool by bare name. The configurator's `write_run_*` functions should emit `"$CONDA_PREFIX/bin/<tool>"`.
+
+---
+
+## 10. Don't hand-author tool CLIs — the configurator/templates are the source of truth
+**[Likely portable]** — process lesson
+
+Every CLI-drift bug this campaign hit (PC `pipeline=` shorthand + wrong Hydra paths, PH `--plot`, BoltzGen `--design_spec`/`--output_dir` + `--additional_filters` ordering, RFD3 `spec=` vs `inputs=` + space-vs-comma contig + `--pdb_path_multi` vs `--structure_path`) lived in a **hand-written kickoff doc** — never in the configurator, which already generated the verified form. Hand-editing a kickoff re-introduces solved bugs.
+
+**Rule:** generate run commands from `configurator/configurator.py` `write_run_<tool>` (or `bindmaster_examples/run_*.sh.template`), or validate a hand-edited command against them, before committing to a long run. When a campaign discovers a CLI fix or better default, push it **into the configurator + this skill**, not just the one kickoff. Always smoke-test the exact CLI (1 batch / `nsamples=4`) on the deployed tool version before a multi-hour commit — tool versions drift and CLIs change between releases.
+
+**Applies to:** SKILL.md (kickoff authoring), all `tools/*.md` "Key knobs".
+
+---
+
+## 11. Generation is cheap; the cross-engine refold is the funnel — draw more, filter hard
+**[Likely portable]** — orchestration strategy
+
+When the goal is "best possible designs" (expensive wet-lab validation downstream), the binding constraint is **not** design-tool compute — it's the cross-engine refold (Boltz-2 + AF3 + Protenix on the big-VRAM/Spark node). Cheap generators (esp. **RFD3** — ApoE4 did 100 backbones in 1h59m on H200) can flood a large pool, but tools that emit *unscored* designs (RFD3 has no native interface metric) load the refold 1:1.
+
+**Pattern — decouple the cheap engine from the Spark-locked one:**
+1. Scale up the cheap generator (RFD3 backbones, MPNN best-of-N) + filter cheaply first: geometry (drop chainbreaks/clashes), then a cheap fold.
+2. **ESMFold2-Fast** (`binder-eval-esmfold2`) folds the *complex* and emits `iptm` directly — it is NOT Spark-locked, runs on any idle 24 GB card. Use it as a pre-filter: gate on `iptm` up front (cheap, conventional), keep the top slice (~40%).
+3. Promote only survivors to the expensive Boltz-2 + AF3 + Protenix merge, where `ipsae_min` does the real ranking (`scoring.py` computes `esmfold2_ipsae_min` too; ESMFold2 is reported-not-counted in `agreement_count`).
+
+This keeps the Spark refold load flat as the generated pool grows. (ApoE4 2026-05-29: RFD3 v2 = 500 backbones → geometry → MPNN best-of-30 → ESMFold2 iPTM top-40% → cross-engine merge.)
+
+**Applies to tool entries:** `tools/rfd3.md`, `tools/boltz2.md`, `evaluation.md` (triage stage), SKILL.md §6 (cheap-first / funnel heuristics).
+
+---
+
+## 12. Never put CUDA PyTorch in the Mosaic (JAX) venv — it silently breaks JAX
+**[Likely portable]** — dependency fact
+
+The Mosaic venv is JAX-first: both Mosaic design and the `refold-boltz2` refolder are JAX/jax-cuda and use the GPU via JAX, *not* torch. PyTorch is only a transitive **CPU** dep (via `boltz`). Do NOT "upgrade" it to a CUDA build:
+
+- A CUDA torch wheel (e.g. `2.7.1+cu128`) hard-pins `nvidia-cudnn-cu12==9.7.x`, but jaxlib (>=0.10) requires `nvidia-cudnn-cu12>=9.8`. They cannot coexist — installing CUDA torch drags cuDNN below JAX's floor and JAX dies at runtime with `RET_CHECK failure ... dnn_support != nullptr` (XLA can't init cuDNN). **The break is silent:** `jax.devices()` still lists the GPU; only an actual op fails.
+- This bit the ApoE4 campaign: a CUDA-torch install (to run torch `boltz predict` for a homodimer) broke `refold-boltz2`. Fix = revert torch to CPU + restore cuDNN ≥9.8 — cleanest is re-run `bindmaster install --tool mosaic`, which `uv sync`s the venv back to its lock.
+- If you genuinely need torch-on-GPU (e.g. `boltz predict` for a homodimer, which `refold-boltz2` skips because binder==target), do it in a **separate** env, never the Mosaic venv.
+
+**Applies to:** `install/install.sh` (install_mosaic must NOT force CUDA torch), `tools/mosaic.md`, `tools/boltz2.md`.
+
+---
+
 ## When to add a new learning
 
 - The lesson would change behavior in a future campaign
@@ -145,3 +199,6 @@ Categories of lessons that have repeated themselves across the campaign. If a ne
 - **MSA mode is a per-tool axis, not a campaign default.** §1.
 - **Filter presets matter more than you'd expect.** V2+V4 vs V1+default is a 0 → 32 effect on 2VDY (§3).
 - **Logs lie at the wrapper level.** Real errors are deeper (§7).
+- **`bin/` wrappers fail non-interactively.** Use `$CONDA_PREFIX/bin/<tool>` in batch (§9).
+- **Hand-written CLIs drift; the configurator doesn't.** Generate/validate against it; smoke-test before long runs (§10).
+- **Generation is cheap; the refold is the funnel.** Draw more, filter hard, triage off-Spark with ESMFold2 (§11).
