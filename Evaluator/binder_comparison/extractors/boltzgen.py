@@ -4,8 +4,9 @@ BoltzGen output files (from task/analyze/analyze.py):
   - aggregate_metrics_{name}.csv  — metrics for all designs in an analysis step
   - final_designs_metrics_{budget}.csv — metrics for the final filtered set
 
-Sequence column: 'designed_sequence' (single binder chain)
-                 'designed_chain_sequence' (designed residues only, subset)
+Sequence column: 'designed_chain_sequence' (the FULL binder chain — preferred)
+                 'designed_sequence' (only the DESIGNED residues; for nanobody
+                     CDR-redesign this is the CDR subset, NOT the full VHH chain)
 ID column: 'id' (format: target_name__design_index)
 
 Note: BoltzGen has no PyRosetta metrics, so NativeMetrics is empty.
@@ -28,9 +29,15 @@ _CSV_CANDIDATES = [
     "aggregate_metrics_*.csv",
 ]
 
+# Order matters. `designed_chain_sequence` is the full binder chain for every
+# BoltzGen protocol. `designed_sequence` holds only the DESIGNED residues: for
+# protein-anything it equals the full chain, but for nanobody CDR-redesign it is
+# just the CDR subset (~25-40 aa) and would feed a truncated binder to refolding.
+# Verified on the 2VDY campaign: nano `designed_sequence` len 24-42 vs
+# `designed_chain_sequence` len 112-133 (full VHH). Prefer the chain sequence.
 _SEQUENCE_COL_CANDIDATES = [
-    "designed_sequence",
     "designed_chain_sequence",
+    "designed_sequence",
     "sequence",
 ]
 
