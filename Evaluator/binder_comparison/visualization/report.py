@@ -18,8 +18,10 @@ import pandas as pd
 from .plots import (
     METRIC_META,
     fig_to_base64,
+    plot_max_vs_mean_iptm,
     plot_metric_distributions,
     plot_radar_chart,
+    plot_radar_iptm,
     plot_radar_per_engine,
     plot_radar_per_engine_uniform_selection,
 )
@@ -150,7 +152,7 @@ _HTML_TEMPLATE = """\
   designs in the <a href="https://doi.org/10.1101/2025.08.14.670059" target="_blank">Adaptyv/Overath et al. 2025</a>
   benchmark. Quality tiers and the 0.61 pass threshold follow their screening methodology.
   <b>agreement_count</b> reports how many refolding engines score ipSAE_min above 0.61.
-  Ranking sorts by quality tier first, then agreement count, then ipSAE_min.
+  {ranking_method_html}
 </p>
 
 <details style="margin:0.8em 0;">
@@ -236,6 +238,8 @@ _HTML_TEMPLATE = """\
 </p>
 <img src="data:image/png;base64,{radar_plot}" alt="Per-engine radar (each panel ranks per-tool top-10 independently)">
 
+{scatter_block}
+
 {radar_fixed_block}
 
 {per_tool_top10}
@@ -301,7 +305,7 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path, target_seq: st
     # Collect PDBs/CIFs and metadata for each top design
     entries = []
     for _, row in top_df.head(20).iterrows():
-        rank = int(row.get("adaptyv_rank", 0))
+        rank = int(row.get("active_rank", row.get("adaptyv_rank", 0)))
         binder_id = row.get("binder_id", f"rank{rank}")
         tool = row.get("source_tool", "unknown")
         ipsae = row.get("ipsae_min", "")
@@ -1229,6 +1233,7 @@ def generate_report(
     boltz2_results_dir: str | Path | None = None,
     primary_engine: str = "boltz",
     top_per_tool: int = 10,
+    rank_method: str = "adaptyv",
 ) -> None:
     """Generate and write the HTML report.
 
@@ -1255,8 +1260,11 @@ def generate_report(
             target_seq = vals.iloc[0]
 
     sort_df = df.copy()
-    if "adaptyv_rank" in sort_df.columns:
-        sort_df = sort_df.sort_values("adaptyv_rank", ascending=True)
+    # active_rank reflects the --rank-by choice (== adaptyv_rank for the default),
+    # so the HTML table/structures follow the selected ranking method.
+    _order_col = "active_rank" if "active_rank" in sort_df.columns else "adaptyv_rank"
+    if _order_col in sort_df.columns:
+        sort_df = sort_df.sort_values(_order_col, ascending=True)
 
     # Tool counts
     tool_counts_str = ""
@@ -1291,24 +1299,40 @@ def generate_report(
 
     # Plots
     dist_fig = plot_metric_distributions(sort_df)
-    # Per-engine radar (top-10 per tool by that engine's ipSAE), one polar
-    # subplot per available engine. Falls back to legacy radar if df lacks
-    # the per-engine PAE-ipsae columns.
-    try:
-        radar_fig = plot_radar_per_engine(sort_df, top_n=top_per_tool)
-    except Exception:  # pragma: no cover - defensive
-        radar_fig = plot_radar_chart(summary)
-    # Second radar: fixed per-tool selection by *our refold rank* (primary engine),
-    # then measure each engine on the same designs.
-    try:
-        radar_fixed_fig = plot_radar_per_engine_uniform_selection(
-            sort_df, primary_engine=primary_engine, top_n=top_per_tool
-        )
-    except Exception:  # pragma: no cover - defensive
+    scatter_fig = None
+    if rank_method == "two_stage":
+        # Two-stage view: radar over the engine iPTMs (balance = consensus =
+        # high mean-rank; spike = passes max-screen only) + the max-vs-mean
+        # signature scatter. Replaces the ipsae-centric per-engine radars.
+        try:
+            radar_fig = plot_radar_iptm(sort_df, top_n=top_per_tool)
+        except Exception:  # pragma: no cover - defensive
+            radar_fig = plot_radar_chart(summary)
+        try:
+            scatter_fig = plot_max_vs_mean_iptm(sort_df, label_n=20)
+        except Exception:  # pragma: no cover - defensive
+            scatter_fig = None
         radar_fixed_fig = None
+    else:
+        # Per-engine radar (top-N per tool by that engine's ipSAE), one polar
+        # subplot per available engine. Falls back to legacy radar if df lacks
+        # the per-engine PAE-ipsae columns.
+        try:
+            radar_fig = plot_radar_per_engine(sort_df, top_n=top_per_tool)
+        except Exception:  # pragma: no cover - defensive
+            radar_fig = plot_radar_chart(summary)
+        # Second radar: fixed per-tool selection by *our refold rank* (primary engine),
+        # then measure each engine on the same designs.
+        try:
+            radar_fixed_fig = plot_radar_per_engine_uniform_selection(
+                sort_df, primary_engine=primary_engine, top_n=top_per_tool
+            )
+        except Exception:  # pragma: no cover - defensive
+            radar_fixed_fig = None
 
     dist_b64 = fig_to_base64(dist_fig)
     radar_b64 = fig_to_base64(radar_fig)
+    scatter_b64 = fig_to_base64(scatter_fig) if scatter_fig is not None else ""
     radar_fixed_b64 = fig_to_base64(radar_fixed_fig) if radar_fixed_fig is not None else ""
 
     # Per-tool top 10 tables (collapsible, one per tool present in data)
@@ -1569,8 +1593,40 @@ def generate_report(
     else:
         radar_fixed_block = ""
 
+    if scatter_b64:
+        scatter_block = (
+            f"<h2>Two-stage selection — max-screen vs mean-rank</h2>\n"
+            f'<p style="font-size:0.85em;color:#555;margin:0.2em 0 0.6em 0;">'
+            f"Each point is a design: x = <b>max</b> engine iPTM (Stage-1 screen), "
+            f"y = <b>mean</b> engine iPTM (Stage-2 rank). The dotted red line is the "
+            f"top-50% max-screen cut; the dashed diagonal is the upper bound (max ≥ mean) — "
+            f"vertical distance below it = engine disagreement. Points near the diagonal in the "
+            f"top-right are strong, agreed-upon binders; points that clear the screen but sit low "
+            f"are single-engine spikes. Top-20 are labelled with their rank."
+            f"</p>\n"
+            f'<img src="data:image/png;base64,{scatter_b64}" alt="max vs mean engine iPTM scatter">'
+        )
+    else:
+        scatter_block = ""
+
+    _rank_desc = {
+        "adaptyv": "Ranking sorts by quality tier first, then agreement count, then ipSAE_min.",
+        "consensus_iptm": (
+            "Ranking is by <b>consensus_iptm</b> — the row-wise <b>max</b> of the engine iPTMs "
+            "(benchmark-validated binder-vs-non-binder screen; the most predictive engine flips per target)."
+        ),
+        "two_stage": (
+            "Ranking is <b>two-stage</b> (benchmark-validated for wet-lab selection): "
+            "<b>screen</b> by max engine iPTM (keep top 50%), then <b>rank survivors by mean</b> engine iPTM "
+            "— precision@top-10% 0.92 vs 0.79 for max alone. All designs are ranked (the max-screen is a "
+            "<code>passes_max_screen</code> flag, nothing is dropped); the table shows the top of the list."
+        ),
+    }
+    ranking_method_html = _rank_desc.get(rank_method, _rank_desc["adaptyv"])
+
     html = _HTML_TEMPLATE.format(
         n_binders=len(sort_df),
+        ranking_method_html=ranking_method_html,
         tool_counts_str=tool_counts_str or "—",
         engine_threshold_legend=engine_threshold_legend,
         agreement_summary=agreement_summary,
@@ -1579,6 +1635,7 @@ def generate_report(
         summary_table=summary_table,
         dist_plot=dist_b64,
         radar_plot=radar_b64,
+        scatter_block=scatter_block,
         radar_fixed_block=radar_fixed_block,
         per_tool_top10=per_tool_top10,
         ngl_viewer_block=ngl_viewer_block,
