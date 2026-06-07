@@ -30,6 +30,7 @@ from ..comparison.scoring import (
     compute_consensus_iptm,
     rank_by_adaptyv_method,
     rank_by_consensus_iptm,
+    rank_by_two_stage,
 )
 from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
@@ -181,13 +182,23 @@ def run(args: argparse.Namespace) -> None:
     df = compute_consensus_iptm(df)
     df = rank_by_adaptyv_method(df)
     df = rank_by_consensus_iptm(df)
+    df = rank_by_two_stage(df)
 
+    # All three rankings coexist as columns (adaptyv_rank, consensus_rank,
+    # two_stage_rank); --rank-by selects which orders the report. `active_rank`
+    # is the chosen ordering (1..N) — used for display + structure-file naming so
+    # the HTML shows the selected method's rank. For the default (adaptyv) it
+    # equals adaptyv_rank, so existing behaviour is unchanged.
     rank_by = getattr(args, "rank_by", "adaptyv") or "adaptyv"
     if rank_by == "consensus_iptm":
         print("[report] Ranking by consensus_iptm (max engine iptm — benchmark-validated binder filter)")
         df = df.sort_values(["consensus_rank"], ascending=[True]).reset_index(drop=True)
+    elif rank_by == "two_stage":
+        print("[report] Ranking by two_stage (max-screen top 50% → mean-rank — benchmark-validated for selection)")
+        df = df.sort_values(["two_stage_rank"], ascending=[True]).reset_index(drop=True)
     else:
         df = df.sort_values(["adaptyv_rank"], ascending=[True]).reset_index(drop=True)
+    df["active_rank"] = range(1, len(df) + 1)
 
     # Step 4: Write outputs
     write_csv(df, output_dir / "metrics.csv")
@@ -205,7 +216,10 @@ def run(args: argparse.Namespace) -> None:
         "sequence",
         "binder_length",
         "consensus_iptm",
+        "consensus_iptm_mean",
+        "consensus_iptm_min",
         "consensus_iptm_n",
+        "passes_max_screen",
         "ipsae_min",
         "boltz_pae_ipsae_min",
         "protenix_pae_ipsae_min",
@@ -228,6 +242,9 @@ def run(args: argparse.Namespace) -> None:
         "passes_esmfold2_filter",
         "native_bg_design_ipsae_min",
         "adaptyv_rank",
+        "consensus_rank",
+        "two_stage_rank",
+        "active_rank",
     ]
     _available = [c for c in _top_cols if c in df.columns]
     top20 = df.head(20)[_available]
@@ -250,7 +267,7 @@ def run(args: argparse.Namespace) -> None:
     structures_dir.mkdir(parents=True, exist_ok=True)
     n_copied = 0
     for _, row in df.head(20).iterrows():
-        rank = int(row.get("adaptyv_rank", 0))
+        rank = int(row.get("active_rank", row.get("adaptyv_rank", 0)))
         binder_id = row.get("binder_id", f"rank{rank}")
         for col in pdb_cols:
             src = row.get(col)
@@ -298,6 +315,7 @@ def run(args: argparse.Namespace) -> None:
         boltz2_results_dir=Path(args.boltz2_results).resolve().parent if args.boltz2_results else None,
         primary_engine=primary_engine,
         top_per_tool=args.top_per_tool,
+        rank_method=rank_by,
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
@@ -373,7 +391,7 @@ def _write_pymol_script(top_df: pd.DataFrame, structures_dir: Path) -> None:
     # Colour each binder by source tool
     pml_lines.append("# Binder chain (A) coloured by source tool")
     for _, row in top_df.iterrows():
-        rank = int(row.get("adaptyv_rank", 0))
+        rank = int(row.get("active_rank", row.get("adaptyv_rank", 0)))
         binder_id = row.get("binder_id", f"rank{rank}")
         tool = row.get("source_tool", "unknown")
         colour = _TOOL_COLOURS_PYMOL.get(tool, "white")
@@ -544,11 +562,13 @@ def add_parser(subparsers) -> None:
     )
     p.add_argument(
         "--rank-by",
-        choices=["adaptyv", "consensus_iptm"],
+        choices=["adaptyv", "consensus_iptm", "two_stage"],
         default="adaptyv",
         help="Ranking method for the report. 'adaptyv' (default) = quality_tier → agreement_count → "
-        "ipsae_min. 'consensus_iptm' = max engine iptm (benchmark-validated binder-vs-non-binder filter; "
-        "see docs/plans.md Part N). Both ranks are always written as columns (adaptyv_rank, consensus_rank).",
+        "ipsae_min. 'consensus_iptm' = max engine iptm (benchmark-validated binder-vs-non-binder filter). "
+        "'two_stage' = max-screen (top 50%) then mean-rank survivors (benchmark-validated for wet-lab "
+        "selection: precision@top-10% 0.92 vs 0.79 for max alone; see docs/plans.md Part N). All ranks "
+        "are always written as columns (adaptyv_rank, consensus_rank, two_stage_rank).",
     )
     # Per-engine iPSAE thresholds (defaults from scoring.DEFAULT_ENGINE_THRESHOLDS)
     p.add_argument(
