@@ -908,6 +908,40 @@ def _pc_seq_to_pdb_index(pdb_dir: Path, target_sequence: str | None = None) -> d
     return index
 
 
+_GENERAL_SEQ_INDEX_CACHE: dict[str, dict[str, Path]] = {}
+
+
+def _seq_to_pdb_index_general(pdb_dir: Path, target_seq: str | None = None, max_files: int = 6000) -> dict[str, Path]:
+    """Build a {binder_sequence -> structure path} index for ANY tool's design dir.
+
+    Parses every .pdb/.cif under *pdb_dir*, takes the chain whose sequence is NOT
+    the target as the binder, and indexes it by sequence (first-seen wins). This
+    lets the per-tool viewer match a design to its ORIGINAL structure by sequence,
+    independent of the tool's filename convention. Cached per directory.
+    """
+    key = str(pdb_dir.resolve())
+    if key in _GENERAL_SEQ_INDEX_CACHE:
+        return _GENERAL_SEQ_INDEX_CACHE[key]
+    target_up = (target_seq or "").upper().strip()
+    index: dict[str, Path] = {}
+    files = (list(pdb_dir.rglob("*.pdb")) + list(pdb_dir.rglob("*.cif")))[:max_files]
+    for p in files:
+        if "MONOMER_ONLY" in p.name:
+            continue
+        try:
+            chains = _struct_chains(p.read_text(), p.suffix[1:] or "pdb")
+        except Exception:
+            continue
+        if not chains:
+            continue
+        for seq in chains.values():
+            if target_up and seq == target_up:
+                continue
+            index.setdefault(seq, p)
+    _GENERAL_SEQ_INDEX_CACHE[key] = index
+    return index
+
+
 def _build_per_tool_pdb_viewer(
     tool: str,
     tool_csv_path: Path,
@@ -1011,6 +1045,31 @@ def _build_per_tool_pdb_viewer(
                         }
                     )
                     continue
+
+            # General sequence-based resolution for ANY tool: match the design's
+            # binder sequence to a structure in the tool's own design dir. Robust
+            # to per-tool filename conventions.
+            gidx = _seq_to_pdb_index_general(tool_pdb_dir, target_seq or row.get("target_sequence"))
+            ghit = gidx.get(seq)
+            if ghit is not None and ghit.exists():
+                raw_text = ghit.read_text()
+                pdb_text, gext, _ = _normalize_struct_to_pdb(raw_text, ghit.suffix[1:] or "pdb")
+                bch, tch = _pick_binder_target_chains(pdb_text, gext, target_seq or row.get("target_sequence"))
+                pdb_js = pdb_text.replace("\\", "\\\\").replace("`", "\\`")
+                entries.append(
+                    {
+                        "rank": i + 1,
+                        "name": name or ghit.stem,
+                        "binder_id": eval_info.get("binder_id", ""),
+                        "eval_rank": eval_info.get("adaptyv_rank", ""),
+                        "length": len(seq),
+                        "ext": gext,
+                        "binder_chain": bch,
+                        "target_chain": tch,
+                        "pdb": pdb_js,
+                    }
+                )
+                continue
 
             # Find matching PDB/CIF file.
             # Try exact name first, then strip common prefixes (e.g. "pc_0001_")
