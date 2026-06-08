@@ -45,6 +45,11 @@ _CSV_CANDIDATES = [
 class BindCraftExtractor(SequenceExtractor):
     """Extract binder sequences and PyRosetta native metrics from BindCraft output."""
 
+    def __init__(self, *, collapse_variants: bool = True):
+        # "Best design, not multiple sequences per design": keep only the best
+        # MPNN sequence per trajectory (by Average_i_pTM). Set False to keep all.
+        self.collapse_variants = collapse_variants
+
     @property
     def tool_name(self) -> str:
         return "bindcraft"
@@ -61,6 +66,21 @@ class BindCraftExtractor(SequenceExtractor):
             raise ValueError(
                 f"BindCraft CSV {csv_path} missing '{_SEQUENCE_COL}' column. Available: {list(df.columns[:10])}"
             )
+
+        # Collapse MPNN variants (Design = l<L>_s<seed>_mpnn<N>) to the single best
+        # Average_i_pTM per trajectory — one design, not many sequences of it.
+        if self.collapse_variants and "Design" in df.columns and "Average_i_pTM" in df.columns:
+            traj = df["Design"].astype(str).str.replace(r"_mpnn\d+.*$", "", regex=True)
+            rank = pd.to_numeric(df["Average_i_pTM"], errors="coerce")
+            before = len(df)
+            df = (
+                df.assign(_traj=traj, _r=rank)
+                .sort_values("_r", ascending=False)
+                .drop_duplicates("_traj", keep="first")
+                .drop(columns=["_traj", "_r"])
+            )
+            if len(df) != before:
+                warnings.warn(f"BindCraft: collapsed {before} MPNN sequences → {len(df)} trajectories (best per backbone)")
 
         results: list[ExtractedBinder] = []
         stem = csv_path.stem

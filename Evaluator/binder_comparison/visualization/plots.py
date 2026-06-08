@@ -18,6 +18,8 @@ from matplotlib.figure import Figure
 TOOL_COLOURS = {
     "bindcraft": "#2196F3",  # blue
     "boltzgen": "#FF9800",  # orange
+    "boltzgen_nano": "#FF9800",  # orange (nano sub-variant)
+    "boltzgen_protein": "#EF6C00",  # deep orange (protein sub-variant)
     "mosaic": "#4CAF50",  # green
     "pxdesign": "#9C27B0",  # purple
     "proteina_complexa": "#795548",  # brown
@@ -31,6 +33,8 @@ _TOOL_DISPLAY = {
     "mosaic": "Mosaic",
     "pxdesign": "PXDesign",
     "boltzgen": "BoltzGen",
+    "boltzgen_nano": "BoltzGen (nano)",
+    "boltzgen_protein": "BoltzGen (protein)",
     "bindcraft": "BindCraft",
     "proteina_complexa": "Proteina-Complexa",
     "rfd3": "RFD3",

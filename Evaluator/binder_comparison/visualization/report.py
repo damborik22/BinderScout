@@ -31,6 +31,8 @@ _TOOL_DISPLAY = {
     "mosaic": "Mosaic",
     "pxdesign": "PXDesign",
     "boltzgen": "BoltzGen",
+    "boltzgen_nano": "BoltzGen (nano)",
+    "boltzgen_protein": "BoltzGen (protein)",
     "bindcraft": "BindCraft",
     "proteina_complexa": "Proteina-Complexa",
     "rfd3": "RFD3",
@@ -106,6 +108,8 @@ _HTML_TEMPLATE = """\
   }}
   .tool-bindcraft          {{ color: #1565C0; font-weight: bold; }}
   .tool-boltzgen           {{ color: #E65100; font-weight: bold; }}
+  .tool-boltzgen_nano      {{ color: #E65100; font-weight: bold; }}
+  .tool-boltzgen_protein   {{ color: #EF6C00; font-weight: bold; }}
   .tool-mosaic             {{ color: #2E7D32; font-weight: bold; }}
   .tool-pxdesign           {{ color: #7B1FA2; font-weight: bold; }}
   .tool-proteina_complexa  {{ color: #6D4C41; font-weight: bold; }}
@@ -139,20 +143,11 @@ _HTML_TEMPLATE = """\
 
 <p style="font-size:0.85em;color:#555;line-height:1.6;">
   <b>Methodology.</b>
-  All designed binder sequences are independently re-folded as target–binder complexes by one or
-  more refolding engines — currently <b>Boltz-2</b>, <b>Protenix</b> (x86) and <b>AlphaFold 3</b>
-  (DGX Spark / aarch64). The <b>primary engine</b> (chosen via <code>--primary-engine</code>;
-  default <code>boltz</code>) provides the structure used for ranking; the other engines, when
-  present, vote in the agreement count as independent cross-validators.
-  The primary ranking metric is <b>ipSAE_min</b> — the minimum of binder→target and target→binder
-  interface Predicted Structural Alignment Error, computed using the
-  <a href="https://github.com/DunbrackLab/IPSAE" target="_blank">DunbrackLab d0<sub>res</sub> formula</a>
-  (per-residue d0, uniform 10 Å PAE cutoff for all engines).
-  This metric showed 1.4× better average precision than ipAE across 3,766 experimentally tested
-  designs in the <a href="https://doi.org/10.1101/2025.08.14.670059" target="_blank">Adaptyv/Overath et al. 2025</a>
-  benchmark. Quality tiers and the 0.61 pass threshold follow their screening methodology.
-  <b>agreement_count</b> reports how many refolding engines score ipSAE_min above 0.61.
-  {ranking_method_html}
+  All designed binder sequences are independently re-folded as target–binder complexes by the
+  refolding engines used in this report — {engines_present_html}. The cross-engine 3D structures
+  shown are from the <b>primary engine</b> (<code>--primary-engine</code>, default
+  <code>boltz</code>); the other engines serve as independent cross-validators.
+  {methodology_ranking_html}
 </p>
 
 <details style="margin:0.8em 0;">
@@ -287,6 +282,8 @@ _TOOL_COLOURS_NGL = {
     "mosaic": "#4CAF50",
     "pxdesign": "#9C27B0",
     "boltzgen": "#FF9800",
+    "boltzgen_nano": "#FF9800",
+    "boltzgen_protein": "#EF6C00",
     "bindcraft": "#2196F3",
     "proteina_complexa": "#00897B",
     "rfd3": "#D84315",
@@ -1281,7 +1278,7 @@ def generate_report(
     agreement_summary = _agreement_summary_html(sort_df)
 
     # Top 20 table (primary + collapsible secondary)
-    primary_cols, secondary_cols = _select_display_cols(sort_df)
+    primary_cols, secondary_cols = _select_display_cols(sort_df, rank_method=rank_method)
     top20_primary = sort_df[primary_cols].head(20)
     top_table = _df_to_html(top20_primary, colour_tool=True).replace("<table>", '<table style="width:100%">', 1)
     if secondary_cols:
@@ -1609,24 +1606,64 @@ def generate_report(
     else:
         scatter_block = ""
 
+    _ipsae_link = (
+        'interface Predicted Structural Alignment Error, computed using the '
+        '<a href="https://github.com/DunbrackLab/IPSAE" target="_blank">DunbrackLab d0<sub>res</sub> formula</a> '
+        "(per-residue d0, uniform 10 Å PAE cutoff for all engines)"
+    )
     _rank_desc = {
-        "adaptyv": "Ranking sorts by quality tier first, then agreement count, then ipSAE_min.",
+        "adaptyv": (
+            f"The primary ranking metric is <b>ipSAE_min</b> — the minimum of binder→target and "
+            f"target→binder {_ipsae_link}. This metric showed 1.4× better average precision than ipAE "
+            f'across 3,766 experimentally tested designs in the <a href="https://doi.org/10.1101/2025.08.14.670059" '
+            f'target="_blank">Adaptyv/Overath et al. 2025</a> benchmark. Quality tiers and the 0.61 pass '
+            f"threshold follow their screening methodology. <b>agreement_count</b> reports how many refolding "
+            f"engines score ipSAE_min above 0.61. Ranking sorts by quality tier, then agreement count, then ipSAE_min."
+        ),
         "consensus_iptm": (
-            "Ranking is by <b>consensus_iptm</b> — the row-wise <b>max</b> of the engine iPTMs "
-            "(benchmark-validated binder-vs-non-binder screen; the most predictive engine flips per target)."
+            f"Ranking is by <b>consensus_iptm</b> = max(boltz2, af3, esmfold2 iPTM) — the benchmark-validated "
+            f"binder-vs-non-binder screen (the most predictive engine flips per target, so trusting the most "
+            f"confident engine wins; macro-AUC ≈ 0.76). <b>ipSAE_min</b> ({_ipsae_link}) and "
+            f"<b>agreement_count</b> are still computed and shown per design as secondary cross-validation."
         ),
         "two_stage": (
-            "Ranking is <b>two-stage</b> (benchmark-validated for wet-lab selection): "
-            "<b>screen</b> by max engine iPTM (keep top 50%), then <b>rank survivors by mean</b> engine iPTM "
-            "— precision@top-10% 0.92 vs 0.79 for max alone. All designs are ranked (the max-screen is a "
-            "<code>passes_max_screen</code> flag, nothing is dropped); the table shows the top of the list."
+            f"Ranking is <b>two-stage</b>, benchmark-validated for wet-lab selection on the ProteinBase "
+            f"4-target set (Nipah / EGFR / IL7R / PD-L1). <b>Stage 1 — screen:</b> <code>consensus_iptm</code> "
+            f"= max(boltz2, af3, esmfold2 iPTM); the top 50% (<code>passes_max_screen</code>) form the "
+            f"binder-likely pool — max gives the best binder-vs-non-binder AUC because the most predictive "
+            f"engine flips per target. <b>Stage 2 — rank:</b> survivors are ordered by the <b>mean</b> of the "
+            f"three engine iPTMs (<code>consensus_iptm_mean</code>); demanding multi-engine consensus at the "
+            f"sharp end lifts precision@top-10% to 0.92 vs 0.79 for max alone. All designs are ranked — the "
+            f"screen is a flag, nothing is dropped. <b>ipSAE_min</b> ({_ipsae_link}) and <b>agreement_count</b> "
+            f"are still computed and shown per design as secondary cross-validation, but are <em>not</em> the "
+            f"ranking key here: on this benchmark ipSAE consensus/agreement underperforms max-then-mean iPTM."
         ),
     }
-    ranking_method_html = _rank_desc.get(rank_method, _rank_desc["adaptyv"])
+    methodology_ranking_html = _rank_desc.get(rank_method, _rank_desc["adaptyv"])
+
+    # Engine list reflects the engines actually present (populated) in this run.
+    _engine_check = [
+        ("<b>Boltz-2</b>", ("boltz_pae_iptm", "boltz_iptm")),
+        ("<b>AlphaFold 3</b>", ("af3_iptm",)),
+        ("<b>ESMFold2</b>", ("esmfold2_iptm",)),
+        ("<b>Protenix</b>", ("protenix_iptm",)),
+    ]
+    _engines = [
+        lbl
+        for lbl, cols in _engine_check
+        if any(c in sort_df.columns and pd.to_numeric(sort_df[c], errors="coerce").notna().any() for c in cols)
+    ]
+    if len(_engines) > 1:
+        engines_present_html = ", ".join(_engines[:-1]) + " and " + _engines[-1]
+    elif _engines:
+        engines_present_html = _engines[0]
+    else:
+        engines_present_html = "one or more refolding engines"
 
     html = _HTML_TEMPLATE.format(
         n_binders=len(sort_df),
-        ranking_method_html=ranking_method_html,
+        methodology_ranking_html=methodology_ranking_html,
+        engines_present_html=engines_present_html,
         tool_counts_str=tool_counts_str or "—",
         engine_threshold_legend=engine_threshold_legend,
         agreement_summary=agreement_summary,
@@ -1649,11 +1686,49 @@ def generate_report(
     print(f"[report] Written → {output_path}")
 
 
-def _select_display_cols(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tuple[list[str], list[str]]:
     """Pick columns for the top-20 table: (primary, secondary).
 
     Primary columns are always visible; secondary are in a collapsible section.
+    For the iptm-based rankings (two_stage / consensus_iptm) the iptm/consensus
+    columns lead and ipSAE is demoted to secondary (still shown). adaptyv keeps
+    the ipSAE-led layout.
     """
+    if rank_method in ("two_stage", "consensus_iptm"):
+        rank_col = "two_stage_rank" if rank_method == "two_stage" else "consensus_rank"
+        primary = [rank_col, "binder_id", "source_tool", "binder_length"]
+        if rank_method == "two_stage":
+            primary.append("passes_max_screen")
+        primary += [
+            "consensus_iptm",
+            "consensus_iptm_mean",
+            "consensus_iptm_min",
+            "boltz_pae_iptm",
+            "af3_iptm",
+            "esmfold2_iptm",
+            "ipsae_min",
+            "plddt_binder_mean",
+        ]
+        secondary = [
+            "agreement_count",
+            "quality_tier",
+            "boltz_pae_ipsae_min",
+            "af3_ipsae_min",
+            "esmfold2_ipsae_min",
+            "binder_ptm",
+            "plddt_binder_min",
+            "pae_bt",
+            "pae_tb",
+            "native_bg_design_ipsae_min",
+            "native_dG",
+            "native_dSASA",
+            "native_shape_complementarity",
+            "sequence",
+        ]
+        return (
+            [c for c in primary if c in df.columns],
+            [c for c in secondary if c in df.columns],
+        )
     primary = [
         "adaptyv_rank",
         "binder_id",

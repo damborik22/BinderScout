@@ -62,8 +62,11 @@ def _safe_float(val) -> float | None:
 class ProteinHunterExtractor(SequenceExtractor):
     """Extract binder sequences from a Protein-Hunter results directory."""
 
-    def __init__(self, *, all_runs: bool = False):
+    def __init__(self, *, all_runs: bool = False, collapse_variants: bool = True):
         self.all_runs = all_runs
+        # "Best design, not multiple sequences per design": keep only the best
+        # cycle (by iptm) per run — PH cycles are snapshots of one trajectory.
+        self.collapse_variants = collapse_variants
 
     @property
     def tool_name(self) -> str:
@@ -105,6 +108,19 @@ class ProteinHunterExtractor(SequenceExtractor):
                     merge_cols = [c for c in ("run_id", "best_iptm", "best_plddt") if c in all_runs.columns]
                     if len(merge_cols) > 1:
                         df = df.merge(all_runs[merge_cols], on="run_id", how="left")
+
+        # Collapse cycles to the single best iptm per run — one design per
+        # trajectory (PH run cycles are 60-80% identical snapshots).
+        if self.collapse_variants and "run_id" in df.columns and "iptm" in df.columns:
+            before = len(df)
+            df = (
+                df.assign(_r=pd.to_numeric(df["iptm"], errors="coerce"))
+                .sort_values("_r", ascending=False)
+                .drop_duplicates("run_id", keep="first")
+                .drop(columns=["_r"])
+            )
+            if len(df) != before:
+                warnings.warn(f"Protein-Hunter: collapsed {before} cycle-rows → {len(df)} runs (best cycle per run)")
 
         results: list[ExtractedBinder] = []
         for idx, row in df.iterrows():

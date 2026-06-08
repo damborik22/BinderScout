@@ -22,6 +22,7 @@ from ..comparison.ensemble import compute_ensemble_metrics
 from ..comparison.merger import merge_refold_results
 from ..comparison.scoring import (
     add_boltz_ipsae_from_files,
+    add_design_groups,
     add_ipsae_from_pae_files,
     add_iptm_from_pae_files,
     apply_screening_thresholds,
@@ -200,7 +201,25 @@ def run(args: argparse.Namespace) -> None:
         df = df.sort_values(["adaptyv_rank"], ascending=[True]).reset_index(drop=True)
     df["active_rank"] = range(1, len(df) + 1)
 
-    # Step 4: Write outputs
+    # "Best design, not multiple sequences per design": collapse near-duplicate
+    # variants of one trajectory (Protein-Hunter cycles, BindCraft MPNN re-designs)
+    # to the single best-ranked representative. metrics.csv keeps ALL rows (with
+    # design_group + is_representative); the report/top-N show distinct designs.
+    df = add_design_groups(df)
+    df["is_representative"] = ~df.duplicated("design_group", keep="first")
+    collapse = not getattr(args, "no_collapse_duplicates", False)
+    n_groups = int(df["design_group"].nunique())
+    if collapse and n_groups < len(df):
+        print(
+            f"[report] Collapsing {len(df) - n_groups} near-duplicate variant(s) → "
+            f"{n_groups} distinct designs (best per trajectory; --no-collapse-duplicates to disable)"
+        )
+        df_display = df[df["is_representative"]].reset_index(drop=True)
+        df_display["active_rank"] = range(1, len(df_display) + 1)
+    else:
+        df_display = df
+
+    # Step 4: Write outputs — metrics.csv = every row; everything else = distinct designs
     write_csv(df, output_dir / "metrics.csv")
 
     z_cols = [c for c in df.columns if c.endswith("_z")]
@@ -247,9 +266,9 @@ def run(args: argparse.Namespace) -> None:
         "active_rank",
     ]
     _available = [c for c in _top_cols if c in df.columns]
-    top20 = df.head(20)[_available]
+    top20 = df_display.head(20)[_available]
     write_csv(top20, output_dir / "top20_candidates.csv")
-    print("  top20_candidates.csv — top 20 designs with sequences")
+    print("  top20_candidates.csv — top 20 distinct designs with sequences")
 
     # Step 4c: Copy top-20 refolded PDB structures for visual inspection.
     # Prefer the *primary engine's* PDB so the viewer shows the structure
@@ -266,7 +285,7 @@ def run(args: argparse.Namespace) -> None:
     structures_dir = output_dir / "top20_structures"
     structures_dir.mkdir(parents=True, exist_ok=True)
     n_copied = 0
-    for _, row in df.head(20).iterrows():
+    for _, row in df_display.head(20).iterrows():
         rank = int(row.get("active_rank", row.get("adaptyv_rank", 0)))
         binder_id = row.get("binder_id", f"rank{rank}")
         for col in pdb_cols:
@@ -286,7 +305,7 @@ def run(args: argparse.Namespace) -> None:
                     break
     if n_copied:
         print(f"  top20_structures/    — {n_copied} refolded PDB structures for visual inspection")
-        _write_pymol_script(df.head(20), structures_dir)
+        _write_pymol_script(df_display.head(20), structures_dir)
         print("  top20_structures/    — view_top20.pml (open in PyMOL)")
 
     # Step 5: HTML report
@@ -307,7 +326,7 @@ def run(args: argparse.Namespace) -> None:
                 tool_pdb_dirs[tool_name.strip()] = pdb_dir.strip()
 
     generate_report(
-        df=df,
+        df=df_display,
         summary=summary,
         output_path=output_dir / "report.html",
         tool_csvs=tool_csvs or None,
@@ -329,6 +348,8 @@ _TOOL_COLOURS_PYMOL = {
     "mosaic": "green",
     "pxdesign": "purple",
     "boltzgen": "orange",
+    "boltzgen_nano": "orange",
+    "boltzgen_protein": "tv_orange",
     "bindcraft": "blue",
     "proteina_complexa": "teal",
     "rfd3": "tv_orange",
@@ -569,6 +590,14 @@ def add_parser(subparsers) -> None:
         "'two_stage' = max-screen (top 50%) then mean-rank survivors (benchmark-validated for wet-lab "
         "selection: precision@top-10% 0.92 vs 0.79 for max alone; see docs/plans.md Part N). All ranks "
         "are always written as columns (adaptyv_rank, consensus_rank, two_stage_rank).",
+    )
+    p.add_argument(
+        "--no-collapse-duplicates",
+        action="store_true",
+        help="Disable the default 'best design, not multiple sequences per design' collapse. By default "
+        "near-duplicate variants of one trajectory (Protein-Hunter cycles, BindCraft MPNN re-designs) are "
+        "collapsed to the single best-ranked representative in the report and top-N (metrics.csv keeps all, "
+        "tagged with design_group + is_representative).",
     )
     # Per-engine iPSAE thresholds (defaults from scoring.DEFAULT_ENGINE_THRESHOLDS)
     p.add_argument(
