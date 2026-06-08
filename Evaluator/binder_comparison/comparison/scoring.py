@@ -18,6 +18,7 @@ Key findings implemented here:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -754,6 +755,40 @@ def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5) -> pd.DataFram
     result = result.sort_values(sort_keys, ascending=ascending, na_position="last")
     result["two_stage_rank"] = range(1, len(result) + 1)
     return result.reset_index(drop=True)
+
+
+def add_design_groups(df: pd.DataFrame) -> pd.DataFrame:
+    """Add a ``design_group`` column collapsing multiple *sequences of one design*.
+
+    Rule: we want the best design, not many near-duplicate variants of it. A
+    "design" is a backbone / hallucination trajectory:
+
+      - Protein-Hunter: ``protein_hunter_<run>_c<cycle>`` → one group per *run*
+        (cycles are snapshots of one hallucination trajectory; e.g. run 107's
+        c5–c8 are 61–80 % identical).
+      - BindCraft: ``..._mpnn<N>`` → one group per *trajectory* (MPNN re-designs
+        of one AF2 backbone).
+
+    Every other tool emits one design per entry (verified distinct — e.g. Mosaic
+    designs from one worker are only ~10 % identical), so the group is the
+    binder_id itself. Downstream keeps the best-ranked entry per group.
+    """
+    result = df.copy()
+    if "binder_id" not in result.columns:
+        result["design_group"] = [str(i) for i in range(len(result))]
+        return result
+
+    def _grp(row: pd.Series) -> str:
+        bid = str(row.get("binder_id", ""))
+        tool = str(row.get("source_tool", ""))
+        if tool == "protein_hunter":
+            return re.sub(r"_c\d+$", "", bid)
+        if tool == "bindcraft":
+            return re.sub(r"_mpnn\d+.*$", "", bid)
+        return bid
+
+    result["design_group"] = result.apply(_grp, axis=1)
+    return result
 
 
 # ---------------------------------------------------------------------------

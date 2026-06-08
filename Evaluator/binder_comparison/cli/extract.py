@@ -29,10 +29,14 @@ from ..io.write import write_fasta
 
 def run(args: argparse.Namespace) -> None:
     all_binders: list[ExtractedBinder] = []
+    # "Best design, not multiple sequences per design" — default on. Collapses
+    # BindCraft MPNN variants to best per trajectory and Protein-Hunter cycles to
+    # best per run, so the refold pool is clean from the start.
+    collapse = not getattr(args, "no_collapse_variants", False)
 
     if args.bindcraft:
         print(f"[extract] BindCraft: {args.bindcraft}")
-        extracted = BindCraftExtractor().extract(args.bindcraft)
+        extracted = BindCraftExtractor(collapse_variants=collapse).extract(args.bindcraft)
         print(f"  → {len(extracted)} sequences")
         all_binders.extend(extracted)
 
@@ -70,7 +74,7 @@ def run(args: argparse.Namespace) -> None:
     if args.protein_hunter:
         print(f"[extract] Protein-Hunter: {args.protein_hunter}")
         all_runs = getattr(args, "all_protein_hunter_designs", False)
-        extracted = ProteinHunterExtractor(all_runs=all_runs).extract(args.protein_hunter)
+        extracted = ProteinHunterExtractor(all_runs=all_runs, collapse_variants=collapse).extract(args.protein_hunter)
         print(f"  → {len(extracted)} sequences")
         all_binders.extend(extracted)
 
@@ -173,5 +177,11 @@ def add_parser(subparsers) -> None:
         "--all-protein-hunter-designs",
         action="store_true",
         help="Include all Protein-Hunter designs (default: only summary_high_iptm.csv rows)",
+    )
+    p.add_argument(
+        "--no-collapse-variants",
+        action="store_true",
+        help="Disable the default 'best design, not multiple sequences per design' collapse "
+        "(BindCraft MPNN variants → best per trajectory; Protein-Hunter cycles → best per run).",
     )
     p.set_defaults(func=run)
