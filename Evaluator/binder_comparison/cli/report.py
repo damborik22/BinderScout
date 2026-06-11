@@ -188,9 +188,9 @@ def run(args: argparse.Namespace) -> None:
     # All three rankings coexist as columns (adaptyv_rank, consensus_rank,
     # two_stage_rank); --rank-by selects which orders the report. `active_rank`
     # is the chosen ordering (1..N) — used for display + structure-file naming so
-    # the HTML shows the selected method's rank. For the default (adaptyv) it
-    # equals adaptyv_rank, so existing behaviour is unchanged.
-    rank_by = getattr(args, "rank_by", "adaptyv") or "adaptyv"
+    # the HTML shows the selected method's rank. The default is two_stage
+    # (max-screen → mean-rank), the benchmark-recommended ordering for wet-lab selection.
+    rank_by = getattr(args, "rank_by", "two_stage") or "two_stage"
     if rank_by == "consensus_iptm":
         print("[report] Ranking by consensus_iptm (max engine iptm — benchmark-validated binder filter)")
         df = df.sort_values(["consensus_rank"], ascending=[True]).reset_index(drop=True)
@@ -584,10 +584,10 @@ def add_parser(subparsers) -> None:
     p.add_argument(
         "--rank-by",
         choices=["adaptyv", "consensus_iptm", "two_stage"],
-        default="adaptyv",
-        help="Ranking method for the report. 'adaptyv' (default) = quality_tier → agreement_count → "
+        default="two_stage",
+        help="Ranking method for the report. 'adaptyv' = quality_tier → agreement_count → "
         "ipsae_min. 'consensus_iptm' = max engine iptm (benchmark-validated binder-vs-non-binder filter). "
-        "'two_stage' = max-screen (top 50%%) then mean-rank survivors (benchmark-validated for wet-lab "
+        "'two_stage' (default) = max-screen (top 50%%) then mean-rank survivors (benchmark-validated for wet-lab "
         "selection: precision@top-10%% 0.92 vs 0.79 for max alone; see docs/plans.md Part N). All ranks "
         "are always written as columns (adaptyv_rank, consensus_rank, two_stage_rank).",
     )

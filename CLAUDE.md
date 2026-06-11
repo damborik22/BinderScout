@@ -98,8 +98,8 @@ Target structure (.pdb / .mmcif)
        2. Refold with Boltz-2 (Mosaic venv)                                    [live, all platforms]
        3. Refold with AlphaFold 3 v3.0.2 (binder-eval-af3 env)                 [live, canonical 2nd engine — Spark / H200 / >100 GB VRAM]
        4. (optional) Refold with Protenix v0.5.0 (bindmaster_pxdesign env)     [live, fits 24 GB GPUs — opt-in]
-       4.5 (optional) Refold with ESMFold2 (binder-eval-esmfold2 env)          [live, lightweight 4th engine; not yet in agreement_count]
-       5. Rank by agreement_count then ipsae_min; generate HTML + CSV report
+       4.5 (optional) Refold with ESMFold2 (binder-eval-esmfold2 env)          [live, lightweight 4th engine; auto-detected by evaluate.sh; feeds consensus_iptm]
+       5. Rank by two-stage cross-engine iPTM (max-screen → mean iptm); generate HTML + CSV report
 ```
 
 ### Directory layout
@@ -306,7 +306,9 @@ the parameter sweep.
 
 ### Evaluation metrics and ranking
 
-**Primary metric: `ipsae_min`** — the minimum of binder→target and target→binder iPSAE scores. Computed from PAE arrays using the DunbrackLab 2025 formula: `max_i[mean_j(1/(1+(PAE_ij/d0)²))]` (d0_res variant, uniform 10 Å PAE cutoff across all engines). Ranking uses agreement_count (how many engines agree ipsae_min > 0.61) as primary sort, then ipsae_min desc.
+**Primary ranking: two-stage cross-engine iPTM** — `binder-compare report --rank-by two_stage` (the default). **Stage 1 (screen):** `consensus_iptm` = max of the per-engine PAE-recomputed iPTMs (`boltz_pae_iptm`, `af3_pae_iptm`, `esmfold2_pae_iptm`); keep the top 50% (`passes_max_screen`) — benchmark-validated binder-vs-non-binder filter (macro AUC ≈ 0.755, ProteinBase 4-target). **Stage 2 (rank):** `consensus_iptm_mean` = mean of those iPTMs, which orders the survivors (precision@top-10% 0.92 vs 0.79 for max alone). `adaptyv_rank` (agreement_count → ipsae_min) and `consensus_rank` (max only) remain as columns but are no longer the default sort.
+
+`ipsae_min` (min of binder→target and target→binder iPSAE; DunbrackLab 2025 `max_i[mean_j(1/(1+(PAE_ij/d0)²))]`, d0_res variant, uniform 10 Å PAE cutoff) is retained as a diagnostic and for the quality tiers below — not the primary sort. **Caveat:** no structure-confidence metric ranks *affinity* among binders, only binder-vs-non-binder (see `docs/plans.md` Part N; affinity needs an interface-ΔG metric, planned).
 
 **Direction guide:**
 - **Higher is better:** `iptm`, `bt_ipsae`, `tb_ipsae`, `ipsae_min`, `plddt_binder_mean`, `binder_ptm`
@@ -323,8 +325,8 @@ the parameter sweep.
 
 ### Critical domain facts
 
-- **iptm is gameable** — AF2-designed sequences (BindCraft) tend to score high on ipTM by construction. Use `ipsae_min` as the primary ranking metric instead.
-- **Engine disagreement is signal, not noise** — For short binders (~60aa), different refolding engines often disagree on interface quality. The `agreement_count` column reflects how many engines pass the 0.61 threshold; higher = stronger candidate.
+- **iptm is gameable by the designing engine** — BindCraft games AF2 ipTM; Mosaic games `boltz_iptm` by construction (it *is* Boltz-2 gradient hallucination). Never rank on a single engine's ipTM. The two-stage `consensus_iptm_mean` (mean across independent engines) resists this — a design one engine loves but another rejects is demoted by the mean.
+- **Engine disagreement is signal, not noise** — For short binders (~60aa), refolding engines often disagree on interface quality. The two-stage mean iPTM captures this continuously (disagreement lowers the mean); the `agreement_count` column (engines past the 0.61 ipSAE threshold) is retained as a diagnostic.
 - **Binder length is a main driver** — Longer binders tend to score lower on `ipsae_min` (r ≈ -0.78).
 - **Mosaic designs.csv format** — Can mix column formats between workers (old 11-col / new 13-col). The parser must handle this carefully or columns misalign. The `is_top` column marks the ~40 refolded designs out of ~800 total; extractors filter to `is_top=1` by default.
 - **Mosaic `target_sequence` placeholder** — The Mosaic template (`hallucinate_bindmaster.py`) writes `"REPLACE_ME"` as `target_sequence` when not configured. The legacy evaluator guards against using this as a real target sequence.
