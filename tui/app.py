@@ -286,21 +286,12 @@ def _curses_submenu_runs(stdscr, repo: Path) -> None:  # type: ignore[type-arg]
 
 
 def _curses_submenu_evaluate(stdscr, repo: Path) -> None:  # type: ignore[type-arg]
-    """Sub-menu: pick a run to evaluate."""
-    runs = _list_runs(repo)
-    if not runs:
-        _curses_show_message(stdscr, "No runs found. Use 'Configure run' first.")
-        return
-    names = [r.name for r in runs]
-    hints = [_run_status_line(r) for r in runs]
-    idx = _curses_pick(stdscr, "Evaluate results", names, hints)
-    if idx is not None:
-        mosaic_py = repo / "Mosaic" / ".venv" / "bin" / "python"
-        evaluator = repo / "evaluator" / "evaluator.py"
-        if not mosaic_py.exists():
-            _curses_show_message(stdscr, "Mosaic must be installed first (evaluator needs Mosaic venv).")
-            return
-        _curses_run_subprocess(stdscr, [str(mosaic_py), str(evaluator), str(runs[idx])], f"Evaluate: {runs[idx].name}")
+    """Launch the evaluator (binder-compare passthrough — shows available subcommands)."""
+    _curses_run_subprocess(
+        stdscr,
+        [sys.executable, str(repo / "bindmaster.py"), "evaluate"],
+        "Evaluate results (binder-compare)",
+    )
 
 
 def _curses_submenu_status(stdscr, repo: Path) -> None:  # type: ignore[type-arg]
@@ -461,33 +452,11 @@ def _simple_submenu_runs(repo: Path) -> None:
 
 
 def _simple_submenu_evaluate(repo: Path) -> None:
-    """Simple numbered sub-menu: pick a run to evaluate."""
-    runs = _list_runs(repo)
-    if not runs:
-        print(f"\n{YELLOW}No runs found. Use 'Configure run' first.{RESET}")
-        return
-    print(f"\n{BOLD}Evaluate results{RESET}\n")
-    for i, r in enumerate(runs, 1):
-        print(f"  {BOLD}{i}{RESET}) {r.name}  {DIM}({_run_status_line(r)}){RESET}")
-    print(f"  {BOLD}0{RESET}) Back\n")
-    try:
-        raw = input(f"{BOLD}>{RESET} ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return
-    if raw == "0" or not raw:
-        return
-    try:
-        idx = int(raw) - 1
-    except ValueError:
-        return
-    if 0 <= idx < len(runs):
-        mosaic_py = repo / "Mosaic" / ".venv" / "bin" / "python"
-        evaluator = repo / "evaluator" / "evaluator.py"
-        if not mosaic_py.exists():
-            print(f"\n{RED}Mosaic must be installed first (evaluator needs Mosaic venv).{RESET}")
-            return
-        _run_subprocess([str(mosaic_py), str(evaluator), str(runs[idx])], f"Evaluate: {runs[idx].name}")
+    """Launch the evaluator (binder-compare passthrough — shows available subcommands)."""
+    _run_subprocess(
+        [sys.executable, str(repo / "bindmaster.py"), "evaluate"],
+        "Evaluate results (binder-compare)",
+    )
 
 
 def _simple_submenu_status(repo: Path) -> None:
