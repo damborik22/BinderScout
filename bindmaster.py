@@ -6,13 +6,13 @@ Dispatches sub-commands to their respective scripts:
   (no args) → interactive TUI menu (tui/app.py)
   install   → bash install/install.sh
   configure → python configurator/configurator.py
-  evaluate  → Mosaic/.venv/bin/python evaluator_legacy/evaluator.py
+  evaluate  → conda run -n binder-eval binder-compare (Evaluator/binder_comparison)
 
 Usage:
   bindmaster                                                    Interactive menu (TUI)
   bindmaster install   [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples]
   bindmaster configure [options passed through to configurator.py]
-  bindmaster evaluate  <run-dir> [--metric METRIC] [--top N] [--refold N]
+  bindmaster evaluate  <binder-compare args>   (e.g. run --mosaic DIR --target-seq SEQ -o OUT)
   bindmaster --help
 """
 
@@ -21,7 +21,6 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
-MOSAIC_VENV_PYTHON = REPO / "Mosaic" / ".venv" / "bin" / "python"
 
 BOLD = "\033[1m"
 CYAN = "\033[0;36m"
@@ -35,19 +34,19 @@ USAGE = f"""{BOLD}BindMaster{RESET} — GPU-accelerated protein binder design to
   bindmaster                                                    Interactive menu (TUI)
   bindmaster install   [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples]
   bindmaster configure [options passed through]
-  bindmaster evaluate  <run-dir> [--metric METRIC] [--top N] [--refold N]
+  bindmaster evaluate  <binder-compare args>   (e.g. run --mosaic DIR --target-seq SEQ -o OUT)
   bindmaster --help
 
 {BOLD}Commands:{RESET}
   {CYAN}(no args){RESET}  Launch interactive menu — install, configure, run, evaluate
   {CYAN}install{RESET}    Install BindCraft, BoltzGen, and/or Mosaic
   {CYAN}configure{RESET}  Interactive wizard to set up a run (target, tools, parameters)
-  {CYAN}evaluate{RESET}   Parse outputs, rank designs, optionally re-fold top candidates
+  {CYAN}evaluate{RESET}   Passthrough to the binder-compare evaluator (extract / refold / report / run)
 
 {BOLD}Environments:{RESET}
   install    → bash          {REPO}/install/install.sh
   configure  → system python {REPO}/configurator/configurator.py
-  evaluate   → Mosaic venv   {REPO}/evaluator_legacy/evaluator.py
+  evaluate   → conda env binder-eval → binder-compare (Evaluator/binder_comparison)
 
 {BOLD}Clone:{RESET}
   git clone https://github.com/damborik22/BindMaster.git
@@ -82,6 +81,24 @@ def _install_bindmaster_shortcut() -> None:
         pass  # ~/.local/bin not writable — BindMaster/bin/ is the primary location
 
 
+def _find_conda_base() -> Path | None:
+    """Return the conda base dir (local standalone install first, then system)."""
+    local = REPO / "conda"
+    candidates = [
+        local,
+        Path.home() / "miniforge3",
+        Path.home() / "mambaforge",
+        Path.home() / "miniconda3",
+        Path.home() / "anaconda3",
+        Path("/opt/conda"),
+        Path("/opt/miniforge3"),
+    ]
+    for base in candidates:
+        if (base / "etc" / "profile.d" / "conda.sh").exists() and (base / "bin" / "conda").exists():
+            return base
+    return None
+
+
 def _dispatch(cmd: str, args: list) -> None:
     """Resolve and exec the appropriate sub-command. Never returns."""
     if cmd == "install":
@@ -101,18 +118,20 @@ def _dispatch(cmd: str, args: list) -> None:
         os.execv(sys.executable, [sys.executable, str(script)] + args)
 
     elif cmd == "evaluate":
-        if not MOSAIC_VENV_PYTHON.exists():
+        conda_base = _find_conda_base()
+        if conda_base is None:
             print(
-                f"{RED}✗ Mosaic must be installed first (`bindmaster install --tool mosaic`){RESET}",
+                f"{RED}✗ conda not found — install the evaluator first "
+                f"(`bindmaster install --tool all`){RESET}",
                 file=sys.stderr,
             )
             sys.exit(1)
-        script = REPO / "evaluator" / "evaluator.py"
-        if not script.exists():
-            print(f"{RED}✗ evaluator.py not found: {script}{RESET}", file=sys.stderr)
-            sys.exit(1)
-        print(f"{BOLD}BindMaster → evaluate{RESET}")
-        os.execv(str(MOSAIC_VENV_PYTHON), [str(MOSAIC_VENV_PYTHON), str(script)] + args)
+        conda_bin = conda_base / "bin" / "conda"
+        print(f"{BOLD}BindMaster → evaluate (binder-compare){RESET}")
+        os.execv(
+            str(conda_bin),
+            [str(conda_bin), "run", "-n", "binder-eval", "--no-capture-output", "binder-compare"] + args,
+        )
 
     else:
         print(f"{RED}✗ Unknown command: {cmd!r}{RESET}", file=sys.stderr)
