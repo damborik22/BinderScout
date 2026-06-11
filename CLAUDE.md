@@ -6,7 +6,7 @@ BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. I
 
 **Current status:** v0.7.0 + Parts I, J, K, L, M landed on `[Unreleased]`. Latest milestones: Evaluator AF2 refolding removed (Part I), AF3 v3.0.2 stood up as the canonical 2nd refolding engine on big-VRAM hardware (Part K — Spark / H200, >100 GB unified memory), Protenix v0.5.0 retained as an optional alternative for smaller GPUs (Part J — 24 GB OK), Protein-Hunter installed and configurable (Part L), RFD3 installed and configurable (Part M). Active development on `master`; `aarch64` branch tracks DGX Spark / Grace-Hopper and is periodically rebased.
 
-**Repository:** `github.com/damborik22/BindMaster`
+**Repository:** `github.com/damborik22/BindMaster` (the working-tree directory may be checked out as `BinderScout`; the CLI command and Python package are both `bindmaster`)
 
 ---
 
@@ -99,14 +99,19 @@ Target structure (.pdb / .mmcif)
        3. Refold with AlphaFold 3 v3.0.2 (binder-eval-af3 env)                 [live, canonical 2nd engine — Spark / H200 / >100 GB VRAM]
        4. (optional) Refold with Protenix v0.5.0 (bindmaster_pxdesign env)     [live, fits 24 GB GPUs — opt-in]
        4.5 (optional) Refold with ESMFold2 (binder-eval-esmfold2 env)          [live, lightweight 4th engine; not yet in agreement_count]
-       5. Rank by agreement_count then ipsae_min; generate HTML + CSV report
+       5. Rank by consensus_iptm (primary; agreement_count + plddt tiebreakers); generate HTML + CSV report
 ```
 
 ### Directory layout
 
 ```
 BindMaster/
-├── bindmaster.py              ← unified CLI entry point (system Python, stdlib only)
+├── bindmaster.py              ← unified CLI dispatcher (system Python, stdlib only)
+├── bindmaster/                ← Python package: feature_flags, scoring/unified (BinderScore),
+│                                 tools/ (ToolAdapter + PXDesignRunner), scheduler/ (empty stub).
+│                                 NOTE: currently used only by examples/ — NOT wired into the CLI.
+├── tui/
+│   └── app.py                 ← interactive curses menu + numbered fallback (`bindmaster` no-args)
 ├── install/
 │   ├── install.sh             ← x86_64 installer (master branch)
 │   └── install_aarch.sh       ← aarch64 / DGX Spark installer
@@ -114,8 +119,9 @@ BindMaster/
 ├── bin/                       ← LOCAL shortcuts (standalone mode, gitignored)
 ├── configurator/
 │   └── configurator.py        ← interactive 5-step setup wizard (~1700 lines)
-├── evaluator/
-│   └── evaluator.py           ← lightweight evaluator (Mosaic venv, ~780 lines)
+├── evaluator_legacy/
+│   └── evaluator.py           ← LEGACY single-file evaluator (~955 lines). Retired:
+│                                 `bindmaster evaluate` now passes through to binder-compare.
 ├── Evaluator/                 ← bundled full evaluation pipeline package
 │   ├── binder_comparison/     ← core Python package (extractors, refolding, scoring, viz)
 │   ├── scripts/               ← standalone refold scripts (refold_boltz2.py, refold_af3.py — canonical; refold_protenix.py — optional fallback)
@@ -129,7 +135,7 @@ BindMaster/
 │   └── run_protein_hunter.sh.template ← Protein-Hunter Boltz-2 hallucination
 ├── tools/
 │   └── aarch64/               ← pre-built ARM64 binaries (DAlphaBall, dssp)
-├── .github/workflows/ci.yml  ← shellcheck + ruff + Docker build
+├── .github/workflows/ci.yml  ← shellcheck + ruff + pytest + Docker build
 ├── test_env.sh                ← Docker test environment launcher
 ├── Dockerfile.test            ← CUDA 12.4, Ubuntu 22.04, Miniforge
 ├── docker-entrypoint.sh       ← container init (conda, HOME setup)
@@ -165,7 +171,7 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `binder-eval-esmfold2` | ESMFold2 refolder | 3.10 | conda | Optional 4th refold engine (biohub); lightweight, no gated weights |
 | `binder-eval-soluprot` | SoluProt screen | 3.7 | conda | Sequence-only *E. coli* solubility filter (Hon et al. 2021); x86 only (USEARCH dep). NOT a refold engine; runs before refolding; `--soluprot-filter` drops sub-threshold designs before any GPU work |
 
-The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in their correct environment — `install` runs in bash, `configure` runs in system Python, `evaluate` runs in the Mosaic `.venv` Python.
+The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in their correct environment — `install` runs in bash, `configure` runs in system Python, and `evaluate` is a **passthrough to the `binder-compare` CLI** run in the `binder-eval` conda env (`bindmaster evaluate <binder-compare args>`). The legacy single-file evaluator (`evaluator_legacy/evaluator.py`, formerly run in the Mosaic `.venv`) is retired and no longer dispatched.
 
 In **standalone mode** (`--standalone` or auto-detected), all conda environments live under `BindMaster/conda/envs/` instead of the system conda's envs directory. This requires zero system permissions.
 
@@ -285,7 +291,8 @@ the parameter sweep.
 | **Refolding** | Re-predicting structure from sequence using an independent model (cross-validation) |
 | **ipTM** | Interface predicted TM-score (0–1, higher = better). Measures binding interface quality |
 | **iPSAE** | Interface Predicted Structural Alignment Error (DunbrackLab 2025 formula). TM-score analogue; **higher is better** |
-| **ipsae_min** | min(binder→target iPSAE, target→binder iPSAE). **Primary ranking metric** |
+| **ipsae_min** | min(binder→target iPSAE, target→binder iPSAE). Secondary metric / tiebreaker (primary is `consensus_iptm` — see ranking note) |
+| **consensus_iptm** | max ipTM across independent refolding engines. **Primary ranking metric** (benchmark-validated) |
 | **PAE** | Predicted Aligned Error (Angstroms, **lower = better**). Raw error between residue pairs |
 | **pLDDT** | Predicted Local Distance Difference Test (0–1, higher = better). Per-residue confidence |
 | **MPNN** | ProteinMPNN — sequence design neural network |
@@ -306,7 +313,9 @@ the parameter sweep.
 
 ### Evaluation metrics and ranking
 
-**Primary metric: `ipsae_min`** — the minimum of binder→target and target→binder iPSAE scores. Computed from PAE arrays using the DunbrackLab 2025 formula: `max_i[mean_j(1/(1+(PAE_ij/d0)²))]` (d0_res variant, uniform 10 Å PAE cutoff across all engines). Ranking uses agreement_count (how many engines agree ipsae_min > 0.61) as primary sort, then ipsae_min desc.
+**Primary ranking (benchmark-validated): `consensus_iptm`** — the max ipTM across refolding engines, implemented by `rank_by_consensus_iptm` in `Evaluator/binder_comparison/comparison/scoring.py`, with `agreement_count` then `plddt_binder_mean` as tiebreakers. `ipsae_min` — the minimum of binder→target and target→binder iPSAE (DunbrackLab 2025 formula: `max_i[mean_j(1/(1+(PAE_ij/d0)²))]`, d0_res variant, uniform 10 Å PAE cutoff) — is retained as a **secondary** metric and feeds `agreement_count` (engines agreeing ipsae_min > 0.61). The older `rank_by_adaptyv_method` (quality_tier → agreement_count → ipsae_min → iptm) still coexists, so the report can offer either ranking.
+
+> Historical note: earlier guidance made `ipsae_min` the primary metric. After a cross-target benchmark this was superseded by `consensus_iptm`. Update older docs/skills that still say "rank by ipsae_min" accordingly.
 
 **Direction guide:**
 - **Higher is better:** `iptm`, `bt_ipsae`, `tb_ipsae`, `ipsae_min`, `plddt_binder_mean`, `binder_ptm`
@@ -323,7 +332,7 @@ the parameter sweep.
 
 ### Critical domain facts
 
-- **iptm is gameable** — AF2-designed sequences (BindCraft) tend to score high on ipTM by construction. Use `ipsae_min` as the primary ranking metric instead.
+- **single-engine iptm is gameable** — AF2-designed sequences (BindCraft) tend to score high on one engine's ipTM by construction. The benchmark-validated ranking therefore uses `consensus_iptm` (max ipTM *across independent engines*) plus `agreement_count`, which resists this; `ipsae_min` remains a useful secondary/tiebreaker. (Earlier guidance made `ipsae_min` primary — superseded by the consensus-iptm benchmark.)
 - **Engine disagreement is signal, not noise** — For short binders (~60aa), different refolding engines often disagree on interface quality. The `agreement_count` column reflects how many engines pass the 0.61 threshold; higher = stronger candidate.
 - **Binder length is a main driver** — Longer binders tend to score lower on `ipsae_min` (r ≈ -0.78).
 - **Mosaic designs.csv format** — Can mix column formats between workers (old 11-col / new 13-col). The parser must handle this carefully or columns misalign. The `is_top` column marks the ~40 refolded designs out of ~800 total; extractors filter to `is_top=1` by default.
