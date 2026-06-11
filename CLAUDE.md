@@ -107,9 +107,6 @@ Target structure (.pdb / .mmcif)
 ```
 BindMaster/
 ├── bindmaster.py              ← unified CLI dispatcher (system Python, stdlib only)
-├── bindmaster/                ← Python package: feature_flags, scoring/unified (BinderScore),
-│                                 tools/ (ToolAdapter + PXDesignRunner), scheduler/ (empty stub).
-│                                 NOTE: currently used only by examples/ — NOT wired into the CLI.
 ├── tui/
 │   └── app.py                 ← interactive curses menu + numbered fallback (`bindmaster` no-args)
 ├── install/
