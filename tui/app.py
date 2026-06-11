@@ -519,7 +519,10 @@ def launch_tui(repo: Path) -> None:
     """Launch interactive TUI. Curses if possible, numbered menu otherwise."""
     try:
         import curses
-
+    except ImportError:
+        _simple_menu_main(repo)
+        return
+    try:
         curses.wrapper(_curses_main, repo)
-    except (ImportError, curses.error):
+    except curses.error:
         _simple_menu_main(repo)
