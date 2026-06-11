@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 # Add evaluator to path so we can import the module
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "evaluator"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "evaluator_legacy"))
 import evaluator as ev
 
 
