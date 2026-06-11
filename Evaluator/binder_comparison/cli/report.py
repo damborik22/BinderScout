@@ -587,8 +587,8 @@ def add_parser(subparsers) -> None:
         default="adaptyv",
         help="Ranking method for the report. 'adaptyv' (default) = quality_tier → agreement_count → "
         "ipsae_min. 'consensus_iptm' = max engine iptm (benchmark-validated binder-vs-non-binder filter). "
-        "'two_stage' = max-screen (top 50%) then mean-rank survivors (benchmark-validated for wet-lab "
-        "selection: precision@top-10% 0.92 vs 0.79 for max alone; see docs/plans.md Part N). All ranks "
+        "'two_stage' = max-screen (top 50%%) then mean-rank survivors (benchmark-validated for wet-lab "
+        "selection: precision@top-10%% 0.92 vs 0.79 for max alone; see docs/plans.md Part N). All ranks "
         "are always written as columns (adaptyv_rank, consensus_rank, two_stage_rank).",
     )
     p.add_argument(

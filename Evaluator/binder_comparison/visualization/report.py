@@ -1666,7 +1666,7 @@ def generate_report(
         scatter_block = ""
 
     _ipsae_link = (
-        'interface Predicted Structural Alignment Error, computed using the '
+        "interface Predicted Structural Alignment Error, computed using the "
         '<a href="https://github.com/DunbrackLab/IPSAE" target="_blank">DunbrackLab d0<sub>res</sub> formula</a> '
         "(per-residue d0, uniform 10 Å PAE cutoff for all engines)"
     )
