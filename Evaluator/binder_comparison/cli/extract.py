@@ -113,6 +113,31 @@ def run(args: argparse.Namespace) -> None:
     # its own design" next to "what the refold engines say".
     _write_native_metrics_sidecar(all_binders, output)
 
+    # Optionally collect each design's ORIGINAL complex structure into DIR/<tool>/
+    # so the report can show the tool's own design (matched by binder sequence).
+    if getattr(args, "collect_structures", None):
+        from ..structures import collect_design_structures
+
+        tool_dir = {
+            "bindcraft": args.bindcraft,
+            "boltzgen": args.boltzgen,
+            "mosaic": args.mosaic,
+            "pxdesign": args.pxdesign,
+            "rfd3": args.rfd3,
+            "proteina_complexa": args.proteina_complexa,
+            "protein_hunter": args.protein_hunter,
+        }
+        by_tool: dict[str, list[str]] = {}
+        for b in all_binders:
+            by_tool.setdefault(b.source_tool, []).append(b.sequence)
+        cdir = Path(args.collect_structures)
+        for tool, seqs in by_tool.items():
+            idir = tool_dir.get(tool)
+            if not idir:
+                continue
+            n = collect_design_structures(idir, seqs, cdir / tool)
+            print(f"[extract] {tool}: collected {n}/{len(seqs)} original structures → {cdir / tool}")
+
 
 def _write_native_metrics_sidecar(binders: list[ExtractedBinder], fasta_path: Path) -> None:
     """Write a CSV next to the extracted FASTA with one row per binder containing
@@ -183,5 +208,13 @@ def add_parser(subparsers) -> None:
         action="store_true",
         help="Disable the default 'best design, not multiple sequences per design' collapse "
         "(BindCraft MPNN variants → best per trajectory; Protein-Hunter cycles → best per run).",
+    )
+    p.add_argument(
+        "--collect-structures",
+        metavar="DIR",
+        help="Copy each design's ORIGINAL complex structure (matched by binder sequence) into "
+        "DIR/<tool>/ next to the FASTA, for the report's --tool-pdb-dir <tool>=DIR/<tool>. "
+        "Filename/folder-agnostic; cif/.gz converted to PDB. Tools whose structures lack the "
+        "design sequence (e.g. RFD3 backbones) collect nothing and fall back to refold.",
     )
     p.set_defaults(func=run)
