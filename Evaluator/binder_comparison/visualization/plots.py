@@ -596,9 +596,7 @@ def plot_radar_iptm(df: pd.DataFrame, top_n: int = 10) -> Figure:
         sub = gdf
         if rank_col:
             sub = (
-                gdf.assign(_r=pd.to_numeric(gdf[rank_col], errors="coerce"))
-                .dropna(subset=["_r"])
-                .nlargest(top_n, "_r")
+                gdf.assign(_r=pd.to_numeric(gdf[rank_col], errors="coerce")).dropna(subset=["_r"]).nlargest(top_n, "_r")
             )
         if len(sub) == 0:
             continue

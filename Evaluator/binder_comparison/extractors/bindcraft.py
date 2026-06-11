@@ -80,7 +80,9 @@ class BindCraftExtractor(SequenceExtractor):
                 .drop(columns=["_traj", "_r"])
             )
             if len(df) != before:
-                warnings.warn(f"BindCraft: collapsed {before} MPNN sequences → {len(df)} trajectories (best per backbone)")
+                warnings.warn(
+                    f"BindCraft: collapsed {before} MPNN sequences → {len(df)} trajectories (best per backbone)"
+                )
 
         results: list[ExtractedBinder] = []
         stem = csv_path.stem
