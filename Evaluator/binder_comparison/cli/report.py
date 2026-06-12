@@ -22,6 +22,7 @@ from ..comparison.ensemble import compute_ensemble_metrics
 from ..comparison.merger import merge_refold_results
 from ..comparison.scoring import (
     add_boltz_ipsae_from_files,
+    add_chain_iptm_interface,
     add_design_groups,
     add_ipsae_from_pae_files,
     add_iptm_from_pae_files,
@@ -134,13 +135,10 @@ def run(args: argparse.Namespace) -> None:
             base_dir=esmfold2_base,
         )
 
-    # Recover the interface chain-pair iPTM under its legacy name. The refolder emits
-    # iptm_pair (=max of the two target<->binder directions) and iptm_pair_min (=min);
-    # their mean is the old chain_iptm_interface. Derive it so the metric is surfaced.
-    if {"esmfold2_iptm_pair", "esmfold2_iptm_pair_min"} <= set(df.columns):
-        df["esmfold2_chain_iptm_interface"] = (
-            df["esmfold2_iptm_pair"] + df["esmfold2_iptm_pair_min"]
-        ) / 2.0
+    # Recover the interface chain-pair iPTM (mean of the two directional pair iPTMs).
+    # Canonical definition lives in scoring.add_chain_iptm_interface so the report and
+    # any downstream gate (e.g. the ESMFold2 autosize loop) share one formula.
+    df = add_chain_iptm_interface(df, prefix="esmfold2")
 
     # Promote the chosen engine's DunbrackLab PAE-based ipsae_min as the primary ranking column.
     # Column naming differs across engines: boltz uses boltz_pae_ipsae_min, others use
