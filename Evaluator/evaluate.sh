@@ -19,7 +19,7 @@
 #   --af3-env ENV          conda env for AF3 (default: binder-eval-af3)
 #   --skip-esmfold2        skip ESMFold2 refolding (default: auto-detect binder-eval-esmfold2 env)
 #   --esmfold2-env ENV     conda env for ESMFold2 (default: binder-eval-esmfold2)
-#   --esmfold2-model V     ESMFold2 checkpoint: fast | full (default: fast)
+#   --esmfold2-model V     ESMFold2 checkpoint: full | fast (default: full)
 #   --skip-soluprot        skip SoluProt solubility screen (default: auto-detect binder-eval-soluprot env)
 #   --soluprot-env ENV     conda env for SoluProt (default: binder-eval-soluprot)
 #   --soluprot-threshold N pass threshold for soluprot_score (default: 0.5; paper value)
@@ -76,7 +76,7 @@ SKIP_AF3=0
 AF3_ENV="binder-eval-af3"
 SKIP_ESMFOLD2=0
 ESMFOLD2_ENV="binder-eval-esmfold2"
-ESMFOLD2_MODEL="fast"
+ESMFOLD2_MODEL="full"
 SKIP_SOLUPROT=0
 SOLUPROT_ENV="binder-eval-soluprot"
 SOLUPROT_THRESHOLD=0.5
