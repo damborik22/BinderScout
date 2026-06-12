@@ -18,6 +18,8 @@ from matplotlib.figure import Figure
 TOOL_COLOURS = {
     "bindcraft": "#2196F3",  # blue
     "boltzgen": "#FF9800",  # orange
+    "boltzgen_nano": "#FF9800",  # orange (nano sub-variant)
+    "boltzgen_protein": "#EF6C00",  # deep orange (protein sub-variant)
     "mosaic": "#4CAF50",  # green
     "pxdesign": "#9C27B0",  # purple
     "proteina_complexa": "#795548",  # brown
@@ -31,6 +33,8 @@ _TOOL_DISPLAY = {
     "mosaic": "Mosaic",
     "pxdesign": "PXDesign",
     "boltzgen": "BoltzGen",
+    "boltzgen_nano": "BoltzGen (nano)",
+    "boltzgen_protein": "BoltzGen (protein)",
     "bindcraft": "BindCraft",
     "proteina_complexa": "Proteina-Complexa",
     "rfd3": "RFD3",
@@ -547,6 +551,136 @@ def plot_radar_chart(
 # ---------------------------------------------------------------------------
 # Metric distribution box plots
 # ---------------------------------------------------------------------------
+
+
+# Engine iPTM columns for the two-stage radar/scatter (uses whichever are present,
+# in this priority order). Mirrors scoring._ENGINE_IPTM_COLS.
+_IPTM_RADAR_SPOKES: list[tuple[str, str]] = [
+    ("boltz_pae_iptm", "Boltz-2 iPTM"),
+    ("af3_pae_iptm", "AF3 iPTM"),
+    ("esmfold2_pae_iptm", "ESMFold2 iPTM"),
+    ("protenix_pae_iptm", "Protenix iPTM"),
+]
+
+
+def plot_radar_iptm(df: pd.DataFrame, top_n: int = 10) -> Figure:
+    """Per-tool radar over the engine iPTMs — the two-stage view.
+
+    Spokes = each available engine's iPTM (raw 0–1, NOT z-scored). One polygon
+    per tool = mean iPTM over that tool's top-N designs (by ``consensus_iptm``).
+    A large, balanced polygon = engines agree (high mean → ranks high in the
+    two-stage mean step); a spiky/lopsided polygon = one engine confident and
+    the others not (passes the max screen but low mean).
+    """
+    if "source_tool" not in df.columns:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No source_tool — radar skipped", ha="center", va="center")
+        return fig
+    spokes = [
+        (c, lbl)
+        for c, lbl in _IPTM_RADAR_SPOKES
+        if c in df.columns and pd.to_numeric(df[c], errors="coerce").notna().any()
+    ]
+    if len(spokes) < 2:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "<2 engine iPTM columns — radar skipped", ha="center", va="center")
+        return fig
+
+    cols = [c for c, _ in spokes]
+    rank_col = "consensus_iptm" if "consensus_iptm" in df.columns else None
+    angles = np.linspace(0, 2 * np.pi, len(spokes), endpoint=False).tolist() + [0.0]
+    fig, ax = plt.subplots(figsize=(7, 7), subplot_kw=dict(polar=True))
+
+    handles: dict[str, object] = {}
+    for tool, gdf in df.groupby("source_tool"):
+        sub = gdf
+        if rank_col:
+            sub = (
+                gdf.assign(_r=pd.to_numeric(gdf[rank_col], errors="coerce")).dropna(subset=["_r"]).nlargest(top_n, "_r")
+            )
+        if len(sub) == 0:
+            continue
+        means = [pd.to_numeric(sub[c], errors="coerce").mean() for c in cols]
+        if not np.isfinite(np.nanmean(means)):
+            continue
+        vals = means + [means[0]]
+        colour = TOOL_COLOURS.get(str(tool), TOOL_COLOURS["unknown"])
+        (line,) = ax.plot(angles, vals, color=colour, linewidth=2, label=_tool_display(str(tool)))
+        ax.fill(angles, vals, color=colour, alpha=0.12)
+        handles.setdefault(str(tool), line)
+
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels([lbl for _, lbl in spokes], size=9)
+    ax.set_ylim(0, 1.0)
+    ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.set_yticklabels(["0.2", "0.4", "0.6", "0.8", "1.0"], size=7)
+    ax.set_title(f"Per-tool engine-iPTM radar — top-{top_n} per tool (raw iPTM; outward = higher)", pad=16)
+    if handles:
+        fig.legend(
+            handles=list(handles.values()),
+            labels=list(handles.keys()),
+            loc="lower center",
+            ncol=min(len(handles), 8),
+            bbox_to_anchor=(0.5, -0.04),
+            frameon=False,
+        )
+    fig.tight_layout()
+    return fig
+
+
+def plot_max_vs_mean_iptm(df: pd.DataFrame, label_n: int = 20) -> Figure:
+    """Two-stage signature scatter: max engine iPTM (screen) vs mean engine iPTM (rank).
+
+    x = ``consensus_iptm`` (max, the Stage-1 screen), y = ``consensus_iptm_mean``
+    (the Stage-2 re-rank). The dashed y=x line is the upper bound (max ≥ mean) —
+    vertical distance below it = engine disagreement. The dotted vertical line is
+    the max-screen threshold (top 50%). Colour by tool; top designs are labelled
+    with their rank. Top-right = strong, agreed-upon binders.
+    """
+    fig, ax = plt.subplots(figsize=(8, 7))
+    if "consensus_iptm" not in df.columns or "consensus_iptm_mean" not in df.columns:
+        ax.text(0.5, 0.5, "consensus iptm columns missing — scatter skipped", ha="center", va="center")
+        return fig
+    x = pd.to_numeric(df["consensus_iptm"], errors="coerce")
+    y = pd.to_numeric(df["consensus_iptm_mean"], errors="coerce")
+    m = x.notna() & y.notna()
+    d = df[m].copy()
+    d["_x"], d["_y"] = x[m], y[m]
+    tools = sorted(d["source_tool"].dropna().unique()) if "source_tool" in d.columns else ["all"]
+
+    ax.plot([0, 1], [0, 1], ls="--", color="#888", lw=1, zorder=0)
+    for tool in tools:
+        sel = (d["source_tool"] == tool) if "source_tool" in d.columns else slice(None)
+        ax.scatter(
+            d.loc[sel, "_x"],
+            d.loc[sel, "_y"],
+            s=28,
+            alpha=0.72,
+            color=TOOL_COLOURS.get(str(tool), TOOL_COLOURS["unknown"]),
+            label=_tool_display(str(tool)),
+            edgecolors="none",
+        )
+    if "passes_max_screen" in d.columns and d["passes_max_screen"].any():
+        thr = pd.to_numeric(d.loc[d["passes_max_screen"], "consensus_iptm"], errors="coerce").min()
+        ax.axvline(thr, ls=":", color="#c62828", lw=1.5)
+        ax.text(thr, 0.02, f" max-screen ≥ {thr:.3f} (top 50%)", color="#c62828", fontsize=8, rotation=90, va="bottom")
+
+    if "active_rank" in d.columns:
+        topd = d.dropna(subset=["active_rank"]).nsmallest(label_n, "active_rank")
+    else:
+        topd = d.nlargest(label_n, "_x")
+    for _, r in topd.iterrows():
+        lab = str(int(r["active_rank"])) if "active_rank" in r and pd.notna(r.get("active_rank")) else ""
+        ax.annotate(lab, (r["_x"], r["_y"]), fontsize=7, xytext=(3, 3), textcoords="offset points")
+
+    ax.set_xlabel("max engine iPTM = consensus_iptm   (Stage-1 screen →)")
+    ax.set_ylabel("mean engine iPTM = consensus_iptm_mean   (Stage-2 rank ↑)")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_title("Two-stage selection: max-screen (x) → mean-rank (y); top-right = best", fontsize=10)
+    ax.legend(fontsize=7, loc="upper left", frameon=False, ncol=2)
+    fig.tight_layout()
+    return fig
 
 
 def plot_metric_distributions(

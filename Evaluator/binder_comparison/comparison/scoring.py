@@ -18,6 +18,7 @@ Key findings implemented here:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -666,10 +667,16 @@ def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     present = [c for c in _ENGINE_IPTM_COLS if c in result.columns]
     if not present:
         result["consensus_iptm"] = np.nan
+        result["consensus_iptm_mean"] = np.nan
+        result["consensus_iptm_min"] = np.nan
         result["consensus_iptm_n"] = 0
         return result
     numeric = result[present].apply(pd.to_numeric, errors="coerce")
+    # max = binder screen (recall); mean/min = consensus re-rank (precision). See
+    # rank_by_two_stage and docs/plans.md Part N (exhaustive two-stage analysis).
     result["consensus_iptm"] = numeric.max(axis=1)
+    result["consensus_iptm_mean"] = numeric.mean(axis=1)
+    result["consensus_iptm_min"] = numeric.min(axis=1)
     result["consensus_iptm_n"] = numeric.notna().sum(axis=1).astype(int)
     return result
 
@@ -702,6 +709,86 @@ def rank_by_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     result = result.sort_values(sort_keys, ascending=ascending, na_position="last")
     result["consensus_rank"] = range(1, len(result) + 1)
     return result.reset_index(drop=True)
+
+
+def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5) -> pd.DataFrame:
+    """Two-stage ranking — the EVALUATOR benchmark recommendation for wet-lab selection.
+
+    Stage 1 — screen by ``consensus_iptm`` (max engine iptm): keep the top
+    ``screen_frac`` as the binder-likely pool. This is the recall step — the most
+    predictive engine flips per target, so "trust whichever engine is most
+    confident" gives the best binder-vs-non-binder AUC (~0.755 on the ProteinBase
+    4-target benchmark).
+
+    Stage 2 — rank survivors by ``consensus_iptm_mean`` (mean engine iptm): the
+    precision step — at the sharp end of the list you want designs *all* engines
+    agree on. On the benchmark this lifts precision@top-10% to 0.92 vs 0.79 for
+    max alone.
+
+    Ranks ALL rows (the screen is a flag + ordering, nothing is dropped):
+    survivors first (by mean), then the rest (by mean). Because max >= mean, a
+    design that fails the max screen also has a low mean, so the head of the list
+    is the genuine two-stage result. Adds:
+        passes_max_screen — bool, in the top ``screen_frac`` by consensus_iptm
+        two_stage_rank    — 1 = best
+
+    See docs/plans.md Part N for the exhaustive two-stage analysis.
+    """
+    result = df.copy()
+    if "consensus_iptm" not in result.columns or "consensus_iptm_mean" not in result.columns:
+        result = compute_consensus_iptm(result)
+
+    cons = pd.to_numeric(result["consensus_iptm"], errors="coerce")
+    eligible = cons.notna()
+    n_eligible = int(eligible.sum())
+    n_keep = round(n_eligible * screen_frac)
+    thr = cons[eligible].nlargest(n_keep).min() if n_keep else float("inf")
+    result["passes_max_screen"] = eligible & (cons >= thr)
+
+    sort_keys = ["passes_max_screen", "consensus_iptm_mean", "consensus_iptm"]
+    ascending = [False, False, False]
+    for col in ("plddt_binder_mean", "boltz_plddt_binder_mean"):
+        if col in result.columns:
+            sort_keys.append(col)
+            ascending.append(False)
+            break
+    result = result.sort_values(sort_keys, ascending=ascending, na_position="last")
+    result["two_stage_rank"] = range(1, len(result) + 1)
+    return result.reset_index(drop=True)
+
+
+def add_design_groups(df: pd.DataFrame) -> pd.DataFrame:
+    """Add a ``design_group`` column collapsing multiple *sequences of one design*.
+
+    Rule: we want the best design, not many near-duplicate variants of it. A
+    "design" is a backbone / hallucination trajectory:
+
+      - Protein-Hunter: ``protein_hunter_<run>_c<cycle>`` → one group per *run*
+        (cycles are snapshots of one hallucination trajectory; e.g. run 107's
+        c5–c8 are 61–80 % identical).
+      - BindCraft: ``..._mpnn<N>`` → one group per *trajectory* (MPNN re-designs
+        of one AF2 backbone).
+
+    Every other tool emits one design per entry (verified distinct — e.g. Mosaic
+    designs from one worker are only ~10 % identical), so the group is the
+    binder_id itself. Downstream keeps the best-ranked entry per group.
+    """
+    result = df.copy()
+    if "binder_id" not in result.columns:
+        result["design_group"] = [str(i) for i in range(len(result))]
+        return result
+
+    def _grp(row: pd.Series) -> str:
+        bid = str(row.get("binder_id", ""))
+        tool = str(row.get("source_tool", ""))
+        if tool == "protein_hunter":
+            return re.sub(r"_c\d+$", "", bid)
+        if tool == "bindcraft":
+            return re.sub(r"_mpnn\d+.*$", "", bid)
+        return bid
+
+    result["design_group"] = result.apply(_grp, axis=1)
+    return result
 
 
 # ---------------------------------------------------------------------------

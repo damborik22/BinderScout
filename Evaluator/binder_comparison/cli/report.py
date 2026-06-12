@@ -22,6 +22,7 @@ from ..comparison.ensemble import compute_ensemble_metrics
 from ..comparison.merger import merge_refold_results
 from ..comparison.scoring import (
     add_boltz_ipsae_from_files,
+    add_design_groups,
     add_ipsae_from_pae_files,
     add_iptm_from_pae_files,
     apply_screening_thresholds,
@@ -30,6 +31,7 @@ from ..comparison.scoring import (
     compute_consensus_iptm,
     rank_by_adaptyv_method,
     rank_by_consensus_iptm,
+    rank_by_two_stage,
 )
 from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
@@ -132,6 +134,14 @@ def run(args: argparse.Namespace) -> None:
             base_dir=esmfold2_base,
         )
 
+    # Recover the interface chain-pair iPTM under its legacy name. The refolder emits
+    # iptm_pair (=max of the two target<->binder directions) and iptm_pair_min (=min);
+    # their mean is the old chain_iptm_interface. Derive it so the metric is surfaced.
+    if {"esmfold2_iptm_pair", "esmfold2_iptm_pair_min"} <= set(df.columns):
+        df["esmfold2_chain_iptm_interface"] = (
+            df["esmfold2_iptm_pair"] + df["esmfold2_iptm_pair_min"]
+        ) / 2.0
+
     # Promote the chosen engine's DunbrackLab PAE-based ipsae_min as the primary ranking column.
     # Column naming differs across engines: boltz uses boltz_pae_ipsae_min, others use
     # <engine>_ipsae_min (no _pae_ prefix) — see scoring._ENGINE_IPSAE_COLS for the canonical map.
@@ -181,15 +191,43 @@ def run(args: argparse.Namespace) -> None:
     df = compute_consensus_iptm(df)
     df = rank_by_adaptyv_method(df)
     df = rank_by_consensus_iptm(df)
+    df = rank_by_two_stage(df)
 
-    rank_by = getattr(args, "rank_by", "adaptyv") or "adaptyv"
+    # All three rankings coexist as columns (adaptyv_rank, consensus_rank,
+    # two_stage_rank); --rank-by selects which orders the report. `active_rank`
+    # is the chosen ordering (1..N) — used for display + structure-file naming so
+    # the HTML shows the selected method's rank. The default is two_stage
+    # (max-screen → mean-rank), the benchmark-recommended ordering for wet-lab selection.
+    rank_by = getattr(args, "rank_by", "two_stage") or "two_stage"
     if rank_by == "consensus_iptm":
         print("[report] Ranking by consensus_iptm (max engine iptm — benchmark-validated binder filter)")
         df = df.sort_values(["consensus_rank"], ascending=[True]).reset_index(drop=True)
+    elif rank_by == "two_stage":
+        print("[report] Ranking by two_stage (max-screen top 50% → mean-rank — benchmark-validated for selection)")
+        df = df.sort_values(["two_stage_rank"], ascending=[True]).reset_index(drop=True)
     else:
         df = df.sort_values(["adaptyv_rank"], ascending=[True]).reset_index(drop=True)
+    df["active_rank"] = range(1, len(df) + 1)
 
-    # Step 4: Write outputs
+    # "Best design, not multiple sequences per design": collapse near-duplicate
+    # variants of one trajectory (Protein-Hunter cycles, BindCraft MPNN re-designs)
+    # to the single best-ranked representative. metrics.csv keeps ALL rows (with
+    # design_group + is_representative); the report/top-N show distinct designs.
+    df = add_design_groups(df)
+    df["is_representative"] = ~df.duplicated("design_group", keep="first")
+    collapse = not getattr(args, "no_collapse_duplicates", False)
+    n_groups = int(df["design_group"].nunique())
+    if collapse and n_groups < len(df):
+        print(
+            f"[report] Collapsing {len(df) - n_groups} near-duplicate variant(s) → "
+            f"{n_groups} distinct designs (best per trajectory; --no-collapse-duplicates to disable)"
+        )
+        df_display = df[df["is_representative"]].reset_index(drop=True)
+        df_display["active_rank"] = range(1, len(df_display) + 1)
+    else:
+        df_display = df
+
+    # Step 4: Write outputs — metrics.csv = every row; everything else = distinct designs
     write_csv(df, output_dir / "metrics.csv")
 
     z_cols = [c for c in df.columns if c.endswith("_z")]
@@ -205,7 +243,10 @@ def run(args: argparse.Namespace) -> None:
         "sequence",
         "binder_length",
         "consensus_iptm",
+        "consensus_iptm_mean",
+        "consensus_iptm_min",
         "consensus_iptm_n",
+        "passes_max_screen",
         "ipsae_min",
         "boltz_pae_ipsae_min",
         "protenix_pae_ipsae_min",
@@ -228,11 +269,14 @@ def run(args: argparse.Namespace) -> None:
         "passes_esmfold2_filter",
         "native_bg_design_ipsae_min",
         "adaptyv_rank",
+        "consensus_rank",
+        "two_stage_rank",
+        "active_rank",
     ]
     _available = [c for c in _top_cols if c in df.columns]
-    top20 = df.head(20)[_available]
+    top20 = df_display.head(20)[_available]
     write_csv(top20, output_dir / "top20_candidates.csv")
-    print("  top20_candidates.csv — top 20 designs with sequences")
+    print("  top20_candidates.csv — top 20 distinct designs with sequences")
 
     # Step 4c: Copy top-20 refolded PDB structures for visual inspection.
     # Prefer the *primary engine's* PDB so the viewer shows the structure
@@ -249,8 +293,8 @@ def run(args: argparse.Namespace) -> None:
     structures_dir = output_dir / "top20_structures"
     structures_dir.mkdir(parents=True, exist_ok=True)
     n_copied = 0
-    for _, row in df.head(20).iterrows():
-        rank = int(row.get("adaptyv_rank", 0))
+    for _, row in df_display.head(20).iterrows():
+        rank = int(row.get("active_rank", row.get("adaptyv_rank", 0)))
         binder_id = row.get("binder_id", f"rank{rank}")
         for col in pdb_cols:
             src = row.get(col)
@@ -269,7 +313,7 @@ def run(args: argparse.Namespace) -> None:
                     break
     if n_copied:
         print(f"  top20_structures/    — {n_copied} refolded PDB structures for visual inspection")
-        _write_pymol_script(df.head(20), structures_dir)
+        _write_pymol_script(df_display.head(20), structures_dir)
         print("  top20_structures/    — view_top20.pml (open in PyMOL)")
 
     # Step 5: HTML report
@@ -290,7 +334,7 @@ def run(args: argparse.Namespace) -> None:
                 tool_pdb_dirs[tool_name.strip()] = pdb_dir.strip()
 
     generate_report(
-        df=df,
+        df=df_display,
         summary=summary,
         output_path=output_dir / "report.html",
         tool_csvs=tool_csvs or None,
@@ -298,6 +342,7 @@ def run(args: argparse.Namespace) -> None:
         boltz2_results_dir=Path(args.boltz2_results).resolve().parent if args.boltz2_results else None,
         primary_engine=primary_engine,
         top_per_tool=args.top_per_tool,
+        rank_method=rank_by,
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
@@ -311,6 +356,8 @@ _TOOL_COLOURS_PYMOL = {
     "mosaic": "green",
     "pxdesign": "purple",
     "boltzgen": "orange",
+    "boltzgen_nano": "orange",
+    "boltzgen_protein": "tv_orange",
     "bindcraft": "blue",
     "proteina_complexa": "teal",
     "rfd3": "tv_orange",
@@ -373,7 +420,7 @@ def _write_pymol_script(top_df: pd.DataFrame, structures_dir: Path) -> None:
     # Colour each binder by source tool
     pml_lines.append("# Binder chain (A) coloured by source tool")
     for _, row in top_df.iterrows():
-        rank = int(row.get("adaptyv_rank", 0))
+        rank = int(row.get("active_rank", row.get("adaptyv_rank", 0)))
         binder_id = row.get("binder_id", f"rank{rank}")
         tool = row.get("source_tool", "unknown")
         colour = _TOOL_COLOURS_PYMOL.get(tool, "white")
@@ -544,11 +591,21 @@ def add_parser(subparsers) -> None:
     )
     p.add_argument(
         "--rank-by",
-        choices=["adaptyv", "consensus_iptm"],
-        default="adaptyv",
-        help="Ranking method for the report. 'adaptyv' (default) = quality_tier → agreement_count → "
-        "ipsae_min. 'consensus_iptm' = max engine iptm (benchmark-validated binder-vs-non-binder filter; "
-        "see docs/plans.md Part N). Both ranks are always written as columns (adaptyv_rank, consensus_rank).",
+        choices=["adaptyv", "consensus_iptm", "two_stage"],
+        default="two_stage",
+        help="Ranking method for the report. 'adaptyv' = quality_tier → agreement_count → "
+        "ipsae_min. 'consensus_iptm' = max engine iptm (benchmark-validated binder-vs-non-binder filter). "
+        "'two_stage' (default) = max-screen (top 50%%) then mean-rank survivors (benchmark-validated for wet-lab "
+        "selection: precision@top-10%% 0.92 vs 0.79 for max alone; see docs/plans.md Part N). All ranks "
+        "are always written as columns (adaptyv_rank, consensus_rank, two_stage_rank).",
+    )
+    p.add_argument(
+        "--no-collapse-duplicates",
+        action="store_true",
+        help="Disable the default 'best design, not multiple sequences per design' collapse. By default "
+        "near-duplicate variants of one trajectory (Protein-Hunter cycles, BindCraft MPNN re-designs) are "
+        "collapsed to the single best-ranked representative in the report and top-N (metrics.csv keeps all, "
+        "tagged with design_group + is_representative).",
     )
     # Per-engine iPSAE thresholds (defaults from scoring.DEFAULT_ENGINE_THRESHOLDS)
     p.add_argument(
