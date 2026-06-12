@@ -19,6 +19,7 @@ the deployment mode, not here.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 # When no design has cleared the gate yet, the yield is unknown (0) and we cannot
@@ -108,3 +109,45 @@ def count_independent_passers(pool, *, threshold: float, score_col: str, group_c
     n_independent = int(best.notna().sum())
     n_passers = int((best >= threshold).sum())
     return n_passers, n_independent
+
+
+def run_autosize_loop(
+    *,
+    generate: Callable[[int], None],
+    score_pool: Callable[[], tuple[int, int]],
+    n_target: int,
+    budget_cap: float | None = None,
+    gpu_h_per_design: float = 0.0,
+    margin: float = 1.2,
+    max_rounds: int = 100,
+) -> list[Verdict]:
+    """Drive generate → score → decide until the tool is done.
+
+    Deployment-agnostic: ``generate(n)`` produces ``n`` more designs (a subprocess
+    locally, or a "need n more" signal to a worker), and ``score_pool()`` re-reads the
+    full accumulated pool and returns ``(independent_passers, n_independent)`` — the same
+    pair ``count_independent_passers`` yields. The designs ``generate(n)`` makes must be
+    visible to the next ``score_pool()`` call.
+
+    Budget is accrued as ``designs_generated * gpu_h_per_design`` and checked *between*
+    rounds, so the final round may overshoot the cap by at most one batch — the cap is a
+    stop signal, not a hard ceiling. ``max_rounds`` guards against a never-converging loop
+    when no ``budget_cap`` is set. Returns the Verdict history (one per round)."""
+    history: list[Verdict] = []
+    budget_spent = 0.0
+    for _ in range(max_rounds):
+        have, n_independent = score_pool()
+        verdict = autosize_decision(
+            have=have,
+            n_independent=n_independent,
+            n_target=n_target,
+            budget_spent=budget_spent,
+            budget_cap=budget_cap,
+            margin=margin,
+        )
+        history.append(verdict)
+        if verdict.stop_reason in ("complete", "budget"):
+            break
+        generate(verdict.next_batch)
+        budget_spent += verdict.next_batch * gpu_h_per_design
+    return history
