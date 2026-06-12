@@ -5,7 +5,24 @@ from binder_comparison.comparison.autosize import (
     MIN_PROBE,
     autosize_decision,
     count_independent_passers,
+    run_autosize_loop,
 )
+
+
+class _FakePool:
+    """Simulates a tool: generate(n) grows the pool; score_pool() reports
+    (passers, n_independent) at a fixed per-design yield."""
+
+    def __init__(self, yield_rate):
+        self.total = 0
+        self.yield_rate = yield_rate
+
+    def generate(self, n):
+        self.total += n
+
+    def score(self):
+        return round(self.total * self.yield_rate), self.total
+
 
 # --- autosize_decision (pure, no pandas) --------------------------------------
 
@@ -48,6 +65,45 @@ def test_zero_yield_explores_groups_seen_when_larger():
 def test_empty_pool_does_not_crash():
     v = autosize_decision(have=0, n_independent=0, n_target=50)
     assert v.stop_reason == "continue" and v.next_batch == MIN_PROBE
+
+
+# --- run_autosize_loop (pure orchestration, no pandas) ------------------------
+
+
+def test_loop_converges_to_complete():
+    pool = _FakePool(yield_rate=0.5)
+    history = run_autosize_loop(generate=pool.generate, score_pool=pool.score, n_target=10)
+    assert history[-1].stop_reason == "complete"
+    assert history[-1].have >= 10
+
+
+def test_loop_cold_start_explores_then_grows():
+    """First score sees an empty pool (0,0); the loop must seed generation, not stall."""
+    pool = _FakePool(yield_rate=0.2)
+    history = run_autosize_loop(generate=pool.generate, score_pool=pool.score, n_target=5)
+    assert history[0].n_independent == 0  # cold start
+    assert history[0].next_batch == MIN_PROBE
+    assert history[-1].complete
+
+
+def test_loop_stops_on_budget_without_reaching_target():
+    pool = _FakePool(yield_rate=0.0)  # tool never produces a passer
+    history = run_autosize_loop(
+        generate=pool.generate,
+        score_pool=pool.score,
+        n_target=50,
+        budget_cap=10.0,
+        gpu_h_per_design=1.0,  # MIN_PROBE designs = 50 GPU-h, blows the 10 h cap next round
+    )
+    assert history[-1].stop_reason == "budget"
+    assert history[-1].have < 50
+
+
+def test_loop_max_rounds_guard_prevents_infinite_loop():
+    pool = _FakePool(yield_rate=0.0)  # never converges, no budget cap
+    history = run_autosize_loop(generate=pool.generate, score_pool=pool.score, n_target=50, max_rounds=4)
+    assert len(history) == 4
+    assert history[-1].stop_reason == "continue"
 
 
 # --- count_independent_passers (independence dedup, needs pandas) --------------
