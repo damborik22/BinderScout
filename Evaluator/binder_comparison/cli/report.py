@@ -134,6 +134,14 @@ def run(args: argparse.Namespace) -> None:
             base_dir=esmfold2_base,
         )
 
+    # Recover the interface chain-pair iPTM under its legacy name. The refolder emits
+    # iptm_pair (=max of the two target<->binder directions) and iptm_pair_min (=min);
+    # their mean is the old chain_iptm_interface. Derive it so the metric is surfaced.
+    if {"esmfold2_iptm_pair", "esmfold2_iptm_pair_min"} <= set(df.columns):
+        df["esmfold2_chain_iptm_interface"] = (
+            df["esmfold2_iptm_pair"] + df["esmfold2_iptm_pair_min"]
+        ) / 2.0
+
     # Promote the chosen engine's DunbrackLab PAE-based ipsae_min as the primary ranking column.
     # Column naming differs across engines: boltz uses boltz_pae_ipsae_min, others use
     # <engine>_ipsae_min (no _pae_ prefix) — see scoring._ENGINE_IPSAE_COLS for the canonical map.
