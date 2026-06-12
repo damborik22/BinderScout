@@ -98,8 +98,8 @@ Target structure (.pdb / .mmcif)
        2. Refold with Boltz-2 (Mosaic venv)                                    [live, all platforms]
        3. Refold with AlphaFold 3 v3.0.2 (binder-eval-af3 env)                 [live, canonical 2nd engine — Spark / H200 / >100 GB VRAM]
        4. (optional) Refold with Protenix v0.5.0 (bindmaster_pxdesign env)     [live, fits 24 GB GPUs — opt-in]
-       4.5 (optional) Refold with ESMFold2 (binder-eval-esmfold2 env)          [live, lightweight 4th engine; not yet in agreement_count]
-       5. Rank by consensus_iptm (primary; agreement_count + plddt tiebreakers); generate HTML + CSV report
+       4.5 (optional) Refold with ESMFold2 (binder-eval-esmfold2 env)          [live, lightweight 4th engine; auto-detected by evaluate.sh; feeds consensus_iptm]
+       5. Rank by two-stage cross-engine iPTM (max-screen → mean iptm); generate HTML + CSV report
 ```
 
 ### Directory layout
@@ -310,9 +310,9 @@ the parameter sweep.
 
 ### Evaluation metrics and ranking
 
-**Primary ranking (benchmark-validated): `consensus_iptm`** — the max ipTM across refolding engines, implemented by `rank_by_consensus_iptm` in `Evaluator/binder_comparison/comparison/scoring.py`, with `agreement_count` then `plddt_binder_mean` as tiebreakers. `ipsae_min` — the minimum of binder→target and target→binder iPSAE (DunbrackLab 2025 formula: `max_i[mean_j(1/(1+(PAE_ij/d0)²))]`, d0_res variant, uniform 10 Å PAE cutoff) — is retained as a **secondary** metric and feeds `agreement_count` (engines agreeing ipsae_min > 0.61). The older `rank_by_adaptyv_method` (quality_tier → agreement_count → ipsae_min → iptm) still coexists, so the report can offer either ranking.
+**Primary ranking: two-stage cross-engine iPTM** — `binder-compare report --rank-by two_stage` (the default). **Stage 1 (screen):** `consensus_iptm` = max of the per-engine PAE-recomputed iPTMs (`boltz_pae_iptm`, `af3_pae_iptm`, `esmfold2_pae_iptm`); keep the top 50% (`passes_max_screen`) — benchmark-validated binder-vs-non-binder filter (macro AUC ≈ 0.755, ProteinBase 4-target). **Stage 2 (rank):** `consensus_iptm_mean` = mean of those iPTMs, which orders the survivors (precision@top-10% 0.92 vs 0.79 for max alone). `adaptyv_rank` (agreement_count → ipsae_min) and `consensus_rank` (max only) remain as columns but are no longer the default sort.
 
-> Historical note: earlier guidance made `ipsae_min` the primary metric. After a cross-target benchmark this was superseded by `consensus_iptm`. Update older docs/skills that still say "rank by ipsae_min" accordingly.
+`ipsae_min` (min of binder→target and target→binder iPSAE; DunbrackLab 2025 `max_i[mean_j(1/(1+(PAE_ij/d0)²))]`, d0_res variant, uniform 10 Å PAE cutoff) is retained as a diagnostic and for the quality tiers below — not the primary sort. **Caveat:** no structure-confidence metric ranks *affinity* among binders, only binder-vs-non-binder (see `docs/plans.md` Part N; affinity needs an interface-ΔG metric, planned).
 
 **Direction guide:**
 - **Higher is better:** `iptm`, `bt_ipsae`, `tb_ipsae`, `ipsae_min`, `plddt_binder_mean`, `binder_ptm`
@@ -329,8 +329,8 @@ the parameter sweep.
 
 ### Critical domain facts
 
-- **single-engine iptm is gameable** — AF2-designed sequences (BindCraft) tend to score high on one engine's ipTM by construction. The benchmark-validated ranking therefore uses `consensus_iptm` (max ipTM *across independent engines*) plus `agreement_count`, which resists this; `ipsae_min` remains a useful secondary/tiebreaker. (Earlier guidance made `ipsae_min` primary — superseded by the consensus-iptm benchmark.)
-- **Engine disagreement is signal, not noise** — For short binders (~60aa), different refolding engines often disagree on interface quality. The `agreement_count` column reflects how many engines pass the 0.61 threshold; higher = stronger candidate.
+- **iptm is gameable by the designing engine** — BindCraft games AF2 ipTM; Mosaic games `boltz_iptm` by construction (it *is* Boltz-2 gradient hallucination). Never rank on a single engine's ipTM. The two-stage `consensus_iptm_mean` (mean across independent engines) resists this — a design one engine loves but another rejects is demoted by the mean.
+- **Engine disagreement is signal, not noise** — For short binders (~60aa), refolding engines often disagree on interface quality. The two-stage mean iPTM captures this continuously (disagreement lowers the mean); the `agreement_count` column (engines past the 0.61 ipSAE threshold) is retained as a diagnostic.
 - **Binder length is a main driver** — Longer binders tend to score lower on `ipsae_min` (r ≈ -0.78).
 - **Mosaic designs.csv format** — Can mix column formats between workers (old 11-col / new 13-col). The parser must handle this carefully or columns misalign. The `is_top` column marks the ~40 refolded designs out of ~800 total; extractors filter to `is_top=1` by default.
 - **Mosaic `target_sequence` placeholder** — The Mosaic template (`hallucinate_bindmaster.py`) writes `"REPLACE_ME"` as `target_sequence` when not configured. The legacy evaluator guards against using this as a real target sequence.
@@ -372,6 +372,7 @@ the parameter sweep.
 - **Mosaic `is_top` filtering:** Both extractors (Evaluator package `MosaicExtractor` and legacy `evaluator.py`) now default to `is_top=1` rows only (~40 refolded designs instead of all ~800). Use `--all-mosaic-designs` to override. The `target_sequence` CSV fallback also skips `"REPLACE_ME"` placeholders.
 - **Mosaic CSV column mismatch:** `designs.csv` can mix two column formats when multiple workers run. Parser may misalign columns for some workers. Documented in `Evaluator/docs/pipeline_reference.md`.
 - **BoltzGen pass rate is low:** In CALCA target testing, only 1/50 BoltzGen designs passed the `ipsae_min > 0.61` threshold. Sequences designed for Boltz-2 often don't cross-validate well.
+- **BoltzGen sequence column (`designed_chain_sequence` vs `designed_sequence`):** Extract the binder from `designed_chain_sequence` (the full chain). `designed_sequence` holds only the *designed residues* — for nanobody CDR-redesign that is just the CDR subset (~25-40 aa), so refolding it feeds a truncated binder. Verified on 2VDY: nano `designed_sequence` len 24-42 vs `designed_chain_sequence` len 112-133 (full VHH). `BoltzGenExtractor._SEQUENCE_COL_CANDIDATES` was reordered to prefer `designed_chain_sequence`.
 - **aarch64 BindCraft:** May fail because jaxlib CUDA conda packages are not available for aarch64.
 - **aarch64 Mosaic:** May fail because `torchtext` has no Linux aarch64 wheel.
 - **aarch64 Proteina-Complexa:** May need patches — PyTorch Geometric (PyG) and torchtext may lack aarch64 wheels. Core deps (PyTorch 2.7, JAX 0.4.29) are fine. Same approach as Mosaic: patch pyproject.toml to exclude problematic packages with `platform_machine != 'aarch64'` markers.

@@ -81,6 +81,13 @@ Two design checkpoints are loaded by default (`boltzgen1_diverse` + `boltzgen1_a
 - `largest_hydrophobic_patch` — surface hydrophobicity (omitted for peptide/nanobody protocols)
 - Boltz-2 native confidence: `iptm`, `plddt`, `pae_*` (in `[binder|target]` ordering)
 
+**Sequence column — use `designed_chain_sequence`, not `designed_sequence`:**
+`designed_chain_sequence` is the FULL binder chain for every protocol. `designed_sequence`
+holds only the *designed residues*: identical to the full chain for protein-anything, but for
+**nanobody CDR-redesign it is just the CDR subset (~25-40 aa)** — refolding it would feed a
+truncated binder. Verified on 2VDY: nano `designed_sequence` len 24-42 vs `designed_chain_sequence`
+len 112-133 (full VHH). The `BoltzGenExtractor` was corrected to prefer `designed_chain_sequence`.
+
 **Evaluator step (BindMaster):**
 
 The evaluator re-folds with Boltz-2 using the uniform 10 Å PAE cutoff and DunbrackLab 2025 iPSAE formula, producing `bt_ipsae`, `tb_ipsae`, `ipsae_min` (column prefix `boltz_*` to distinguish from `protenix_*` and `af3_*`). BoltzGen's own metrics and the evaluator's cross-method `ipsae_min` are preserved side by side — the evaluator is an unbiased comparator across tools, not a replacement for BoltzGen's internal ranking.
