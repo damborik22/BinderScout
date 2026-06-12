@@ -645,6 +645,32 @@ _ENGINE_IPTM_COLS: list[str] = [
 ]
 
 
+def add_chain_iptm_interface(df: pd.DataFrame, prefix: str = "esmfold2") -> pd.DataFrame:
+    """Derive the symmetric chain-pair interface iPTM from the refolder's pair columns.
+
+    The ESMFold2 refolder records ``iptm_pair`` (= max off-diagonal of
+    ``pair_chains_iptm``) and ``iptm_pair_min`` (= min). For a 2-chain binder
+    complex those are the two directional target<->binder interface iPTMs, so their
+    mean ``(iptm_pair + iptm_pair_min) / 2`` is the symmetric chain-pair interface
+    iPTM — the strongest single binder-vs-non-binder screen on the ProteinBase
+    4-target benchmark (macro AUC ≈ 0.745).
+
+    Prefix-aware so one definition serves both column conventions: ``prefix="esmfold2"``
+    for the merged report frame (``esmfold2_iptm_pair``), ``prefix=""`` for a raw refold
+    CSV (``iptm_pair``). Writes ``{prefix}_chain_iptm_interface`` (or
+    ``chain_iptm_interface`` when ``prefix`` is empty); no-op if the pair columns are
+    absent.
+    """
+    result = df.copy()
+    p = f"{prefix}_" if prefix else ""
+    pair, pair_min = f"{p}iptm_pair", f"{p}iptm_pair_min"
+    if {pair, pair_min} <= set(result.columns):
+        result[f"{p}chain_iptm_interface"] = (
+            pd.to_numeric(result[pair], errors="coerce") + pd.to_numeric(result[pair_min], errors="coerce")
+        ) / 2.0
+    return result
+
+
 def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     """Add a ``consensus_iptm`` column = max of the per-engine PAE-recomputed iptms.
 
@@ -726,9 +752,10 @@ def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5) -> pd.DataFram
     max alone.
 
     Ranks ALL rows (the screen is a flag + ordering, nothing is dropped):
-    survivors first (by mean), then the rest (by mean). Because max >= mean, a
-    design that fails the max screen also has a low mean, so the head of the list
-    is the genuine two-stage result. Adds:
+    ``passes_max_screen`` is the primary sort key, so all screen survivors sort
+    above all non-survivors regardless of their mean; within each group rows are
+    ordered by ``consensus_iptm_mean``. The head of the list is therefore the
+    genuine two-stage result. Adds:
         passes_max_screen — bool, in the top ``screen_frac`` by consensus_iptm
         two_stage_rank    — 1 = best
 
