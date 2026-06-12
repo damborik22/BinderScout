@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 
 from .cli import (
+    autosize,
     extract,
     filter_soluprot,
     parse_seqs,
@@ -53,6 +54,7 @@ def main(argv=None) -> None:
     report.add_parser(subparsers)
     run.add_parser(subparsers)
     validate.add_parser(subparsers)
+    autosize.add_parser(subparsers)
 
     args = parser.parse_args(argv)
     args.func(args)
