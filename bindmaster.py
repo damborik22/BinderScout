@@ -121,8 +121,7 @@ def _dispatch(cmd: str, args: list) -> None:
         conda_base = _find_conda_base()
         if conda_base is None:
             print(
-                f"{RED}✗ conda not found — install the evaluator first "
-                f"(`bindmaster install --tool all`){RESET}",
+                f"{RED}✗ conda not found — install the evaluator first (`bindmaster install --tool all`){RESET}",
                 file=sys.stderr,
             )
             sys.exit(1)
