@@ -18,10 +18,12 @@ are live in-session; use real queries, cite what you use.
 
 ## Step 0 — resolve identity (name → UniProt → gene → PDB)
 
-> **Sequence-only input?** First identify it: UniProt sequence search
-> (`https://rest.uniprot.org/uniprotkb/search?query=<seq>&format=json`) or BLAST. If it matches a
-> known protein, proceed below. If it's novel/engineered (no hit), skip to folding (SKILL §2a) —
-> there's no literature, so geometry on the predicted model leads.
+> **Sequence-only input?** See SKILL §2a — do sequence-driven discovery first: find the right PDB
+> (RCSB sequence search), build the MSA (`get_target_msa` → homologs, conservation), and fold only
+> if no good experimental structure. Identify it via UniProt sequence search
+> (`https://rest.uniprot.org/uniprotkb/search?query=<seq>&format=json`) or BLAST, then proceed
+> below. If it's novel/engineered (no hit), there's no literature — geometry + conservation on the
+> predicted model lead.
 
 1. `mcp__ChEMBL__target_search(gene_symbol="<GENE>", organism="Homo sapiens", target_type="SINGLE PROTEIN")`
    → returns the target's components incl. **UniProt accession** + `target_chembl_id` (keep both).

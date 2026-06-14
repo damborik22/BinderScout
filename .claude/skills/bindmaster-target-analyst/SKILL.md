@@ -51,29 +51,49 @@ A target reference in any of these forms — resolve to the others as step 0:
 `TODO:` document the resolution recipe (name → UniProt → gene → PDB) using WebFetch on
 UniProt/PDB.
 
-### 2a. Sequence-only targets (no structure / no id)
+### 2a. Sequence-driven discovery (the common case)
 
-Every downstream step needs a structure (`analyze-target`, PDBsum). When the input is just a
-sequence, **fold it first**, in parallel with identifying it:
+A bare sequence is usually all we get. Every downstream step needs a structure, so from the
+sequence do three things before §3 — **find the right PDB, build the MSA, fold only if needed**:
 
-1. **Identify** — the sequence may be a known protein. Search UniProt by sequence
-   (`https://rest.uniprot.org/uniprotkb/search?query=<seq>` / BLAST), or it may be named in the
-   request. If identified → pull literature + *experimental* structures as usual (prefer a real
-   PDB over a model).
-2. **Fold** — if there is no experimental structure (novel/engineered target, or just to move
-   fast), predict one with the repo's helper:
+1. **Find the right PDB** — search the sequence against the PDB and pick the best *experimental*
+   structure: high identity (≥ ~95 % = the same protein), good resolution, and **prefer a
+   relevant complex over apo** (complexes reveal interfaces). A high-identity PDB beats any model —
+   use it and skip folding.
+   - RCSB sequence service: POST a sequence query to `https://search.rcsb.org/rcsbsearch/v2/query`
+     (returns scored PDB ids). `TODO:` pin the exact JSON query + a small helper.
+2. **Build the MSA** — reuse the repo's `get_target_msa(seq)`
+   (`Evaluator/binder_comparison/refolding/target_msa.py`): queries the ColabFold MMseqs2 server,
+   returns an A3M, **cached** (`~/.cache/bindmaster/target_msa/`). The MSA gives:
+   homologs/family (*what is this target*), **conservation** (per-column entropy → conserved
+   surface residues = functional/binding sites; see `interaction-sites.md`), and it is **reused**
+   downstream by folding + the evaluator's AF3/ESMFold2 refold (same cache — generate once).
+   `TODO:` expose as `binder-compare target-msa` so the skill / `analyze-target` call it cleanly.
+3. **Fold only if needed** — no good experimental PDB (novel / low-identity) → predict a model
+   *with the MSA*:
    ```bash
    Mosaic/.venv/bin/python configurator/predict_structure.py "<SEQUENCE>" runs/<name>/target/<name>.pdb
    ```
-   It folds with Boltz-2 and prints **mean pLDDT**. Then run `analyze-target` + PDBsum on the model.
-3. **Use pLDDT as a confidence + disorder signal** — low-pLDDT regions are disordered (raise the
-   difficulty band) and their pockets/clefts are unreliable (down-weight sites there). A
-   well-folded high-pLDDT core is where a binder should grip.
+   (Boltz-2 + MSA; prints mean pLDDT.) Then run `analyze-target` + PDBsum on the model.
+
+**Which folding engine?** For an *unsolved target* (a natural protein), **MSA-based AF-class
+prediction is best** — accuracy matters because every site/difficulty call rides on the model:
+- **AF3** (`binder-eval-af3`, big-VRAM) — highest accuracy when available.
+- **Boltz-2 + MSA** (`predict_structure.py`, already wired) — AF3-class, the practical default.
+- **AF2 / ColabFold** (via the BindCraft env) — gold-standard monomer accuracy with a deep MSA.
+- **ESMFold2** — MSA-free, fast, good for a first pass, but **weaker on novel / low-homology**
+  folds — use it only as a quick proxy, not the model the dossier commits to.
+(This is the opposite of *binder* refolding, where de novo binders have no MSA — here the target
+is natural and has homologs, so feed the MSA.)
+
+**pLDDT = confidence + disorder:** low-pLDDT regions are disordered (raise the difficulty band)
+and their pockets/clefts are unreliable (down-weight sites there); the high-pLDDT core is where a
+binder should grip.
 
 **Caveats:** a *monomer model* has no real partner, so PDBsum PPI-interface detection won't apply
-(cleft/ligand-pocket detection still does) — for a PPI target you need the partner or a predicted
-complex. `TODO:` code enhancement — let `analyze-target` ingest per-residue pLDDT to compute its
-`disorder_fraction` directly (today it is hardcoded 0); also an ESMFold2/AF2 alt-folder option.
+(cleft / ligand-pocket detection still does) — for a PPI target you need the partner or a
+predicted complex. `TODO:` let `analyze-target` ingest per-residue pLDDT to compute its
+`disorder_fraction` directly (today hardcoded 0).
 
 ---
 
