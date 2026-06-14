@@ -45,6 +45,27 @@ for the orchestrator/autosize. Save to `CLUSTER/<TARGET>_DOSSIER.md` (+ `.json`)
 }
 ```
 
-`TODO:` reconcile the geometric `analyze-target` JSON with the literature-chosen site; document
-the override rules (literature beats geometry on *where*, geometry informs *difficulty* and
-*length*). `TODO:` the exact mapping into the orchestrator kickoff doc + each tool's hotspot field.
+## Merge rules (literature/PDBsum vs. geometry)
+
+- **Where to bind** → evidence wins: take `hotspots` from the top-ranked site in
+  `interaction-sites.md` (PDBsum / complex / literature), **not** from `analyze-target`'s
+  Cα-density pockets. Use the geometric pockets only as a fallback when there is no
+  structural/literature site, or as a confirmation signal.
+- **Difficulty** → blend: start from `analyze-target`'s geometric `difficulty`, then **raise the
+  band** for literature flags (disorder, heavy glycosylation, flat/shallow PPI, no apo structure).
+  Document the rationale.
+- **Binder length** → `analyze-target`'s `suggested_binder_length`, widened toward the longer end
+  for shallow-PPI targets.
+- **n_target / gate_tier / tools** → from the (possibly raised) difficulty band via
+  `suggest_campaign`; harder → smaller N, more permissive gate, more diverse tools.
+
+## Into the orchestrator kickoff
+
+The JSON sidecar maps onto the campaign the orchestrator drives:
+- `hotspots` → each tool's hotspot field (BindCraft `target_hotspot_residues`, PXDesign / PC /
+  PH / RFD3 hotspot configs) — kept clustered on one face (see `interaction-sites.md`).
+- `n_target` + `gate_tier` → `binder-compare autosize --n-target --tier` (per tool, equal-N).
+- `tools` → which design tools the orchestrator assigns.
+- `binder_length` → each tool's length range.
+
+`TODO:` finalize the exact field names once the orchestrator's `autosize.md` is polished.
