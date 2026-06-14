@@ -19,6 +19,7 @@ import argparse
 
 from .cli import (
     affinity,
+    analyze_target,
     autosize,
     extract,
     filter_soluprot,
@@ -63,6 +64,7 @@ def main(argv=None) -> None:
     mature.add_parser(subparsers)
     monomer.add_parser(subparsers)
     affinity.add_parser(subparsers)
+    analyze_target.add_parser(subparsers)
 
     args = parser.parse_args(argv)
     args.func(args)
