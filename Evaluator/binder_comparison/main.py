@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 
 from .cli import (
+    affinity,
     autosize,
     extract,
     filter_soluprot,
@@ -61,6 +62,7 @@ def main(argv=None) -> None:
     wetlab.add_parser(subparsers)
     mature.add_parser(subparsers)
     monomer.add_parser(subparsers)
+    affinity.add_parser(subparsers)
 
     args = parser.parse_args(argv)
     args.func(args)
