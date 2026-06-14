@@ -10,6 +10,15 @@ kinetics → solution-phase affinity**:
    - **SPR** (Biacore) — gold-standard kinetics (kon/koff/KD).
    - **FIDA** (flow-induced dispersion analysis) — solution-phase Kd, **immobilization-free**:
      robust for targets that don't immobilize well and a check against surface artifacts.
+3. **Stability / QC** — is the binder a real, folded, stable protein?
+   - **SDS-PAGE** — purity + integrity after expression (± reducing agent for disulfides).
+   - **Panta** (NanoTemper nanoDSF + DLS) — thermal stability (**Tm**) + **aggregation** / colloidal stability.
+   - **CD** (circular dichroism) — secondary-structure content + thermal melt (confirms a folded,
+     cooperatively-unfolding protein, not a molten globule).
+
+   This is the in-vitro counterpart of the in-silico **monomer QC** (`bindmaster-evaluator` `qc.md`)
+   and the binder **surface-hydrophobicity** developability flag: a design that failed monomer-RMSD
+   or has large hydrophobic patches is the one to watch for low Tm / aggregation here.
 
 ## What governs the choices
 - **Adaptyv submission count**, not assay type, is the budget lever: every submitted design gets
