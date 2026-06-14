@@ -18,9 +18,13 @@ from __future__ import annotations
 import argparse
 
 from .cli import (
+    affinity,
+    analyze_target,
     autosize,
     extract,
     filter_soluprot,
+    mature,
+    monomer,
     parse_seqs,
     refold_af3,
     refold_boltz2,
@@ -29,6 +33,7 @@ from .cli import (
     report,
     run,
     validate,
+    wetlab,
 )
 
 
@@ -55,6 +60,11 @@ def main(argv=None) -> None:
     run.add_parser(subparsers)
     validate.add_parser(subparsers)
     autosize.add_parser(subparsers)
+    wetlab.add_parser(subparsers)
+    mature.add_parser(subparsers)
+    monomer.add_parser(subparsers)
+    affinity.add_parser(subparsers)
+    analyze_target.add_parser(subparsers)
 
     args = parser.parse_args(argv)
     args.func(args)
