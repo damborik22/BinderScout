@@ -5,8 +5,8 @@ description: Use this skill at the START of a binder-design campaign to research
 
 # BindMaster Target Analyst — SKILL base
 
-> **Status: scaffold.** Basic structure to polish section by section. `TODO:` marks the spots
-> that need fleshing out with real recipes/examples.
+> Remaining `TODO:` markers are the genuinely external items — PDBsum / HotSpot Wizard submit-parse
+> recipes (need the live tools) and a couple of cross-skill field syncs.
 
 **Audience:** an AI agent characterizing a binder-design target before a campaign. The job:
 **research → find the important spots → assess difficulty → recommend a campaign**, captured

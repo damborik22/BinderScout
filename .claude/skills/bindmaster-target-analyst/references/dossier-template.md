@@ -1,8 +1,5 @@
 # Target dossier template
 
-> **Scaffold.** The structure is here; `TODO:` fill worked examples and the dossier→kickoff
-> field mapping.
-
 The analyst's deliverable: a markdown dossier for humans + a JSON sidecar of campaign params
 for the orchestrator/autosize. Save to `CLUSTER/<TARGET>_DOSSIER.md` (+ `.json`).
 
