@@ -1,8 +1,5 @@
 # Interaction & functional sites
 
-> **Scaffold.** Taxonomy + evidence sources are listed; `TODO:` add residue-mapping recipes,
-> ranking rubric, and how the chosen site becomes hotspots.
-
 Turn the research brief (`literature-research.md`) + structural annotation (PDBsum) + geometry
 (`binder-compare analyze-target`) into a **ranked list of candidate binding sites**, each with
 evidence and residue numbers.
