@@ -4,12 +4,46 @@ import numpy as np
 from binder_comparison.comparison.target_analysis import (
     classify_difficulty,
     difficulty_score,
+    disorder_fraction_from_plddt,
     flat_surface_fraction,
     neighbor_counts,
     pick_hotspots,
     suggest_binder_length,
     suggest_campaign,
+    surface_hydrophobicity,
 )
+
+# --- disorder from pLDDT ------------------------------------------------------
+
+
+def test_disorder_fraction_0_100_scale():
+    # 2 of 4 below 70 on the 0-100 scale
+    assert disorder_fraction_from_plddt([90, 80, 50, 40]) == 0.5
+
+
+def test_disorder_fraction_0_1_scale():
+    assert disorder_fraction_from_plddt([0.9, 0.8, 0.5, 0.4]) == 0.5
+
+
+def test_disorder_ignores_nan_and_empty():
+    assert disorder_fraction_from_plddt([float("nan"), 90.0]) == 0.0  # only the 90 counts, ≥70
+    assert disorder_fraction_from_plddt([]) == 0.0
+
+
+# --- surface hydrophobicity ---------------------------------------------------
+
+
+def test_surface_hydrophobicity_counts_exposed_hydrophobics():
+    # ILE (KD +4.5, hydrophobic) + ARG (KD -4.5) exposed; ILE buried.
+    resnames = ["ILE", "ARG", "ILE"]
+    counts = [3, 3, 30]  # first two exposed (<=9), third buried
+    # exposed = ILE(+), ARG(-) → 1 of 2 hydrophobic
+    assert surface_hydrophobicity(resnames, counts, exposed_max=9) == 0.5
+
+
+def test_surface_hydrophobicity_empty():
+    assert surface_hydrophobicity([], []) == 0.0
+
 
 # --- geometry -----------------------------------------------------------------
 

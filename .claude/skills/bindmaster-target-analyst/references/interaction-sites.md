@@ -68,11 +68,14 @@ look for **accessible hydrophobic clusters**. An accessible hydrophobic patch th
 PDBsum cleft / conserved surface = a strong binding-site candidate. Tools beyond the built-in
 table: molecular hydrophobicity potential (MHP), PyMOL `color_h`.
 
+`analyze-target` now computes this directly: its profile JSON includes **`surface_hydrophobicity`**
+(fraction of exposed residues that are hydrophobic, KD > 0). Use it as a quick patch-level signal;
+for residue-level hydrophobic-patch hotspots, map KD × exposure onto the structure (MHP / PyMOL
+`color_h`) — `TODO:` add a per-residue hydrophobicity track to the CLI if needed.
+
 **Flip side — binder developability:** the same metric on the *binder* surface flags aggregation
 risk (large exposed hydrophobic patches). That's a QC/developability concern → see
-`bindmaster-wetlab` and `bindmaster-evaluator` (`qc.md`), not target analysis. `TODO:` a small
-`analyze-target` enhancement could emit a per-residue surface-hydrophobicity track for free (it
-already has coords + the KD table is one import away).
+`bindmaster-wetlab` and `bindmaster-evaluator` (`qc.md`), not target analysis.
 
 ## Site taxonomy (target the right one)
 
