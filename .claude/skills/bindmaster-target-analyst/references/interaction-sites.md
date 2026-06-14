@@ -26,6 +26,16 @@ campaign — prefer PDBsum for clefts/interfaces when available; `analyze-target
 fallback + difficulty score. The EBI web PDBsum (`https://www.ebi.ac.uk/pdbsum/`) is a quick
 per-PDB-id lookup when a local run isn't set up.
 
+## Conservation (from the MSA)
+
+The target MSA (`get_target_msa`, SKILL §2a) is a second, sequence-based site signal:
+**conserved surface residues are usually functional** (active sites, binding patches stay
+conserved while the rest of the surface drifts). Compute per-column conservation (e.g. Shannon
+entropy / a ConSurf-style score) over the A3M, map it onto the structure, and treat a **conserved
++ surface-accessible patch that coincides with a PDBsum cleft/interface** as a high-confidence
+functional site. Conservation alone (buried conserved core) is *not* a binding site — require
+surface accessibility. `TODO:` pin the conservation calc + the mapping recipe.
+
 ## Site taxonomy (target the right one)
 
 | Site type | What it is | Where to find it | Design implication |
