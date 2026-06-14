@@ -5,8 +5,6 @@ description: Use this skill to take ranked binder designs out of silico — gene
 
 # BindMaster Wet-Lab Advisor — SKILL base
 
-> **Status: scaffold.** Basic structure to polish. `TODO:` marks spots to flesh out.
-
 **Audience:** an AI agent at the in-silico → wet-lab boundary, and back. **Job:** turn the
 evaluator's shortlist into an orderable/expressable/assayable plan, then turn binding results
 into the next computational round — closing the campaign loop.
