@@ -97,24 +97,30 @@ def _isoelectric_point(counts: dict[str, int]) -> float:
 
 
 def recommend_assay(n_designs: int, budget_usd: float | None = None) -> dict:
-    """Budget- and throughput-aware experimental assay recommendation.
+    """Assay panel for the lab's Adaptyv-based workflow.
 
-    Mirrors BindMaster 2's logic: a high-throughput split-luciferase screen (NanoBiT)
-    above ~50 designs, label-free BLI below that, and SPR reserved for lead
-    characterization. Budget, when given, can downgrade the screen tier.
+    Designs are submitted to Adaptyv Bio (express + characterize). BLI gives a quick yes/no plus
+    first-pass kinetics on everything submitted; the top hits go to SPR (gold-standard kinetics)
+    and FIDA (solution-phase Kd, immobilization-free). Throughput / budget govern *how many*
+    designs to submit, not which assay.
     """
-    if n_designs > 50:
-        screen = "split-luciferase (NanoBiT) — high-throughput binary binding screen"
-    else:
-        screen = "BLI (bio-layer interferometry) — label-free kinetics on all designs"
-    # Tight budget can't afford BLI on a large pool; fall back to the cheap binary screen.
-    if budget_usd is not None and budget_usd < 5000 and n_designs > 20:
-        screen = "split-luciferase (NanoBiT) — cheapest binary screen for the budget"
-    return {
-        "screen": screen,
-        "lead_characterization": "SPR (Biacore) — full kinetics (kon/koff/KD) on the top hits",
-        "orthogonal": ["DSF (thermal stability)", "ITC (binding thermodynamics)"],
+    panel = {
+        "platform": "Adaptyv Bio — express + characterize the submitted designs",
+        "screen": "BLI — quick yes/no binding + first-pass kinetics (all submitted designs)",
+        "lead_characterization": [
+            "SPR — gold-standard kinetics (kon/koff/KD) on the top hits",
+            "FIDA — solution-phase Kd, no immobilization (robust for hard-to-immobilize targets)",
+        ],
+        "stability": [
+            "SDS-PAGE — purity + integrity (expression QC; ± reducing agent)",
+            "Panta (NanoTemper nanoDSF + DLS) — thermal stability (Tm) + aggregation / colloidal stability",
+            "CD — secondary-structure content + thermal melt (confirms a folded, cooperative protein)",
+        ],
+        "submitting": n_designs,
     }
+    if budget_usd is not None:
+        panel["budget_usd"] = budget_usd
+    return panel
 
 
 # Most-frequent E. coli codon per amino acid (high-expression bias).
@@ -149,12 +155,35 @@ class WetLabConfig:
     """Knobs for the plan. Vendor/cost are lab-overridable defaults, not authority."""
 
     organism: str = "e_coli"
+    expression: str = "e_coli"  # "e_coli" (in-cell) | "cell_free" (CFPS)
+    test_matrices: list[str] = field(default_factory=lambda: ["purified"])  # → crude_extract → plasma
     budget_usd: float | None = None
     top_n: int = 20
     tag: str = "His6-TEV"
     gene_vendor: str = "Twist Bioscience"
     cost_per_gene_usd: float = 0.10  # per bp, rough order-of-magnitude default
     notes: list[str] = field(default_factory=list)
+
+
+# How a binder is produced (plan section 2).
+_EXPRESSION = {
+    "e_coli": [
+        "- Strain: E. coli BL21(DE3); medium: LB or auto-induction (ZYM-5052)",
+        "- Induction: 0.5 mM IPTG, 18 °C overnight (favors soluble folding)",
+    ],
+    "cell_free": [
+        "- Cell-free protein synthesis (CFPS) — E. coli lysate / PURE; transformation-free, ~hours to protein",
+        "- Template: linear DNA (PCR) or plasmid; parallel-friendly — good for screening many designs fast",
+        "- Scale solubly-expressing hits into cells only if more material is needed",
+    ],
+}
+
+# Where binding is tested — a clean → complex specificity/developability ladder (plan section 3).
+_MATRIX = {
+    "purified": "purified protein (clean affinity)",
+    "crude_extract": "crude lysate (specificity in a cellular background)",
+    "plasma": "plasma / serum (physiological binding + serum stability)",
+}
 
 
 def wetlab_plan_markdown(designs: list[dict], config: WetLabConfig | None = None) -> str:
@@ -188,23 +217,21 @@ def wetlab_plan_markdown(designs: list[dict], config: WetLabConfig | None = None
     ]
 
     # 2. Expression
+    lines += ["## 2. Expression", *_EXPRESSION.get(cfg.expression, _EXPRESSION["e_coli"]), ""]
+
+    # 3. Testing (Adaptyv: express + characterize)
     lines += [
-        "## 2. Expression",
-        "- Strain: E. coli BL21(DE3); medium: LB or auto-induction (ZYM-5052)",
-        "- Induction: 0.5 mM IPTG, 18 °C overnight (favors soluble folding)",
+        "## 3. Testing",
+        f"- Platform: {assay['platform']}",
+        f"- Screen: {assay['screen']}",
+        "- Lead characterization:",
+        *[f"  - {a}" for a in assay["lead_characterization"]],
+        "- Matrices: " + " → ".join(_MATRIX.get(m, m) for m in cfg.test_matrices),
         "",
     ]
 
-    # 3. Screening (budget/throughput aware)
-    lines += [
-        "## 3. Screening",
-        f"- Primary screen: {assay['screen']}",
-        f"- Lead characterization: {assay['lead_characterization']}",
-        "",
-    ]
-
-    # 4. Characterization
-    lines += ["## 4. Characterization", *[f"- {a}" for a in assay["orthogonal"]], ""]
+    # 4. Stability / QC
+    lines += ["## 4. Stability / QC", *[f"- {a}" for a in assay["stability"]], ""]
 
     # 5. Controls
     lines += [
