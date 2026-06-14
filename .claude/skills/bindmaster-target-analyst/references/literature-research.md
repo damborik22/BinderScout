@@ -12,6 +12,7 @@ Goal: assemble "what is known about this target" with citations, ending in a lis
 |---|---|---|
 | **UniProt** | WebFetch `https://rest.uniprot.org/uniprotkb/<acc>.txt` (or `.json`) | identity, function, domains, **feature table** (active/binding sites, PTM, glyco, disulfide), sequence |
 | **RCSB PDB** | WebFetch `https://www.rcsb.org/structure/<id>`, `https://data.rcsb.org/rest/v1/core/entry/<id>` | apo + **complex** structures (complexes show binding sites), resolution, ligands |
+| **PDBsum** | local [PDBsum1](https://github.com/RomanLas/PDBsum1) on a PDB; web `https://www.ebi.ac.uk/pdbsum/<id>` | **interface residues, clefts/pockets, ligand contacts, active sites** — the richest per-structure site source (see `interaction-sites.md`) |
 | **PubMed** | `mcp__PubMed__search_articles`, `get_article_metadata`, `get_full_text_article`, `find_related_articles` | function, disease relevance, epitopes, PPI partners, flexibility/glycosylation notes |
 | **ChEMBL** | `target_search`, `get_bioactivity`, `drug_search`, `get_mechanism`, `compound_search` | known ligands/drugs and **their binding site / mechanism** |
 | **bioRxiv/medRxiv** | `mcp__bioRxiv__search_preprints`, `search_published_preprints` | recent, not-yet-indexed findings |

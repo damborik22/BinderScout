@@ -72,13 +72,16 @@ Build the "what's known" picture. Tools available in-session: **PubMed**, **ChEM
 
 `TODO:` per-tool query templates + how to dedupe/cite; how much to trust each source.
 
-### 3b. Interaction-site identification  →  see `references/interaction-sites.md`
+### 3b. Structural annotation + interaction-site ID  →  see `references/interaction-sites.md`
 
-Turn the research into a list of candidate binding sites, each with **evidence**:
+Turn the research + structure into a list of candidate binding sites, each with **evidence**:
+- **PDBsum** ([PDBsum1](https://github.com/RomanLas/PDBsum1), local) on the target/complex PDBs →
+  interface residues (PPI / epitopes), clefts/pockets, ligand-contact residues, active sites.
+  This is the primary per-structure source — richer than the geometric pocket proxy in 3c.
 - UniProt feature table (active site, binding site, glyco, disulfide, PTM).
-- Interface residues from PDB complexes.
 - Epitopes / hotspots from the literature.
-- `TODO:` taxonomy (catalytic / allosteric / PPI / epitope) and how to evidence each.
+- `TODO:` taxonomy (catalytic / allosteric / PPI / epitope / ligand) and how to evidence each;
+  PDBsum install + output-parsing recipe.
 
 ### 3c. Geometric analysis  →  `binder-compare analyze-target`
 
@@ -87,8 +90,10 @@ binder-compare analyze-target --target runs/<name>/target/<t>.pdb --chain A \
     --n-hotspots 6 -o target_geometry.json
 ```
 Gives a 0–1 difficulty score, Cα-density pocket hotspots, and suggested `n_target` / gate-tier /
-tools / binder-length. **Advisory** — reconcile with 3b, don't replace it. `TODO:` how to map
-literature sites to residue numbers and check them against the geometric pockets.
+tools / binder-length. The **difficulty score** is the main use here; for *where to bind*, prefer
+PDBsum's clefts/interfaces (3b) — `analyze-target`'s Cα-density pockets are the always-on fallback
+when PDBsum isn't installed. **Advisory** — reconcile with 3b, don't replace it. `TODO:` how to
+map literature/PDBsum sites to residue numbers and cross-check the geometric pockets.
 
 ### 3d. Synthesis → the dossier  →  see `references/dossier-template.md`
 
@@ -119,7 +124,10 @@ gate tier. `TODO:` exact field mapping dossier → kickoff doc.
 ## 6. References
 
 - `references/literature-research.md` — the PubMed/ChEMBL/bioRxiv/ClinicalTrials/UniProt/PDB playbook.
-- `references/interaction-sites.md` — site taxonomy + how to find and evidence each.
+- `references/interaction-sites.md` — site taxonomy + PDBsum structural annotation + how to evidence each.
 - `references/dossier-template.md` — the output dossier structure + the params handed to the orchestrator.
+- **Tooling:** [PDBsum1](https://github.com/RomanLas/PDBsum1) — local structural annotation
+  (interfaces / clefts / ligand contacts / active sites). `TODO:` add to the worker pre-flight / a
+  setup note; it is per-platform executables + `data.tar.gz`, not pip-installable.
 - Sibling skills: `bindmaster-orchestrator` (consumes the dossier), `bindmaster-evaluator`, `bindmaster-wetlab`.
 - CLI: `binder-compare analyze-target` (`Evaluator/binder_comparison/cli/analyze_target.py`).
