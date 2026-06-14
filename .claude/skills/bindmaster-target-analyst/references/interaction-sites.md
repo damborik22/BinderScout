@@ -39,17 +39,32 @@ per-PDB-id lookup when a local run isn't set up.
 
 ## From site → residues → hotspots
 
-1. Map each candidate site to **residue numbers** on the target chain (UniProt features are
-   1-indexed on the canonical sequence; reconcile with the PDB numbering of the actual file).
-   `TODO:` numbering-reconciliation recipe (auth vs label seq id).
-2. Cross-check against `analyze-target`'s geometric pockets — a site that is *both*
-   biologically important *and* a geometric pocket is the strongest candidate.
-3. Pick **hotspots** on the chosen site (3–6 residues lining the pocket). `TODO:` selection
-   rubric; the BindCraft caveat — scattered hotspots across distant SSEs break AF2 hallucination
-   (orchestrator `learnings.md` #2), so prefer hotspots clustered on **one** face.
+1. **Map every site to the PDB file's own residue numbering** — that is what the design tools'
+   hotspot fields use. UniProt features are 1-indexed on the canonical sequence; the PDB file
+   uses author numbering (`auth_seq_id`), which can differ (His-tags, construct cropping, missing
+   loops). Reconcile via **SIFTS** (`https://www.ebi.ac.uk/pdbe/api/mappings/<pdbid>`) or by
+   aligning the PDB chain sequence to UniProt. PDBsum and RCSB both report author numbering, so
+   they already match the structure file `analyze-target` reads.
+2. **Cross-check against geometry** — a site that is *both* biologically important (literature /
+   PDBsum interface or cleft) *and* a real pocket (`analyze-target` Cα-density or, better, a
+   PDBsum cleft) is the strongest candidate. Disagreement is a flag, not a veto.
+3. **Pick hotspots (3–6 residues) on ONE contiguous patch.** Prefer residues that line the chosen
+   cleft/interface (PDBsum contact residues), are solvent-accessible, and **cluster on a single
+   face**. Hard rule from `bindmaster-orchestrator/references/learnings.md` #2: hotspots scattered
+   across distant secondary-structure elements break BindCraft's AF2 hallucination (10/10 failed
+   trajectories on 2VDY). When a site is large, pick the centroid contact residue + its nearest
+   lining residues rather than the extremes.
 
 ## Ranking the candidate sites
 
-`TODO:` rubric combining evidence strength (structure > drug-mechanism > literature claim),
-druggability (pocket depth from geometry), and campaign goal (block function vs. block PPI).
-Output the ranked list into the dossier.
+Score each candidate site, output the ranked list to the dossier:
+
+| Factor | Strong → weak |
+|---|---|
+| **Evidence** | experimental complex (partner/antibody bound) > PDBsum cleft/ligand contacts > ChEMBL `get_mechanism` site > bare literature claim |
+| **Druggability** | deep, well-defined PDBsum cleft (or confirmed geometric pocket) > shallow/flat patch |
+| **Campaign fit** | matches the goal: *block function* → active/allosteric site; *block signaling* → the PPI interface; *proven bindable* → a known epitope |
+| **Risk** | clean surface > glycosylated/PTM-adjacent (down-weight or avoid) |
+
+The top-ranked site's clustered hotspots + accessibility become the dossier's recommended
+hotspots; carry the runners-up so the orchestrator can A/B two sites if the budget allows.

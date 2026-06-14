@@ -1,43 +1,57 @@
 # Literature & database research playbook
 
-> **Scaffold.** The tool list and query intents are real; `TODO:` marks where to add worked
-> query templates, extraction recipes, and trust/caveat notes.
-
 Goal: assemble "what is known about this target" with citations, ending in a list of
-**candidate binding sites with evidence** (consumed by `interaction-sites.md`).
+**candidate binding sites with evidence** (consumed by `interaction-sites.md`). All tools below
+are live in-session; use real queries, cite what you use.
 
-## Available research tools (this session)
+## Available research tools
 
 | Source | Tool(s) | Use for |
 |---|---|---|
-| **UniProt** | WebFetch `https://rest.uniprot.org/uniprotkb/<acc>.txt` (or `.json`) | identity, function, domains, **feature table** (active/binding sites, PTM, glyco, disulfide), sequence |
-| **RCSB PDB** | WebFetch `https://www.rcsb.org/structure/<id>`, `https://data.rcsb.org/rest/v1/core/entry/<id>` | apo + **complex** structures (complexes show binding sites), resolution, ligands |
-| **PDBsum** | local [PDBsum1](https://github.com/RomanLas/PDBsum1) on a PDB; web `https://www.ebi.ac.uk/pdbsum/<id>` | **interface residues, clefts/pockets, ligand contacts, active sites** — the richest per-structure site source (see `interaction-sites.md`) |
+| **UniProt** | WebFetch `https://rest.uniprot.org/uniprotkb/<acc>.txt` (or `.json`) | identity, function, domains, **feature table** (active/binding sites, PTM, glyco, disulfide), sequence + numbering |
+| **RCSB PDB** | WebFetch `https://data.rcsb.org/rest/v1/core/entry/<id>`; `https://www.rcsb.org/structure/<id>` | apo + **complex** structures, resolution, bound ligands/partners |
+| **PDBsum** | local [PDBsum1](https://github.com/RomanLas/PDBsum1); web `https://www.ebi.ac.uk/pdbsum/<id>` | interface residues, clefts, ligand contacts, active sites (richest per-structure — see `interaction-sites.md`) |
 | **PubMed** | `mcp__PubMed__search_articles`, `get_article_metadata`, `get_full_text_article`, `find_related_articles` | function, disease relevance, epitopes, PPI partners, flexibility/glycosylation notes |
-| **ChEMBL** | `target_search`, `get_bioactivity`, `drug_search`, `get_mechanism`, `compound_search` | known ligands/drugs and **their binding site / mechanism** |
-| **bioRxiv/medRxiv** | `mcp__bioRxiv__search_preprints`, `search_published_preprints` | recent, not-yet-indexed findings |
-| **ClinicalTrials** | `mcp__Clinical_Trials__search_trials`, `search_by_sponsor` | clinical-stage modalities against the target |
+| **ChEMBL** | `target_search`, `get_bioactivity`, `get_mechanism`, `drug_search` | known ligands/drugs and **their binding site / mechanism** |
+| **bioRxiv/medRxiv** | `mcp__bioRxiv__search_preprints` | recent, not-yet-indexed findings |
+| **ClinicalTrials** | `mcp__Clinical_Trials__search_trials` | clinical-stage modalities against the target |
 
-## Research order (cheap → specific)
+## Step 0 — resolve identity (name → UniProt → gene → PDB)
 
-0. **Resolve identity** — name → UniProt accession → gene → PDB ids. `TODO:` resolution recipe.
-1. **Function & family** — UniProt + ChEMBL `target_search`. One-paragraph summary + family.
-2. **Disease / why-a-target** — PubMed `search_articles` (target + "therapeutic"/"inhibitor"/
-   "antibody"); ClinicalTrials. `TODO:` query templates + how many to read.
-3. **Known binders & their sites** — ChEMBL `target_search` → `get_bioactivity`
-   (`min_pchembl>=7` for potent), `drug_search`, **`get_mechanism`** (binding-site/mechanism
-   field names the pocket). This is often the fastest route to *where things bind*.
-4. **Structures** — list PDB entries; flag **complexes** (with antibodies, peptides, partners,
-   ligands) — these directly reveal interface residues. `TODO:` how to pull interface residues
-   from a complex (or defer to `analyze-target` on that PDB).
-5. **Recent** — bioRxiv for the last 1–2 years.
+1. `mcp__ChEMBL__target_search(gene_symbol="<GENE>", organism="Homo sapiens", target_type="SINGLE PROTEIN")`
+   → returns the target's components incl. **UniProt accession** + `target_chembl_id` (keep both).
+2. WebFetch UniProt `.../uniprotkb/<acc>.txt` → canonical sequence, gene, domains, and the
+   **feature table** (the authoritative residue-level site list).
+3. WebFetch RCSB `.../core/entry/<pdbid>` for each PDB the target appears in → note **complexes**
+   (antibody / partner / ligand bound) — these are where the real binding sites are.
 
-## Output of this step
+## Step-by-step research order (cheap → specific)
 
-A short, **cited** brief: function; disease context; table of known binders (modality, potency,
-binding site, source); list of relevant PDB structures (apo vs complex); and any flags for
-difficulty (flexible / disordered / heavily glycosylated / shallow interface). Feed sites into
-`interaction-sites.md`, flags into the dossier's difficulty rationale.
+1. **Function & family** — UniProt + ChEMBL `target_search`. One-paragraph cited summary.
+2. **Disease / why-a-target** —
+   `mcp__PubMed__search_articles(query="<TARGET> AND (inhibitor OR antibody OR binder)[Title/Abstract]", sort="relevance", max_results=20)`;
+   `mcp__Clinical_Trials__search_trials(...)`. Read the top 3–5 abstracts.
+3. **Known binders & their sites** —
+   `mcp__ChEMBL__get_bioactivity(target_chembl_id="<id>", min_pchembl=7)` (potent compounds);
+   `mcp__ChEMBL__get_mechanism(target_chembl_id="<id>")` — the `binding_site_name` /
+   `molecular_mechanism` fields **name the pocket** (active vs allosteric);
+   `mcp__ChEMBL__drug_search(indication="<disease>")` for approved/clinical modalities.
+   Fastest route to *where things bind*.
+4. **Structures** — list PDB entries; flag complexes; queue them for PDBsum (`interaction-sites.md`).
+5. **Recent** — `mcp__bioRxiv__search_preprints(category="biochemistry", recent_days=730)` then filter to the target.
 
-`TODO:` citation format; how to reconcile conflicting reports; when literature is too thin and
-geometry must lead.
+## Output of this step — the research brief
+
+A short, **cited** brief that feeds `interaction-sites.md` + the dossier:
+- Function + family; disease context (with PMIDs).
+- Table of known binders: modality | potency (pChEMBL) | binding site | source.
+- PDB entries: apo vs complex (partner/ligand), resolution.
+- **Difficulty flags**: disordered / flexible / heavily glycosylated / shallow interface / no
+  apo structure — each cited; these feed the dossier's difficulty rationale.
+
+## Trust & caveats
+- Prefer **structural evidence** (PDB complex / PDBsum / ChEMBL mechanism) over a bare literature
+  claim when they disagree about *where* a binder should go.
+- ChEMBL potency ≠ a binder-design target per se — it tells you the *druggable pocket*, which is
+  a strong hotspot prior.
+- `TODO:` citation format to standardize across dossiers.
