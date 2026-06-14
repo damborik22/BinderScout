@@ -26,6 +26,27 @@ campaign — prefer PDBsum for clefts/interfaces when available; `analyze-target
 fallback + difficulty score. The EBI web PDBsum (`https://www.ebi.ac.uk/pdbsum/`) is a quick
 per-PDB-id lookup when a local run isn't set up.
 
+## HotSpot Wizard (Loschmidt — functional pocket/tunnel residues)
+
+[HotSpot Wizard 3](https://loschmidt.chemi.muni.cz/hotspotwizard/) (our lab) takes a **PDB or a
+sequence** and integrates pocket detection (**CASTp**), access tunnels (**CAVER**), catalytic
+sites (Catalytic Site Atlas), and conservation (**Rate4Site**) into hotspot lists. Its
+**functional hotspots** — residues lining the **active-site pocket** and **access tunnels** — are
+exactly the residues a binder targeting that pocket should engage, so for an **enzyme / deep-pocket
+target** HSW directly yields the candidate binding-site residues, sequence-input and all (fits
+SKILL §2a).
+
+**Use it for the pocket *location*, not its mutability ranking.** HSW ranks residues by how good
+they are to *mutate* (it favours highly *variable* positions for engineering); for *binding* we
+want the residues that *define/line* the pocket, regardless of mutability. So take HSW's
+pocket/tunnel residue **set** as the candidate site, then pick clustered, accessible hotspots from
+it as below.
+
+**Caveats:** HSW is **pocket/tunnel-centric** (CASTp/CAVER) — great for active-site/cryptic-pocket
+binders, but it does **not** find flat **protein–protein interface** patches; those still come from
+PDBsum complexes + conservation. It's a Loschmidt **web server** (lab access; automation may need
+the lab instance). `TODO:` pin the submit/parse recipe (or its API) during polish.
+
 ## Conservation (from the MSA)
 
 The target MSA (`get_target_msa`, SKILL §2a) is a second, sequence-based site signal:
@@ -35,6 +56,23 @@ entropy / a ConSurf-style score) over the A3M, map it onto the structure, and tr
 + surface-accessible patch that coincides with a PDBsum cleft/interface** as a high-confidence
 functional site. Conservation alone (buried conserved core) is *not* a binding site — require
 surface accessibility. `TODO:` pin the conservation calc + the mapping recipe.
+
+## Surface hydrophobicity (binding-patch signal)
+
+Protein–protein and pocket binding patches are frequently **hydrophobic**, so a third site signal
+is **surface hydrophobicity**: per-residue hydrophobicity weighted by exposure. Compute residue
+hydrophobicity (Kyte-Doolittle — the repo already ships the table in
+`Evaluator/binder_comparison/comparison/wetlab.py:_KD_HYDROPATHY`, or the Eisenberg scale /
+hydrophobic moment for amphipathicity) × surface accessibility (SASA / the Cα-density proxy), and
+look for **accessible hydrophobic clusters**. An accessible hydrophobic patch that overlaps a
+PDBsum cleft / conserved surface = a strong binding-site candidate. Tools beyond the built-in
+table: molecular hydrophobicity potential (MHP), PyMOL `color_h`.
+
+**Flip side — binder developability:** the same metric on the *binder* surface flags aggregation
+risk (large exposed hydrophobic patches). That's a QC/developability concern → see
+`bindmaster-wetlab` and `bindmaster-evaluator` (`qc.md`), not target analysis. `TODO:` a small
+`analyze-target` enhancement could emit a per-residue surface-hydrophobicity track for free (it
+already has coords + the KD table is one import away).
 
 ## Site taxonomy (target the right one)
 

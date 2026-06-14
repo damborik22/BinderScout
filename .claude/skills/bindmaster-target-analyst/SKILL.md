@@ -119,14 +119,17 @@ Build the "what's known" picture. Tools available in-session: **PubMed**, **ChEM
 
 ### 3b. Structural annotation + interaction-site ID  →  see `references/interaction-sites.md`
 
-Turn the research + structure into a list of candidate binding sites, each with **evidence**:
-- **PDBsum** ([PDBsum1](https://github.com/RomanLas/PDBsum1), local) on the target/complex PDBs →
-  interface residues (PPI / epitopes), clefts/pockets, ligand-contact residues, active sites.
-  This is the primary per-structure source — richer than the geometric pocket proxy in 3c.
-- UniProt feature table (active site, binding site, glyco, disulfide, PTM).
-- Epitopes / hotspots from the literature.
-- `TODO:` taxonomy (catalytic / allosteric / PPI / epitope / ligand) and how to evidence each;
-  PDBsum install + output-parsing recipe.
+Turn the research + structure into a list of candidate binding sites, each with **evidence** —
+combine several signals (details + caveats in `interaction-sites.md`):
+- **PDBsum** ([PDBsum1](https://github.com/RomanLas/PDBsum1), local) → interface residues (PPI /
+  epitopes), clefts/pockets, ligand contacts, active sites. Primary per-structure source.
+- **HotSpot Wizard** ([HSW3](https://loschmidt.chemi.muni.cz/hotspotwizard/), Loschmidt; PDB *or*
+  sequence) → functional hotspots = active-site-pocket + access-tunnel residues (CASTp/CAVER) for
+  enzyme/pocket targets. Use its pocket *location*, not its mutability ranking; pocket-centric (not PPI).
+- **Conservation** (from the MSA, §2a) — conserved + surface patch = functional site.
+- **Surface hydrophobicity** — accessible hydrophobic clusters = binding-prone patches.
+- **UniProt** feature table (active/binding sites, glyco, disulfide, PTM); literature epitopes.
+- `TODO:` PDBsum + HSW submit/parse recipes; the conservation + hydrophobicity calcs.
 
 ### 3c. Geometric analysis  →  `binder-compare analyze-target`
 
@@ -171,8 +174,13 @@ gate tier. `TODO:` exact field mapping dossier → kickoff doc.
 - `references/literature-research.md` — the PubMed/ChEMBL/bioRxiv/ClinicalTrials/UniProt/PDB playbook.
 - `references/interaction-sites.md` — site taxonomy + PDBsum structural annotation + how to evidence each.
 - `references/dossier-template.md` — the output dossier structure + the params handed to the orchestrator.
-- **Tooling:** [PDBsum1](https://github.com/RomanLas/PDBsum1) — local structural annotation
-  (interfaces / clefts / ligand contacts / active sites). `TODO:` add to the worker pre-flight / a
-  setup note; it is per-platform executables + `data.tar.gz`, not pip-installable.
+- **External tools:**
+  - [PDBsum1](https://github.com/RomanLas/PDBsum1) — local structural annotation (interfaces /
+    clefts / ligand contacts / active sites). Per-platform executables + `data.tar.gz`, not
+    pip-installable; `TODO:` worker pre-flight setup note.
+  - [HotSpot Wizard 3](https://loschmidt.chemi.muni.cz/hotspotwizard/) — Loschmidt functional
+    pocket/tunnel hotspots + conservation (CASTp / CAVER / Rate4Site); web server, lab access.
+  - MSA via the repo's `get_target_msa` (`Evaluator/binder_comparison/refolding/target_msa.py`,
+    ColabFold MMseqs2, cached); folding via `configurator/predict_structure.py` (Boltz-2).
 - Sibling skills: `bindmaster-orchestrator` (consumes the dossier), `bindmaster-evaluator`, `bindmaster-wetlab`.
 - CLI: `binder-compare analyze-target` (`Evaluator/binder_comparison/cli/analyze_target.py`).
