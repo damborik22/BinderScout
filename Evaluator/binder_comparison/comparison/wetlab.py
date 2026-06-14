@@ -111,6 +111,11 @@ def recommend_assay(n_designs: int, budget_usd: float | None = None) -> dict:
             "SPR — gold-standard kinetics (kon/koff/KD) on the top hits",
             "FIDA — solution-phase Kd, no immobilization (robust for hard-to-immobilize targets)",
         ],
+        "stability": [
+            "SDS-PAGE — purity + integrity (expression QC; ± reducing agent)",
+            "Panta (NanoTemper nanoDSF + DLS) — thermal stability (Tm) + aggregation / colloidal stability",
+            "CD — secondary-structure content + thermal melt (confirms a folded, cooperative protein)",
+        ],
         "submitting": n_designs,
     }
     if budget_usd is not None:
@@ -205,6 +210,9 @@ def wetlab_plan_markdown(designs: list[dict], config: WetLabConfig | None = None
         *[f"  - {a}" for a in assay["lead_characterization"]],
         "",
     ]
+
+    # 4. Stability / QC
+    lines += ["## 4. Stability / QC", *[f"- {a}" for a in assay["stability"]], ""]
 
     # 5. Controls
     lines += [

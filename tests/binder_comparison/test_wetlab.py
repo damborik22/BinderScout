@@ -59,6 +59,11 @@ def test_assay_leads_get_spr_and_fida():
     assert "SPR" in leads and "FIDA" in leads
 
 
+def test_assay_stability_panel():
+    s = " ".join(recommend_assay(10)["stability"])
+    assert "SDS-PAGE" in s and "Panta" in s and "CD" in s
+
+
 def test_assay_reports_submission_count_and_budget():
     a = recommend_assay(25, budget_usd=8000)
     assert a["submitting"] == 25 and a["budget_usd"] == 8000
@@ -95,11 +100,12 @@ def test_plan_has_required_sections_and_fasta():
         "## 1. Gene synthesis",
         "## 2. Expression",
         "## 3. Testing",
+        "## 4. Stability / QC",
         "## 5. Controls",
         "### FASTA",
     ):
         assert section in md
-    assert "Adaptyv" in md and "FIDA" in md
+    assert "Adaptyv" in md and "FIDA" in md and "Panta" in md
     assert ">d1" in md and "MAEVKLSYWY" in md
 
 
