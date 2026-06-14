@@ -46,20 +46,27 @@ def test_empty_sequence_is_zeroed():
 # --- recommend_assay ----------------------------------------------------------
 
 
-def test_assay_high_throughput_above_50():
-    assert "NanoBiT" in recommend_assay(80)["screen"]
+def test_assay_platform_is_adaptyv():
+    assert "Adaptyv" in recommend_assay(80)["platform"]
 
 
-def test_assay_bli_at_or_below_50():
+def test_assay_screen_is_bli():
     assert "BLI" in recommend_assay(30)["screen"]
 
 
-def test_assay_tight_budget_downgrades_to_cheap_screen():
-    assert "NanoBiT" in recommend_assay(30, budget_usd=1000)["screen"]
+def test_assay_leads_get_spr_and_fida():
+    leads = " ".join(recommend_assay(10)["lead_characterization"])
+    assert "SPR" in leads and "FIDA" in leads
 
 
-def test_assay_always_recommends_spr_for_leads():
-    assert "SPR" in recommend_assay(10)["lead_characterization"]
+def test_assay_stability_panel():
+    s = " ".join(recommend_assay(10)["stability"])
+    assert "SDS-PAGE" in s and "Panta" in s and "CD" in s
+
+
+def test_assay_reports_submission_count_and_budget():
+    a = recommend_assay(25, budget_usd=8000)
+    assert a["submitting"] == 25 and a["budget_usd"] == 8000
 
 
 # --- codon_optimize -----------------------------------------------------------
@@ -92,11 +99,13 @@ def test_plan_has_required_sections_and_fasta():
         "# Wet-lab plan",
         "## 1. Gene synthesis",
         "## 2. Expression",
-        "## 3. Screening",
+        "## 3. Testing",
+        "## 4. Stability / QC",
         "## 5. Controls",
         "### FASTA",
     ):
         assert section in md
+    assert "Adaptyv" in md and "FIDA" in md and "Panta" in md
     assert ">d1" in md and "MAEVKLSYWY" in md
 
 
@@ -104,3 +113,14 @@ def test_plan_respects_top_n():
     designs = [{"binder_id": f"d{i}", "sequence": "MKV"} for i in range(10)]
     md = wetlab_plan_markdown(designs, WetLabConfig(top_n=3))
     assert md.count(">d") == 3
+
+
+def test_plan_cell_free_expression():
+    md = wetlab_plan_markdown([{"binder_id": "d1", "sequence": "MKV"}], WetLabConfig(expression="cell_free"))
+    assert "Cell-free" in md or "CFPS" in md
+
+
+def test_plan_matrix_ladder():
+    cfg = WetLabConfig(test_matrices=["purified", "crude_extract", "plasma"])
+    md = wetlab_plan_markdown([{"binder_id": "d1", "sequence": "MKV"}], cfg)
+    assert "crude lysate" in md and "plasma" in md.lower()

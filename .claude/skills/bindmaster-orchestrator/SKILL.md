@@ -529,7 +529,8 @@ Don't let the campaign drift past these. The wet-lab cost dominates total projec
 - `references/tools/README.md` — cross-method bias matrix, philosophy, file index
 - `references/learnings.md` — empirical campaign lessons (formerly §9), distilled from 2VDY and earlier
 - `references/evaluation.md` — local cross-engine refold + iPSAE merge + ranking recipe (refolders called as code on Spark)
-- `bindmaster-worker/` — sibling skill for the per-machine execution layer
+- `references/autosize.md` — the `binder-compare autosize` adaptive sampling loop (equal-N per tool, budget caps, ESMFold2 gate); how the target-analyst dossier sets `--n-target`/`--tier`/`tools`
+- **Sibling skills** (the campaign lifecycle): `bindmaster-target-analyst` (research a target → dossier, upstream), `bindmaster-evaluator` (refold → two-stage rank → affinity → QC), `bindmaster-wetlab` (plan + maturation, closes the loop), `bindmaster-worker` (per-machine execution)
 - `CLAUDE.md` (BindMaster repo root) — codebase reference, design decisions, conventions, per-tool gotchas
 - `STAGES.md` — pipeline implementation milestones
 - `bindmaster_examples/run_*.sh.template` — canonical patterns for tool run scripts
