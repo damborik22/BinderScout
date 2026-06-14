@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BindMaster / BinderScout — Repository Status</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#181b22; --ink:#e8eaed; --muted:#9aa0aa; --line:#272b34;
+    --ok:#3fb950; --warn:#d29922; --bad:#f85149; --info:#58a6ff; --accent:#bc8cff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1060px;margin:0 auto;padding:32px 22px 80px}
+  h1{font-size:26px;margin:0 0 4px}
+  h2{font-size:19px;margin:34px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  h3{font-size:15px;margin:18px 0 6px;color:var(--accent)}
+  .sub{color:var(--muted);margin:0 0 18px}
+  code{background:#0b0d11;border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+    font:13px/1.4 "SF Mono",ui-monospace,Menlo,Consolas,monospace;color:#cdd3dc}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:12px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .stat b{display:block;font-size:22px;line-height:1.2}
+  .stat span{color:var(--muted);font-size:12.5px}
+  .badge{display:inline-block;font-size:11.5px;font-weight:600;border-radius:20px;padding:2px 10px;margin-right:6px}
+  .b-ok{background:rgba(63,185,80,.15);color:var(--ok);border:1px solid rgba(63,185,80,.4)}
+  .b-warn{background:rgba(210,153,34,.13);color:var(--warn);border:1px solid rgba(210,153,34,.4)}
+  .b-bad{background:rgba(248,81,73,.13);color:var(--bad);border:1px solid rgba(248,81,73,.4)}
+  .b-info{background:rgba(88,166,255,.13);color:var(--info);border:1px solid rgba(88,166,255,.4)}
+  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:13.5px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+  ul{margin:6px 0 6px 2px;padding-left:18px}
+  li{margin:5px 0}
+  .pill{font-size:11px;color:var(--muted)}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:middle}
+  .d-ok{background:var(--ok)} .d-warn{background:var(--warn)} .d-bad{background:var(--bad)} .d-info{background:var(--info)}
+  .flow{font:12.5px/1.6 "SF Mono",ui-monospace,Menlo,monospace;color:#cdd3dc;white-space:pre;overflow-x:auto;
+    background:#0b0d11;border:1px solid var(--line);border-radius:8px;padding:14px}
+  .foot{color:var(--muted);font-size:12.5px;margin-top:40px;border-top:1px solid var(--line);padding-top:14px}
+  a{color:var(--info)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>BindMaster / BinderScout — Repository Status</h1>
+  <p class="sub">Generated 2026-06-14 · branch <code>claude/exciting-wozniak-nbsy4z</code> ·
+     GPU-accelerated protein-binder design toolkit (7 design tools + cross-engine evaluator)</p>
+
+  <div class="grid">
+    <div class="stat"><b style="color:var(--ok)">40</b><span>unit tests passing</span></div>
+    <div class="stat"><b style="color:var(--ok)">clean</b><span>ruff check + format</span></div>
+    <div class="stat"><b style="color:var(--info)">+22</b><span>commits ahead of master</span></div>
+    <div class="stat"><b style="color:var(--warn)">7</b><span>branches unmerged to master</span></div>
+    <div class="stat"><b style="color:var(--accent)">1</b><span>new feature: <code>autosize</code></span></div>
+  </div>
+  <p>
+    <span class="badge b-ok">CLI restored</span>
+    <span class="badge b-ok">one evaluator</span>
+    <span class="badge b-ok">two-stage ranking</span>
+    <span class="badge b-ok">autosize loop</span>
+    <span class="badge b-warn">gate not yet calibrated</span>
+    <span class="badge b-warn">integration debt</span>
+  </p>
+
+  <!-- ===================== HOW IT WORKS ===================== -->
+  <h2>1 · How it works now</h2>
+
+  <div class="card">
+    <h3>Entry point — the <code>bindmaster</code> CLI (stdlib dispatcher)</h3>
+    <table>
+      <tr><th>Command</th><th>Runs in</th><th>Does</th></tr>
+      <tr><td><code>bindmaster</code> (no args)</td><td>system python → curses</td><td>Interactive TUI menu (numbered fallback if no curses)</td></tr>
+      <tr><td><code>install</code></td><td>bash</td><td><code>install/install.sh</code> — per-tool conda/venv envs (standalone Miniforge auto-detect)</td></tr>
+      <tr><td><code>configure</code></td><td>system python</td><td>5-step wizard → run scripts + <code>settings.json</code> per run</td></tr>
+      <tr><td><code>evaluate</code></td><td>conda <code>binder-eval</code></td><td><b>Passthrough to <code>binder-compare</code></b> (extract / refold / report / run / autosize)</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Design layer — 7 tools, each isolated</h3>
+    <p class="pill">Launched by configurator-generated run scripts; never share an environment.</p>
+    <table>
+      <tr><th>Tool</th><th>Method</th><th>Native "best" sort</th><th>Refolder it's correlated with</th></tr>
+      <tr><td>BindCraft</td><td>AF2 hallucination + MPNN + PyRosetta</td><td><code>Average_i_pTM</code></td><td>— (clean vs all)</td></tr>
+      <tr><td>PXDesign</td><td>Protenix diffusion + MPNN + AF2-IG</td><td><code>af2_iptm</code></td><td>Protenix</td></tr>
+      <tr><td>Protein-Hunter</td><td>Boltz-2 hallucination</td><td>best-of-cycle iPTM</td><td>Boltz-2</td></tr>
+      <tr><td>Proteina-Complexa</td><td>NVIDIA flow matching + ITO</td><td><code>i_pTM</code></td><td>— (clean)</td></tr>
+      <tr><td>Mosaic</td><td>JAX gradient hallucination</td><td>iPTM on <code>is_top=1</code></td><td>Boltz-2</td></tr>
+      <tr><td>BoltzGen</td><td>Boltz-1 diffusion + inverse fold</td><td>per-protocol <code>ranking</code></td><td>Boltz-2</td></tr>
+      <tr><td>RFD3</td><td>All-atom diffusion + ProteinMPNN</td><td>none native (MPNN recovery)</td><td>— (clean)</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Evaluation layer — <code>binder-compare</code> pipeline</h3>
+    <div class="flow">target + tool outputs
+  └─ extract        one sequence-extractor per tool  →  FASTA + native-metrics sidecar
+  └─ refold         Boltz-2 (Mosaic venv) + AF3 (binder-eval-af3)        [canonical]
+                    Protenix (24 GB) + ESMFold2 (lightweight)            [optional]
+  └─ rank           TWO-STAGE:  stage 1 screen = max(engine iPTMs), keep top 50%
+                                stage 2 rank   = mean(engine iPTMs)  (precision)
+  └─ report         HTML + metrics.csv  (native metrics ride alongside)</div>
+    <p style="margin-top:10px">
+      <b>Gate / screen metric:</b> ESMFold2 <code>chain_iptm_interface</code> — the symmetric
+      mean of the two directional <code>pair_chains_iptm</code> off-diagonals. On the ProteinBase
+      4-target benchmark it is the <b>single strongest binder discriminator</b> (macro AUC ≈ 0.745),
+      and it runs off the Spark-locked GPU.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>New — <code>binder-compare autosize</code> (adaptive sampling controller)</h3>
+    <p>Decides "do we have <i>N independent</i> good designs yet?" and, if not, how many more to draw.</p>
+    <ul>
+      <li><b>Counts independent backbones, not sequences</b> — collapses MPNN/cycle variants to one entry per <code>design_group</code> before counting.</li>
+      <li><b>Tier-aware gate</b> — <code>--tier permissive 0.70 / default 0.75 / strict 0.80</code> (interface-iPTM convention); <code>--threshold</code> overrides.</li>
+      <li><b>Equal across tools</b> — every tool driven to the same <code>--n-target</code>; per-tool <code>--budget-cap</code> lets hard tools settle for fewer (never loops forever).</li>
+      <li><b>Two modes</b> — single-shot verdict, or <code>--loop</code> (generate → refold → decide) wiring <code>--generate-cmd</code> / <code>--refold-cmd</code>.</li>
+      <li>Next-batch size = <code>ceil((target − have)/yield × 1.2)</code>; cold start explores <code>MIN_PROBE</code>.</li>
+    </ul>
+  </div>
+
+  <!-- ===================== WHAT WORKS ===================== -->
+  <h2>2 · What's working &amp; verified</h2>
+  <div class="card">
+    <ul>
+      <li><span class="dot d-ok"></span><b><code>bindmaster evaluate</code> restored</b> — was dispatching to a deleted <code>evaluator/</code> dir; now a passthrough to <code>binder-compare</code>.</li>
+      <li><span class="dot d-ok"></span><b><code>binder-compare run</code> repaired</b> — added the missing <code>__main__.py</code> its nested steps need.</li>
+      <li><span class="dot d-ok"></span><b>TUI fallback fixed</b> — <code>NameError</code> when curses was absent; the numbered-menu fallback now runs.</li>
+      <li><span class="dot d-ok"></span><b>pytest collects &amp; runs in CI</b> — was uncollectable at repo root; CI was shellcheck/ruff/docker only.</li>
+      <li><span class="dot d-ok"></span><b>Two-stage ranking</b> default, with the load-bearing "survivor outranks higher-mean non-survivor" property tested.</li>
+      <li><span class="dot d-ok"></span><b><code>chain_iptm_interface</code> canonicalized</b> — one shared definition (report + autosize); formula verified.</li>
+      <li><span class="dot d-ok"></span><b><code>autosize</code> verified end-to-end</b> — real subprocess loop reaches <code>complete</code>; backbone dedup confirmed.</li>
+      <li><span class="dot d-ok"></span><b>Dead code removed</b> — the unused <code>bindmaster/</code> package (BinderScore, ToolAdapter, FeatureFlags, empty scheduler).</li>
+    </ul>
+  </div>
+
+  <!-- ===================== BROKEN / FRAGILE ===================== -->
+  <h2>3 · What's broken or fragile</h2>
+  <div class="card">
+    <table>
+      <tr><th>Item</th><th>Severity</th><th>Detail</th></tr>
+      <tr><td>Gate not target-calibrated</td><td><span class="badge b-warn">medium</span></td>
+        <td>Tiers are conventional defaults; the <code>chain_iptm_interface</code> distribution shifts per target (benchmark AUC 0.61–0.88). On an unfamiliar target the absolute cutoff can over/under-count. Calibration step not built.</td></tr>
+      <tr><td>chain-iPTM AUC equivalence unverified</td><td><span class="badge b-warn">medium</span></td>
+        <td>The <i>formula</i> is verified (mean of pair_chains off-diagonals). That it reproduces the benchmark's exact 0.745-AUC column was not re-checked against per-design data.</td></tr>
+      <tr><td>No per-tool loop wiring</td><td><span class="badge b-warn">medium</span></td>
+        <td>The <code>--loop</code> is generic over two shell commands; concrete <code>--generate-cmd</code>/<code>--refold-cmd</code> templates per tool (BindCraft, RFD3, …) don't exist yet.</td></tr>
+      <tr><td>Integration debt</td><td><span class="badge b-warn">medium</span></td>
+        <td>Work spans many branches (this +22, <code>evaluator-two-stage-ranking</code> +9, plus ~5 stale branches 40–70 commits behind master). Nothing merged to <code>master</code> yet.</td></tr>
+      <tr><td>PXDesign site-packages patches</td><td><span class="badge b-warn">fragile</span></td>
+        <td>Installer patches <code>protenix</code>/<code>pxdbench</code>/<code>configs_infer.py</code>; silently lost if packages are upgraded manually.</td></tr>
+      <tr><td>BoltzGen low cross-tool pass rate</td><td><span class="badge b-info">known</span></td>
+        <td>~1/50 designs clear the independent <code>ipsae_min &gt; 0.61</code> bar (same-model self-judging). Better for diversity than bulk yield.</td></tr>
+      <tr><td><code>bin/</code> wrappers in batch</td><td><span class="badge b-info">known</span></td>
+        <td>Shortcuts break under SLURM/non-TTY; run scripts must call <code>$CONDA_PREFIX/bin/&lt;tool&gt;</code>.</td></tr>
+      <tr><td>aarch64 gaps</td><td><span class="badge b-info">platform</span></td>
+        <td>BindCraft jaxlib CUDA conda pkgs, Mosaic <code>torchtext</code>, PC PyG may lack aarch64 wheels; Protein-Hunter unsupported (PyRosetta).</td></tr>
+      <tr><td><code>scripts/install_pxdesign.sh</code> orphaned</td><td><span class="badge b-info">low</span></td>
+        <td>Referenced only by the removed World-B runner + a doc; left in place pending a decision.</td></tr>
+    </table>
+  </div>
+
+  <!-- ===================== TO BE DECIDED ===================== -->
+  <h2>4 · What's to be decided</h2>
+  <div class="card">
+    <ul>
+      <li><span class="dot d-info"></span><b>Phase 2 calibration</b> — build batch-1 self-tuning (run full refold alongside ESMFold2, fit the cutoff to a target precision) <i>or</i> stay with tier defaults?</li>
+      <li><span class="dot d-info"></span><b>Distributed loop mode</b> — local closed loop is built; wire the campaign signal (autosize on returned tarballs → "need M more" into PROGRESS.md) now or later?</li>
+      <li><span class="dot d-info"></span><b>Global stop-override</b> — currently per-tool equal N. Add a campaign-wide "we have enough pooled, stop the stragglers" override?</li>
+      <li><span class="dot d-info"></span><b>Branch integration plan</b> — which of the 7 open branches land on <code>master</code>, in what order? (This branch + two-stage are the live line.)</li>
+      <li><span class="dot d-info"></span><b>Affinity metric (Part N)</b> — no structure-confidence metric ranks <i>affinity</i> among binders. Add interface ΔG (Rosetta InterfaceAnalyzer / PRODIGY fallback)?</li>
+      <li><span class="dot d-info"></span><b>Structural-cluster independence</b> — backbone dedup is by trajectory id; add Foldseek/TM clustering so two seeds converging on one fold count once?</li>
+      <li><span class="dot d-info"></span><b>Remove <code>scripts/install_pxdesign.sh</code></b> — now that its only Python caller is gone?</li>
+    </ul>
+  </div>
+
+  <!-- ===================== TO BE IMPROVED ===================== -->
+  <h2>5 · What's to be improved</h2>
+  <div class="card">
+    <ul>
+      <li><span class="dot d-warn"></span><b>Per-tool loop templates</b> — generate the <code>--generate-cmd</code>/<code>--refold-cmd</code> for each tool from the configurator so <code>autosize --loop</code> is turnkey.</li>
+      <li><span class="dot d-warn"></span><b>Calibration helper</b> — a small subcommand that emits the recommended per-target threshold from a labelled batch.</li>
+      <li><span class="dot d-warn"></span><b>ESMFold2 fast vs full</b> — <code>evaluate.sh</code> defaults to <code>full</code>; the loop gate wants <code>fast</code> for throughput. Reconcile + recalibrate the cutoff for whichever the gate uses.</li>
+      <li><span class="dot d-warn"></span><b>Broaden Evaluator tests</b> — only scoring + autosize are unit-tested; refolders, merger, and extractors have none.</li>
+      <li><span class="dot d-warn"></span><b>Foldseek cluster dedup</b> — true structural diversity beyond per-trajectory counting.</li>
+      <li><span class="dot d-warn"></span><b>RFD3 configurator support</b> — run scripts are still hand-written from the template; the configurator doesn't generate them.</li>
+    </ul>
+  </div>
+
+  <!-- ===================== BRANCH STATUS ===================== -->
+  <h2>6 · Branch &amp; merge status</h2>
+  <div class="card">
+    <table>
+      <tr><th>Branch</th><th>vs master</th><th>Role</th></tr>
+      <tr><td><code>claude/exciting-wozniak-nbsy4z</code></td><td><span class="badge b-info">+22 / −0</span></td><td>This work: cleanup → one-evaluator → autosize (live line)</td></tr>
+      <tr><td><code>evaluator-two-stage-ranking</code></td><td><span class="badge b-info">+9 / −0</span></td><td>Two-stage ranking + chain-iPTM (merged into the above)</td></tr>
+      <tr><td><code>claude/aarch64-skills</code></td><td><span class="badge b-warn">+8 / −73</span></td><td>Stale — far behind master</td></tr>
+      <tr><td><code>claude/cool-allen-msrZ2</code></td><td><span class="badge b-warn">+5 / −47</span></td><td>Stale</td></tr>
+      <tr><td><code>claude/repo-cleanup</code></td><td><span class="badge b-warn">+4 / −43</span></td><td>Stale</td></tr>
+      <tr><td><code>claude/slurm-style-local-jobs-986V6</code></td><td><span class="badge b-warn">+1 / −48</span></td><td>Stale</td></tr>
+      <tr><td><code>claude/notebook-ruff-fix</code></td><td><span class="badge b-warn">+1 / −47</span></td><td>Stale</td></tr>
+    </table>
+    <p class="pill">Recommendation: open a PR from this branch (it carries the two-stage work too), then triage the stale branches — most look superseded by master.</p>
+  </div>
+
+  <p class="foot">
+    Status reflects the working tree at generation time. "Verified" = exercised by tests or a real run in this session;
+    "known/platform" items are pre-existing and documented in <code>CLAUDE.md</code>. Not a substitute for
+    <code>RESULTS/PROGRESS.md</code> (live campaign state).
+  </p>
+
+</div>
+</body>
+</html>
