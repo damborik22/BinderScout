@@ -46,9 +46,34 @@ A target reference in any of these forms — resolve to the others as step 0:
 - UniProt accession
 - PDB id(s) — apo and/or in complex
 - A local structure file (`runs/<name>/target/*.pdb|*.cif`)
+- **A bare amino-acid sequence** (very common) — handle via §2a.
 
 `TODO:` document the resolution recipe (name → UniProt → gene → PDB) using WebFetch on
 UniProt/PDB.
+
+### 2a. Sequence-only targets (no structure / no id)
+
+Every downstream step needs a structure (`analyze-target`, PDBsum). When the input is just a
+sequence, **fold it first**, in parallel with identifying it:
+
+1. **Identify** — the sequence may be a known protein. Search UniProt by sequence
+   (`https://rest.uniprot.org/uniprotkb/search?query=<seq>` / BLAST), or it may be named in the
+   request. If identified → pull literature + *experimental* structures as usual (prefer a real
+   PDB over a model).
+2. **Fold** — if there is no experimental structure (novel/engineered target, or just to move
+   fast), predict one with the repo's helper:
+   ```bash
+   Mosaic/.venv/bin/python configurator/predict_structure.py "<SEQUENCE>" runs/<name>/target/<name>.pdb
+   ```
+   It folds with Boltz-2 and prints **mean pLDDT**. Then run `analyze-target` + PDBsum on the model.
+3. **Use pLDDT as a confidence + disorder signal** — low-pLDDT regions are disordered (raise the
+   difficulty band) and their pockets/clefts are unreliable (down-weight sites there). A
+   well-folded high-pLDDT core is where a binder should grip.
+
+**Caveats:** a *monomer model* has no real partner, so PDBsum PPI-interface detection won't apply
+(cleft/ligand-pocket detection still does) — for a PPI target you need the partner or a predicted
+complex. `TODO:` code enhancement — let `analyze-target` ingest per-residue pLDDT to compute its
+`disorder_fraction` directly (today it is hardcoded 0); also an ESMFold2/AF2 alt-folder option.
 
 ---
 
