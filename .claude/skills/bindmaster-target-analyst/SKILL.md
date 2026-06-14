@@ -86,14 +86,15 @@ prediction is best** — accuracy matters because every site/difficulty call rid
 (This is the opposite of *binder* refolding, where de novo binders have no MSA — here the target
 is natural and has homologs, so feed the MSA.)
 
-**pLDDT = confidence + disorder:** low-pLDDT regions are disordered (raise the difficulty band)
-and their pockets/clefts are unreliable (down-weight sites there); the high-pLDDT core is where a
-binder should grip.
+**pLDDT = confidence + disorder:** low-pLDDT regions are disordered and their pockets unreliable.
+AF/Boltz write pLDDT into the PDB B-factor column, so pass it straight through —
+`binder-compare analyze-target --target model.pdb --plddt-from-bfactor` computes a real
+`disorder_fraction` that raises the difficulty band (do **not** use the flag on experimental
+structures — those B-factors are crystallographic).
 
 **Caveats:** a *monomer model* has no real partner, so PDBsum PPI-interface detection won't apply
 (cleft / ligand-pocket detection still does) — for a PPI target you need the partner or a
-predicted complex. `TODO:` let `analyze-target` ingest per-residue pLDDT to compute its
-`disorder_fraction` directly (today hardcoded 0).
+predicted complex.
 
 ---
 
@@ -129,19 +130,22 @@ combine several signals (details + caveats in `interaction-sites.md`):
 - **Conservation** (from the MSA, §2a) — conserved + surface patch = functional site.
 - **Surface hydrophobicity** — accessible hydrophobic clusters = binding-prone patches.
 - **UniProt** feature table (active/binding sites, glyco, disulfide, PTM); literature epitopes.
-- `TODO:` PDBsum + HSW submit/parse recipes; the conservation + hydrophobicity calcs.
+- `TODO:` PDBsum + HSW submit/parse recipes; the conservation calc. (Surface hydrophobicity +
+  pLDDT-disorder are now emitted by `analyze-target` — see 3c.)
 
 ### 3c. Geometric analysis  →  `binder-compare analyze-target`
 
 ```bash
 binder-compare analyze-target --target runs/<name>/target/<t>.pdb --chain A \
-    --n-hotspots 6 -o target_geometry.json
+    --n-hotspots 6 [--plddt-from-bfactor] -o target_geometry.json
 ```
-Gives a 0–1 difficulty score, Cα-density pocket hotspots, and suggested `n_target` / gate-tier /
-tools / binder-length. The **difficulty score** is the main use here; for *where to bind*, prefer
-PDBsum's clefts/interfaces (3b) — `analyze-target`'s Cα-density pockets are the always-on fallback
-when PDBsum isn't installed. **Advisory** — reconcile with 3b, don't replace it. `TODO:` how to
-map literature/PDBsum sites to residue numbers and cross-check the geometric pockets.
+Profile JSON: a 0–1 `difficulty` (+ band), Cα-density pocket `candidate_hotspots`,
+`flat_surface_fraction`, `surface_hydrophobicity`, `disorder_fraction` (real when
+`--plddt-from-bfactor` is set on a predicted model), and suggested `n_target` / gate-tier / tools /
+binder-length. The **difficulty score** is the main use here; for *where to bind*, prefer PDBsum /
+HSW / conservation (3b) — the Cα-density pockets are the always-on fallback. **Advisory** —
+reconcile with 3b, don't replace it. `TODO:` map literature/PDBsum/HSW sites to residue numbers and
+cross-check the geometric pockets.
 
 ### 3d. Synthesis → the dossier  →  see `references/dossier-template.md`
 

@@ -12,8 +12,16 @@ from __future__ import annotations
 
 import numpy as np
 
+from .wetlab import _KD_HYDROPATHY as _KD  # Kyte-Doolittle scale — single source of truth
+
 # Difficulty sub-score weights (sum to 1.0). Documented so they can be tuned.
 _W_LENGTH, _W_DISORDER, _W_FLAT = 0.45, 0.25, 0.30
+
+_THREE_TO_ONE = {
+    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C", "GLU": "E", "GLN": "Q",
+    "GLY": "G", "HIS": "H", "ILE": "I", "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F",
+    "PRO": "P", "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V",
+}  # fmt: skip
 
 
 def neighbor_counts(coords, radius: float = 10.0) -> np.ndarray:
@@ -92,3 +100,37 @@ def pick_hotspots(counts, residue_ids, n: int = 4, pocket_lo: int = 10, pocket_h
     candidates = [(int(c), rid) for c, rid in zip(counts, residue_ids) if pocket_lo <= c <= pocket_hi]
     candidates.sort(key=lambda cr: -cr[0])  # most concave first
     return [rid for _, rid in candidates[:n]]
+
+
+def disorder_fraction_from_plddt(plddt, low: float | None = None) -> float:
+    """Fraction of residues below a per-residue pLDDT confidence cutoff (= disordered).
+
+    Accepts pLDDT on a 0–1 or 0–100 scale (auto-detected); the cutoff defaults to 0.70 (or 70 on
+    the 0–100 scale). Predicted structures (AF/Boltz) store pLDDT in the PDB B-factor column —
+    feed that. NaNs are ignored; empty input → 0.0.
+    """
+    p = np.asarray(plddt, dtype=float)
+    p = p[~np.isnan(p)]
+    if p.size == 0:
+        return 0.0
+    scale_100 = float(p.max()) > 1.5
+    thr = low if low is not None else (70.0 if scale_100 else 0.70)
+    return float((p < thr).mean())
+
+
+def surface_hydrophobicity(resnames, counts, exposed_max: int = 9) -> float:
+    """Fraction of *exposed* residues that are hydrophobic (Kyte-Doolittle > 0) — a binding-patch
+    signal: accessible hydrophobic surface is binding-prone.
+
+    ``resnames`` are 3-letter PDB residue names aligned with ``counts`` (Cα neighbour counts; low =
+    exposed). Unknown residues contribute hydropathy 0. Empty / no-exposed → 0.0.
+    """
+    counts = np.asarray(counts)
+    if counts.size == 0:
+        return 0.0
+    exposed = counts <= exposed_max
+    kd = np.array([_KD.get(_THREE_TO_ONE.get(str(r).upper(), ""), 0.0) for r in resnames])
+    exposed_kd = kd[exposed]
+    if exposed_kd.size == 0:
+        return 0.0
+    return float((exposed_kd > 0).mean())
