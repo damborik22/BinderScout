@@ -1,6 +1,6 @@
 ---
 name: bindmaster-wetlab
-description: Use this skill to take ranked binder designs out of silico — generate the experimental handoff and plan the next computational round from results. It builds a wet-lab plan (gene synthesis + codon optimization, expression conditions, budget-aware assay selection, characterization, controls, FASTA with biophysical properties) via `binder-compare wetlab`, and after binding data comes back it chooses the next maturation strategy (partial diffusion / MPNN redesign / mutation scan / done) and the parents to carry forward via `binder-compare mature`. Triggers include "prepare the wet-lab plan", "what should we order / test", "generate the gene FASTA", "we got Kd / BLI / SPR results — what next", "plan the next maturation round", "should we mature these", "close the loop". It emits the plan and the maturation spec; the actual maturation design round is handed back to `bindmaster-orchestrator`.
+description: Use this skill to take ranked binder designs out of silico — generate the experimental handoff and plan the next computational round from results. It builds a wet-lab plan (gene synthesis + codon optimization, expression conditions, testing via Adaptyv with a BLI / SPR / FIDA panel, controls, FASTA with biophysical properties) via `binder-compare wetlab`, and after binding data comes back it chooses the next maturation strategy (partial diffusion / MPNN redesign / mutation scan / done) and the parents to carry forward via `binder-compare mature`. Triggers include "prepare the wet-lab plan", "what should we order / test", "generate the gene FASTA", "we got Kd / BLI / SPR results — what next", "plan the next maturation round", "should we mature these", "close the loop". It emits the plan and the maturation spec; the actual maturation design round is handed back to `bindmaster-orchestrator`.
 ---
 
 # BindMaster Wet-Lab Advisor — SKILL base
@@ -20,9 +20,9 @@ LIMS; vendor/cost defaults are lab-overridable, not authority.
 binder-compare wetlab --designs report/top20_candidates.csv -o wetlab_plan.md \
     --top 20 --budget 8000 --tag His6-TEV
 ```
-Sections: gene synthesis (codon-opt, tag), expression, **budget-aware assays** (NanoBiT >50 /
-BLI ≤50 / SPR for leads), characterization (DSF/ITC), controls, FASTA + biophysics. `TODO:`
-how to choose `--budget`/`--tag`; when to split designs across assay tiers.
+Sections: gene synthesis (codon-opt, tag), expression, **testing via Adaptyv** (BLI quick yes/no
+→ SPR + FIDA on leads — see `assays.md`), controls, FASTA + biophysics. `--budget` sets how many
+designs to submit to Adaptyv (every submission gets BLI; leads get SPR + FIDA).
 
 ## 2. Maturation — the next round  →  see `references/maturation.md`
 

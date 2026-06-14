@@ -97,24 +97,25 @@ def _isoelectric_point(counts: dict[str, int]) -> float:
 
 
 def recommend_assay(n_designs: int, budget_usd: float | None = None) -> dict:
-    """Budget- and throughput-aware experimental assay recommendation.
+    """Assay panel for the lab's Adaptyv-based workflow.
 
-    Mirrors BindMaster 2's logic: a high-throughput split-luciferase screen (NanoBiT)
-    above ~50 designs, label-free BLI below that, and SPR reserved for lead
-    characterization. Budget, when given, can downgrade the screen tier.
+    Designs are submitted to Adaptyv Bio (express + characterize). BLI gives a quick yes/no plus
+    first-pass kinetics on everything submitted; the top hits go to SPR (gold-standard kinetics)
+    and FIDA (solution-phase Kd, immobilization-free). Throughput / budget govern *how many*
+    designs to submit, not which assay.
     """
-    if n_designs > 50:
-        screen = "split-luciferase (NanoBiT) — high-throughput binary binding screen"
-    else:
-        screen = "BLI (bio-layer interferometry) — label-free kinetics on all designs"
-    # Tight budget can't afford BLI on a large pool; fall back to the cheap binary screen.
-    if budget_usd is not None and budget_usd < 5000 and n_designs > 20:
-        screen = "split-luciferase (NanoBiT) — cheapest binary screen for the budget"
-    return {
-        "screen": screen,
-        "lead_characterization": "SPR (Biacore) — full kinetics (kon/koff/KD) on the top hits",
-        "orthogonal": ["DSF (thermal stability)", "ITC (binding thermodynamics)"],
+    panel = {
+        "platform": "Adaptyv Bio — express + characterize the submitted designs",
+        "screen": "BLI — quick yes/no binding + first-pass kinetics (all submitted designs)",
+        "lead_characterization": [
+            "SPR — gold-standard kinetics (kon/koff/KD) on the top hits",
+            "FIDA — solution-phase Kd, no immobilization (robust for hard-to-immobilize targets)",
+        ],
+        "submitting": n_designs,
     }
+    if budget_usd is not None:
+        panel["budget_usd"] = budget_usd
+    return panel
 
 
 # Most-frequent E. coli codon per amino acid (high-expression bias).
@@ -195,16 +196,15 @@ def wetlab_plan_markdown(designs: list[dict], config: WetLabConfig | None = None
         "",
     ]
 
-    # 3. Screening (budget/throughput aware)
+    # 3. Testing (Adaptyv: express + characterize)
     lines += [
-        "## 3. Screening",
-        f"- Primary screen: {assay['screen']}",
-        f"- Lead characterization: {assay['lead_characterization']}",
+        "## 3. Testing",
+        f"- Platform: {assay['platform']}",
+        f"- Screen: {assay['screen']}",
+        "- Lead characterization:",
+        *[f"  - {a}" for a in assay["lead_characterization"]],
         "",
     ]
-
-    # 4. Characterization
-    lines += ["## 4. Characterization", *[f"- {a}" for a in assay["orthogonal"]], ""]
 
     # 5. Controls
     lines += [
