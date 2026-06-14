@@ -5,10 +5,6 @@ description: Use this skill to evaluate, rank, and quality-check a pool of desig
 
 # BindMaster Evaluator — SKILL base
 
-> **Status: scaffold.** Basic structure to polish. `TODO:` marks spots to flesh out. Much of
-> the canonical pipeline recipe already lives in `bindmaster-orchestrator/references/evaluation.md` —
-> consolidate it here.
-
 **Audience:** an AI agent turning a pool of designs into a ranked, quality-checked shortlist.
 **Job:** extract → refold → two-stage rank → affinity → QC → report.
 
