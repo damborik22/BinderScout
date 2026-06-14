@@ -113,3 +113,14 @@ def test_plan_respects_top_n():
     designs = [{"binder_id": f"d{i}", "sequence": "MKV"} for i in range(10)]
     md = wetlab_plan_markdown(designs, WetLabConfig(top_n=3))
     assert md.count(">d") == 3
+
+
+def test_plan_cell_free_expression():
+    md = wetlab_plan_markdown([{"binder_id": "d1", "sequence": "MKV"}], WetLabConfig(expression="cell_free"))
+    assert "Cell-free" in md or "CFPS" in md
+
+
+def test_plan_matrix_ladder():
+    cfg = WetLabConfig(test_matrices=["purified", "crude_extract", "plasma"])
+    md = wetlab_plan_markdown([{"binder_id": "d1", "sequence": "MKV"}], cfg)
+    assert "crude lysate" in md and "plasma" in md.lower()
