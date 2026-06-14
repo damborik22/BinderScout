@@ -20,6 +20,15 @@ kinetics → solution-phase affinity**:
    and the binder **surface-hydrophobicity** developability flag: a design that failed monomer-RMSD
    or has large hydrophobic patches is the one to watch for low Tm / aggregation here.
 
+## Test matrices — a clean → complex ladder (`WetLabConfig.test_matrices`)
+Where binding is measured, in increasing physiological realism (each step adds developability signal):
+1. **purified** — clean affinity (the default; what BLI/SPR/FIDA above use).
+2. **crude_extract** — binding in a **cell lysate** background → **specificity** (does it still hit the
+   target amid thousands of other proteins?). Pairs naturally with **cell-free expression**.
+3. **plasma** — binding in **serum/plasma** → physiological binding + **serum stability** (proteolysis,
+   off-target/albumin binding) — the developability bar for a therapeutic-track binder.
+Advance a design down the ladder only as it survives the prior step.
+
 ## What governs the choices
 - **Adaptyv submission count**, not assay type, is the budget lever: every submitted design gets
   BLI; only the leads go to SPR + FIDA. So `--top`/`--budget` set *how many designs to submit*.

@@ -17,6 +17,12 @@ fraction) for the order sheet + downstream concentration math.
   or down-rank.
 - **ε₂₈₀ = 0** (no Trp/Tyr) → can't quantify by A280; note an alternative (BCA) or add a Trp.
 
+## Expression method (`WetLabConfig.expression`)
+- **`e_coli`** (default) — BL21(DE3), IPTG induction, 18 °C overnight for soluble folding.
+- **`cell_free`** — cell-free protein synthesis (E. coli lysate / PURE): transformation-free,
+  ~hours to protein, parallel-friendly → ideal for **screening many designs fast** before scaling
+  the soluble winners into cells. The plan's section 2 switches on this flag.
+
 ## When E. coli isn't right
 - Disulfide-rich / glycosylated / large multidomain binders → mammalian (HEK/Expi) or yeast +
   a signal peptide for secretion. `TODO:` mammalian codon table + secretion-tag recipe.

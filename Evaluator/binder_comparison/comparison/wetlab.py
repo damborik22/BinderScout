@@ -155,12 +155,35 @@ class WetLabConfig:
     """Knobs for the plan. Vendor/cost are lab-overridable defaults, not authority."""
 
     organism: str = "e_coli"
+    expression: str = "e_coli"  # "e_coli" (in-cell) | "cell_free" (CFPS)
+    test_matrices: list[str] = field(default_factory=lambda: ["purified"])  # → crude_extract → plasma
     budget_usd: float | None = None
     top_n: int = 20
     tag: str = "His6-TEV"
     gene_vendor: str = "Twist Bioscience"
     cost_per_gene_usd: float = 0.10  # per bp, rough order-of-magnitude default
     notes: list[str] = field(default_factory=list)
+
+
+# How a binder is produced (plan section 2).
+_EXPRESSION = {
+    "e_coli": [
+        "- Strain: E. coli BL21(DE3); medium: LB or auto-induction (ZYM-5052)",
+        "- Induction: 0.5 mM IPTG, 18 °C overnight (favors soluble folding)",
+    ],
+    "cell_free": [
+        "- Cell-free protein synthesis (CFPS) — E. coli lysate / PURE; transformation-free, ~hours to protein",
+        "- Template: linear DNA (PCR) or plasmid; parallel-friendly — good for screening many designs fast",
+        "- Scale solubly-expressing hits into cells only if more material is needed",
+    ],
+}
+
+# Where binding is tested — a clean → complex specificity/developability ladder (plan section 3).
+_MATRIX = {
+    "purified": "purified protein (clean affinity)",
+    "crude_extract": "crude lysate (specificity in a cellular background)",
+    "plasma": "plasma / serum (physiological binding + serum stability)",
+}
 
 
 def wetlab_plan_markdown(designs: list[dict], config: WetLabConfig | None = None) -> str:
@@ -194,12 +217,7 @@ def wetlab_plan_markdown(designs: list[dict], config: WetLabConfig | None = None
     ]
 
     # 2. Expression
-    lines += [
-        "## 2. Expression",
-        "- Strain: E. coli BL21(DE3); medium: LB or auto-induction (ZYM-5052)",
-        "- Induction: 0.5 mM IPTG, 18 °C overnight (favors soluble folding)",
-        "",
-    ]
+    lines += ["## 2. Expression", *_EXPRESSION.get(cfg.expression, _EXPRESSION["e_coli"]), ""]
 
     # 3. Testing (Adaptyv: express + characterize)
     lines += [
@@ -208,6 +226,7 @@ def wetlab_plan_markdown(designs: list[dict], config: WetLabConfig | None = None
         f"- Screen: {assay['screen']}",
         "- Lead characterization:",
         *[f"  - {a}" for a in assay["lead_characterization"]],
+        "- Matrices: " + " → ".join(_MATRIX.get(m, m) for m in cfg.test_matrices),
         "",
     ]
 
