@@ -22,6 +22,7 @@ from .cli import (
     extract,
     filter_soluprot,
     mature,
+    monomer,
     parse_seqs,
     refold_af3,
     refold_boltz2,
@@ -59,6 +60,7 @@ def main(argv=None) -> None:
     autosize.add_parser(subparsers)
     wetlab.add_parser(subparsers)
     mature.add_parser(subparsers)
+    monomer.add_parser(subparsers)
 
     args = parser.parse_args(argv)
     args.func(args)
