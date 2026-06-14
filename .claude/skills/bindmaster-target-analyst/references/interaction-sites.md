@@ -3,18 +3,39 @@
 > **Scaffold.** Taxonomy + evidence sources are listed; `TODO:` add residue-mapping recipes,
 > ranking rubric, and how the chosen site becomes hotspots.
 
-Turn the research brief (`literature-research.md`) + geometry (`binder-compare analyze-target`)
-into a **ranked list of candidate binding sites**, each with evidence and residue numbers.
+Turn the research brief (`literature-research.md`) + structural annotation (PDBsum) + geometry
+(`binder-compare analyze-target`) into a **ranked list of candidate binding sites**, each with
+evidence and residue numbers.
+
+## Structural annotation — PDBsum (primary site source from a structure)
+
+[PDBsum1](https://github.com/RomanLas/PDBsum1) (Roman Laskowski, EMBL-EBI) — the **standalone,
+local** version of PDBsum Generate — is the best per-structure source of *important spots*. Run
+it on the target PDB (or any complex PDB) and it computes:
+
+- **protein–protein / protein–DNA interface residues** (which residues a partner actually contacts → PPI sites, epitopes)
+- **clefts / pockets** (SURFNET-style — real concave pockets, much richer than `analyze-target`'s Cα-density proxy)
+- **ligand-contact residues** (LigPlot — where a known ligand/drug binds → candidate hotspot site)
+- **active sites**, secondary structure + topology
+
+It is **local** (no API; works offline on Spark) — install from the repo's per-platform
+executables + `data.tar.gz`; usage is in its `docs.tar.gz` (`install.html`). `TODO:` pin the
+exact run command + parse its interface/cleft/ligand outputs into our residue lists once
+installed. `TODO:` decide PDBsum (rich, needs install) vs `analyze-target` (built-in, crude) per
+campaign — prefer PDBsum for clefts/interfaces when available; `analyze-target` is the always-on
+fallback + difficulty score. The EBI web PDBsum (`https://www.ebi.ac.uk/pdbsum/`) is a quick
+per-PDB-id lookup when a local run isn't set up.
 
 ## Site taxonomy (target the right one)
 
 | Site type | What it is | Where to find it | Design implication |
 |---|---|---|---|
-| **Catalytic / active** | enzyme active site, cofactor pocket | UniProt features; ChEMBL `get_mechanism`; literature | block function; usually deep/conserved → easier to grip |
-| **Allosteric** | regulatory pocket away from the active site | literature; allosteric-modulator drugs (ChEMBL) | functional modulation; may be shallow |
-| **Protein–protein interface (PPI)** | the surface it uses to bind a partner/receptor | PDB complexes; literature | block signaling; often **flat/shallow → harder** |
-| **Epitope** | a known antibody-binding patch | antibody-complex PDBs; literature | proven bindable surface; good hotspot prior |
-| **PTM / glyco** | modified residues | UniProt features | avoid (glycans block binders) — a difficulty flag |
+| **Catalytic / active** | enzyme active site, cofactor pocket | **PDBsum active sites**; UniProt features; ChEMBL `get_mechanism` | block function; usually deep/conserved → easier to grip |
+| **Allosteric** | regulatory pocket away from the active site | **PDBsum clefts**; allosteric-modulator drugs (ChEMBL); literature | functional modulation; may be shallow |
+| **Protein–protein interface (PPI)** | the surface it uses to bind a partner/receptor | **PDBsum interface residues** (from complexes); literature | block signaling; often **flat/shallow → harder** |
+| **Epitope** | a known antibody-binding patch | **PDBsum interface residues** of antibody complexes; literature | proven bindable surface; good hotspot prior |
+| **Ligand pocket** | where a known small-molecule/drug binds | **PDBsum ligand contacts** (LigPlot); ChEMBL | druggable pocket → strong hotspot prior |
+| **PTM / glyco** | modified residues | UniProt features; PDBsum modified residues | avoid (glycans block binders) — a difficulty flag |
 
 ## From site → residues → hotspots
 
