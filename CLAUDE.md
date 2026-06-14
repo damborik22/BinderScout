@@ -97,8 +97,8 @@ Target structure (.pdb / .mmcif)
        1.5. (optional) Screen with SoluProt 1.0 (binder-eval-soluprot env)     [live, x86 only; --soluprot-filter drops sub-threshold designs from FASTA before refold]
        2. Refold with Boltz-2 (Mosaic venv)                                    [live, all platforms]
        3. Refold with AlphaFold 3 v3.0.2 (binder-eval-af3 env)                 [live, canonical 2nd engine — Spark / H200 / >100 GB VRAM]
-       4. (optional) Refold with Protenix v0.5.0 (bindmaster_pxdesign env)     [live, fits 24 GB GPUs — opt-in]
-       4.5 (optional) Refold with ESMFold2 (binder-eval-esmfold2 env)          [live, lightweight 4th engine; auto-detected by evaluate.sh; feeds consensus_iptm]
+       4. Refold with ESMFold2 (binder-eval-esmfold2 env)                      [live, DEFAULT engine — installed by --tool all; auto-detected by evaluate.sh; feeds consensus_iptm + autosize gate]
+       4.5 (optional) Refold with Protenix v0.5.0 (bindmaster_pxdesign env)    [live, fits 24 GB GPUs — the ONLY optional refold engine]
        5. Rank by two-stage cross-engine iPTM (max-screen → mean iptm); generate HTML + CSV report
 ```
 

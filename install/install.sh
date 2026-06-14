@@ -74,7 +74,7 @@ DO_PROTEINA_COMPLEXA=false
 DO_PROTEIN_HUNTER=false
 DO_RFD3=false
 DO_AF3=false            # opt-in via --tool af3 (>=100 GB GPU memory required; weights not bundled)
-DO_ESMFOLD2=false       # opt-in via --tool esmfold2 (lightweight 4th refold engine; no gated weights)
+DO_ESMFOLD2=false       # default refold engine (included in --tool all; lightweight, no gated weights)
 DO_SOLUPROT=false       # opt-in via --tool soluprot (sequence-only E. coli solubility screen; x86 only — USEARCH dep)
 
 # Note: legacy RFAA support was removed entirely (see CHANGELOG).
@@ -87,7 +87,7 @@ while [[ $# -gt 0 ]]; do
             TOOL_SPECIFIED=true
             case "${2,,}" in
                 all)
-                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true; DO_PROTEINA_COMPLEXA=true; DO_PROTEIN_HUNTER=true; DO_RFD3=true ;;
+                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true; DO_PROTEINA_COMPLEXA=true; DO_PROTEIN_HUNTER=true; DO_RFD3=true; DO_ESMFOLD2=true ;;
                 bindcraft)
                     DO_BINDCRAFT=true ;;
                 boltzgen)
@@ -149,15 +149,15 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes]
   --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
                   all                  current-generation tools: bindcraft, boltzgen,
                                        mosaic, evaluator, pxdesign, proteina-complexa,
-                                       protein-hunter, rfd3
+                                       protein-hunter, rfd3, esmfold2 (default refold engine)
                   bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3
                                        install one current-generation tool
                   af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
                                        requires >=100 GB GPU memory (H200/GH200/Spark)
                                        and gated AF3 weights you obtain from
                                        https://github.com/google-deepmind/alphafold3
-                  esmfold2             ESMFold2 refolder — opt-in only;
-                                       lightweight 4th refold engine, no gated weights
+                  esmfold2             ESMFold2 refolder — default (in --tool all);
+                                       lightweight refold engine, no gated weights
                   soluprot             SoluProt 1.0 solubility screen — opt-in only;
                                        sequence-only, no GPU, no refolding. x86 only
                                        (USEARCH dep is x86 binary). TMHMM (DTU
