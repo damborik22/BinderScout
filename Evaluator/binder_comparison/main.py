@@ -29,6 +29,7 @@ from .cli import (
     report,
     run,
     validate,
+    wetlab,
 )
 
 
@@ -55,6 +56,7 @@ def main(argv=None) -> None:
     run.add_parser(subparsers)
     validate.add_parser(subparsers)
     autosize.add_parser(subparsers)
+    wetlab.add_parser(subparsers)
 
     args = parser.parse_args(argv)
     args.func(args)
