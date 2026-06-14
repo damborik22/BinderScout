@@ -24,7 +24,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ..comparison.autosize import autosize_decision, count_independent_passers, run_autosize_loop
+from ..comparison.autosize import (
+    GATE_TIERS,
+    autosize_decision,
+    count_independent_passers,
+    resolve_gate_threshold,
+    run_autosize_loop,
+)
 from ..comparison.scoring import add_chain_iptm_interface, add_design_groups
 from ..io.read import read_csv_safe
 
@@ -32,6 +38,11 @@ DEFAULT_SCORE_COL = "chain_iptm_interface"
 
 
 def run(args: argparse.Namespace) -> None:
+    # Resolve the gate cutoff once, before either path: an explicit --threshold overrides
+    # the named --tier. Record which was used so the Verdict is self-documenting.
+    args.tier_label = "explicit" if args.threshold is not None else args.tier
+    args.threshold = resolve_gate_threshold(args.tier, args.threshold)
+
     if args.loop:
         _run_loop(args)
         return
@@ -81,6 +92,7 @@ def _score_pool(args: argparse.Namespace, *, require: bool) -> tuple[int, int]:
 def _emit(verdict, args: argparse.Namespace, *, history: list | None = None) -> None:
     payload = verdict.to_dict()
     payload["threshold"] = args.threshold
+    payload["tier"] = args.tier_label
     payload["score_col"] = args.score_col
     if history is not None:
         payload["rounds"] = len(history)
@@ -178,11 +190,19 @@ def add_parser(subparsers) -> None:
     )
     p.add_argument("--n-target", type=int, required=True, metavar="N", help="Target number of INDEPENDENT designs")
     p.add_argument(
+        "--tier",
+        choices=sorted(GATE_TIERS),
+        default="default",
+        help="Named gate cutoff for the chain-pair interface iPTM: "
+        + ", ".join(f"{k}={v}" for k, v in sorted(GATE_TIERS.items()))
+        + ". A binder-vs-non-binder screen, not an affinity bar — calibrate on an unfamiliar target.",
+    )
+    p.add_argument(
         "--threshold",
         type=float,
-        default=0.75,
+        default=None,
         metavar="X",
-        help="Gate cutoff on the score column (default 0.75; calibrate per target — see Phase 2).",
+        help="Explicit gate cutoff; overrides --tier.",
     )
     p.add_argument(
         "--score-col",

@@ -2,11 +2,35 @@
 
 import pytest
 from binder_comparison.comparison.autosize import (
+    GATE_TIERS,
     MIN_PROBE,
     autosize_decision,
     count_independent_passers,
+    resolve_gate_threshold,
     run_autosize_loop,
 )
+
+# --- resolve_gate_threshold (tier ladder) -------------------------------------
+
+
+def test_tier_ladder_maps_names_to_cutoffs():
+    assert resolve_gate_threshold("permissive") == 0.70
+    assert resolve_gate_threshold("default") == 0.75
+    assert resolve_gate_threshold("strict") == 0.80
+
+
+def test_explicit_threshold_overrides_tier():
+    assert resolve_gate_threshold("strict", 0.66) == 0.66
+
+
+def test_unknown_tier_raises():
+    with pytest.raises(ValueError):
+        resolve_gate_threshold("ultra")
+
+
+def test_tier_ladder_is_monotonic():
+    vals = [GATE_TIERS["permissive"], GATE_TIERS["default"], GATE_TIERS["strict"]]
+    assert vals == sorted(vals)
 
 
 class _FakePool:
