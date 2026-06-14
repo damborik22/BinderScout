@@ -26,6 +26,26 @@ from dataclasses import asdict, dataclass
 # back-compute a batch size. Explore at least this many more before giving up.
 MIN_PROBE = 50
 
+# Named gate tiers for the ESMFold2 chain-pair interface iPTM. Values follow the
+# AlphaFold-Multimer interface-iPTM convention (>0.80 confident, 0.60-0.80 acceptable):
+# permissive leans inclusive, strict is the confident line. These are binder-vs-non-binder
+# *screen* cutoffs, not affinity bars, and the score distribution shifts per target — so on
+# an unfamiliar target, calibrate against a batch-1 cross-engine refold before trusting them.
+GATE_TIERS: dict[str, float] = {
+    "permissive": 0.70,
+    "default": 0.75,
+    "strict": 0.80,
+}
+
+
+def resolve_gate_threshold(tier: str = "default", threshold: float | None = None) -> float:
+    """Resolve the gate cutoff: an explicit ``threshold`` wins; else map the named ``tier``."""
+    if threshold is not None:
+        return threshold
+    if tier not in GATE_TIERS:
+        raise ValueError(f"unknown tier {tier!r}; choose from {sorted(GATE_TIERS)}")
+    return GATE_TIERS[tier]
+
 
 @dataclass
 class Verdict:
