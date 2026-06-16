@@ -3,20 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-SourceTool = Literal[
-    "bindcraft",
-    "boltzgen",
-    "mosaic",
-    "pxdesign",
-    "rfd3",
-    "proteina_complexa",
-    "protein_hunter",
-    "unknown",
-]
+# binder-compare also runs inside the Python 3.7 `binder-eval-soluprot` env
+# (for `filter-soluprot`), where `typing.Literal` does not exist (3.8+).
+# Annotations are lazy here (PEP 563 `from __future__ import annotations`), so
+# the precise Literal is only needed by type checkers; at runtime `str` suffices
+# and keeps the module importable on 3.7.
+if TYPE_CHECKING:
+    from typing import Literal
+
+    SourceTool = Literal[
+        "bindcraft",
+        "boltzgen",
+        "mosaic",
+        "pxdesign",
+        "rfd3",
+        "proteina_complexa",
+        "protein_hunter",
+        "unknown",
+    ]
+else:
+    SourceTool = str
 
 
 @dataclass

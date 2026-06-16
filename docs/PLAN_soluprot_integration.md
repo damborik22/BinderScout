@@ -262,17 +262,27 @@ distinct background so the user can decide per-design.
 
 ## Open questions for you to decide
 
-1. **aarch64 support.** USEARCH is x86 only. Options:
-   - (a) Mark SoluProt x86-only; print clear error on aarch64.
-   - (b) Use a Python reimplementation of the one USEARCH call
-     SoluProt makes (it's a single identity search against an
-     E. coli reference set). ~1 day of work, lifts the aarch64
-     limitation.
-   - (c) Fall through gracefully on aarch64: skip the USEARCH-derived
-     feature and let SoluProt run with 95 features instead of 96.
-     The paper doesn't tell us how much accuracy that costs.
-   Recommendation: (a) for the first cut, decide on (b)/(c) after we
-   see whether Spark users actually want SoluProt.
+1. **aarch64 support. — RESOLVED (2026-06-16), aarch64 is now enabled.**
+   On inspection the blocker is not one thing but four, all handled in
+   `install/install_aarch.sh:install_soluprot()` and validated end-to-end on
+   DGX Spark (agreement r≈0.96 / 90% pass-fail vs the x86 reference output):
+   - **USEARCH** (identity feature): x86 binary, and `vsearch` cannot
+     substitute (it is nucleotide-only — silently strips amino acids).
+     Fix: compile open-source **USEARCH v12** (`rcedgar/usearch12`, GPLv3,
+     portable C++11, no x86 intrinsics) from source. The `bioconda::usearch
+     12.0_beta` aarch64 build crashes at startup, so source build it is. The
+     shipped `-search_global` spelling is patched to `usearch_global`.
+   - **TMHMM** (3 of 96 features): also x86-only, no source. Fix: SoluProt's
+     shipped `--no_tmhmm` model (`grad_clf_v1_tc_notmhmm.pkl`, ~-0.5%).
+   - **scikit-learn 0.20.1**: no aarch64 build, and the model pickle won't
+     `predict()` under aarch64's 0.21/0.22 (raises `get_init_raw_predictions`).
+     Fix: pip-build **scikit-learn 0.20.4** from source (same minor series; still
+     `<0.23` so `sklearn.externals.joblib` imports).
+   - **biopython 1.74**: no aarch64 build; the oldest (1.78) removed
+     `Bio.Alphabet`. Fix: patch `soluprot.py` + the 3 `feature_scripts/*.py`
+     that import it. Also pin `numpy<1.24` / `pandas<1.4`.
+   The earlier "Python reimplementation of USEARCH" / "drop the feature" ideas
+   are unnecessary — the source-built USEARCH v12 reproduces the exact feature.
 
 2. **Default threshold.** 0.5 is the paper default, but binders are
    short and atypical. After we run SoluProt on the existing CALCA /

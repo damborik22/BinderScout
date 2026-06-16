@@ -94,7 +94,7 @@ Target structure (.pdb / .mmcif)
        RFD3                 (RosettaCommons foundry diffusion + ProteinMPNN)
     → Evaluator (canonical pipeline = Boltz-2 + AF3 + ESMFold2; SoluProt optional screen):
        1. Extract sequences from all tool outputs (one extractor per tool)
-       1.5. (optional) Screen with SoluProt 1.0 (binder-eval-soluprot env)     [live, x86 only; --soluprot-filter drops sub-threshold designs from FASTA before refold]
+       1.5. (optional) Screen with SoluProt 1.0 (binder-eval-soluprot env)     [live, x86 + aarch64; --soluprot-filter drops sub-threshold designs from FASTA before refold]
        2. Refold with Boltz-2 (Mosaic venv)                                    [live, all platforms]
        3. Refold with AlphaFold 3 v3.0.2 (binder-eval-af3 env)                 [live, canonical 2nd engine — Spark / H200 / >100 GB VRAM]
        4. Refold with ESMFold2 (binder-eval-esmfold2 env)                      [live, DEFAULT engine — installed by --tool all; auto-detected by evaluate.sh; feeds consensus_iptm + autosize gate]
@@ -166,7 +166,7 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
 | `binder-eval-af3` | AF3 refolder | 3.10 | conda | AlphaFold 3 v3.0.2 refolding — **canonical 2nd engine** (Part K, live on Spark / H200 / >100 GB VRAM hardware) |
 | `binder-eval-esmfold2` | ESMFold2 refolder | 3.10 | conda | **Default refold engine** (biohub) — installed by `--tool all`, auto-detected by `evaluate.sh`; lightweight, no gated weights; feeds `consensus_iptm` + autosize gate |
-| `binder-eval-soluprot` | SoluProt screen | 3.7 | conda | Sequence-only *E. coli* solubility filter (Hon et al. 2021); x86 only (USEARCH dep). NOT a refold engine; runs before refolding; `--soluprot-filter` drops sub-threshold designs before any GPU work |
+| `binder-eval-soluprot` | SoluProt screen | 3.7 | conda | Sequence-only *E. coli* solubility filter (Hon et al. 2021); x86 + aarch64 (aarch64 builds scikit-learn 0.20.4 + USEARCH v12 from source, uses the `--no_tmhmm` model). NOT a refold engine; runs before refolding; `--soluprot-filter` drops sub-threshold designs before any GPU work |
 
 The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in their correct environment — `install` runs in bash, `configure` runs in system Python, and `evaluate` is a **passthrough to the `binder-compare` CLI** run in the `binder-eval` conda env (`bindmaster evaluate <binder-compare args>`). The legacy single-file evaluator (`evaluator_legacy/evaluator.py`, formerly run in the Mosaic `.venv`) is retired and no longer dispatched.
 
@@ -185,6 +185,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - Mosaic: `esmj` excluded (no aarch64 wheel); `torchtext` also may fail
 - RFD3: fully supported on aarch64 (no DGL dependency; pip-installs cleanly)
 - Protein-Hunter: NOT supported on aarch64 (PyRosetta has no aarch64 wheels)
+- SoluProt: supported on aarch64 via `bash install/install_aarch.sh --tool soluprot` (the x86 `bindmaster install` path redirects here). The installer builds scikit-learn 0.20.4 (the model pickle won't `predict()` under aarch64's 0.21/0.22) and open-source USEARCH v12 (`rcedgar/usearch12`, GPLv3) from source, patches `soluprot.py` for biopython≥1.78, and uses the shipped `--no_tmhmm` model (TMHMM/USEARCH x86 binaries are not used). Needs a C/C++ toolchain. `binder-compare` itself runs in the `binder-eval` env and shells out to this py3.7 env via `$SOLUPROT_PYTHON`.
 - Pre-cached AF2 weights path: `Documents/OLD/BindMaster/bindcraft-tools`
 
 ### Design decisions and WHY
@@ -442,7 +443,7 @@ bindmaster install --tool proteina-complexa # install Proteina-Complexa
 bindmaster install --tool protein-hunter    # install Protein-Hunter (Part L)
 bindmaster install --tool rfd3              # install RFD3 / foundry (Part M)
 bindmaster install --tool esmfold2          # install ESMFold2 refolder individually (default engine; also in --tool all)
-bindmaster install --tool soluprot          # install SoluProt screen (opt-in eval filter; x86 only)
+bindmaster install --tool soluprot          # install SoluProt screen (opt-in eval filter; x86 + aarch64)
 bindmaster install --uninstall --tool all   # remove envs + shortcuts (preserves runs/)
 bindmaster install --standalone --tool all    # force local Miniforge install
 bindmaster install --system-conda --tool all  # use existing system conda
