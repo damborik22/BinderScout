@@ -1349,6 +1349,7 @@ def generate_report(
             + _df_to_html(top20_secondary, colour_tool=True)
             + "\n</details>"
         )
+    top_table += _advisory_legend_html(sort_df)
 
     # Summary statistics table
     summary_table = _summary_to_html(summary)
@@ -1619,6 +1620,9 @@ def generate_report(
         "native_dG",
         "native_dSASA",
         "native_shape_complementarity",
+        "native_soluprot_score",
+        "native_soluprot_passes",
+        "qc_pass",
         "sequence",
         "target_sequence",
     ]
@@ -1745,6 +1749,39 @@ def generate_report(
     print(f"[report] Written → {output_path}")
 
 
+# Advisory annotation columns: SoluProt solubility score (--soluprot-results, renamed
+# native_soluprot_*) + qc-annotate BindCraft interface panel (--qc-results). Surfaced in
+# the report only when present. ADVISORY — displayed for human review, never used to
+# reorder or drop designs (hard-gating either removes true binders; see qc-annotate).
+_ADVISORY_PRIMARY = ["native_soluprot_score", "qc_pass"]
+_ADVISORY_SECONDARY = [
+    "native_soluprot_passes",
+    "qc_fail_reasons",
+    "interface_sc",
+    "interface_dG",
+    "interface_dG_SASA_ratio",
+    "interface_delta_unsat_hbonds",
+    "interface_nres",
+]
+
+
+def _advisory_legend_html(df: pd.DataFrame) -> str:
+    """Legend for the advisory SoluProt + qc-annotate columns, shown only when present."""
+    bits = []
+    if "native_soluprot_score" in df.columns:
+        bits.append("<b>soluprot_score</b> = SoluProt solubility (0–1, higher = more soluble; sequence-only screen)")
+    if "qc_pass" in df.columns:
+        bits.append(
+            "<b>qc_pass</b> = BindCraft interface QC panel (shape-comp / ΔG / buried-unsat H-bonds / #interface res)"
+        )
+    if not bits:
+        return ""
+    return (
+        "<p style='font-size:0.85em;color:#555;'><b>Advisory annotations</b> "
+        "(shown, never used to reorder or drop): &nbsp;" + " &nbsp;·&nbsp; ".join(bits) + "</p>"
+    )
+
+
 def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tuple[list[str], list[str]]:
     """Pick columns for the top-20 table: (primary, secondary).
 
@@ -1785,8 +1822,8 @@ def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tupl
             "sequence",
         ]
         return (
-            [c for c in primary if c in df.columns],
-            [c for c in secondary if c in df.columns],
+            [c for c in primary + _ADVISORY_PRIMARY if c in df.columns],
+            [c for c in _ADVISORY_SECONDARY + secondary if c in df.columns],
         )
     primary = [
         "adaptyv_rank",
@@ -1818,8 +1855,8 @@ def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tupl
         "sequence",
     ]
     return (
-        [c for c in primary if c in df.columns],
-        [c for c in secondary if c in df.columns],
+        [c for c in primary + _ADVISORY_PRIMARY if c in df.columns],
+        [c for c in _ADVISORY_SECONDARY + secondary if c in df.columns],
     )
 
 
