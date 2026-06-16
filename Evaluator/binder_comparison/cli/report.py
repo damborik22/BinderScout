@@ -72,6 +72,13 @@ def run(args: argparse.Namespace) -> None:
     if args.soluprot_results:
         df = _attach_soluprot_results(df, args.soluprot_results)
 
+    # qc-annotate: BindCraft interface QC panel for a shortlist. Left-joined by
+    # binder_id — adds qc_pass + qc_fail_reasons + interface_* columns. ADVISORY
+    # (most rows stay NaN; only the annotated shortlist carries values); never
+    # used to reorder or drop.
+    if getattr(args, "qc_results", None):
+        df = _attach_qc_results(df, args.qc_results)
+
     # Step 2: Promote Boltz-2 as primary predictor
     print("[report] Promoting Boltz-2 metrics as primary…")
     df = compute_ensemble_metrics(df)
@@ -545,6 +552,49 @@ def _attach_soluprot_results(df: pd.DataFrame, soluprot_csv: str) -> pd.DataFram
     return pd.merge(df, sp_sub, on="sequence", how="left")
 
 
+# qc-annotate (interface_qc.py) panel columns to surface in the report.
+_QC_PANEL_COLS = (
+    "qc_pass",
+    "qc_fail_reasons",
+    "interface_sc",
+    "interface_packstat",
+    "interface_dG",
+    "interface_dSASA",
+    "interface_dG_SASA_ratio",
+    "interface_nres",
+    "interface_interface_hbonds",
+    "interface_delta_unsat_hbonds",
+    "interface_hydrophobicity",
+    "surface_hydrophobicity",
+)
+
+
+def _attach_qc_results(df: pd.DataFrame, qc_csv: str) -> pd.DataFrame:
+    """Left-join qc-annotate's BindCraft interface panel (``qc_pass`` +
+    ``qc_fail_reasons`` + ``interface_*``) onto the merged frame by ``binder_id``.
+
+    ADVISORY columns — surfaced in the report, never used to reorder or drop. qc-annotate
+    annotates only a shortlist, so most rows stay NaN (expected).
+    """
+    qc_path = Path(qc_csv)
+    if not qc_path.exists():
+        print(f"[report] [warn] qc-annotate CSV not found at {qc_path} — skipping")
+        return df
+    qc_df = pd.read_csv(qc_path)
+    id_col = next((c for c in ("binder_id", "design_id", "id") if c in qc_df.columns), None)
+    if qc_df.empty or id_col is None or "binder_id" not in df.columns:
+        print(f"[report] [warn] qc-annotate CSV {qc_path.name} not joinable (need an id column) — skipping")
+        return df
+    keep = [id_col] + [c for c in _QC_PANEL_COLS if c in qc_df.columns]
+    qc_sub = qc_df[keep].rename(columns={id_col: "binder_id"}).copy()
+    qc_sub["binder_id"] = qc_sub["binder_id"].astype(str)
+    df = df.copy()
+    df["binder_id"] = df["binder_id"].astype(str)
+    n = int(qc_sub["qc_pass"].notna().sum()) if "qc_pass" in qc_sub.columns else len(qc_sub)
+    print(f"[report] Attaching qc-annotate panel from {qc_path.name} ({n} annotated designs)")
+    return pd.merge(df, qc_sub, on="binder_id", how="left")
+
+
 def add_parser(subparsers) -> None:
     p = subparsers.add_parser(
         "report",
@@ -570,6 +620,13 @@ def add_parser(subparsers) -> None:
         help="Optional: output from 'filter-soluprot' (soluprot_results.csv). Adds "
         "native_soluprot_score and native_soluprot_passes columns. SoluProt is a "
         "screen, not a re-ranker; the ranking hierarchy is unchanged.",
+    )
+    p.add_argument(
+        "--qc-results",
+        metavar="CSV",
+        help="Optional: output from 'qc-annotate' (BindCraft interface panel for a shortlist). "
+        "Adds advisory qc_pass / qc_fail_reasons / interface_* columns joined by binder_id. "
+        "Advisory only — never reorders or drops designs.",
     )
     p.add_argument(
         "--esmfold2-results",
