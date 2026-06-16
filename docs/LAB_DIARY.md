@@ -630,3 +630,18 @@
 - 103 tests pass (rewrote `test_affinity.py` for gate-then-density + ipsae-independence + screen-metric tests).
 - **2VDY (CBG) reranked** with the new mean-screen — 400 designs across 8 tools, reusing the Jun-7 Boltz-2 + AF3 + ESMFold2 refolds (no GPU). The top-80 is **identical** to the old max-screen (first divergence at rank 81; 46 designs flip near the 50% boundary, all movers rank ≥81), so the wet-lab shortlist is robust to the screen choice. New report at `2VDY_CBG/RESULTS/2VDY_Evaluator_two_stage/report_two_stage_mean/`.
 - Shipped on branch `two-stage-screen-metric-and-partn-affinity` (PR pending); CLAUDE.md ranking section + terminology aligned to the mean default.
+
+---
+
+## 2026-06-16 — Report generator surfaces SoluProt + qc-annotate panels (advisory); 2VDY enhanced
+
+**What changed:**
+- `binder-compare report --qc-results` ingests qc-annotate's BindCraft interface panel (`qc_pass` / `qc_fail_reasons` / `interface_*`) by `binder_id`. Advisory SoluProt (`native_soluprot_score`) + qc columns now render in the report's top-N table, full table, and a legend. Both ADVISORY — surfaced for review, never used to reorder or drop (hard-gating the BindCraft panel removes ~⅔ of cross-engine designs).
+- New `tests/binder_comparison/test_report_advisory.py`; 108 tests pass.
+
+**Why it mattered:**
+- Adds solubility + interface-quality QC to the report without disturbing the benchmark-validated ranking.
+
+**Outcome:**
+- 2VDY (CBG) report enhanced end-to-end: SoluProt on all 400 designs (24/30 of the top-30 predicted soluble, median 0.65) + qc-annotate on the top-30 (4/30 pass the strict BindCraft panel; the rest fail mainly on buried-unsat H-bonds yet carry strongly favorable ΔG — `protein_hunter_13_c10` best: qc_pass, sc 0.75, ΔG −178.5). Report at `2VDY_CBG/RESULTS/2VDY_Evaluator_two_stage/report_two_stage_mean_enhanced/`.
+- SoluProt aarch64 build exercised on real campaign data (`sklearn020-build` env + USEARCH v12).
