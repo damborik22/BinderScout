@@ -92,7 +92,7 @@ Target structure (.pdb / .mmcif)
        Proteina-Complexa    (NVIDIA flow matching + ITO)
        Protein-Hunter       (Boltz-2 / Chai-1; 6 modalities: protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA)
        RFD3                 (RosettaCommons foundry diffusion + ProteinMPNN)
-    → Evaluator (canonical pipeline = Boltz-2 + AF3; SoluProt optional screen):
+    → Evaluator (canonical pipeline = Boltz-2 + AF3 + ESMFold2; SoluProt optional screen):
        1. Extract sequences from all tool outputs (one extractor per tool)
        1.5. (optional) Screen with SoluProt 1.0 (binder-eval-soluprot env)     [live, x86 only; --soluprot-filter drops sub-threshold designs from FASTA before refold]
        2. Refold with Boltz-2 (Mosaic venv)                                    [live, all platforms]
@@ -165,7 +165,7 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `bindmaster_rfd3` | RFD3 (`rc-foundry`) | 3.12 | conda | RosettaCommons foundry diffusion + ProteinMPNN |
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
 | `binder-eval-af3` | AF3 refolder | 3.10 | conda | AlphaFold 3 v3.0.2 refolding — **canonical 2nd engine** (Part K, live on Spark / H200 / >100 GB VRAM hardware) |
-| `binder-eval-esmfold2` | ESMFold2 refolder | 3.10 | conda | Optional 4th refold engine (biohub); lightweight, no gated weights |
+| `binder-eval-esmfold2` | ESMFold2 refolder | 3.10 | conda | **Default refold engine** (biohub) — installed by `--tool all`, auto-detected by `evaluate.sh`; lightweight, no gated weights; feeds `consensus_iptm` + autosize gate |
 | `binder-eval-soluprot` | SoluProt screen | 3.7 | conda | Sequence-only *E. coli* solubility filter (Hon et al. 2021); x86 only (USEARCH dep). NOT a refold engine; runs before refolding; `--soluprot-filter` drops sub-threshold designs before any GPU work |
 
 The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in their correct environment — `install` runs in bash, `configure` runs in system Python, and `evaluate` is a **passthrough to the `binder-compare` CLI** run in the `binder-eval` conda env (`bindmaster evaluate <binder-compare args>`). The legacy single-file evaluator (`evaluator_legacy/evaluator.py`, formerly run in the Mosaic `.venv`) is retired and no longer dispatched.
@@ -193,7 +193,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - **stdlib-only CLI:** `bindmaster.py` uses only stdlib so it works on any Python 3.10+ without pip installs.
 - **uv for Mosaic:** Mosaic uses `uv` instead of conda because it needs JAX with CUDA, and uv resolves this faster and more reliably.
 - **Pinned commits:** Tool repos are cloned at pinned commits (`BINDCRAFT_COMMIT`, `BOLTZGEN_COMMIT`, `MOSAIC_COMMIT`) for reproducible installs.
-- **Separate evaluator envs:** Boltz-2 refolding runs in the Mosaic venv (JAX). AF3 v3.0.2 (Part K, live) is the canonical 2nd engine and runs in a dedicated `binder-eval-af3` conda env on DGX Spark / H200 / any host with >100 GB unified or device memory — full AF3 inference needs that headroom. Protenix v0.5.0 (Part J, live) rides the existing `bindmaster_pxdesign` conda env as an *optional* alternative for smaller GPUs (24 GB is enough). `evaluate.sh` orchestrates Boltz-2 + AF3 by default; Protenix runs only when explicitly enabled.
+- **Separate evaluator envs:** Boltz-2 refolding runs in the Mosaic venv (JAX). AF3 v3.0.2 (Part K, live) is the canonical 2nd engine and runs in a dedicated `binder-eval-af3` conda env on DGX Spark / H200 / any host with >100 GB unified or device memory — full AF3 inference needs that headroom. Protenix v0.5.0 (Part J, live) rides the existing `bindmaster_pxdesign` conda env as an *optional* alternative for smaller GPUs (24 GB is enough). ESMFold2 (biohub) runs in its own `binder-eval-esmfold2` conda env as a default engine, auto-detected by `evaluate.sh` when present. `evaluate.sh` orchestrates Boltz-2 + AF3 + ESMFold2 by default; Protenix runs only when explicitly enabled.
 
 ---
 
@@ -354,7 +354,7 @@ the parameter sweep.
 - **Parts A–H complete** (see STAGES.md); **Parts I, J, K, L, M landed on `[Unreleased]`** (see CHANGELOG). All Roadmap items are done.
 - **Part I — AF2 refolding removed from Evaluator.** Deleted `refold_af2.py`, `af2_runner.py`, `binder-eval-af2.yml`; pruned all `af2_*` schema fields and report plots. BindCraft / PXDesign / Proteina-Complexa still use AF2 internally — only the Evaluator's AF2 refolding step was removed.
 - **Part K — AF3 v3.0.2 is the canonical 2nd refolding engine.** Runs in its own `binder-eval-af3` conda env on DGX Spark, H200, or any host with >100 GB unified / device memory (full AF3 inference doesn't fit on consumer 24 GB GPUs). Schema: `af3_*` columns in `StandardisedMetrics`; pLDDT rescaled 0–100 → 0–1 on ingest; PAE transposed from token-order to `[binder|target]` to match Boltz-2.
-- **Part J — Protenix v0.5.0 as the optional fallback refolder.** `binder-compare refold-protenix` runs inside the existing `bindmaster_pxdesign` conda env (no new env). ByteDance's open-source AF3 reimplementation, ~3–4 GB weights, fits 24 GB GPUs — useful when AF3 isn't an option. Schema: `protenix_*` columns. Opt-in via `evaluate.sh` flags; **not part of the default Boltz-2 + AF3 pipeline.**
+- **Part J — Protenix v0.5.0 as the optional fallback refolder.** `binder-compare refold-protenix` runs inside the existing `bindmaster_pxdesign` conda env (no new env). ByteDance's open-source AF3 reimplementation, ~3–4 GB weights, fits 24 GB GPUs — useful when AF3 isn't an option. Schema: `protenix_*` columns. Opt-in via `evaluate.sh` flags; **not part of the default Boltz-2 + AF3 + ESMFold2 pipeline.**
 - **Part L — Protein-Hunter** installable via `bindmaster install --tool protein-hunter` (x86 only; aarch64 blocked by PyRosetta). Conda env `bindmaster_protein_hunter`, vendored Boltz-2 + Chai-1 (sokrypton fork). New `ProteinHunterExtractor` reads `summary_high_iptm.csv` by default (`--all-protein-hunter-designs` for all runs). Configurator generates `run_protein_hunter.sh`.
 - **Part M — RFD3** installable via `bindmaster install --tool rfd3` (x86 + aarch64). Conda env `bindmaster_rfd3`, `rc-foundry[rfd3,mpnn]` from PyPI, weights at `weights/foundry/`. New `RFD3Extractor`. Configurator generates `run_rfd3.sh`.
 - **Standalone mode** (Part H, v0.7.0): Installer auto-detects whether system conda is writable. If not, downloads Miniforge3 into `BindMaster/conda/` and creates all environments locally. Shortcuts go to `BindMaster/bin/` instead of `~/.local/bin/`. `--standalone` forces this; `--system-conda` opts out. All generated run scripts and Evaluator shell scripts search local conda first.
@@ -441,7 +441,7 @@ bindmaster install --tool all --yes --skip-examples  # non-interactive (CI)
 bindmaster install --tool proteina-complexa # install Proteina-Complexa
 bindmaster install --tool protein-hunter    # install Protein-Hunter (Part L)
 bindmaster install --tool rfd3              # install RFD3 / foundry (Part M)
-bindmaster install --tool esmfold2          # install ESMFold2 refolder (opt-in eval engine)
+bindmaster install --tool esmfold2          # install ESMFold2 refolder individually (default engine; also in --tool all)
 bindmaster install --tool soluprot          # install SoluProt screen (opt-in eval filter; x86 only)
 bindmaster install --uninstall --tool all   # remove envs + shortcuts (preserves runs/)
 bindmaster install --standalone --tool all    # force local Miniforge install
