@@ -15,7 +15,7 @@ existing tool/refold launchers, exactly like the `autosize` loop.
 | 1 | `wetlab` | `wetlab.py` | Ranked designs → Markdown wet-lab plan (synthesis, expression, budget-aware assays, FASTA + biophysics) | none (stdlib only) |
 | 2 | `mature` | `maturation.py` | Best affinity (Kd or proxy) → next round: partial-diffusion / MPNN-redesign / mutation-scan / done + parents | RFD3 partial-diffusion / ProteinMPNN |
 | 3 | `monomer` | `monomer.py` | Binder-alone vs in-complex Cα RMSD; flag context-dependent (target-stabilized) folds | binder-only refold (ESMFold2/Boltz-2) |
-| 4 | `affinity` | `affinity.py` | Rank affinity **among** binders via `ipsae_min × \|dG/dSASA\|` (Part N) | Rosetta InterfaceAnalyzer in the **BindCraft** env |
+| 4 | `affinity` | `affinity.py` | Rank affinity **among** binders via `\|dG/dSASA\|` energy density, gated by `ipsae_min` (Part N) | Rosetta InterfaceAnalyzer in the **BindCraft** env |
 | 5 | `analyze-target` | `target_analysis.py` | Advisory 0–1 difficulty + autosize/length/hotspot suggestions from a PDB | none (Cα-density SASA proxy) |
 
 ## The closed campaign loop they enable

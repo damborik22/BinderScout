@@ -1,13 +1,17 @@
 # Affinity among binders (Part N)
 
-Two-stage ranking separates binders from non-binders; it does **not** order affinity. The composite
-that does (BindMaster 2 / Overath 2025 best single affinity predictor) is:
+Two-stage ranking separates binders from non-binders; it does **not** order affinity. The affinity
+score is the interface energy *density*, with `ipsae_min` used as a binder **gate** (not a multiplier):
 
 ```
-affinity_composite = ipsae_min × |interface_dG / interface_dSASA|
+affinity_energy_density = |interface_dG / interface_dSASA|     # the rank
+passes_affinity_gate    = ipsae_min ≥ 0.61                     # the cull
 ```
 
-interface confidence × interface energy *density* — higher = tighter predicted affinity. Run it
+Rank survivors by `affinity_energy_density` (higher = tighter predicted affinity) among the
+gated-in binders. **Why not `ipsae_min × |dG/dSASA|`:** on the Adaptyv 4-target benchmark
+(experimental Kd) `ipsae_min` carries no affinity signal among binders (Spearman vs log10 Kd ≈ 0,
+sign flips per target), so multiplying it in only adds variance — gate, don't weight. Run this
 **only on the two-stage shortlist** (the survivors worth wet-lab time), not the whole pool.
 
 ## Command
@@ -23,11 +27,11 @@ binder-compare affinity --metrics report/metrics.csv \
 
 ## When is it worth the Rosetta cost?
 - **Yes:** you have a two-stage shortlist (tens of designs) and need to pick the tightest for SPR,
-  or to feed `bindmaster-wetlab`'s maturation (the composite is the pre-experimental affinity proxy
-  when there's no Kd yet).
+  or to feed `bindmaster-wetlab`'s maturation (`affinity_energy_density` is the pre-experimental
+  affinity proxy when there's no Kd yet).
 - **No:** the whole pool (too slow), or a single-engine pool where ranking is dominated by bias.
 
 ## Caveats
-- A *structure-confidence × energy* proxy, not a measured Kd — calibrate against any real data you have.
+- An *interface-energy density* proxy, not a measured Kd — calibrate against any real data you have.
 - ΔG depends on the interface chain spec being right; a wrong `--interface` silently mis-scores.
 - `TODO:` PRODIGY fallback wiring if a host lacks PyRosetta (BindCraft env should always have it).
