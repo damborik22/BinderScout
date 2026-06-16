@@ -737,19 +737,18 @@ def rank_by_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     return result.reset_index(drop=True)
 
 
-def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5, screen_metric: str = "max") -> pd.DataFrame:
+def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5, screen_metric: str = "mean") -> pd.DataFrame:
     """Two-stage ranking — the EVALUATOR benchmark recommendation for wet-lab selection.
 
     Stage 1 — screen by the ``screen_metric`` consensus iptm: keep the top
     ``screen_frac`` as the binder-likely pool (the recall step).
-    ``screen_metric="max"`` (default) screens by ``consensus_iptm`` — the most
-    predictive engine flips per target, so "trust whichever engine is most
-    confident" gave the best binder-vs-non-binder AUC (~0.755 on the ProteinBase
-    4-target benchmark). ``screen_metric="mean"`` screens by
-    ``consensus_iptm_mean`` instead — a stronger screen on the Adaptyv 4-target
-    set with experimental Kd (macro AUC 0.710 vs 0.689; +20 true binders recalled
-    and higher purity at the 50% cut), but pending a ProteinBase recheck before it
-    becomes the shipped default (see docs/plans.md Part N).
+    ``screen_metric="mean"`` (default) screens by ``consensus_iptm_mean`` — the
+    stronger binder-vs-non-binder screen on the Adaptyv 4-target benchmark with
+    experimental Kd (macro AUC 0.710 vs 0.689 for max; +20 true binders recalled
+    and higher purity at the 50% cut), and more robust to a single engine's
+    per-target blind spots. ``screen_metric="max"`` screens by ``consensus_iptm``
+    instead (the legacy default — best on the ProteinBase 4-target benchmark, macro
+    AUC ~0.755, "trust whichever engine is most confident"). See docs/plans.md Part N.
 
     Stage 2 — rank survivors by ``consensus_iptm_mean`` (mean engine iptm): the
     precision step — at the sharp end of the list you want designs *all* engines

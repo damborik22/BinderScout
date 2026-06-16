@@ -189,7 +189,7 @@ def run(args: argparse.Namespace) -> None:
     df = compute_consensus_iptm(df)
     df = rank_by_adaptyv_method(df)
     df = rank_by_consensus_iptm(df)
-    screen_metric = getattr(args, "screen_metric", "max") or "max"
+    screen_metric = getattr(args, "screen_metric", "mean") or "mean"
     df = rank_by_two_stage(df, screen_metric=screen_metric)
 
     # All three rankings coexist as columns (adaptyv_rank, consensus_rank,
@@ -604,11 +604,11 @@ def add_parser(subparsers) -> None:
     p.add_argument(
         "--screen-metric",
         choices=["max", "mean"],
-        default="max",
-        help="Stage-1 screen metric for --rank-by two_stage. 'max' (default) = consensus_iptm, the "
-        "shipped ProteinBase-validated screen. 'mean' = consensus_iptm_mean, a stronger binder screen on "
-        "the Adaptyv 4-target set (macro AUC 0.710 vs 0.689; +20 true binders recalled at the 50%% cut) — "
-        "opt-in pending a ProteinBase recheck before it becomes default.",
+        default="mean",
+        help="Stage-1 screen metric for --rank-by two_stage. 'mean' (default) = consensus_iptm_mean, the "
+        "stronger binder screen on the Adaptyv 4-target benchmark with experimental Kd (macro AUC 0.710 vs "
+        "0.689; +20 true binders recalled at the 50%% cut). 'max' = consensus_iptm (legacy; best on the "
+        "ProteinBase benchmark, ~0.755).",
     )
     p.add_argument(
         "--no-collapse-duplicates",
