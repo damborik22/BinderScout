@@ -618,7 +618,7 @@
 
 **What changed:**
 - Two-stage ranking (`consensus_iptm_mean` for survivors vs `consensus_iptm_max` for screening) validated on Adaptyv 4-target / 662-design benchmark (experimental Kd). Macro AUC 0.710 vs 0.689 (previous max-only baseline), +20 true binders recalled, higher purity at 50% cut.
-- `--screen-metric {max,mean}` flag added to report; default stays `max` pending a ProteinBase recheck before promotion. Column name `passes_max_screen` unchanged to preserve plot/viz compatibility.
+- `--screen-metric {max,mean}` flag added to report, then the **default flipped `max` → `mean`** (the Adaptyv benchmark uses real experimental Kd and is trusted over ProteinBase). The legacy max screen stays available via `--screen-metric max`. Column name `passes_max_screen` unchanged to preserve plot/viz compatibility.
 - Part N affinity redesigned: structure confidence (`ipsae_min`) shown to carry ~0, sign-unstable correlation with Kd (Spearman pooled Boltz-2: −0.09; mean: +0.13; macro ≈ +0.04, sign flips per target). Affinity metric drops the `ipsae_min × |dG/dSASA|` composite: now pure `|dG/dSASA|` (interface energy density). `ipsae_min` becomes a **gate** only (`passes_affinity_gate = ipsae_min ≥ 0.61`).
 - `affinity_composite` renamed `interface_energy_density`; `--gate-threshold` flag added to CLI. Evaluator skill + grafts docs updated.
 
@@ -628,3 +628,5 @@
 
 **Outcome:**
 - 103 tests pass (rewrote `test_affinity.py` for gate-then-density + ipsae-independence + screen-metric tests).
+- **2VDY (CBG) reranked** with the new mean-screen — 400 designs across 8 tools, reusing the Jun-7 Boltz-2 + AF3 + ESMFold2 refolds (no GPU). The top-80 is **identical** to the old max-screen (first divergence at rank 81; 46 designs flip near the 50% boundary, all movers rank ≥81), so the wet-lab shortlist is robust to the screen choice. New report at `2VDY_CBG/RESULTS/2VDY_Evaluator_two_stage/report_two_stage_mean/`.
+- Shipped on branch `two-stage-screen-metric-and-partn-affinity` (PR pending); CLAUDE.md ranking section + terminology aligned to the mean default.
