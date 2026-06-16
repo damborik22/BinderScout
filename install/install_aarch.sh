@@ -64,7 +64,7 @@ DO_EVALUATOR=false
 DO_PXDESIGN=false
 DO_AF3=false            # opt-in via --tool af3 (gated weights; not in --tool all)
 DO_ESMFOLD2=false       # opt-in via --tool esmfold2 (lightweight 4th refold engine; no gated weights)
-DO_SOLUPROT=false       # opt-in via --tool soluprot — USEARCH x86-only; install_soluprot() refuses on aarch64
+DO_SOLUPROT=false       # opt-in via --tool soluprot (sequence-only E. coli solubility screen; aarch64-enabled via source-built USEARCH v12 + --no_tmhmm model)
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -141,10 +141,11 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
                                        https://github.com/google-deepmind/alphafold3
                   esmfold2             ESMFold2 refolder — opt-in only;
                                        lightweight 4th refold engine, no gated weights
-                  soluprot             SoluProt solubility screen — opt-in but NOT
-                                       supported on aarch64 (USEARCH dep is x86 only).
-                                       Install on an x86 host with --tool soluprot
-                                       and rsync the score CSVs over for the report.
+                  soluprot             SoluProt solubility screen — opt-in. aarch64
+                                       enabled: builds scikit-learn 0.20.4 + USEARCH
+                                       v12 from source, patches biopython, uses the
+                                       --no_tmhmm model (TMHMM/USEARCH x86 binaries
+                                       are not used). Needs a C/C++ toolchain.
   --tools-dir   Path to pre-cached resources (AF2 weights, ARM64 binaries).
                 Default: <repo>/../../OLD/BindMaster/bindcraft-tools
   --cuda        CUDA version (default: 13.0). Only 13.0 has been tested on DGX Spark (GB10).
@@ -628,7 +629,7 @@ select_tools_interactive() {
     [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
     [[ "$DO_AF3"       == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; weights required)${RESET}"
     [[ "$DO_ESMFOLD2"  == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (opt-in refolder)"
-    [[ "$DO_SOLUPROT"  == true ]] && echo -e "    ${YELLOW}✓ SoluProt (opt-in solubility screen; aarch64 unsupported — will error out)${RESET}"
+    [[ "$DO_SOLUPROT"  == true ]] && echo -e "    ${GREEN}✓${RESET} SoluProt (opt-in solubility screen; aarch64 via source build)"
     echo ""
 
     confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
@@ -1814,22 +1815,248 @@ uninstall_tool() {
     esac
 }
 
-# ─── SoluProt (sequence-only solubility screen, x86 only — refuses on aarch64) ─
+# ─── SoluProt (sequence-only solubility screen) — aarch64 enabled ─────────────
+#
+# SoluProt's pinned environment is unsatisfiable on aarch64 and its external
+# tools ship x86-only binaries; this installer works around all four blockers:
+#   1. USEARCH (identity feature) — x86 binary, and vsearch can't substitute
+#      (nucleotide-only). We compile open-source USEARCH v12 (rcedgar/usearch12,
+#      GPLv3, portable C++11, no x86 intrinsics) from source.
+#   2. TMHMM (3 of 96 features) — x86-only binary, no source. We use SoluProt's
+#      shipped --no_tmhmm model (grad_clf_v1_tc_notmhmm.pkl, ~-0.5% accuracy).
+#   3. scikit-learn 0.20.1 — no aarch64 build, and the model pickle won't
+#      predict() under any aarch64-available sklearn (0.21/0.22 raise
+#      'get_init_raw_predictions'). We pip-build scikit-learn 0.20.4 from source
+#      (same minor series as the pickle; <0.23 so sklearn.externals.joblib still
+#      imports).
+#   4. biopython 1.74 — no aarch64 build; the oldest (1.78) removed Bio.Alphabet
+#      that soluprot.py imports. We patch the SoluProt source.
+# Validated on DGX Spark: end-to-end agreement r~0.96 / 90% pass-fail vs the x86
+# reference output (the residual is the --no_tmhmm model swap).
+SOLUPROT_DIR="${EVALUATOR_DIR}/tools/soluprot"
+SOLUPROT_ZIP_URL="https://loschmidt.chemi.muni.cz/soluprot/?page=download&f=soluprot.zip"
+USEARCH12_REPO="https://github.com/rcedgar/usearch12"
+
+# Patch the downloaded SoluProt source for aarch64: biopython>=1.78 (removed
+# Bio.Alphabet/IUPAC) and the USEARCH command spelling (usearch_global).
+_patch_soluprot_source() {
+    local patch_py
+    patch_py="$(mktemp)"
+    cat > "${patch_py}" <<'PYEOF'
+import re, sys, pathlib
+root = pathlib.Path(sys.argv[1])
+AA = '"ACDEFGHIKLMNPQRSTVWY"'
+changed = []
+for f in root.rglob("*.py"):
+    s = f.read_text(); o = s
+    s = s.replace("from Bio.Alphabet.IUPAC import IUPACProtein\n", "")
+    s = s.replace("from Bio.Alphabet import IUPAC\n", "")
+    s = s.replace("IUPAC.protein.letters", AA)
+    s = s.replace("IUPACProtein.letters", AA)
+    s = re.sub(r"Seq\(([^,()]+),\s*IUPAC\.protein\)", r"Seq(\1)", s)
+    s = s.replace("'-search_global'", "'-usearch_global'")
+    if s != o:
+        f.write_text(s); changed.append(f.name)
+print("[soluprot-patch] " + ("patched: " + ", ".join(sorted(changed)) if changed else "nothing to patch"))
+PYEOF
+    run_logged "Patching SoluProt source (biopython>=1.78, usearch_global)" \
+        "${CONDA_CMD}" run -n binder-eval-soluprot python "${patch_py}" "${SOLUPROT_DIR}"
+    local rc=$?
+    rm -f "${patch_py}"
+    return $rc
+}
+
+# Compile open-source USEARCH v12 for the identity feature. The bioconda
+# usearch 12.0_beta build crashes at startup on aarch64, so we build from
+# source (clean on GB10/Grace-Hopper with gcc 13). TMHMM is sidestepped via
+# the --no_tmhmm model, so no second binary is needed.
+_build_usearch_v12() {
+    print_step "Building open-source USEARCH v12 for the identity feature (aarch64)"
+    local t
+    for t in git make g++ gcc; do
+        if ! command -v "${t}" >/dev/null 2>&1; then
+            print_warn "USEARCH build needs git + make + gcc/g++ (missing: ${t})."
+            print_warn "  Install a toolchain and re-run, or drop a 'usearch' binary at ${SOLUPROT_DIR}/usearch."
+            return 1
+        fi
+    done
+    local src_dir="${SOLUPROT_DIR}/usearch12-src"
+    rm -rf "${src_dir}"
+    run_logged "Cloning ${USEARCH12_REPO}" \
+        git clone --depth 1 "${USEARCH12_REPO}" "${src_dir}" \
+        || { print_warn "git clone of ${USEARCH12_REPO} failed"; return 1; }
+    # The generated Makefile hardcodes 'ccache g++'; override CC/CXX. -march=native
+    # is valid on aarch64 and the source carries no x86 intrinsics. Static link
+    # works on Spark; fall back to dynamic if static libs are unavailable.
+    if ! run_logged "Compiling usearch12 (static)" \
+        make -C "${src_dir}/src" -j"$(nproc)" CC=gcc CXX=g++; then
+        print_warn "Static build failed; retrying without -static"
+        # NB: the Makefile appends '-static' to LDFLAGS, and a command-line
+        # LDFLAGS= override does NOT win against that '+=' here — so strip it
+        # from the Makefile directly, then re-link (objects are already built).
+        sed -i 's/[[:space:]]*-static//g' "${src_dir}/src/Makefile"
+        run_logged "Compiling usearch12 (dynamic)" \
+            make -C "${src_dir}/src" -j"$(nproc)" CC=gcc CXX=g++ \
+            || { print_warn "USEARCH v12 build failed"; return 1; }
+    fi
+    if [[ -x "${src_dir}/bin/usearch12" ]]; then
+        cp "${src_dir}/bin/usearch12" "${SOLUPROT_DIR}/usearch"
+        chmod +x "${SOLUPROT_DIR}/usearch"
+        rm -rf "${src_dir}"
+        print_ok "USEARCH v12 built → ${SOLUPROT_DIR}/usearch"
+        return 0
+    fi
+    print_warn "USEARCH v12 binary not found after build (${src_dir}/bin/usearch12)"
+    return 1
+}
 
 install_soluprot() {
-    print_step "Installing SoluProt 1.0 (aarch64)"
+    print_step "Installing SoluProt 1.0 solubility screen (aarch64 — binder-eval-soluprot env)"
+    ensure_conda_in_path
 
-    # USEARCH 32-bit is the gating dep here — it ships only as a Linux x86
-    # binary. The plan (docs/PLAN_soluprot_integration.md §"Open questions")
-    # is to mark aarch64 unsupported for the first cut and revisit if Spark
-    # users actually want SoluProt; either a Python reimpl of the USEARCH
-    # identity step (lifts the limitation) or graceful-skip of the
-    # USEARCH-derived feature (one of 96 — paper doesn't quantify the cost).
-    print_fail "SoluProt's USEARCH dependency is an x86 binary; aarch64 is NOT supported."
-    print_warn "  Run \`bindmaster install --tool soluprot\` on an x86 host instead, then"
-    print_warn "  rsync the score CSV into this Spark for the report step."
-    print_warn "  Details + future workaround: docs/PLAN_soluprot_integration.md"
-    return 1
+    if [[ ! -d "${EVALUATOR_DIR}" ]]; then
+        print_fail "Evaluator directory not found at ${EVALUATOR_DIR}"
+        return 1
+    fi
+
+    # 1. Create the env imperatively (the pinned soluprot_environment.yml is
+    #    unsatisfiable on aarch64). scikit-learn 0.20.4 is built from source so
+    #    the 0.20.1 model pickle predicts correctly; numpy is held at 1.17.5
+    #    (build-compatible with that sklearn) across the runtime-dep install.
+    # Treat the env as ready only if it imports the full SoluProt stack; an
+    # interrupted earlier run can leave the env created but without sklearn /
+    # biopython, which the bare env_exists check would wrongly skip past.
+    if env_exists binder-eval-soluprot \
+        && "${CONDA_CMD}" run -n binder-eval-soluprot python -c "import sklearn, Bio, pandas" >/dev/null 2>&1; then
+        print_warn "Conda environment 'binder-eval-soluprot' already complete — skipping creation."
+    else
+        if env_exists binder-eval-soluprot; then
+            print_warn "Existing 'binder-eval-soluprot' env is incomplete (interrupted install?) — rebuilding."
+            run_logged "Removing incomplete binder-eval-soluprot env" \
+                "${CONDA_CMD}" env remove -n binder-eval-soluprot -y || true
+        fi
+        print_step "Creating binder-eval-soluprot conda env (Python 3.7, aarch64 pins)"
+        run_logged "Creating binder-eval-soluprot conda env" \
+            "${CONDA_CMD}" create -n binder-eval-soluprot -y -c conda-forge \
+            python=3.7 numpy=1.17.5 scipy cython joblib pip \
+            || { print_fail "Failed to create binder-eval-soluprot conda env"; return 1; }
+        run_logged "Building scikit-learn 0.20.4 from source (matches model pickle)" \
+            "${CONDA_CMD}" run -n binder-eval-soluprot \
+            pip install --no-build-isolation "scikit-learn==0.20.4" \
+            || { print_fail "Failed to build scikit-learn 0.20.4 (needs a C/C++ toolchain)"; return 1; }
+        run_logged "Installing SoluProt runtime deps (biopython 1.78, pandas<1.4, blast)" \
+            "${CONDA_CMD}" install -n binder-eval-soluprot -y -c conda-forge -c bioconda \
+            numpy=1.17.5 "pandas<1.4" biopython=1.78 tqdm blast \
+            || { print_fail "Failed to install SoluProt runtime deps"; return 1; }
+    fi
+
+    # 2. Fetch and unpack SoluProt's distribution.
+    mkdir -p "${SOLUPROT_DIR}"
+    local zip_path="${SOLUPROT_DIR}/soluprot.zip"
+    if [[ -f "${SOLUPROT_DIR}/soluprot.py" ]]; then
+        print_ok "SoluProt distribution already present at ${SOLUPROT_DIR}"
+    else
+        print_step "Downloading SoluProt 1.0 from Loschmidt Lab"
+        if ! run_logged "Downloading soluprot.zip" \
+            curl -fsSL -o "${zip_path}" "${SOLUPROT_ZIP_URL}"; then
+            print_fail "Failed to download SoluProt from Loschmidt Lab."
+            print_warn "  Manual download: https://loschmidt.chemi.muni.cz/soluprot/?page=download"
+            print_warn "  Unpack into:     ${SOLUPROT_DIR}"
+            return 1
+        fi
+        if ! run_logged "Unpacking soluprot.zip" \
+            unzip -q -o "${zip_path}" -d "${SOLUPROT_DIR}"; then
+            print_fail "Failed to unpack soluprot.zip — is 'unzip' installed?"
+            return 1
+        fi
+        local nested
+        nested="$(find "${SOLUPROT_DIR}" -mindepth 1 -maxdepth 1 -type d | head -1)"
+        if [[ -n "${nested}" ]] && [[ -f "${nested}/soluprot.py" ]]; then
+            mv "${nested}"/* "${SOLUPROT_DIR}/"
+            rmdir "${nested}" 2>/dev/null || true
+        fi
+        rm -f "${zip_path}"
+    fi
+
+    # 3. Patch SoluProt's source for biopython>=1.78 and the usearch_global
+    #    command spelling.
+    _patch_soluprot_source || { print_fail "Failed to patch SoluProt source for aarch64"; return 1; }
+
+    # Sanity-check the bundle actually contains the model we use (the --help
+    # smoke test below loads no model, so verify it here).
+    if [[ ! -f "${SOLUPROT_DIR}/data/grad_clf_v1_tc_notmhmm.pkl" ]]; then
+        print_fail "SoluProt model missing at ${SOLUPROT_DIR}/data/grad_clf_v1_tc_notmhmm.pkl — incomplete download?"
+        return 1
+    fi
+
+    # 4. Build USEARCH v12 for the identity feature. SoluProt cannot score
+    #    without it (it aborts on a USEARCH failure), so a missing binary is a
+    #    hard install failure — the --help smoke test below would NOT catch it
+    #    (argparse exits before the USEARCH path runs).
+    if [[ -x "${SOLUPROT_DIR}/usearch" ]] || command -v usearch >/dev/null 2>&1; then
+        print_ok "USEARCH binary present (${SOLUPROT_DIR}/usearch or on PATH)"
+    else
+        _build_usearch_v12 || true
+        if [[ ! -x "${SOLUPROT_DIR}/usearch" ]] && ! command -v usearch >/dev/null 2>&1; then
+            print_fail "USEARCH is required for SoluProt's identity feature and could not be built."
+            print_warn "  Install a C/C++ toolchain (git make g++) and re-run, or place a 'usearch'"
+            print_warn "  binary at ${SOLUPROT_DIR}/usearch (or on PATH), then re-run --tool soluprot."
+            return 1
+        fi
+    fi
+
+    # 5. binder-compare runs in the 'binder-eval' env (Python 3.10+), NOT here.
+    # binder-comparison is requires-python>=3.10 (numpy>=1.24 / pandas>=2.0), so
+    # it cannot be installed into this Python 3.7 SoluProt env; the soluprot
+    # runner shells out to this env's interpreter via $SOLUPROT_PYTHON.
+    if ! env_exists binder-eval; then
+        print_warn "The 'binder-eval' env is not installed — SoluProt scoring runs binder-compare from there."
+        print_warn "  Install it with: bash install/install_aarch.sh --tool evaluator   (or --tool all)"
+    fi
+
+    # 6. Smoke test: SoluProt's own (patched) entry script imports cleanly here.
+    smoke_test "soluprot.py --help" \
+        "${CONDA_CMD}" run -n binder-eval-soluprot python "${SOLUPROT_DIR}/soluprot.py" --help \
+        || return 1
+
+    # 7. Shortcut.
+    print_step "Installing soluprot shortcut"
+    _write_soluprot_shortcut
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/soluprot"
+
+    echo ""
+    print_ok "SoluProt (aarch64) ready: scikit-learn 0.20.4 (source build), biopython 1.78 (patched), --no_tmhmm model"
+    print_ok "  Citation:  Hon et al. 2021, Bioinformatics 37(1):23-28 | License: academic (commercial via Enantis)"
+    print_ok "  USEARCH:   open-source v12 ${USEARCH12_REPO} (GPLv3) | Threshold: 0.5 (paper default)"
+    echo ""
+    print_ok "SoluProt solubility screen installation complete"
+}
+
+_write_soluprot_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# BindMaster SoluProt shortcut — runs 'binder-compare filter-soluprot ...' in the"
+        echo "# binder-eval env (Python 3.10+), shelling out to the Python 3.7 binder-eval-soluprot"
+        echo "# env for SoluProt itself. With no args: opens a shell in the SoluProt env."
+        echo ""
+        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "export SOLUPROT_HOME=\"${SOLUPROT_DIR}\""
+    } > "${SHORTCUTS_DIR}/soluprot"
+    cat >> "${SHORTCUTS_DIR}/soluprot" << 'SOLUPROTEOF'
+SOLUPROT_PYTHON="$("${CONDA_CMD}" run -n binder-eval-soluprot python -c 'import sys; print(sys.executable)' 2>/dev/null)"
+export SOLUPROT_PYTHON
+
+if [[ $# -eq 0 ]]; then
+    echo "SoluProt: binder-compare runs in 'binder-eval'; soluprot.py runs in 'binder-eval-soluprot'."
+    echo "Usage:"
+    echo "  soluprot --sequences seqs.fasta -o soluprot.csv [--threshold 0.5]"
+    echo "  (aarch64: uses the --no_tmhmm model + open-source USEARCH v12 automatically.)"
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-soluprot bash
+fi
+exec "${CONDA_CMD}" run --live-stream -n binder-eval binder-compare filter-soluprot "$@"
+SOLUPROTEOF
+    chmod +x "${SHORTCUTS_DIR}/soluprot"
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────────────

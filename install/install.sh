@@ -2261,18 +2261,20 @@ ESMFOLD2EOF
 # Where SoluProt's distribution lands. Kept inside Evaluator/tools/ so the
 # Python runner's default _resolve_scripts_path() finds it without env vars.
 SOLUPROT_DIR="${EVALUATOR_DIR}/tools/soluprot"
-SOLUPROT_ZIP_URL="https://loschmidt.chemi.muni.cz/soluprot/api/download/soluprot.zip"
+SOLUPROT_ZIP_URL="https://loschmidt.chemi.muni.cz/soluprot/?page=download&f=soluprot.zip"
 
 install_soluprot() {
     print_step "Installing SoluProt 1.0 solubility screen (binder-eval-soluprot env)"
     ensure_conda_in_path
 
-    # SoluProt depends on USEARCH which ships as an x86 binary only.
-    # See docs/PLAN_soluprot_integration.md §"Open questions" for the
-    # decision to mark aarch64 as unsupported for the first cut.
+    # This is the x86_64 installer. SoluProt IS supported on aarch64, but via the
+    # aarch64 installer (it builds scikit-learn 0.20.4 + USEARCH v12 from source
+    # and patches biopython — the pinned x86 env below has no aarch64 conda
+    # builds). Redirect rather than attempting a doomed conda solve here.
     if [[ "${ARCH}" == "aarch64" ]]; then
-        print_fail "SoluProt's USEARCH dependency is an x86 binary; aarch64 is not supported."
-        print_warn "  Track docs/PLAN_soluprot_integration.md for the planned workaround."
+        print_fail "This is the x86_64 installer. On aarch64, install SoluProt with:"
+        print_warn "    bash install/install_aarch.sh --tool soluprot"
+        print_warn "  (It source-builds scikit-learn 0.20.4 + USEARCH v12 and uses the --no_tmhmm model.)"
         return 1
     fi
 
@@ -2326,6 +2328,17 @@ install_soluprot() {
         rm -f "${zip_path}"
     fi
 
+    # 2b. Patch SoluProt's USEARCH command. The shipped soluprot.py calls
+    # `usearch -search_global ...`, but the canonical (and only documented)
+    # USEARCH command is `usearch_global`; the `-search_global` spelling is
+    # rejected by open-source USEARCH v12 and is not a documented option in any
+    # version. Idempotent — only rewrites if the old spelling is present.
+    local _solu_py="${SOLUPROT_DIR}/soluprot.py"
+    if [[ -f "${_solu_py}" ]] && grep -q "'-search_global'" "${_solu_py}"; then
+        sed -i "s/'-search_global'/'-usearch_global'/g" "${_solu_py}"
+        print_ok "Patched soluprot.py: USEARCH command -search_global -> -usearch_global"
+    fi
+
     # 3. Check TMHMM. We cannot redistribute it; the user gets a registration URL.
     if [[ ! -x "${SOLUPROT_DIR}/tmhmm-2.0/bin/tmhmm" ]] \
         && ! command -v tmhmm >/dev/null 2>&1; then
@@ -2348,14 +2361,18 @@ install_soluprot() {
         echo ""
     fi
 
-    # 5. Make `binder-compare filter-soluprot` available in the env.
-    run_logged "Installing binder-compare into binder-eval-soluprot" \
-        "${CONDA_CMD}" run -n binder-eval-soluprot pip install -q -e "${EVALUATOR_DIR}[report]" \
-        || { print_fail "Failed to install binder-compare into binder-eval-soluprot"; return 1; }
+    # 5. binder-compare runs in the 'binder-eval' env (Python 3.10+), NOT here.
+    # binder-comparison is requires-python>=3.10 (numpy>=1.24 / pandas>=2.0), so
+    # it cannot be installed into this Python 3.7 SoluProt env; the soluprot
+    # runner shells out to this env's interpreter via $SOLUPROT_PYTHON.
+    if ! env_exists binder-eval; then
+        print_warn "The 'binder-eval' env is not installed — SoluProt scoring runs binder-compare from there."
+        print_warn "  Install it with: bindmaster install --tool evaluator   (or --tool all)"
+    fi
 
-    # 6. Smoke test the CLI (does NOT actually score anything; just exercises argparse).
-    smoke_test "binder-compare filter-soluprot --help" \
-        "${CONDA_CMD}" run -n binder-eval-soluprot binder-compare filter-soluprot --help \
+    # 6. Smoke test: SoluProt's own entry script imports cleanly in this env.
+    smoke_test "soluprot.py --help" \
+        "${CONDA_CMD}" run -n binder-eval-soluprot python "${SOLUPROT_DIR}/soluprot.py" --help \
         || return 1
 
     # 7. Shortcut
@@ -2378,22 +2395,25 @@ _write_soluprot_shortcut() {
     {
         echo "#!/bin/bash"
         echo "# BindMaster SoluProt shortcut — runs 'binder-compare filter-soluprot ...' in the"
-        echo "# binder-eval-soluprot env. With no args: opens an interactive env shell."
+        echo "# binder-eval env (Python 3.10+), shelling out to the Python 3.7 binder-eval-soluprot"
+        echo "# env for SoluProt itself. With no args: opens a shell in the SoluProt env."
         echo ""
         echo "CONDA_CMD=\"${CONDA_CMD}\""
         echo "export SOLUPROT_HOME=\"${SOLUPROT_DIR}\""
     } > "${SHORTCUTS_DIR}/soluprot"
     cat >> "${SHORTCUTS_DIR}/soluprot" << 'SOLUPROTEOF'
+SOLUPROT_PYTHON="$("${CONDA_CMD}" run -n binder-eval-soluprot python -c 'import sys; print(sys.executable)' 2>/dev/null)"
+export SOLUPROT_PYTHON
 
 if [ "$#" -eq 0 ]; then
-    echo "SoluProt env (binder-eval-soluprot) activated."
+    echo "SoluProt: binder-compare runs in 'binder-eval'; soluprot.py runs in 'binder-eval-soluprot'."
     echo "Usage:"
-    echo "  binder-compare filter-soluprot --sequences seqs.fasta -o soluprot.csv [--threshold 0.5]"
+    echo "  soluprot --sequences seqs.fasta -o soluprot.csv [--threshold 0.5]"
     echo "  (Default threshold: 0.5 -- the SoluProt paper value.)"
     echo ""
     exec "${CONDA_CMD}" run --live-stream -n binder-eval-soluprot bash
 else
-    exec "${CONDA_CMD}" run --live-stream -n binder-eval-soluprot binder-compare filter-soluprot "$@"
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval binder-compare filter-soluprot "$@"
 fi
 SOLUPROTEOF
     chmod +x "${SHORTCUTS_DIR}/soluprot"
