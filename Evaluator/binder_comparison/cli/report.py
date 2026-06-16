@@ -189,7 +189,8 @@ def run(args: argparse.Namespace) -> None:
     df = compute_consensus_iptm(df)
     df = rank_by_adaptyv_method(df)
     df = rank_by_consensus_iptm(df)
-    df = rank_by_two_stage(df)
+    screen_metric = getattr(args, "screen_metric", "max") or "max"
+    df = rank_by_two_stage(df, screen_metric=screen_metric)
 
     # All three rankings coexist as columns (adaptyv_rank, consensus_rank,
     # two_stage_rank); --rank-by selects which orders the report. `active_rank`
@@ -201,7 +202,10 @@ def run(args: argparse.Namespace) -> None:
         print("[report] Ranking by consensus_iptm (max engine iptm — benchmark-validated binder filter)")
         df = df.sort_values(["consensus_rank"], ascending=[True]).reset_index(drop=True)
     elif rank_by == "two_stage":
-        print("[report] Ranking by two_stage (max-screen top 50% → mean-rank — benchmark-validated for selection)")
+        print(
+            f"[report] Ranking by two_stage ({screen_metric}-screen top 50% → mean-rank — "
+            "benchmark-validated for selection)"
+        )
         df = df.sort_values(["two_stage_rank"], ascending=[True]).reset_index(drop=True)
     else:
         df = df.sort_values(["adaptyv_rank"], ascending=[True]).reset_index(drop=True)
@@ -593,9 +597,18 @@ def add_parser(subparsers) -> None:
         default="two_stage",
         help="Ranking method for the report. 'adaptyv' = quality_tier → agreement_count → "
         "ipsae_min. 'consensus_iptm' = max engine iptm (benchmark-validated binder-vs-non-binder filter). "
-        "'two_stage' (default) = max-screen (top 50%%) then mean-rank survivors (benchmark-validated for wet-lab "
+        "'two_stage' (default) = screen (top 50%%) then mean-rank survivors (benchmark-validated for wet-lab "
         "selection: precision@top-10%% 0.92 vs 0.79 for max alone; see docs/plans.md Part N). All ranks "
         "are always written as columns (adaptyv_rank, consensus_rank, two_stage_rank).",
+    )
+    p.add_argument(
+        "--screen-metric",
+        choices=["max", "mean"],
+        default="max",
+        help="Stage-1 screen metric for --rank-by two_stage. 'max' (default) = consensus_iptm, the "
+        "shipped ProteinBase-validated screen. 'mean' = consensus_iptm_mean, a stronger binder screen on "
+        "the Adaptyv 4-target set (macro AUC 0.710 vs 0.689; +20 true binders recalled at the 50%% cut) — "
+        "opt-in pending a ProteinBase recheck before it becomes default.",
     )
     p.add_argument(
         "--no-collapse-duplicates",

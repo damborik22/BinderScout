@@ -77,6 +77,22 @@ def test_two_stage_screen_keeps_top_frac_by_max():
     assert passed == {"A", "B"}
 
 
+def test_two_stage_screen_metric_mean_changes_survivors():
+    """screen_metric='mean' screens on consensus_iptm_mean, not max — so design C
+    (mean 0.60) is kept over design B (mean 0.425), the reverse of the max screen."""
+    out = rank_by_two_stage(_two_engine_df(), screen_frac=0.5, screen_metric="mean")
+    passed = set(out.loc[out["passes_max_screen"], "id"])
+    assert passed == {"A", "C"}  # top-2 by mean = {A 0.90, C 0.60}; not B (0.425)
+
+
+def test_two_stage_default_screen_metric_is_max():
+    """Omitting screen_metric must reproduce the shipped max-screen exactly."""
+    default = rank_by_two_stage(_two_engine_df(), screen_frac=0.5)
+    explicit = rank_by_two_stage(_two_engine_df(), screen_frac=0.5, screen_metric="max")
+    assert default["two_stage_rank"].tolist() == explicit["two_stage_rank"].tolist()
+    assert set(default.loc[default["passes_max_screen"], "id"]) == {"A", "B"}
+
+
 def test_two_stage_handles_nan_consensus_rows():
     """A design with no engine iPTMs (all NaN) must sort last, not crash."""
     df = _two_engine_df()
