@@ -26,6 +26,7 @@ from .cli import (
     mature,
     monomer,
     parse_seqs,
+    qc_annotate,
     refold_af3,
     refold_boltz2,
     refold_esmfold2,
@@ -64,6 +65,7 @@ def main(argv=None) -> None:
     mature.add_parser(subparsers)
     monomer.add_parser(subparsers)
     affinity.add_parser(subparsers)
+    qc_annotate.add_parser(subparsers)
     analyze_target.add_parser(subparsers)
 
     args = parser.parse_args(argv)
