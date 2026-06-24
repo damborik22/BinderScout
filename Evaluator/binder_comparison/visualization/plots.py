@@ -75,6 +75,11 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "sequence": ("Sequence", "", ""),
     "binder_length": ("Binder length", "aa", ""),
     "ipsae_valid": ("ipSAE valid", "", ""),
+    "native_rank": ("Native rank", "", ""),
+    "eval_rank": ("Ranking refolded", "", ""),
+    "consensus_iptm_mean": ("Mean ipTM", "[0–1]", "↑"),
+    "consensus_ipsae_min_mean": ("Mean ipSAE_min", "[0–1]", "↑"),
+    "native_soluprot_score": ("Solubility (SoluProt)", "[0–1]", "↑"),
 }
 
 
