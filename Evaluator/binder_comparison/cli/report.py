@@ -344,6 +344,7 @@ def run(args: argparse.Namespace) -> None:
 
     generate_report(
         df=df_display,
+        full_df=df,
         summary=summary,
         output_path=output_dir / "report.html",
         tool_csvs=tool_csvs or None,

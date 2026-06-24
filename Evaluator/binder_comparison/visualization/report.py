@@ -1290,6 +1290,7 @@ def generate_report(
     primary_engine: str = "boltz",
     top_per_tool: int = 10,
     rank_method: str = "adaptyv",
+    full_df: pd.DataFrame | None = None,
 ) -> None:
     """Generate and write the HTML report.
 
@@ -1410,15 +1411,21 @@ def generate_report(
                 "</p>\n"
             )
 
-            # Build sequence → binder_id + adaptyv_rank lookup
+            # Build sequence → binder_id + rank lookup. Use the FULL (pre-collapse)
+            # frame when available: df/sort_df here is representatives-only, so
+            # multi-sequence-per-backbone tools (BindCraft MPNN siblings,
+            # Protein-Hunter cycles) would otherwise leave their sibling rows'
+            # eval_rank blank. active_rank is the primary (two-stage) ranking.
             seq_to_ids = {}
-            if "sequence" in sort_df.columns:
-                for _, row in sort_df.iterrows():
+            lookup_df = full_df if full_df is not None else sort_df
+            if "sequence" in lookup_df.columns:
+                for _, row in lookup_df.iterrows():
                     seq = str(row.get("sequence", "")).strip().upper()
                     if seq and seq not in seq_to_ids:
                         seq_to_ids[seq] = {
                             "binder_id": row.get("binder_id", ""),
                             "adaptyv_rank": row.get("adaptyv_rank", ""),
+                            "active_rank": row.get("active_rank", ""),
                         }
 
             for tool in tools_present:
@@ -1449,7 +1456,7 @@ def generate_report(
                                     native_df[seq_col]
                                     .str.strip()
                                     .str.upper()
-                                    .map(lambda s: seq_to_ids.get(s, {}).get("adaptyv_rank", "")),
+                                    .map(lambda s: seq_to_ids.get(s, {}).get("active_rank", "")),
                                 )
                                 native_df.insert(
                                     2,
