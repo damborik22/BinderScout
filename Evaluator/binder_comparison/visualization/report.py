@@ -1416,6 +1416,12 @@ def generate_report(
             # multi-sequence-per-backbone tools (BindCraft MPNN siblings,
             # Protein-Hunter cycles) would otherwise leave their sibling rows'
             # eval_rank blank. active_rank is the primary (two-stage) ranking.
+            def _r3(v):
+                try:
+                    return round(float(v), 3)
+                except (TypeError, ValueError):
+                    return v
+
             seq_to_ids = {}
             lookup_df = full_df if full_df is not None else sort_df
             if "sequence" in lookup_df.columns:
@@ -1426,6 +1432,11 @@ def generate_report(
                             "binder_id": row.get("binder_id", ""),
                             "adaptyv_rank": row.get("adaptyv_rank", ""),
                             "active_rank": row.get("active_rank", ""),
+                            "consensus_iptm_mean": _r3(row.get("consensus_iptm_mean", "")),
+                            "consensus_ipsae_min_mean": _r3(row.get("consensus_ipsae_min_mean", "")),
+                            "native_soluprot_score": _r3(row.get("native_soluprot_score", "")),
+                            "binder_length": row.get("binder_length", ""),
+                            "sequence": row.get("sequence", ""),
                         }
 
             for tool in tools_present:
@@ -1444,28 +1455,29 @@ def generate_report(
                                     seq_col = candidate
                                     break
                             if seq_col:
-                                # First two cols: native (tool) rank + evaluator rank.
-                                native_df.insert(
-                                    0,
-                                    "native_rank",
-                                    range(1, len(native_df) + 1),
-                                )
-                                native_df.insert(
-                                    1,
-                                    "eval_rank",
-                                    native_df[seq_col]
-                                    .str.strip()
-                                    .str.upper()
-                                    .map(lambda s: seq_to_ids.get(s, {}).get("active_rank", "")),
-                                )
-                                native_df.insert(
-                                    2,
-                                    "binder_id",
-                                    native_df[seq_col]
-                                    .str.strip()
-                                    .str.upper()
-                                    .map(lambda s: seq_to_ids.get(s, {}).get("binder_id", "")),
-                                )
+                                native_df.insert(0, "native_rank", range(1, len(native_df) + 1))
+                                _keyseq = native_df[seq_col].str.strip().str.upper()
+                                # Evaluator columns alongside the tool's native ranking, matched by
+                                # sequence: refold rank, cross-engine means, solubility, length, sequence.
+                                _eval_cols = [
+                                    ("eval_rank", "active_rank"),
+                                    ("binder_id", "binder_id"),
+                                    ("consensus_iptm_mean", "consensus_iptm_mean"),
+                                    ("consensus_ipsae_min_mean", "consensus_ipsae_min_mean"),
+                                    ("native_soluprot_score", "native_soluprot_score"),
+                                    ("binder_length", "binder_length"),
+                                    ("sequence", "sequence"),
+                                ]
+                                _pos = 1
+                                for _col, _key in _eval_cols:
+                                    if _col in native_df.columns:
+                                        continue
+                                    native_df.insert(
+                                        _pos,
+                                        _col,
+                                        _keyseq.map(lambda s, k=_key: seq_to_ids.get(s, {}).get(k, "")),
+                                    )
+                                    _pos += 1
                             n = len(native_df)
                             tool_table = _df_to_html(native_df, colour_tool=False)
 
@@ -1610,6 +1622,7 @@ def generate_report(
         "quality_tier",
         "agreement_count",
         "ipsae_min",
+        "consensus_ipsae_min_mean",
         "iptm",
         "boltz_pae_iptm",
         "plddt_binder_mean",
@@ -1810,6 +1823,7 @@ def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tupl
             "af3_iptm",
             "esmfold2_iptm",
             "ipsae_min",
+            "consensus_ipsae_min_mean",
             "plddt_binder_mean",
         ]
         secondary = [
