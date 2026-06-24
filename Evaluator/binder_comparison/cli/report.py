@@ -29,6 +29,7 @@ from ..comparison.scoring import (
     apply_screening_thresholds,
     compute_agreement,
     compute_composite_scores,
+    compute_consensus_ipsae,
     compute_consensus_iptm,
     rank_by_adaptyv_method,
     rank_by_consensus_iptm,
@@ -194,6 +195,7 @@ def run(args: argparse.Namespace) -> None:
     # (ProteinBase 4-target, exhaustive 297-combo search) as the best deployable
     # binder-vs-non-binder score. Always computed; selectable as the ranking metric.
     df = compute_consensus_iptm(df)
+    df = compute_consensus_ipsae(df)
     df = rank_by_adaptyv_method(df)
     df = rank_by_consensus_iptm(df)
     screen_metric = getattr(args, "screen_metric", "mean") or "mean"
@@ -261,6 +263,7 @@ def run(args: argparse.Namespace) -> None:
         "protenix_pae_ipsae_min",
         "af3_pae_ipsae_min",
         "esmfold2_ipsae_min",
+        "consensus_ipsae_min_mean",
         "esmfold2_chain_iptm_interface",
         "boltz_pae_iptm",
         "boltz_pae_bt_ipsae",

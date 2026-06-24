@@ -707,6 +707,40 @@ def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+# Per-engine DunbrackLab ipSAE_min columns (engine-comparable, recomputed from PAE files).
+_ENGINE_IPSAE_MIN_COLS: list[str] = [
+    "boltz_pae_ipsae_min",
+    "af3_ipsae_min",
+    "esmfold2_ipsae_min",
+    "protenix_ipsae_min",
+]
+
+
+def compute_consensus_ipsae(df: pd.DataFrame) -> pd.DataFrame:
+    """Add ``consensus_ipsae_min_mean`` = mean across engines of the per-engine
+    DunbrackLab ipSAE_min.
+
+    Parallels :func:`compute_consensus_iptm`: averages the independent engines'
+    interface ipSAE_min (boltz / af3 / esmfold2 [/ protenix]). The metric being
+    averaged is each engine's ``ipsae_min`` (hence ``_min_mean``). Diagnostic /
+    reporting column — the primary ranker stays the two-stage iptm.
+
+    Adds:
+        consensus_ipsae_min_mean — mean over available per-engine ipsae_min (NaN if none)
+        consensus_ipsae_min_n    — how many engines contributed (0–4)
+    """
+    result = df.copy()
+    present = [c for c in _ENGINE_IPSAE_MIN_COLS if c in result.columns]
+    if not present:
+        result["consensus_ipsae_min_mean"] = np.nan
+        result["consensus_ipsae_min_n"] = 0
+        return result
+    numeric = result[present].apply(pd.to_numeric, errors="coerce")
+    result["consensus_ipsae_min_mean"] = numeric.mean(axis=1)
+    result["consensus_ipsae_min_n"] = numeric.notna().sum(axis=1).astype(int)
+    return result
+
+
 def rank_by_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     """Rank by ``consensus_iptm`` (max-iptm) descending; benchmark-validated binder filter.
 
