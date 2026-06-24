@@ -1,0 +1,9 @@
+name: soluprot
+channels:
+  - defaults
+dependencies:
+  - python=3.7
+  - scikit-learn=0.20.1
+  - biopython=1.74
+  - pandas
+  - tqdm
