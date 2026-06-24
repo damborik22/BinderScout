@@ -188,7 +188,7 @@ _HTML_TEMPLATE = """\
 {agreement_summary}
 {tier_summary}
 
-<h2>Top 20 Binders</h2>
+<h2>Top 30 Binders</h2>
 {top_table}
 
 <table style="font-size:0.8em;border-collapse:collapse;margin:0.5em 0 1.5em 0;color:#555;">
@@ -1337,17 +1337,17 @@ def generate_report(
     engine_threshold_legend = _engine_threshold_legend_html(sort_df)
     agreement_summary = _agreement_summary_html(sort_df)
 
-    # Top 20 table (primary + collapsible secondary)
+    # Top 30 table (primary + collapsible secondary)
     primary_cols, secondary_cols = _select_display_cols(sort_df, rank_method=rank_method)
-    top20_primary = sort_df[primary_cols].head(20)
-    top_table = _df_to_html(top20_primary, colour_tool=True).replace("<table>", '<table style="width:100%">', 1)
+    top30_primary = sort_df[primary_cols].head(30)
+    top_table = _df_to_html(top30_primary, colour_tool=True).replace("<table>", '<table style="width:100%">', 1)
     if secondary_cols:
-        top20_secondary = sort_df[primary_cols[:2] + secondary_cols].head(20)
+        top30_secondary = sort_df[primary_cols[:2] + secondary_cols].head(30)
         top_table += (
             '\n<details style="margin:0.5em 0;">'
             '<summary style="cursor:pointer;font-size:0.85em;color:#1565C0;font-weight:bold;">'
-            "Show additional metrics for Top 20</summary>\n"
-            + _df_to_html(top20_secondary, colour_tool=True)
+            "Show additional metrics for Top 30</summary>\n"
+            + _df_to_html(top30_secondary, colour_tool=True)
             + "\n</details>"
         )
     top_table += _advisory_legend_html(sort_df)

@@ -286,9 +286,9 @@ def run(args: argparse.Namespace) -> None:
         "active_rank",
     ]
     _available = [c for c in _top_cols if c in df.columns]
-    top20 = df_display.head(20)[_available]
-    write_csv(top20, output_dir / "top20_candidates.csv")
-    print("  top20_candidates.csv — top 20 distinct designs with sequences")
+    top30 = df_display.head(30)[_available]
+    write_csv(top30, output_dir / "top30_candidates.csv")
+    print("  top30_candidates.csv — top 30 distinct designs with sequences")
 
     # Step 4c: Copy top-20 refolded PDB structures for visual inspection.
     # Prefer the *primary engine's* PDB so the viewer shows the structure

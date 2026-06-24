@@ -17,7 +17,7 @@ LIMS; vendor/cost defaults are lab-overridable, not authority.
 ## 1. Wet-lab plan  →  see `references/assays.md`, `references/synthesis.md`
 
 ```bash
-binder-compare wetlab --designs report/top20_candidates.csv -o wetlab_plan.md \
+binder-compare wetlab --designs report/top30_candidates.csv -o wetlab_plan.md \
     --top 20 --budget 8000 --tag His6-TEV
 ```
 Sections: gene synthesis (codon-opt, tag), expression, **testing via Adaptyv** (BLI quick yes/no

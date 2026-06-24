@@ -4,7 +4,7 @@ Turn ranked designs into a Markdown wet-lab plan — gene synthesis, expression,
 aware assay selection, characterization, controls, and a FASTA with computed properties.
 
 Usage:
-    binder-compare wetlab --designs report/top20_candidates.csv -o wetlab_plan.md \\
+    binder-compare wetlab --designs report/top30_candidates.csv -o wetlab_plan.md \\
         --top 20 --budget 8000 --tag His6-TEV
 """
 
