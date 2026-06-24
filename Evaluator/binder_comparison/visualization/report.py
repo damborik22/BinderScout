@@ -1429,7 +1429,7 @@ def generate_report(
                     csv_path = Path(tool_csvs[tool])
                     if csv_path.exists():
                         try:
-                            native_df = pd.read_csv(csv_path, nrows=10)
+                            native_df = pd.read_csv(csv_path, nrows=top_per_tool)
                             # Add our binder_id by matching sequence
                             seq_col = None
                             for candidate in ("sequence", "Sequence", "designed_chain_sequence", "designed_sequence"):
@@ -1475,7 +1475,7 @@ def generate_report(
                                             pdb_dir,
                                             pattern,
                                             seq_to_ids,
-                                            n=10,
+                                            n=top_per_tool,
                                             target_seq=target_seq,
                                         )
                                     except Exception as e:
@@ -1507,7 +1507,7 @@ def generate_report(
                                             tool,
                                             refold_df,
                                             boltz2_results_dir,
-                                            n=10,
+                                            n=top_per_tool,
                                             primary_engine=primary_engine,
                                             target_seq=target_seq,
                                         )
