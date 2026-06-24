@@ -17,7 +17,7 @@ Either pass a precomputed panel CSV (``--panel``) or relax+score a structures di
 the BindCraft conda env (``--structures-dir --run-rosetta``).
 
 Usage:
-    binder-compare qc-annotate --metrics report/top20_candidates.csv \\
+    binder-compare qc-annotate --metrics report/top30_candidates.csv \\
         --structures-dir runs/X/refold_esmfold2 --run-rosetta --binder-chain B -o annotated.csv
 """
 
