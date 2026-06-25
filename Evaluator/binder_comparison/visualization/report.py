@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..comparison.candidates import _NATIVE_SEQ_COLS, collapse_native_df, order_tools
 from .plots import (
     METRIC_META,
     fig_to_base64,
@@ -1398,7 +1399,7 @@ def generate_report(
     # and join with our binder_id via sequence matching.
     per_tool_top10 = ""
     if "source_tool" in sort_df.columns:
-        tools_present = sorted(sort_df["source_tool"].dropna().unique())
+        tools_present = order_tools(sort_df["source_tool"].dropna().unique())
         if tools_present:
             per_tool_top10 = (
                 "<h2>Top Designs per Tool "
@@ -1407,7 +1408,8 @@ def generate_report(
                 'margin-left:0.4em;">NATIVE TOOL RANKING</span></h2>\n'
                 '<p style="font-size:0.85em;color:#555;">'
                 "Each tool's top designs ranked by <b>that tool's own internal scoring</b> "
-                "(not the evaluator's cross-engine ranking)."
+                "(not the evaluator's cross-engine ranking). Shows <b>refolded designs only</b>, "
+                "one row per backbone (MPNN/cycle siblings collapsed; never-refolded designs omitted)."
                 "</p>\n"
             )
 
@@ -1422,6 +1424,13 @@ def generate_report(
                 except (TypeError, ValueError):
                     return v
 
+            # eval_rank = the collapsed two-stage refold rank (dense, the same
+            # ranking the Top-30 table and candidates.csv use), keyed by backbone
+            # so sibling rows resolve to their representative's rank.
+            grp_to_dense = {}
+            if "design_group" in sort_df.columns and "active_rank" in sort_df.columns:
+                grp_to_dense = dict(zip(sort_df["design_group"], sort_df["active_rank"], strict=False))
+
             seq_to_ids = {}
             lookup_df = full_df if full_df is not None else sort_df
             if "sequence" in lookup_df.columns:
@@ -1431,13 +1440,19 @@ def generate_report(
                         seq_to_ids[seq] = {
                             "binder_id": row.get("binder_id", ""),
                             "adaptyv_rank": row.get("adaptyv_rank", ""),
-                            "active_rank": row.get("active_rank", ""),
+                            "active_rank": grp_to_dense.get(row.get("design_group", ""), row.get("active_rank", "")),
                             "consensus_iptm_mean": _r3(row.get("consensus_iptm_mean", "")),
                             "consensus_ipsae_min_mean": _r3(row.get("consensus_ipsae_min_mean", "")),
                             "native_soluprot_score": _r3(row.get("native_soluprot_score", "")),
                             "binder_length": row.get("binder_length", ""),
                             "sequence": row.get("sequence", ""),
+                            "design_group": row.get("design_group", ""),
                         }
+
+            # Sequence → backbone (design_group) for the refold pool, so the
+            # native section can drop never-refolded designs and collapse MPNN/
+            # cycle siblings to one row per backbone.
+            seq_to_group = {s: d["design_group"] for s, d in seq_to_ids.items() if d.get("design_group")}
 
             for tool in tools_present:
                 display_name = _tool_display(tool)
@@ -1447,10 +1462,19 @@ def generate_report(
                     csv_path = Path(tool_csvs[tool])
                     if csv_path.exists():
                         try:
-                            native_df = pd.read_csv(csv_path, nrows=top_per_tool)
-                            # Add our binder_id by matching sequence
+                            # Refolded designs only, one row per backbone (best
+                            # native rank), in the tool's native order. Drops
+                            # never-refolded designs and MPNN/cycle siblings so
+                            # the native top-N is distinct backbones with no
+                            # blank-metric rows.
+                            native_df = collapse_native_df(csv_path, seq_to_group, top_n=top_per_tool)
+                            native_df = native_df.drop(columns=["_seq_key", "_design_group"], errors="ignore")
+                            if native_df.empty:
+                                raise ValueError("no refolded native designs for this tool")
+                            # Add our binder_id by matching sequence (full-chain
+                            # column first — same preference collapse_native_df used).
                             seq_col = None
-                            for candidate in ("sequence", "Sequence", "designed_chain_sequence", "designed_sequence"):
+                            for candidate in _NATIVE_SEQ_COLS:
                                 if candidate in native_df.columns:
                                     seq_col = candidate
                                     break
