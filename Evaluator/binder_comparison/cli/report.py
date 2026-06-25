@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..comparison.candidates import build_candidates_table
 from ..comparison.ensemble import compute_ensemble_metrics
 from ..comparison.merger import merge_refold_results
 from ..comparison.scoring import (
@@ -290,6 +291,22 @@ def run(args: argparse.Namespace) -> None:
     write_csv(top30, output_dir / "top30_candidates.csv")
     print("  top30_candidates.csv — top 30 distinct designs with sequences")
 
+    # Parse --tool-csv flags into dict (also consumed by the HTML report below).
+    tool_csvs = {}
+    if args.tool_csv:
+        for spec in args.tool_csv:
+            if "=" in spec:
+                tool_name, csv_path = spec.split("=", 1)
+                tool_csvs[tool_name.strip()] = csv_path.strip()
+
+    # Step 4d: Combined candidates CSV — per-tool native top-20 (refolded designs
+    # only, one row per backbone) followed by the refold top-30 ranking. Built
+    # from the tools' RAW native CSVs; the in-pool filter + backbone collapse are
+    # applied internally (no pre-processing needed).
+    candidates = build_candidates_table(df, df_display, tool_csvs or None)
+    write_csv(candidates, output_dir / "candidates.csv")
+    print("  candidates.csv — per-tool native top-20 + refold top-30 with sequences")
+
     # Step 4c: Copy top-20 refolded PDB structures for visual inspection.
     # Prefer the *primary engine's* PDB so the viewer shows the structure
     # that was actually used for ranking. Fall back through the engine
@@ -329,14 +346,6 @@ def run(args: argparse.Namespace) -> None:
         print("  top20_structures/    — view_top20.pml (open in PyMOL)")
 
     # Step 5: HTML report
-    # Parse --tool-csv flags into dict
-    tool_csvs = {}
-    if args.tool_csv:
-        for spec in args.tool_csv:
-            if "=" in spec:
-                tool_name, csv_path = spec.split("=", 1)
-                tool_csvs[tool_name.strip()] = csv_path.strip()
-
     # Parse --tool-pdb-dir flags into dict
     tool_pdb_dirs = {}
     if args.tool_pdb_dir:
