@@ -26,6 +26,7 @@ from .cli import (
     mature,
     monomer,
     parse_seqs,
+    prefilter,
     qc_annotate,
     refold_af3,
     refold_boltz2,
@@ -57,6 +58,7 @@ def main(argv=None) -> None:
     refold_af3.add_parser(subparsers)
     refold_esmfold2.add_parser(subparsers)
     filter_soluprot.add_parser(subparsers)
+    prefilter.add_parser(subparsers)
     report.add_parser(subparsers)
     run.add_parser(subparsers)
     validate.add_parser(subparsers)
