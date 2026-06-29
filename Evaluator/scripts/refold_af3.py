@@ -260,8 +260,21 @@ def _run_single(
         f"--num_diffusion_samples={num_samples}",
     ]
 
-    print(f"  [af3] Running: {Path(cmd[1]).name} ...")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    # Cap AF3's JAX/XLA memory preallocation. On unified-memory hosts (DGX Spark, 96 GB
+    # shared CPU+GPU) JAX otherwise grabs ~97% of the pool (~93.7 GB observed), starving
+    # the OS/NVRM driver → out-of-memory cascade → whole-box reboot. Preallocate a fixed
+    # capped fraction so AF3 can never starve the system: a complex too big to fit then
+    # fails with a CLEAN per-design JAX OOM (recorded as an empty row) instead of taking
+    # down the machine. Keep PREALLOCATE=true (=false fragments and hangs). Default 0.8 (~77
+    # GB, ~19 GB headroom); override via AF3_XLA_MEM_FRACTION on >100 GB hosts.
+    af3_env = {
+        **os.environ,
+        "XLA_PYTHON_CLIENT_PREALLOCATE": "true",
+        "XLA_PYTHON_CLIENT_MEM_FRACTION": os.environ.get("AF3_XLA_MEM_FRACTION", "0.8"),
+    }
+    print(f"  [af3] Running: {Path(cmd[1]).name} "
+          f"(XLA mem fraction {af3_env['XLA_PYTHON_CLIENT_MEM_FRACTION']}) ...")
+    result = subprocess.run(cmd, capture_output=True, text=True, env=af3_env)
     if result.returncode != 0:
         print(f"  [af3] STDERR: {result.stderr[-500:]}" if result.stderr else "  [af3] No stderr")
         raise RuntimeError(f"AF3 exited with code {result.returncode}")
