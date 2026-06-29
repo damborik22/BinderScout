@@ -645,3 +645,141 @@
 **Outcome:**
 - 2VDY (CBG) report enhanced end-to-end: SoluProt on all 400 designs (24/30 of the top-30 predicted soluble, median 0.65) + qc-annotate on the top-30 (4/30 pass the strict BindCraft panel; the rest fail mainly on buried-unsat H-bonds yet carry strongly favorable ΔG — `protein_hunter_13_c10` best: qc_pass, sc 0.75, ΔG −178.5). Report at `2VDY_CBG/RESULTS/2VDY_Evaluator_two_stage/report_two_stage_mean_enhanced/`.
 - SoluProt aarch64 build exercised on real campaign data (`sklearn020-build` env + USEARCH v12).
+
+---
+
+## 2026-06-17 — Adaptyv full-batch confirms esm_chain as a binder SCREEN (0.69, not 0.745); 3-engine comparison
+
+**What changed:**
+- Refolded the full experimentally-labeled Adaptyv 4-target set (Nipah/EGFR/IL7R/PD-L1) with all 3 engines and computed per-engine screen AUCs (binder vs non-binder). ESMFold2 schema gap fixed: the unified refolder emits `iptm_pair`/`iptm_pair_min`; `cli/report.py` now derives `esmfold2_chain_iptm_interface = (iptm_pair+iptm_pair_min)/2` (commit `8405b11`).
+- 3-engine leaderboard built: per-engine `iptm`/`ipSAE_min` + cross-engine max/mean/min combos, scored as binder screens. Run dir `runs/adaptyv_esmfold2_confirm/`.
+
+**Why it mattered:**
+- The earlier 180-design subset put `esm_chain` at macro AUC **0.745** — winner's curse. On the full batch it is **0.692** (IL7R alone collapsed 0.875 → 0.683 from 20 → 96 designs). The honest, de-biased screen number.
+
+**Outcome:**
+- Best single screen = **Boltz-2 `iptm` 0.712**; `mean` consensus ties it; **no combination beats the best single engine**; `ipSAE_min ≈ iptm`. Plateaus ~0.71. No universal engine winner (ESMFold2 wins Nipah, Boltz-2 EGFR, AF3 IL7R/PD-L1).
+- HTML reports + `combinations`/`leaderboard` CSVs pushed to MUNI `EVALUATOR/3engine_binder_comparison/`.
+
+---
+
+## 2026-06-18 — Affinity RANKING: exhaustive in-silico search comes up empty; qc-annotate shipped
+
+**What changed:**
+- Tested whether *any* in-silico metric ranks binding STRENGTH (Strong/Medium/Weak), not just binder-vs-non. Per design, 3 structure engines: confidence (`iptm`/`ipSAE`), relaxed Rosetta interface ΔG + `|dG/dSASA|`, the full BindCraft 14-metric quality panel (shape complementarity, packstat, H-bonds, buried-unsat H-bonds, hydrophobicity, # interface residues), and **PRODIGY** (contact model *trained on experimental Kd*).
+- New `binder-compare qc-annotate` (commit `2836ed8`): relax + BindCraft interface panel as an **advisory** annotation on a shortlist (`qc_pass`/`qc_fail_reasons` + panel values) — never drops/reorders (`--drop-failures` opt-in). Validated: hard-gating with BindCraft defaults removes ~⅔ of true binders on predicted structures (panel ≈ 0.52-AUC binder classifier).
+
+**Why it mattered:**
+- Closes the "find a strength metric" search and prevents re-running it expecting a win.
+
+**Outcome:**
+- **Nothing ranks strength.** Best |pooled ρ| across all metrics × engines = **0.34** (`dG/dSASA`, only 2/4 targets); the BindCraft panel does *no* better than raw dG (sc/packstat inverted); **PRODIGY |ρ| ≤ 0.15** despite being Kd-trained. Confidence/ΔG screen binders (~0.6–0.72) but the within-binder strength signal is ~0 / mildly inverted (length confound). The `ipSAE×dG` composite from the original Part N plan does *not* rescue it.
+- "screen-then-invert" (filter top-20% by mean_iptm, rank ascending) looked usable pooled (66% vs 16% Strong, partial ρ −0.38) but is a **Simpson's-paradox artifact** — replicates on EGFR only (ρ −0.71); IL7R flat, Nipah reversed. Do not use.
+- Reports `REPORT_partN_deltaG_affinity.html`, `REPORT_strength_ranking_search.html`, `REPORT_screen_then_invert_STRONG_binders.html` on MUNI.
+
+---
+
+## 2026-06-22 — External corroboration: OpenBind + SKEMPI; affinity unsolved everywhere, "structure-quality bottleneck" refined
+
+**What changed:**
+- Ran the **OpenBind A71EV2A** benchmark (RosettaCommons, released 2026-06-03) — crystal protein–ligand structures + real Creoptix Kd. Reproduced the authors' affinity table exactly.
+- Ran a **SKEMPI 2.0** crystal control + a predicted-structure arm: PRODIGY + Rosetta ΔG on 343 crystal protein–protein complexes vs Kd, AND our ESMFold2 refold of the same complexes (243 ≤600-token) vs the same Kd. Positive control = the curated Affinity Benchmark v2. Work dir `~/dev/openbind/`.
+
+**Why it mattered:**
+- Two independent, gold-standard datasets test whether affinity ranking is solved by *anyone*, and whether crystal structures rescue it.
+
+**Outcome:**
+- **OpenBind:** the best affinity predictor is **molecular weight** (Spearman **0.48**), beating Boltz-2 (0.40) and dedicated ML models — the size confound, in someone else's benchmark. Affinity unsolved even on crystal/protein-ligand/wide-Kd.
+- **SKEMPI:** PRODIGY ranks Kd at only **0.20** on broad crystals (positive control 0.56 — the famous ~0.73 is a curated-benchmark artifact); Rosetta ΔG **0.12** (weakest). Crucially, on the SAME complexes our **predicted-structure ipTM = 0.28 ≈ crystal PRODIGY 0.27**. This **refines** the earlier "predicted structure is the bottleneck": for natural complexes predicted ≈ crystal; no single-structure metric exceeds ~0.3 anywhere. Adaptyv de novo ≤0.15 is a *special* regime (OOD designs + coarse labels + length confound), not generic predicted-is-bad.
+
+---
+
+## 2026-06-23 — De novo replication (BindCraft) confirms the SCREEN half (0.91); combination report v2 adds ipSAE_mean
+
+**What changed:**
+- Independent de novo replication: extracted **BindCraft Nature 2025** designs (SI `m4.csv` — 152 with experimental Binding labels + SPR Kd + sequences) and refolded them through our pipeline. Targets sourced from the BindCraft repo (PD-L1) + UniProt/PDB (PD1, CLDN1, BetV1, IFNAR2, BBF-14, DerF7).
+- Rebuilt the combination report symmetrically (`combination_report_v2.html`): 6 features = 3 engines × {`iptm`, `ipSAE_min`}, ALL aggregations (max/mean/min/median + single), full per-target table — because the old report only had Boltz-2's ipSAE, so `mean_ipSAE` was never searched.
+
+**Why it mattered:**
+- The screen half ("does it bind?") needed confirmation on an *independent* dataset + *independent* engine (BindCraft games AF2 ipTM by construction; ESMFold2 is independent).
+
+**Outcome:**
+- **Our ESMFold2 ipTM screens BindCraft experimental binders vs non-binders at AUC 0.91 pooled / 0.91 on PD1 (13b/40n)** — *stronger* than Adaptyv's 0.69. The screen half is robustly confirmed across datasets and engines.
+- `combination_report_v2`: `mean ipSAE_min` macro AUC **0.709** ≈ `mean ipTM` **0.710** (interchangeable); best overall median(3×iptm) 0.737. Everything still plateaus ~0.70–0.74. On MUNI next to the original.
+- Net stance: **SCREEN solved (cross-engine ipTM, ~0.69–0.91); affinity RANK unsolved in-silico everywhere** — needs experimental Kd + active-learning, or better/ensemble structures.
+
+---
+
+## 2026-06-24 — AF3 unified-memory OOM reboots the Spark; capped via `XLA_PYTHON_CLIENT_MEM_FRACTION`
+
+**What changed:**
+- A 3-engine de novo refold rebooted the DGX Spark mid-run. Forensics (previous-boot kernel log) showed a sustained `NVRM: Out of memory [NV_ERR_NO_MEMORY] _memdescAllocInternal` cascade (01:14–01:42 → reboot 01:46). **AF3 preallocates ~93.7 of 96 GB unified memory (~0.976)**, leaving ~2 GB for the OS/NVRM → whole-box reboot. (CLAUDE.md already notes AF3 wants >100 GB; the Spark's 96 GB is under-spec.)
+- Fix in `Evaluator/scripts/refold_af3.py`: AF3 subprocess now runs with `XLA_PYTHON_CLIENT_PREALLOCATE=true` + `XLA_PYTHON_CLIENT_MEM_FRACTION=0.8` (override via `AF3_XLA_MEM_FRACTION`). `run_alphafold.py` does not set MEM_FRACTION itself, so the env var is honored. A too-big complex then fails as a clean per-design JAX OOM (recorded empty), not a box reboot. Keep PREALLOCATE=true (`false` fragments/hangs).
+- Separately, **Boltz-2 IFNAR2** crashed non-fatally: transient MSA-server hiccup → empty dataloader → `IndexError` (Mosaic `load_features_and_structure_writer`); recoverable by rerun.
+
+**Why it mattered:**
+- The reboots were AF3 starving the box, not our complexes (all ≤349 tokens) — a deterministic guard was needed before any large AF3 run.
+
+**Outcome:**
+- AF3 runs to completion with the cap (exit 0, valid metrics, log confirms `mem fraction 0.8`); exact peak MiB to be confirmed on the first batch of a real run. De novo refold otherwise reached 6/7 targets fully 3-engine before being stopped to protect the box.
+- Next: source the 19 missing Adaptyv target sequences for the full 23-target / ~5253-design refold (the user-selected scope).
+
+---
+
+## 2026-06-24 — SoluProt 1.0 dist + aarch64 USEARCH v12 vendored into the repo (durable screen)
+
+**What changed:**
+- Vendored the full SoluProt 1.0 distribution (scripts + GradientBoosting model pickles + USEARCH reference DBs) and the from-source aarch64 USEARCH v12 binary into `Evaluator/tools/soluprot/` — the installer's canonical `SOLUPROT_DIR` (commit `f0bc5d3`). Previously these lived only in `/tmp`, which gets wiped, losing the hard-to-rebuild USEARCH build and forcing a full re-download + recompile each time.
+- `soluprot.py` + `feature_scripts/` are pre-patched for biopython ≥ 1.78 and the `usearch_global` command spelling (aarch64). `usearch` is a static ARM64 ELF built from `rcedgar/usearch12` (the bioconda `12.0_beta` crashes on aarch64). Both model pickles shipped: `grad_clf_v1_tc.pkl` (full, with TMHMM) and `grad_clf_v1_tc_notmhmm.pkl` (TMHMM-free, aarch64 default).
+
+**Why it mattered:**
+- Makes the SoluProt screen durable and self-contained in `git clone` — the installer's "already present" check short-circuits the expensive rebuild, and the aarch64 USEARCH build no longer evaporates on reboot.
+
+**Outcome:**
+- 53 MB vendored (44 MB is the two re-downloadable reference FASTAs). The screen now resolves its scripts-path + USEARCH + model variant with zero `/tmp` dependency.
+
+---
+
+## 2026-06-26 — Report: Boltz-2 fold-back prefilter for tools lacking a native metric (RFD3); native-section enhancements
+
+**What changed:**
+- New `binder-compare prefilter` (commit `902729f`) — ranks designs by a cheap single-engine Boltz-2 fold-back *interface* score (`boltz_pae_ipsae_min` default, or `boltz_pae_iptm`), recomputed from the Boltz-2 PAE files so the numbers match the evaluator's consensus inputs. This is the literature-standard RFdiffusion recipe (diffusion gives geometry, the fold-back gives the rank; Bennett 2023; the 2025 3,766-binder meta-analysis ranks ipSAE the best single in-silico predictor). Falls back to raw Boltz-2 columns when PAE files are absent. New `cli/prefilter.py`; `test_prefilter.py` (117 pass).
+- Targets **RFD3** — the one tool with no native interface metric, previously selected by `mpnn_sequence_recovery` (a sequence proxy with no binding signal), which is why its refold pool was full of non-interfacing designs (ipSAE_min = 0). Output is sorted best-first with a `sequence` column → drops straight into `report --tool-csv rfd3=<sel>`.
+- Report native-section polish (commits `c36a652`→`44c1f43`): honors `--top-per-tool` in the Top-Designs-per-Tool section; populates `eval_rank` from the full df; adds `consensus_ipsae_min_mean` (mean of per-engine ipSAE_min) surfaced in tables; friendly `METRIC_META` labels for native/consensus columns; main refold candidates Top-20 → Top-30; emits a combined `candidates.csv` (per-tool native + refold shortlist).
+
+**Why it mattered:**
+- RFD3 designs were being chosen by a metric blind to binding — the fold-back prefilter applies the field-standard recipe so the expensive AF3 pass is spent on designs that actually interface.
+- The report now presents a single, friendly, deduplicated candidate list spanning native + cross-engine signals.
+
+**Outcome:**
+- `binder-compare prefilter` in production; 117 tests pass; native section + `candidates.csv`/`top30_candidates.csv` are the canonical shortlist surface.
+
+---
+
+## 2026-06-28 — SoluProt screen runs by default on BM5 (aarch64): env rename + dead-env cleanup
+
+**What changed:**
+- Cloned the validated `sklearn020-build` env → **`binder-eval-soluprot`** — the name `evaluate.sh` auto-detects and the configurator checks via `_env_exists`. So `bindmaster evaluate` / `evaluate.sh` now RUN the SoluProt screen by default on BM5 with NO extra flags (previously silently skipped: nothing on the box was named `binder-eval-soluprot`).
+- **Deleted the broken `soluprot-py37` env** (had scikit-learn 0.21.3 → `'BinomialDeviance' has no attribute 'get_init_raw_predictions'` crash at `predict()` — a trap that loaded but never scored).
+- Resolved the USEARCH version ambiguity: the deployed `~/soluprot-dist/usearch` banner = `usearch v12.0`; the vendored repo copy + dist copy + source build all share BuildID `920b9334` (identical aarch64 v12 source builds). Removed a stray x86 leftover (`usearch12-src/tmp/usearch_linux_x86_12.0-beta`).
+
+**Why it mattered:**
+- The default canonical pipeline (Boltz-2 + AF3 + ESMFold2 + SoluProt screen) was silently dropping the solubility screen on BM5 purely because of an env-name mismatch — a "wired but never fires" footgun.
+
+**Outcome:**
+- Verified end-to-end: the vendored `Evaluator/tools/soluprot/` is self-contained on aarch64 (patched `soluprot.py`, both pickles, 22 MB ref DB, bundled v12 USEARCH); the runner auto-resolves scripts-path + USEARCH + `--no_tmhmm`. SoluProt now screens by default on BM5.
+
+---
+
+## 2026-06-29 — SoluProt 2.0 web UI (standalone) + x86 validation: full TMHMM model reproduces the public server
+
+**What changed:**
+- Built **SoluProt 2.0 UI** — a standalone local web app that reproduces the public SoluProt server (`loschmidt.chemi.muni.cz/soluprot/`): paste FASTA → the host computes the *E. coli* solubility score via `soluprot.py` → a color-graded results table + score-distribution histogram, with per-job persistence retrievable by Job ID. FastAPI (py3.10) serving env shells into the py3.7 `binder-eval-soluprot` model env via `$SOLUPROT_PYTHON`; vanilla-JS SPA (no external libs); keeps the original branding/affiliation banner. **This project lives OUTSIDE this repo** (`~/dev/SoluProt-2.0-UI/`, deliberately not under BinderScout) — it was the validation vehicle, not a BindMaster component. Diary records the *finding*, not the code.
+- Used it to settle the open question: **does the aarch64/BM5 SoluProt screen differ from the public server because of a wrapper/USEARCH/sklearn bug, or solely the TMHMM-free model variant?** Staged the bundle + a `compare.py` validator + a Claude Code kickoff doc to MUNI; ran it on BM1 (x86) with the FULL native stack (TMHMM binary → 96-feature model, scikit-learn 0.20.1 wheel, x86 USEARCH).
+- Found + fixed a TMHMM x86 setup gotcha (folded into the standalone's `setup_tmhmm.sh`, also on MUNI): TMHMM 2.0's `tmhmm` wrapper AND `tmhmmformat.pl` BOTH ship `#!/usr/local/bin/perl`; the wrapper execs the formatter via its shebang, so rewriting only `tmhmm`'s shebang makes the formatter silently fail → empty `-short` output, exit 0 → SoluProt backfills every TMHMM feature with the training mean → WRONG scores for membrane sequences while passing an exit-code check. Fix: rewrite the perl shebang on BOTH files; smoke test must assert `PredHel=` on a membrane control, not just exit 0.
+
+**Why it mattered:**
+- Pins down exactly what the aarch64 screen's ~0.03–0.12 offset from the public server is — and whether to trust the BM5 numbers.
+
+**Outcome:**
+- **x86 + full TMHMM model + scikit-learn 0.20.1 MATCHES the public SoluProt server** (max|Δ| < 0.01). This confirms the aarch64/BM5 offset (~0.03–0.12, Pearson r ≈ 0.98, identical ranking) is **solely the TMHMM-free model variant** — NOT a wrapper / USEARCH-v12 / sklearn-0.20.4 bug. So: need exact public-server parity → use x86 (full TMHMM); aarch64 gives the screen-equivalent TMHMM-free variant (AUC 0.62, immaterial for a screen). A working TMHMM x86 is now stored on MUNI, reusable for future x86 deploys (or to drive the full model on BM5 via qemu per `setup_tmhmm.sh`).
