@@ -75,8 +75,11 @@ def run(args: argparse.Namespace) -> None:
 
     merged = metrics.merge(panel, left_on=metrics_id, right_on="design_id", how="left", suffixes=("", "_panel"))
     th = {
-        "dg_max": args.dg_max, "sc_min": args.sc_min, "hbonds_min": args.hbonds_min,
-        "unsat_max": args.unsat_max, "nres_min": args.nres_min,
+        "dg_max": args.dg_max,
+        "sc_min": args.sc_min,
+        "hbonds_min": args.hbonds_min,
+        "unsat_max": args.unsat_max,
+        "nres_min": args.nres_min,
     }
     verdicts = merged.apply(lambda r: _evaluate(r, th), axis=1)
     merged["qc_pass"] = [v[0] for v in verdicts]
@@ -90,10 +93,12 @@ def run(args: argparse.Namespace) -> None:
     scored = int(merged["interface_dG"].notna().sum()) if "interface_dG" in merged else 0
     flagged = int((~merged["qc_pass"]).sum())
     mode = "DROPPED (hard filter)" if args.drop_failures else "kept (advisory — not dropped)"
-    print(f"[qc-annotate] {args.output}: {scored} scored on the interface panel; "
-          f"{flagged} flagged qc_pass=False, {mode}. "
-          f"Thresholds: dG≤{th['dg_max']}, sc≥{th['sc_min']}, hbonds≥{th['hbonds_min']}, "
-          f"unsat≤{th['unsat_max']}, nres≥{th['nres_min']}.")
+    print(
+        f"[qc-annotate] {args.output}: {scored} scored on the interface panel; "
+        f"{flagged} flagged qc_pass=False, {mode}. "
+        f"Thresholds: dG≤{th['dg_max']}, sc≥{th['sc_min']}, hbonds≥{th['hbonds_min']}, "
+        f"unsat≤{th['unsat_max']}, nres≥{th['nres_min']}."
+    )
 
 
 def _resolve_panel(args: argparse.Namespace) -> Path:
@@ -114,8 +119,10 @@ def _resolve_panel(args: argparse.Namespace) -> Path:
         "--binder-chain", args.binder_chain,
         "-o", str(out),
     ]  # fmt: skip
-    print(f"[qc-annotate] relax + interface panel in '{args.bindcraft_env}' (shortlist only — FastRelax is slow)…",
-          file=sys.stderr)
+    print(
+        f"[qc-annotate] relax + interface panel in '{args.bindcraft_env}' (shortlist only — FastRelax is slow)…",
+        file=sys.stderr,
+    )
     subprocess.run(cmd, check=True)
     return out
 
@@ -139,7 +146,10 @@ def add_parser(subparsers) -> None:
     p.add_argument("--hbonds-min", type=int, default=DEFAULT_QC["hbonds_min"], help="Min interface H-bonds")
     p.add_argument("--unsat-max", type=int, default=DEFAULT_QC["unsat_max"], help="Max buried unsatisfied H-bonds")
     p.add_argument("--nres-min", type=int, default=DEFAULT_QC["nres_min"], help="Min interface residues")
-    p.add_argument("--drop-failures", action="store_true",
-                   help="Hard-filter: drop qc_pass=False rows (OFF by default; culls binders on predicted structures)")
+    p.add_argument(
+        "--drop-failures",
+        action="store_true",
+        help="Hard-filter: drop qc_pass=False rows (OFF by default; culls binders on predicted structures)",
+    )
     p.add_argument("--output", "-o", required=True, metavar="CSV", help="Annotated output CSV")
     p.set_defaults(func=run)
