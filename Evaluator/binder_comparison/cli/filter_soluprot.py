@@ -39,6 +39,8 @@ def run(args: argparse.Namespace) -> None:
         threshold=args.threshold,
         scripts_path=args.scripts_path,
         binder_ids=binder_ids,
+        no_tmhmm=args.no_tmhmm,
+        usearch_path=args.usearch,
     )
 
 
@@ -83,6 +85,27 @@ def add_parser(subparsers) -> None:
             "Path to the unpacked SoluProt distribution (the directory "
             "containing soluprot.py). Falls back to $SOLUPROT_HOME, then to "
             "Evaluator/tools/soluprot/ inside the BinderScout repo."
+        ),
+    )
+    p.add_argument(
+        "--usearch",
+        default=None,
+        metavar="BIN",
+        help=(
+            "Path to the USEARCH binary for the identity feature. Falls back "
+            "to $SOLUPROT_USEARCH, then <scripts-path>/usearch, then 'usearch' "
+            "on PATH."
+        ),
+    )
+    p.add_argument(
+        "--no-tmhmm",
+        dest="no_tmhmm",
+        action="store_true",
+        default=None,
+        help=(
+            "Use SoluProt's TMHMM-free model (-0.5%% accuracy). Default: auto "
+            "— enabled when no TMHMM binary is found (always so on aarch64, "
+            "where TMHMM ships x86 only)."
         ),
     )
     p.set_defaults(func=run)

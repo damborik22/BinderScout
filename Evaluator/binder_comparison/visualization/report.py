@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..comparison.candidates import _NATIVE_SEQ_COLS, collapse_native_df, order_tools
 from .plots import (
     METRIC_META,
     fig_to_base64,
@@ -188,7 +189,7 @@ _HTML_TEMPLATE = """\
 {agreement_summary}
 {tier_summary}
 
-<h2>Top 20 Binders</h2>
+<h2>Top 30 Binders</h2>
 {top_table}
 
 <table style="font-size:0.8em;border-collapse:collapse;margin:0.5em 0 1.5em 0;color:#555;">
@@ -1290,6 +1291,7 @@ def generate_report(
     primary_engine: str = "boltz",
     top_per_tool: int = 10,
     rank_method: str = "adaptyv",
+    full_df: pd.DataFrame | None = None,
 ) -> None:
     """Generate and write the HTML report.
 
@@ -1336,19 +1338,20 @@ def generate_report(
     engine_threshold_legend = _engine_threshold_legend_html(sort_df)
     agreement_summary = _agreement_summary_html(sort_df)
 
-    # Top 20 table (primary + collapsible secondary)
+    # Top 30 table (primary + collapsible secondary)
     primary_cols, secondary_cols = _select_display_cols(sort_df, rank_method=rank_method)
-    top20_primary = sort_df[primary_cols].head(20)
-    top_table = _df_to_html(top20_primary, colour_tool=True).replace("<table>", '<table style="width:100%">', 1)
+    top30_primary = sort_df[primary_cols].head(30)
+    top_table = _df_to_html(top30_primary, colour_tool=True).replace("<table>", '<table style="width:100%">', 1)
     if secondary_cols:
-        top20_secondary = sort_df[primary_cols[:2] + secondary_cols].head(20)
+        top30_secondary = sort_df[primary_cols[:2] + secondary_cols].head(30)
         top_table += (
             '\n<details style="margin:0.5em 0;">'
             '<summary style="cursor:pointer;font-size:0.85em;color:#1565C0;font-weight:bold;">'
-            "Show additional metrics for Top 20</summary>\n"
-            + _df_to_html(top20_secondary, colour_tool=True)
+            "Show additional metrics for Top 30</summary>\n"
+            + _df_to_html(top30_secondary, colour_tool=True)
             + "\n</details>"
         )
+    top_table += _advisory_legend_html(sort_df)
 
     # Summary statistics table
     summary_table = _summary_to_html(summary)
@@ -1396,7 +1399,7 @@ def generate_report(
     # and join with our binder_id via sequence matching.
     per_tool_top10 = ""
     if "source_tool" in sort_df.columns:
-        tools_present = sorted(sort_df["source_tool"].dropna().unique())
+        tools_present = order_tools(sort_df["source_tool"].dropna().unique())
         if tools_present:
             per_tool_top10 = (
                 "<h2>Top Designs per Tool "
@@ -1405,20 +1408,51 @@ def generate_report(
                 'margin-left:0.4em;">NATIVE TOOL RANKING</span></h2>\n'
                 '<p style="font-size:0.85em;color:#555;">'
                 "Each tool's top designs ranked by <b>that tool's own internal scoring</b> "
-                "(not the evaluator's cross-engine ranking)."
+                "(not the evaluator's cross-engine ranking). Shows <b>refolded designs only</b>, "
+                "one row per backbone (MPNN/cycle siblings collapsed; never-refolded designs omitted)."
                 "</p>\n"
             )
 
-            # Build sequence → binder_id + adaptyv_rank lookup
+            # Build sequence → binder_id + rank lookup. Use the FULL (pre-collapse)
+            # frame when available: df/sort_df here is representatives-only, so
+            # multi-sequence-per-backbone tools (BindCraft MPNN siblings,
+            # Protein-Hunter cycles) would otherwise leave their sibling rows'
+            # eval_rank blank. active_rank is the primary (two-stage) ranking.
+            def _r3(v):
+                try:
+                    return round(float(v), 3)
+                except (TypeError, ValueError):
+                    return v
+
+            # eval_rank = the collapsed two-stage refold rank (dense, the same
+            # ranking the Top-30 table and candidates.csv use), keyed by backbone
+            # so sibling rows resolve to their representative's rank.
+            grp_to_dense = {}
+            if "design_group" in sort_df.columns and "active_rank" in sort_df.columns:
+                grp_to_dense = dict(zip(sort_df["design_group"], sort_df["active_rank"], strict=False))
+
             seq_to_ids = {}
-            if "sequence" in sort_df.columns:
-                for _, row in sort_df.iterrows():
+            lookup_df = full_df if full_df is not None else sort_df
+            if "sequence" in lookup_df.columns:
+                for _, row in lookup_df.iterrows():
                     seq = str(row.get("sequence", "")).strip().upper()
                     if seq and seq not in seq_to_ids:
                         seq_to_ids[seq] = {
                             "binder_id": row.get("binder_id", ""),
                             "adaptyv_rank": row.get("adaptyv_rank", ""),
+                            "active_rank": grp_to_dense.get(row.get("design_group", ""), row.get("active_rank", "")),
+                            "consensus_iptm_mean": _r3(row.get("consensus_iptm_mean", "")),
+                            "consensus_ipsae_min_mean": _r3(row.get("consensus_ipsae_min_mean", "")),
+                            "native_soluprot_score": _r3(row.get("native_soluprot_score", "")),
+                            "binder_length": row.get("binder_length", ""),
+                            "sequence": row.get("sequence", ""),
+                            "design_group": row.get("design_group", ""),
                         }
+
+            # Sequence → backbone (design_group) for the refold pool, so the
+            # native section can drop never-refolded designs and collapse MPNN/
+            # cycle siblings to one row per backbone.
+            seq_to_group = {s: d["design_group"] for s, d in seq_to_ids.items() if d.get("design_group")}
 
             for tool in tools_present:
                 display_name = _tool_display(tool)
@@ -1428,36 +1462,46 @@ def generate_report(
                     csv_path = Path(tool_csvs[tool])
                     if csv_path.exists():
                         try:
-                            native_df = pd.read_csv(csv_path, nrows=10)
-                            # Add our binder_id by matching sequence
+                            # Refolded designs only, one row per backbone (best
+                            # native rank), in the tool's native order. Drops
+                            # never-refolded designs and MPNN/cycle siblings so
+                            # the native top-N is distinct backbones with no
+                            # blank-metric rows.
+                            native_df = collapse_native_df(csv_path, seq_to_group, top_n=top_per_tool)
+                            native_df = native_df.drop(columns=["_seq_key", "_design_group"], errors="ignore")
+                            if native_df.empty:
+                                raise ValueError("no refolded native designs for this tool")
+                            # Add our binder_id by matching sequence (full-chain
+                            # column first — same preference collapse_native_df used).
                             seq_col = None
-                            for candidate in ("sequence", "Sequence", "designed_chain_sequence", "designed_sequence"):
+                            for candidate in _NATIVE_SEQ_COLS:
                                 if candidate in native_df.columns:
                                     seq_col = candidate
                                     break
                             if seq_col:
-                                # First two cols: native (tool) rank + evaluator rank.
-                                native_df.insert(
-                                    0,
-                                    "native_rank",
-                                    range(1, len(native_df) + 1),
-                                )
-                                native_df.insert(
-                                    1,
-                                    "eval_rank",
-                                    native_df[seq_col]
-                                    .str.strip()
-                                    .str.upper()
-                                    .map(lambda s: seq_to_ids.get(s, {}).get("adaptyv_rank", "")),
-                                )
-                                native_df.insert(
-                                    2,
-                                    "binder_id",
-                                    native_df[seq_col]
-                                    .str.strip()
-                                    .str.upper()
-                                    .map(lambda s: seq_to_ids.get(s, {}).get("binder_id", "")),
-                                )
+                                native_df.insert(0, "native_rank", range(1, len(native_df) + 1))
+                                _keyseq = native_df[seq_col].str.strip().str.upper()
+                                # Evaluator columns alongside the tool's native ranking, matched by
+                                # sequence: refold rank, cross-engine means, solubility, length, sequence.
+                                _eval_cols = [
+                                    ("eval_rank", "active_rank"),
+                                    ("binder_id", "binder_id"),
+                                    ("consensus_iptm_mean", "consensus_iptm_mean"),
+                                    ("consensus_ipsae_min_mean", "consensus_ipsae_min_mean"),
+                                    ("native_soluprot_score", "native_soluprot_score"),
+                                    ("binder_length", "binder_length"),
+                                    ("sequence", "sequence"),
+                                ]
+                                _pos = 1
+                                for _col, _key in _eval_cols:
+                                    if _col in native_df.columns:
+                                        continue
+                                    native_df.insert(
+                                        _pos,
+                                        _col,
+                                        _keyseq.map(lambda s, k=_key: seq_to_ids.get(s, {}).get(k, "")),
+                                    )
+                                    _pos += 1
                             n = len(native_df)
                             tool_table = _df_to_html(native_df, colour_tool=False)
 
@@ -1474,7 +1518,7 @@ def generate_report(
                                             pdb_dir,
                                             pattern,
                                             seq_to_ids,
-                                            n=10,
+                                            n=top_per_tool,
                                             target_seq=target_seq,
                                         )
                                     except Exception as e:
@@ -1506,7 +1550,7 @@ def generate_report(
                                             tool,
                                             refold_df,
                                             boltz2_results_dir,
-                                            n=10,
+                                            n=top_per_tool,
                                             primary_engine=primary_engine,
                                             target_seq=target_seq,
                                         )
@@ -1602,6 +1646,7 @@ def generate_report(
         "quality_tier",
         "agreement_count",
         "ipsae_min",
+        "consensus_ipsae_min_mean",
         "iptm",
         "boltz_pae_iptm",
         "plddt_binder_mean",
@@ -1619,6 +1664,9 @@ def generate_report(
         "native_dG",
         "native_dSASA",
         "native_shape_complementarity",
+        "native_soluprot_score",
+        "native_soluprot_passes",
+        "qc_pass",
         "sequence",
         "target_sequence",
     ]
@@ -1745,6 +1793,39 @@ def generate_report(
     print(f"[report] Written → {output_path}")
 
 
+# Advisory annotation columns: SoluProt solubility score (--soluprot-results, renamed
+# native_soluprot_*) + qc-annotate BindCraft interface panel (--qc-results). Surfaced in
+# the report only when present. ADVISORY — displayed for human review, never used to
+# reorder or drop designs (hard-gating either removes true binders; see qc-annotate).
+_ADVISORY_PRIMARY = ["native_soluprot_score", "qc_pass"]
+_ADVISORY_SECONDARY = [
+    "native_soluprot_passes",
+    "qc_fail_reasons",
+    "interface_sc",
+    "interface_dG",
+    "interface_dG_SASA_ratio",
+    "interface_delta_unsat_hbonds",
+    "interface_nres",
+]
+
+
+def _advisory_legend_html(df: pd.DataFrame) -> str:
+    """Legend for the advisory SoluProt + qc-annotate columns, shown only when present."""
+    bits = []
+    if "native_soluprot_score" in df.columns:
+        bits.append("<b>soluprot_score</b> = SoluProt solubility (0–1, higher = more soluble; sequence-only screen)")
+    if "qc_pass" in df.columns:
+        bits.append(
+            "<b>qc_pass</b> = BindCraft interface QC panel (shape-comp / ΔG / buried-unsat H-bonds / #interface res)"
+        )
+    if not bits:
+        return ""
+    return (
+        "<p style='font-size:0.85em;color:#555;'><b>Advisory annotations</b> "
+        "(shown, never used to reorder or drop): &nbsp;" + " &nbsp;·&nbsp; ".join(bits) + "</p>"
+    )
+
+
 def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tuple[list[str], list[str]]:
     """Pick columns for the top-20 table: (primary, secondary).
 
@@ -1766,6 +1847,7 @@ def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tupl
             "af3_iptm",
             "esmfold2_iptm",
             "ipsae_min",
+            "consensus_ipsae_min_mean",
             "plddt_binder_mean",
         ]
         secondary = [
@@ -1785,8 +1867,8 @@ def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tupl
             "sequence",
         ]
         return (
-            [c for c in primary if c in df.columns],
-            [c for c in secondary if c in df.columns],
+            [c for c in primary + _ADVISORY_PRIMARY if c in df.columns],
+            [c for c in _ADVISORY_SECONDARY + secondary if c in df.columns],
         )
     primary = [
         "adaptyv_rank",
@@ -1818,8 +1900,8 @@ def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tupl
         "sequence",
     ]
     return (
-        [c for c in primary if c in df.columns],
-        [c for c in secondary if c in df.columns],
+        [c for c in primary + _ADVISORY_PRIMARY if c in df.columns],
+        [c for c in _ADVISORY_SECONDARY + secondary if c in df.columns],
     )
 
 

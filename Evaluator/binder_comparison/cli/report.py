@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..comparison.candidates import build_candidates_table
 from ..comparison.ensemble import compute_ensemble_metrics
 from ..comparison.merger import merge_refold_results
 from ..comparison.scoring import (
@@ -29,6 +30,7 @@ from ..comparison.scoring import (
     apply_screening_thresholds,
     compute_agreement,
     compute_composite_scores,
+    compute_consensus_ipsae,
     compute_consensus_iptm,
     rank_by_adaptyv_method,
     rank_by_consensus_iptm,
@@ -71,6 +73,13 @@ def run(args: argparse.Namespace) -> None:
     # Not part of agreement_count; this is a screen, not a re-ranker.
     if args.soluprot_results:
         df = _attach_soluprot_results(df, args.soluprot_results)
+
+    # qc-annotate: BindCraft interface QC panel for a shortlist. Left-joined by
+    # binder_id — adds qc_pass + qc_fail_reasons + interface_* columns. ADVISORY
+    # (most rows stay NaN; only the annotated shortlist carries values); never
+    # used to reorder or drop.
+    if getattr(args, "qc_results", None):
+        df = _attach_qc_results(df, args.qc_results)
 
     # Step 2: Promote Boltz-2 as primary predictor
     print("[report] Promoting Boltz-2 metrics as primary…")
@@ -187,9 +196,11 @@ def run(args: argparse.Namespace) -> None:
     # (ProteinBase 4-target, exhaustive 297-combo search) as the best deployable
     # binder-vs-non-binder score. Always computed; selectable as the ranking metric.
     df = compute_consensus_iptm(df)
+    df = compute_consensus_ipsae(df)
     df = rank_by_adaptyv_method(df)
     df = rank_by_consensus_iptm(df)
-    df = rank_by_two_stage(df)
+    screen_metric = getattr(args, "screen_metric", "mean") or "mean"
+    df = rank_by_two_stage(df, screen_metric=screen_metric)
 
     # All three rankings coexist as columns (adaptyv_rank, consensus_rank,
     # two_stage_rank); --rank-by selects which orders the report. `active_rank`
@@ -201,7 +212,10 @@ def run(args: argparse.Namespace) -> None:
         print("[report] Ranking by consensus_iptm (max engine iptm — benchmark-validated binder filter)")
         df = df.sort_values(["consensus_rank"], ascending=[True]).reset_index(drop=True)
     elif rank_by == "two_stage":
-        print("[report] Ranking by two_stage (max-screen top 50% → mean-rank — benchmark-validated for selection)")
+        print(
+            f"[report] Ranking by two_stage ({screen_metric}-screen top 50% → mean-rank — "
+            "benchmark-validated for selection)"
+        )
         df = df.sort_values(["two_stage_rank"], ascending=[True]).reset_index(drop=True)
     else:
         df = df.sort_values(["adaptyv_rank"], ascending=[True]).reset_index(drop=True)
@@ -250,6 +264,7 @@ def run(args: argparse.Namespace) -> None:
         "protenix_pae_ipsae_min",
         "af3_pae_ipsae_min",
         "esmfold2_ipsae_min",
+        "consensus_ipsae_min_mean",
         "esmfold2_chain_iptm_interface",
         "boltz_pae_iptm",
         "boltz_pae_bt_ipsae",
@@ -272,9 +287,25 @@ def run(args: argparse.Namespace) -> None:
         "active_rank",
     ]
     _available = [c for c in _top_cols if c in df.columns]
-    top20 = df_display.head(20)[_available]
-    write_csv(top20, output_dir / "top20_candidates.csv")
-    print("  top20_candidates.csv — top 20 distinct designs with sequences")
+    top30 = df_display.head(30)[_available]
+    write_csv(top30, output_dir / "top30_candidates.csv")
+    print("  top30_candidates.csv — top 30 distinct designs with sequences")
+
+    # Parse --tool-csv flags into dict (also consumed by the HTML report below).
+    tool_csvs = {}
+    if args.tool_csv:
+        for spec in args.tool_csv:
+            if "=" in spec:
+                tool_name, csv_path = spec.split("=", 1)
+                tool_csvs[tool_name.strip()] = csv_path.strip()
+
+    # Step 4d: Combined candidates CSV — per-tool native top-20 (refolded designs
+    # only, one row per backbone) followed by the refold top-30 ranking. Built
+    # from the tools' RAW native CSVs; the in-pool filter + backbone collapse are
+    # applied internally (no pre-processing needed).
+    candidates = build_candidates_table(df, df_display, tool_csvs or None)
+    write_csv(candidates, output_dir / "candidates.csv")
+    print("  candidates.csv — per-tool native top-20 + refold top-30 with sequences")
 
     # Step 4c: Copy top-20 refolded PDB structures for visual inspection.
     # Prefer the *primary engine's* PDB so the viewer shows the structure
@@ -315,14 +346,6 @@ def run(args: argparse.Namespace) -> None:
         print("  top20_structures/    — view_top20.pml (open in PyMOL)")
 
     # Step 5: HTML report
-    # Parse --tool-csv flags into dict
-    tool_csvs = {}
-    if args.tool_csv:
-        for spec in args.tool_csv:
-            if "=" in spec:
-                tool_name, csv_path = spec.split("=", 1)
-                tool_csvs[tool_name.strip()] = csv_path.strip()
-
     # Parse --tool-pdb-dir flags into dict
     tool_pdb_dirs = {}
     if args.tool_pdb_dir:
@@ -333,6 +356,7 @@ def run(args: argparse.Namespace) -> None:
 
     generate_report(
         df=df_display,
+        full_df=df,
         summary=summary,
         output_path=output_dir / "report.html",
         tool_csvs=tool_csvs or None,
@@ -541,6 +565,49 @@ def _attach_soluprot_results(df: pd.DataFrame, soluprot_csv: str) -> pd.DataFram
     return pd.merge(df, sp_sub, on="sequence", how="left")
 
 
+# qc-annotate (interface_qc.py) panel columns to surface in the report.
+_QC_PANEL_COLS = (
+    "qc_pass",
+    "qc_fail_reasons",
+    "interface_sc",
+    "interface_packstat",
+    "interface_dG",
+    "interface_dSASA",
+    "interface_dG_SASA_ratio",
+    "interface_nres",
+    "interface_interface_hbonds",
+    "interface_delta_unsat_hbonds",
+    "interface_hydrophobicity",
+    "surface_hydrophobicity",
+)
+
+
+def _attach_qc_results(df: pd.DataFrame, qc_csv: str) -> pd.DataFrame:
+    """Left-join qc-annotate's BindCraft interface panel (``qc_pass`` +
+    ``qc_fail_reasons`` + ``interface_*``) onto the merged frame by ``binder_id``.
+
+    ADVISORY columns — surfaced in the report, never used to reorder or drop. qc-annotate
+    annotates only a shortlist, so most rows stay NaN (expected).
+    """
+    qc_path = Path(qc_csv)
+    if not qc_path.exists():
+        print(f"[report] [warn] qc-annotate CSV not found at {qc_path} — skipping")
+        return df
+    qc_df = pd.read_csv(qc_path)
+    id_col = next((c for c in ("binder_id", "design_id", "id") if c in qc_df.columns), None)
+    if qc_df.empty or id_col is None or "binder_id" not in df.columns:
+        print(f"[report] [warn] qc-annotate CSV {qc_path.name} not joinable (need an id column) — skipping")
+        return df
+    keep = [id_col] + [c for c in _QC_PANEL_COLS if c in qc_df.columns]
+    qc_sub = qc_df[keep].rename(columns={id_col: "binder_id"}).copy()
+    qc_sub["binder_id"] = qc_sub["binder_id"].astype(str)
+    df = df.copy()
+    df["binder_id"] = df["binder_id"].astype(str)
+    n = int(qc_sub["qc_pass"].notna().sum()) if "qc_pass" in qc_sub.columns else len(qc_sub)
+    print(f"[report] Attaching qc-annotate panel from {qc_path.name} ({n} annotated designs)")
+    return pd.merge(df, qc_sub, on="binder_id", how="left")
+
+
 def add_parser(subparsers) -> None:
     p = subparsers.add_parser(
         "report",
@@ -568,6 +635,13 @@ def add_parser(subparsers) -> None:
         "screen, not a re-ranker; the ranking hierarchy is unchanged.",
     )
     p.add_argument(
+        "--qc-results",
+        metavar="CSV",
+        help="Optional: output from 'qc-annotate' (BindCraft interface panel for a shortlist). "
+        "Adds advisory qc_pass / qc_fail_reasons / interface_* columns joined by binder_id. "
+        "Advisory only — never reorders or drops designs.",
+    )
+    p.add_argument(
         "--esmfold2-results",
         metavar="CSV",
         help="Optional: output from 'refold-esmfold2' (esmfold2_results.csv). "
@@ -593,9 +667,18 @@ def add_parser(subparsers) -> None:
         default="two_stage",
         help="Ranking method for the report. 'adaptyv' = quality_tier → agreement_count → "
         "ipsae_min. 'consensus_iptm' = max engine iptm (benchmark-validated binder-vs-non-binder filter). "
-        "'two_stage' (default) = max-screen (top 50%%) then mean-rank survivors (benchmark-validated for wet-lab "
+        "'two_stage' (default) = screen (top 50%%) then mean-rank survivors (benchmark-validated for wet-lab "
         "selection: precision@top-10%% 0.92 vs 0.79 for max alone; see docs/plans.md Part N). All ranks "
         "are always written as columns (adaptyv_rank, consensus_rank, two_stage_rank).",
+    )
+    p.add_argument(
+        "--screen-metric",
+        choices=["max", "mean"],
+        default="mean",
+        help="Stage-1 screen metric for --rank-by two_stage. 'mean' (default) = consensus_iptm_mean, the "
+        "stronger binder screen on the Adaptyv 4-target benchmark with experimental Kd (macro AUC 0.710 vs "
+        "0.689; +20 true binders recalled at the 50%% cut). 'max' = consensus_iptm (legacy; best on the "
+        "ProteinBase benchmark, ~0.755).",
     )
     p.add_argument(
         "--no-collapse-duplicates",
