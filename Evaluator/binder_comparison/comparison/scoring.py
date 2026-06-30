@@ -686,8 +686,11 @@ def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     rank affinity among binders (see docs/plans.md Part N — that needs interface ΔG).
 
     Adds:
-        consensus_iptm     — max over available {engine}_pae_iptm columns (NaN if none).
-        consensus_iptm_n   — how many engines contributed (0–4).
+        consensus_iptm        — max over available {engine}_pae_iptm columns (NaN if none).
+        consensus_iptm_mean   — mean over available engines (precision re-rank metric).
+        consensus_iptm_min    — min over available engines (most conservative engine).
+        consensus_iptm_spread — max − min (engine disagreement; NaN if <2 engines).
+        consensus_iptm_n      — how many engines contributed (0–4).
     """
     result = df.copy()
     present = [c for c in _ENGINE_IPTM_COLS if c in result.columns]
@@ -695,6 +698,7 @@ def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
         result["consensus_iptm"] = np.nan
         result["consensus_iptm_mean"] = np.nan
         result["consensus_iptm_min"] = np.nan
+        result["consensus_iptm_spread"] = np.nan
         result["consensus_iptm_n"] = 0
         return result
     numeric = result[present].apply(pd.to_numeric, errors="coerce")
@@ -703,7 +707,13 @@ def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     result["consensus_iptm"] = numeric.max(axis=1)
     result["consensus_iptm_mean"] = numeric.mean(axis=1)
     result["consensus_iptm_min"] = numeric.min(axis=1)
+    # Engine spread = max − min. Only meaningful when ≥2 engines contributed;
+    # NaN for single-engine rows (no disagreement to measure). Surfaced in the
+    # report's Top-30 as a "single-engine spike" / "engine disagreement" flag.
     result["consensus_iptm_n"] = numeric.notna().sum(axis=1).astype(int)
+    spread = result["consensus_iptm"] - result["consensus_iptm_min"]
+    spread = spread.where(result["consensus_iptm_n"] >= 2)
+    result["consensus_iptm_spread"] = spread
     return result
 
 
@@ -726,18 +736,24 @@ def compute_consensus_ipsae(df: pd.DataFrame) -> pd.DataFrame:
     reporting column — the primary ranker stays the two-stage iptm.
 
     Adds:
-        consensus_ipsae_min_mean — mean over available per-engine ipsae_min (NaN if none)
-        consensus_ipsae_min_n    — how many engines contributed (0–4)
+        consensus_ipsae_min_mean   — mean over available per-engine ipsae_min (NaN if none).
+        consensus_ipsae_min_spread — max − min (engine disagreement; NaN if <2 engines).
+        consensus_ipsae_min_n      — how many engines contributed (0–4).
     """
     result = df.copy()
     present = [c for c in _ENGINE_IPSAE_MIN_COLS if c in result.columns]
     if not present:
         result["consensus_ipsae_min_mean"] = np.nan
+        result["consensus_ipsae_min_spread"] = np.nan
         result["consensus_ipsae_min_n"] = 0
         return result
     numeric = result[present].apply(pd.to_numeric, errors="coerce")
     result["consensus_ipsae_min_mean"] = numeric.mean(axis=1)
     result["consensus_ipsae_min_n"] = numeric.notna().sum(axis=1).astype(int)
+    # Engine ipSAE_min disagreement (max − min). NaN for single-engine rows.
+    spread = numeric.max(axis=1) - numeric.min(axis=1)
+    spread = spread.where(result["consensus_ipsae_min_n"] >= 2)
+    result["consensus_ipsae_min_spread"] = spread
     return result
 
 
