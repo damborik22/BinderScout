@@ -196,6 +196,18 @@ def run(args: argparse.Namespace) -> None:
     if getattr(args, "qc_results", None):
         df = _attach_qc_results(df, args.qc_results)
 
+    # epitope: target-side interface residues vs intended hotspot list (Item 2).
+    # Joined by binder_id; adds epitope_match_fraction + epitope_status +
+    # epitope_off_target_residues. ADVISORY — never reorders or drops.
+    if getattr(args, "epitope_results", None):
+        df = _attach_epitope_results(df, args.epitope_results)
+
+    # diversity: sequence-similarity clustering into "families" (Item 1).
+    # Joined by binder_id; adds family_id / family_size / family_rank. ADVISORY
+    # — never reorders or drops; the report surfaces a "Top per family" block.
+    if getattr(args, "diversity_results", None):
+        df = _attach_diversity_results(df, args.diversity_results)
+
     # Step 2: Promote Boltz-2 as primary predictor
     print("[report] Promoting Boltz-2 metrics as primary…")
     df = compute_ensemble_metrics(df)
@@ -689,6 +701,69 @@ def _attach_soluprot_results(df: pd.DataFrame, soluprot_csv: str) -> pd.DataFram
 
 
 # qc-annotate (interface_qc.py) panel columns to surface in the report.
+_DIVERSITY_COLS = ("family_id", "family_size", "family_rank")
+
+
+def _attach_diversity_results(df: pd.DataFrame, diversity_csv: str) -> pd.DataFrame:
+    """Left-join the diversity CSV by binder_id. ADVISORY — no reorder/drop."""
+    div_path = Path(diversity_csv)
+    if not div_path.exists():
+        print(f"[report] WARNING: --diversity-results file not found: {div_path}; skipping.")
+        return df
+    try:
+        div_df = pd.read_csv(div_path)
+    except (OSError, pd.errors.ParserError) as exc:
+        print(f"[report] WARNING: could not read --diversity-results {div_path}: {exc}")
+        return df
+    id_col = next((c for c in ("binder_id", "design_id", "id") if c in div_df.columns), None)
+    if id_col is None:
+        print(f"[report] WARNING: --diversity-results {div_path} has no id column; skipping.")
+        return df
+    keep = [id_col] + [c for c in _DIVERSITY_COLS if c in div_df.columns]
+    sub = div_df[keep].rename(columns={id_col: "binder_id"}).copy()
+    sub["binder_id"] = sub["binder_id"].astype(str)
+    df = df.copy()
+    df["binder_id"] = df["binder_id"].astype(str)
+    n_fam = int(sub["family_id"].nunique()) if "family_id" in sub.columns else 0
+    print(f"[report] Attaching diversity clusters from {div_path.name} ({n_fam} families)")
+    return pd.merge(df, sub, on="binder_id", how="left")
+
+
+_EPITOPE_COLS = (
+    "epitope_match_fraction",
+    "epitope_match_n",
+    "epitope_n_interface",
+    "epitope_off_target_residues",
+    "epitope_matched_residues",
+    "epitope_status",
+)
+
+
+def _attach_epitope_results(df: pd.DataFrame, epitope_csv: str) -> pd.DataFrame:
+    """Left-join the epitope-match CSV by binder_id. ADVISORY — no reorder/drop."""
+    epitope_path = Path(epitope_csv)
+    if not epitope_path.exists():
+        print(f"[report] WARNING: --epitope-results file not found: {epitope_path}; skipping.")
+        return df
+    try:
+        ep_df = pd.read_csv(epitope_path)
+    except (OSError, pd.errors.ParserError) as exc:
+        print(f"[report] WARNING: could not read --epitope-results {epitope_path}: {exc}")
+        return df
+    id_col = next((c for c in ("binder_id", "design_id", "id") if c in ep_df.columns), None)
+    if id_col is None:
+        print(f"[report] WARNING: --epitope-results {epitope_path} has no id column; skipping.")
+        return df
+    keep = [id_col] + [c for c in _EPITOPE_COLS if c in ep_df.columns]
+    ep_sub = ep_df[keep].rename(columns={id_col: "binder_id"}).copy()
+    ep_sub["binder_id"] = ep_sub["binder_id"].astype(str)
+    df = df.copy()
+    df["binder_id"] = df["binder_id"].astype(str)
+    n = int(ep_sub["epitope_match_fraction"].notna().sum()) if "epitope_match_fraction" in ep_sub.columns else 0
+    print(f"[report] Attaching epitope-match panel from {epitope_path.name} ({n} annotated designs)")
+    return pd.merge(df, ep_sub, on="binder_id", how="left")
+
+
 _QC_PANEL_COLS = (
     "qc_pass",
     "qc_fail_reasons",
@@ -763,6 +838,21 @@ def add_parser(subparsers) -> None:
         help="Optional: output from 'qc-annotate' (BindCraft interface panel for a shortlist). "
         "Adds advisory qc_pass / qc_fail_reasons / interface_* columns joined by binder_id. "
         "Advisory only — never reorders or drops designs.",
+    )
+    p.add_argument(
+        "--epitope-results",
+        metavar="CSV",
+        help="Optional: output from 'epitope' (per-design overlap with intended hotspots). "
+        "Adds advisory epitope_match_fraction + epitope_status columns joined by binder_id. "
+        "Critical for serpins / multi-pocket targets where high iPTM doesn't guarantee the "
+        "right epitope. Advisory only — never reorders or drops designs.",
+    )
+    p.add_argument(
+        "--diversity-results",
+        metavar="CSV",
+        help="Optional: output from 'diversity' (sequence-similarity clustering into families). "
+        "Adds advisory family_id + family_size + family_rank columns. Surfaces a 'Top per "
+        "family' recommendation block in the report — never reorders or drops the main rank.",
     )
     p.add_argument(
         "--esmfold2-results",

@@ -21,6 +21,8 @@ from .cli import (
     affinity,
     analyze_target,
     autosize,
+    diversity,
+    epitope,
     extract,
     filter_soluprot,
     mature,
@@ -69,6 +71,8 @@ def main(argv=None) -> None:
     affinity.add_parser(subparsers)
     qc_annotate.add_parser(subparsers)
     analyze_target.add_parser(subparsers)
+    epitope.add_parser(subparsers)
+    diversity.add_parser(subparsers)
 
     args = parser.parse_args(argv)
     args.func(args)
