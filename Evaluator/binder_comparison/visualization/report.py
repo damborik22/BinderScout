@@ -154,6 +154,7 @@ _HTML_TEMPLATE = """\
 
 {benchmark_provenance_block}
 {qc_rules_block}
+{tool_classification_banner}
 
 <details style="margin:0.8em 0;">
   <summary style="cursor:pointer;font-size:0.85em;color:#1565C0;font-weight:bold;">
@@ -257,6 +258,8 @@ pymol view_top20.pml</pre>
   <summary>Click to expand ({n_binders} binders)</summary>
   {full_table}
 </details>
+
+{provenance_footer}
 
 </body>
 </html>
@@ -1276,6 +1279,8 @@ def generate_report(
     top_per_tool: int = 10,
     rank_method: str = "adaptyv",
     full_df: pd.DataFrame | None = None,
+    tool_overrides: dict[str, dict] | None = None,
+    provenance: dict | None = None,
 ) -> None:
     """Generate and write the HTML report.
 
@@ -1773,16 +1778,21 @@ def generate_report(
 
     # Item 7 + 15: provenance + QC rules blocks live under the methodology
     # paragraph. Item 12: legend + screening intro adapt to rank_method.
+    # Items 3 + 5: per-tool framing banner (pre-filter / modality / convergence).
+    # Item 6: run provenance footer (CLI args / git_sha / engine versions).
     benchmark_provenance_block = _benchmark_provenance_html() if rank_method == "two_stage" else ""
     qc_rules_block = _qc_rules_html() if "qc_pass" in sort_df.columns else ""
     screening_summary_intro = _screening_summary_intro_html(rank_method)
     top_table_legend = _top_table_legend_html(rank_method, top30_primary)
+    tool_classification_banner = _tool_classification_banner_html(sort_df, tool_overrides=tool_overrides)
+    provenance_footer = _provenance_footer_html(provenance)
 
     html = _HTML_TEMPLATE.format(
         n_binders=len(sort_df),
         methodology_ranking_html=methodology_ranking_html,
         benchmark_provenance_block=benchmark_provenance_block,
         qc_rules_block=qc_rules_block,
+        tool_classification_banner=tool_classification_banner,
         screening_summary_intro=screening_summary_intro,
         top_table_legend=top_table_legend,
         engines_present_html=engines_present_html,
@@ -1800,6 +1810,7 @@ def generate_report(
         ngl_viewer_block=ngl_viewer_block,
         full_table=full_table,
         primary_engine_label=primary_engine_label,
+        provenance_footer=provenance_footer,
     )
 
     with output_path.open("w", encoding="utf-8") as fh:
@@ -1913,6 +1924,204 @@ def _col_in_df_legend(label: str, df: pd.DataFrame) -> bool:
     """
     cols = [c.strip() for c in label.split("↑")[0].split("↓")[0].strip().split("/")]
     return any(c.strip() in df.columns for c in cols if c.strip())
+
+
+def _tool_classification_banner_html(
+    df: pd.DataFrame,
+    tool_overrides: dict[str, dict] | None = None,
+) -> str:
+    """Per-tool fairness banner (Items 3 + 5).
+
+    Reports each tool's pool size, modality, pre-filter caveat, native-metric
+    interpretation, and convergence verdict. Renders nothing if neither
+    source_tool nor tool data are available.
+
+    ``tool_overrides`` is keyed by tool name (lowercase) and may carry extractor
+    runtime metadata (``pool_pre_filtered``, ``source_csv``, ``notes``); the CLI
+    can populate it from extractor sidecar JSON or per-tool flags. When absent,
+    we fall back to the static defaults in TOOL_CLASSIFICATION.
+    """
+    if "source_tool" not in df.columns:
+        return ""
+    from ..comparison.tool_classification import (
+        convergence_status,
+        get_classification,
+    )
+
+    counts = df["source_tool"].fillna("unknown").astype(str).str.lower().value_counts()
+    if counts.empty:
+        return ""
+
+    overrides = {(k or "").lower(): v for k, v in (tool_overrides or {}).items()}
+
+    # Aggregate ipSAE_min consensus per tool so convergence checks can fire.
+    mean_per_tool: dict[str, float] = {}
+    if "consensus_ipsae_min_mean" in df.columns:
+        try:
+            mean_per_tool = (
+                df.assign(_t=df["source_tool"].fillna("unknown").astype(str).str.lower())
+                .groupby("_t")["consensus_ipsae_min_mean"]
+                .mean()
+                .dropna()
+                .to_dict()
+            )
+        except (TypeError, ValueError):
+            mean_per_tool = {}
+
+    rows = []
+    any_flag = False
+    any_failed = False
+    for tool_name, count in counts.items():
+        cls = get_classification(tool_name)
+        ov = overrides.get(tool_name, {})
+        display = cls.display_name if cls else tool_name
+        modality = cls.modality if cls else "—"
+        pre_filtered = bool(ov.get("pool_pre_filtered", cls.pool_pre_filtered_default if cls else False))
+        source_csv = ov.get("source_csv", cls.source_csv_default if cls else None)
+        notes = ov.get("notes")
+        native_note = cls.native_metric_interpretation if cls else ""
+        failed, reason = convergence_status(tool_name, mean_per_tool.get(tool_name))
+        if pre_filtered or modality not in ("de-novo", "—") or failed:
+            any_flag = True
+        if failed:
+            any_failed = True
+        # Status badge
+        if failed:
+            status = (
+                f"<span style='background:#c62828;color:white;padding:2px 8px;border-radius:3px;"
+                f"font-size:0.75em;font-weight:bold;'>FAILED RUN</span><br>"
+                f"<small style='color:#555;'>{reason}</small>"
+            )
+        elif pre_filtered:
+            status = (
+                "<span style='background:#f57f17;color:white;padding:2px 8px;border-radius:3px;"
+                "font-size:0.75em;font-weight:bold;'>PRE-FILTERED POOL</span>"
+            )
+        elif cls and cls.modality not in ("de-novo", "—"):
+            status = (
+                f"<span style='background:#1565C0;color:white;padding:2px 8px;border-radius:3px;"
+                f"font-size:0.75em;font-weight:bold;'>{cls.modality.upper()}</span>"
+            )
+        else:
+            status = "<span style='color:#888;'>—</span>"
+
+        notes_html = ""
+        if notes:
+            notes_html = f"<br><small style='color:#777;'><em>{notes}</em></small>"
+        rows.append(
+            "<tr>"
+            f'<td><span class="tool-{tool_name}">{display}</span></td>'
+            f"<td style='text-align:right;'><b>{int(count)}</b></td>"
+            f"<td>{modality}</td>"
+            f"<td>{source_csv or '—'}{notes_html}</td>"
+            f"<td><small>{native_note}</small></td>"
+            f"<td>{status}</td>"
+            "</tr>"
+        )
+
+    summary_caveat = ""
+    if any_failed:
+        summary_caveat += (
+            "<p style='color:#c62828;font-size:0.85em;margin:0.4em 0;'>"
+            "<b>⚠ At least one tool's run did not converge</b> — its rows still appear in the "
+            "Top-30 and the merged metrics CSV, but the per-tool mean is dominated by noise. "
+            "Exclude FAILED-RUN tools from head-to-head comparisons.</p>"
+        )
+    if any_flag:
+        return (
+            "<details open style='margin:0.8em 0;'>"
+            "<summary style='cursor:pointer;font-size:0.95em;color:#1565C0;font-weight:bold;'>"
+            "Per-tool framing &nbsp;<small style='color:#888;font-weight:normal;'>"
+            "(pre-filter / modality / convergence — fairness caveats)</small></summary>"
+            f"<div style='padding:0.4em 0;'>{summary_caveat}"
+            "<table style='font-size:0.85em;border-collapse:collapse;'>"
+            "<tr><th style='text-align:left;'>Tool</th><th>Count</th><th style='text-align:left;'>Modality</th>"
+            "<th style='text-align:left;'>Source CSV</th>"
+            "<th style='text-align:left;'>Native metric (what it measures)</th>"
+            "<th style='text-align:left;'>Status</th></tr>" + "".join(rows) + "</table>"
+            "<p style='font-size:0.8em;color:#777;margin:0.4em 0 0 0;'>"
+            "<b>PRE-FILTERED POOL</b> = the extractor read a curated subset (e.g. Protein-Hunter's "
+            "<code>summary_high_iptm.csv</code> applies the tool's own iPTM + %X filter). Pool means "
+            "are inflated relative to unfiltered tools — compare per-design rank, not per-tool mean. "
+            "<b>VHH-CDR-REDESIGN</b> = sequences inside a fixed antibody framework; not de-novo. "
+            "<b>FAILED RUN</b> = mean cross-engine ipSAE_min &lt; 0.20 — output is essentially noise. "
+            "Status badges are advisory; ranking is unchanged.</p>"
+            "</div></details>"
+        )
+    # Even when nothing is flagged we still show the count table (transparency
+    # baseline). Use the same wrapper so the layout is consistent.
+    return (
+        "<details style='margin:0.8em 0;'>"
+        "<summary style='cursor:pointer;font-size:0.95em;color:#1565C0;font-weight:bold;'>"
+        "Per-tool framing</summary>"
+        "<div style='padding:0.4em 0;'>"
+        "<table style='font-size:0.85em;border-collapse:collapse;'>"
+        "<tr><th style='text-align:left;'>Tool</th><th>Count</th><th style='text-align:left;'>Modality</th>"
+        "<th style='text-align:left;'>Source CSV</th>"
+        "<th style='text-align:left;'>Native metric (what it measures)</th>"
+        "<th style='text-align:left;'>Status</th></tr>" + "".join(rows) + "</table></div></details>"
+    )
+
+
+def _provenance_footer_html(provenance: dict | None) -> str:
+    """Item 6: footer with run reproducibility metadata.
+
+    Renders only when ``provenance`` is non-empty. CLI auto-populates git_sha,
+    evaluator_version, cli_args, run_timestamp_utc; ``engine_versions`` flows
+    in from ``--engine-versions FILE`` (JSON/YAML).
+    """
+    if not provenance:
+        return ""
+    lines = [
+        "<hr style='margin:2em 0 0.5em 0;border:0;border-top:1px solid #ddd;'>",
+        "<details style='margin:0.5em 0;font-size:0.82em;color:#555;'>",
+        "<summary style='cursor:pointer;font-weight:bold;color:#1565C0;'>"
+        "Run provenance &nbsp;<small style='color:#888;font-weight:normal;'>"
+        "(versions / git / CLI flags — for reproducibility)</small></summary>",
+        "<table style='border-collapse:collapse;margin:0.4em 0;font-size:0.95em;'>",
+    ]
+
+    def _row(label, value):
+        if value in (None, "", {}, []):
+            return ""
+        return (
+            f"<tr><td style='padding:2px 12px 2px 0;vertical-align:top;white-space:nowrap;'>"
+            f"<b>{label}</b></td><td>{value}</td></tr>"
+        )
+
+    lines.append(_row("git_sha", provenance.get("git_sha", "unknown")))
+    lines.append(_row("evaluator_version", provenance.get("evaluator_version", "unknown")))
+    lines.append(_row("run_timestamp_utc", provenance.get("run_timestamp_utc", "unknown")))
+    cli_args = provenance.get("cli_args")
+    if cli_args:
+        if isinstance(cli_args, list):
+            cli_str = "<code>" + " ".join(str(a) for a in cli_args) + "</code>"
+        else:
+            cli_str = f"<code>{cli_args}</code>"
+        lines.append(_row("cli_args", cli_str))
+    engine_versions = provenance.get("engine_versions") or {}
+    if engine_versions:
+        rows = "".join(
+            f"<tr><td style='padding:2px 8px;'><code>{k}</code></td><td>{v}</td></tr>"
+            for k, v in engine_versions.items()
+        )
+        ev_html = (
+            f"<table style='border-collapse:collapse;font-size:0.95em;'>"
+            f"<tr><th style='text-align:left;'>engine</th><th style='text-align:left;'>version</th></tr>"
+            f"{rows}</table>"
+        )
+        lines.append(_row("engine_versions", ev_html))
+    extra = provenance.get("extra") or {}
+    for key, value in extra.items():
+        lines.append(_row(key, value))
+    lines.append("</table>")
+    lines.append(
+        "<p style='font-size:0.85em;color:#888;margin:0.3em 0;'>"
+        "Pass <code>--engine-versions FILE</code> to <code>binder-compare report</code> to record "
+        "engine checkpoints and random seeds. The other fields auto-populate from the running CLI.</p>"
+    )
+    lines.append("</details>")
+    return "\n".join(lines)
 
 
 def _screening_summary_intro_html(rank_method: str) -> str:
