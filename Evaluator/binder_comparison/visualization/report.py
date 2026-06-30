@@ -332,7 +332,7 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path, target_seq: st
                 "tool_colour": _TOOL_COLOURS_NGL.get(tool, _TOOL_COLOURS_NGL["unknown"]),
                 "ipsae": f"{float(ipsae):.3f}" if ipsae not in ("", None) else "n/a",
                 "iptm": f"{float(iptm):.3f}" if iptm not in ("", None) else "n/a",
-                "length": str(length).rstrip(".0") if length else "?",
+                "length": (f"{int(float(length))}" if str(length).strip() not in ("", "nan", "None") else "?"),
                 "pdb": pdb_js,
             }
         )
@@ -1817,8 +1817,8 @@ def generate_report(
         ),
         "two_stage": (
             f"Ranking is <b>two-stage mean iPTM</b>, validated on two <em>internal</em> 4-target benchmarks "
-            f"(Adaptyv: 8 hand-curated targets, Kd-screened, n &gt; 3,700; ProteinBase: Nipah / EGFR / "
-            f"IL7R / PD-L1, n = 175). <b>Stage 1 — screen:</b> <code>consensus_iptm_mean</code> = "
+            f"(Adaptyv: 4 targets — Nipah / EGFR / IL7R / PD-L1 — Kd-screened, n = 662; ProteinBase: the "
+            f"same 4 targets, n = 175). <b>Stage 1 — screen:</b> <code>consensus_iptm_mean</code> = "
             f"mean(boltz2, af3, esmfold2 iPTM); the top 50% (<code>passes_max_screen</code>) form the "
             f"binder-likely pool. Mean was selected as default over max because it is more robust to "
             f"per-target engine blind spots (Adaptyv macro AUC <b>0.710 vs 0.689</b> for max; ~20 more "
@@ -1943,8 +1943,8 @@ def _top_table_legend_html(rank_method: str, df: pd.DataFrame) -> str:
             ),
             (
                 "agreement_count ↑",
-                "Number of engines whose ipSAE_min &gt; 0.61 (Boltz-2 / AF3 / ESMFold2 / Protenix). "
-                "agreement_count &lt; 2 earns the <span style='color:#c62828;font-weight:bold;'>⚠</span> warning.",
+                "How many of the 3 engines (Boltz-2 / AF3 / ESMFold2) score ipSAE_min &gt; 0.61 — so 0–3. "
+                "Fewer than 2 of 3 earns the <span style='color:#c62828;font-weight:bold;'>⚠</span> warning.",
             ),
             (
                 "boltz_pae_iptm / af3_iptm / esmfold2_iptm ↑",
@@ -1967,8 +1967,8 @@ def _top_table_legend_html(rank_method: str, df: pd.DataFrame) -> str:
             ("consensus_iptm_spread ↓", "Engine disagreement (max − min). &gt; 0.3 flagged on the rank."),
             (
                 "agreement_count ↑",
-                "Engines with ipSAE_min &gt; 0.61. &lt; 2 flagged with <span style='color:#c62828;"
-                "font-weight:bold;'>⚠</span> on the rank.",
+                "How many of the 3 engines score ipSAE_min &gt; 0.61 (0–3). Fewer than 2 of 3 flagged "
+                "with <span style='color:#c62828;font-weight:bold;'>⚠</span> on the rank.",
             ),
             ("boltz_pae_iptm / af3_iptm / esmfold2_iptm ↑", "Per-engine PAE-recomputed iPTM."),
             ("ipsae_min ↑", "Cross-validation — Boltz-2 ipSAE_min. Tier-banded. Not the ranking key."),
@@ -2218,39 +2218,29 @@ def _screening_summary_intro_html(rank_method: str) -> str:
     cross-reference which threshold belonged to which metric. Now folded
     into one side-by-side table with a shared tier label.
     """
+    ipsae_band = (
+        " &nbsp;<span style='color:#2e7d32'>■ High</span> &gt;0.80 &nbsp;"
+        "<span style='color:#f57f17'>■ Medium</span> &gt;0.61 &nbsp;"
+        "<span style='color:#e65100'>■ Low</span> &gt;0.40 &nbsp;"
+        "<span style='color:#c62828'>■ Reject</span> ≤0.40"
+    )
     if rank_method in ("two_stage", "consensus_iptm"):
         active = "consensus_iptm_mean" if rank_method == "two_stage" else "consensus_iptm"
-        rows = [
-            ("#2e7d32", "■ Strong / High", "≥ 0.80", "&gt; 0.80"),
-            ("#f57f17", "■ Plausible / Medium", "≥ 0.60", "&gt; 0.61"),
-            ("#e65100", "■ Weak / Low", "≥ 0.40", "&gt; 0.40"),
-            ("#c62828", "■ Reject", "&lt; 0.40", "≤ 0.40"),
-        ]
-        body = "".join(
-            f"<tr><td style='color:{c};white-space:nowrap;padding-right:1em;'><b>{label}</b></td>"
-            f"<td style='padding-right:2em;'>{iptm}</td><td>{ipsae}</td></tr>"
-            for c, label, iptm, ipsae in rows
-        )
+        # One tier system only: the ipSAE_min tiers shown here are exactly the bands
+        # the tier-count table below reports. iPTM is the ranking metric but is NOT
+        # tier-banded (no second tier table exists for it), so it is named in prose
+        # rather than rendered as a parallel — and easily-confused — tier legend.
         return (
             "<p style='font-size:0.85em;color:#555;margin:0.3em 0;'>"
-            "<b>Threshold bands.</b> Active ranking metric: <code>" + active + "</code>. "
-            "The <code>quality_tier</code> column + tier-count table below use ipSAE_min."
-            "</p>"
-            "<table style='font-size:0.85em;border-collapse:collapse;margin:0.3em 0 0.6em 0;'>"
-            "<tr><th style='text-align:left;padding-right:1em;'>Tier</th>"
-            "<th style='text-align:left;padding-right:2em;'>iPTM band <small>(ranking)</small></th>"
-            "<th style='text-align:left;'>ipSAE_min band <small>(quality_tier)</small></th></tr>" + body + "</table>"
+            "<b>Ranking metric:</b> <code>" + active + "</code> (iPTM-based; continuous, not tier-banded). "
+            "The single tier system below — used by the <code>quality_tier</code> column and the "
+            "tier-count table — is <b>ipSAE_min</b>:" + ipsae_band + "</p>"
         )
     # adaptyv: ipSAE_min IS the ranking metric, single band.
     return (
         "<p style='font-size:0.85em;color:#555;margin:0.3em 0;'>"
         "<b>ipSAE_min tiers</b> (the ranking metric under <code>adaptyv</code> — "
-        "and the basis for <code>quality_tier</code>):"
-        " &nbsp;<span style='color:#2e7d32'>■ High</span> &gt;0.80 &nbsp;"
-        "<span style='color:#f57f17'>■ Medium</span> &gt;0.61 &nbsp;"
-        "<span style='color:#e65100'>■ Low</span> &gt;0.40 &nbsp;"
-        "<span style='color:#c62828'>■ Reject</span> ≤0.40"
-        "</p>"
+        "and the basis for <code>quality_tier</code>):" + ipsae_band + "</p>"
     )
 
 
@@ -2309,13 +2299,13 @@ def _benchmark_provenance_html() -> str:
         "<th style='text-align:left;padding:2px 12px 2px 0;'>Max-screen AUC</th></tr>"
         "<tr><td style='padding:2px 12px 2px 0;'><b>Adaptyv</b> "
         "(<a href='https://doi.org/10.1101/2025.08.14.670059' target='_blank'>Overath et al. 2025</a>)</td>"
-        "<td>&gt; 3,700</td>"
-        "<td>4 (Kd-screened)</td>"
+        "<td>662</td>"
+        "<td>4 — Nipah / EGFR / IL7R / PD-L1</td>"
         "<td><b>0.710</b> ✓ default</td>"
         "<td>0.689</td></tr>"
         "<tr><td style='padding:2px 12px 2px 0;'><b>ProteinBase</b></td>"
         "<td>175</td>"
-        "<td>Nipah, EGFR, IL7R, PD-L1</td>"
+        "<td>Nipah, EGFR, IL7R, PD-L1 (same 4)</td>"
         "<td>~0.74</td>"
         "<td><b>~0.755</b> (precision-leaning)</td></tr>"
         "</table>"
@@ -2327,8 +2317,8 @@ def _benchmark_provenance_html() -> str:
         "<p style='margin:0.3em 0;'><b>Precision@top-10%.</b> Two-stage (max-screen then mean-rank) lifts "
         "precision@top-10% to <b>0.92</b> vs <b>0.79</b> for max-screen alone, measured on ProteinBase. "
         "This is the headline number that motivated the move from single-stage to two-stage.</p>"
-        "<p style='margin:0.3em 0;'><b>Transferability caveat.</b> All 8 validation targets across both "
-        "benchmarks are compact globular proteins. The ranking is <em>unvalidated</em> on serpins "
+        "<p style='margin:0.3em 0;'><b>Transferability caveat.</b> Both benchmarks share the same 4 "
+        "compact globular validation targets (Nipah / EGFR / IL7R / PD-L1). The ranking is <em>unvalidated</em> on serpins "
         "(2VDY/CBG has a reactive-center loop and a deep steroid pocket), small peptide receptors "
         "(CALCA/CTR), antibody framework grafts, membrane proteins, and intrinsically disordered "
         "targets. Treat the rank as a strong shortlist signal, not a guarantee.</p>"
@@ -2441,8 +2431,9 @@ def _advisory_legend_html(df: pd.DataFrame) -> str:
         )
     if "wetlab_recommended" in df.columns:
         bits.append(
-            "<b>wetlab_recommended</b> = SoluProt pass + agreement_count ≥ 2 + min binder pLDDT ≥ 0.50 "
-            "+ no FAILED RUN. Failing rows are rendered with a strike-through in the Top-30 (rank unchanged)."
+            "<b>wetlab_recommended</b> = SoluProt pass + agreement_count ≥ 2 of 3 + min binder pLDDT ≥ 0.50 "
+            "+ no FAILED RUN. Failing rows are <b>marked with a wavy red underline</b> in the Top-30 "
+            "(advisory only — the rank does not change)."
         )
     if "interface_dG" in df.columns:
         # Item 13: surface the interface-energy decomposition columns (computed
@@ -2751,15 +2742,16 @@ def _df_to_html(
             fmt(c, _tool_display(v) if c == "source_tool" and isinstance(v, str) else v, row_idx=idx)
             for c, v in zip(df.columns, row)
         )
-        # Item 9: strike-through any row whose recommendation column is False.
-        # The row stays present (the rank doesn't move); the visual cue tells
-        # the reader to skip it when picking wet-lab candidates.
+        # Item 9: MARK (not strike-through) any row whose recommendation column is
+        # False. A strike-through reads as a hard reject; this is advisory only, so
+        # use a wavy red underline — a "needs a look" mark. The row stays present and
+        # the rank does not move.
         strike_style = ""
         if strike_when_false_col and strike_when_false_col in df.columns:
             val = row.get(strike_when_false_col)
             is_falsey_str = val is not None and val is not True and str(val).lower() in ("false", "0", "no")
             if val is False or is_falsey_str:
-                strike_style = "text-decoration:line-through;opacity:0.6;"
+                strike_style = "text-decoration:underline wavy #c62828;"
         attrs: list[str] = []
         if colour_tool and "source_tool" in df.columns:
             tool = row.get("source_tool", "")
