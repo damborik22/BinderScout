@@ -166,7 +166,7 @@ fi
 if [[ $SKIP_SOLUPROT -eq 0 ]]; then
     if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${SOLUPROT_ENV}"; then
         echo "[note] conda env '${SOLUPROT_ENV}' not found — SoluProt solubility screen will be skipped."
-        echo "        (install with: bindmaster install --tool soluprot; x86 only)"
+        echo "        (install with: bindmaster install --tool soluprot)"
         echo ""
         SKIP_SOLUPROT=1
     fi
@@ -200,8 +200,14 @@ STEP=1
 # Runs before any refold engine so --soluprot-filter can drop sub-threshold
 # sequences and save GPU time. The score lands in the report either way.
 if [[ $SKIP_SOLUPROT -eq 0 ]]; then
-    echo "[step ${STEP}/${N_STEPS}] SoluProt screen     (conda env: ${SOLUPROT_ENV}, threshold: ${SOLUPROT_THRESHOLD})..."
-    conda run -n "${SOLUPROT_ENV}" binder-compare filter-soluprot \
+    echo "[step ${STEP}/${N_STEPS}] SoluProt screen     (soluprot env: ${SOLUPROT_ENV}, threshold: ${SOLUPROT_THRESHOLD})..."
+    # binder-compare runs in binder-eval (py3.10); SoluProt's soluprot.py runs in
+    # the py3.7 ${SOLUPROT_ENV} via $SOLUPROT_PYTHON. The two envs are mutually
+    # exclusive — SoluProt needs scikit-learn 0.20.x / py3.7, binder-comparison
+    # needs py3.10+ — so we cannot run binder-compare inside ${SOLUPROT_ENV}.
+    SOLUPROT_PYTHON="$(conda run -n "${SOLUPROT_ENV}" python -c 'import sys; print(sys.executable)' 2>/dev/null)"
+    export SOLUPROT_PYTHON
+    conda run -n binder-eval binder-compare filter-soluprot \
         --sequences "$SEQUENCES" \
         -o          "$SOLUPROT_CSV" \
         --threshold "$SOLUPROT_THRESHOLD"

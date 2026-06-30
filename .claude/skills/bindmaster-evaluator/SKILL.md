@@ -31,7 +31,8 @@ Two-stage (max-screen → mean-rank), `chain_iptm_interface` as the best single 
 same-model bias matrix, `ipsae_min`/`agreement_count` as secondary. `TODO:` interpretation guide.
 
 ## 3. Affinity among binders (Part N)  →  see `references/affinity.md`
-`ipsae_min × |dG/dSASA|`; Rosetta runs in the **BindCraft** env (cross-platform, incl. aarch64).
+`|dG/dSASA|` energy density, gated by `ipsae_min` (not multiplied — it carries no affinity signal);
+Rosetta runs in the **BindCraft** env (cross-platform, incl. aarch64).
 `TODO:` when the extra Rosetta cost is worth it.
 
 ## 4. Quality control  →  see `references/qc.md`

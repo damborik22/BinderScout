@@ -707,6 +707,40 @@ def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+# Per-engine DunbrackLab ipSAE_min columns (engine-comparable, recomputed from PAE files).
+_ENGINE_IPSAE_MIN_COLS: list[str] = [
+    "boltz_pae_ipsae_min",
+    "af3_ipsae_min",
+    "esmfold2_ipsae_min",
+    "protenix_ipsae_min",
+]
+
+
+def compute_consensus_ipsae(df: pd.DataFrame) -> pd.DataFrame:
+    """Add ``consensus_ipsae_min_mean`` = mean across engines of the per-engine
+    DunbrackLab ipSAE_min.
+
+    Parallels :func:`compute_consensus_iptm`: averages the independent engines'
+    interface ipSAE_min (boltz / af3 / esmfold2 [/ protenix]). The metric being
+    averaged is each engine's ``ipsae_min`` (hence ``_min_mean``). Diagnostic /
+    reporting column — the primary ranker stays the two-stage iptm.
+
+    Adds:
+        consensus_ipsae_min_mean — mean over available per-engine ipsae_min (NaN if none)
+        consensus_ipsae_min_n    — how many engines contributed (0–4)
+    """
+    result = df.copy()
+    present = [c for c in _ENGINE_IPSAE_MIN_COLS if c in result.columns]
+    if not present:
+        result["consensus_ipsae_min_mean"] = np.nan
+        result["consensus_ipsae_min_n"] = 0
+        return result
+    numeric = result[present].apply(pd.to_numeric, errors="coerce")
+    result["consensus_ipsae_min_mean"] = numeric.mean(axis=1)
+    result["consensus_ipsae_min_n"] = numeric.notna().sum(axis=1).astype(int)
+    return result
+
+
 def rank_by_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     """Rank by ``consensus_iptm`` (max-iptm) descending; benchmark-validated binder filter.
 
@@ -737,27 +771,37 @@ def rank_by_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     return result.reset_index(drop=True)
 
 
-def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5) -> pd.DataFrame:
+def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5, screen_metric: str = "mean") -> pd.DataFrame:
     """Two-stage ranking — the EVALUATOR benchmark recommendation for wet-lab selection.
 
-    Stage 1 — screen by ``consensus_iptm`` (max engine iptm): keep the top
-    ``screen_frac`` as the binder-likely pool. This is the recall step — the most
-    predictive engine flips per target, so "trust whichever engine is most
-    confident" gives the best binder-vs-non-binder AUC (~0.755 on the ProteinBase
-    4-target benchmark).
+    Stage 1 — screen by the ``screen_metric`` consensus iptm: keep the top
+    ``screen_frac`` as the binder-likely pool (the recall step).
+    ``screen_metric="mean"`` (default) screens by ``consensus_iptm_mean`` — the
+    stronger binder-vs-non-binder screen on the Adaptyv 4-target benchmark with
+    experimental Kd (macro AUC 0.710 vs 0.689 for max; +20 true binders recalled
+    and higher purity at the 50% cut), and more robust to a single engine's
+    per-target blind spots. ``screen_metric="max"`` screens by ``consensus_iptm``
+    instead (the legacy default — best on the ProteinBase 4-target benchmark, macro
+    AUC ~0.755, "trust whichever engine is most confident"). See docs/plans.md Part N.
 
     Stage 2 — rank survivors by ``consensus_iptm_mean`` (mean engine iptm): the
     precision step — at the sharp end of the list you want designs *all* engines
     agree on. On the benchmark this lifts precision@top-10% to 0.92 vs 0.79 for
-    max alone.
+    max alone. (With ``screen_metric="mean"`` Stage 1 and Stage 2 share the mean
+    metric — the screen collapses to a single mean-iptm gate+rank, which is fine
+    since mean is both the stronger screen and the validated ranker on Adaptyv.)
 
     Ranks ALL rows (the screen is a flag + ordering, nothing is dropped):
     ``passes_max_screen`` is the primary sort key, so all screen survivors sort
     above all non-survivors regardless of their mean; within each group rows are
     ordered by ``consensus_iptm_mean``. The head of the list is therefore the
     genuine two-stage result. Adds:
-        passes_max_screen — bool, in the top ``screen_frac`` by consensus_iptm
+        passes_max_screen — bool, in the top ``screen_frac`` by the screen metric
         two_stage_rank    — 1 = best
+
+    NOTE: this ranks binder-vs-non-binder *confidence*, NOT affinity among binders
+    (every confidence metric inverts against Kd — strongest binders score lowest).
+    Affinity ranking needs the interface-ΔG term (see comparison.affinity, Part N).
 
     See docs/plans.md Part N for the exhaustive two-stage analysis.
     """
@@ -765,7 +809,8 @@ def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5) -> pd.DataFram
     if "consensus_iptm" not in result.columns or "consensus_iptm_mean" not in result.columns:
         result = compute_consensus_iptm(result)
 
-    cons = pd.to_numeric(result["consensus_iptm"], errors="coerce")
+    screen_col = "consensus_iptm_mean" if screen_metric == "mean" else "consensus_iptm"
+    cons = pd.to_numeric(result[screen_col], errors="coerce")
     eligible = cons.notna()
     n_eligible = int(eligible.sum())
     n_keep = round(n_eligible * screen_frac)

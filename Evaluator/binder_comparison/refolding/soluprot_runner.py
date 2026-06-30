@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import csv
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 DEFAULT_THRESHOLD = 0.5  # paper default; tune via --threshold for binder-length sequences
@@ -42,6 +44,8 @@ def run_soluprot_filter(
     threshold: float = DEFAULT_THRESHOLD,
     scripts_path: str | Path | None = None,
     binder_ids: list[str] | None = None,
+    no_tmhmm: bool | None = None,
+    usearch_path: str | Path | None = None,
 ) -> None:
     """Score every entry in *sequences* with SoluProt and write a CSV.
 
@@ -56,6 +60,14 @@ def run_soluprot_filter(
                        repo root.
         binder_ids:    optional 1-to-1 list of binder identifiers; if
                        provided, they're emitted as the first column.
+        no_tmhmm:      use SoluProt's TMHMM-free model (``--no_tmhmm``,
+                       grad_clf_v1_tc_notmhmm.pkl, -0.5% accuracy). If
+                       None, auto: enabled when no TMHMM binary is found
+                       (always the case on aarch64 — TMHMM ships x86 only).
+        usearch_path:  path to the USEARCH binary for the identity
+                       feature. If None, resolved from ``$SOLUPROT_USEARCH``,
+                       then ``<scripts_path>/usearch``, else left to
+                       SoluProt's own PATH lookup.
 
     Output schema (one row per sequence):
         ``binder_id (optional), sequence, soluprot_score,
@@ -74,36 +86,60 @@ def run_soluprot_filter(
     # and read the scores back keyed by position.
     fasta_tmp = output_csv.with_suffix(".soluprot_in.fasta")
     score_tmp = output_csv.with_suffix(".soluprot_out.csv")
+    work_dir = output_csv.with_suffix(".soluprot_work")
     _write_fasta(sequences, fasta_tmp)
 
+    use_no_tmhmm = _decide_no_tmhmm(no_tmhmm, soluprot_dir)
+    usearch = _resolve_usearch(usearch_path, soluprot_dir)
+    soluprot_python = _resolve_soluprot_python()
+
     try:
+        # SoluProt 1.0.1.0 CLI: --i_fa / --o_csv / --tmp_dir (required), plus
+        # --no_tmhmm (use the TMHMM-free model) and --usearch (identity-feature
+        # binary). --pdb defaults to the bundled E. coli reference, resolved
+        # relative to the script, so we don't pass it. SoluProt runs under its
+        # own Python 3.7 interpreter (see _resolve_soluprot_python), not ours.
         cmd = [
-            "python",
+            soluprot_python,
             str(soluprot_entry),
-            "--input",
+            "--i_fa",
             str(fasta_tmp),
-            "--output",
+            "--o_csv",
             str(score_tmp),
+            "--tmp_dir",
+            str(work_dir),
         ]
+        if use_no_tmhmm:
+            cmd.append("--no_tmhmm")
+        if usearch is not None:
+            cmd += ["--usearch", str(usearch)]
         # SoluProt's CWD matters because its data files (training-set features,
-        # etc.) are looked up relative to the script.
+        # reference DB, model) are looked up relative to the script.
         env = os.environ.copy()
         env.setdefault("PYTHONUNBUFFERED", "1")
         print(f"[soluprot] running: {' '.join(cmd)}  (cwd={soluprot_dir})")
         proc = subprocess.run(cmd, cwd=soluprot_dir, env=env, capture_output=True, text=True, check=False)
-        if proc.returncode != 0:
+        # SoluProt's main() swallows tool failures (USEARCH/TMHMM) — it prints to
+        # stderr and exits 0 without writing the CSV. So a missing output file,
+        # not the return code, is the real failure signal.
+        if proc.returncode != 0 or not score_tmp.exists():
             raise RuntimeError(
-                f"SoluProt exited with code {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                f"SoluProt did not produce {score_tmp} (exit {proc.returncode}).\n"
+                f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
             )
 
         scores = _parse_scores(score_tmp, n_expected=len(sequences))
     finally:
         # Keep the intermediate files if the run failed (helpful for debugging),
-        # clean them up on success.
-        if fasta_tmp.exists() and not _keep_intermediates():
-            fasta_tmp.unlink(missing_ok=True)
-        if score_tmp.exists() and not _keep_intermediates():
-            score_tmp.unlink(missing_ok=True)
+        # clean them up on success. NB: this module may itself run under Python
+        # 3.7 (the binder-eval-soluprot env), so we avoid
+        # Path.unlink(missing_ok=...) (3.8+) and guard with exists().
+        if not _keep_intermediates():
+            for tmp in (fasta_tmp, score_tmp):
+                if tmp.exists():
+                    tmp.unlink()
+            if work_dir.exists():
+                shutil.rmtree(work_dir, ignore_errors=True)
 
     _write_csv(
         output_csv,
@@ -138,6 +174,67 @@ def _resolve_scripts_path(override: str | Path | None) -> Path:
         "SoluProt is not installed. Run `bindmaster install --tool soluprot`, "
         "set $SOLUPROT_HOME, or pass --scripts-path."
     )
+
+
+def _resolve_soluprot_python() -> str:
+    """Interpreter that executes SoluProt's ``soluprot.py``.
+
+    SoluProt needs Python 3.7 + scikit-learn 0.20.x, which cannot host the
+    py3.10+ ``binder-comparison`` package — so ``binder-compare`` runs in the
+    ``binder-eval`` env and shells out to the ``binder-eval-soluprot`` env's
+    interpreter here. Resolution order: ``$SOLUPROT_PYTHON`` (set by
+    ``evaluate.sh`` / the ``soluprot`` shortcut), then a sibling
+    ``binder-eval-soluprot`` env next to the current interpreter, then bare
+    ``python`` (works when binder-compare is itself run inside that env).
+    """
+    override = os.environ.get("SOLUPROT_PYTHON")
+    if override and Path(override).exists():
+        return override
+    exe = Path(sys.executable)
+    for parent in exe.parents:
+        if parent.name == "envs":
+            cand = parent / "binder-eval-soluprot" / "bin" / "python"
+            if cand.exists():
+                return str(cand)
+            break
+    return "python"
+
+
+def _decide_no_tmhmm(override: bool | None, soluprot_dir: Path) -> bool:
+    """Whether to pass ``--no_tmhmm`` (SoluProt's TMHMM-free model).
+
+    Explicit override wins, then ``$SOLUPROT_NO_TMHMM``, else auto:
+    enabled when no TMHMM binary is available. TMHMM 2.0 ships an x86-only
+    ``decodeanhmm`` binary, so this is always the case on aarch64; the
+    TMHMM-free model (grad_clf_v1_tc_notmhmm.pkl) costs ~-0.5% accuracy.
+    """
+    if override is not None:
+        return override
+    env_val = os.environ.get("SOLUPROT_NO_TMHMM")
+    if env_val is not None:
+        return env_val not in ("", "0", "false", "False")
+    bundled = soluprot_dir / "tmhmm-2.0" / "bin" / "tmhmm"
+    return not (bundled.exists() or shutil.which("tmhmm"))
+
+
+def _resolve_usearch(override: str | Path | None, soluprot_dir: Path) -> Path | None:
+    """Locate the USEARCH binary for SoluProt's identity feature.
+
+    Order: explicit arg, ``$SOLUPROT_USEARCH``, ``<soluprot_dir>/usearch``.
+    Returns None if none found, leaving SoluProt to look up ``usearch`` on
+    PATH. Paths are returned absolute (SoluProt resolves relative paths
+    against its own script directory, not the caller's CWD).
+    """
+    for cand in (override, os.environ.get("SOLUPROT_USEARCH")):
+        if cand:
+            p = Path(cand).resolve()
+            if not p.exists():
+                raise FileNotFoundError(f"USEARCH binary not found: {p}")
+            return p
+    bundled = soluprot_dir / "usearch"
+    if bundled.exists():
+        return bundled.resolve()
+    return None
 
 
 def _find_entry_script(soluprot_dir: Path) -> Path:

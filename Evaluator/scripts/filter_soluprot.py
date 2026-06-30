@@ -71,6 +71,18 @@ def main() -> None:
         default=None,
         help="Override path to the SoluProt distribution (containing soluprot.py).",
     )
+    parser.add_argument(
+        "--usearch",
+        default=None,
+        help="Path to the USEARCH binary (falls back to $SOLUPROT_USEARCH, <scripts-path>/usearch, PATH).",
+    )
+    parser.add_argument(
+        "--no-tmhmm",
+        dest="no_tmhmm",
+        action="store_true",
+        default=None,
+        help="Use SoluProt's TMHMM-free model (-0.5%%). Default: auto (on when no TMHMM binary is found).",
+    )
     args = parser.parse_args()
 
     fasta_path = Path(args.sequences)
@@ -90,6 +102,8 @@ def main() -> None:
         threshold=args.threshold,
         scripts_path=args.scripts_path,
         binder_ids=headers,
+        no_tmhmm=args.no_tmhmm,
+        usearch_path=args.usearch,
     )
 
 

@@ -3,7 +3,11 @@ name: binder-eval-soluprot
 # Bioinformatics 37(1):23–28, Loschmidt Lab, Masaryk University).
 #
 # Used for: binder-compare filter-soluprot
-# Platform: x86_64 (USEARCH binary is x86 only; aarch64 support is deferred).
+# Platform: x86_64. This pinned spec (scikit-learn 0.20.1 / biopython 1.74) has
+# NO aarch64 conda builds, so the aarch64 installer (install/install_aarch.sh)
+# does NOT use this file — it creates the env imperatively (scikit-learn 0.20.4
+# built from source, biopython 1.78 + a soluprot.py patch, USEARCH v12 from
+# source, the --no_tmhmm model). See that installer's install_soluprot().
 #
 # SoluProt is NOT redistributed with BinderScout. The installer
 # (`bindmaster install --tool soluprot`) fetches the standalone bundle
