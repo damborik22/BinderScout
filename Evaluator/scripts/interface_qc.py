@@ -19,9 +19,16 @@ import tempfile
 from pathlib import Path
 
 PANEL = [
-    "interface_sc", "interface_packstat", "interface_dG", "interface_dSASA",
-    "interface_dG_SASA_ratio", "interface_nres", "interface_interface_hbonds",
-    "interface_delta_unsat_hbonds", "interface_hydrophobicity", "surface_hydrophobicity",
+    "interface_sc",
+    "interface_packstat",
+    "interface_dG",
+    "interface_dSASA",
+    "interface_dG_SASA_ratio",
+    "interface_nres",
+    "interface_interface_hbonds",
+    "interface_delta_unsat_hbonds",
+    "interface_hydrophobicity",
+    "surface_hydrophobicity",
 ]
 
 
@@ -29,8 +36,11 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="Relax + BindCraft interface panel for QC gating")
     ap.add_argument("--structures-dir", required=True, help="Directory of complex PDBs")
     ap.add_argument("--binder-chain", default="B", help="Binder chain id (B for AF3/ESMFold2/RFD3, A for Boltz-2)")
-    ap.add_argument("--bindcraft-dir", default=str(Path(__file__).resolve().parents[2] / "BindCraft"),
-                    help="BindCraft repo (for functions/ + DAlphaBall.gcc)")
+    ap.add_argument(
+        "--bindcraft-dir",
+        default=str(Path(__file__).resolve().parents[2] / "BindCraft"),
+        help="BindCraft repo (for functions/ + DAlphaBall.gcc)",
+    )
     ap.add_argument("--output", "-o", required=True, help="Output panel CSV")
     args = ap.parse_args(argv)
 
@@ -40,8 +50,10 @@ def main(argv: list[str] | None = None) -> None:
 
     import pyrosetta as pr
 
-    pr.init(f"-ignore_unrecognized_res -ignore_zero_occupancy -mute all "
-            f"-holes:dalphaball {dalphaball} -corrections::beta_nov16 true -relax:default_repeats 1")
+    pr.init(
+        f"-ignore_unrecognized_res -ignore_zero_occupancy -mute all "
+        f"-holes:dalphaball {dalphaball} -corrections::beta_nov16 true -relax:default_repeats 1"
+    )
     from functions.pyrosetta_utils import pr_relax, score_interface
 
     pdbs = sorted(Path(args.structures_dir).glob("*.pdb"))

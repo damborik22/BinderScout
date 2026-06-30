@@ -272,8 +272,7 @@ def _run_single(
         "XLA_PYTHON_CLIENT_PREALLOCATE": "true",
         "XLA_PYTHON_CLIENT_MEM_FRACTION": os.environ.get("AF3_XLA_MEM_FRACTION", "0.8"),
     }
-    print(f"  [af3] Running: {Path(cmd[1]).name} "
-          f"(XLA mem fraction {af3_env['XLA_PYTHON_CLIENT_MEM_FRACTION']}) ...")
+    print(f"  [af3] Running: {Path(cmd[1]).name} (XLA mem fraction {af3_env['XLA_PYTHON_CLIENT_MEM_FRACTION']}) ...")
     result = subprocess.run(cmd, capture_output=True, text=True, env=af3_env)
     if result.returncode != 0:
         print(f"  [af3] STDERR: {result.stderr[-500:]}" if result.stderr else "  [af3] No stderr")
