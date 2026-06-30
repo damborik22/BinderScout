@@ -194,6 +194,8 @@ _HTML_TEMPLATE = """\
 
 {top_table_legend}
 
+{top_per_family_block}
+
 <details style="margin:1em 0;">
   <summary style="cursor:pointer;font-size:1.5em;color:#1a5276;font-weight:bold;
            border-bottom:2px solid #CFE6F6;padding-bottom:4px;margin-bottom:0.5em;">
@@ -1786,6 +1788,7 @@ def generate_report(
     top_table_legend = _top_table_legend_html(rank_method, top30_primary)
     tool_classification_banner = _tool_classification_banner_html(sort_df, tool_overrides=tool_overrides)
     provenance_footer = _provenance_footer_html(provenance)
+    top_per_family_block = _top_per_family_html(sort_df)
 
     html = _HTML_TEMPLATE.format(
         n_binders=len(sort_df),
@@ -1795,6 +1798,7 @@ def generate_report(
         tool_classification_banner=tool_classification_banner,
         screening_summary_intro=screening_summary_intro,
         top_table_legend=top_table_legend,
+        top_per_family_block=top_per_family_block,
         engines_present_html=engines_present_html,
         tool_counts_str=tool_counts_str or "—",
         engine_threshold_legend=engine_threshold_legend,
@@ -2241,10 +2245,10 @@ def _benchmark_provenance_html() -> str:
 
 
 # Advisory annotation columns: SoluProt solubility score (--soluprot-results, renamed
-# native_soluprot_*) + qc-annotate BindCraft interface panel (--qc-results). Surfaced in
-# the report only when present. ADVISORY — displayed for human review, never used to
-# reorder or drop designs (hard-gating either removes true binders; see qc-annotate).
-_ADVISORY_PRIMARY = ["native_soluprot_score", "qc_pass"]
+# native_soluprot_*) + qc-annotate BindCraft interface panel (--qc-results) + epitope-
+# match fraction (--epitope-results). Surfaced in the report only when present.
+# ADVISORY — displayed for human review, never used to reorder or drop designs.
+_ADVISORY_PRIMARY = ["native_soluprot_score", "qc_pass", "epitope_match_fraction", "family_id"]
 _ADVISORY_SECONDARY = [
     "native_soluprot_passes",
     "qc_fail_reasons",
@@ -2253,17 +2257,80 @@ _ADVISORY_SECONDARY = [
     "interface_dG_SASA_ratio",
     "interface_delta_unsat_hbonds",
     "interface_nres",
+    "epitope_status",
+    "epitope_match_n",
+    "epitope_n_interface",
+    "epitope_off_target_residues",
+    "epitope_matched_residues",
+    "family_size",
+    "family_rank",
 ]
 
 
+def _top_per_family_html(df: pd.DataFrame, n_per_family: int = 1, top_n: int = 15) -> str:
+    """Render the diversity 'Top per family' recommendations block (Item 1).
+
+    Collapses the ranked frame to one representative per family (best
+    active_rank wins), then surfaces the top ``top_n`` families. Renders
+    nothing if no ``family_id`` column is present.
+    """
+    if "family_id" not in df.columns or df.empty:
+        return ""
+    from ..comparison.diversity import top_per_family
+
+    rank_col = next(
+        (c for c in ("active_rank", "two_stage_rank", "consensus_rank", "adaptyv_rank") if c in df.columns),
+        None,
+    )
+    if rank_col is None:
+        return ""
+    representatives = top_per_family(df, n_per_family=n_per_family, sort_col=rank_col, ascending=True)
+    representatives = representatives.head(top_n)
+    cols = [
+        rank_col,
+        "binder_id",
+        "source_tool",
+        "binder_length",
+        "family_id",
+        "family_size",
+    ]
+    if "consensus_iptm_mean" in representatives.columns:
+        cols.append("consensus_iptm_mean")
+    if "epitope_match_fraction" in representatives.columns:
+        cols.append("epitope_match_fraction")
+    if "native_soluprot_score" in representatives.columns:
+        cols.append("native_soluprot_score")
+    cols = [c for c in cols if c in representatives.columns]
+    table_html = _df_to_html(representatives[cols], colour_tool=True)
+    return (
+        "<h2>Top per family — diversity-aware shortlist</h2>"
+        "<p style='font-size:0.85em;color:#555;line-height:1.55;'>"
+        "Designs are clustered into <b>families</b> by sequence similarity (default ≥ 0.70 Jaccard on "
+        "4-mers — see <code>binder-compare diversity</code>). This block shows the best-ranked design "
+        "from each of the top families, so the wet-lab portfolio doesn't accidentally test 5 copies of "
+        "one motif. <b>Advisory</b> — the main Top-30 ranking is unchanged."
+        "</p>" + table_html
+    )
+
+
 def _advisory_legend_html(df: pd.DataFrame) -> str:
-    """Legend for the advisory SoluProt + qc-annotate columns, shown only when present."""
+    """Legend for the advisory SoluProt + qc-annotate + epitope columns, shown only when present."""
     bits = []
     if "native_soluprot_score" in df.columns:
         bits.append("<b>soluprot_score</b> = SoluProt solubility (0–1, higher = more soluble; sequence-only screen)")
     if "qc_pass" in df.columns:
         bits.append(
             "<b>qc_pass</b> = BindCraft interface QC panel (shape-comp / ΔG / buried-unsat H-bonds / #interface res)"
+        )
+    if "epitope_match_fraction" in df.columns:
+        bits.append(
+            "<b>epitope_match_fraction</b> = fraction of intended hotspots within Cα-Cα cutoff of the binder "
+            "in the refolded complex (target-side recall; &lt; 0.30 flagged as OFF_TARGET)"
+        )
+    if "family_id" in df.columns:
+        bits.append(
+            "<b>family_id / family_size</b> = sequence-similarity cluster (greedy Jaccard k-mer, default "
+            "70% similarity threshold). Use the 'Top per family' block to pick non-redundant wet-lab candidates."
         )
     if not bits:
         return ""
