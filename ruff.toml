@@ -1,6 +1,9 @@
 target-version = "py310"
 line-length = 120
 
+# Vendored third-party code (not authored here, follows upstream conventions)
+extend-exclude = ["Evaluator/tools"]
+
 [lint]
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
 ignore = [
