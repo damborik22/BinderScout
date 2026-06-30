@@ -20,7 +20,9 @@ from .plots import (
     METRIC_META,
     fig_to_base64,
     plot_max_vs_mean_iptm,
+    plot_metric_correlation_heatmap,
     plot_metric_distributions,
+    plot_pareto_front,
     plot_radar_chart,
     plot_radar_iptm,
     plot_radar_per_engine,
@@ -224,6 +226,10 @@ _HTML_TEMPLATE = """\
 {scatter_block}
 
 {radar_fixed_block}
+
+{correlation_heatmap_block}
+
+{pareto_block}
 
 {per_tool_top10}
 
@@ -1283,6 +1289,7 @@ def generate_report(
     full_df: pd.DataFrame | None = None,
     tool_overrides: dict[str, dict] | None = None,
     provenance: dict | None = None,
+    lightweight: bool = False,
 ) -> None:
     """Generate and write the HTML report.
 
@@ -1344,6 +1351,7 @@ def generate_report(
         colour_tool=True,
         flag_disagreement=True,
         rank_col=_rank_col_for_flag,
+        strike_when_false_col="wetlab_recommended" if "wetlab_recommended" in top30_primary.columns else None,
     ).replace("<table>", '<table style="width:100%">', 1)
     if secondary_cols:
         top30_secondary = sort_df[primary_cols[:2] + secondary_cols].head(30)
@@ -1676,9 +1684,26 @@ def generate_report(
     full_cols_available = [c for c in _full_cols if c in sort_df.columns]
     full_table = _df_to_html(sort_df[full_cols_available], max_rows=None)
 
-    # 3D viewer for top-20 refolded structures
+    # 3D viewer for top-20 refolded structures. When --lightweight is set,
+    # the inline NGL viewer (which embeds ~140 KB of PDB text per design) is
+    # skipped; instead we point at the on-disk top20_structures/ directory +
+    # PyMOL session script. Cuts the HTML from ~5 MB to ~150 KB on big pools.
     structures_dir = output_path.parent / "top20_structures"
-    if structures_dir.exists():
+    if lightweight:
+        if structures_dir.exists():
+            ngl_viewer_block = (
+                "<div class='callout' style='background:#fff3e0;border-left-color:#f57f17;'>"
+                "<b>Lightweight mode</b> — inline 3D viewer was skipped to keep the HTML small "
+                "(<code>--lightweight</code>). The top-20 refolded structures are still on disk: "
+                f"<code>{structures_dir.relative_to(output_path.parent)}/</code>. Open the bundled "
+                "PyMOL session (<code>view_top20.pml</code>) or any other viewer of choice."
+                "</div>"
+            )
+        else:
+            ngl_viewer_block = (
+                "<p style='color:#888;'><em>Lightweight mode — no refolded structures available.</em></p>"
+            )
+    elif structures_dir.exists():
         ngl_viewer_block = _build_ngl_viewer(sort_df, structures_dir, target_seq=target_seq)
     else:
         ngl_viewer_block = "<p style='color:#888;'><em>No refolded structures available.</em></p>"
@@ -1715,6 +1740,60 @@ def generate_report(
         )
     else:
         scatter_block = ""
+
+    # Item 10 plots (correlation heatmap + Pareto front). Both are optional —
+    # render only when they have enough data.
+    correlation_heatmap_block = ""
+    try:
+        heat_fig = plot_metric_correlation_heatmap(sort_df)
+    except Exception as exc:
+        print(f"[report] WARNING: correlation heatmap failed: {exc}")
+        heat_fig = None
+    if heat_fig is not None:
+        heat_b64 = fig_to_base64(heat_fig)
+        correlation_heatmap_block = (
+            "<details style='margin:0.8em 0;'>"
+            "<summary style='cursor:pointer;font-size:1.2em;color:#1a5276;font-weight:bold;'>"
+            "Metric correlation heatmap "
+            "<small style='color:#888;font-weight:normal;'>(redundancy check — Spearman ρ)</small></summary>"
+            "<p style='font-size:0.85em;color:#555;margin:0.4em 0;'>"
+            "Highly correlated pairs (|ρ| &gt; 0.9) are largely redundant signals — picking by one is "
+            "almost equivalent to picking by the other. Use to identify metrics that don't add information."
+            "</p>"
+            f'<img src="data:image/png;base64,{heat_b64}" alt="Spearman correlation heatmap">'
+            "</details>"
+        )
+
+    pareto_block = ""
+    pareto_z_candidate = next((c for c in ("interface_dG_SASA_ratio", "interface_dG") if c in sort_df.columns), None)
+    pareto_y_candidate = (
+        "native_soluprot_score" if "native_soluprot_score" in sort_df.columns else "consensus_ipsae_min_mean"
+    )
+    try:
+        pareto_fig = plot_pareto_front(
+            sort_df,
+            x="consensus_iptm_mean" if "consensus_iptm_mean" in sort_df.columns else "ipsae_min",
+            y=pareto_y_candidate if pareto_y_candidate in sort_df.columns else "ipsae_min",
+            z=pareto_z_candidate,
+        )
+    except Exception as exc:
+        print(f"[report] WARNING: Pareto front failed: {exc}")
+        pareto_fig = None
+    if pareto_fig is not None:
+        pareto_b64 = fig_to_base64(pareto_fig)
+        pareto_block = (
+            "<details style='margin:0.8em 0;'>"
+            "<summary style='cursor:pointer;font-size:1.2em;color:#1a5276;font-weight:bold;'>"
+            "Pareto front "
+            "<small style='color:#888;font-weight:normal;'>(jointly-optimal designs across multiple objectives)</small></summary>"
+            "<p style='font-size:0.85em;color:#555;margin:0.4em 0;'>"
+            "Points on the dashed Pareto line aren't dominated on either axis — there is no design "
+            "with strictly better confidence AND solubility (the two visible axes). Use to spot the "
+            "design where a small drop in one objective buys you a big gain on another."
+            "</p>"
+            f'<img src="data:image/png;base64,{pareto_b64}" alt="Pareto front">'
+            "</details>"
+        )
 
     _ipsae_link = (
         "interface Predicted Structural Alignment Error, computed using the "
@@ -1810,6 +1889,8 @@ def generate_report(
         radar_plot=radar_b64,
         scatter_block=scatter_block,
         radar_fixed_block=radar_fixed_block,
+        correlation_heatmap_block=correlation_heatmap_block,
+        pareto_block=pareto_block,
         per_tool_top10=per_tool_top10,
         ngl_viewer_block=ngl_viewer_block,
         full_table=full_table,
@@ -2248,14 +2329,26 @@ def _benchmark_provenance_html() -> str:
 # native_soluprot_*) + qc-annotate BindCraft interface panel (--qc-results) + epitope-
 # match fraction (--epitope-results). Surfaced in the report only when present.
 # ADVISORY — displayed for human review, never used to reorder or drop designs.
-_ADVISORY_PRIMARY = ["native_soluprot_score", "qc_pass", "epitope_match_fraction", "family_id"]
+_ADVISORY_PRIMARY = [
+    "wetlab_recommended",
+    "native_soluprot_score",
+    "qc_pass",
+    "epitope_match_fraction",
+    "family_id",
+]
 _ADVISORY_SECONDARY = [
+    "wetlab_reason",
     "native_soluprot_passes",
     "qc_fail_reasons",
+    # Interface energy decomposition (Item 13) — surfaces existing
+    # interface_qc.py columns. Already in `_attach_qc_results`, just now
+    # visible in the report.
     "interface_sc",
     "interface_dG",
     "interface_dG_SASA_ratio",
     "interface_delta_unsat_hbonds",
+    "interface_interface_hbonds",
+    "interface_hydrophobicity",
     "interface_nres",
     "epitope_status",
     "epitope_match_n",
@@ -2331,6 +2424,23 @@ def _advisory_legend_html(df: pd.DataFrame) -> str:
         bits.append(
             "<b>family_id / family_size</b> = sequence-similarity cluster (greedy Jaccard k-mer, default "
             "70% similarity threshold). Use the 'Top per family' block to pick non-redundant wet-lab candidates."
+        )
+    if "wetlab_recommended" in df.columns:
+        bits.append(
+            "<b>wetlab_recommended</b> = SoluProt pass + agreement_count ≥ 2 + min binder pLDDT ≥ 0.50 "
+            "+ no FAILED RUN. Failing rows are rendered with a strike-through in the Top-30 (rank unchanged)."
+        )
+    if "interface_dG" in df.columns:
+        # Item 13: surface the interface-energy decomposition columns (computed
+        # by qc-annotate, already in the secondary table). The legend explains
+        # what they decompose into.
+        bits.append(
+            "<b>interface_*</b> (Rosetta decomposition; from qc-annotate): "
+            "<code>dG</code> Rosetta interface energy · "
+            "<code>sc</code> shape complementarity · "
+            "<code>interface_hbonds</code> H-bonds across interface · "
+            "<code>delta_unsat_hbonds</code> buried unsatisfied polar atoms · "
+            "<code>nres</code> # interface residues."
         )
     if not bits:
         return ""
@@ -2540,6 +2650,7 @@ def _df_to_html(
     max_rows: int | None = 500,
     flag_disagreement: bool = False,
     rank_col: str | None = None,
+    strike_when_false_col: str | None = None,
 ) -> str:
     """Render a DataFrame as an HTML table.
 
@@ -2626,11 +2737,22 @@ def _df_to_html(
             fmt(c, _tool_display(v) if c == "source_tool" and isinstance(v, str) else v, row_idx=idx)
             for c, v in zip(df.columns, row)
         )
+        # Item 9: strike-through any row whose recommendation column is False.
+        # The row stays present (the rank doesn't move); the visual cue tells
+        # the reader to skip it when picking wet-lab candidates.
+        strike_style = ""
+        if strike_when_false_col and strike_when_false_col in df.columns:
+            val = row.get(strike_when_false_col)
+            is_falsey_str = val is not None and val is not True and str(val).lower() in ("false", "0", "no")
+            if val is False or is_falsey_str:
+                strike_style = "text-decoration:line-through;opacity:0.6;"
+        attrs: list[str] = []
         if colour_tool and "source_tool" in df.columns:
             tool = row.get("source_tool", "")
-            rows.append(f'<tr class="tool-{tool}">{cells}</tr>')
-        else:
-            rows.append(f"<tr>{cells}</tr>")
+            attrs.append(f'class="tool-{tool}"')
+        if strike_style:
+            attrs.append(f'style="{strike_style}"')
+        rows.append(f"<tr {' '.join(attrs)}>{cells}</tr>")
 
     return f"<table>{header}{''.join(rows)}</table>"
 
