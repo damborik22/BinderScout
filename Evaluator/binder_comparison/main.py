@@ -23,6 +23,7 @@ from .cli import (
     autosize,
     diversity,
     epitope,
+    epitope_map,
     extract,
     filter_soluprot,
     mature,
@@ -71,6 +72,7 @@ def main(argv=None) -> None:
     affinity.add_parser(subparsers)
     qc_annotate.add_parser(subparsers)
     analyze_target.add_parser(subparsers)
+    epitope_map.add_parser(subparsers)
     epitope.add_parser(subparsers)
     diversity.add_parser(subparsers)
 
