@@ -14,6 +14,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -39,6 +43,117 @@ from ..comparison.scoring import (
 from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
 from ..visualization.report import generate_report
+
+
+def _parse_tool_meta(specs: list[str] | None) -> dict[str, dict]:
+    """Parse repeated --tool-meta TOOL='k:v;k:v' flags into a dict.
+
+    Empty list / None / malformed pieces are skipped silently (we'd rather
+    render an under-annotated banner than refuse to render a report).
+    """
+    overrides: dict[str, dict] = {}
+    if not specs:
+        return overrides
+    for spec in specs:
+        if "=" not in spec:
+            continue
+        tool, payload = spec.split("=", 1)
+        tool = tool.strip().lower()
+        if not tool:
+            continue
+        d: dict = {}
+        for piece in payload.split(";"):
+            if ":" not in piece:
+                continue
+            k, v = piece.split(":", 1)
+            k = k.strip()
+            v = v.strip()
+            if not k:
+                continue
+            if k == "pool_pre_filtered":
+                d[k] = v.lower() in ("true", "1", "yes", "y")
+            else:
+                d[k] = v
+        if d:
+            overrides[tool] = d
+    return overrides
+
+
+def _load_engine_versions(path: str | None) -> dict[str, str]:
+    """Load engine version info from a JSON or YAML file. Missing/empty → {}."""
+    if not path:
+        return {}
+    p = Path(path)
+    if not p.exists():
+        print(f"[report] WARNING: --engine-versions file not found: {p}; skipping.", file=sys.stderr)
+        return {}
+    try:
+        text = p.read_text()
+        if p.suffix.lower() in (".yaml", ".yml"):
+            import yaml
+
+            data = yaml.safe_load(text) or {}
+        else:
+            data = json.loads(text) if text.strip() else {}
+        if not isinstance(data, dict):
+            print(f"[report] WARNING: --engine-versions file {p} is not a dict; skipping.", file=sys.stderr)
+            return {}
+        return {str(k): str(v) for k, v in data.items()}
+    except (OSError, ValueError, ImportError) as exc:
+        print(f"[report] WARNING: could not parse --engine-versions file {p}: {exc}", file=sys.stderr)
+        return {}
+
+
+def _detect_evaluator_version() -> str:
+    """Return the binder-comparison version. Falls back to pyproject if uninstalled."""
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+
+        return version("binder-comparison")
+    except (ImportError, PackageNotFoundError):
+        pass
+    try:
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        if pyproject.exists():
+            for line in pyproject.read_text().splitlines():
+                if line.strip().startswith("version") and "=" in line:
+                    return line.split("=", 1)[1].strip().strip("'\"")
+    except OSError:
+        pass
+    return "unknown"
+
+
+def _collect_provenance(args: argparse.Namespace) -> dict:
+    """Auto-detect git_sha, evaluator_version, timestamp; merge --engine-versions."""
+    prov: dict = {
+        "run_timestamp_utc": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "cli_args": list(sys.argv),
+    }
+    # git sha (best-effort; works only when run from inside a git checkout).
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        if sha.returncode == 0:
+            prov["git_sha"] = sha.stdout.strip()
+            # also note if the worktree is dirty
+            status = subprocess.run(
+                ["git", "status", "--porcelain"], capture_output=True, text=True, check=False, timeout=2
+            )
+            if status.returncode == 0 and status.stdout.strip():
+                prov["git_sha"] = f"{prov['git_sha']} (dirty)"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    # evaluator version from the installed package metadata (or fall back to pyproject).
+    prov["evaluator_version"] = _detect_evaluator_version()
+    ev = _load_engine_versions(getattr(args, "engine_versions", None))
+    if ev:
+        prov["engine_versions"] = ev
+    return prov
 
 
 def run(args: argparse.Namespace) -> None:
@@ -354,6 +469,12 @@ def run(args: argparse.Namespace) -> None:
                 tool_name, pdb_dir = spec.split("=", 1)
                 tool_pdb_dirs[tool_name.strip()] = pdb_dir.strip()
 
+    # Item 3 + 5: fairness banner data. Static defaults live in
+    # comparison.tool_classification; per-run overrides come from --tool-meta.
+    tool_overrides = _parse_tool_meta(getattr(args, "tool_meta", None))
+    # Item 6: provenance footer (git_sha, evaluator_version, CLI flags, ts).
+    provenance = _collect_provenance(args)
+
     generate_report(
         df=df_display,
         full_df=df,
@@ -365,6 +486,8 @@ def run(args: argparse.Namespace) -> None:
         primary_engine=primary_engine,
         top_per_tool=args.top_per_tool,
         rank_method=rank_by,
+        tool_overrides=tool_overrides or None,
+        provenance=provenance,
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
@@ -736,5 +859,31 @@ def add_parser(subparsers) -> None:
         action="append",
         help="Directory containing a tool's original design PDBs/CIFs for 3D viewer in the "
         "native top-10 section. Must be used with matching --tool-csv. Can be repeated.",
+    )
+    # Item 3: per-tool extractor-metadata overrides for the fairness banner.
+    p.add_argument(
+        "--tool-meta",
+        metavar="TOOL=KEY:VALUE[;KEY:VALUE]",
+        action="append",
+        help="Override the per-tool fairness banner (e.g. mark a pool as pre-filtered). "
+        "Keys: pool_pre_filtered (true|false), source_csv (filename), notes (string). "
+        "Example: --tool-meta protein_hunter='pool_pre_filtered:true;source_csv:summary_high_iptm.csv'. "
+        "If absent, the static defaults in comparison.tool_classification apply.",
+    )
+    # Item 6: run provenance (engine versions / checkpoints / seeds for the footer).
+    p.add_argument(
+        "--engine-versions",
+        metavar="FILE",
+        help="JSON or YAML file mapping engine name → version/checkpoint string "
+        "(e.g. boltz: 2024.08, af3: v3.0.2, esmfold2: full). Rendered in the report footer.",
+    )
+    # Item 12_orig (Phase 4): coordinate externalisation. Wired here so the
+    # CLI surface is stable from Phase 2 onward; the implementation lives in
+    # generate_report (Phase 4).
+    p.add_argument(
+        "--lightweight",
+        action="store_true",
+        help="Skip the inline 3D viewer (top-20 NGL coords stay in PDB files in top20_structures/, "
+        "but no embedded base64). Cuts ~5 MB from the HTML for large pools.",
     )
     p.set_defaults(func=run)
