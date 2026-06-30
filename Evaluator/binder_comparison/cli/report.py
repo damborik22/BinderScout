@@ -31,6 +31,7 @@ from ..comparison.scoring import (
     add_design_groups,
     add_ipsae_from_pae_files,
     add_iptm_from_pae_files,
+    annotate_wetlab_recommended,
     apply_screening_thresholds,
     compute_agreement,
     compute_composite_scores,
@@ -329,6 +330,11 @@ def run(args: argparse.Namespace) -> None:
     screen_metric = getattr(args, "screen_metric", "mean") or "mean"
     df = rank_by_two_stage(df, screen_metric=screen_metric)
 
+    # Item 9: wet-lab-ready badge (SoluProt-passes + agreement_count >= 2 +
+    # min binder pLDDT >= 0.50 + no FAILED RUN). Advisory only — the rank is
+    # unchanged; the report renders failing rows with CSS strike-through.
+    df = annotate_wetlab_recommended(df)
+
     # All three rankings coexist as columns (adaptyv_rank, consensus_rank,
     # two_stage_rank); --rank-by selects which orders the report. `active_rank`
     # is the chosen ordering (1..N) — used for display + structure-file naming so
@@ -500,6 +506,7 @@ def run(args: argparse.Namespace) -> None:
         rank_method=rank_by,
         tool_overrides=tool_overrides or None,
         provenance=provenance,
+        lightweight=bool(getattr(args, "lightweight", False)),
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")

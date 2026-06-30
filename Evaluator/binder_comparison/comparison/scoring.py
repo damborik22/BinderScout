@@ -958,6 +958,79 @@ def rank_by_adaptyv_method(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
+def annotate_wetlab_recommended(
+    df: pd.DataFrame,
+    *,
+    soluprot_passes_col: str = "native_soluprot_passes",
+    agreement_min: int = 2,
+    min_plddt_binder: float = 0.50,
+) -> pd.DataFrame:
+    """Item 9: per-design ``wetlab_recommended`` bool + ``wetlab_reason`` string.
+
+    Combines existing advisory signals (SoluProt + agreement_count + binder
+    pLDDT min) into a single conservative "would-I-ship-this" annotation. The
+    report renders failing rows with a CSS strike-through in the Top-30 — but
+    never reorders or drops them. NaN values are treated as "we don't know" and
+    do NOT block recommendation (we don't penalise an unknown).
+
+    Rule (all required for recommend=True):
+      - SoluProt pass (when known): native_soluprot_passes is True or NaN.
+      - Cross-engine agreement: agreement_count >= ``agreement_min`` (when known).
+      - Binder fold confidence: plddt_binder_min >= ``min_plddt_binder`` (when known).
+      - No FAILED RUN convergence flag from the per-tool classification.
+    """
+    out = df.copy()
+    reasons: list[list[str]] = [[] for _ in range(len(out))]
+
+    if soluprot_passes_col in out.columns:
+        sp = out[soluprot_passes_col]
+        # bool dtype keeps NaN-friendly semantics if cast carefully
+        try:
+            sp_bool = sp.apply(lambda v: bool(v) if pd.notna(v) else None)
+        except Exception:
+            sp_bool = pd.Series([None] * len(out), index=out.index)
+        for idx, val in zip(out.index, sp_bool):
+            if val is False:
+                reasons[out.index.get_loc(idx)].append("SoluProt FAIL")
+
+    if "agreement_count" in out.columns:
+        agreement = pd.to_numeric(out["agreement_count"], errors="coerce")
+        for i, val in enumerate(agreement):
+            if pd.notna(val) and val < agreement_min:
+                reasons[i].append(f"agreement {int(val)} < {agreement_min}")
+
+    if "plddt_binder_min" in out.columns:
+        plddt_min = pd.to_numeric(out["plddt_binder_min"], errors="coerce")
+        for i, val in enumerate(plddt_min):
+            if pd.notna(val) and val < min_plddt_binder:
+                reasons[i].append(f"min pLDDT {val:.2f} < {min_plddt_binder:g}")
+
+    # Per-tool FAILED RUN convergence check (only fires for boltzgen_*).
+    if "source_tool" in out.columns and "consensus_ipsae_min_mean" in out.columns:
+        from .tool_classification import convergence_status
+
+        # Compute mean once per tool to avoid recomputing per row.
+        tool_means = (
+            out.assign(_t=out["source_tool"].fillna("").astype(str).str.lower())
+            .groupby("_t")["consensus_ipsae_min_mean"]
+            .mean()
+            .to_dict()
+        )
+        failed_tools: dict[str, str] = {}
+        for tool, mean_val in tool_means.items():
+            failed, why = convergence_status(tool, mean_val)
+            if failed and why:
+                failed_tools[tool] = why
+        if failed_tools:
+            for i, tool_name in enumerate(out["source_tool"].fillna("").astype(str).str.lower()):
+                if tool_name in failed_tools:
+                    reasons[i].append(f"tool failed run ({failed_tools[tool_name]})")
+
+    out["wetlab_recommended"] = [len(r) == 0 for r in reasons]
+    out["wetlab_reason"] = ["; ".join(r) if r else "" for r in reasons]
+    return out
+
+
 def _best_ipsae_col(df: pd.DataFrame) -> str | None:
     """Return the best available ipsae_min column name.
 
