@@ -2210,34 +2210,48 @@ def _provenance_footer_html(provenance: dict | None) -> str:
 
 
 def _screening_summary_intro_html(rank_method: str) -> str:
-    """Tier legend block above the screening tables. Adapts to the active ranking.
+    """Single combined tier legend block above the screening tables.
 
-    For two_stage / consensus_iptm rankings, surfaces both the ipSAE tier (used
-    by `quality_tier`) and the iPTM tier (informational — bands the ranking
-    metric is generally interpreted on).
+    iPTM is the active ranking metric (under two_stage / consensus_iptm);
+    ipSAE_min drives the ``quality_tier`` column and the tier-count table.
+    Previously rendered as two near-identical paragraphs — readers had to
+    cross-reference which threshold belonged to which metric. Now folded
+    into one side-by-side table with a shared tier label.
     """
-    ipsae_bands = (
+    if rank_method in ("two_stage", "consensus_iptm"):
+        active = "consensus_iptm_mean" if rank_method == "two_stage" else "consensus_iptm"
+        rows = [
+            ("#2e7d32", "■ Strong / High", "≥ 0.80", "&gt; 0.80"),
+            ("#f57f17", "■ Plausible / Medium", "≥ 0.60", "&gt; 0.61"),
+            ("#e65100", "■ Weak / Low", "≥ 0.40", "&gt; 0.40"),
+            ("#c62828", "■ Reject", "&lt; 0.40", "≤ 0.40"),
+        ]
+        body = "".join(
+            f"<tr><td style='color:{c};white-space:nowrap;padding-right:1em;'><b>{label}</b></td>"
+            f"<td style='padding-right:2em;'>{iptm}</td><td>{ipsae}</td></tr>"
+            for c, label, iptm, ipsae in rows
+        )
+        return (
+            "<p style='font-size:0.85em;color:#555;margin:0.3em 0;'>"
+            "<b>Threshold bands.</b> Active ranking metric: <code>" + active + "</code>. "
+            "The <code>quality_tier</code> column + tier-count table below use ipSAE_min."
+            "</p>"
+            "<table style='font-size:0.85em;border-collapse:collapse;margin:0.3em 0 0.6em 0;'>"
+            "<tr><th style='text-align:left;padding-right:1em;'>Tier</th>"
+            "<th style='text-align:left;padding-right:2em;'>iPTM band <small>(ranking)</small></th>"
+            "<th style='text-align:left;'>ipSAE_min band <small>(quality_tier)</small></th></tr>" + body + "</table>"
+        )
+    # adaptyv: ipSAE_min IS the ranking metric, single band.
+    return (
         "<p style='font-size:0.85em;color:#555;margin:0.3em 0;'>"
-        "<b>ipSAE_min tiers</b> (used by <code>quality_tier</code>, cross-validation):"
+        "<b>ipSAE_min tiers</b> (the ranking metric under <code>adaptyv</code> — "
+        "and the basis for <code>quality_tier</code>):"
         " &nbsp;<span style='color:#2e7d32'>■ High</span> &gt;0.80 &nbsp;"
         "<span style='color:#f57f17'>■ Medium</span> &gt;0.61 &nbsp;"
         "<span style='color:#e65100'>■ Low</span> &gt;0.40 &nbsp;"
         "<span style='color:#c62828'>■ Reject</span> ≤0.40"
         "</p>"
     )
-    if rank_method in ("two_stage", "consensus_iptm"):
-        iptm_bands = (
-            "<p style='font-size:0.85em;color:#555;margin:0.3em 0;'>"
-            "<b>iPTM tiers</b> (informational; the active ranking is "
-            f"<code>{'consensus_iptm_mean' if rank_method == 'two_stage' else 'consensus_iptm'}</code>):"
-            " &nbsp;<span style='color:#2e7d32'>■ Strong</span> ≥0.80 &nbsp;"
-            "<span style='color:#f57f17'>■ Plausible</span> ≥0.60 &nbsp;"
-            "<span style='color:#e65100'>■ Weak</span> ≥0.40 &nbsp;"
-            "<span style='color:#c62828'>■ Reject</span> &lt;0.40"
-            "</p>"
-        )
-        return iptm_bands + ipsae_bands
-    return ipsae_bands
 
 
 def _qc_rules_html() -> str:

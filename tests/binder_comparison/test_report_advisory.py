@@ -113,17 +113,29 @@ def test_top_table_legend_adaptyv_still_calls_ipsae_primary():
     assert ipsae_idx < primary_idx + 200
 
 
-def test_screening_summary_intro_two_stage_has_both_tier_legends():
-    """Item 12: when ranking by iPTM, surface BOTH the iPTM and ipSAE tier legends."""
+def test_screening_summary_intro_two_stage_combined_table():
+    """Item 12: two_stage shows a single combined table with iPTM + ipSAE bands side-by-side.
+
+    The previous design had two paragraph blocks which read as duplication
+    (same 4 colored bands, slightly different thresholds). Folded into one
+    table with a shared tier label.
+    """
     html = _screening_summary_intro_html("two_stage")
-    assert "iPTM tiers" in html and "ipSAE_min tiers" in html
+    # One combined block, not two duplicate paragraphs.
+    assert "Threshold bands" in html
+    assert "iPTM band" in html and "ipSAE_min band" in html
+    # The active ranking metric is named so the reader knows which is the ranking key.
+    assert "consensus_iptm_mean" in html
+    # No leftover "iPTM tiers" / "ipSAE_min tiers" duplicate paragraph headings.
+    assert "ipSAE_min tiers" not in html
 
 
 def test_screening_summary_intro_adaptyv_only_ipsae_legend():
-    """Under adaptyv, the iPTM legend is irrelevant — show only the ipSAE bands."""
+    """Under adaptyv, ipSAE IS the ranking metric — show just the single ipSAE band."""
     html = _screening_summary_intro_html("adaptyv")
     assert "ipSAE_min tiers" in html
-    assert "iPTM tiers" not in html
+    # No iPTM band table in adaptyv mode (iPTM isn't the ranking key here).
+    assert "iPTM band" not in html
 
 
 def test_qc_rules_html_lists_all_five_default_thresholds():
