@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import csv
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -220,10 +221,13 @@ def _decide_no_tmhmm(override: bool | None, soluprot_dir: Path) -> bool:
 def _resolve_usearch(override: str | Path | None, soluprot_dir: Path) -> Path | None:
     """Locate the USEARCH binary for SoluProt's identity feature.
 
-    Order: explicit arg, ``$SOLUPROT_USEARCH``, ``<soluprot_dir>/usearch``.
-    Returns None if none found, leaving SoluProt to look up ``usearch`` on
-    PATH. Paths are returned absolute (SoluProt resolves relative paths
-    against its own script directory, not the caller's CWD).
+    Order: explicit arg, ``$SOLUPROT_USEARCH``, ``<soluprot_dir>/usearch.<arch>``,
+    then a bare ``<soluprot_dir>/usearch``. USEARCH is a native binary and the
+    dist carries per-arch copies (``usearch.x86_64`` / ``usearch.aarch64``) so a
+    checkout/merge on one machine can't clobber the other's. Returns None if none
+    found, leaving SoluProt to look up ``usearch`` on PATH. Paths are returned
+    absolute (SoluProt resolves relative paths against its own script directory,
+    not the caller's CWD).
     """
     for cand in (override, os.environ.get("SOLUPROT_USEARCH")):
         if cand:
@@ -231,9 +235,9 @@ def _resolve_usearch(override: str | Path | None, soluprot_dir: Path) -> Path | 
             if not p.exists():
                 raise FileNotFoundError(f"USEARCH binary not found: {p}")
             return p
-    bundled = soluprot_dir / "usearch"
-    if bundled.exists():
-        return bundled.resolve()
+    for bundled in (soluprot_dir / f"usearch.{platform.machine()}", soluprot_dir / "usearch"):
+        if bundled.exists():
+            return bundled.resolve()
     return None
 
 
