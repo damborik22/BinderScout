@@ -75,7 +75,7 @@ def test_wetlab_recommended_flags_failed_run_convergence():
 # --- _df_to_html strike-through ---------------------------------------------
 
 
-def test_df_to_html_strikes_through_when_recommended_false():
+def test_df_to_html_marks_when_recommended_false():
     df = pd.DataFrame(
         {
             "binder_id": ["a", "b"],
@@ -83,15 +83,17 @@ def test_df_to_html_strikes_through_when_recommended_false():
         }
     )
     html = _df_to_html(df, strike_when_false_col="wetlab_recommended")
-    assert "line-through" in html  # row b struck
+    # Advisory mark (wavy underline), NOT a definitive strike-through.
+    assert "underline wavy" in html  # row b marked
+    assert "line-through" not in html
     # Both rows present
     assert ">a<" in html and ">b<" in html
 
 
-def test_df_to_html_no_strike_when_column_absent():
+def test_df_to_html_no_mark_when_column_absent():
     df = pd.DataFrame({"binder_id": ["a"]})
     html = _df_to_html(df, strike_when_false_col="wetlab_recommended")
-    assert "line-through" not in html
+    assert "underline wavy" not in html
 
 
 # --- Item 10 plots -----------------------------------------------------------
