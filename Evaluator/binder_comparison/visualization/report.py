@@ -1352,6 +1352,7 @@ def generate_report(
         flag_disagreement=True,
         rank_col=_rank_col_for_flag,
         strike_when_false_col="wetlab_recommended" if "wetlab_recommended" in top30_primary.columns else None,
+        mark_reason=(sort_df["wetlab_reason"].to_dict() if "wetlab_reason" in sort_df.columns else None),
     ).replace("<table>", '<table style="width:100%">', 1)
     if secondary_cols:
         top30_secondary = sort_df[primary_cols[:2] + secondary_cols].head(30)
@@ -2433,7 +2434,10 @@ def _advisory_legend_html(df: pd.DataFrame) -> str:
         bits.append(
             "<b>wetlab_recommended</b> = SoluProt pass + agreement_count ≥ 2 of 3 + min binder pLDDT ≥ 0.50 "
             "+ no FAILED RUN. Failing rows are <b>marked with a wavy red underline</b> in the Top-30 "
-            "(advisory only — the rank does not change)."
+            "(advisory only — the rank does not change). This is a <em>separate</em> axis from the "
+            "<span style='color:#c62828;font-weight:bold;'>⚠</span> engine-disagreement flag — a design can be "
+            "marked here (e.g. predicted-insoluble) while all engines agree on the interface, or vice-versa. "
+            "<b>Hover a marked row</b> to see which condition failed (also in the <code>wetlab_reason</code> column)."
         )
     if "interface_dG" in df.columns:
         # Item 13: surface the interface-energy decomposition columns (computed
@@ -2656,6 +2660,7 @@ def _df_to_html(
     flag_disagreement: bool = False,
     rank_col: str | None = None,
     strike_when_false_col: str | None = None,
+    mark_reason: dict | None = None,
 ) -> str:
     """Render a DataFrame as an HTML table.
 
@@ -2747,17 +2752,26 @@ def _df_to_html(
         # use a wavy red underline — a "needs a look" mark. The row stays present and
         # the rank does not move.
         strike_style = ""
+        mark_title = ""
         if strike_when_false_col and strike_when_false_col in df.columns:
             val = row.get(strike_when_false_col)
             is_falsey_str = val is not None and val is not True and str(val).lower() in ("false", "0", "no")
             if val is False or is_falsey_str:
                 strike_style = "text-decoration:underline wavy #c62828;"
+                # Surface WHY on hover — the mark is a composite gate (solubility /
+                # engine agreement / pLDDT / failed run); the reason disambiguates
+                # it from the separate ⚠ engine-disagreement flag.
+                reason = str(mark_reason.get(idx, "")).strip() if mark_reason else ""
+                detail = f": {reason}" if reason and reason.lower() != "nan" else ""
+                mark_title = f"not wet-lab-recommended{detail} (advisory; rank unchanged)".replace('"', "'")
         attrs: list[str] = []
         if colour_tool and "source_tool" in df.columns:
             tool = row.get("source_tool", "")
             attrs.append(f'class="tool-{tool}"')
         if strike_style:
             attrs.append(f'style="{strike_style}"')
+        if mark_title:
+            attrs.append(f'title="{mark_title}"')
         rows.append(f"<tr {' '.join(attrs)}>{cells}</tr>")
 
     return f"<table>{header}{''.join(rows)}</table>"
