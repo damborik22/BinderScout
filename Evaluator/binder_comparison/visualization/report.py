@@ -2336,13 +2336,13 @@ def _benchmark_provenance_html() -> str:
 # ADVISORY — displayed for human review, never used to reorder or drop designs.
 _ADVISORY_PRIMARY = [
     "wetlab_recommended",
+    "wetlab_reason",
     "native_soluprot_score",
     "qc_pass",
     "epitope_match_fraction",
     "family_id",
 ]
 _ADVISORY_SECONDARY = [
-    "wetlab_reason",
     "native_soluprot_passes",
     "qc_fail_reasons",
     # Interface energy decomposition (Item 13) — surfaces existing
@@ -2437,7 +2437,8 @@ def _advisory_legend_html(df: pd.DataFrame) -> str:
             "(advisory only — the rank does not change). This is a <em>separate</em> axis from the "
             "<span style='color:#c62828;font-weight:bold;'>⚠</span> engine-disagreement flag — a design can be "
             "marked here (e.g. predicted-insoluble) while all engines agree on the interface, or vice-versa. "
-            "<b>Hover a marked row</b> to see which condition failed (also in the <code>wetlab_reason</code> column)."
+            "The <b>&ldquo;Why flagged (wet-lab)&rdquo;</b> column (and the row tooltip) states exactly which "
+            "condition failed &mdash; blank means wet-lab-ready."
         )
     if "interface_dG" in df.columns:
         # Item 13: surface the interface-energy decomposition columns (computed
