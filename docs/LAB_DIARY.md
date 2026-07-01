@@ -806,3 +806,31 @@
 **Outcome:**
 - End-to-end smoke verified without Claude (`PYTHONPATH=Evaluator python -m binder_comparison.main report ...` on a synthetic 12-design Boltz-2 CSV) — all Phase 1-4 features present in the rendered HTML. CI passes on Phases 2/3/4 commits.
 - 4 new CLI subcommands: `binder-compare epitope`, `binder-compare diversity`, plus `--lightweight` / `--engine-versions` / `--tool-meta` / `--epitope-results` / `--diversity-results` flags on `report`.
+
+
+---
+
+## 2026-07-01 — Phase 1–4 reapplied on BM5 (GPU-free), 6 review fixes, + `epitope-map` binding map
+
+**What changed:**
+- **Reapplied the Phases 1–4 work on the real data.** The 2026-06-30 BM1 commits were rolled back from master because the v2 report was rebuilt on top of v1's (2026-06-24) *merged* `metrics.csv`, so data-layer fixes between 06-24 and 06-30 weren't picked up. On BM5 the archived branch (`fc40196..22de7bf` + tier-consolidation `e19386d`) fast-forwards cleanly onto our report HEAD `d72658e` — the rollback was a **data** problem, not a code conflict. Regenerated **CALCA (350) + 2VDY (400) Full Phase 1–4** through the proper extract→merge→report path from the **cached per-engine refold CSVs** (`runs/CALCA_eval_top50/`, `eval_workdir/2VDY/refold/`) — **zero GPU** (the sequences didn't change; only merge/score/report code did). Both bundles pushed + md5-verified to muni RESULTS.
+- **6 review findings fixed** (user review of the regenerated reports; commit `09934e8` + follow-ups):
+  1. **Benchmark provenance was overstated** — methodology + provenance table claimed "Adaptyv: 8 hand-curated targets, n > 3,700", contradicting the repo's own diary. Corrected to **Adaptyv 4-target / 662-design** (mean-default 0.710 vs 0.689) + **ProteinBase 4-target / 175-design** (max-screen ~0.755); both share Nipah/EGFR/IL7R/PD-L1. The "3,700 / 8 targets" was the *planned* 23-target scope conflated in, never run.
+  2. **Two tier systems, one tier-count table** — collapsed the screening-summary legend to a single ipSAE_min tier band (matches the one count table); iPTM ranking named in prose (continuous, not tier-banded).
+  3. **agreement_count read as 0–2** with 3 engines — reworded legends to "X of 3 engines".
+  4. **Wet-lab strike-through too definitive** — replaced the line-through with an advisory wavy-underline **mark**; then, because "hover isn't immediate", promoted `wetlab_reason` into an always-visible **"Why flagged (wet-lab)"** Top-30 column (blank = ready, else `SoluProt FAIL` / `agreement 1 < 2` / `min pLDDT 0.48 < 0.5`). This is a *separate axis* from the ⚠ engine-disagreement flag — a top design can be marked (predicted-insoluble) while all 3 engines agree.
+  5. **CALCA native ranks missing** for mosaic / proteina_complexa / boltzgen (no native `--tool-csv`) — built standardized `*_native.csv` from the per-tool `rank=` pool-selection token in the source-tagged FASTA. All 7 tools now show a native rank.
+  6. **Per-tool viewer length bug** — `str(length).rstrip(".0")` stripped trailing zeros (140 → "14", 60 → "6"); format as `int` instead.
+- **New viz: `binder-compare epitope-map`** (`comparison/epitope_map.py` + `cli/epitope_map.py`). Renders a standalone `binding_map.html`: the target cartoon + surface coloured by **per-residue contact frequency** (B-factor recolor from the `epitope` interface residues), plus **footprint-clustered binding-mode** toggles (designs grouped by *which* residues they contact — the structural analogue of the sequence `family_id`) and an optional intended-pocket outline. Wired a `--binding-map HREF` callout link into the main `report`. 2VDY: 8 modes converging on the steroid-pocket shutter (368 **74%**, 267/264 70%); CALCA: 5 modes on helix residues **5–16 (95–99%)**.
+- **Tests**: 191 → **198** (epitope-map 6 + binding-map-link 1; mark/tier/length tests updated). ruff + format clean.
+
+**Why it mattered:**
+- The rollback reason (stale merged `metrics.csv`) is fixed by feeding the report the **per-engine refold CSVs** — reproducible from cache at no GPU cost, so the report always reflects current data-layer code.
+- The benchmark overstatement undercut the methodology's credibility; the real numbers (662 + 175) are what the mean-default and max-screen decisions actually rest on.
+- The wet-lab mark was being conflated with engine uncertainty; an inline reason column makes the two independent axes legible at a glance.
+- Epitope-match was a per-design *number*; the binding map aggregates those footprints **onto the structure**, answering "where do the families bind" visually — the natural next question after the epitope column.
+
+**Outcome:**
+- Both Full Phase 1–4 reports live on muni (`.../2VDY_CBG/RESULTS/2VDY_CBG_fullphase_2026-06-30/`, `.../P01258_CALCA/RESULTS/CALCA_top50_fullphase_2026-06-30/`), each with the corrected report, the standalone `binding_map.html`, and the epitope/diversity/soluprot(/qc) CSVs; file-count + report-md5 verified on every push.
+- Working branch `two-stage-screen-metric-and-partn-affinity` carries the reapply + 6 fixes + `epitope-map` + link (commits `e19386d → 09934e8 → 75605ea → 8111467 → b03073c → 2f72252`). Local only — not pushed to the git remote.
+- Binding-map link verified to resolve to the co-located map file (well-formed anchor → existing 262 KB `2VDY_CBG_binding_map.html` in the same bundle dir); a live browser render is still pending (Chrome extension disconnected, no headless Chrome on BM5).
