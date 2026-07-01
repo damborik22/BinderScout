@@ -35,6 +35,10 @@ from ..io.read import read_csv_safe
 # Distinct, colour-blind-friendlyish palette for binding modes.
 _MODE_COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#9467bd", "#8c564b", "#e377c2", "#17becf", "#bcbd22"]
 
+# Vendored NGL (relative to the Evaluator package root) — inlined by default so the
+# map is self-contained (no unpkg CDN dependency; works offline / behind Brave Shields).
+_VENDORED_NGL = "tools/ngl/ngl-2.3.1.min.js"
+
 
 def _recolor_target_pdb(pdb_path: Path, chain: str, freq_pct: dict[int, float]) -> str:
     """Return the target chain's ATOM records with the B-factor column overwritten
@@ -105,6 +109,17 @@ def run(args: argparse.Namespace) -> None:
     pocket_res = sorted({h.resnum for h in hotspots})
     pocket_sele = _sele(pocket_res, chain)
 
+    # Resolve the NGL library: inline it (self-contained, immune to CDN blocks /
+    # Brave Shields / offline) by default from the vendored copy; --ngl-js overrides
+    # the path; --ngl-cdn falls back to the unpkg <script src>.
+    ngl_inline = None
+    if not args.ngl_cdn:
+        ngl_path = Path(args.ngl_js) if args.ngl_js else (Path(__file__).resolve().parents[2] / _VENDORED_NGL)
+        if ngl_path.is_file():
+            ngl_inline = ngl_path.read_text()
+        else:
+            print(f"[epitope-map] note: vendored NGL not found at {ngl_path}; using CDN.", file=sys.stderr)
+
     top_freq = sorted(freq.items(), key=lambda kv: -kv[1])[:15]
     html = _render_html(
         pdb_text=pdb_text,
@@ -116,6 +131,7 @@ def run(args: argparse.Namespace) -> None:
         pocket_res=pocket_res,
         top_freq=[(r, c, round(100.0 * c / n_designs)) for r, c in top_freq],
         title=args.title or tgt.stem,
+        ngl_inline=ngl_inline,
     )
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -128,7 +144,14 @@ def run(args: argparse.Namespace) -> None:
     )
 
 
-def _render_html(*, pdb_text, chain, n_designs, max_pct, modes, pocket_sele, pocket_res, top_freq, title) -> str:
+def _render_html(
+    *, pdb_text, chain, n_designs, max_pct, modes, pocket_sele, pocket_res, top_freq, title, ngl_inline=None
+) -> str:
+    ngl_script = (
+        "<script>" + ngl_inline + "</script>"
+        if ngl_inline
+        else '<script src="https://unpkg.com/ngl@2.3.1/dist/ngl.js"></script>'
+    )
     pdb_js = json.dumps(pdb_text)
     modes_js = json.dumps(modes)
     mode_buttons = "".join(
@@ -170,7 +193,7 @@ def _render_html(*, pdb_text, chain, n_designs, max_pct, modes, pocket_sele, poc
     )
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Target binding map — {title}</title>
-<script src="https://unpkg.com/ngl@2.3.1/dist/ngl.js"></script>
+{ngl_script}
 <style>body{{font-family:system-ui,Arial,sans-serif;margin:1em;color:#222;}}
 #viewer{{width:100%;height:560px;border:1px solid #ccc;border-radius:4px;background:#fff;}}
 table{{border-collapse:collapse;font-size:0.85em;}} th{{text-align:left;padding:1px 8px;}}</style>
@@ -203,29 +226,38 @@ function webglOK() {{
     return !!(window.WebGLRenderingContext && (c.getContext("webgl") || c.getContext("experimental-webgl"))); }}
   catch (e) {{ return false; }}
 }}
-if (!webglOK()) {{
-  document.getElementById("viewer").innerHTML =
-    "<div style='padding:1.4em;font-size:0.95em;color:#333;line-height:1.6;'>"
-    + "<b>The 3D viewer needs WebGL, which is disabled in this browser.</b> The binding data is fully "
-    + "available in the tables below (aggregate footprint + per-mode consensus residues).<br><br>"
+function showMsg(h) {{ document.getElementById("viewer").innerHTML =
+  "<div style='padding:1.4em;font-size:0.95em;color:#333;line-height:1.6;'>" + h + "</div>"; }}
+if (typeof NGL === "undefined") {{
+  showMsg("<b>The 3D library (NGL) did not load.</b> The binding data is fully available in the "
+    + "tables below. If this map is served from the internet and NGL is blocked, disable "
+    + "<b>Brave Shields</b> for this page and reload (this build normally inlines NGL, so you should "
+    + "not see this).");
+}} else if (!webglOK()) {{
+  showMsg("<b>The 3D viewer needs WebGL, which is disabled in this browser.</b> The binding data is "
+    + "fully available in the tables below (aggregate footprint + per-mode consensus residues).<br><br>"
     + "<b>To enable the interactive 3D:</b><br>"
     + "&bull; <b>Brave / Chrome on Linux</b> (the GPU is often blocklisted): open <code>brave://flags</code> "
     + "(or <code>chrome://flags</code>) &rarr; set <b>&ldquo;Override software rendering list&rdquo;</b> = "
     + "<b>Enabled</b> &rarr; <b>Relaunch</b>. This turns on software WebGL (SwiftShader).<br>"
     + "&bull; And/or Settings &rarr; System &rarr; <b>Use graphics acceleration when available</b> = on; "
     + "drop <b>Brave Shields</b> for this page.<br>"
-    + "&bull; Check <code>brave://gpu</code> &mdash; the WebGL rows should not say &lsquo;Disabled&rsquo;.</div>";
+    + "&bull; Check <code>brave://gpu</code> &mdash; the WebGL rows should not say &lsquo;Disabled&rsquo;.");
 }} else {{
-  stage = new NGL.Stage("viewer", {{backgroundColor: "white"}});
-  window.addEventListener("resize", function(){{ stage.handleResize(); }});
-  var blob = new Blob([PDB], {{type: "text/plain"}});
-  stage.loadFile(blob, {{ext: "pdb"}}).then(function(c) {{
-    comp = c;
-    comp.addRepresentation("cartoon", {{colorScheme:"bfactor", colorScale:"OrRd", colorDomain:[0, MAXPCT]}});
-    comp.addRepresentation("surface", {{colorScheme:"bfactor", colorScale:"OrRd", colorDomain:[0, MAXPCT],
-      opacity:0.35, surfaceType:"av", probeRadius:1.4}});
-    comp.autoView();
-  }});
+  try {{
+    stage = new NGL.Stage("viewer", {{backgroundColor: "white"}});
+    window.addEventListener("resize", function(){{ stage.handleResize(); }});
+    var blob = new Blob([PDB], {{type: "text/plain"}});
+    stage.loadFile(blob, {{ext: "pdb"}}).then(function(c) {{
+      comp = c;
+      comp.addRepresentation("cartoon", {{colorScheme:"bfactor", colorScale:"OrRd", colorDomain:[0, MAXPCT]}});
+      comp.addRepresentation("surface", {{colorScheme:"bfactor", colorScale:"OrRd", colorDomain:[0, MAXPCT],
+        opacity:0.35, surfaceType:"av", probeRadius:1.4}});
+      comp.autoView();
+    }}).catch(function(err) {{ showMsg("<b>Structure failed to load:</b> " + err); }});
+  }} catch (e) {{
+    showMsg("<b>3D init failed:</b> " + e.message + "<br>The binding data is available in the tables below.");
+  }}
 }}
 function toggleMode(i) {{
   if (!comp) return;
@@ -269,5 +301,17 @@ def add_parser(subparsers) -> None:
     p.add_argument("--max-modes", type=int, default=8, help="Cap the number of modes shown (default 8).")
     p.add_argument("--consensus-frac", type=float, default=0.5, help="Residue in a mode if ≥ this frac contact it.")
     p.add_argument("--title", default=None, help="Heading for the page (default: structure stem).")
+    p.add_argument(
+        "--ngl-js",
+        default=None,
+        metavar="JS",
+        help="Path to an ngl.js to inline (default: the vendored Evaluator/tools/ngl copy). "
+        "Inlining makes the map self-contained — no unpkg CDN, works offline / behind Brave Shields.",
+    )
+    p.add_argument(
+        "--ngl-cdn",
+        action="store_true",
+        help="Load NGL from the unpkg CDN via <script src> instead of inlining it (smaller file, needs network).",
+    )
     p.add_argument("--output", "-o", required=True, metavar="HTML", help="Output HTML file.")
     p.set_defaults(func=run)
