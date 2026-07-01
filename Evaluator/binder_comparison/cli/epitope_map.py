@@ -151,6 +151,23 @@ def _render_html(*, pdb_text, chain, n_designs, max_pct, modes, pocket_sele, poc
         f"<td style='padding:1px 8px;'>{pct}%</td></tr>"
         for r, c, pct in top_freq
     )
+    pocket_set = set(pocket_res)
+    mode_rows = "".join(
+        f"<tr><td style='padding:1px 8px;color:{m['color']};white-space:nowrap;'>&#9632; {m['label']}</td>"
+        f"<td style='padding:1px 8px;'>{m['n']}</td>"
+        f"<td style='padding:1px 8px;'>{sum(1 for r in m['residues'] if r in pocket_set)}/{len(m['residues'])}</td>"
+        f"<td style='padding:1px 8px;font-family:monospace;'>"
+        f"{', '.join(str(r) for r in m['residues'][:18])}{'…' if len(m['residues']) > 18 else ''}</td></tr>"
+        for m in modes
+    )
+    mode_table = (
+        "<div style='margin-top:0.8em;'><b style='font-size:0.9em;'>Binding modes (footprint clusters)</b>"
+        "<table><tr><th>Mode</th><th>Designs</th><th>In pocket</th><th>Consensus residues</th></tr>"
+        + mode_rows
+        + "</table></div>"
+        if mode_rows
+        else ""
+    )
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Target binding map — {title}</title>
 <script src="https://unpkg.com/ngl@2.3.1/dist/ngl.js"></script>
@@ -174,23 +191,44 @@ consensus patch; toggle the intended pocket to compare. This shows <em>where</em
 <b>Heatmap scale</b>: white (0%) &rarr; <span style="color:#d73027;font-weight:bold;">red</span> ({max_pct:.0f}%).
 The B-factor column of the embedded structure carries each residue's contact %.</div>
 </div>
+{mode_table}
 <script>
 var PDB = {pdb_js};
 var MODES = {modes_js};
 var POCKET_SELE = {json.dumps(pocket_sele)};
 var MAXPCT = {max_pct:.2f};
-var stage = new NGL.Stage("viewer", {{backgroundColor: "white"}});
-window.addEventListener("resize", function(){{ stage.handleResize(); }});
-var comp = null, reps = {{}};
-var blob = new Blob([PDB], {{type: "text/plain"}});
-stage.loadFile(blob, {{ext: "pdb"}}).then(function(c) {{
-  comp = c;
-  comp.addRepresentation("cartoon", {{colorScheme:"bfactor", colorScale:"OrRd", colorDomain:[0, MAXPCT]}});
-  comp.addRepresentation("surface", {{colorScheme:"bfactor", colorScale:"OrRd", colorDomain:[0, MAXPCT],
-    opacity:0.35, surfaceType:"av", probeRadius:1.4}});
-  comp.autoView();
-}});
+var stage = null, comp = null, reps = {{}};
+function webglOK() {{
+  try {{ var c = document.createElement("canvas");
+    return !!(window.WebGLRenderingContext && (c.getContext("webgl") || c.getContext("experimental-webgl"))); }}
+  catch (e) {{ return false; }}
+}}
+if (!webglOK()) {{
+  document.getElementById("viewer").innerHTML =
+    "<div style='padding:1.4em;font-size:0.95em;color:#333;line-height:1.6;'>"
+    + "<b>The 3D viewer needs WebGL, which is disabled in this browser.</b> The binding data is fully "
+    + "available in the tables below (aggregate footprint + per-mode consensus residues).<br><br>"
+    + "<b>To enable the interactive 3D:</b><br>"
+    + "&bull; <b>Brave / Chrome on Linux</b> (the GPU is often blocklisted): open <code>brave://flags</code> "
+    + "(or <code>chrome://flags</code>) &rarr; set <b>&ldquo;Override software rendering list&rdquo;</b> = "
+    + "<b>Enabled</b> &rarr; <b>Relaunch</b>. This turns on software WebGL (SwiftShader).<br>"
+    + "&bull; And/or Settings &rarr; System &rarr; <b>Use graphics acceleration when available</b> = on; "
+    + "drop <b>Brave Shields</b> for this page.<br>"
+    + "&bull; Check <code>brave://gpu</code> &mdash; the WebGL rows should not say &lsquo;Disabled&rsquo;.</div>";
+}} else {{
+  stage = new NGL.Stage("viewer", {{backgroundColor: "white"}});
+  window.addEventListener("resize", function(){{ stage.handleResize(); }});
+  var blob = new Blob([PDB], {{type: "text/plain"}});
+  stage.loadFile(blob, {{ext: "pdb"}}).then(function(c) {{
+    comp = c;
+    comp.addRepresentation("cartoon", {{colorScheme:"bfactor", colorScale:"OrRd", colorDomain:[0, MAXPCT]}});
+    comp.addRepresentation("surface", {{colorScheme:"bfactor", colorScale:"OrRd", colorDomain:[0, MAXPCT],
+      opacity:0.35, surfaceType:"av", probeRadius:1.4}});
+    comp.autoView();
+  }});
+}}
 function toggleMode(i) {{
+  if (!comp) return;
   var key = "mode"+i, btn = document.getElementById("mbtn"+i);
   if (reps[key]) {{ reps[key].forEach(function(r){{comp.removeRepresentation(r);}}); reps[key]=null; btn.style.background="#fff"; return; }}
   var m = MODES[i];
@@ -201,12 +239,14 @@ function toggleMode(i) {{
   btn.style.background = m.color + "22";
 }}
 function togglePocket() {{
+  if (!comp) return;
   var btn = document.getElementById("pbtn");
   if (reps["pocket"]) {{ reps["pocket"].forEach(function(r){{comp.removeRepresentation(r);}}); reps["pocket"]=null; btn.style.background="#fff"; return; }}
   reps["pocket"] = [ comp.addRepresentation("licorice", {{sele:POCKET_SELE, color:"#2e7d32"}}) ];
   btn.style.background = "#2e7d3222";
 }}
 function clearAll() {{
+  if (!comp) return;
   Object.keys(reps).forEach(function(k){{ if(reps[k]){{ reps[k].forEach(function(r){{comp.removeRepresentation(r);}}); reps[k]=null; }} }});
   document.querySelectorAll("button[id^=mbtn],#pbtn").forEach(function(b){{b.style.background="#fff";}});
 }}
