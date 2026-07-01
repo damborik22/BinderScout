@@ -129,6 +129,17 @@ def test_screening_summary_intro_two_stage_single_ipsae_tier():
     assert "High" in html and "Reject" in html
 
 
+def test_binding_map_link_renders_only_when_provided():
+    from binder_comparison.visualization.report import _binding_map_link_html
+
+    assert _binding_map_link_html(None) == ""
+    assert _binding_map_link_html("") == ""
+    html = _binding_map_link_html("2VDY_CBG_binding_map.html")
+    assert "Target binding map" in html
+    assert "href='2VDY_CBG_binding_map.html'" in html
+    assert 'target="_blank"' in html or "target='_blank'" in html
+
+
 def test_screening_summary_intro_adaptyv_only_ipsae_legend():
     """Under adaptyv, ipSAE IS the ranking metric — show just the single ipSAE band."""
     html = _screening_summary_intro_html("adaptyv")

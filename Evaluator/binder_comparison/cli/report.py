@@ -507,6 +507,7 @@ def run(args: argparse.Namespace) -> None:
         tool_overrides=tool_overrides or None,
         provenance=provenance,
         lightweight=bool(getattr(args, "lightweight", False)),
+        binding_map=getattr(args, "binding_map", None),
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
@@ -982,5 +983,12 @@ def add_parser(subparsers) -> None:
         action="store_true",
         help="Skip the inline 3D viewer (top-20 NGL coords stay in PDB files in top20_structures/, "
         "but no embedded base64). Cuts ~5 MB from the HTML for large pools.",
+    )
+    p.add_argument(
+        "--binding-map",
+        default=None,
+        metavar="HREF",
+        help="Relative path/filename of a binding_map.html (from 'binder-compare epitope-map') to link "
+        "from the report as a callout. The file must sit next to report.html in the bundle.",
     )
     p.set_defaults(func=run)

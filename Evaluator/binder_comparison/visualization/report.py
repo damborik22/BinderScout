@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import math
+from html import escape as html_escape
 from pathlib import Path
 
 import pandas as pd
@@ -157,6 +158,7 @@ _HTML_TEMPLATE = """\
 {benchmark_provenance_block}
 {qc_rules_block}
 {tool_classification_banner}
+{binding_map_link}
 
 <details style="margin:0.8em 0;">
   <summary style="cursor:pointer;font-size:0.85em;color:#1565C0;font-weight:bold;">
@@ -1290,6 +1292,7 @@ def generate_report(
     tool_overrides: dict[str, dict] | None = None,
     provenance: dict | None = None,
     lightweight: bool = False,
+    binding_map: str | None = None,
 ) -> None:
     """Generate and write the HTML report.
 
@@ -1869,6 +1872,7 @@ def generate_report(
     tool_classification_banner = _tool_classification_banner_html(sort_df, tool_overrides=tool_overrides)
     provenance_footer = _provenance_footer_html(provenance)
     top_per_family_block = _top_per_family_html(sort_df)
+    binding_map_link = _binding_map_link_html(binding_map)
 
     html = _HTML_TEMPLATE.format(
         n_binders=len(sort_df),
@@ -1876,6 +1880,7 @@ def generate_report(
         benchmark_provenance_block=benchmark_provenance_block,
         qc_rules_block=qc_rules_block,
         tool_classification_banner=tool_classification_banner,
+        binding_map_link=binding_map_link,
         screening_summary_intro=screening_summary_intro,
         top_table_legend=top_table_legend,
         top_per_family_block=top_per_family_block,
@@ -2208,6 +2213,24 @@ def _provenance_footer_html(provenance: dict | None) -> str:
     )
     lines.append("</details>")
     return "\n".join(lines)
+
+
+def _binding_map_link_html(binding_map: str | None) -> str:
+    """Callout linking to the standalone binding_map.html (from `epitope-map`).
+
+    ``binding_map`` is a relative href (filename) — the map file is expected to
+    sit next to report.html in the bundle. Empty string when not provided.
+    """
+    if not binding_map:
+        return ""
+    href = html_escape(str(binding_map), quote=True)
+    return (
+        "<div style='margin:0.8em 0;padding:0.6em 1em;background:#eef6ff;border:1px solid #b3d4fc;"
+        f"border-radius:6px;font-size:0.9em;'>&#128506; <b><a href='{href}' target='_blank' "
+        "rel='noopener'>Target binding map</a></b> &mdash; interactive target structure coloured by "
+        "per-residue contact frequency, with per-binding-mode toggles (where on the target the "
+        "designs land). Open in a browser.</div>"
+    )
 
 
 def _screening_summary_intro_html(rank_method: str) -> str:
