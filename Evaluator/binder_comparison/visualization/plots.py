@@ -80,6 +80,8 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "consensus_iptm_mean": ("Mean ipTM", "[0–1]", "↑"),
     "consensus_ipsae_min_mean": ("Mean ipSAE_min", "[0–1]", "↑"),
     "native_soluprot_score": ("Solubility (SoluProt)", "[0–1]", "↑"),
+    "wetlab_recommended": ("Wet-lab ready", "", ""),
+    "wetlab_reason": ("Why flagged (wet-lab)", "", ""),
 }
 
 
