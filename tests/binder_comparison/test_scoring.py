@@ -8,9 +8,13 @@ ESMFold2 autosize gate will also consume.
 import pytest
 
 pytest.importorskip("pandas")
+import math
+
 import pandas as pd
 from binder_comparison.comparison.scoring import (
     add_chain_iptm_interface,
+    compute_consensus_ipsae,
+    compute_consensus_iptm,
     rank_by_two_stage,
 )
 
@@ -102,3 +106,51 @@ def test_two_stage_handles_nan_consensus_rows():
     last_id = out.sort_values("two_stage_rank")["id"].tolist()[-1]
     assert last_id == "E"
     assert not bool(out.loc[out["id"] == "E", "passes_max_screen"].iloc[0])
+
+
+# --- consensus_iptm_spread / consensus_ipsae_min_spread (Item 4) -------------
+
+
+def test_consensus_iptm_spread_is_max_minus_min():
+    """The per-row spread surfaced as the engine-disagreement signal must equal max − min."""
+    df = pd.DataFrame(
+        {
+            "boltz_pae_iptm": [0.90, 0.85, 0.50],  # spreads: 0.05, 0.45, 0.00
+            "af3_pae_iptm": [0.88, 0.40, 0.50],
+            "esmfold2_pae_iptm": [0.85, 0.42, 0.50],
+        }
+    )
+    out = compute_consensus_iptm(df)
+    spreads = out["consensus_iptm_spread"].round(2).tolist()
+    assert spreads == [0.05, 0.45, 0.00]
+
+
+def test_consensus_iptm_spread_is_nan_when_single_engine():
+    """A row with only one engine present has no measurable disagreement."""
+    df = pd.DataFrame({"boltz_pae_iptm": [0.9, 0.8], "af3_pae_iptm": [0.85, float("nan")]})
+    out = compute_consensus_iptm(df)
+    # Row 0: 2 engines → spread defined; Row 1: 1 engine → spread NaN
+    assert math.isfinite(out["consensus_iptm_spread"].iloc[0])
+    assert math.isnan(out["consensus_iptm_spread"].iloc[1])
+
+
+def test_consensus_ipsae_min_spread_added():
+    """ipSAE_min spread mirrors the iPTM spread for the engine-disagreement flag."""
+    df = pd.DataFrame(
+        {
+            "boltz_pae_ipsae_min": [0.85, 0.30],
+            "af3_ipsae_min": [0.82, 0.80],
+        }
+    )
+    out = compute_consensus_ipsae(df)
+    assert "consensus_ipsae_min_spread" in out.columns
+    spreads = out["consensus_ipsae_min_spread"].round(2).tolist()
+    assert spreads == [0.03, 0.50]
+
+
+def test_consensus_iptm_spread_empty_when_no_engines_present():
+    """Defensive: even with zero engine columns the spread column is initialised."""
+    df = pd.DataFrame({"id": ["a", "b"]})
+    out = compute_consensus_iptm(df)
+    assert "consensus_iptm_spread" in out.columns
+    assert out["consensus_iptm_spread"].isna().all()

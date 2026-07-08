@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..comparison.tool_classification import ExtractorMetadata
 from ..core.schema import ExtractedBinder, NativeMetrics
 from .base import SequenceExtractor
 
@@ -71,6 +72,31 @@ class ProteinHunterExtractor(SequenceExtractor):
     @property
     def tool_name(self) -> str:
         return "protein_hunter"
+
+    def extractor_metadata(self) -> ExtractorMetadata:
+        """Default-mode PH reads a curated CSV — flag it so the report shows the caveat (Item 3).
+
+        ``summary_high_iptm.csv`` is pre-filtered by iPTM + %X by Protein-Hunter
+        itself, so head-to-head pool means against unfiltered tools (Mosaic,
+        BindCraft etc.) are inflated. Set ``all_runs=True`` to read the full
+        ``summary_all_runs.csv`` instead — the flag also turns off the banner
+        caveat so it stays honest.
+        """
+        if self.all_runs:
+            return ExtractorMetadata(
+                pool_pre_filtered=False,
+                source_csv=_ALL_RUNS_CSV,
+                notes="Reading every cycle of every run; no per-row Protein-Hunter pre-filter.",
+            )
+        return ExtractorMetadata(
+            pool_pre_filtered=True,
+            source_csv=_HIGH_IPTM_CSV,
+            notes=(
+                "Protein-Hunter's own iPTM + %X filter has already culled the pool — pool means "
+                "are not directly comparable to unfiltered tools (Mosaic / BindCraft / RFD3 / etc.). "
+                "Pass --all-protein-hunter-designs to compare on the full pool."
+            ),
+        )
 
     def extract(self, input_dir: str | Path) -> list[ExtractedBinder]:
         input_dir = Path(input_dir)
