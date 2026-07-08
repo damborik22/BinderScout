@@ -760,6 +760,173 @@ def plot_metric_distributions(
 
 
 # ---------------------------------------------------------------------------
+# Item 10: metric-metric correlation heatmap + Pareto front
+# ---------------------------------------------------------------------------
+
+
+def plot_metric_correlation_heatmap(
+    df: pd.DataFrame,
+    metrics: list[str] | None = None,
+    method: str = "spearman",
+) -> Figure | None:
+    """Spearman correlation heatmap across selected metrics.
+
+    Reveals redundant signals (e.g. consensus_iptm vs consensus_iptm_mean
+    nearly always > 0.95). Returns ``None`` if too few metrics are present.
+    """
+    if metrics is None:
+        # Sensible default: ranking metrics + confidence + cross-validation.
+        candidates = [
+            "consensus_iptm",
+            "consensus_iptm_mean",
+            "consensus_iptm_min",
+            "consensus_iptm_spread",
+            "agreement_count",
+            "ipsae_min",
+            "consensus_ipsae_min_mean",
+            "binder_ptm",
+            "plddt_binder_mean",
+            "plddt_binder_min",
+        ]
+        metrics = [m for m in candidates if m in df.columns]
+    metrics = [m for m in metrics if m in df.columns]
+    if len(metrics) < 3:
+        return None
+    sub = df[metrics].apply(pd.to_numeric, errors="coerce")
+    sub = sub.dropna(axis=1, how="all")
+    if sub.shape[1] < 3:
+        return None
+    corr = sub.corr(method=method)
+    fig, ax = plt.subplots(figsize=(max(6, 0.7 * len(corr)), max(5, 0.6 * len(corr))))
+    cmap = plt.get_cmap("RdBu_r")
+    im = ax.imshow(corr.values, vmin=-1.0, vmax=1.0, cmap=cmap, aspect="auto")
+    ax.set_xticks(np.arange(len(corr.columns)))
+    ax.set_yticks(np.arange(len(corr.columns)))
+    ax.set_xticklabels(corr.columns, rotation=45, ha="right", fontsize=9)
+    ax.set_yticklabels(corr.columns, fontsize=9)
+    # Annotate cells
+    for i in range(len(corr)):
+        for j in range(len(corr)):
+            v = corr.values[i, j]
+            color = "white" if abs(v) > 0.5 else "black"
+            ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=7, color=color)
+    fig.colorbar(im, ax=ax, fraction=0.03, pad=0.04, label=f"{method} ρ")
+    ax.set_title(f"Metric correlations ({method}) — n={len(sub)} designs")
+    fig.tight_layout()
+    return fig
+
+
+def plot_pareto_front(
+    df: pd.DataFrame,
+    x: str = "consensus_iptm_mean",
+    y: str = "native_soluprot_score",
+    z: str | None = "interface_dG_SASA_ratio",
+    color_by: str = "source_tool",
+    label_n: int = 8,
+) -> Figure | None:
+    """2-D Pareto scatter (x, y both higher-is-better) with Pareto-optimal points highlighted.
+
+    ``z`` adds a colorbar-style third axis (lower-is-better for energy density,
+    so we negate it if positive — interpret as ``|dG/dSASA|``). If ``z`` is None
+    or absent, falls back to colouring by tool. Pareto front computed by an
+    O(n²) dominance test — sufficient for n < 1000.
+    """
+    if x not in df.columns or y not in df.columns:
+        return None
+    sub = df.copy()
+    sub[x] = pd.to_numeric(sub[x], errors="coerce")
+    sub[y] = pd.to_numeric(sub[y], errors="coerce")
+    sub = sub.dropna(subset=[x, y])
+    if sub.empty:
+        return None
+    use_z = z is not None and z in sub.columns
+    if use_z:
+        sub[z] = pd.to_numeric(sub[z], errors="coerce").abs()
+        sub = sub.dropna(subset=[z])
+    use_z = use_z and not sub.empty
+    if sub.empty:
+        return None
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.5))
+    if use_z:
+        sc = ax.scatter(
+            sub[x],
+            sub[y],
+            c=sub[z],
+            cmap="viridis",
+            s=50,
+            alpha=0.75,
+            edgecolor="white",
+            linewidth=0.5,
+        )
+        cbar = fig.colorbar(sc, ax=ax, label=f"|{z}|")
+        cbar.ax.yaxis.label.set_size(9)
+    else:
+        if color_by in sub.columns:
+            for tool, g in sub.groupby(color_by):
+                ax.scatter(
+                    g[x],
+                    g[y],
+                    label=_TOOL_DISPLAY.get(tool, tool),
+                    color=TOOL_COLOURS.get(tool, TOOL_COLOURS["unknown"]),
+                    s=50,
+                    alpha=0.75,
+                    edgecolor="white",
+                    linewidth=0.5,
+                )
+            ax.legend(loc="best", fontsize=8, frameon=True)
+        else:
+            ax.scatter(sub[x], sub[y], s=50, alpha=0.75, edgecolor="white", linewidth=0.5)
+
+    # Pareto front (both axes higher-is-better)
+    pts = sub[[x, y]].to_numpy()
+    n = len(pts)
+    pareto_mask = np.ones(n, dtype=bool)
+    for i in range(n):
+        if not pareto_mask[i]:
+            continue
+        for j in range(n):
+            if i == j:
+                continue
+            if pts[j, 0] >= pts[i, 0] and pts[j, 1] >= pts[i, 1] and (pts[j, 0] > pts[i, 0] or pts[j, 1] > pts[i, 1]):
+                pareto_mask[i] = False
+                break
+    pareto = sub[pareto_mask].sort_values(by=x)
+    ax.plot(
+        pareto[x],
+        pareto[y],
+        color="#c62828",
+        marker="o",
+        markersize=8,
+        markerfacecolor="none",
+        markeredgewidth=2,
+        linewidth=1.2,
+        linestyle="--",
+        label="Pareto front",
+    )
+
+    # Annotate top-N Pareto designs with binder_id
+    if "binder_id" in pareto.columns:
+        for _, row in pareto.head(label_n).iterrows():
+            ax.annotate(
+                str(row["binder_id"])[:18],
+                xy=(row[x], row[y]),
+                xytext=(6, 6),
+                textcoords="offset points",
+                fontsize=7,
+                color="#333",
+            )
+
+    ax.set_xlabel(x)
+    ax.set_ylabel(y)
+    z_part = f" × {z} (color)" if use_z else ""
+    ax.set_title(f"Pareto front: {x} × {y}{z_part} — n={len(sub)} designs")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # Utility: figure → base64 PNG string for HTML embedding
 # ---------------------------------------------------------------------------
 

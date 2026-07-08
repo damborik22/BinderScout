@@ -14,6 +14,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -27,6 +31,7 @@ from ..comparison.scoring import (
     add_design_groups,
     add_ipsae_from_pae_files,
     add_iptm_from_pae_files,
+    annotate_wetlab_recommended,
     apply_screening_thresholds,
     compute_agreement,
     compute_composite_scores,
@@ -39,6 +44,117 @@ from ..comparison.scoring import (
 from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
 from ..visualization.report import generate_report
+
+
+def _parse_tool_meta(specs: list[str] | None) -> dict[str, dict]:
+    """Parse repeated --tool-meta TOOL='k:v;k:v' flags into a dict.
+
+    Empty list / None / malformed pieces are skipped silently (we'd rather
+    render an under-annotated banner than refuse to render a report).
+    """
+    overrides: dict[str, dict] = {}
+    if not specs:
+        return overrides
+    for spec in specs:
+        if "=" not in spec:
+            continue
+        tool, payload = spec.split("=", 1)
+        tool = tool.strip().lower()
+        if not tool:
+            continue
+        d: dict = {}
+        for piece in payload.split(";"):
+            if ":" not in piece:
+                continue
+            k, v = piece.split(":", 1)
+            k = k.strip()
+            v = v.strip()
+            if not k:
+                continue
+            if k == "pool_pre_filtered":
+                d[k] = v.lower() in ("true", "1", "yes", "y")
+            else:
+                d[k] = v
+        if d:
+            overrides[tool] = d
+    return overrides
+
+
+def _load_engine_versions(path: str | None) -> dict[str, str]:
+    """Load engine version info from a JSON or YAML file. Missing/empty → {}."""
+    if not path:
+        return {}
+    p = Path(path)
+    if not p.exists():
+        print(f"[report] WARNING: --engine-versions file not found: {p}; skipping.", file=sys.stderr)
+        return {}
+    try:
+        text = p.read_text()
+        if p.suffix.lower() in (".yaml", ".yml"):
+            import yaml
+
+            data = yaml.safe_load(text) or {}
+        else:
+            data = json.loads(text) if text.strip() else {}
+        if not isinstance(data, dict):
+            print(f"[report] WARNING: --engine-versions file {p} is not a dict; skipping.", file=sys.stderr)
+            return {}
+        return {str(k): str(v) for k, v in data.items()}
+    except (OSError, ValueError, ImportError) as exc:
+        print(f"[report] WARNING: could not parse --engine-versions file {p}: {exc}", file=sys.stderr)
+        return {}
+
+
+def _detect_evaluator_version() -> str:
+    """Return the binder-comparison version. Falls back to pyproject if uninstalled."""
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+
+        return version("binder-comparison")
+    except (ImportError, PackageNotFoundError):
+        pass
+    try:
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        if pyproject.exists():
+            for line in pyproject.read_text().splitlines():
+                if line.strip().startswith("version") and "=" in line:
+                    return line.split("=", 1)[1].strip().strip("'\"")
+    except OSError:
+        pass
+    return "unknown"
+
+
+def _collect_provenance(args: argparse.Namespace) -> dict:
+    """Auto-detect git_sha, evaluator_version, timestamp; merge --engine-versions."""
+    prov: dict = {
+        "run_timestamp_utc": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "cli_args": list(sys.argv),
+    }
+    # git sha (best-effort; works only when run from inside a git checkout).
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        if sha.returncode == 0:
+            prov["git_sha"] = sha.stdout.strip()
+            # also note if the worktree is dirty
+            status = subprocess.run(
+                ["git", "status", "--porcelain"], capture_output=True, text=True, check=False, timeout=2
+            )
+            if status.returncode == 0 and status.stdout.strip():
+                prov["git_sha"] = f"{prov['git_sha']} (dirty)"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    # evaluator version from the installed package metadata (or fall back to pyproject).
+    prov["evaluator_version"] = _detect_evaluator_version()
+    ev = _load_engine_versions(getattr(args, "engine_versions", None))
+    if ev:
+        prov["engine_versions"] = ev
+    return prov
 
 
 def run(args: argparse.Namespace) -> None:
@@ -80,6 +196,18 @@ def run(args: argparse.Namespace) -> None:
     # used to reorder or drop.
     if getattr(args, "qc_results", None):
         df = _attach_qc_results(df, args.qc_results)
+
+    # epitope: target-side interface residues vs intended hotspot list (Item 2).
+    # Joined by binder_id; adds epitope_match_fraction + epitope_status +
+    # epitope_off_target_residues. ADVISORY — never reorders or drops.
+    if getattr(args, "epitope_results", None):
+        df = _attach_epitope_results(df, args.epitope_results)
+
+    # diversity: sequence-similarity clustering into "families" (Item 1).
+    # Joined by binder_id; adds family_id / family_size / family_rank. ADVISORY
+    # — never reorders or drops; the report surfaces a "Top per family" block.
+    if getattr(args, "diversity_results", None):
+        df = _attach_diversity_results(df, args.diversity_results)
 
     # Step 2: Promote Boltz-2 as primary predictor
     print("[report] Promoting Boltz-2 metrics as primary…")
@@ -201,6 +329,11 @@ def run(args: argparse.Namespace) -> None:
     df = rank_by_consensus_iptm(df)
     screen_metric = getattr(args, "screen_metric", "mean") or "mean"
     df = rank_by_two_stage(df, screen_metric=screen_metric)
+
+    # Item 9: wet-lab-ready badge (SoluProt-passes + agreement_count >= 2 +
+    # min binder pLDDT >= 0.50 + no FAILED RUN). Advisory only — the rank is
+    # unchanged; the report renders failing rows with CSS strike-through.
+    df = annotate_wetlab_recommended(df)
 
     # All three rankings coexist as columns (adaptyv_rank, consensus_rank,
     # two_stage_rank); --rank-by selects which orders the report. `active_rank`
@@ -354,6 +487,12 @@ def run(args: argparse.Namespace) -> None:
                 tool_name, pdb_dir = spec.split("=", 1)
                 tool_pdb_dirs[tool_name.strip()] = pdb_dir.strip()
 
+    # Item 3 + 5: fairness banner data. Static defaults live in
+    # comparison.tool_classification; per-run overrides come from --tool-meta.
+    tool_overrides = _parse_tool_meta(getattr(args, "tool_meta", None))
+    # Item 6: provenance footer (git_sha, evaluator_version, CLI flags, ts).
+    provenance = _collect_provenance(args)
+
     generate_report(
         df=df_display,
         full_df=df,
@@ -365,6 +504,9 @@ def run(args: argparse.Namespace) -> None:
         primary_engine=primary_engine,
         top_per_tool=args.top_per_tool,
         rank_method=rank_by,
+        tool_overrides=tool_overrides or None,
+        provenance=provenance,
+        lightweight=bool(getattr(args, "lightweight", False)),
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
@@ -566,6 +708,69 @@ def _attach_soluprot_results(df: pd.DataFrame, soluprot_csv: str) -> pd.DataFram
 
 
 # qc-annotate (interface_qc.py) panel columns to surface in the report.
+_DIVERSITY_COLS = ("family_id", "family_size", "family_rank")
+
+
+def _attach_diversity_results(df: pd.DataFrame, diversity_csv: str) -> pd.DataFrame:
+    """Left-join the diversity CSV by binder_id. ADVISORY — no reorder/drop."""
+    div_path = Path(diversity_csv)
+    if not div_path.exists():
+        print(f"[report] WARNING: --diversity-results file not found: {div_path}; skipping.")
+        return df
+    try:
+        div_df = pd.read_csv(div_path)
+    except (OSError, pd.errors.ParserError) as exc:
+        print(f"[report] WARNING: could not read --diversity-results {div_path}: {exc}")
+        return df
+    id_col = next((c for c in ("binder_id", "design_id", "id") if c in div_df.columns), None)
+    if id_col is None:
+        print(f"[report] WARNING: --diversity-results {div_path} has no id column; skipping.")
+        return df
+    keep = [id_col] + [c for c in _DIVERSITY_COLS if c in div_df.columns]
+    sub = div_df[keep].rename(columns={id_col: "binder_id"}).copy()
+    sub["binder_id"] = sub["binder_id"].astype(str)
+    df = df.copy()
+    df["binder_id"] = df["binder_id"].astype(str)
+    n_fam = int(sub["family_id"].nunique()) if "family_id" in sub.columns else 0
+    print(f"[report] Attaching diversity clusters from {div_path.name} ({n_fam} families)")
+    return pd.merge(df, sub, on="binder_id", how="left")
+
+
+_EPITOPE_COLS = (
+    "epitope_match_fraction",
+    "epitope_match_n",
+    "epitope_n_interface",
+    "epitope_off_target_residues",
+    "epitope_matched_residues",
+    "epitope_status",
+)
+
+
+def _attach_epitope_results(df: pd.DataFrame, epitope_csv: str) -> pd.DataFrame:
+    """Left-join the epitope-match CSV by binder_id. ADVISORY — no reorder/drop."""
+    epitope_path = Path(epitope_csv)
+    if not epitope_path.exists():
+        print(f"[report] WARNING: --epitope-results file not found: {epitope_path}; skipping.")
+        return df
+    try:
+        ep_df = pd.read_csv(epitope_path)
+    except (OSError, pd.errors.ParserError) as exc:
+        print(f"[report] WARNING: could not read --epitope-results {epitope_path}: {exc}")
+        return df
+    id_col = next((c for c in ("binder_id", "design_id", "id") if c in ep_df.columns), None)
+    if id_col is None:
+        print(f"[report] WARNING: --epitope-results {epitope_path} has no id column; skipping.")
+        return df
+    keep = [id_col] + [c for c in _EPITOPE_COLS if c in ep_df.columns]
+    ep_sub = ep_df[keep].rename(columns={id_col: "binder_id"}).copy()
+    ep_sub["binder_id"] = ep_sub["binder_id"].astype(str)
+    df = df.copy()
+    df["binder_id"] = df["binder_id"].astype(str)
+    n = int(ep_sub["epitope_match_fraction"].notna().sum()) if "epitope_match_fraction" in ep_sub.columns else 0
+    print(f"[report] Attaching epitope-match panel from {epitope_path.name} ({n} annotated designs)")
+    return pd.merge(df, ep_sub, on="binder_id", how="left")
+
+
 _QC_PANEL_COLS = (
     "qc_pass",
     "qc_fail_reasons",
@@ -640,6 +845,21 @@ def add_parser(subparsers) -> None:
         help="Optional: output from 'qc-annotate' (BindCraft interface panel for a shortlist). "
         "Adds advisory qc_pass / qc_fail_reasons / interface_* columns joined by binder_id. "
         "Advisory only — never reorders or drops designs.",
+    )
+    p.add_argument(
+        "--epitope-results",
+        metavar="CSV",
+        help="Optional: output from 'epitope' (per-design overlap with intended hotspots). "
+        "Adds advisory epitope_match_fraction + epitope_status columns joined by binder_id. "
+        "Critical for serpins / multi-pocket targets where high iPTM doesn't guarantee the "
+        "right epitope. Advisory only — never reorders or drops designs.",
+    )
+    p.add_argument(
+        "--diversity-results",
+        metavar="CSV",
+        help="Optional: output from 'diversity' (sequence-similarity clustering into families). "
+        "Adds advisory family_id + family_size + family_rank columns. Surfaces a 'Top per "
+        "family' recommendation block in the report — never reorders or drops the main rank.",
     )
     p.add_argument(
         "--esmfold2-results",
@@ -736,5 +956,31 @@ def add_parser(subparsers) -> None:
         action="append",
         help="Directory containing a tool's original design PDBs/CIFs for 3D viewer in the "
         "native top-10 section. Must be used with matching --tool-csv. Can be repeated.",
+    )
+    # Item 3: per-tool extractor-metadata overrides for the fairness banner.
+    p.add_argument(
+        "--tool-meta",
+        metavar="TOOL=KEY:VALUE[;KEY:VALUE]",
+        action="append",
+        help="Override the per-tool fairness banner (e.g. mark a pool as pre-filtered). "
+        "Keys: pool_pre_filtered (true|false), source_csv (filename), notes (string). "
+        "Example: --tool-meta protein_hunter='pool_pre_filtered:true;source_csv:summary_high_iptm.csv'. "
+        "If absent, the static defaults in comparison.tool_classification apply.",
+    )
+    # Item 6: run provenance (engine versions / checkpoints / seeds for the footer).
+    p.add_argument(
+        "--engine-versions",
+        metavar="FILE",
+        help="JSON or YAML file mapping engine name → version/checkpoint string "
+        "(e.g. boltz: 2024.08, af3: v3.0.2, esmfold2: full). Rendered in the report footer.",
+    )
+    # Item 12_orig (Phase 4): coordinate externalisation. Wired here so the
+    # CLI surface is stable from Phase 2 onward; the implementation lives in
+    # generate_report (Phase 4).
+    p.add_argument(
+        "--lightweight",
+        action="store_true",
+        help="Skip the inline 3D viewer (top-20 NGL coords stay in PDB files in top20_structures/, "
+        "but no embedded base64). Cuts ~5 MB from the HTML for large pools.",
     )
     p.set_defaults(func=run)
