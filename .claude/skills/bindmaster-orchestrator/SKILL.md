@@ -1,6 +1,6 @@
 ---
 name: bindmaster-orchestrator
-description: Use this skill when planning, dispatching, and evaluating a BindMaster binder-design campaign. Triggers include any mention of orchestrating a binder campaign, deciding which design tool to run on which target, writing kickoff docs for compute nodes, managing PROGRESS.md state across machines, or running the cross-engine refold + iPSAE merge after results return. Use whenever the user says "let's start a campaign on <target>", "what should we run next", "which tool fits this target", "merge the results", "evaluate the pool", or refers to BindMaster, ApoE4 binders, CBG binders, 2VDY, or similar binder-design contexts. The sibling skill `bindmaster-worker` handles the per-machine execution layer.
+description: Use this skill when planning, dispatching, and evaluating a BindMaster binder-design campaign. Triggers include any mention of orchestrating a binder campaign, deciding which design tool to run on which target, writing kickoff docs for compute nodes, deploying or checking jobs directly on the Clara (CIIRC) cluster over ssh, managing PROGRESS.md state across machines, or running the cross-engine refold + iPSAE merge after results return. Use whenever the user says "let's start a campaign on <target>", "what should we run next", "which tool fits this target", "deploy/run/check a job on Clara", "merge the results", "evaluate the pool", or refers to BindMaster, ApoE4 binders, CBG binders, 2VDY, or similar binder-design contexts. When this machine has direct ssh access to Clara, the orchestrator can deploy and monitor Clara jobs itself (see references/clara-deploy.md); otherwise it hands off to the sibling skill `bindmaster-worker` which handles the per-machine execution layer.
 ---
 
 # BindMaster Campaign Orchestration — SKILL base
@@ -27,12 +27,14 @@ Workers report back via:
 - `RESULTS/<tool>_<machine>.tar.gz` (final outputs, packaged)
 - PROGRESS.md "Worker updates" appends (with SLURM IDs, wall-clocks, yield counts)
 
-**The orchestrator runs on Spark.** The three cross-engine refolders (Boltz-2, Protenix, AlphaFold 3) all have their conda envs on Spark — refolding is done locally as code, not dispatched as jobs. Design tools that need bigger GPUs or specific architectures run on remote workers (BM2, BM4, Clara, …) and ship tarballs back to RESULTS/ on muni-disk.
+**The orchestrator runs on Spark (or any workstation with the refold envs).** The three cross-engine refolders (Boltz-2, Protenix, AlphaFold 3) all have their conda envs on Spark — refolding is done locally as code, not dispatched as jobs. Design tools that need bigger GPUs or specific architectures run on remote workers (BM2, BM4, Clara, …) and ship tarballs back to RESULTS/ on muni-disk.
+
+**Dispatch to Clara can be direct.** When the orchestrator machine has non-interactive `ssh clara` access (passphrase-less key; `ssh clara "true"` succeeds without a prompt), "dispatch a job to Clara" does **not** have to mean writing a handoff doc and waiting for a separate worker — the orchestrator can drive Clara itself over SSH, running the full worker loop (pre-flight → deploy scripts → submit → monitor → package → transfer) remotely inside its own session. The orchestrator and worker roles collapse into one operator for Clara-bound work. Whether *this* machine has that access, and the machine-specific setup (VPN, DNS pin, key, alias), lives in the repo-root `CLAUDE.local.md`; the operational playbook is `references/clara-deploy.md`. If `ssh clara` isn't set up here, fall back to the handoff-doc model below.
 
 **The orchestrator's job is:**
 1. Read PROGRESS.md and CLUSTER/ to know the current state.
 2. Decide what to run next (which tools on which machines, what settings).
-3. Draft per-machine assignments in CLUSTER/.
+3. Draft per-machine assignments in CLUSTER/ — and, for Clara when this machine has direct SSH, deploy and run them itself (`references/clara-deploy.md`).
 4. Track work as it lands, merge worker updates into PROGRESS.md.
 5. After tarballs return, run cross-engine refold + iPSAE merge locally on Spark (see `references/evaluation.md`).
 6. Recognize when to kill, scale, pivot, or stop.
@@ -206,6 +208,8 @@ Worker side (the per-machine Claude, the orchestrator driving a remote session, 
 1. Pre-flight checks (env present, GPU available, disk free).
 2. Set up: source env, register target, generate sbatch/run script.
 3. Submit. Append a started-entry to PROGRESS.md "Worker updates" with SLURM ID and 🔄.
+
+**Direct-deploy shortcut (Clara).** When this machine has `ssh clara` access, the orchestrator performs the worker-side steps above itself over SSH — deploy the scripts (`scp` or heredoc), submit, monitor, package, transfer — without a separate worker or a Worker-updates handshake (you own both role's PROGRESS.md sections). Full loop, command patterns, and direct-deploy-specific failure modes: `references/clara-deploy.md`. Still write the kickoff doc in `CLUSTER/` for any campaign-significant run (durable record of why/how), then execute it yourself.
 
 ### Phase 2 — Monitor
 
@@ -529,6 +533,8 @@ Don't let the campaign drift past these. The wet-lab cost dominates total projec
 - `references/tools/README.md` — cross-method bias matrix, philosophy, file index
 - `references/learnings.md` — empirical campaign lessons (formerly §9), distilled from 2VDY and earlier
 - `references/evaluation.md` — local cross-engine refold + iPSAE merge + ranking recipe (refolders called as code on Spark)
+- `references/clara-deploy.md` — direct-deploy playbook: driving the Clara cluster over `ssh clara` (pre-flight → deploy → submit → monitor → package → transfer) when this machine has SSH access, instead of handing off to a separate worker
+- `CLAUDE.local.md` (repo root, machine-local / gitignored) — whether *this* machine has direct Clara SSH, and its access setup (VPN, DNS pin, key, alias). Also `docs/local/*-Manual.md` when present: the full Clara/Slurm per-tool operating manuals
 - `references/autosize.md` — the `binder-compare autosize` adaptive sampling loop (equal-N per tool, budget caps, ESMFold2 gate); how the target-analyst dossier sets `--n-target`/`--tier`/`tools`
 - **Sibling skills** (the campaign lifecycle): `bindmaster-target-analyst` (research a target → dossier, upstream), `bindmaster-evaluator` (refold → two-stage rank → affinity → QC), `bindmaster-wetlab` (plan + maturation, closes the loop), `bindmaster-worker` (per-machine execution)
 - `CLAUDE.md` (BindMaster repo root) — codebase reference, design decisions, conventions, per-tool gotchas
