@@ -21,6 +21,10 @@ install*.log
 .claude/*
 !.claude/skills/
 
+# Machine-local Claude Code notes (per-workstation setup, IPs, key paths) — never shared
+CLAUDE.local.md
+docs/local/
+
 # Docker build cache / test artifacts
 .docker-iidfile
 
