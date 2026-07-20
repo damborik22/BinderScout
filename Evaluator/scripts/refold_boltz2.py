@@ -387,8 +387,12 @@ def refold_batch(
                 chains=[
                     TargetChain(sequence=seq_str, use_msa=False),  # binder: de novo, no MSA
                     TargetChain(
+                        # Co-fold (no template) needs the target MSA; template mode
+                        # already fixes the target backbone, so skip the MSA fetch —
+                        # this keeps template-mode refolds runnable on offline compute
+                        # nodes (e.g. Clara) where the ColabFold MSA server is unreachable.
                         sequence=target_sequence,
-                        use_msa=True,
+                        use_msa=target_template_chain is None,
                         template_chain=target_template_chain,
                     ),
                 ],
