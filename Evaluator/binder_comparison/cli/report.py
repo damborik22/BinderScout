@@ -209,6 +209,14 @@ def run(args: argparse.Namespace) -> None:
     if getattr(args, "diversity_results", None):
         df = _attach_diversity_results(df, args.diversity_results)
 
+    # beta-check: binder→target β-sheet intercalation (β-augmentation), from DSSP
+    # cross-chain bridges. Joined by binder_id; adds n_xbridge + beta_intercalates.
+    # With --exclude-intercalators this DROPS the flagged designs — the one advisory
+    # allowed to drop, because a strand threaded into a folded target's sheet is
+    # non-physical (a design artifact), not merely weak.
+    if getattr(args, "beta_results", None):
+        df = _attach_beta_results(df, args.beta_results, exclude=getattr(args, "exclude_intercalators", False))
+
     # Step 2: Promote Boltz-2 as primary predictor
     print("[report] Promoting Boltz-2 metrics as primary…")
     df = compute_ensemble_metrics(df)
@@ -772,6 +780,42 @@ def _attach_epitope_results(df: pd.DataFrame, epitope_csv: str) -> pd.DataFrame:
     return pd.merge(df, ep_sub, on="binder_id", how="left")
 
 
+_BETA_COLS = ("n_xbridge", "n_xbridge2", "beta_intercalates")
+
+
+def _attach_beta_results(df: pd.DataFrame, beta_csv: str, exclude: bool = False) -> pd.DataFrame:
+    """Left-join the beta-check CSV by binder_id. Advisory unless *exclude* — then
+    DROP designs flagged ``beta_intercalates=true`` (binder strand threaded into
+    the target β-sheet; non-physical)."""
+    path = Path(beta_csv)
+    if not path.exists():
+        print(f"[report] WARNING: --beta-results file not found: {path}; skipping.")
+        return df
+    try:
+        b_df = pd.read_csv(path)
+    except (OSError, pd.errors.ParserError) as exc:
+        print(f"[report] WARNING: could not read --beta-results {path}: {exc}")
+        return df
+    id_col = next((c for c in ("binder_id", "design_id", "id") if c in b_df.columns), None)
+    if id_col is None:
+        print(f"[report] WARNING: --beta-results {path} has no id column; skipping.")
+        return df
+    keep = [id_col] + [c for c in _BETA_COLS if c in b_df.columns]
+    b_sub = b_df[keep].rename(columns={id_col: "binder_id"}).copy()
+    b_sub["binder_id"] = b_sub["binder_id"].astype(str)
+    df = df.copy()
+    df["binder_id"] = df["binder_id"].astype(str)
+    df = pd.merge(df, b_sub, on="binder_id", how="left")
+    flagged = df["beta_intercalates"].astype(str).str.lower() == "true" if "beta_intercalates" in df.columns else None
+    if exclude and flagged is not None:
+        before = len(df)
+        df = df[~flagged].reset_index(drop=True)
+        print(f"[report] beta-check: EXCLUDED {before - len(df)} intercalating designs → {len(df)} remain")
+    elif flagged is not None:
+        print(f"[report] beta-check: {int(flagged.sum())} intercalating designs flagged (advisory — not dropped)")
+    return df
+
+
 _QC_PANEL_COLS = (
     "qc_pass",
     "qc_fail_reasons",
@@ -861,6 +905,18 @@ def add_parser(subparsers) -> None:
         help="Optional: output from 'diversity' (sequence-similarity clustering into families). "
         "Adds advisory family_id + family_size + family_rank columns. Surfaces a 'Top per "
         "family' recommendation block in the report — never reorders or drops the main rank.",
+    )
+    p.add_argument(
+        "--beta-results",
+        metavar="CSV",
+        help="Optional: output from 'beta-check' (binder→target β-sheet intercalation flag via DSSP). "
+        "Adds advisory n_xbridge + beta_intercalates columns joined by binder_id.",
+    )
+    p.add_argument(
+        "--exclude-intercalators",
+        action="store_true",
+        help="With --beta-results: DROP designs flagged as intercalating (binder strand threaded into the "
+        "target β-sheet — non-physical β-augmentation). Off by default (advisory).",
     )
     p.add_argument(
         "--esmfold2-results",
