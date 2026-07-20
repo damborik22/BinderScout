@@ -21,6 +21,7 @@ from .cli import (
     affinity,
     analyze_target,
     autosize,
+    beta_check,
     diversity,
     epitope,
     epitope_map,
@@ -73,6 +74,7 @@ def main(argv=None) -> None:
     qc_annotate.add_parser(subparsers)
     analyze_target.add_parser(subparsers)
     epitope_map.add_parser(subparsers)
+    beta_check.add_parser(subparsers)
     epitope.add_parser(subparsers)
     diversity.add_parser(subparsers)
 
