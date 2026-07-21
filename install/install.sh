@@ -44,6 +44,13 @@ FOUNDRY_REPO="https://github.com/RosettaCommons/foundry.git"
 FOUNDRY_COMMIT="v0.1.9"
 FOUNDRY_DIR="${BINDMASTER_DIR}/Foundry"
 FOUNDRY_WEIGHTS_DIR="${BINDMASTER_DIR}/weights/foundry"
+# AlphaFold 3 (DeepMind, Evaluator refolding). NOT a real PyPI package — the
+# "alphafold3" name on PyPI is an unrelated stub (v0.0.x). Installed from the
+# official repo (pinned); refold_af3.py resolves run_alphafold.py at ${AF3_DIR}
+# by default (or $AF3_REPO_DIR). alphafold3/ is gitignored.
+AF3_REPO="https://github.com/google-deepmind/alphafold3"
+AF3_COMMIT="fd39d2c5dcaadfc7333c3466951b27563fa7d6fa"  # v3.0.3.dev, compatible with the v3.0.2 weights
+AF3_DIR="${BINDMASTER_DIR}/alphafold3"
 
 CONDA_CMD=""          # set by detect_conda: full path to mamba (preferred) or conda
 ARCH="$(uname -m)"   # x86_64 or aarch64 (e.g. DGX Spark / Grace-Hopper)
@@ -2106,17 +2113,48 @@ install_af3() {
             || { print_fail "Failed to create binder-eval-af3 conda env"; return 1; }
     fi
 
-    # Install AF3 producer + gemmi (structure I/O used by refold_af3.py)
-    run_logged "Installing alphafold3 + gemmi into binder-eval-af3" \
-        "${CONDA_CMD}" run -n binder-eval-af3 pip install -q alphafold3 gemmi \
-        || { print_fail "Failed to install alphafold3 + gemmi (check PyPI access)"; return 1; }
+    # Install AlphaFold 3 from source. The "alphafold3" PyPI package is an unrelated
+    # stub (v0.0.x) — the genuine DeepMind AF3 ships only via its repo (source build)
+    # or Docker. Recipe (verified on Clara H200, 2026-07-15):
+    #   clone (pinned) -> pip install (pulls jax==0.9.1 + gemmi + deps, builds C++)
+    #   -> build_data (generates the CCD chemical_component_sets.pickle AF3 needs).
+    if [[ -d "${AF3_DIR}/.git" ]]; then
+        print_warn "alphafold3 repo already present at ${AF3_DIR} — fetching + re-pinning to ${AF3_COMMIT}."
+        run_logged "Re-pinning alphafold3 to ${AF3_COMMIT}" \
+            bash -c "cd '${AF3_DIR}' && git fetch --quiet origin && git checkout '${AF3_COMMIT}'" \
+            || { print_fail "Failed to checkout alphafold3 ${AF3_COMMIT}"; return 1; }
+    elif [[ -e "${AF3_DIR}" ]]; then
+        print_fail "${AF3_DIR} exists but is not a git repo — remove it and retry."; return 1
+    else
+        run_logged "Cloning alphafold3" \
+            git clone "${AF3_REPO}" "${AF3_DIR}" \
+            || { print_fail "Failed to clone alphafold3 (network / GitHub access?)"; return 1; }
+        run_logged "Pinning alphafold3 to ${AF3_COMMIT}" \
+            bash -c "cd '${AF3_DIR}' && git checkout '${AF3_COMMIT}'" \
+            || { print_fail "Failed to checkout alphafold3 ${AF3_COMMIT}"; return 1; }
+    fi
+
+    run_logged "Building + installing AlphaFold 3 from source (jax 0.9.1 + gemmi)" \
+        "${CONDA_CMD}" run -n binder-eval-af3 pip install -q "${AF3_DIR}" gemmi \
+        || { print_fail "Failed to build/install AlphaFold 3 (jax 0.9.1 + C++ build)"; return 1; }
+
+    run_logged "Building AF3 chemical-component data (build_data)" \
+        "${CONDA_CMD}" run -n binder-eval-af3 build_data \
+        || { print_fail "Failed to run AF3 build_data (CCD pickle)"; return 1; }
 
     # Install binder-compare into the env so 'binder-compare refold-af3' works
     run_logged "Installing binder-compare into binder-eval-af3" \
         "${CONDA_CMD}" run -n binder-eval-af3 pip install -q -e "${EVALUATOR_DIR}[report]" \
         || { print_fail "Failed to install binder-compare into binder-eval-af3"; return 1; }
 
-    # Smoke test — just the CLI parses (no weights needed for --help)
+    # Smoke test — verify the REAL AF3 actually imports (the old --help-only test
+    # passed even against the broken PyPI stub, which imports nothing) and that
+    # run_alphafold.py is present.
+    smoke_test "AF3 producer imports (alphafold3 + jax)" \
+        "${CONDA_CMD}" run -n binder-eval-af3 python -c "import alphafold3, jax" \
+        || { print_fail "AF3 producer import failed — install did not build the real AF3"; return 1; }
+    [[ -f "${AF3_DIR}/run_alphafold.py" ]] \
+        || { print_fail "AF3 install incomplete: ${AF3_DIR}/run_alphafold.py missing"; return 1; }
     smoke_test "binder-compare refold-af3 --help" \
         "${CONDA_CMD}" run -n binder-eval-af3 binder-compare refold-af3 --help \
         || return 1
@@ -2513,6 +2551,7 @@ uninstall_tool() {
             env_exists binder-eval-af3 && run_logged "Removing binder-eval-af3 conda env" \
                 "${CONDA_CMD}" env remove -n binder-eval-af3 -y
             rm -f "${SHORTCUTS_DIR}/af3"
+            [[ -d "${AF3_DIR}" ]] && { rm -rf "${AF3_DIR}"; print_ok "Removed ${AF3_DIR}"; }
             print_warn "AF3 model weights (if any) at ~/.alphafold3/models or \$AF3_MODEL_DIR were NOT removed."
             print_ok "AF3 refolder uninstalled"
             ;;
