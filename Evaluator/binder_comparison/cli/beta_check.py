@@ -61,7 +61,9 @@ def run(args: argparse.Namespace) -> None:
         w.writerows(rows)
     print(
         f"[beta-check] {out}: {len(rows) - n_fail} scored, {n_fail} unscored (no {args.pdb_col}); "
-        f"{n_inter} intercalating (min_xbridge={args.min_xbridge} or both-side≥{args.min_both_side}).",
+        f"{n_inter} intercalating (both-side≥{args.min_both_side}"
+        + (f" or single-side≥{args.min_xbridge}" if args.min_xbridge is not None else "")
+        + ").",
         file=sys.stderr,
     )
 
@@ -79,9 +81,11 @@ def add_parser(subparsers) -> None:
     p.add_argument("--pdb-col", default="af3_pdb", help="Column holding the complex PDB path (default af3_pdb).")
     p.add_argument("--target-chain", default="A", metavar="CH", help="Target chain (default A for AF3).")
     p.add_argument("--binder-chain", default="B", metavar="CH", help="Binder chain (default B for AF3).")
-    p.add_argument(
-        "--min-xbridge", type=int, default=3, help="Intercalating if ≥ this many binder residues bridge the target."
-    )
-    p.add_argument("--min-both-side", type=int, default=2, help="Or ≥ this many bridged on both sides (interior).")
+    p.add_argument("--min-both-side", type=int, default=2,
+                   help="Intercalating if ≥ this many binder residues β-bridge the target on BOTH sides "
+                        "(interior threading; the mechanistic augmentation signal). Default 2.")
+    p.add_argument("--min-xbridge", type=int, default=None,
+                   help="Opt-in: also flag if ≥ this many residues bridge on one side (edge contacts). "
+                        "Off by default — edge β-pairing is a normal binding mode, not augmentation.")
     p.add_argument("--output", "-o", required=True, metavar="CSV", help="Output CSV (joinable by binder_id).")
     p.set_defaults(func=run)

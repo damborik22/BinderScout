@@ -83,12 +83,18 @@ def count_cross_chain_bridges(
     return (n1, n2, binder_res)
 
 
-def is_intercalating(n_xbridge: int, n_xbridge2: int, *, min_xbridge: int = 3, min_both_side: int = 2) -> bool:
-    """True when the binder threads a strand into the target sheet.
+def is_intercalating(n_xbridge: int, n_xbridge2: int, *, min_both_side: int = 2, min_xbridge: int | None = None) -> bool:
+    """True when the binder threads a strand INTO the target sheet (interior intercalation).
 
-    Default rule: ≥ ``min_xbridge`` binder residues β-bridged to the target, OR
-    ≥ ``min_both_side`` bridged on both sides (interior intercalation).
+    A residue counted in ``n_xbridge2`` is β-bridged to the target on *both* sides — i.e.
+    inserted between two target strands. That two-sided ladder is the mechanistic signature
+    of β-augmentation. One-sided (edge) β-contacts counted in ``n_xbridge`` are a normal
+    binding mode, NOT augmentation (a handful of scattered edge bridges on a long binder, or
+    even a short edge-paired strand, does not thread the sheet), so the legacy single-sided
+    trigger is opt-in only: pass ``min_xbridge`` to re-enable it; by default it is off.
     """
     if n_xbridge < 0:
         return False  # unknown (DSSP failed) — don't drop on missing data
-    return n_xbridge >= min_xbridge or n_xbridge2 >= min_both_side
+    if n_xbridge2 >= min_both_side:
+        return True
+    return min_xbridge is not None and n_xbridge >= min_xbridge
