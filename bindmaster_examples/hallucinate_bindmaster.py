@@ -18,7 +18,7 @@ from mosaic.losses.protein_mpnn import InverseFoldingSequenceRecovery
 from mosaic.losses.transformations import ClippedLoss, NoCys
 from mosaic.proteinmpnn.mpnn import load_mpnn_sol
 from mosaic.structure_prediction import TargetChain
-from mosaic.optimizers import simplex_APGM
+from mosaic.optimizers import batched_simplex_APGM
 
 # Offline-only resolver for the cached target MSA (never contacts a server).
 # Present when the Evaluator (binder_comparison) is installed in this venv;
@@ -45,6 +45,12 @@ except Exception:
 ESM2_WEIGHT = 0.3  # weight of the ESM2 PLL term added to the design loss; 0.0 disables it
 ESM2_MODEL = "esm2_t30_150M_UR50D"  # fair-esm model id (150M: balances signal vs per-step O(N) cost)
 ESM2_CLIP = (2.0, 100.0)  # ClippedLoss bounds — guards against over-optimization into homopolymers
+
+# --- Batched design settings ---
+# Seeds optimized in parallel per GPU pass (one vmap'd batched_simplex_APGM call).
+# GPU memory scales ~linearly with the batch; the ESM2 prior adds more pressure —
+# drop to 2 (or disable ESM2) if you OOM on a 24 GB card.
+DESIGN_BATCH_SIZE = 4
 
 
 # ============================
@@ -419,15 +425,20 @@ def design(
     # --------------------------
     # Stage 1: optimize, rank
     # --------------------------
-    def design_one(design_idx):
-        print(f"[{design_idx + 1}/{n_designs}] designing...")
-        _pssm = np.random.uniform(low=0.25, high=0.75) * jax.random.gumbel(
-            key=jax.random.key(np.random.randint(10000000)),
-            shape=(binder_length, 19),
-        )
-        _, pssm = simplex_APGM(
+    def _optimize_batch(batch_size):
+        """Optimize `batch_size` seeds in parallel (one GPU pass, vmap'd) through the
+        3-phase simplex schedule. Returns a list of binder sequence strings.
+
+        GPU memory scales with batch_size (each seed holds a live Boltz-2 forward
+        pass, and the ESM2 prior adds more) — tune DESIGN_BATCH_SIZE, not this call.
+        """
+        keys = jax.random.split(jax.random.key(np.random.randint(10000000)), batch_size)
+        scales = np.random.uniform(low=0.25, high=0.75, size=(batch_size, 1, 1))
+        _pssm = scales * jax.vmap(lambda k: jax.random.gumbel(k, shape=(binder_length, 19)))(keys)
+        x = jax.nn.softmax(_pssm, axis=-1)
+        _, pssm = batched_simplex_APGM(
             loss_function=loss,
-            x=jax.nn.softmax(_pssm),
+            x=x,
             n_steps=100,
             stepsize=0.2 * np.sqrt(binder_length),
             momentum=0.3,
@@ -435,7 +446,7 @@ def design(
             logspace=False,
             max_gradient_norm=1.0,
         )
-        pssm, _ = simplex_APGM(
+        pssm, _ = batched_simplex_APGM(
             loss_function=loss,
             x=jnp.log(pssm + 1e-5),
             n_steps=50,
@@ -445,7 +456,7 @@ def design(
             logspace=True,
             max_gradient_norm=1.0,
         )
-        pssm, _ = simplex_APGM(
+        pssm, _ = batched_simplex_APGM(
             loss_function=loss,
             x=jnp.log(pssm + 1e-5),
             n_steps=15,
@@ -455,11 +466,15 @@ def design(
             logspace=True,
             max_gradient_norm=1.0,
         )
+        seqs = []
+        for b in range(batch_size):
+            tokens = NoCys.sequence(pssm[b]).argmax(-1)
+            seqs.append("".join(TOKENS[i] for i in tokens))
+        return seqs
 
-        pssm = NoCys.sequence(pssm)
-        seq = pssm.argmax(-1)
-        seq_str = "".join(TOKENS[i] for i in seq)
-
+    def _rank_seq(seq_str):
+        """Re-fold a designed sequence and score it for the Stage-1 relative sort."""
+        seq = jnp.array([TOKENS.index(c) for c in seq_str])
         # Stage-1 ranking: MSA-free for binder AND target (free generation, cheap
         # relative sort; target anchored by the template when provided). To also use
         # the cached target MSA here (D1 toggle), mirror the Stage-2 target chain below.
@@ -476,8 +491,6 @@ def design(
             num_samples=6,
         )
         loss_value, _ = evaluate_loss(ranking_loss, jax.nn.one_hot(seq, 20), key=jax.random.key(0))
-
-        print(f"  ranking_loss={loss_value.item():.4f}  seq={seq_str}")
         return seq_str, loss_value.item()
 
     print(f"\n=== Stage 1: Generating {n_designs} designs ===")
@@ -492,9 +505,15 @@ def design(
             print(f"    ... and {len(candidates) - 5} more")
     else:
         candidates = candidates_ref
-        for i in range(n_designs):
-            seq, loss_value = design_one(i)
-            candidates.append((seq, loss_value))
+        n_done = 0
+        while n_done < n_designs:
+            this_batch = min(DESIGN_BATCH_SIZE, n_designs - n_done)
+            print(f"\n[batch {n_done + 1}-{n_done + this_batch}/{n_designs}] optimizing {this_batch} seed(s) in parallel...")
+            for seq_str in _optimize_batch(this_batch):
+                seq_str, loss_value = _rank_seq(seq_str)
+                candidates.append((seq_str, loss_value))
+                print(f"  [{len(candidates)}/{n_designs}] ranking_loss={loss_value:.4f}  seq={seq_str}")
+            n_done += this_batch
 
         candidates = sorted(candidates, key=lambda x: x[1])
         _interrupt_state["candidates"] = candidates
