@@ -25,7 +25,7 @@ EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
 # Pinned commits for reproducible installs (x86_64 clones only; aarch64 uses bundled)
 BINDCRAFT_COMMIT="7cd4ace"
 BOLTZGEN_COMMIT="da0f092"
-MOSAIC_COMMIT="0599248"
+MOSAIC_COMMIT="82593a8"
 
 PXDESIGN_REPO="https://github.com/bytedance/PXDesign.git"
 PXDESIGN_COMMIT="HEAD"
@@ -1015,15 +1015,16 @@ install_mosaic() {
     fi
     print_ok "uv is available: $(command -v uv)"
 
-    # Patch: pin grpcio-tools>=1.60 in override-dependencies.
-    # Mosaic 0599248+ pulls flax 0.12.7 → orbax-checkpoint 0.11.37 → grpcio-tools==1.48.2,
-    # whose setup.py imports pkg_resources without declaring setuptools as a build dep.
-    # uv 0.5+ strict isolation rejects that, so the build fails with ModuleNotFoundError.
-    # Forcing a modern grpcio-tools (which declares its build deps correctly) avoids it.
-    local mosaic_pyproject="${MOSAIC_DIR}/pyproject.toml"
-    if [[ -f "${mosaic_pyproject}" ]] && ! grep -q "grpcio-tools" "${mosaic_pyproject}"; then
-        sed -i 's/^\(override-dependencies = \[[^]]*\)\]/\1, "grpcio-tools>=1.60"]/' "${mosaic_pyproject}" \
-            && print_ok "Patched Mosaic pyproject.toml: override grpcio-tools>=1.60"
+    # Offline-MSA support: upstream Mosaic lacks TargetChain.msa_path, which our
+    # Boltz-2 refolds AND the hallucination template rely on to feed a cached
+    # target .a3m on air-gapped nodes. Re-apply our source patch after clone
+    # (idempotent — skipped if already present). The old grpcio-tools override is
+    # obsolete: upstream removed override-dependencies at this pin (uv sync resolves).
+    local msa_patch="${BINDMASTER_DIR}/install/patches/mosaic-offline-msa.patch"
+    if [[ -f "${msa_patch}" ]] && ! grep -q "msa_path" "${MOSAIC_DIR}/src/mosaic/structure_prediction.py" 2>/dev/null; then
+        git -C "${MOSAIC_DIR}" apply "${msa_patch}" \
+            && print_ok "Applied offline-MSA patch (TargetChain.msa_path)" \
+            || print_warn "Offline-MSA patch failed to apply — offline target MSA disabled"
     fi
 
     # Create virtual environment with JAX CUDA support

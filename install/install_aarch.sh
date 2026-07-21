@@ -32,7 +32,7 @@ AF3_DIR="${BINDMASTER_DIR}/alphafold3"
 # Pinned commits for reproducible installs (same as x86_64)
 BINDCRAFT_COMMIT="7cd4ace"
 BOLTZGEN_COMMIT="da0f092"
-MOSAIC_COMMIT="dc9c4d7"
+MOSAIC_COMMIT="82593a8"
 
 PXDESIGN_REPO="https://github.com/bytedance/PXDesign.git"
 PXDESIGN_COMMIT="HEAD"
@@ -1180,6 +1180,14 @@ _patch_mosaic_pyproject() {
     else
         print_ok "Mosaic pyproject.toml: esmj already has aarch64 exclusion"
     fi
+
+    # Mosaic 82593a8 pins required-environments to x86_64, which breaks uv
+    # resolution on aarch64. Strip it so uv resolves for this platform.
+    # UNTESTED on DGX Spark — verify uv sync resolves after this.
+    if grep -q 'required-environments' "${toml}"; then
+        sed -i '/required-environments = /d' "${toml}"
+        print_ok "Removed required-environments x86_64 pin (aarch64 resolution)"
+    fi
 }
 
 install_mosaic() {
@@ -1219,6 +1227,15 @@ install_mosaic() {
     print_ok "uv: $(command -v uv)"
 
     _patch_mosaic_pyproject
+
+    # Offline-MSA support: re-apply TargetChain.msa_path patch (upstream lacks it;
+    # our refolds + hallucination template need it). Idempotent.
+    local msa_patch="${BINDMASTER_DIR}/install/patches/mosaic-offline-msa.patch"
+    if [[ -f "${msa_patch}" ]] && ! grep -q "msa_path" "${MOSAIC_DIR}/src/mosaic/structure_prediction.py" 2>/dev/null; then
+        git -C "${MOSAIC_DIR}" apply "${msa_patch}" \
+            && print_ok "Applied offline-MSA patch (TargetChain.msa_path)" \
+            || print_warn "Offline-MSA patch failed to apply — offline target MSA disabled"
+    fi
 
     run_logged "Setting up Mosaic venv (uv sync --group jax-cuda)" \
         bash -c "cd '${MOSAIC_DIR}' && uv sync --group jax-cuda" \

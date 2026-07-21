@@ -1,0 +1,32 @@
+diff --git a/src/mosaic/models/boltz2.py b/src/mosaic/models/boltz2.py
+index 1ce98b9..3892090 100644
+--- a/src/mosaic/models/boltz2.py
++++ b/src/mosaic/models/boltz2.py
+@@ -46,7 +46,11 @@ def chain_yaml(chain_name: str, chain: TargetChain) -> str:
+     raw = f"""  - {chain.polymer_type.lower()}:
+         id: [{chain_name}]
+         sequence: {chain.sequence}"""
+-    if not chain.use_msa:
++    if chain.msa_path:
++        # Precomputed a3m — Boltz uses it directly, no online MSA-server fetch.
++        raw += f"""
++        msa: {chain.msa_path}"""
++    elif not chain.use_msa:
+         raw += """
+         msa: empty"""
+ 
+diff --git a/src/mosaic/structure_prediction.py b/src/mosaic/structure_prediction.py
+index cc20549..1a2bc9b 100644
+--- a/src/mosaic/structure_prediction.py
++++ b/src/mosaic/structure_prediction.py
+@@ -26,6 +26,10 @@ class TargetChain:
+     polymer_type: str = PolymerType.PROTEIN
+     use_msa: bool = True
+     template_chain: gemmi.Chain | None = None
++    # Path to a precomputed .a3m MSA. When set it is written into the Boltz
++    # input YAML directly (no online MSA-server fetch) — lets template/co-fold
++    # refolds use the target MSA on offline compute nodes. Overrides use_msa.
++    msa_path: str | None = None
+ 
+ 
+ class StructurePrediction(eqx.Module):
