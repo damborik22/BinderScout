@@ -372,6 +372,35 @@ def extract_sequence_from_pdb(pdb_path: str, chain_id: str) -> str | None:
     return "".join(seen.values()) if seen else None
 
 
+def pdb_chain_residue_numbers(pdb_path: str, chain_id: str) -> list[int]:
+    """Ordered residue numbers for CA atoms of chain_id.
+
+    Parallels extract_sequence_from_pdb: element i here is residue i of that
+    sequence, so it maps a hotspot residue number to its 0-based sequence index.
+    """
+    out: list[int] = []
+    seen: set = set()
+    try:
+        with open(Path(pdb_path).expanduser()) as f:
+            for line in f:
+                if line[:4] != "ATOM":
+                    continue
+                if line[12:16].strip() != "CA":
+                    continue
+                if line[21].strip().upper() != chain_id.upper():
+                    continue
+                key = (line[22:26].strip(), line[26].strip())
+                if key not in seen:
+                    seen.add(key)
+                    try:
+                        out.append(int(line[22:26]))
+                    except ValueError:
+                        out.append(-1)
+    except OSError:
+        return []
+    return out
+
+
 def _cif_tokenize(text: str) -> list:
     """Tokenize an mmCIF file into a flat list of string tokens.
 
@@ -866,6 +895,35 @@ def copy_nanobody_scaffolds(dest_dir: Path):
             shutil.copy2(src, dest_dir / f"{name}{ext}")
 
 
+def hotspots_to_epitope_idx(cfg: dict) -> list[int] | None:
+    """Map configured hotspot residue numbers to 0-based indices into the Mosaic
+    target sequence (what BinderTargetContact.epitope_idx expects).
+
+    Prefers the target PDB residue order (His-tag/offset safe: the PDB-derived
+    sequence is located within target_sequence to recover any N-terminal offset).
+    Falls back to treating hotspots as 1-based positions in target_sequence when
+    no PDB is available. Returns None when no hotspots are configured.
+    """
+    hotspots_str = cfg.get("mosaic_hotspots", "") or cfg.get("hotspots", "") or ""
+    hotspot_list = parse_hotspots(hotspots_str) if hotspots_str.strip() else []
+    if not hotspot_list:
+        return None
+    target_seq = cfg.get("target_sequence", "") or ""
+    target_pdb = str(cfg.get("target_pdb", "") or "")
+    chain = cfg.get("target_chain") or cfg.get("chain") or "A"
+    resnums = pdb_chain_residue_numbers(target_pdb, chain) if target_pdb else []
+    if resnums:
+        pdb_seq = extract_sequence_from_pdb(target_pdb, chain) or ""
+        offset = target_seq.find(pdb_seq) if (pdb_seq and pdb_seq in target_seq) else 0
+        if offset < 0:
+            offset = 0
+        pos = {rn: i for i, rn in enumerate(resnums)}
+        idx = sorted(offset + pos[r] for r in hotspot_list if r in pos)
+    else:
+        idx = sorted(r - 1 for r in hotspot_list if 0 < r <= len(target_seq)) if target_seq else []
+    return idx or None
+
+
 def write_mosaic_hallucinate(path: Path, cfg: dict):
     """
     Copy hallucinate_bindmaster.py and inject run parameters into the
@@ -874,6 +932,7 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
     content = MOSAIC_HALLUCINATE_SRC.read_text()
 
     target_pdb_path = str(cfg.get("target_pdb", ""))
+    epitope_idx = hotspots_to_epitope_idx(cfg)
 
     old_block = (
         'TARGET_SEQUENCE = "REPLACE_ME"  # target protein sequence\n'
@@ -882,7 +941,8 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
         "TOP_K = 5  # Stage 2: how many top designs to refold and export PDB\n"
         "MIN_LENGTH = 65  # minimum binder length (aa)\n"
         "MAX_LENGTH = 100  # maximum binder length (aa)\n"
-        "LENGTH_STEP = 5  # step between scanned lengths; set MIN=MAX for a single length"
+        "LENGTH_STEP = 5  # step between scanned lengths; set MIN=MAX for a single length\n"
+        "EPITOPE_IDX = None  # 0-based target-residue indices the binder must contact (hotspots); None = whole surface"
     )
     new_block = (
         f"TARGET_SEQUENCE = {cfg['target_sequence']!r}  # target protein sequence\n"
@@ -891,7 +951,8 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
         f"TOP_K = {cfg.get('mosaic_top_k', min(5, cfg['n_designs']))}  # Stage 2: how many top designs to refold and export PDB\n"
         f"MIN_LENGTH = {cfg.get('mosaic_min_length', cfg['min_length'])}  # minimum binder length (aa)\n"
         f"MAX_LENGTH = {cfg.get('mosaic_max_length', cfg['max_length'])}  # maximum binder length (aa)\n"
-        f"LENGTH_STEP = {cfg.get('mosaic_length_step', 5)}  # step between scanned lengths; set MIN=MAX for a single length"
+        f"LENGTH_STEP = {cfg.get('mosaic_length_step', 5)}  # step between scanned lengths; set MIN=MAX for a single length\n"
+        f"EPITOPE_IDX = {epitope_idx!r}  # 0-based target-residue indices the binder must contact (hotspots); None = whole surface"
     )
 
     if old_block in content:

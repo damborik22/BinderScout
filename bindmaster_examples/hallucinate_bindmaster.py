@@ -42,6 +42,7 @@ TOP_K = 5  # Stage 2: how many top designs to refold and export PDB
 MIN_LENGTH = 65  # minimum binder length (aa)
 MAX_LENGTH = 100  # maximum binder length (aa)
 LENGTH_STEP = 5  # step between scanned lengths; set MIN=MAX for a single length
+EPITOPE_IDX = None  # 0-based target-residue indices the binder must contact (hotspots); None = whole surface
 
 
 # ============================
@@ -835,6 +836,7 @@ def main():
             output_dir,
             template_chain=template_chain,
             checkpoint_path=ckpt_path,
+            epitope_idx=EPITOPE_IDX,
         )
 
         summary_rows.append(
