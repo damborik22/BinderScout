@@ -1322,6 +1322,19 @@ install_evaluator() {
         uv pip install --python "${MOSAIC_VENV}/bin/python" -q -e "${EVALUATOR_DIR}[boltz2]" \
         || { print_fail "Failed to install binder-compare into Mosaic venv"; return 1; }
 
+    # ESM2 pseudolikelihood expressibility prior for Mosaic hallucination.
+    # fair-esm loads the weights via torch; the PLL runs in JAX/esm2quinox.
+    # Non-fatal — the design template guards a missing ESM2 (fine on aarch64).
+    print_step "Installing fair-esm (ESM2 expressibility prior) into Mosaic venv"
+    run_logged "pip install fair-esm into Mosaic venv" \
+        uv pip install --python "${MOSAIC_VENV}/bin/python" -q fair-esm \
+        || print_warn "fair-esm install failed — Mosaic will run without the ESM2 prior"
+    # Pre-cache the ESM2-150M weights (~566 MB) so offline compute nodes need no
+    # download at design time (cached under ~/.cache/torch/hub/checkpoints). Non-fatal.
+    run_logged "pre-fetch ESM2-150M weights" \
+        "${MOSAIC_VENV}/bin/python" -c "import esm; esm.pretrained.esm2_t30_150M_UR50D()" \
+        || print_warn "ESM2-150M weight prefetch failed — provision it offline or design runs without the prior"
+
     # Save the venv path so evaluate.sh can find it
     mkdir -p "${EVALUATOR_DIR}/envs"
     echo "${MOSAIC_VENV}" > "${EVALUATOR_DIR}/envs/mosaic_venv_path"
