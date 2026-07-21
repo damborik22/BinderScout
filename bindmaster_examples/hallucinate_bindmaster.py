@@ -15,7 +15,7 @@ from mosaic.models.boltz2 import Boltz2
 import mosaic.losses.structure_prediction as sp
 from mosaic.common import TOKENS
 from mosaic.losses.protein_mpnn import InverseFoldingSequenceRecovery
-from mosaic.losses.transformations import NoCys
+from mosaic.losses.transformations import ClippedLoss, NoCys
 from mosaic.proteinmpnn.mpnn import load_mpnn_sol
 from mosaic.structure_prediction import TargetChain
 from mosaic.optimizers import simplex_APGM
@@ -27,6 +27,24 @@ try:
     from binder_comparison.refolding.target_msa import target_msa_cache_path
 except Exception:
     target_msa_cache_path = None
+
+# ESM2 pseudolikelihood expressibility prior (guarded). Needs fair-esm +
+# esm2quinox + the model weights; skips cleanly if any are missing (aarch64,
+# offline without a pre-cached model) so the design still runs without it.
+try:
+    import esm as _fair_esm
+    import esm2quinox as _esm2quinox
+
+    from mosaic.losses.esm import ESM2PseudoLikelihood
+except Exception:
+    _fair_esm = None
+    _esm2quinox = None
+    ESM2PseudoLikelihood = None
+
+# --- ESM2 expressibility-prior settings (edit to tune / disable) ---
+ESM2_WEIGHT = 0.3  # weight of the ESM2 PLL term added to the design loss; 0.0 disables it
+ESM2_MODEL = "esm2_t30_150M_UR50D"  # fair-esm model id (150M: balances signal vs per-step O(N) cost)
+ESM2_CLIP = (2.0, 100.0)  # ClippedLoss bounds — guards against over-optimization into homopolymers
 
 
 # ============================
@@ -257,6 +275,25 @@ def _extract_prediction_metrics(prediction, binder_length):
     }
 
 
+def _load_esm2_pll(model_id: str):
+    """Load an ESM2 pseudolikelihood loss term (guarded).
+
+    Returns an ESM2PseudoLikelihood, or None when fair-esm / esm2quinox / the
+    model weights are unavailable, so the design still runs without the prior.
+    """
+    if ESM2PseudoLikelihood is None or _fair_esm is None or _esm2quinox is None:
+        print("  ESM2 prior: fair-esm/esm2quinox unavailable — expressibility term OFF")
+        return None
+    try:
+        torch_model, _ = getattr(_fair_esm.pretrained, model_id)()
+        pll = ESM2PseudoLikelihood(_esm2quinox.from_torch(torch_model))
+        print(f"  ESM2 prior: loaded {model_id} (expressibility term ON)")
+        return pll
+    except Exception as exc:
+        print(f"  ESM2 prior: load failed ({exc}) — expressibility term OFF")
+        return None
+
+
 def design(
     n_designs: int,
     top_k: int,
@@ -272,6 +309,9 @@ def design(
     epitope_idx=None,
     ss_bias="none",
     min_iptm_aux=None,
+    esm2_pll=None,
+    esm2_weight=0.0,
+    esm2_clip=(2.0, 100.0),
 ):
     """Run a binder design campaign for one binder_length.
 
@@ -359,14 +399,18 @@ def design(
         chains=[target_tc],
     )
 
-    loss = NoCys(
-        folder.build_multisample_loss(
-            loss=sp_loss,
-            features=features,
-            recycling_steps=1,
-            num_samples=1,
-        )
+    model_loss = folder.build_multisample_loss(
+        loss=sp_loss,
+        features=features,
+        recycling_steps=1,
+        num_samples=1,
     )
+    if esm2_pll is not None and esm2_weight > 0:
+        # Clipped ESM2 pseudolikelihood: bias toward expressible sequences.
+        # Composed OUTSIDE build_multisample_loss so it runs once per step (not
+        # per sample); NoCys feeds it the same 20-dim binder sequence.
+        model_loss = model_loss + esm2_weight * ClippedLoss(esm2_pll, esm2_clip[0], esm2_clip[1])
+    loss = NoCys(model_loss)
 
     @eqx.filter_jit
     def evaluate_loss(loss, pssm, key):
@@ -818,6 +862,9 @@ def main():
     print(f"  Binder lengths   : {binder_lengths}")
     print()
 
+    # Load the ESM2 expressibility prior once (guarded); skipped if unavailable.
+    esm2_pll = _load_esm2_pll(ESM2_MODEL) if ESM2_WEIGHT > 0 else None
+
     _install_signal_handler(
         get_candidates_fn=lambda: _interrupt_state["candidates"],
         checkpoint_path_fn=lambda: _interrupt_state["checkpoint_path"],
@@ -837,6 +884,9 @@ def main():
             template_chain=template_chain,
             checkpoint_path=ckpt_path,
             epitope_idx=EPITOPE_IDX,
+            esm2_pll=esm2_pll,
+            esm2_weight=ESM2_WEIGHT,
+            esm2_clip=ESM2_CLIP,
         )
 
         summary_rows.append(
