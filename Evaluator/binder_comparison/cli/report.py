@@ -441,8 +441,8 @@ def run(args: argparse.Namespace) -> None:
 
     # Slim decision-metrics table (companion to report.html): the agreed columns
     # + TmProt Tm + a plain-text Notes column (wet-lab advisory, no icon flags).
-    write_top30_slim(df_display, output_dir, pool_size=len(df))
-    print("  top30_slim.html     — decision-metrics-only top-30 table (+ .csv)")
+    write_top30_slim(df_display, output_dir, top_per_tool=getattr(args, "top_per_tool", None) or 10, pool_size=len(df))
+    print("  top30_slim.html     — decision-metrics tables: overall + per-tool, all-metric roll-ups (+ .csv)")
 
     # Parse --tool-csv flags into dict (also consumed by the HTML report below).
     tool_csvs = {}

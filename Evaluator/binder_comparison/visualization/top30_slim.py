@@ -1,14 +1,18 @@
-"""Slim top-30 table — the decision metrics only.
+"""Slim decision-metrics tables — a compact companion to the full ``report.html``.
 
-A compact, sortable companion to the full ``report.html``. Columns answer the
-five questions a wet-lab pick rests on — *does it bind* (Mean ipTM), *is the
-signal robust* (Agreement), *is the interface real* (ipSAE_min), *does it bind
-the right place* (Epitope), *can we express it* (Solubility) — plus TmProt
-thermostability (Tm) and a plain-text Notes column carrying any wet-lab
-advisory. No icon flags: the advisory reason is written out in Notes.
+Emits ``top30_slim.html`` (+ ``top30_slim.csv``) with, top to bottom:
 
-Optional columns (Epitope, Solubility, Tm, Notes) render only when their source
-column is present in the metrics frame.
+* an overall **Top-30** table of the metrics a wet-lab pick rests on — *does it
+  bind* (Mean ipTM), *is the signal robust* (Agreement), *is the interface real*
+  (ipSAE_min), *does it bind the right place* (Epitope), *can we express it*
+  (Solubility), plus TmProt thermostability (Tm) and a plain-text **Notes** column
+  carrying any wet-lab advisory (no icon flags);
+* the same slim view **per tool** (top-N each);
+* at the bottom, every one of those tables again with **all metrics**, each in a
+  collapsed ``<details>`` roll-up.
+
+Optional slim columns (Epitope, Solubility, Tm, Notes) render only when their
+source column is present in the metrics frame.
 """
 
 from __future__ import annotations
@@ -18,8 +22,8 @@ from pathlib import Path
 
 import pandas as pd
 
-# display label -> source column. Optional columns are dropped when absent.
-_COLS = [
+# display label -> (source column, sort kind). Optional columns drop when absent.
+_SLIM = [
     ("Rank", "two_stage_rank", "n"),
     ("Binder ID", "binder_id", "s"),
     ("Tool", "source_tool", "s"),
@@ -39,36 +43,33 @@ _TOOLCOL = {
     "boltzgen_protein": "#14b8a6", "boltzgen_nano": "#64748b",
 }
 
+# columns excluded from the "all metrics" roll-ups (paths / blobs, not metrics).
+_DROP_SUFFIX = ("_pdb", "_cif", "_file", "_path", "_idx")
+_DROP_EXACT = {"sequence", "pdb", "cif"}
+_FULL_LEAD = ["two_stage_rank", "binder_id", "source_tool", "binder_length",
+              "consensus_iptm_mean", "agreement_count", "ipsae_min"]
 
-def _tier(v: float) -> str:
+
+def _tier(v) -> str:
     if pd.isna(v):
         return "na"
-    if v > 0.80:
-        return "high"
-    if v > 0.61:
-        return "med"
-    if v > 0.40:
-        return "low"
-    return "rej"
+    return "high" if v > 0.80 else "med" if v > 0.61 else "low" if v > 0.40 else "rej"
 
 
-def write_top30_slim(df: pd.DataFrame, output_dir: Path, n: int = 30, pool_size: int | None = None) -> None:
-    """Write ``top30_slim.html`` + ``top30_slim.csv`` (decision metrics only)."""
-    output_dir = Path(output_dir)
-    sort_col = "two_stage_rank" if "two_stage_rank" in df.columns else "consensus_iptm_mean"
-    ascending = sort_col == "two_stage_rank"
-    cols = [(lbl, col, kind) for lbl, col, kind in _COLS if col in df.columns]
-    t = df.sort_values(sort_col, ascending=ascending).head(n)[[c for _, c, _ in cols]].reset_index(drop=True)
-    t.columns = [lbl for lbl, _, _ in cols]
-    t.to_csv(output_dir / "top30_slim.csv", index=False)
+def _slim_cols(df: pd.DataFrame):
+    return [(lbl, col, kind) for lbl, col, kind in _SLIM if col in df.columns]
 
-    body = []
-    for _, r in t.iterrows():
+
+def _slim_table(df: pd.DataFrame, cols, table_id: str) -> str:
+    heads = "".join(f'<th data-t="{kind}">{_html.escape(lbl)}</th>' for lbl, _, kind in cols)
+    rows = []
+    for _, r in df[[c for _, c, _ in cols]].iterrows():
+        d = dict(zip([lbl for lbl, _, _ in cols], r))
         cells = []
         for lbl, _col, _kind in cols:
-            v = r[lbl]
+            v = d[lbl]
             if lbl == "Rank":
-                cells.append(f'<td class="rank">{int(v)}</td>')
+                cells.append(f'<td class="rank">{"" if pd.isna(v) else int(v)}</td>')
             elif lbl == "Binder ID":
                 cells.append(f'<td class="bid" title="{_html.escape(str(v))}">{_html.escape(str(v))}</td>')
             elif lbl == "Tool":
@@ -90,28 +91,73 @@ def write_top30_slim(df: pd.DataFrame, output_dir: Path, n: int = 30, pool_size:
             elif lbl == "Solubility":
                 cells.append(f'<td class="num">{"—" if pd.isna(v) else f"{float(v):.2f}"}</td>')
             elif lbl == "Tm":
-                txt = "—" if pd.isna(v) else f"{float(v):.0f}"
                 cls = "" if pd.isna(v) else ("tm-hi" if float(v) >= 60 else "tm-lo")
-                cells.append(f'<td class="num"><span class="{cls}">{txt}</span></td>')
+                cells.append(f'<td class="num"><span class="{cls}">{"—" if pd.isna(v) else f"{float(v):.0f}"}</span></td>')
             elif lbl == "Notes":
                 note = "" if pd.isna(v) or not str(v).strip() else str(v).strip()
                 cells.append(f'<td class="note">{_html.escape(note)}</td>')
             else:
                 cells.append(f'<td class="num">{"—" if pd.isna(v) else _html.escape(str(v))}</td>')
-        body.append("<tr>" + "".join(cells) + "</tr>")
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    return f'<table class="sortable" id="{table_id}"><thead><tr>{heads}</tr></thead><tbody>\n{chr(10).join(rows)}\n</tbody></table>'
 
-    heads = "".join(
-        f'<th data-t="{"n" if kind == "n" else "s"}">{_html.escape(lbl)}</th>' for lbl, _, kind in cols
-    )
-    subtitle = f"Ranked by two-stage cross-engine iPTM · intercalators excluded{f' · n={pool_size} pool' if pool_size else ''}. Click a header to sort."
 
-    page = _TEMPLATE.replace("__HEADS__", heads).replace("__BODY__", "\n".join(body)).replace("__SUB__", _html.escape(subtitle))
+def _full_table(df: pd.DataFrame, table_id: str) -> str:
+    cols = [c for c in df.columns if not c.endswith(_DROP_SUFFIX) and c not in _DROP_EXACT]
+    cols = [c for c in _FULL_LEAD if c in cols] + [c for c in cols if c not in _FULL_LEAD]
+    heads = "".join(f'<th data-t="{"n" if pd.api.types.is_numeric_dtype(df[c]) else "s"}">{_html.escape(c)}</th>' for c in cols)
+    rows = []
+    for _, r in df[cols].iterrows():
+        cells = []
+        for c in cols:
+            v = r[c]
+            if pd.isna(v):
+                cells.append('<td class="num">—</td>')
+            elif isinstance(v, float):
+                cells.append(f'<td class="num">{v:.3f}</td>')
+            else:
+                cells.append(f'<td>{_html.escape(str(v))}</td>')
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    return f'<table class="sortable full" id="{table_id}"><thead><tr>{heads}</tr></thead><tbody>\n{chr(10).join(rows)}\n</tbody></table>'
+
+
+def write_top30_slim(df: pd.DataFrame, output_dir: Path, top_per_tool: int = 10, pool_size: int | None = None) -> None:
+    """Write ``top30_slim.html`` + ``top30_slim.csv`` (decision metrics + per-tool + all-metric roll-ups)."""
+    output_dir = Path(output_dir)
+    sort_col = "two_stage_rank" if "two_stage_rank" in df.columns else "consensus_iptm_mean"
+    asc = sort_col == "two_stage_rank"
+    d = df.sort_values(sort_col, ascending=asc).reset_index(drop=True)
+    cols = _slim_cols(d)
+
+    # overall slim CSV (unchanged contract)
+    top30 = d.head(30)[[c for _, c, _ in cols]].copy()
+    top30.columns = [lbl for lbl, _, _ in cols]
+    top30.to_csv(output_dir / "top30_slim.csv", index=False)
+
+    tools = list(d["source_tool"].value_counts().index) if "source_tool" in d.columns else []
+
+    sections = [f'<h2>Overall — Top 30</h2>{_slim_table(d.head(30), cols, "t_overall")}']
+    for i, tool in enumerate(tools):
+        sub = d[d["source_tool"] == tool].head(top_per_tool)
+        c = _TOOLCOL.get(tool, "#64748b")
+        sections.append(f'<h2><span class="dot" style="background:{c}"></span>{_html.escape(tool)} — Top {min(top_per_tool, len(sub))}</h2>{_slim_table(sub, cols, f"t_tool{i}")}')
+
+    rolls = [f'<details><summary>Overall Top-30 — all metrics</summary><div class="scroll">{_full_table(d.head(30), "f_overall")}</div></details>']
+    for i, tool in enumerate(tools):
+        sub = d[d["source_tool"] == tool].head(top_per_tool)
+        rolls.append(f'<details><summary>{_html.escape(tool)} Top-{min(top_per_tool, len(sub))} — all metrics</summary><div class="scroll">{_full_table(sub, f"f_tool{i}")}</div></details>')
+
+    subtitle = f"Ranked by two-stage cross-engine iPTM · intercalators excluded{f' · n={pool_size} pool' if pool_size else ''}. Click any header to sort."
+    page = (_TEMPLATE
+            .replace("__SUB__", _html.escape(subtitle))
+            .replace("__SECTIONS__", "\n".join(f'<div class="scroll">{s}</div>' if s.startswith("<table") else s for s in sections))
+            .replace("__ROLLS__", "\n".join(rolls)))
     (output_dir / "top30_slim.html").write_text(page)
 
 
 _TEMPLATE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Top 30 — decision metrics</title>
+<title>Decision tables — Top 30 + per tool</title>
 <style>
 :root { color-scheme: light dark; --bg:#fff; --fg:#111827; --mut:#6b7280; --line:#e5e7eb; --head:#f9fafb;
         --high:#16a34a; --med:#d97706; --low:#dc2626; --rej:#991b1b; --barbg:#eef2ff; --bar:#6366f1; }
@@ -120,14 +166,16 @@ _TEMPLATE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 :root[data-theme=light]{ --bg:#fff;--fg:#111827;--mut:#6b7280;--line:#e5e7eb;--head:#f9fafb;--barbg:#eef2ff; }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-.wrap{max-width:1180px;margin:0 auto;padding:22px 18px 60px}
-h1{font-size:18px;margin:0 0 4px}
-p.sub{color:var(--mut);margin:0 0 16px;font-size:12.5px}
-.legend{color:var(--mut);font-size:11.5px;margin:10px 2px 0}
-.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+.wrap{max-width:1240px;margin:0 auto;padding:22px 18px 80px}
+h1{font-size:19px;margin:0 0 4px}
+h2{font-size:14px;margin:26px 2px 8px;display:flex;align-items:center;gap:8px}
+.dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+p.sub{color:var(--mut);margin:0 0 8px;font-size:12.5px}
+.legend{color:var(--mut);font-size:11.5px;margin:6px 2px 4px}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin-top:6px}
 table{border-collapse:collapse;width:100%;font-size:13px}
-th,td{padding:8px 11px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
-thead th{position:sticky;top:0;background:var(--head);cursor:pointer;user-select:none;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--mut)}
+th,td{padding:7px 11px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+thead th{position:sticky;top:0;background:var(--head);cursor:pointer;user-select:none;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--mut)}
 thead th:hover{color:var(--fg)}
 thead th::after{content:" \\2195";opacity:.35}
 tbody tr:hover{background:color-mix(in srgb, var(--head) 60%, transparent)}
@@ -135,7 +183,7 @@ tbody tr:hover{background:color-mix(in srgb, var(--head) 60%, transparent)}
 .bid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;max-width:220px;overflow:hidden;text-overflow:ellipsis}
 .num{text-align:right;font-variant-numeric:tabular-nums}
 .chip{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;color:var(--c);background:color-mix(in srgb, var(--c) 15%, transparent);border:1px solid color-mix(in srgb,var(--c) 35%,transparent)}
-.iptm{position:relative;text-align:right;min-width:110px}
+.iptm{position:relative;text-align:right;min-width:104px}
 .iptm .bar{position:absolute;left:8px;right:8px;bottom:3px;height:3px;border-radius:2px;background:var(--barbg)}
 .iptm .bar::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--w);background:var(--bar);border-radius:2px}
 .pill{padding:2px 8px;border-radius:6px;font-weight:600;font-size:12px}
@@ -148,31 +196,35 @@ tbody tr:hover{background:color-mix(in srgb, var(--head) 60%, transparent)}
 .ag0{background:color-mix(in srgb,var(--low) 18%,transparent);color:var(--low)}
 .tm-hi{color:var(--high);font-weight:600}.tm-lo{color:var(--mut)}
 .note{white-space:normal;max-width:280px;font-size:11.5px;color:var(--mut)}
+details{margin:8px 0;border:1px solid var(--line);border-radius:10px;background:var(--head)}
+summary{cursor:pointer;padding:10px 14px;font-weight:600;font-size:13px}
+details .scroll{margin:0 0 0 0;border:none;border-top:1px solid var(--line);border-radius:0 0 10px 10px}
+details .full th,details .full td{font-size:11px;padding:5px 8px}
+.rollhdr{margin:34px 2px 4px;font-size:13px;color:var(--mut);border-top:1px solid var(--line);padding-top:16px}
 </style></head><body><div class="wrap">
-<h1>Top 30 · decision metrics</h1>
+<h1>Decision tables · Top 30 + per tool</h1>
 <p class="sub">__SUB__</p>
-<div class="scroll"><table id="t">
-<thead><tr>__HEADS__</tr></thead>
-<tbody>
-__BODY__
-</tbody></table></div>
 <p class="legend"><b>Mean ipTM</b> (binds, cross-engine ↑) · <b>Agreement</b> (engines concurring 0–3 ↑) ·
 <b>ipSAE_min</b> (interface: <span style="color:var(--high)">High&gt;.80</span>/<span style="color:var(--med)">Med</span>/<span style="color:var(--low)">Low</span> ↑) ·
-<b>Epitope</b> (contacts on the target pocket ↑) · <b>Solubility</b> (SoluProt ↑) · <b>Tm</b> (TmProt °C ↑) · <b>Notes</b> (wet-lab advisory).</p>
-</div>
+<b>Epitope</b> (contacts on the pocket ↑) · <b>Solubility</b> (SoluProt ↑) · <b>Tm</b> (TmProt °C ↑) · <b>Notes</b> (wet-lab advisory).</p>
+__SECTIONS__
+<div class="rollhdr">All metrics — roll-ups (click to expand)</div>
+__ROLLS__
 <script>
-const tb=document.querySelector('#t tbody');
-document.querySelectorAll('#t thead th').forEach((th,i)=>{
-  let asc=true;
-  th.onclick=()=>{
-    const num=th.dataset.t==='n';
-    [...tb.rows].sort((a,b)=>{
-      let x=a.cells[i].innerText.replace('%','').replace('/3','').replace('\\u2014','NaN'),
-          y=b.cells[i].innerText.replace('%','').replace('/3','').replace('\\u2014','NaN');
-      if(num){x=parseFloat(x);y=parseFloat(y);if(isNaN(x))x=-1;if(isNaN(y))y=-1;return asc?x-y:y-x;}
-      return asc?x.localeCompare(y):y.localeCompare(x);
-    }).forEach(r=>tb.appendChild(r));
-    asc=!asc;
-  };
+document.querySelectorAll('table.sortable').forEach(tbl=>{
+  const tb=tbl.querySelector('tbody');
+  tbl.querySelectorAll('thead th').forEach((th,i)=>{
+    let asc=true;
+    th.onclick=()=>{
+      const num=th.dataset.t==='n';
+      [...tb.rows].sort((a,b)=>{
+        let x=(a.cells[i].innerText||'').replace('%','').replace('/3','').replace('\\u2014','NaN'),
+            y=(b.cells[i].innerText||'').replace('%','').replace('/3','').replace('\\u2014','NaN');
+        if(num){x=parseFloat(x);y=parseFloat(y);if(isNaN(x))x=-1e9;if(isNaN(y))y=-1e9;return asc?x-y:y-x;}
+        return asc?x.localeCompare(y):y.localeCompare(x);
+      }).forEach(r=>tb.appendChild(r));
+      asc=!asc;
+    };
+  });
 });
 </script></body></html>"""
