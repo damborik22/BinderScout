@@ -32,6 +32,9 @@ docs/local/
 runs/
 refold_boltz2/
 
+# RFD3 / foundry checkpoints — fetched by `foundry install` (~2.5 GB), not part of repo
+weights/
+
 # AlphaFold 3 model weights — personal, DO NOT commit
 af3.bin
 *.af3.bin*
