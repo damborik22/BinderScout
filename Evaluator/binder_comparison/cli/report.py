@@ -44,6 +44,7 @@ from ..comparison.scoring import (
 from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
 from ..visualization.report import generate_report
+from ..visualization.top30_slim import write_top30_slim
 
 
 def _parse_tool_meta(specs: list[str] | None) -> dict[str, dict]:
@@ -189,6 +190,12 @@ def run(args: argparse.Namespace) -> None:
     # Not part of agreement_count; this is a screen, not a re-ranker.
     if args.soluprot_results:
         df = _attach_soluprot_results(df, args.soluprot_results)
+
+    # TmProt: sequence-only melting-temperature (thermostability) screen — sister
+    # tool to SoluProt. Left-joined by sequence — adds native_tmprot_tm (°C).
+    # A screen, not a re-ranker; not part of agreement_count.
+    if args.tmprot_results:
+        df = _attach_tmprot_results(df, args.tmprot_results)
 
     # qc-annotate: BindCraft interface QC panel for a shortlist. Left-joined by
     # binder_id — adds qc_pass + qc_fail_reasons + interface_* columns. ADVISORY
@@ -431,6 +438,11 @@ def run(args: argparse.Namespace) -> None:
     top30 = df_display.head(30)[_available]
     write_csv(top30, output_dir / "top30_candidates.csv")
     print("  top30_candidates.csv — top 30 distinct designs with sequences")
+
+    # Slim decision-metrics table (companion to report.html): the agreed columns
+    # + TmProt Tm + a plain-text Notes column (wet-lab advisory, no icon flags).
+    write_top30_slim(df_display, output_dir, pool_size=len(df))
+    print("  top30_slim.html     — decision-metrics-only top-30 table (+ .csv)")
 
     # Parse --tool-csv flags into dict (also consumed by the HTML report below).
     tool_csvs = {}
@@ -716,6 +728,37 @@ def _attach_soluprot_results(df: pd.DataFrame, soluprot_csv: str) -> pd.DataFram
     return pd.merge(df, sp_sub, on="sequence", how="left")
 
 
+def _attach_tmprot_results(df: pd.DataFrame, tmprot_csv: str) -> pd.DataFrame:
+    """Left-join TmProt's per-sequence melting-temperature output by sequence.
+
+    TmProt (ESM2-LoRA Tm predictor, sister tool to SoluProt) is run externally on
+    the same source FASTA; its native CLI writes ``Rank, ID, Predicted Tm [°C],
+    Thermostable``. The runner here only requires a ``sequence`` column plus a Tm
+    column under any common spelling — renamed to ``native_tmprot_tm`` so it lives
+    alongside the other design-time screens in the final CSV.
+    """
+    tp_path = Path(tmprot_csv)
+    if not tp_path.exists():
+        print(f"[report] [warn] TmProt CSV not found at {tp_path} — skipping")
+        return df
+    tp_df = pd.read_csv(tp_path)
+    if tp_df.empty or "sequence" not in tp_df.columns:
+        return df
+    tm_col = next(
+        (c for c in tp_df.columns if c.strip().lower() in
+         ("native_tmprot_tm", "tmprot_tm", "predicted_tm", "predicted_tm_c", "predicted tm [°c]", "tm", "tm_c")),
+        None,
+    )
+    if tm_col is None:
+        print(f"[report] [warn] no Tm column found in {tp_path.name} — skipping")
+        return df
+    tp_sub = tp_df[["sequence", tm_col]].rename(columns={tm_col: "native_tmprot_tm"}).copy()
+    tp_sub["sequence"] = tp_sub["sequence"].str.strip().str.upper()
+    tp_sub["native_tmprot_tm"] = pd.to_numeric(tp_sub["native_tmprot_tm"], errors="coerce")
+    print(f"[report] Attaching TmProt Tm from {tp_path.name}")
+    return pd.merge(df, tp_sub, on="sequence", how="left")
+
+
 # qc-annotate (interface_qc.py) panel columns to surface in the report.
 _DIVERSITY_COLS = ("family_id", "family_size", "family_rank")
 
@@ -883,6 +926,13 @@ def add_parser(subparsers) -> None:
         help="Optional: output from 'filter-soluprot' (soluprot_results.csv). Adds "
         "native_soluprot_score and native_soluprot_passes columns. SoluProt is a "
         "screen, not a re-ranker; the ranking hierarchy is unchanged.",
+    )
+    p.add_argument(
+        "--tmprot-results",
+        metavar="CSV",
+        help="Optional: TmProt output (sequence + predicted Tm in °C; ESM2-LoRA "
+        "thermostability screen, sister tool to SoluProt). Adds native_tmprot_tm. "
+        "A screen, not a re-ranker; the ranking hierarchy is unchanged.",
     )
     p.add_argument(
         "--qc-results",
