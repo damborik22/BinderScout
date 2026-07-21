@@ -20,6 +20,14 @@ from mosaic.proteinmpnn.mpnn import load_mpnn_sol
 from mosaic.structure_prediction import TargetChain
 from mosaic.optimizers import simplex_APGM
 
+# Offline-only resolver for the cached target MSA (never contacts a server).
+# Present when the Evaluator (binder_comparison) is installed in this venv;
+# None otherwise so the template still runs standalone.
+try:
+    from binder_comparison.refolding.target_msa import target_msa_cache_path
+except Exception:
+    target_msa_cache_path = None
+
 
 # ============================
 # BINDMASTER PARAMETERS
@@ -303,6 +311,23 @@ def design(
     folder = Boltz2()
     mpnn = load_mpnn_sol(0.05)
 
+    # Stage-2 refold uses the target's MSA when a precomputed .a3m is cached
+    # (offline-safe: this resolver never contacts a server). Binder stays MSA-free
+    # and Stage-1 ranking stays MSA-free; this only affects the Stage-2 target.
+    # Falls back to template/single-sequence when no cached MSA is present.
+    # Mirrors the Evaluator's refold_boltz2 offline-MSA handling.
+    target_msa_path = None
+    if target_msa_cache_path is not None:
+        try:
+            _cached = target_msa_cache_path(target_sequence)
+            if _cached is not None and os.path.exists(_cached):
+                target_msa_path = str(_cached)
+                print(f"  Target MSA (cached, offline): {target_msa_path}")
+            else:
+                print("  Target MSA: no cached .a3m — Stage-2 target uses template/single-seq")
+        except Exception as exc:
+            print(f"  Target MSA cache lookup failed ({exc}); using template/single-seq")
+
     bias = jnp.zeros((binder_length, 20)).at[:binder_length, TOKENS.index("C")].set(-1e6)
 
     sp_loss = (
@@ -390,10 +415,13 @@ def design(
         seq = pssm.argmax(-1)
         seq_str = "".join(TOKENS[i] for i in seq)
 
+        # Stage-1 ranking: MSA-free for binder AND target (free generation, cheap
+        # relative sort; target anchored by the template when provided). To also use
+        # the cached target MSA here (D1 toggle), mirror the Stage-2 target chain below.
         boltz_features, _ = folder.target_only_features(
             chains=[
-                TargetChain(sequence=seq_str, use_msa=True),
-                TargetChain(sequence=target_sequence, use_msa=True, template_chain=template_chain),
+                TargetChain(sequence=seq_str, use_msa=False),
+                TargetChain(sequence=target_sequence, use_msa=False, template_chain=template_chain),
             ]
         )
         ranking_loss = folder.build_multisample_loss(
@@ -508,10 +536,17 @@ def design(
 
             seq = jnp.array([TOKENS.index(c) for c in seq_str])
 
+            # Stage-2 refold: binder MSA-free; target uses the cached MSA when
+            # available (offline-safe via msa_path), else template/single-sequence.
             boltz_features, boltz_writer = folder.target_only_features(
                 chains=[
-                    TargetChain(sequence=seq_str, use_msa=True),
-                    TargetChain(sequence=target_sequence, use_msa=True, template_chain=template_chain),
+                    TargetChain(sequence=seq_str, use_msa=False),
+                    TargetChain(
+                        sequence=target_sequence,
+                        use_msa=template_chain is None,
+                        template_chain=template_chain,
+                        msa_path=target_msa_path,
+                    ),
                 ]
             )
 

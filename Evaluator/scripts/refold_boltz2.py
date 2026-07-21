@@ -287,8 +287,12 @@ def refold_batch(
             target_msa_path = str(_cached)
             print(f"Target MSA (cached): {target_msa_path}")
         else:
-            print("Target MSA: none cached — using single-sequence/template" if target_template_chain else "Target MSA: none cached — online co-fold")
-    except Exception as e:  # noqa: BLE001 — MSA is best-effort; never block the refold
+            print(
+                "Target MSA: none cached — using single-sequence/template"
+                if target_template_chain
+                else "Target MSA: none cached — online co-fold"
+            )
+    except Exception as e:  # MSA is best-effort; never block the refold
         print(f"Target MSA lookup skipped ({e})")
 
     folder = Boltz2()

@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -35,6 +36,7 @@ def refold_batch(
     n_cycle: int = 10,
     n_step: int = 200,
     skip_indices: set[int] | None = None,
+    target_msa_a3m: str | None = None,
 ) -> None:
     """Refold each binder against target using Protenix; write metrics CSV.
 
@@ -47,7 +49,22 @@ def refold_batch(
     predictions_root = out_dir / "predictions"
     predictions_root.mkdir(parents=True, exist_ok=True)
 
-    jobs = _build_job_jsons(binder_sequences, target_sequence, skip_indices=skip_indices)
+    # Stage a cached target MSA into a Protenix precomputed_msa_dir. Once the
+    # binder is excluded from MSA (see _build_job_jsons) the target is a monomer,
+    # so only ``non_pairing.a3m`` is required. Force use_msa on so the featurizer
+    # actually reads it; no chain ever triggers a ColabFold query.
+    target_msa_dir: str | None = None
+    if target_msa_a3m and os.path.exists(target_msa_a3m):
+        _msa_dir = out_dir / "target_msa"
+        _msa_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(target_msa_a3m, _msa_dir / "non_pairing.a3m")
+        target_msa_dir = str(_msa_dir.resolve())
+        use_msa = True
+        print(f"[protenix] using cached target MSA (no ColabFold query): {target_msa_a3m}")
+    elif target_msa_a3m:
+        print(f"[protenix] target MSA path not found ({target_msa_a3m}); ignoring")
+
+    jobs = _build_job_jsons(binder_sequences, target_sequence, skip_indices=skip_indices, target_msa_dir=target_msa_dir)
     if not jobs:
         print("[protenix] Nothing to do (all indices skipped).")
         return
@@ -95,29 +112,47 @@ def _build_job_jsons(
     target_sequence: str,
     *,
     skip_indices: set[int],
+    target_msa_dir: str | None = None,
 ) -> list[tuple[int, dict]]:
     """Build one Protenix entry per (target, binder) pair.
 
     Returns a list of (idx, dict) where idx is a 1-based binder index and dict
     is the per-job Protenix schema entry.
+
+    When *target_msa_dir* (a precomputed_msa_dir holding the target's
+    ``non_pairing.a3m``) is given, the target chain (A) is fed that cached MSA so
+    Protenix skips the ColabFold query for the natural target. The binder (chain
+    B) gets ``use_msa: False`` — excluding it from MSA featurization (single
+    sequence) and, as a side effect, flipping the target to a monomer so only
+    ``non_pairing.a3m`` is required. The binder still carries a non-empty ``msa``
+    dict so Protenix's pre-inference search gate (``need_msa_search``, which
+    ignores ``use_msa`` and only checks for a non-empty ``msa`` key) does not
+    re-search and overwrite the cached target MSA. Net: zero ColabFold queries.
     """
     jobs: list[tuple[int, dict]] = []
     for i, seq in enumerate(binder_sequences, start=1):
         if i in skip_indices:
             continue
         name = f"design_{i:04d}"
-        jobs.append(
-            (
-                i,
-                {
-                    "name": name,
-                    "sequences": [
-                        {"proteinChain": {"sequence": target_sequence, "count": 1}},
-                        {"proteinChain": {"sequence": seq, "count": 1}},
-                    ],
-                },
-            )
-        )
+        target_chain: dict = {"sequence": target_sequence, "count": 1}
+        binder_chain: dict = {"sequence": seq, "count": 1}
+        if target_msa_dir is not None:
+            # pairing_db is a required key (direct access in msa_featurizer);
+            # its value is unused for a monomer target but must be present.
+            target_chain["msa"] = {
+                "precomputed_msa_dir": target_msa_dir,
+                "pairing_db": "uniref100",
+            }
+            binder_chain["use_msa"] = False
+            binder_chain["msa"] = {"precomputed_msa_dir": target_msa_dir}
+        entry: dict = {
+            "name": name,
+            "sequences": [
+                {"proteinChain": target_chain},
+                {"proteinChain": binder_chain},
+            ],
+        }
+        jobs.append((i, entry))
     return jobs
 
 
@@ -403,6 +438,9 @@ if __name__ == "__main__":
     parser.add_argument("--num-samples", type=int, default=5)
     parser.add_argument("--num-seeds", type=int, default=1)
     parser.add_argument("--use-msa", action="store_true")
+    parser.add_argument(
+        "--target-msa", default=None, help="Path to a cached target a3m; skips the ColabFold query for the target"
+    )
     parser.add_argument("--n-cycle", type=int, default=10)
     parser.add_argument("--n-step", type=int, default=200)
     args = parser.parse_args()
@@ -420,7 +458,8 @@ if __name__ == "__main__":
         output_csv=args.output,
         num_samples=args.num_samples,
         num_seeds=args.num_seeds,
-        use_msa=args.use_msa,
+        use_msa=args.use_msa or bool(args.target_msa),
         n_cycle=args.n_cycle,
         n_step=args.n_step,
+        target_msa_a3m=args.target_msa,
     )
