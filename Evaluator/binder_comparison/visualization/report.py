@@ -1439,15 +1439,12 @@ def generate_report(
         tools_present = order_tools(sort_df["source_tool"].dropna().unique())
         if tools_present:
             per_tool_top10 = (
-                "<h2>Top Designs per Tool "
-                '<span style="background:#1565C0;color:white;padding:2px 10px;'
-                "border-radius:4px;font-size:0.7em;font-weight:bold;vertical-align:middle;"
-                'margin-left:0.4em;">NATIVE TOOL RANKING</span></h2>\n'
+                "<h2>Top Designs per Tool</h2>\n"
                 '<p style="font-size:0.85em;color:#555;">'
-                "Each tool's top designs ranked by <b>that tool's own internal scoring</b> "
-                "(not the evaluator's cross-engine ranking). Shows <b>refolded designs only</b>, "
-                "one row per backbone (MPNN/cycle siblings collapsed; never-refolded designs omitted)."
-                "</p>\n"
+                "Each tool's best designs by the evaluator's cross-engine two-stage ranking, in the "
+                "same slim decision-metrics view as the main Top-30 "
+                "(Mean ipTM · Agreement · ipSAE_min · Epitope · Solubility · Tm · Notes). "
+                "Expand a tool for its table + 3D structures.</p>\n"
             )
 
             # Build sequence → binder_id + rank lookup. Use the FULL (pre-collapse)
@@ -1540,7 +1537,11 @@ def generate_report(
                                     )
                                     _pos += 1
                             n = len(native_df)
-                            tool_table = _df_to_html(native_df, colour_tool=False)
+                            tool_table = (
+                                '<div class="slimreport">'
+                                + slim_table_html(sort_df[sort_df["source_tool"] == tool], top_per_tool, f"tpt_{tool}")
+                                + "</div>"
+                            )
 
                             # Add 3D viewer if tool_pdb_dirs provided
                             viewer_block = ""
@@ -1608,37 +1609,22 @@ def generate_report(
                             per_tool_top10 += (
                                 f'<details style="margin:0.3em 0;">'
                                 f'<summary style="cursor:pointer;font-weight:bold;">'
-                                f"{display_name} — top {n} (native ranking)</summary>\n"
+                                f"{display_name} — top {n}</summary>\n"
                                 f"{tool_table}\n{viewer_block}\n</details>\n"
                             )
                             continue
                         except Exception:
                             pass  # Fall through to evaluator-based ranking
 
-                # Fallback: use a per-tool native column when available;
-                # else fall back to the evaluator's ranking within this tool.
-                tool_only = sort_df[sort_df["source_tool"] == tool].copy()
-                native_sort_col = _TOOL_NATIVE_SORT.get(tool)
-                native_sort_dir = _TOOL_NATIVE_SORT_DIR.get(tool, "desc")
-                used_native = False
-                if native_sort_col and native_sort_col in tool_only.columns:
-                    vals = pd.to_numeric(tool_only[native_sort_col], errors="coerce")
-                    if vals.notna().any():
-                        ascending = native_sort_dir == "asc"
-                        tool_only = (
-                            tool_only.assign(_sort=vals)
-                            .sort_values("_sort", ascending=ascending, na_position="last")
-                            .drop(columns=["_sort"])
-                        )
-                        used_native = True
-                tool_df = tool_only.head(top_per_tool)
+                # Evaluator two-stage ranking within this tool (sort_df is already
+                # rank-sorted); slim decision-metrics table + refolded-structure viewer.
+                tool_df = sort_df[sort_df["source_tool"] == tool].head(top_per_tool)
                 n = len(tool_df)
-                # If native sort applied, surface its column so it's visible in the table
-                cols_for_table = list(primary_cols)
-                if used_native and native_sort_col not in cols_for_table:
-                    cols_for_table = cols_for_table + [native_sort_col]
-                cols_for_table = [c for c in cols_for_table if c in tool_df.columns]
-                tool_table = _df_to_html(tool_df[cols_for_table], colour_tool=True)
+                tool_table = (
+                    '<div class="slimreport">'
+                    + slim_table_html(tool_df, top_per_tool, f"tpt_{tool}")
+                    + "</div>"
+                )
                 # 3D viewer using refolded Boltz-2 PDBs (works for Mosaic etc.
                 # without needing --tool-csv/--tool-pdb-dir flags)
                 refold_viewer = ""
@@ -1653,24 +1639,10 @@ def generate_report(
                     )
                 except Exception as e:  # pragma: no cover - defensive
                     refold_viewer = f"<p style='color:#888;'><em>3D viewer error: {e}</em></p>"
-                if used_native:
-                    badge = (
-                        f'<span style="background:#1565C0;color:white;padding:1px 6px;'
-                        f'border-radius:3px;font-size:0.75em;margin-left:0.4em;">NATIVE RANK</span>'
-                        f'<span style="font-size:0.8em;color:#555;margin-left:0.4em;">'
-                        f"sorted by <code>{native_sort_col}</code> ({native_sort_dir})</span>"
-                    )
-                    label = f"{display_name} — top {n}{badge}"
-                else:
-                    label = (
-                        f"{display_name} — top {n} "
-                        f'<span style="font-size:0.8em;color:#888;">(evaluator ranking; '
-                        f"no native column available)</span>"
-                    )
                 per_tool_top10 += (
                     f'<details style="margin:0.3em 0;">'
                     f'<summary style="cursor:pointer;font-weight:bold;">'
-                    f"{label}</summary>\n"
+                    f"{display_name} — top {n}</summary>\n"
                     f"{tool_table}\n{refold_viewer}\n</details>\n"
                 )
 
