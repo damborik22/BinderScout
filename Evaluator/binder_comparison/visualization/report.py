@@ -23,10 +23,10 @@ from .plots import (
     plot_max_vs_mean_iptm,
     plot_metric_correlation_heatmap,
     plot_metric_distributions,
+    plot_multimetric_radar,
     plot_pareto_front,
     plot_per_tool_engine_iptm,
     plot_radar_chart,
-    plot_radar_iptm,
     plot_radar_per_engine,
     plot_radar_per_engine_uniform_selection,
 )
@@ -222,9 +222,10 @@ _HTML_TEMPLATE = """\
   A taller box indicates greater variability across designs from that tool.
 </p>
 
-<h2>Tool Comparison (Radar Chart)</h2>
+<h2>Tool Comparison</h2>
 <p style="font-size:0.85em;color:#555;margin:0.2em 0 0.6em 0;">
-  Each panel: per-tool top-10 ranked by <b>that engine's own ipSAE_min</b>.
+  <b>Left:</b> each tool's mean profile across the decision metrics (normalized 0–1, top-{top_per_tool_display}/tool).
+  <b>Right:</b> per-tool mean iPTM by refold engine.
 </p>
 <div style="display:flex;flex-wrap:wrap;gap:1.2em;align-items:flex-start;">
   <div style="flex:1 1 460px;min-width:300px;">
@@ -1411,7 +1412,7 @@ def generate_report(
         # high mean-rank; spike = passes max-screen only) + the max-vs-mean
         # signature scatter. Replaces the ipsae-centric per-engine radars.
         try:
-            radar_fig = plot_radar_iptm(sort_df, top_n=top_per_tool)
+            radar_fig = plot_multimetric_radar(sort_df, top_n=top_per_tool)
         except Exception:  # pragma: no cover - defensive
             radar_fig = plot_radar_chart(summary)
         try:
@@ -1460,6 +1461,21 @@ def generate_report(
                 "(Mean ipTM · Agreement · ipSAE_min · Epitope · Solubility · Tm · Notes). "
                 "Expand a tool for its table + 3D structures.</p>\n"
             )
+
+            # Grand-total "designed in total" banner from --tool-meta TOOL='total:N'.
+            _totals = {t: (tool_overrides or {}).get(t, {}).get("total") for t in tools_present}
+            _totals = {t: int(v) for t, v in _totals.items() if v and str(v).isdigit()}
+            if _totals:
+                _grand = sum(_totals.values())
+                _per = " &nbsp;·&nbsp; ".join(
+                    f"{_tool_display(t)} <b>{v:,}</b>" for t, v in sorted(_totals.items(), key=lambda kv: -kv[1])
+                )
+                per_tool_top10 += (
+                    '<p style="font-size:0.92em;color:#222;margin:0 0 0.9em 0;padding:0.55em 0.9em;'
+                    'background:#eef6ff;border:1px solid #b3d4fc;border-radius:6px;">'
+                    f"&#129516; <b>Designed in total: {_grand:,}</b> across {len(_totals)} tools — the 50 best of "
+                    f"each (by cross-engine two-stage ranking) are kept for the pool. &nbsp;{_per}.</p>\n"
+                )
 
             # Build sequence → binder_id + rank lookup. Use the FULL (pre-collapse)
             # frame when available: df/sort_df here is representatives-only, so
