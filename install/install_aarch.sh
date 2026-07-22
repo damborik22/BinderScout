@@ -1941,7 +1941,7 @@ _build_usearch_v12() {
     for t in git make g++ gcc; do
         if ! command -v "${t}" >/dev/null 2>&1; then
             print_warn "USEARCH build needs git + make + gcc/g++ (missing: ${t})."
-            print_warn "  Install a toolchain and re-run, or drop a 'usearch' binary at ${SOLUPROT_DIR}/usearch."
+            print_warn "  Install a toolchain and re-run, or drop a 'usearch.aarch64' binary at ${SOLUPROT_DIR}/usearch.aarch64."
             return 1
         fi
     done
@@ -1965,10 +1965,10 @@ _build_usearch_v12() {
             || { print_warn "USEARCH v12 build failed"; return 1; }
     fi
     if [[ -x "${src_dir}/bin/usearch12" ]]; then
-        cp "${src_dir}/bin/usearch12" "${SOLUPROT_DIR}/usearch"
-        chmod +x "${SOLUPROT_DIR}/usearch"
+        cp "${src_dir}/bin/usearch12" "${SOLUPROT_DIR}/usearch.aarch64"
+        chmod +x "${SOLUPROT_DIR}/usearch.aarch64"
         rm -rf "${src_dir}"
-        print_ok "USEARCH v12 built → ${SOLUPROT_DIR}/usearch"
+        print_ok "USEARCH v12 built → ${SOLUPROT_DIR}/usearch.aarch64"
         return 0
     fi
     print_warn "USEARCH v12 binary not found after build (${src_dir}/bin/usearch12)"
@@ -2058,14 +2058,14 @@ install_soluprot() {
     #    without it (it aborts on a USEARCH failure), so a missing binary is a
     #    hard install failure — the --help smoke test below would NOT catch it
     #    (argparse exits before the USEARCH path runs).
-    if [[ -x "${SOLUPROT_DIR}/usearch" ]] || command -v usearch >/dev/null 2>&1; then
-        print_ok "USEARCH binary present (${SOLUPROT_DIR}/usearch or on PATH)"
+    if [[ -x "${SOLUPROT_DIR}/usearch.aarch64" ]] || command -v usearch >/dev/null 2>&1; then
+        print_ok "USEARCH binary present (${SOLUPROT_DIR}/usearch.aarch64 or on PATH)"
     else
         _build_usearch_v12 || true
-        if [[ ! -x "${SOLUPROT_DIR}/usearch" ]] && ! command -v usearch >/dev/null 2>&1; then
+        if [[ ! -x "${SOLUPROT_DIR}/usearch.aarch64" ]] && ! command -v usearch >/dev/null 2>&1; then
             print_fail "USEARCH is required for SoluProt's identity feature and could not be built."
-            print_warn "  Install a C/C++ toolchain (git make g++) and re-run, or place a 'usearch'"
-            print_warn "  binary at ${SOLUPROT_DIR}/usearch (or on PATH), then re-run --tool soluprot."
+            print_warn "  Install a C/C++ toolchain (git make g++) and re-run, or place a 'usearch.aarch64'"
+            print_warn "  binary at ${SOLUPROT_DIR}/usearch.aarch64 (or on PATH), then re-run --tool soluprot."
             return 1
         fi
     fi

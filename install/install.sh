@@ -2402,13 +2402,14 @@ install_soluprot() {
         echo ""
     fi
 
-    # 4. Check USEARCH. 32-bit academic build is free; 64-bit needs a paid licence.
-    if [[ ! -x "${SOLUPROT_DIR}/usearch" ]] \
+    # 4. Check USEARCH (x86_64). The committed usearch.x86_64 is open-source v12;
+    #    for bit-exact public-server scores use the drive5 32-bit academic build.
+    if [[ ! -x "${SOLUPROT_DIR}/usearch.x86_64" ]] && [[ ! -x "${SOLUPROT_DIR}/usearch" ]] \
         && ! command -v usearch >/dev/null 2>&1; then
         echo ""
         print_warn "USEARCH is not installed. SoluProt needs it for the E. coli identity feature."
         print_warn "  Download (32-bit, free for academic):  https://drive5.com/usearch/"
-        print_warn "  Place at:                              ${SOLUPROT_DIR}/usearch  (chmod +x)"
+        print_warn "  Place at:                              ${SOLUPROT_DIR}/usearch.x86_64  (chmod +x)"
         print_warn "  Or add 'usearch' to PATH; the runner finds it as a fallback."
         echo ""
     fi
