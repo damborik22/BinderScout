@@ -1359,10 +1359,8 @@ def generate_report(
     top_table = (
         f'<div class="slimreport">{slim_table_html(sort_df, 30, "t_top30_slim")}</div>'
         '\n<p style="font-size:0.8em;color:#666;margin-top:0.4em;">'
-        "Mean ipTM (binds, cross-engine ↑) · Agreement (engines concurring 0–3 ↑) · "
-        "ipSAE_min (interface ↑) · Epitope (contacts on the pocket ↑) · Solubility (SoluProt ↑) · "
-        "Tm (TmProt °C ↑) · Notes (wet-lab advisory). Full metric set for these 30 is in "
-        "<b>Top 30 — all metrics</b> at the bottom.</p>"
+        "Column key below. The full metric set for these 30 is in "
+        "<b>Top 30 — all metrics</b> at the bottom of the report.</p>"
     )
 
     # Full-metrics Top-30 table — moved to a collapsible section at the bottom of the report.
@@ -1387,7 +1385,8 @@ def generate_report(
     top30_full_bottom = (
         '<h2>Top 30 — all metrics</h2>\n'
         '<details style="margin:0.5em 0;"><summary style="cursor:pointer;color:#1565C0;font-weight:bold;">'
-        "Click to expand — full metric set for the Top 30</summary>\n" + _full_top30 + "\n</details>"
+        "Click to expand — full metric set for the Top 30</summary>\n" + _full_top30
+        + "\n" + _top_table_legend_html(rank_method, top30_primary) + "\n</details>"
     )
 
     # Summary statistics table
@@ -1862,7 +1861,7 @@ def generate_report(
     benchmark_provenance_block = _benchmark_provenance_html() if rank_method == "two_stage" else ""
     qc_rules_block = _qc_rules_html() if "qc_pass" in sort_df.columns else ""
     screening_summary_intro = _screening_summary_intro_html(rank_method)
-    top_table_legend = _top_table_legend_html(rank_method, top30_primary)
+    top_table_legend = _slim_legend_html(sort_df)
     tool_classification_banner = _tool_classification_banner_html(sort_df, tool_overrides=tool_overrides)
     provenance_footer = _provenance_footer_html(provenance)
     top_per_family_block = _top_per_family_html(sort_df)
@@ -1914,6 +1913,46 @@ def generate_report(
 # stale legend rows). These helpers regenerate the user-visible labels each
 # render so methodology and tables tell the same story.
 # ────────────────────────────────────────────────────────────────────────────
+
+
+def _slim_legend_html(df: pd.DataFrame) -> str:
+    """Per-column description table for the slim decision-metrics Top-30 table.
+
+    Matches the slim column set (Mean ipTM · Agreement · ipSAE_min · Epitope ·
+    Solubility · Tm · Notes); optional columns are shown only when present.
+    """
+    checks = [
+        ("Rank", "two_stage_rank",
+         "Overall rank — Stage-1 mean-iPTM screen survival, then mean engine iPTM (the primary key)."),
+        ("Length", "binder_length",
+         "Designed binder length (aa) — a main difficulty driver (longer tends to lower ipSAE)."),
+        ("Mean ipTM ↑", "consensus_iptm_mean",
+         "<b>Primary ranking metric</b> — mean of the 3 engines' PAE-recomputed iPTM. Higher = stronger "
+         "multi-engine consensus, which resists single-engine gaming."),
+        ("Agreement ↑", "agreement_count",
+         "How many of the 3 engines (Boltz-2 / AF3 / ESMFold2) score ipSAE_min &gt; 0.61 — so 0–3. "
+         "Low = fragile, single-engine signal."),
+        ("ipSAE_min ↑", "ipsae_min",
+         "Interface quality (cross-validation). Tier-banded: High &gt; 0.80, Medium &gt; 0.61, "
+         "Low &gt; 0.40, Reject ≤ 0.40."),
+        ("Epitope ↑", "epitope_match_fraction",
+         "Fraction of the binder's interface contacts landing on the intended target pocket."),
+        ("Solubility ↑", "native_soluprot_score",
+         "SoluProt sequence-only <i>E. coli</i> solubility probability (0–1)."),
+        ("Tm ↑", "native_tmprot_tm",
+         "TmProt predicted melting temperature (°C, ESM2-LoRA). Higher = more thermostable (≥ 60 °C highlighted)."),
+        ("Notes", "wetlab_reason",
+         "Wet-lab advisory (BindCraft interface QC, etc.); blank = no flag. Advisory only — never affects ranking."),
+    ]
+    visible = [(lbl, desc) for lbl, src, desc in checks if src in df.columns]
+    lines = ["<table style='font-size:0.8em;border-collapse:collapse;margin:0.5em 0 1.5em 0;color:#555;'>"]
+    for col, desc in visible:
+        lines.append(
+            f"<tr><td style='padding:2px 12px 2px 0;vertical-align:top;white-space:nowrap;'><b>{col}</b></td>"
+            f"<td>{desc}</td></tr>"
+        )
+    lines.append("</table>")
+    return "\n".join(lines)
 
 
 def _top_table_legend_html(rank_method: str, df: pd.DataFrame) -> str:
