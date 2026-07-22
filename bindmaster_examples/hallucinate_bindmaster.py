@@ -508,7 +508,9 @@ def design(
         n_done = 0
         while n_done < n_designs:
             this_batch = min(DESIGN_BATCH_SIZE, n_designs - n_done)
-            print(f"\n[batch {n_done + 1}-{n_done + this_batch}/{n_designs}] optimizing {this_batch} seed(s) in parallel...")
+            print(
+                f"\n[batch {n_done + 1}-{n_done + this_batch}/{n_designs}] optimizing {this_batch} seed(s) in parallel..."
+            )
             for seq_str in _optimize_batch(this_batch):
                 seq_str, loss_value = _rank_seq(seq_str)
                 candidates.append((seq_str, loss_value))

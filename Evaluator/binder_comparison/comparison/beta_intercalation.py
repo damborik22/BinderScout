@@ -83,7 +83,9 @@ def count_cross_chain_bridges(
     return (n1, n2, binder_res)
 
 
-def is_intercalating(n_xbridge: int, n_xbridge2: int, *, min_both_side: int = 2, min_xbridge: int | None = None) -> bool:
+def is_intercalating(
+    n_xbridge: int, n_xbridge2: int, *, min_both_side: int = 2, min_xbridge: int | None = None
+) -> bool:
     """True when the binder threads a strand INTO the target sheet (interior intercalation).
 
     A residue counted in ``n_xbridge2`` is β-bridged to the target on *both* sides — i.e.
