@@ -62,6 +62,21 @@ def get_target_msa(target_seq: str, cache_dir: str | Path | None = None) -> str:
     return a3m
 
 
+def target_msa_cache_path(target_seq: str, cache_dir: str | Path | None = None) -> Path | None:
+    """Return the on-disk path of the cached target MSA, or None if not cached.
+
+    Unlike ``get_target_msa`` this never queries the MSA server — it only reports
+    whether a usable cached A3M already exists.  Offline consumers (e.g. the
+    Boltz-2 refold) need the a3m *file path* for the Boltz input YAML, and must
+    not trigger an online fetch on a no-internet compute node.
+    """
+    cache_dir = _resolve_cache_dir(cache_dir)
+    cache_file = cache_dir / f"target_{_cache_key(target_seq)}.a3m"
+    if cache_file.exists() and cache_file.stat().st_size > 0:
+        return cache_file
+    return None
+
+
 # ---------------------------------------------------------------------------
 # ColabFold MSA query
 # ---------------------------------------------------------------------------

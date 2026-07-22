@@ -425,9 +425,10 @@ def _resolve_af3_script() -> Path:
         return script
 
     raise FileNotFoundError(
-        "Cannot find run_alphafold.py. Clone the official AF3 repo:\n"
-        "  git clone --depth 1 --branch v3.0.2 "
-        "https://github.com/google-deepmind/alphafold3.git ~/BindMaster/alphafold3\n"
+        "Cannot find run_alphafold.py. Install AF3 via `bindmaster install --tool af3`, "
+        "or clone it manually into <BindMaster>/alphafold3:\n"
+        "  git clone https://github.com/google-deepmind/alphafold3.git <BindMaster>/alphafold3\n"
+        "  git -C <BindMaster>/alphafold3 checkout fd39d2c5dcaadfc7333c3466951b27563fa7d6fa\n"
         "Or set AF3_REPO_DIR to the repo root."
     )
 

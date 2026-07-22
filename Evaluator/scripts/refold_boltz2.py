@@ -274,6 +274,26 @@ def refold_batch(
         n_res = sum(1 for _ in target_template_chain)
         print(f"Target template: {target_pdb} ({n_res} residues, force=True)")
 
+    # Resolve a cached target MSA (offline-safe — never triggers an online fetch).
+    # If present, the target is folded WITH its MSA even on no-internet compute
+    # nodes; otherwise we fall back to single-sequence (template) / online co-fold.
+    target_msa_path = None
+    try:
+        from binder_comparison.refolding.target_msa import target_msa_cache_path
+
+        _cached = target_msa_cache_path(target_sequence)
+        if _cached is not None:
+            target_msa_path = str(_cached)
+            print(f"Target MSA (cached): {target_msa_path}")
+        else:
+            print(
+                "Target MSA: none cached — using single-sequence/template"
+                if target_template_chain
+                else "Target MSA: none cached — online co-fold"
+            )
+    except Exception as e:  # MSA is best-effort; never block the refold
+        print(f"Target MSA lookup skipped ({e})")
+
     folder = Boltz2()
 
     # Fetch the target MSA exactly ONCE for the whole batch. Boltz's
@@ -424,9 +444,14 @@ def refold_batch(
                 chains=[
                     TargetChain(sequence=seq_str, use_msa=False),  # binder: de novo, no MSA
                     TargetChain(
+                        # Prefer a cached a3m (msa_path) — folds the target WITH its
+                        # MSA offline. Falls back to use_msa: co-fold (no template)
+                        # fetches online; template mode goes single-sequence (the
+                        # template already fixes the backbone) when no MSA is cached.
                         sequence=target_sequence,
-                        use_msa=True,
+                        use_msa=target_template_chain is None,
                         template_chain=target_template_chain,
+                        msa_path=target_msa_path,
                     ),
                 ],
             )
