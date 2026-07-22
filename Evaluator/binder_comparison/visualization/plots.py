@@ -1001,3 +1001,60 @@ def plot_per_tool_engine_iptm(df: pd.DataFrame, top_n: int | None = None) -> Fig
     ax.legend(title="Engine", fontsize=8, loc="upper right")
     ax.grid(axis="y", alpha=0.3)
     return fig
+
+
+def plot_multimetric_radar(df: pd.DataFrame, top_n: int | None = None) -> Figure:
+    """Per-tool profile radar across the decision metrics (one polygon per tool).
+
+    Axes are the wet-lab decision metrics, each normalised to 0–1; each tool's
+    polygon is the mean of its top-``top_n`` designs (by two-stage rank) on every
+    axis. Shows at a glance where each tool is strong/weak across *all* metrics —
+    a richer view than a single-metric or per-engine radar.
+    """
+    metrics = [
+        ("Mean ipTM", "consensus_iptm_mean", lambda v: v),
+        ("ipSAE_min", "ipsae_min", lambda v: v),
+        ("Agreement", "agreement_count", lambda v: v / 3.0),
+        ("Epitope", "epitope_match_fraction", lambda v: v),
+        ("Solubility", "native_soluprot_score", lambda v: v),
+        ("Tm", "native_tmprot_tm", lambda v: (v - 40.0) / 50.0),  # ~40–90 °C → 0–1
+        ("pLDDT", "plddt_binder_mean", lambda v: v),
+    ]
+    metrics = [(lbl, c, f) for lbl, c, f in metrics if c in df.columns]
+    fig = plt.figure(figsize=(7.8, 6.6))
+    ax = fig.add_subplot(111, polar=True)
+    if "source_tool" not in df.columns or len(metrics) < 3:
+        ax.text(0.5, 0.5, "not enough metrics for radar", ha="center", va="center", transform=ax.transAxes)
+        return fig
+    labels = [lbl for lbl, _, _ in metrics]
+    angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False).tolist()
+    angles += angles[:1]
+
+    means = {}
+    for t in df["source_tool"].dropna().unique():
+        sub = df[df["source_tool"] == t]
+        if top_n and "two_stage_rank" in sub.columns:
+            sub = sub.sort_values("two_stage_rank").head(top_n)
+        elif top_n:
+            sub = sub.head(top_n)
+        vals = []
+        for _lbl, c, f in metrics:
+            mv = pd.to_numeric(sub[c], errors="coerce").mean()
+            v = f(mv) if mv == mv else 0.0
+            vals.append(min(1.0, max(0.0, v)))
+        means[t] = vals
+    tools = sorted(means, key=lambda t: -float(np.mean(means[t])))
+
+    for t in tools:
+        vals = means[t] + means[t][:1]
+        col = TOOL_COLOURS.get(t, "#888888")
+        ax.plot(angles, vals, color=col, linewidth=1.9, label=_ENGINE_BAR_LABEL.get(t, t))
+        ax.fill(angles, vals, color=col, alpha=0.07)
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels, fontsize=9)
+    ax.set_ylim(0, 1)
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(["", "0.5", "", "1.0"], fontsize=7, color="#888")
+    ax.set_title(f"Per-tool profile across metrics{f' (top {top_n}/tool)' if top_n else ''}", pad=22, fontsize=11)
+    ax.legend(loc="upper right", bbox_to_anchor=(1.32, 1.12), fontsize=8, framealpha=0.9)
+    return fig
