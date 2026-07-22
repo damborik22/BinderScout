@@ -29,6 +29,7 @@ from .plots import (
     plot_radar_per_engine,
     plot_radar_per_engine_uniform_selection,
 )
+from .top30_slim import SLIM_REPORT_CSS, slim_table_html
 
 # Display names for tools (source_tool values are lowercase internally)
 _TOOL_DISPLAY = {
@@ -90,6 +91,7 @@ _HTML_TEMPLATE = """\
 <meta charset="UTF-8">
 <title>Binder Comparison Report</title>
 <style>
+{slim_css}
   body {{ font-family: 'Segoe UI', sans-serif; margin: 2em; background: #f8f9fa; color: #333; }}
   h1 {{ color: #1a5276; }}
   h2 {{ color: #1a5276; margin-top: 2em; border-bottom: 2px solid #CFE6F6; padding-bottom: 4px; }}
@@ -262,6 +264,8 @@ _HTML_TEMPLATE = """\
 cd report/top20_structures/
 pymol view_top20.pml</pre>
 </details>
+
+{top30_full_bottom}
 
 <h2>Full Metrics Table</h2>
 <details>
@@ -1349,7 +1353,20 @@ def generate_report(
         (c for c in ("active_rank", "two_stage_rank", "consensus_rank", "adaptyv_rank") if c in primary_cols),
         None,
     )
-    top_table = _df_to_html(
+    # Prominent Top-30 = slim decision-metrics table (Mean ipTM · Agreement · ipSAE_min
+    # · Epitope · Solubility · Tm · Notes). No ⚠ flag icons — the wet-lab advisory rides
+    # in the plain-text Notes column. The full metric set moves to a collapsible below.
+    top_table = (
+        f'<div class="slimreport">{slim_table_html(sort_df, 30, "t_top30_slim")}</div>'
+        '\n<p style="font-size:0.8em;color:#666;margin-top:0.4em;">'
+        "Mean ipTM (binds, cross-engine ↑) · Agreement (engines concurring 0–3 ↑) · "
+        "ipSAE_min (interface ↑) · Epitope (contacts on the pocket ↑) · Solubility (SoluProt ↑) · "
+        "Tm (TmProt °C ↑) · Notes (wet-lab advisory). Full metric set for these 30 is in "
+        "<b>Top 30 — all metrics</b> at the bottom.</p>"
+    )
+
+    # Full-metrics Top-30 table — moved to a collapsible section at the bottom of the report.
+    _full_top30 = _df_to_html(
         top30_primary,
         colour_tool=True,
         flag_disagreement=True,
@@ -1359,14 +1376,19 @@ def generate_report(
     ).replace("<table>", '<table style="width:100%">', 1)
     if secondary_cols:
         top30_secondary = sort_df[primary_cols[:2] + secondary_cols].head(30)
-        top_table += (
+        _full_top30 += (
             '\n<details style="margin:0.5em 0;">'
             '<summary style="cursor:pointer;font-size:0.85em;color:#1565C0;font-weight:bold;">'
             "Show additional metrics for Top 30</summary>\n"
             + _df_to_html(top30_secondary, colour_tool=True)
             + "\n</details>"
         )
-    top_table += _advisory_legend_html(sort_df)
+    _full_top30 += _advisory_legend_html(sort_df)
+    top30_full_bottom = (
+        '<h2>Top 30 — all metrics</h2>\n'
+        '<details style="margin:0.5em 0;"><summary style="cursor:pointer;color:#1565C0;font-weight:bold;">'
+        "Click to expand — full metric set for the Top 30</summary>\n" + _full_top30 + "\n</details>"
+    )
 
     # Summary statistics table
     summary_table = _summary_to_html(summary)
@@ -1876,6 +1898,8 @@ def generate_report(
 
     html = _HTML_TEMPLATE.format(
         n_binders=len(sort_df),
+        slim_css=SLIM_REPORT_CSS,
+        top30_full_bottom=top30_full_bottom,
         methodology_ranking_html=methodology_ranking_html,
         benchmark_provenance_block=benchmark_provenance_block,
         qc_rules_block=qc_rules_block,

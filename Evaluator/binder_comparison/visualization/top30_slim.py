@@ -121,6 +121,41 @@ def _full_table(df: pd.DataFrame, table_id: str) -> str:
     return f'<table class="sortable full" id="{table_id}"><thead><tr>{heads}</tr></thead><tbody>\n{chr(10).join(rows)}\n</tbody></table>'
 
 
+def slim_table_html(df: pd.DataFrame, top_n: int = 30, table_id: str = "t") -> str:
+    """Return just the slim ``<table>`` HTML for the top-``top_n`` rows (for embedding)."""
+    sort_col = "two_stage_rank" if "two_stage_rank" in df.columns else "consensus_iptm_mean"
+    d = df.sort_values(sort_col, ascending=(sort_col == "two_stage_rank")).head(top_n)
+    return _slim_table(d, _slim_cols(d), table_id)
+
+
+# Slim-table CSS scoped under a ``.slimreport`` wrapper, for embedding in the main
+# report.html (whose own table CSS would otherwise clash). Light-theme values.
+SLIM_REPORT_CSS = """
+.slimreport{--high:#16a34a;--med:#d97706;--low:#dc2626;--rej:#991b1b;--bar:#6366f1;--barbg:#eef2ff;--line:#e5e7eb;--head:#eef2f7;--mut:#6b7280;overflow-x:auto}
+.slimreport table{border-collapse:collapse;width:100%;font-size:0.85em;margin:0}
+.slimreport th,.slimreport td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap;min-width:0}
+.slimreport thead th{background:var(--head);color:var(--mut);position:sticky;top:0;cursor:pointer;font-size:0.82em;text-transform:uppercase;letter-spacing:.4px}
+.slimreport tbody tr:hover{background:#f6f8fb}
+.slimreport .rank{color:var(--mut);font-variant-numeric:tabular-nums}
+.slimreport .bid{font-family:ui-monospace,Menlo,monospace;font-size:0.9em;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.slimreport .num{text-align:right;font-variant-numeric:tabular-nums}
+.slimreport .chip{font-size:0.85em;font-weight:600;padding:2px 8px;border-radius:20px;color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent);border:1px solid color-mix(in srgb,var(--c) 35%,transparent)}
+.slimreport .iptm{position:relative;text-align:right;min-width:104px}
+.slimreport .iptm .bar{position:absolute;left:8px;right:8px;bottom:3px;height:3px;border-radius:2px;background:var(--barbg)}
+.slimreport .iptm .bar::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--w);background:var(--bar);border-radius:2px}
+.slimreport .pill{padding:2px 8px;border-radius:6px;font-weight:600;color:#fff}
+.slimreport .pill.high{background:var(--high)}.slimreport .pill.med{background:var(--med)}
+.slimreport .pill.low{background:var(--low)}.slimreport .pill.rej{background:var(--rej)}.slimreport .pill.na{background:transparent;color:var(--mut)}
+.slimreport .ag{padding:2px 7px;border-radius:6px;font-weight:600}
+.slimreport .ag3{background:var(--high);color:#fff}
+.slimreport .ag2{background:color-mix(in srgb,var(--high) 22%,transparent);color:var(--high)}
+.slimreport .ag1{background:color-mix(in srgb,var(--med) 22%,transparent);color:var(--med)}
+.slimreport .ag0{background:color-mix(in srgb,var(--low) 18%,transparent);color:var(--low)}
+.slimreport .tm-hi{color:var(--high);font-weight:600}.slimreport .tm-lo{color:var(--mut)}
+.slimreport .note{white-space:normal;max-width:280px;font-size:0.9em;color:var(--mut)}
+"""
+
+
 def write_top30_slim(df: pd.DataFrame, output_dir: Path, top_per_tool: int = 10, pool_size: int | None = None) -> None:
     """Write ``top30_slim.html`` + ``top30_slim.csv`` (decision metrics + per-tool + all-metric roll-ups)."""
     output_dir = Path(output_dir)
