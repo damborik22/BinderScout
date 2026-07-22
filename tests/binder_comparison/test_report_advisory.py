@@ -113,17 +113,39 @@ def test_top_table_legend_adaptyv_still_calls_ipsae_primary():
     assert ipsae_idx < primary_idx + 200
 
 
-def test_screening_summary_intro_two_stage_has_both_tier_legends():
-    """Item 12: when ranking by iPTM, surface BOTH the iPTM and ipSAE tier legends."""
+def test_screening_summary_intro_two_stage_single_ipsae_tier():
+    """Item 12: two_stage shows ONE tier system (ipSAE_min) matching the single tier-count table.
+
+    iPTM is the ranking metric but is continuous, not tier-banded — there is no
+    iPTM tier-count table, so rendering a parallel iPTM tier legend just reads as a
+    confusing second tier system. iPTM is named in prose; only ipSAE_min is banded.
+    """
     html = _screening_summary_intro_html("two_stage")
-    assert "iPTM tiers" in html and "ipSAE_min tiers" in html
+    # The active ranking metric is named so the reader knows the ranking key.
+    assert "consensus_iptm_mean" in html
+    # No second, parallel iPTM tier band/table.
+    assert "iPTM band" not in html
+    # The single ipSAE_min tier band is present.
+    assert "High" in html and "Reject" in html
+
+
+def test_binding_map_link_renders_only_when_provided():
+    from binder_comparison.visualization.report import _binding_map_link_html
+
+    assert _binding_map_link_html(None) == ""
+    assert _binding_map_link_html("") == ""
+    html = _binding_map_link_html("2VDY_CBG_binding_map.html")
+    assert "Target binding map" in html
+    assert "href='2VDY_CBG_binding_map.html'" in html
+    assert 'target="_blank"' in html or "target='_blank'" in html
 
 
 def test_screening_summary_intro_adaptyv_only_ipsae_legend():
-    """Under adaptyv, the iPTM legend is irrelevant — show only the ipSAE bands."""
+    """Under adaptyv, ipSAE IS the ranking metric — show just the single ipSAE band."""
     html = _screening_summary_intro_html("adaptyv")
     assert "ipSAE_min tiers" in html
-    assert "iPTM tiers" not in html
+    # No iPTM band table in adaptyv mode (iPTM isn't the ranking key here).
+    assert "iPTM band" not in html
 
 
 def test_qc_rules_html_lists_all_five_default_thresholds():

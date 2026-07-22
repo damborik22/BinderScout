@@ -80,6 +80,8 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "consensus_iptm_mean": ("Mean ipTM", "[0–1]", "↑"),
     "consensus_ipsae_min_mean": ("Mean ipSAE_min", "[0–1]", "↑"),
     "native_soluprot_score": ("Solubility (SoluProt)", "[0–1]", "↑"),
+    "wetlab_recommended": ("Wet-lab ready", "", ""),
+    "wetlab_reason": ("Why flagged (wet-lab)", "", ""),
 }
 
 
@@ -946,3 +948,113 @@ def save_figure(fig: Figure, path: str | Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), bbox_inches="tight", dpi=150)
     plt.close(fig)
+
+
+# Display labels for the per-tool engine bar chart (kept local to plots.py).
+_ENGINE_BAR_LABEL = {
+    "mosaic": "Mosaic", "pxdesign": "PXDesign", "bindcraft": "BindCraft",
+    "proteina_complexa": "Proteina-C", "protein_hunter": "Protein-Hunter",
+    "rfd3": "RFD3", "boltzgen_protein": "BoltzGen-prot", "boltzgen_nano": "BoltzGen-nano",
+}
+
+
+def plot_per_tool_engine_iptm(df: pd.DataFrame, top_n: int | None = None) -> Figure:
+    """Grouped bar chart — per tool, three bars = each refold engine's mean iPTM.
+
+    For every tool, the mean of Boltz-2 / AF3 / ESMFold2 PAE-recomputed iPTM across
+    the tool's designs (top-``top_n`` by two-stage rank when given). Companion to the
+    per-engine radar: shows, side by side, how strongly each engine scores each tool.
+    """
+    engines = [
+        ("boltz_pae_iptm", "Boltz-2", "#4C72B0"),
+        ("af3_pae_iptm", "AF3", "#DD8452"),
+        ("esmfold2_pae_iptm", "ESMFold2", "#55A868"),
+    ]
+    engines = [(c, n, col) for c, n, col in engines if c in df.columns]
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    if "source_tool" not in df.columns or not engines:
+        ax.text(0.5, 0.5, "per-engine iPTM columns missing — bar chart skipped", ha="center", va="center")
+        return fig
+    tools = list(df["source_tool"].dropna().unique())
+    rows: dict[str, list[float]] = {}
+    for t in tools:
+        sub = df[df["source_tool"] == t]
+        if top_n and "two_stage_rank" in sub.columns:
+            sub = sub.sort_values("two_stage_rank").head(top_n)
+        elif top_n:
+            sub = sub.head(top_n)
+        rows[t] = [pd.to_numeric(sub[c], errors="coerce").mean() for c, _, _ in engines]
+    tools.sort(key=lambda t: -np.nanmean(rows[t]) if np.isfinite(np.nanmean(rows[t])) else 0.0)
+    x = np.arange(len(tools))
+    w = 0.8 / len(engines)
+    for i, (_c, name, col) in enumerate(engines):
+        vals = [rows[t][i] for t in tools]
+        bars = ax.bar(x + (i - (len(engines) - 1) / 2) * w, vals, w, label=name, color=col)
+        for b, v in zip(bars, vals, strict=False):
+            if v == v:
+                ax.text(b.get_x() + b.get_width() / 2, v + 0.012, f"{v:.2f}", ha="center", va="bottom", fontsize=6.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels([_ENGINE_BAR_LABEL.get(t, t) for t in tools], rotation=25, ha="right", fontsize=9)
+    ax.set_ylabel("Mean ipTM (PAE)")
+    ax.set_ylim(0, 1.0)
+    ax.set_title(f"Per-tool mean iPTM by engine{f' (top {top_n}/tool)' if top_n else ''}")
+    ax.legend(title="Engine", fontsize=8, loc="upper right")
+    ax.grid(axis="y", alpha=0.3)
+    return fig
+
+
+def plot_multimetric_radar(df: pd.DataFrame, top_n: int | None = None) -> Figure:
+    """Per-tool profile radar across the decision metrics (one polygon per tool).
+
+    Axes are the wet-lab decision metrics, each normalised to 0–1; each tool's
+    polygon is the mean of its top-``top_n`` designs (by two-stage rank) on every
+    axis. Shows at a glance where each tool is strong/weak across *all* metrics —
+    a richer view than a single-metric or per-engine radar.
+    """
+    metrics = [
+        ("Mean ipTM", "consensus_iptm_mean", lambda v: v),
+        ("ipSAE_min", "ipsae_min", lambda v: v),
+        ("Agreement", "agreement_count", lambda v: v / 3.0),
+        ("Epitope", "epitope_match_fraction", lambda v: v),
+        ("Solubility", "native_soluprot_score", lambda v: v),
+        ("Tm", "native_tmprot_tm", lambda v: (v - 40.0) / 50.0),  # ~40–90 °C → 0–1
+        ("pLDDT", "plddt_binder_mean", lambda v: v),
+    ]
+    metrics = [(lbl, c, f) for lbl, c, f in metrics if c in df.columns]
+    fig = plt.figure(figsize=(7.8, 6.6))
+    ax = fig.add_subplot(111, polar=True)
+    if "source_tool" not in df.columns or len(metrics) < 3:
+        ax.text(0.5, 0.5, "not enough metrics for radar", ha="center", va="center", transform=ax.transAxes)
+        return fig
+    labels = [lbl for lbl, _, _ in metrics]
+    angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False).tolist()
+    angles += angles[:1]
+
+    means = {}
+    for t in df["source_tool"].dropna().unique():
+        sub = df[df["source_tool"] == t]
+        if top_n and "two_stage_rank" in sub.columns:
+            sub = sub.sort_values("two_stage_rank").head(top_n)
+        elif top_n:
+            sub = sub.head(top_n)
+        vals = []
+        for _lbl, c, f in metrics:
+            mv = pd.to_numeric(sub[c], errors="coerce").mean()
+            v = f(mv) if mv == mv else 0.0
+            vals.append(min(1.0, max(0.0, v)))
+        means[t] = vals
+    tools = sorted(means, key=lambda t: -float(np.mean(means[t])))
+
+    for t in tools:
+        vals = means[t] + means[t][:1]
+        col = TOOL_COLOURS.get(t, "#888888")
+        ax.plot(angles, vals, color=col, linewidth=1.9, label=_ENGINE_BAR_LABEL.get(t, t))
+        ax.fill(angles, vals, color=col, alpha=0.07)
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels, fontsize=9)
+    ax.set_ylim(0, 1)
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(["", "0.5", "", "1.0"], fontsize=7, color="#888")
+    ax.set_title(f"Per-tool profile across metrics{f' (top {top_n}/tool)' if top_n else ''}", pad=22, fontsize=11)
+    ax.legend(loc="upper right", bbox_to_anchor=(1.32, 1.12), fontsize=8, framealpha=0.9)
+    return fig

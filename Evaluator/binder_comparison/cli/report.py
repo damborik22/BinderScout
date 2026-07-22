@@ -44,6 +44,7 @@ from ..comparison.scoring import (
 from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
 from ..visualization.report import generate_report
+from ..visualization.top30_slim import write_top30_slim
 
 
 def _parse_tool_meta(specs: list[str] | None) -> dict[str, dict]:
@@ -190,6 +191,12 @@ def run(args: argparse.Namespace) -> None:
     if args.soluprot_results:
         df = _attach_soluprot_results(df, args.soluprot_results)
 
+    # TmProt: sequence-only melting-temperature (thermostability) screen — sister
+    # tool to SoluProt. Left-joined by sequence — adds native_tmprot_tm (°C).
+    # A screen, not a re-ranker; not part of agreement_count.
+    if args.tmprot_results:
+        df = _attach_tmprot_results(df, args.tmprot_results)
+
     # qc-annotate: BindCraft interface QC panel for a shortlist. Left-joined by
     # binder_id — adds qc_pass + qc_fail_reasons + interface_* columns. ADVISORY
     # (most rows stay NaN; only the annotated shortlist carries values); never
@@ -202,12 +209,21 @@ def run(args: argparse.Namespace) -> None:
     # epitope_off_target_residues. ADVISORY — never reorders or drops.
     if getattr(args, "epitope_results", None):
         df = _attach_epitope_results(df, args.epitope_results)
+        df = _attach_binding_mode(df)
 
     # diversity: sequence-similarity clustering into "families" (Item 1).
     # Joined by binder_id; adds family_id / family_size / family_rank. ADVISORY
     # — never reorders or drops; the report surfaces a "Top per family" block.
     if getattr(args, "diversity_results", None):
         df = _attach_diversity_results(df, args.diversity_results)
+
+    # beta-check: binder→target β-sheet intercalation (β-augmentation), from DSSP
+    # cross-chain bridges. Joined by binder_id; adds n_xbridge + beta_intercalates.
+    # With --exclude-intercalators this DROPS the flagged designs — the one advisory
+    # allowed to drop, because a strand threaded into a folded target's sheet is
+    # non-physical (a design artifact), not merely weak.
+    if getattr(args, "beta_results", None):
+        df = _attach_beta_results(df, args.beta_results, exclude=getattr(args, "exclude_intercalators", False))
 
     # Step 2: Promote Boltz-2 as primary predictor
     print("[report] Promoting Boltz-2 metrics as primary…")
@@ -424,6 +440,11 @@ def run(args: argparse.Namespace) -> None:
     write_csv(top30, output_dir / "top30_candidates.csv")
     print("  top30_candidates.csv — top 30 distinct designs with sequences")
 
+    # Slim decision-metrics table (companion to report.html): the agreed columns
+    # + TmProt Tm + a plain-text Notes column (wet-lab advisory, no icon flags).
+    write_top30_slim(df_display, output_dir, top_per_tool=getattr(args, "top_per_tool", None) or 10, pool_size=len(df))
+    print("  top30_slim.html     — decision-metrics tables: overall + per-tool, all-metric roll-ups (+ .csv)")
+
     # Parse --tool-csv flags into dict (also consumed by the HTML report below).
     tool_csvs = {}
     if args.tool_csv:
@@ -507,6 +528,7 @@ def run(args: argparse.Namespace) -> None:
         tool_overrides=tool_overrides or None,
         provenance=provenance,
         lightweight=bool(getattr(args, "lightweight", False)),
+        binding_map=getattr(args, "binding_map", None),
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
@@ -707,6 +729,37 @@ def _attach_soluprot_results(df: pd.DataFrame, soluprot_csv: str) -> pd.DataFram
     return pd.merge(df, sp_sub, on="sequence", how="left")
 
 
+def _attach_tmprot_results(df: pd.DataFrame, tmprot_csv: str) -> pd.DataFrame:
+    """Left-join TmProt's per-sequence melting-temperature output by sequence.
+
+    TmProt (ESM2-LoRA Tm predictor, sister tool to SoluProt) is run externally on
+    the same source FASTA; its native CLI writes ``Rank, ID, Predicted Tm [°C],
+    Thermostable``. The runner here only requires a ``sequence`` column plus a Tm
+    column under any common spelling — renamed to ``native_tmprot_tm`` so it lives
+    alongside the other design-time screens in the final CSV.
+    """
+    tp_path = Path(tmprot_csv)
+    if not tp_path.exists():
+        print(f"[report] [warn] TmProt CSV not found at {tp_path} — skipping")
+        return df
+    tp_df = pd.read_csv(tp_path)
+    if tp_df.empty or "sequence" not in tp_df.columns:
+        return df
+    tm_col = next(
+        (c for c in tp_df.columns if c.strip().lower() in
+         ("native_tmprot_tm", "tmprot_tm", "predicted_tm", "predicted_tm_c", "predicted tm [°c]", "tm", "tm_c")),
+        None,
+    )
+    if tm_col is None:
+        print(f"[report] [warn] no Tm column found in {tp_path.name} — skipping")
+        return df
+    tp_sub = tp_df[["sequence", tm_col]].rename(columns={tm_col: "native_tmprot_tm"}).copy()
+    tp_sub["sequence"] = tp_sub["sequence"].str.strip().str.upper()
+    tp_sub["native_tmprot_tm"] = pd.to_numeric(tp_sub["native_tmprot_tm"], errors="coerce")
+    print(f"[report] Attaching TmProt Tm from {tp_path.name}")
+    return pd.merge(df, tp_sub, on="sequence", how="left")
+
+
 # qc-annotate (interface_qc.py) panel columns to surface in the report.
 _DIVERSITY_COLS = ("family_id", "family_size", "family_rank")
 
@@ -769,6 +822,64 @@ def _attach_epitope_results(df: pd.DataFrame, epitope_csv: str) -> pd.DataFrame:
     n = int(ep_sub["epitope_match_fraction"].notna().sum()) if "epitope_match_fraction" in ep_sub.columns else 0
     print(f"[report] Attaching epitope-match panel from {epitope_path.name} ({n} annotated designs)")
     return pd.merge(df, ep_sub, on="binder_id", how="left")
+
+
+def _attach_binding_mode(df: pd.DataFrame) -> pd.DataFrame:
+    """Add ``binding_mode`` (1–8): footprint clusters matching epitope-map's binding_map.html.
+
+    Uses the same defaults as ``epitope-map`` (Jaccard 0.5, min mode size 3, cap 8) on each
+    design's contacted-residue footprint, so the mode numbers correspond to the map's colours.
+    Designs outside the kept modes get <NA>.
+    """
+    if "epitope_matched_residues" not in df.columns or "binder_id" not in df.columns:
+        return df
+    from ..comparison.epitope_map import cluster_binding_modes, design_footprints
+
+    footprints = design_footprints(df.to_dict("records"))
+    if not footprints:
+        return df
+    modes = [m for m in cluster_binding_modes(footprints, threshold=0.5) if len(m["members"]) >= 3][:8]
+    bid_to_mode = {bid: i for i, m in enumerate(modes, 1) for bid in m["members"]}
+    df = df.copy()
+    df["binding_mode"] = df["binder_id"].map(bid_to_mode).astype("Int64")
+    print(f"[report] Binding modes: {len(modes)} (footprint clustering; matches binding_map.html)")
+    return df
+
+
+_BETA_COLS = ("n_xbridge", "n_xbridge2", "beta_intercalates")
+
+
+def _attach_beta_results(df: pd.DataFrame, beta_csv: str, exclude: bool = False) -> pd.DataFrame:
+    """Left-join the beta-check CSV by binder_id. Advisory unless *exclude* — then
+    DROP designs flagged ``beta_intercalates=true`` (binder strand threaded into
+    the target β-sheet; non-physical)."""
+    path = Path(beta_csv)
+    if not path.exists():
+        print(f"[report] WARNING: --beta-results file not found: {path}; skipping.")
+        return df
+    try:
+        b_df = pd.read_csv(path)
+    except (OSError, pd.errors.ParserError) as exc:
+        print(f"[report] WARNING: could not read --beta-results {path}: {exc}")
+        return df
+    id_col = next((c for c in ("binder_id", "design_id", "id") if c in b_df.columns), None)
+    if id_col is None:
+        print(f"[report] WARNING: --beta-results {path} has no id column; skipping.")
+        return df
+    keep = [id_col] + [c for c in _BETA_COLS if c in b_df.columns]
+    b_sub = b_df[keep].rename(columns={id_col: "binder_id"}).copy()
+    b_sub["binder_id"] = b_sub["binder_id"].astype(str)
+    df = df.copy()
+    df["binder_id"] = df["binder_id"].astype(str)
+    df = pd.merge(df, b_sub, on="binder_id", how="left")
+    flagged = df["beta_intercalates"].astype(str).str.lower() == "true" if "beta_intercalates" in df.columns else None
+    if exclude and flagged is not None:
+        before = len(df)
+        df = df[~flagged].reset_index(drop=True)
+        print(f"[report] beta-check: EXCLUDED {before - len(df)} intercalating designs → {len(df)} remain")
+    elif flagged is not None:
+        print(f"[report] beta-check: {int(flagged.sum())} intercalating designs flagged (advisory — not dropped)")
+    return df
 
 
 _QC_PANEL_COLS = (
@@ -840,6 +951,13 @@ def add_parser(subparsers) -> None:
         "screen, not a re-ranker; the ranking hierarchy is unchanged.",
     )
     p.add_argument(
+        "--tmprot-results",
+        metavar="CSV",
+        help="Optional: TmProt output (sequence + predicted Tm in °C; ESM2-LoRA "
+        "thermostability screen, sister tool to SoluProt). Adds native_tmprot_tm. "
+        "A screen, not a re-ranker; the ranking hierarchy is unchanged.",
+    )
+    p.add_argument(
         "--qc-results",
         metavar="CSV",
         help="Optional: output from 'qc-annotate' (BindCraft interface panel for a shortlist). "
@@ -860,6 +978,18 @@ def add_parser(subparsers) -> None:
         help="Optional: output from 'diversity' (sequence-similarity clustering into families). "
         "Adds advisory family_id + family_size + family_rank columns. Surfaces a 'Top per "
         "family' recommendation block in the report — never reorders or drops the main rank.",
+    )
+    p.add_argument(
+        "--beta-results",
+        metavar="CSV",
+        help="Optional: output from 'beta-check' (binder→target β-sheet intercalation flag via DSSP). "
+        "Adds advisory n_xbridge + beta_intercalates columns joined by binder_id.",
+    )
+    p.add_argument(
+        "--exclude-intercalators",
+        action="store_true",
+        help="With --beta-results: DROP designs flagged as intercalating (binder strand threaded into the "
+        "target β-sheet — non-physical β-augmentation). Off by default (advisory).",
     )
     p.add_argument(
         "--esmfold2-results",
@@ -982,5 +1112,12 @@ def add_parser(subparsers) -> None:
         action="store_true",
         help="Skip the inline 3D viewer (top-20 NGL coords stay in PDB files in top20_structures/, "
         "but no embedded base64). Cuts ~5 MB from the HTML for large pools.",
+    )
+    p.add_argument(
+        "--binding-map",
+        default=None,
+        metavar="HREF",
+        help="Relative path/filename of a binding_map.html (from 'binder-compare epitope-map') to link "
+        "from the report as a callout. The file must sit next to report.html in the bundle.",
     )
     p.set_defaults(func=run)
