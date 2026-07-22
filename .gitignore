@@ -39,6 +39,9 @@ weights/
 af3.bin
 *.af3.bin*
 
+# RFD3 / ProteinMPNN foundry checkpoints (fetched by 'foundry install'; 2.5GB+)
+weights/foundry/
+
 # Evaluator build / runtime artefacts
 __pycache__/
 *.egg-info/

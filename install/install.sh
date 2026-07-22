@@ -25,7 +25,7 @@ EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
 # Pinned commits for reproducible installs (x86_64 clones only; aarch64 uses bundled)
 BINDCRAFT_COMMIT="7cd4ace"
 BOLTZGEN_COMMIT="da0f092"
-MOSAIC_COMMIT="0599248"
+MOSAIC_COMMIT="82593a8"
 
 PXDESIGN_REPO="https://github.com/bytedance/PXDesign.git"
 PXDESIGN_COMMIT="HEAD"
@@ -44,6 +44,13 @@ FOUNDRY_REPO="https://github.com/RosettaCommons/foundry.git"
 FOUNDRY_COMMIT="v0.1.9"
 FOUNDRY_DIR="${BINDMASTER_DIR}/Foundry"
 FOUNDRY_WEIGHTS_DIR="${BINDMASTER_DIR}/weights/foundry"
+# AlphaFold 3 (DeepMind, Evaluator refolding). NOT a real PyPI package — the
+# "alphafold3" name on PyPI is an unrelated stub (v0.0.x). Installed from the
+# official repo (pinned); refold_af3.py resolves run_alphafold.py at ${AF3_DIR}
+# by default (or $AF3_REPO_DIR). alphafold3/ is gitignored.
+AF3_REPO="https://github.com/google-deepmind/alphafold3"
+AF3_COMMIT="fd39d2c5dcaadfc7333c3466951b27563fa7d6fa"  # v3.0.3.dev, compatible with the v3.0.2 weights
+AF3_DIR="${BINDMASTER_DIR}/alphafold3"
 
 CONDA_CMD=""          # set by detect_conda: full path to mamba (preferred) or conda
 ARCH="$(uname -m)"   # x86_64 or aarch64 (e.g. DGX Spark / Grace-Hopper)
@@ -1008,15 +1015,16 @@ install_mosaic() {
     fi
     print_ok "uv is available: $(command -v uv)"
 
-    # Patch: pin grpcio-tools>=1.60 in override-dependencies.
-    # Mosaic 0599248+ pulls flax 0.12.7 → orbax-checkpoint 0.11.37 → grpcio-tools==1.48.2,
-    # whose setup.py imports pkg_resources without declaring setuptools as a build dep.
-    # uv 0.5+ strict isolation rejects that, so the build fails with ModuleNotFoundError.
-    # Forcing a modern grpcio-tools (which declares its build deps correctly) avoids it.
-    local mosaic_pyproject="${MOSAIC_DIR}/pyproject.toml"
-    if [[ -f "${mosaic_pyproject}" ]] && ! grep -q "grpcio-tools" "${mosaic_pyproject}"; then
-        sed -i 's/^\(override-dependencies = \[[^]]*\)\]/\1, "grpcio-tools>=1.60"]/' "${mosaic_pyproject}" \
-            && print_ok "Patched Mosaic pyproject.toml: override grpcio-tools>=1.60"
+    # Offline-MSA support: upstream Mosaic lacks TargetChain.msa_path, which our
+    # Boltz-2 refolds AND the hallucination template rely on to feed a cached
+    # target .a3m on air-gapped nodes. Re-apply our source patch after clone
+    # (idempotent — skipped if already present). The old grpcio-tools override is
+    # obsolete: upstream removed override-dependencies at this pin (uv sync resolves).
+    local msa_patch="${BINDMASTER_DIR}/install/patches/mosaic-offline-msa.patch"
+    if [[ -f "${msa_patch}" ]] && ! grep -q "msa_path" "${MOSAIC_DIR}/src/mosaic/structure_prediction.py" 2>/dev/null; then
+        git -C "${MOSAIC_DIR}" apply "${msa_patch}" \
+            && print_ok "Applied offline-MSA patch (TargetChain.msa_path)" \
+            || print_warn "Offline-MSA patch failed to apply — offline target MSA disabled"
     fi
 
     # Create virtual environment with JAX CUDA support
@@ -1130,6 +1138,19 @@ install_evaluator() {
     run_logged "pip install binder-compare into Mosaic venv" \
         uv pip install --python "${MOSAIC_VENV}/bin/python" -q -e "${EVALUATOR_DIR}[boltz2]" \
         || { print_fail "Failed to install binder-compare into Mosaic venv"; return 1; }
+
+    # ESM2 pseudolikelihood expressibility prior for Mosaic hallucination.
+    # fair-esm loads the weights via torch (already present); the PLL runs in
+    # JAX/esm2quinox. Non-fatal — the design template guards a missing ESM2.
+    print_step "Installing fair-esm (ESM2 expressibility prior) into Mosaic venv"
+    run_logged "pip install fair-esm into Mosaic venv" \
+        uv pip install --python "${MOSAIC_VENV}/bin/python" -q fair-esm \
+        || print_warn "fair-esm install failed — Mosaic will run without the ESM2 prior"
+    # Pre-cache the ESM2-150M weights (~566 MB) so offline compute nodes need no
+    # download at design time (cached under ~/.cache/torch/hub/checkpoints). Non-fatal.
+    run_logged "pre-fetch ESM2-150M weights" \
+        "${MOSAIC_VENV}/bin/python" -c "import esm; esm.pretrained.esm2_t30_150M_UR50D()" \
+        || print_warn "ESM2-150M weight prefetch failed — provision it offline or design runs without the prior"
 
     # DO NOT force a CUDA build of PyTorch into this venv. Mosaic's engine is JAX (jax-cuda),
     # and the campaign's Boltz-2 refold (`binder-compare refold-boltz2`) is JAX as well — both
@@ -2106,17 +2127,48 @@ install_af3() {
             || { print_fail "Failed to create binder-eval-af3 conda env"; return 1; }
     fi
 
-    # Install AF3 producer + gemmi (structure I/O used by refold_af3.py)
-    run_logged "Installing alphafold3 + gemmi into binder-eval-af3" \
-        "${CONDA_CMD}" run -n binder-eval-af3 pip install -q alphafold3 gemmi \
-        || { print_fail "Failed to install alphafold3 + gemmi (check PyPI access)"; return 1; }
+    # Install AlphaFold 3 from source. The "alphafold3" PyPI package is an unrelated
+    # stub (v0.0.x) — the genuine DeepMind AF3 ships only via its repo (source build)
+    # or Docker. Recipe (verified on Clara H200, 2026-07-15):
+    #   clone (pinned) -> pip install (pulls jax==0.9.1 + gemmi + deps, builds C++)
+    #   -> build_data (generates the CCD chemical_component_sets.pickle AF3 needs).
+    if [[ -d "${AF3_DIR}/.git" ]]; then
+        print_warn "alphafold3 repo already present at ${AF3_DIR} — fetching + re-pinning to ${AF3_COMMIT}."
+        run_logged "Re-pinning alphafold3 to ${AF3_COMMIT}" \
+            bash -c "cd '${AF3_DIR}' && git fetch --quiet origin && git checkout '${AF3_COMMIT}'" \
+            || { print_fail "Failed to checkout alphafold3 ${AF3_COMMIT}"; return 1; }
+    elif [[ -e "${AF3_DIR}" ]]; then
+        print_fail "${AF3_DIR} exists but is not a git repo — remove it and retry."; return 1
+    else
+        run_logged "Cloning alphafold3" \
+            git clone "${AF3_REPO}" "${AF3_DIR}" \
+            || { print_fail "Failed to clone alphafold3 (network / GitHub access?)"; return 1; }
+        run_logged "Pinning alphafold3 to ${AF3_COMMIT}" \
+            bash -c "cd '${AF3_DIR}' && git checkout '${AF3_COMMIT}'" \
+            || { print_fail "Failed to checkout alphafold3 ${AF3_COMMIT}"; return 1; }
+    fi
+
+    run_logged "Building + installing AlphaFold 3 from source (jax 0.9.1 + gemmi)" \
+        "${CONDA_CMD}" run -n binder-eval-af3 pip install -q "${AF3_DIR}" gemmi \
+        || { print_fail "Failed to build/install AlphaFold 3 (jax 0.9.1 + C++ build)"; return 1; }
+
+    run_logged "Building AF3 chemical-component data (build_data)" \
+        "${CONDA_CMD}" run -n binder-eval-af3 build_data \
+        || { print_fail "Failed to run AF3 build_data (CCD pickle)"; return 1; }
 
     # Install binder-compare into the env so 'binder-compare refold-af3' works
     run_logged "Installing binder-compare into binder-eval-af3" \
         "${CONDA_CMD}" run -n binder-eval-af3 pip install -q -e "${EVALUATOR_DIR}[report]" \
         || { print_fail "Failed to install binder-compare into binder-eval-af3"; return 1; }
 
-    # Smoke test — just the CLI parses (no weights needed for --help)
+    # Smoke test — verify the REAL AF3 actually imports (the old --help-only test
+    # passed even against the broken PyPI stub, which imports nothing) and that
+    # run_alphafold.py is present.
+    smoke_test "AF3 producer imports (alphafold3 + jax)" \
+        "${CONDA_CMD}" run -n binder-eval-af3 python -c "import alphafold3, jax" \
+        || { print_fail "AF3 producer import failed — install did not build the real AF3"; return 1; }
+    [[ -f "${AF3_DIR}/run_alphafold.py" ]] \
+        || { print_fail "AF3 install incomplete: ${AF3_DIR}/run_alphafold.py missing"; return 1; }
     smoke_test "binder-compare refold-af3 --help" \
         "${CONDA_CMD}" run -n binder-eval-af3 binder-compare refold-af3 --help \
         || return 1
@@ -2513,6 +2565,7 @@ uninstall_tool() {
             env_exists binder-eval-af3 && run_logged "Removing binder-eval-af3 conda env" \
                 "${CONDA_CMD}" env remove -n binder-eval-af3 -y
             rm -f "${SHORTCUTS_DIR}/af3"
+            [[ -d "${AF3_DIR}" ]] && { rm -rf "${AF3_DIR}"; print_ok "Removed ${AF3_DIR}"; }
             print_warn "AF3 model weights (if any) at ~/.alphafold3/models or \$AF3_MODEL_DIR were NOT removed."
             print_ok "AF3 refolder uninstalled"
             ;;

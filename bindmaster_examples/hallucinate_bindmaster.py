@@ -15,10 +15,42 @@ from mosaic.models.boltz2 import Boltz2
 import mosaic.losses.structure_prediction as sp
 from mosaic.common import TOKENS
 from mosaic.losses.protein_mpnn import InverseFoldingSequenceRecovery
-from mosaic.losses.transformations import NoCys
+from mosaic.losses.transformations import ClippedLoss, NoCys
 from mosaic.proteinmpnn.mpnn import load_mpnn_sol
 from mosaic.structure_prediction import TargetChain
-from mosaic.optimizers import simplex_APGM
+from mosaic.optimizers import batched_simplex_APGM
+
+# Offline-only resolver for the cached target MSA (never contacts a server).
+# Present when the Evaluator (binder_comparison) is installed in this venv;
+# None otherwise so the template still runs standalone.
+try:
+    from binder_comparison.refolding.target_msa import target_msa_cache_path
+except Exception:
+    target_msa_cache_path = None
+
+# ESM2 pseudolikelihood expressibility prior (guarded). Needs fair-esm +
+# esm2quinox + the model weights; skips cleanly if any are missing (aarch64,
+# offline without a pre-cached model) so the design still runs without it.
+try:
+    import esm as _fair_esm
+    import esm2quinox as _esm2quinox
+
+    from mosaic.losses.esm import ESM2PseudoLikelihood
+except Exception:
+    _fair_esm = None
+    _esm2quinox = None
+    ESM2PseudoLikelihood = None
+
+# --- ESM2 expressibility-prior settings (edit to tune / disable) ---
+ESM2_WEIGHT = 0.3  # weight of the ESM2 PLL term added to the design loss; 0.0 disables it
+ESM2_MODEL = "esm2_t30_150M_UR50D"  # fair-esm model id (150M: balances signal vs per-step O(N) cost)
+ESM2_CLIP = (2.0, 100.0)  # ClippedLoss bounds — guards against over-optimization into homopolymers
+
+# --- Batched design settings ---
+# Seeds optimized in parallel per GPU pass (one vmap'd batched_simplex_APGM call).
+# GPU memory scales ~linearly with the batch; the ESM2 prior adds more pressure —
+# drop to 2 (or disable ESM2) if you OOM on a 24 GB card.
+DESIGN_BATCH_SIZE = 4
 
 
 # ============================
@@ -34,6 +66,7 @@ TOP_K = 5  # Stage 2: how many top designs to refold and export PDB
 MIN_LENGTH = 65  # minimum binder length (aa)
 MAX_LENGTH = 100  # maximum binder length (aa)
 LENGTH_STEP = 5  # step between scanned lengths; set MIN=MAX for a single length
+EPITOPE_IDX = None  # 0-based target-residue indices the binder must contact (hotspots); None = whole surface
 
 
 # ============================
@@ -248,6 +281,25 @@ def _extract_prediction_metrics(prediction, binder_length):
     }
 
 
+def _load_esm2_pll(model_id: str):
+    """Load an ESM2 pseudolikelihood loss term (guarded).
+
+    Returns an ESM2PseudoLikelihood, or None when fair-esm / esm2quinox / the
+    model weights are unavailable, so the design still runs without the prior.
+    """
+    if ESM2PseudoLikelihood is None or _fair_esm is None or _esm2quinox is None:
+        print("  ESM2 prior: fair-esm/esm2quinox unavailable — expressibility term OFF")
+        return None
+    try:
+        torch_model, _ = getattr(_fair_esm.pretrained, model_id)()
+        pll = ESM2PseudoLikelihood(_esm2quinox.from_torch(torch_model))
+        print(f"  ESM2 prior: loaded {model_id} (expressibility term ON)")
+        return pll
+    except Exception as exc:
+        print(f"  ESM2 prior: load failed ({exc}) — expressibility term OFF")
+        return None
+
+
 def design(
     n_designs: int,
     top_k: int,
@@ -263,6 +315,9 @@ def design(
     epitope_idx=None,
     ss_bias="none",
     min_iptm_aux=None,
+    esm2_pll=None,
+    esm2_weight=0.0,
+    esm2_clip=(2.0, 100.0),
 ):
     """Run a binder design campaign for one binder_length.
 
@@ -303,6 +358,23 @@ def design(
     folder = Boltz2()
     mpnn = load_mpnn_sol(0.05)
 
+    # Stage-2 refold uses the target's MSA when a precomputed .a3m is cached
+    # (offline-safe: this resolver never contacts a server). Binder stays MSA-free
+    # and Stage-1 ranking stays MSA-free; this only affects the Stage-2 target.
+    # Falls back to template/single-sequence when no cached MSA is present.
+    # Mirrors the Evaluator's refold_boltz2 offline-MSA handling.
+    target_msa_path = None
+    if target_msa_cache_path is not None:
+        try:
+            _cached = target_msa_cache_path(target_sequence)
+            if _cached is not None and os.path.exists(_cached):
+                target_msa_path = str(_cached)
+                print(f"  Target MSA (cached, offline): {target_msa_path}")
+            else:
+                print("  Target MSA: no cached .a3m — Stage-2 target uses template/single-seq")
+        except Exception as exc:
+            print(f"  Target MSA cache lookup failed ({exc}); using template/single-seq")
+
     bias = jnp.zeros((binder_length, 20)).at[:binder_length, TOKENS.index("C")].set(-1e6)
 
     sp_loss = (
@@ -333,14 +405,18 @@ def design(
         chains=[target_tc],
     )
 
-    loss = NoCys(
-        folder.build_multisample_loss(
-            loss=sp_loss,
-            features=features,
-            recycling_steps=1,
-            num_samples=1,
-        )
+    model_loss = folder.build_multisample_loss(
+        loss=sp_loss,
+        features=features,
+        recycling_steps=1,
+        num_samples=1,
     )
+    if esm2_pll is not None and esm2_weight > 0:
+        # Clipped ESM2 pseudolikelihood: bias toward expressible sequences.
+        # Composed OUTSIDE build_multisample_loss so it runs once per step (not
+        # per sample); NoCys feeds it the same 20-dim binder sequence.
+        model_loss = model_loss + esm2_weight * ClippedLoss(esm2_pll, esm2_clip[0], esm2_clip[1])
+    loss = NoCys(model_loss)
 
     @eqx.filter_jit
     def evaluate_loss(loss, pssm, key):
@@ -349,15 +425,20 @@ def design(
     # --------------------------
     # Stage 1: optimize, rank
     # --------------------------
-    def design_one(design_idx):
-        print(f"[{design_idx + 1}/{n_designs}] designing...")
-        _pssm = np.random.uniform(low=0.25, high=0.75) * jax.random.gumbel(
-            key=jax.random.key(np.random.randint(10000000)),
-            shape=(binder_length, 19),
-        )
-        _, pssm = simplex_APGM(
+    def _optimize_batch(batch_size):
+        """Optimize `batch_size` seeds in parallel (one GPU pass, vmap'd) through the
+        3-phase simplex schedule. Returns a list of binder sequence strings.
+
+        GPU memory scales with batch_size (each seed holds a live Boltz-2 forward
+        pass, and the ESM2 prior adds more) — tune DESIGN_BATCH_SIZE, not this call.
+        """
+        keys = jax.random.split(jax.random.key(np.random.randint(10000000)), batch_size)
+        scales = np.random.uniform(low=0.25, high=0.75, size=(batch_size, 1, 1))
+        _pssm = scales * jax.vmap(lambda k: jax.random.gumbel(k, shape=(binder_length, 19)))(keys)
+        x = jax.nn.softmax(_pssm, axis=-1)
+        _, pssm = batched_simplex_APGM(
             loss_function=loss,
-            x=jax.nn.softmax(_pssm),
+            x=x,
             n_steps=100,
             stepsize=0.2 * np.sqrt(binder_length),
             momentum=0.3,
@@ -365,7 +446,7 @@ def design(
             logspace=False,
             max_gradient_norm=1.0,
         )
-        pssm, _ = simplex_APGM(
+        pssm, _ = batched_simplex_APGM(
             loss_function=loss,
             x=jnp.log(pssm + 1e-5),
             n_steps=50,
@@ -375,7 +456,7 @@ def design(
             logspace=True,
             max_gradient_norm=1.0,
         )
-        pssm, _ = simplex_APGM(
+        pssm, _ = batched_simplex_APGM(
             loss_function=loss,
             x=jnp.log(pssm + 1e-5),
             n_steps=15,
@@ -385,15 +466,22 @@ def design(
             logspace=True,
             max_gradient_norm=1.0,
         )
+        seqs = []
+        for b in range(batch_size):
+            tokens = NoCys.sequence(pssm[b]).argmax(-1)
+            seqs.append("".join(TOKENS[i] for i in tokens))
+        return seqs
 
-        pssm = NoCys.sequence(pssm)
-        seq = pssm.argmax(-1)
-        seq_str = "".join(TOKENS[i] for i in seq)
-
+    def _rank_seq(seq_str):
+        """Re-fold a designed sequence and score it for the Stage-1 relative sort."""
+        seq = jnp.array([TOKENS.index(c) for c in seq_str])
+        # Stage-1 ranking: MSA-free for binder AND target (free generation, cheap
+        # relative sort; target anchored by the template when provided). To also use
+        # the cached target MSA here (D1 toggle), mirror the Stage-2 target chain below.
         boltz_features, _ = folder.target_only_features(
             chains=[
-                TargetChain(sequence=seq_str, use_msa=True),
-                TargetChain(sequence=target_sequence, use_msa=True, template_chain=template_chain),
+                TargetChain(sequence=seq_str, use_msa=False),
+                TargetChain(sequence=target_sequence, use_msa=False, template_chain=template_chain),
             ]
         )
         ranking_loss = folder.build_multisample_loss(
@@ -403,8 +491,6 @@ def design(
             num_samples=6,
         )
         loss_value, _ = evaluate_loss(ranking_loss, jax.nn.one_hot(seq, 20), key=jax.random.key(0))
-
-        print(f"  ranking_loss={loss_value.item():.4f}  seq={seq_str}")
         return seq_str, loss_value.item()
 
     print(f"\n=== Stage 1: Generating {n_designs} designs ===")
@@ -419,9 +505,15 @@ def design(
             print(f"    ... and {len(candidates) - 5} more")
     else:
         candidates = candidates_ref
-        for i in range(n_designs):
-            seq, loss_value = design_one(i)
-            candidates.append((seq, loss_value))
+        n_done = 0
+        while n_done < n_designs:
+            this_batch = min(DESIGN_BATCH_SIZE, n_designs - n_done)
+            print(f"\n[batch {n_done + 1}-{n_done + this_batch}/{n_designs}] optimizing {this_batch} seed(s) in parallel...")
+            for seq_str in _optimize_batch(this_batch):
+                seq_str, loss_value = _rank_seq(seq_str)
+                candidates.append((seq_str, loss_value))
+                print(f"  [{len(candidates)}/{n_designs}] ranking_loss={loss_value:.4f}  seq={seq_str}")
+            n_done += this_batch
 
         candidates = sorted(candidates, key=lambda x: x[1])
         _interrupt_state["candidates"] = candidates
@@ -508,10 +600,17 @@ def design(
 
             seq = jnp.array([TOKENS.index(c) for c in seq_str])
 
+            # Stage-2 refold: binder MSA-free; target uses the cached MSA when
+            # available (offline-safe via msa_path), else template/single-sequence.
             boltz_features, boltz_writer = folder.target_only_features(
                 chains=[
-                    TargetChain(sequence=seq_str, use_msa=True),
-                    TargetChain(sequence=target_sequence, use_msa=True, template_chain=template_chain),
+                    TargetChain(sequence=seq_str, use_msa=False),
+                    TargetChain(
+                        sequence=target_sequence,
+                        use_msa=template_chain is None,
+                        template_chain=template_chain,
+                        msa_path=target_msa_path,
+                    ),
                 ]
             )
 
@@ -782,6 +881,9 @@ def main():
     print(f"  Binder lengths   : {binder_lengths}")
     print()
 
+    # Load the ESM2 expressibility prior once (guarded); skipped if unavailable.
+    esm2_pll = _load_esm2_pll(ESM2_MODEL) if ESM2_WEIGHT > 0 else None
+
     _install_signal_handler(
         get_candidates_fn=lambda: _interrupt_state["candidates"],
         checkpoint_path_fn=lambda: _interrupt_state["checkpoint_path"],
@@ -800,6 +902,10 @@ def main():
             output_dir,
             template_chain=template_chain,
             checkpoint_path=ckpt_path,
+            epitope_idx=EPITOPE_IDX,
+            esm2_pll=esm2_pll,
+            esm2_weight=ESM2_WEIGHT,
+            esm2_clip=ESM2_CLIP,
         )
 
         summary_rows.append(

@@ -9,10 +9,13 @@ name: binder-eval-af3
 #   1. Request access at https://github.com/google-deepmind/alphafold3
 #   2. Place the model parameters at ~/.alphafold3/models/ (or set AF3_MODEL_DIR).
 #
-# The BindMaster installer (`bindmaster install --tool af3`) creates this env
-# and runs the pip installs below. If installing manually:
+# AF3 is NOT a real PyPI package (the "alphafold3" PyPI name is an unrelated stub) —
+# it is installed from the official repo (source build). The BindMaster installer
+# (`bindmaster install --tool af3`) does this. If installing manually:
 #   conda env create -f binder-eval-af3.yml
-#   conda run -n binder-eval-af3 pip install alphafold3 gemmi
+#   git clone https://github.com/google-deepmind/alphafold3 <repo_root>/alphafold3
+#   conda run -n binder-eval-af3 pip install <repo_root>/alphafold3 gemmi   # jax 0.9.1 + C++ build
+#   conda run -n binder-eval-af3 build_data                                  # CCD pickle (required)
 #   conda run -n binder-eval-af3 pip install -e <repo_root>/Evaluator/[report]
 channels:
   - conda-forge
@@ -21,3 +24,10 @@ dependencies:
   - python=3.12
   - pip
   - numpy>=1.24
+  # AF3's `pip install <repo>` compiles native C++ — provide the toolchain so a
+  # standalone install (Part H, no system build-essential) can build it. Resolves
+  # on both linux-64 and linux-aarch64.
+  - c-compiler
+  - cxx-compiler
+  - cmake
+  - make
