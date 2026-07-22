@@ -948,3 +948,56 @@ def save_figure(fig: Figure, path: str | Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(path), bbox_inches="tight", dpi=150)
     plt.close(fig)
+
+
+# Display labels for the per-tool engine bar chart (kept local to plots.py).
+_ENGINE_BAR_LABEL = {
+    "mosaic": "Mosaic", "pxdesign": "PXDesign", "bindcraft": "BindCraft",
+    "proteina_complexa": "Proteina-C", "protein_hunter": "Protein-Hunter",
+    "rfd3": "RFD3", "boltzgen_protein": "BoltzGen-prot", "boltzgen_nano": "BoltzGen-nano",
+}
+
+
+def plot_per_tool_engine_iptm(df: pd.DataFrame, top_n: int | None = None) -> Figure:
+    """Grouped bar chart — per tool, three bars = each refold engine's mean iPTM.
+
+    For every tool, the mean of Boltz-2 / AF3 / ESMFold2 PAE-recomputed iPTM across
+    the tool's designs (top-``top_n`` by two-stage rank when given). Companion to the
+    per-engine radar: shows, side by side, how strongly each engine scores each tool.
+    """
+    engines = [
+        ("boltz_pae_iptm", "Boltz-2", "#4C72B0"),
+        ("af3_pae_iptm", "AF3", "#DD8452"),
+        ("esmfold2_pae_iptm", "ESMFold2", "#55A868"),
+    ]
+    engines = [(c, n, col) for c, n, col in engines if c in df.columns]
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    if "source_tool" not in df.columns or not engines:
+        ax.text(0.5, 0.5, "per-engine iPTM columns missing — bar chart skipped", ha="center", va="center")
+        return fig
+    tools = list(df["source_tool"].dropna().unique())
+    rows: dict[str, list[float]] = {}
+    for t in tools:
+        sub = df[df["source_tool"] == t]
+        if top_n and "two_stage_rank" in sub.columns:
+            sub = sub.sort_values("two_stage_rank").head(top_n)
+        elif top_n:
+            sub = sub.head(top_n)
+        rows[t] = [pd.to_numeric(sub[c], errors="coerce").mean() for c, _, _ in engines]
+    tools.sort(key=lambda t: -np.nanmean(rows[t]) if np.isfinite(np.nanmean(rows[t])) else 0.0)
+    x = np.arange(len(tools))
+    w = 0.8 / len(engines)
+    for i, (_c, name, col) in enumerate(engines):
+        vals = [rows[t][i] for t in tools]
+        bars = ax.bar(x + (i - (len(engines) - 1) / 2) * w, vals, w, label=name, color=col)
+        for b, v in zip(bars, vals, strict=False):
+            if v == v:
+                ax.text(b.get_x() + b.get_width() / 2, v + 0.012, f"{v:.2f}", ha="center", va="bottom", fontsize=6.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels([_ENGINE_BAR_LABEL.get(t, t) for t in tools], rotation=25, ha="right", fontsize=9)
+    ax.set_ylabel("Mean ipTM (PAE)")
+    ax.set_ylim(0, 1.0)
+    ax.set_title(f"Per-tool mean iPTM by engine{f' (top {top_n}/tool)' if top_n else ''}")
+    ax.legend(title="Engine", fontsize=8, loc="upper right")
+    ax.grid(axis="y", alpha=0.3)
+    return fig
