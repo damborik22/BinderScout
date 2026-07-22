@@ -147,6 +147,7 @@ _HTML_TEMPLATE = """\
   &nbsp;&nbsp;·&nbsp;&nbsp;
   {tool_counts_str}
 </div>
+{designed_total_banner}
 
 <p style="font-size:0.85em;color:#555;line-height:1.6;">
   <b>Methodology.</b>
@@ -161,7 +162,6 @@ _HTML_TEMPLATE = """\
 {benchmark_provenance_block}
 {qc_rules_block}
 {tool_classification_banner}
-{designed_total_banner}
 {binding_map_link}
 
 <details style="margin:0.8em 0;">
