@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import math
+from html import escape as html_escape
 from pathlib import Path
 
 import pandas as pd
@@ -22,12 +23,14 @@ from .plots import (
     plot_max_vs_mean_iptm,
     plot_metric_correlation_heatmap,
     plot_metric_distributions,
+    plot_multimetric_radar,
     plot_pareto_front,
+    plot_per_tool_engine_iptm,
     plot_radar_chart,
-    plot_radar_iptm,
     plot_radar_per_engine,
     plot_radar_per_engine_uniform_selection,
 )
+from .top30_slim import SLIM_REPORT_CSS, slim_table_html
 
 # Display names for tools (source_tool values are lowercase internally)
 _TOOL_DISPLAY = {
@@ -89,6 +92,7 @@ _HTML_TEMPLATE = """\
 <meta charset="UTF-8">
 <title>Binder Comparison Report</title>
 <style>
+{slim_css}
   body {{ font-family: 'Segoe UI', sans-serif; margin: 2em; background: #f8f9fa; color: #333; }}
   h1 {{ color: #1a5276; }}
   h2 {{ color: #1a5276; margin-top: 2em; border-bottom: 2px solid #CFE6F6; padding-bottom: 4px; }}
@@ -143,6 +147,7 @@ _HTML_TEMPLATE = """\
   &nbsp;&nbsp;·&nbsp;&nbsp;
   {tool_counts_str}
 </div>
+{designed_total_banner}
 
 <p style="font-size:0.85em;color:#555;line-height:1.6;">
   <b>Methodology.</b>
@@ -157,6 +162,7 @@ _HTML_TEMPLATE = """\
 {benchmark_provenance_block}
 {qc_rules_block}
 {tool_classification_banner}
+{binding_map_link}
 
 <details style="margin:0.8em 0;">
   <summary style="cursor:pointer;font-size:0.85em;color:#1565C0;font-weight:bold;">
@@ -196,8 +202,6 @@ _HTML_TEMPLATE = """\
 
 {top_table_legend}
 
-{top_per_family_block}
-
 <details style="margin:1em 0;">
   <summary style="cursor:pointer;font-size:1.5em;color:#1a5276;font-weight:bold;
            border-bottom:2px solid #CFE6F6;padding-bottom:4px;margin-bottom:0.5em;">
@@ -217,11 +221,22 @@ _HTML_TEMPLATE = """\
   A taller box indicates greater variability across designs from that tool.
 </p>
 
-<h2>Tool Comparison (Radar Chart)</h2>
+<h2>Tool Comparison</h2>
 <p style="font-size:0.85em;color:#555;margin:0.2em 0 0.6em 0;">
-  Each panel: per-tool top-10 ranked by <b>that engine's own ipSAE_min</b>.
+  <b>Left:</b> each tool's mean profile across the decision metrics (normalized 0–1, top-{top_per_tool_display}/tool).
+  <b>Right:</b> per-tool mean iPTM by refold engine.
 </p>
-<img src="data:image/png;base64,{radar_plot}" alt="Per-engine radar (each panel ranks per-tool top-10 independently)">
+<div style="display:flex;flex-wrap:wrap;gap:1.2em;align-items:flex-start;">
+  <div style="flex:1 1 460px;min-width:300px;">
+    <img src="data:image/png;base64,{radar_plot}" alt="Per-engine radar (each panel ranks per-tool top-10 independently)" style="max-width:100%;height:auto;">
+  </div>
+  <div style="flex:1 1 460px;min-width:300px;">
+    <p style="font-size:0.85em;color:#555;margin:0 0 0.3em 0;">
+      Per-tool <b>mean iPTM by engine</b> — three bars/tool (Boltz-2 · AF3 · ESMFold2), top-{top_per_tool_display}/tool.
+    </p>
+    <img src="data:image/png;base64,{engine_bars_plot}" alt="Per-tool mean iPTM by engine (three bars per tool)" style="max-width:100%;height:auto;">
+  </div>
+</div>
 
 {scatter_block}
 
@@ -260,6 +275,8 @@ _HTML_TEMPLATE = """\
 cd report/top20_structures/
 pymol view_top20.pml</pre>
 </details>
+
+{top30_full_bottom}
 
 <h2>Full Metrics Table</h2>
 <details>
@@ -332,7 +349,7 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path, target_seq: st
                 "tool_colour": _TOOL_COLOURS_NGL.get(tool, _TOOL_COLOURS_NGL["unknown"]),
                 "ipsae": f"{float(ipsae):.3f}" if ipsae not in ("", None) else "n/a",
                 "iptm": f"{float(iptm):.3f}" if iptm not in ("", None) else "n/a",
-                "length": str(length).rstrip(".0") if length else "?",
+                "length": (f"{int(float(length))}" if str(length).strip() not in ("", "nan", "None") else "?"),
                 "pdb": pdb_js,
             }
         )
@@ -1290,6 +1307,7 @@ def generate_report(
     tool_overrides: dict[str, dict] | None = None,
     provenance: dict | None = None,
     lightweight: bool = False,
+    binding_map: str | None = None,
 ) -> None:
     """Generate and write the HTML report.
 
@@ -1346,23 +1364,41 @@ def generate_report(
         (c for c in ("active_rank", "two_stage_rank", "consensus_rank", "adaptyv_rank") if c in primary_cols),
         None,
     )
-    top_table = _df_to_html(
+    # Prominent Top-30 = slim decision-metrics table (Mean ipTM · Agreement · ipSAE_min
+    # · Epitope · Solubility · Tm · Notes). No ⚠ flag icons — the wet-lab advisory rides
+    # in the plain-text Notes column. The full metric set moves to a collapsible below.
+    top_table = (
+        f'<div class="slimreport">{slim_table_html(sort_df, 30, "t_top30_slim")}</div>'
+        '\n<p style="font-size:0.8em;color:#666;margin-top:0.4em;">'
+        "Column key below. The full metric set for these 30 is in "
+        "<b>Top 30 — all metrics</b> at the bottom of the report.</p>"
+    )
+
+    # Full-metrics Top-30 table — moved to a collapsible section at the bottom of the report.
+    _full_top30 = _df_to_html(
         top30_primary,
         colour_tool=True,
         flag_disagreement=True,
         rank_col=_rank_col_for_flag,
         strike_when_false_col="wetlab_recommended" if "wetlab_recommended" in top30_primary.columns else None,
+        mark_reason=(sort_df["wetlab_reason"].to_dict() if "wetlab_reason" in sort_df.columns else None),
     ).replace("<table>", '<table style="width:100%">', 1)
     if secondary_cols:
         top30_secondary = sort_df[primary_cols[:2] + secondary_cols].head(30)
-        top_table += (
+        _full_top30 += (
             '\n<details style="margin:0.5em 0;">'
             '<summary style="cursor:pointer;font-size:0.85em;color:#1565C0;font-weight:bold;">'
             "Show additional metrics for Top 30</summary>\n"
             + _df_to_html(top30_secondary, colour_tool=True)
             + "\n</details>"
         )
-    top_table += _advisory_legend_html(sort_df)
+    _full_top30 += _advisory_legend_html(sort_df)
+    top30_full_bottom = (
+        '<h2>Top 30 — all metrics</h2>\n'
+        '<details style="margin:0.5em 0;"><summary style="cursor:pointer;color:#1565C0;font-weight:bold;">'
+        "Click to expand — full metric set for the Top 30</summary>\n" + _full_top30
+        + "\n" + _top_table_legend_html(rank_method, top30_primary) + "\n</details>"
+    )
 
     # Summary statistics table
     summary_table = _summary_to_html(summary)
@@ -1375,7 +1411,7 @@ def generate_report(
         # high mean-rank; spike = passes max-screen only) + the max-vs-mean
         # signature scatter. Replaces the ipsae-centric per-engine radars.
         try:
-            radar_fig = plot_radar_iptm(sort_df, top_n=top_per_tool)
+            radar_fig = plot_multimetric_radar(sort_df, top_n=top_per_tool)
         except Exception:  # pragma: no cover - defensive
             radar_fig = plot_radar_chart(summary)
         try:
@@ -1402,6 +1438,10 @@ def generate_report(
 
     dist_b64 = fig_to_base64(dist_fig)
     radar_b64 = fig_to_base64(radar_fig)
+    try:
+        engine_bars_b64 = fig_to_base64(plot_per_tool_engine_iptm(sort_df, top_n=top_per_tool))
+    except Exception:  # pragma: no cover - defensive
+        engine_bars_b64 = ""
     scatter_b64 = fig_to_base64(scatter_fig) if scatter_fig is not None else ""
     radar_fixed_b64 = fig_to_base64(radar_fixed_fig) if radar_fixed_fig is not None else ""
 
@@ -1413,15 +1453,12 @@ def generate_report(
         tools_present = order_tools(sort_df["source_tool"].dropna().unique())
         if tools_present:
             per_tool_top10 = (
-                "<h2>Top Designs per Tool "
-                '<span style="background:#1565C0;color:white;padding:2px 10px;'
-                "border-radius:4px;font-size:0.7em;font-weight:bold;vertical-align:middle;"
-                'margin-left:0.4em;">NATIVE TOOL RANKING</span></h2>\n'
+                "<h2>Top Designs per Tool</h2>\n"
                 '<p style="font-size:0.85em;color:#555;">'
-                "Each tool's top designs ranked by <b>that tool's own internal scoring</b> "
-                "(not the evaluator's cross-engine ranking). Shows <b>refolded designs only</b>, "
-                "one row per backbone (MPNN/cycle siblings collapsed; never-refolded designs omitted)."
-                "</p>\n"
+                "Each tool's best designs by the evaluator's cross-engine two-stage ranking, in the "
+                "same slim decision-metrics view as the main Top-30 "
+                "(Mean ipTM · Agreement · ipSAE_min · Epitope · Solubility · Tm · Notes). "
+                "Expand a tool for its table + 3D structures.</p>\n"
             )
 
             # Build sequence → binder_id + rank lookup. Use the FULL (pre-collapse)
@@ -1467,6 +1504,9 @@ def generate_report(
 
             for tool in tools_present:
                 display_name = _tool_display(tool)
+                # Optional "of N generated" suffix from --tool-meta TOOL='total:N'.
+                _total = (tool_overrides or {}).get(tool, {}).get("total")
+                _of_total = f' <span style="font-weight:normal;color:#777;">of {_total} generated</span>' if _total else ""
 
                 # Try reading from tool's original CSV
                 if tool_csvs and tool in tool_csvs:
@@ -1514,7 +1554,11 @@ def generate_report(
                                     )
                                     _pos += 1
                             n = len(native_df)
-                            tool_table = _df_to_html(native_df, colour_tool=False)
+                            tool_table = (
+                                '<div class="slimreport">'
+                                + slim_table_html(sort_df[sort_df["source_tool"] == tool], top_per_tool, f"tpt_{tool}")
+                                + "</div>"
+                            )
 
                             # Add 3D viewer if tool_pdb_dirs provided
                             viewer_block = ""
@@ -1582,37 +1626,22 @@ def generate_report(
                             per_tool_top10 += (
                                 f'<details style="margin:0.3em 0;">'
                                 f'<summary style="cursor:pointer;font-weight:bold;">'
-                                f"{display_name} — top {n} (native ranking)</summary>\n"
+                                f"{display_name} — top {n}{_of_total}</summary>\n"
                                 f"{tool_table}\n{viewer_block}\n</details>\n"
                             )
                             continue
                         except Exception:
                             pass  # Fall through to evaluator-based ranking
 
-                # Fallback: use a per-tool native column when available;
-                # else fall back to the evaluator's ranking within this tool.
-                tool_only = sort_df[sort_df["source_tool"] == tool].copy()
-                native_sort_col = _TOOL_NATIVE_SORT.get(tool)
-                native_sort_dir = _TOOL_NATIVE_SORT_DIR.get(tool, "desc")
-                used_native = False
-                if native_sort_col and native_sort_col in tool_only.columns:
-                    vals = pd.to_numeric(tool_only[native_sort_col], errors="coerce")
-                    if vals.notna().any():
-                        ascending = native_sort_dir == "asc"
-                        tool_only = (
-                            tool_only.assign(_sort=vals)
-                            .sort_values("_sort", ascending=ascending, na_position="last")
-                            .drop(columns=["_sort"])
-                        )
-                        used_native = True
-                tool_df = tool_only.head(top_per_tool)
+                # Evaluator two-stage ranking within this tool (sort_df is already
+                # rank-sorted); slim decision-metrics table + refolded-structure viewer.
+                tool_df = sort_df[sort_df["source_tool"] == tool].head(top_per_tool)
                 n = len(tool_df)
-                # If native sort applied, surface its column so it's visible in the table
-                cols_for_table = list(primary_cols)
-                if used_native and native_sort_col not in cols_for_table:
-                    cols_for_table = cols_for_table + [native_sort_col]
-                cols_for_table = [c for c in cols_for_table if c in tool_df.columns]
-                tool_table = _df_to_html(tool_df[cols_for_table], colour_tool=True)
+                tool_table = (
+                    '<div class="slimreport">'
+                    + slim_table_html(tool_df, top_per_tool, f"tpt_{tool}")
+                    + "</div>"
+                )
                 # 3D viewer using refolded Boltz-2 PDBs (works for Mosaic etc.
                 # without needing --tool-csv/--tool-pdb-dir flags)
                 refold_viewer = ""
@@ -1627,24 +1656,10 @@ def generate_report(
                     )
                 except Exception as e:  # pragma: no cover - defensive
                     refold_viewer = f"<p style='color:#888;'><em>3D viewer error: {e}</em></p>"
-                if used_native:
-                    badge = (
-                        f'<span style="background:#1565C0;color:white;padding:1px 6px;'
-                        f'border-radius:3px;font-size:0.75em;margin-left:0.4em;">NATIVE RANK</span>'
-                        f'<span style="font-size:0.8em;color:#555;margin-left:0.4em;">'
-                        f"sorted by <code>{native_sort_col}</code> ({native_sort_dir})</span>"
-                    )
-                    label = f"{display_name} — top {n}{badge}"
-                else:
-                    label = (
-                        f"{display_name} — top {n} "
-                        f'<span style="font-size:0.8em;color:#888;">(evaluator ranking; '
-                        f"no native column available)</span>"
-                    )
                 per_tool_top10 += (
                     f'<details style="margin:0.3em 0;">'
                     f'<summary style="cursor:pointer;font-weight:bold;">'
-                    f"{label}</summary>\n"
+                    f"{display_name} — top {n}{_of_total}</summary>\n"
                     f"{tool_table}\n{refold_viewer}\n</details>\n"
                 )
 
@@ -1817,8 +1832,8 @@ def generate_report(
         ),
         "two_stage": (
             f"Ranking is <b>two-stage mean iPTM</b>, validated on two <em>internal</em> 4-target benchmarks "
-            f"(Adaptyv: 8 hand-curated targets, Kd-screened, n &gt; 3,700; ProteinBase: Nipah / EGFR / "
-            f"IL7R / PD-L1, n = 175). <b>Stage 1 — screen:</b> <code>consensus_iptm_mean</code> = "
+            f"(Adaptyv: 4 targets — Nipah / EGFR / IL7R / PD-L1 — Kd-screened, n = 662; ProteinBase: the "
+            f"same 4 targets, n = 175). <b>Stage 1 — screen:</b> <code>consensus_iptm_mean</code> = "
             f"mean(boltz2, af3, esmfold2 iPTM); the top 50% (<code>passes_max_screen</code>) form the "
             f"binder-likely pool. Mean was selected as default over max because it is more robust to "
             f"per-target engine blind spots (Adaptyv macro AUC <b>0.710 vs 0.689</b> for max; ~20 more "
@@ -1864,20 +1879,44 @@ def generate_report(
     benchmark_provenance_block = _benchmark_provenance_html() if rank_method == "two_stage" else ""
     qc_rules_block = _qc_rules_html() if "qc_pass" in sort_df.columns else ""
     screening_summary_intro = _screening_summary_intro_html(rank_method)
-    top_table_legend = _top_table_legend_html(rank_method, top30_primary)
+    top_table_legend = _slim_legend_html(sort_df)
     tool_classification_banner = _tool_classification_banner_html(sort_df, tool_overrides=tool_overrides)
+
+    # "Designed in total" banner (top of the report) from --tool-meta TOOL='total:N'.
+    _dt = {t: (tool_overrides or {}).get(t, {}).get("total") for t in sort_df["source_tool"].dropna().unique()} \
+        if "source_tool" in sort_df.columns else {}
+    _dt = {t: int(v) for t, v in _dt.items() if v and str(v).isdigit()}
+    designed_total_banner = ""
+    if _dt:
+        _grand = sum(_dt.values())
+        _per = " &nbsp;·&nbsp; ".join(
+            f"{_tool_display(t)} <b>{v:,}</b>" for t, v in sorted(_dt.items(), key=lambda kv: -kv[1])
+        )
+        designed_total_banner = (
+            '<p style="font-size:0.95em;color:#222;margin:0.6em 0 0.4em 0;padding:0.6em 1em;'
+            'background:#eef6ff;border:1px solid #b3d4fc;border-radius:6px;">'
+            f"&#129516; <b>Designed in total: {_grand:,}</b> across {len(_dt)} tools "
+            f"&rarr; <b>{len(sort_df):,}</b> kept in the ranked pool "
+            f"(the best per tool, by cross-engine two-stage ranking, intercalators excluded). "
+            f"&nbsp;{_per}.</p>"
+        )
     provenance_footer = _provenance_footer_html(provenance)
-    top_per_family_block = _top_per_family_html(sort_df)
+    binding_map_link = _binding_map_link_html(binding_map)
 
     html = _HTML_TEMPLATE.format(
         n_binders=len(sort_df),
+        slim_css=SLIM_REPORT_CSS,
+        top30_full_bottom=top30_full_bottom,
+        designed_total_banner=designed_total_banner,
+        engine_bars_plot=engine_bars_b64,
+        top_per_tool_display=top_per_tool,
         methodology_ranking_html=methodology_ranking_html,
         benchmark_provenance_block=benchmark_provenance_block,
         qc_rules_block=qc_rules_block,
         tool_classification_banner=tool_classification_banner,
+        binding_map_link=binding_map_link,
         screening_summary_intro=screening_summary_intro,
         top_table_legend=top_table_legend,
-        top_per_family_block=top_per_family_block,
         engines_present_html=engines_present_html,
         tool_counts_str=tool_counts_str or "—",
         engine_threshold_legend=engine_threshold_legend,
@@ -1914,6 +1953,48 @@ def generate_report(
 # ────────────────────────────────────────────────────────────────────────────
 
 
+def _slim_legend_html(df: pd.DataFrame) -> str:
+    """Per-column description table for the slim decision-metrics Top-30 table.
+
+    Matches the slim column set (Mean ipTM · Agreement · ipSAE_min · Epitope ·
+    Solubility · Tm · Notes); optional columns are shown only when present.
+    """
+    checks = [
+        ("Rank", "two_stage_rank",
+         "Overall rank — Stage-1 mean-iPTM screen survival, then mean engine iPTM (the primary key)."),
+        ("Length", "binder_length",
+         "Designed binder length (aa) — a main difficulty driver (longer tends to lower ipSAE)."),
+        ("Mean ipTM ↑", "consensus_iptm_mean",
+         "<b>Primary ranking metric</b> — mean of the 3 engines' PAE-recomputed iPTM. Higher = stronger "
+         "multi-engine consensus, which resists single-engine gaming."),
+        ("Agreement ↑", "agreement_count",
+         "How many of the 3 engines (Boltz-2 / AF3 / ESMFold2) score ipSAE_min &gt; 0.61 — so 0–3. "
+         "Low = fragile, single-engine signal."),
+        ("ipSAE_min ↑", "ipsae_min",
+         "Interface quality (cross-validation). Tier-banded: High &gt; 0.80, Medium &gt; 0.61, "
+         "Low &gt; 0.40, Reject ≤ 0.40."),
+        ("Epitope ↑", "epitope_match_fraction",
+         "Fraction of the binder's interface contacts landing on the intended target pocket."),
+        ("Mode", "binding_mode",
+         "Binding mode (#1–8) — which footprint cluster the design lands in (matches the Target binding map's colours). Blank = outside the top-8 modes."),
+        ("Solubility ↑", "native_soluprot_score",
+         "SoluProt sequence-only <i>E. coli</i> solubility probability (0–1)."),
+        ("Tm ↑", "native_tmprot_tm",
+         "TmProt predicted melting temperature (°C, ESM2-LoRA). Higher = more thermostable (≥ 60 °C highlighted)."),
+        ("Notes", "wetlab_reason",
+         "Wet-lab advisory (BindCraft interface QC, etc.); blank = no flag. Advisory only — never affects ranking."),
+    ]
+    visible = [(lbl, desc) for lbl, src, desc in checks if src in df.columns]
+    lines = ["<table style='font-size:0.8em;border-collapse:collapse;margin:0.5em 0 1.5em 0;color:#555;'>"]
+    for col, desc in visible:
+        lines.append(
+            f"<tr><td style='padding:2px 12px 2px 0;vertical-align:top;white-space:nowrap;'><b>{col}</b></td>"
+            f"<td>{desc}</td></tr>"
+        )
+    lines.append("</table>")
+    return "\n".join(lines)
+
+
 def _top_table_legend_html(rank_method: str, df: pd.DataFrame) -> str:
     """Per-column description table that sits under the Top-30 table.
 
@@ -1943,8 +2024,8 @@ def _top_table_legend_html(rank_method: str, df: pd.DataFrame) -> str:
             ),
             (
                 "agreement_count ↑",
-                "Number of engines whose ipSAE_min &gt; 0.61 (Boltz-2 / AF3 / ESMFold2 / Protenix). "
-                "agreement_count &lt; 2 earns the <span style='color:#c62828;font-weight:bold;'>⚠</span> warning.",
+                "How many of the 3 engines (Boltz-2 / AF3 / ESMFold2) score ipSAE_min &gt; 0.61 — so 0–3. "
+                "Fewer than 2 of 3 earns the <span style='color:#c62828;font-weight:bold;'>⚠</span> warning.",
             ),
             (
                 "boltz_pae_iptm / af3_iptm / esmfold2_iptm ↑",
@@ -1967,8 +2048,8 @@ def _top_table_legend_html(rank_method: str, df: pd.DataFrame) -> str:
             ("consensus_iptm_spread ↓", "Engine disagreement (max − min). &gt; 0.3 flagged on the rank."),
             (
                 "agreement_count ↑",
-                "Engines with ipSAE_min &gt; 0.61. &lt; 2 flagged with <span style='color:#c62828;"
-                "font-weight:bold;'>⚠</span> on the rank.",
+                "How many of the 3 engines score ipSAE_min &gt; 0.61 (0–3). Fewer than 2 of 3 flagged "
+                "with <span style='color:#c62828;font-weight:bold;'>⚠</span> on the rank.",
             ),
             ("boltz_pae_iptm / af3_iptm / esmfold2_iptm ↑", "Per-engine PAE-recomputed iPTM."),
             ("ipsae_min ↑", "Cross-validation — Boltz-2 ipSAE_min. Tier-banded. Not the ranking key."),
@@ -2209,35 +2290,57 @@ def _provenance_footer_html(provenance: dict | None) -> str:
     return "\n".join(lines)
 
 
-def _screening_summary_intro_html(rank_method: str) -> str:
-    """Tier legend block above the screening tables. Adapts to the active ranking.
+def _binding_map_link_html(binding_map: str | None) -> str:
+    """Callout linking to the standalone binding_map.html (from `epitope-map`).
 
-    For two_stage / consensus_iptm rankings, surfaces both the ipSAE tier (used
-    by `quality_tier`) and the iPTM tier (informational — bands the ranking
-    metric is generally interpreted on).
+    ``binding_map`` is a relative href (filename) — the map file is expected to
+    sit next to report.html in the bundle. Empty string when not provided.
     """
-    ipsae_bands = (
-        "<p style='font-size:0.85em;color:#555;margin:0.3em 0;'>"
-        "<b>ipSAE_min tiers</b> (used by <code>quality_tier</code>, cross-validation):"
+    if not binding_map:
+        return ""
+    href = html_escape(str(binding_map), quote=True)
+    return (
+        "<div style='margin:0.8em 0;padding:0.6em 1em;background:#eef6ff;border:1px solid #b3d4fc;"
+        f"border-radius:6px;font-size:0.9em;'>&#128506; <b><a href='{href}' target='_blank' "
+        "rel='noopener'>Target binding map</a></b> &mdash; interactive target structure coloured by "
+        "per-residue contact frequency, with per-binding-mode toggles (where on the target the "
+        "designs land). Open in a browser.</div>"
+    )
+
+
+def _screening_summary_intro_html(rank_method: str) -> str:
+    """Single combined tier legend block above the screening tables.
+
+    iPTM is the active ranking metric (under two_stage / consensus_iptm);
+    ipSAE_min drives the ``quality_tier`` column and the tier-count table.
+    Previously rendered as two near-identical paragraphs — readers had to
+    cross-reference which threshold belonged to which metric. Now folded
+    into one side-by-side table with a shared tier label.
+    """
+    ipsae_band = (
         " &nbsp;<span style='color:#2e7d32'>■ High</span> &gt;0.80 &nbsp;"
         "<span style='color:#f57f17'>■ Medium</span> &gt;0.61 &nbsp;"
         "<span style='color:#e65100'>■ Low</span> &gt;0.40 &nbsp;"
         "<span style='color:#c62828'>■ Reject</span> ≤0.40"
-        "</p>"
     )
     if rank_method in ("two_stage", "consensus_iptm"):
-        iptm_bands = (
+        active = "consensus_iptm_mean" if rank_method == "two_stage" else "consensus_iptm"
+        # One tier system only: the ipSAE_min tiers shown here are exactly the bands
+        # the tier-count table below reports. iPTM is the ranking metric but is NOT
+        # tier-banded (no second tier table exists for it), so it is named in prose
+        # rather than rendered as a parallel — and easily-confused — tier legend.
+        return (
             "<p style='font-size:0.85em;color:#555;margin:0.3em 0;'>"
-            "<b>iPTM tiers</b> (informational; the active ranking is "
-            f"<code>{'consensus_iptm_mean' if rank_method == 'two_stage' else 'consensus_iptm'}</code>):"
-            " &nbsp;<span style='color:#2e7d32'>■ Strong</span> ≥0.80 &nbsp;"
-            "<span style='color:#f57f17'>■ Plausible</span> ≥0.60 &nbsp;"
-            "<span style='color:#e65100'>■ Weak</span> ≥0.40 &nbsp;"
-            "<span style='color:#c62828'>■ Reject</span> &lt;0.40"
-            "</p>"
+            "<b>Ranking metric:</b> <code>" + active + "</code> (iPTM-based; continuous, not tier-banded). "
+            "The single tier system below — used by the <code>quality_tier</code> column and the "
+            "tier-count table — is <b>ipSAE_min</b>:" + ipsae_band + "</p>"
         )
-        return iptm_bands + ipsae_bands
-    return ipsae_bands
+    # adaptyv: ipSAE_min IS the ranking metric, single band.
+    return (
+        "<p style='font-size:0.85em;color:#555;margin:0.3em 0;'>"
+        "<b>ipSAE_min tiers</b> (the ranking metric under <code>adaptyv</code> — "
+        "and the basis for <code>quality_tier</code>):" + ipsae_band + "</p>"
+    )
 
 
 def _qc_rules_html() -> str:
@@ -2295,13 +2398,13 @@ def _benchmark_provenance_html() -> str:
         "<th style='text-align:left;padding:2px 12px 2px 0;'>Max-screen AUC</th></tr>"
         "<tr><td style='padding:2px 12px 2px 0;'><b>Adaptyv</b> "
         "(<a href='https://doi.org/10.1101/2025.08.14.670059' target='_blank'>Overath et al. 2025</a>)</td>"
-        "<td>&gt; 3,700</td>"
-        "<td>4 (Kd-screened)</td>"
+        "<td>662</td>"
+        "<td>4 — Nipah / EGFR / IL7R / PD-L1</td>"
         "<td><b>0.710</b> ✓ default</td>"
         "<td>0.689</td></tr>"
         "<tr><td style='padding:2px 12px 2px 0;'><b>ProteinBase</b></td>"
         "<td>175</td>"
-        "<td>Nipah, EGFR, IL7R, PD-L1</td>"
+        "<td>Nipah, EGFR, IL7R, PD-L1 (same 4)</td>"
         "<td>~0.74</td>"
         "<td><b>~0.755</b> (precision-leaning)</td></tr>"
         "</table>"
@@ -2313,8 +2416,8 @@ def _benchmark_provenance_html() -> str:
         "<p style='margin:0.3em 0;'><b>Precision@top-10%.</b> Two-stage (max-screen then mean-rank) lifts "
         "precision@top-10% to <b>0.92</b> vs <b>0.79</b> for max-screen alone, measured on ProteinBase. "
         "This is the headline number that motivated the move from single-stage to two-stage.</p>"
-        "<p style='margin:0.3em 0;'><b>Transferability caveat.</b> All 8 validation targets across both "
-        "benchmarks are compact globular proteins. The ranking is <em>unvalidated</em> on serpins "
+        "<p style='margin:0.3em 0;'><b>Transferability caveat.</b> Both benchmarks share the same 4 "
+        "compact globular validation targets (Nipah / EGFR / IL7R / PD-L1). The ranking is <em>unvalidated</em> on serpins "
         "(2VDY/CBG has a reactive-center loop and a deep steroid pocket), small peptide receptors "
         "(CALCA/CTR), antibody framework grafts, membrane proteins, and intrinsically disordered "
         "targets. Treat the rank as a strong shortlist signal, not a guarantee.</p>"
@@ -2331,13 +2434,13 @@ def _benchmark_provenance_html() -> str:
 # ADVISORY — displayed for human review, never used to reorder or drop designs.
 _ADVISORY_PRIMARY = [
     "wetlab_recommended",
+    "wetlab_reason",
     "native_soluprot_score",
     "qc_pass",
     "epitope_match_fraction",
     "family_id",
 ]
 _ADVISORY_SECONDARY = [
-    "wetlab_reason",
     "native_soluprot_passes",
     "qc_fail_reasons",
     # Interface energy decomposition (Item 13) — surfaces existing
@@ -2360,52 +2463,6 @@ _ADVISORY_SECONDARY = [
 ]
 
 
-def _top_per_family_html(df: pd.DataFrame, n_per_family: int = 1, top_n: int = 15) -> str:
-    """Render the diversity 'Top per family' recommendations block (Item 1).
-
-    Collapses the ranked frame to one representative per family (best
-    active_rank wins), then surfaces the top ``top_n`` families. Renders
-    nothing if no ``family_id`` column is present.
-    """
-    if "family_id" not in df.columns or df.empty:
-        return ""
-    from ..comparison.diversity import top_per_family
-
-    rank_col = next(
-        (c for c in ("active_rank", "two_stage_rank", "consensus_rank", "adaptyv_rank") if c in df.columns),
-        None,
-    )
-    if rank_col is None:
-        return ""
-    representatives = top_per_family(df, n_per_family=n_per_family, sort_col=rank_col, ascending=True)
-    representatives = representatives.head(top_n)
-    cols = [
-        rank_col,
-        "binder_id",
-        "source_tool",
-        "binder_length",
-        "family_id",
-        "family_size",
-    ]
-    if "consensus_iptm_mean" in representatives.columns:
-        cols.append("consensus_iptm_mean")
-    if "epitope_match_fraction" in representatives.columns:
-        cols.append("epitope_match_fraction")
-    if "native_soluprot_score" in representatives.columns:
-        cols.append("native_soluprot_score")
-    cols = [c for c in cols if c in representatives.columns]
-    table_html = _df_to_html(representatives[cols], colour_tool=True)
-    return (
-        "<h2>Top per family — diversity-aware shortlist</h2>"
-        "<p style='font-size:0.85em;color:#555;line-height:1.55;'>"
-        "Designs are clustered into <b>families</b> by sequence similarity (default ≥ 0.70 Jaccard on "
-        "4-mers — see <code>binder-compare diversity</code>). This block shows the best-ranked design "
-        "from each of the top families, so the wet-lab portfolio doesn't accidentally test 5 copies of "
-        "one motif. <b>Advisory</b> — the main Top-30 ranking is unchanged."
-        "</p>" + table_html
-    )
-
-
 def _advisory_legend_html(df: pd.DataFrame) -> str:
     """Legend for the advisory SoluProt + qc-annotate + epitope columns, shown only when present."""
     bits = []
@@ -2422,13 +2479,18 @@ def _advisory_legend_html(df: pd.DataFrame) -> str:
         )
     if "family_id" in df.columns:
         bits.append(
-            "<b>family_id / family_size</b> = sequence-similarity cluster (greedy Jaccard k-mer, default "
-            "70% similarity threshold). Use the 'Top per family' block to pick non-redundant wet-lab candidates."
+            "<b>family_id / family_size</b> = sequence-similarity cluster (greedy Jaccard k-mer; threshold via "
+            "<code>binder-compare diversity --threshold</code>). Designs in the same family share a sequence motif."
         )
     if "wetlab_recommended" in df.columns:
         bits.append(
-            "<b>wetlab_recommended</b> = SoluProt pass + agreement_count ≥ 2 + min binder pLDDT ≥ 0.50 "
-            "+ no FAILED RUN. Failing rows are rendered with a strike-through in the Top-30 (rank unchanged)."
+            "<b>wetlab_recommended</b> = SoluProt pass + agreement_count ≥ 2 of 3 + min binder pLDDT ≥ 0.50 "
+            "+ no FAILED RUN. Failing rows are <b>marked with a wavy red underline</b> in the Top-30 "
+            "(advisory only — the rank does not change). This is a <em>separate</em> axis from the "
+            "<span style='color:#c62828;font-weight:bold;'>⚠</span> engine-disagreement flag — a design can be "
+            "marked here (e.g. predicted-insoluble) while all engines agree on the interface, or vice-versa. "
+            "The <b>&ldquo;Why flagged (wet-lab)&rdquo;</b> column (and the row tooltip) states exactly which "
+            "condition failed &mdash; blank means wet-lab-ready."
         )
     if "interface_dG" in df.columns:
         # Item 13: surface the interface-energy decomposition columns (computed
@@ -2651,6 +2713,7 @@ def _df_to_html(
     flag_disagreement: bool = False,
     rank_col: str | None = None,
     strike_when_false_col: str | None = None,
+    mark_reason: dict | None = None,
 ) -> str:
     """Render a DataFrame as an HTML table.
 
@@ -2737,21 +2800,31 @@ def _df_to_html(
             fmt(c, _tool_display(v) if c == "source_tool" and isinstance(v, str) else v, row_idx=idx)
             for c, v in zip(df.columns, row)
         )
-        # Item 9: strike-through any row whose recommendation column is False.
-        # The row stays present (the rank doesn't move); the visual cue tells
-        # the reader to skip it when picking wet-lab candidates.
+        # Item 9: MARK (not strike-through) any row whose recommendation column is
+        # False. A strike-through reads as a hard reject; this is advisory only, so
+        # use a wavy red underline — a "needs a look" mark. The row stays present and
+        # the rank does not move.
         strike_style = ""
+        mark_title = ""
         if strike_when_false_col and strike_when_false_col in df.columns:
             val = row.get(strike_when_false_col)
             is_falsey_str = val is not None and val is not True and str(val).lower() in ("false", "0", "no")
             if val is False or is_falsey_str:
-                strike_style = "text-decoration:line-through;opacity:0.6;"
+                strike_style = "text-decoration:underline wavy #c62828;"
+                # Surface WHY on hover — the mark is a composite gate (solubility /
+                # engine agreement / pLDDT / failed run); the reason disambiguates
+                # it from the separate ⚠ engine-disagreement flag.
+                reason = str(mark_reason.get(idx, "")).strip() if mark_reason else ""
+                detail = f": {reason}" if reason and reason.lower() != "nan" else ""
+                mark_title = f"not wet-lab-recommended{detail} (advisory; rank unchanged)".replace('"', "'")
         attrs: list[str] = []
         if colour_tool and "source_tool" in df.columns:
             tool = row.get("source_tool", "")
             attrs.append(f'class="tool-{tool}"')
         if strike_style:
             attrs.append(f'style="{strike_style}"')
+        if mark_title:
+            attrs.append(f'title="{mark_title}"')
         rows.append(f"<tr {' '.join(attrs)}>{cells}</tr>")
 
     return f"<table>{header}{''.join(rows)}</table>"

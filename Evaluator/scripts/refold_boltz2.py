@@ -5,7 +5,6 @@ import re
 import signal
 import sys
 import uuid
-from pathlib import Path
 
 import equinox as eqx
 import gemmi
@@ -277,14 +276,52 @@ def refold_batch(
 
     folder = Boltz2()
 
-    # Cache target MSA across all binders. Mosaic's load_features_and_structure_writer
-    # keeps processed/msa/ (CSVs keyed by sequence hash) and wipes the per-complex dirs
-    # (manifest.json, processed/structures, etc.) on each call, so the target's MSA is
-    # fetched once and reused for every binder. Without this, large refold runs flood
-    # api.colabfold.com and hit RATELIMIT, sleeping seconds between every binder.
-    _processing_dir = Path(output_dir) / "boltz_msa_cache"
-    _processing_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Boltz-2 MSA cache : {_processing_dir}")
+    # Fetch the target MSA exactly ONCE for the whole batch. Boltz's
+    # load_features_and_structure_writer allocates a fresh TemporaryDirectory on every
+    # target_only_features() call, so process_inputs re-queries api.colabfold.com for the
+    # (constant) target on EVERY binder — ~1 fetch per binder. That floods the server and
+    # crashes the run on any transient timeout (an unhandled IndexError). The binder is
+    # single-sequence (use_msa=False) and never fetches. Fix: memoize Boltz's run_mmseqs2
+    # by query sequence, so the target is fetched once and every later binder is a cache
+    # hit (fully offline). Score-equivalent: the cached result IS the real server result.
+    import boltz.main as _boltz_main
+
+    if not getattr(_boltz_main, "_mosaic_msa_memoized", False):
+        _orig_run_mmseqs2 = _boltz_main.run_mmseqs2
+        _msa_cache: dict = {}
+
+        def _cached_run_mmseqs2(x, *args, **kwargs):
+            # MSA ONCE PER TARGET, ACROSS SESSIONS. Redirect Boltz's unpaired
+            # (target) MSA to the shared on-disk cache used by AF3 + ESMFold2
+            # (binder_comparison.refolding.target_msa.get_target_msa — keyed by
+            # target-sequence SHA-256 at ~/.cache/bindmaster/target_msa/). This
+            # means (a) all three engines see identical evolutionary context and
+            # (b) a fresh Boltz-2 process is a disk hit — it never re-queries
+            # api.colabfold.com and so never trips the ColabFold rate-limit that
+            # used to crash the refold. Only the unpaired single-/multi-query
+            # (target) path is redirected; paired MSAs fall through to Boltz's own
+            # server call (rare in refolding — the binder is use_msa=False).
+            key = (tuple(x) if isinstance(x, (list, tuple)) else x, kwargs.get("use_pairing", False))
+            if key in _msa_cache:
+                return _msa_cache[key]
+            result = None
+            if not kwargs.get("use_pairing", False) and isinstance(x, (list, tuple)):
+                try:
+                    from binder_comparison.refolding.target_msa import get_target_msa
+
+                    result = [get_target_msa(str(s)) for s in x]
+                    print(f"[boltz2-msa] target MSA from shared on-disk cache ({len(x)} query set(s), no server call)")
+                except Exception as exc:
+                    print(f"[boltz2-msa] shared MSA cache unavailable ({exc}); falling back to Boltz server call")
+                    result = None
+            if result is None:
+                result = _orig_run_mmseqs2(x, *args, **kwargs)
+            _msa_cache[key] = result
+            return result
+
+        _boltz_main.run_mmseqs2 = _cached_run_mmseqs2
+        _boltz_main._mosaic_msa_memoized = True
+        print("[boltz2-msa] run_mmseqs2 → shared on-disk target-MSA cache (once per target, all sessions)")
 
     @eqx.filter_jit
     def evaluate_loss(loss_fn, pssm, key):
