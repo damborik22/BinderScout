@@ -2503,8 +2503,8 @@ def _top_per_family_html(df: pd.DataFrame, n_per_family: int = 1, top_n: int = 1
     return (
         "<h2>Top per family — diversity-aware shortlist</h2>"
         "<p style='font-size:0.85em;color:#555;line-height:1.55;'>"
-        "Designs are clustered into <b>families</b> by sequence similarity (default ≥ 0.70 Jaccard on "
-        "4-mers — see <code>binder-compare diversity</code>). This block shows the best-ranked design "
+        "Designs are clustered into <b>families</b> by sequence similarity (Jaccard on 4-mers; "
+        "threshold set via <code>binder-compare diversity --threshold</code>). This block shows the best-ranked design "
         "from each of the top families, so the wet-lab portfolio doesn't accidentally test 5 copies of "
         "one motif. <b>Advisory</b> — the main Top-30 ranking is unchanged."
         "</p>" + table_html
