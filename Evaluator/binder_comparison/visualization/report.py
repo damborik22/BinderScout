@@ -24,6 +24,7 @@ from .plots import (
     plot_metric_correlation_heatmap,
     plot_metric_distributions,
     plot_pareto_front,
+    plot_per_tool_engine_iptm,
     plot_radar_chart,
     plot_radar_iptm,
     plot_radar_per_engine,
@@ -225,7 +226,17 @@ _HTML_TEMPLATE = """\
 <p style="font-size:0.85em;color:#555;margin:0.2em 0 0.6em 0;">
   Each panel: per-tool top-10 ranked by <b>that engine's own ipSAE_min</b>.
 </p>
-<img src="data:image/png;base64,{radar_plot}" alt="Per-engine radar (each panel ranks per-tool top-10 independently)">
+<div style="display:flex;flex-wrap:wrap;gap:1.2em;align-items:flex-start;">
+  <div style="flex:1 1 460px;min-width:300px;">
+    <img src="data:image/png;base64,{radar_plot}" alt="Per-engine radar (each panel ranks per-tool top-10 independently)" style="max-width:100%;height:auto;">
+  </div>
+  <div style="flex:1 1 460px;min-width:300px;">
+    <p style="font-size:0.85em;color:#555;margin:0 0 0.3em 0;">
+      Per-tool <b>mean iPTM by engine</b> — three bars/tool (Boltz-2 · AF3 · ESMFold2), top-{top_per_tool_display}/tool.
+    </p>
+    <img src="data:image/png;base64,{engine_bars_plot}" alt="Per-tool mean iPTM by engine (three bars per tool)" style="max-width:100%;height:auto;">
+  </div>
+</div>
 
 {scatter_block}
 
@@ -1427,6 +1438,10 @@ def generate_report(
 
     dist_b64 = fig_to_base64(dist_fig)
     radar_b64 = fig_to_base64(radar_fig)
+    try:
+        engine_bars_b64 = fig_to_base64(plot_per_tool_engine_iptm(sort_df, top_n=top_per_tool))
+    except Exception:  # pragma: no cover - defensive
+        engine_bars_b64 = ""
     scatter_b64 = fig_to_base64(scatter_fig) if scatter_fig is not None else ""
     radar_fixed_b64 = fig_to_base64(radar_fixed_fig) if radar_fixed_fig is not None else ""
 
@@ -1489,6 +1504,9 @@ def generate_report(
 
             for tool in tools_present:
                 display_name = _tool_display(tool)
+                # Optional "of N generated" suffix from --tool-meta TOOL='total:N'.
+                _total = (tool_overrides or {}).get(tool, {}).get("total")
+                _of_total = f' <span style="font-weight:normal;color:#777;">of {_total} generated</span>' if _total else ""
 
                 # Try reading from tool's original CSV
                 if tool_csvs and tool in tool_csvs:
@@ -1608,7 +1626,7 @@ def generate_report(
                             per_tool_top10 += (
                                 f'<details style="margin:0.3em 0;">'
                                 f'<summary style="cursor:pointer;font-weight:bold;">'
-                                f"{display_name} — top {n}</summary>\n"
+                                f"{display_name} — top {n}{_of_total}</summary>\n"
                                 f"{tool_table}\n{viewer_block}\n</details>\n"
                             )
                             continue
@@ -1641,7 +1659,7 @@ def generate_report(
                 per_tool_top10 += (
                     f'<details style="margin:0.3em 0;">'
                     f'<summary style="cursor:pointer;font-weight:bold;">'
-                    f"{display_name} — top {n}</summary>\n"
+                    f"{display_name} — top {n}{_of_total}</summary>\n"
                     f"{tool_table}\n{refold_viewer}\n</details>\n"
                 )
 
@@ -1871,6 +1889,8 @@ def generate_report(
         n_binders=len(sort_df),
         slim_css=SLIM_REPORT_CSS,
         top30_full_bottom=top30_full_bottom,
+        engine_bars_plot=engine_bars_b64,
+        top_per_tool_display=top_per_tool,
         methodology_ranking_html=methodology_ranking_html,
         benchmark_provenance_block=benchmark_provenance_block,
         qc_rules_block=qc_rules_block,
