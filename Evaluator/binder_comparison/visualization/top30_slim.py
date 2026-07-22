@@ -39,16 +39,28 @@ _SLIM = [
 ]
 
 _TOOLCOL = {
-    "mosaic": "#3b82f6", "pxdesign": "#8b5cf6", "bindcraft": "#ef4444",
-    "proteina_complexa": "#10b981", "protein_hunter": "#f59e0b", "rfd3": "#ec4899",
-    "boltzgen_protein": "#14b8a6", "boltzgen_nano": "#64748b",
+    "mosaic": "#3b82f6",
+    "pxdesign": "#8b5cf6",
+    "bindcraft": "#ef4444",
+    "proteina_complexa": "#10b981",
+    "protein_hunter": "#f59e0b",
+    "rfd3": "#ec4899",
+    "boltzgen_protein": "#14b8a6",
+    "boltzgen_nano": "#64748b",
 }
 
 # columns excluded from the "all metrics" roll-ups (paths / blobs, not metrics).
 _DROP_SUFFIX = ("_pdb", "_cif", "_file", "_path", "_idx")
 _DROP_EXACT = {"sequence", "pdb", "cif"}
-_FULL_LEAD = ["two_stage_rank", "binder_id", "source_tool", "binder_length",
-              "consensus_iptm_mean", "agreement_count", "ipsae_min"]
+_FULL_LEAD = [
+    "two_stage_rank",
+    "binder_id",
+    "source_tool",
+    "binder_length",
+    "consensus_iptm_mean",
+    "agreement_count",
+    "ipsae_min",
+]
 
 
 def _tier(v) -> str:
@@ -80,22 +92,30 @@ def _slim_table(df: pd.DataFrame, cols, table_id: str) -> str:
                 cells.append(f'<td class="num">{"" if pd.isna(v) else int(v)}</td>')
             elif lbl == "Mean ipTM":
                 w = int(max(0, min(1, (float(v) - 0.3) / 0.65)) * 100) if pd.notna(v) else 0
-                cells.append(f'<td class="iptm"><span class="bar" style="--w:{w}%"></span><b>{"" if pd.isna(v) else f"{v:.3f}"}</b></td>')
+                cells.append(
+                    f'<td class="iptm"><span class="bar" style="--w:{w}%"></span><b>{"" if pd.isna(v) else f"{v:.3f}"}</b></td>'
+                )
             elif lbl == "Agreement":
                 ag = int(v) if pd.notna(v) else 0
                 cells.append(f'<td class="num"><span class="ag ag{ag}">{ag}/3</span></td>')
             elif lbl == "ipSAE_min":
-                cells.append(f'<td class="num"><span class="pill {_tier(v)}">{"—" if pd.isna(v) else f"{v:.2f}"}</span></td>')
+                cells.append(
+                    f'<td class="num"><span class="pill {_tier(v)}">{"—" if pd.isna(v) else f"{v:.2f}"}</span></td>'
+                )
             elif lbl == "Epitope":
                 cls = "na" if pd.isna(v) else ("high" if v >= 0.5 else "med" if v >= 0.3 else "low")
-                cells.append(f'<td class="num"><span class="pill {cls}">{"—" if pd.isna(v) else f"{v * 100:.0f}%"}</span></td>')
+                cells.append(
+                    f'<td class="num"><span class="pill {cls}">{"—" if pd.isna(v) else f"{v * 100:.0f}%"}</span></td>'
+                )
             elif lbl == "Mode":
                 cells.append(f'<td class="num">{"—" if pd.isna(v) else f"#{int(v)}"}</td>')
             elif lbl == "Solubility":
                 cells.append(f'<td class="num">{"—" if pd.isna(v) else f"{float(v):.2f}"}</td>')
             elif lbl == "Tm":
                 cls = "" if pd.isna(v) else ("tm-hi" if float(v) >= 60 else "tm-lo")
-                cells.append(f'<td class="num"><span class="{cls}">{"—" if pd.isna(v) else f"{float(v):.0f}"}</span></td>')
+                cells.append(
+                    f'<td class="num"><span class="{cls}">{"—" if pd.isna(v) else f"{float(v):.0f}"}</span></td>'
+                )
             elif lbl == "Notes":
                 note = "" if pd.isna(v) or not str(v).strip() else str(v).strip()
                 cells.append(f'<td class="note">{_html.escape(note)}</td>')
@@ -108,7 +128,9 @@ def _slim_table(df: pd.DataFrame, cols, table_id: str) -> str:
 def _full_table(df: pd.DataFrame, table_id: str) -> str:
     cols = [c for c in df.columns if not c.endswith(_DROP_SUFFIX) and c not in _DROP_EXACT]
     cols = [c for c in _FULL_LEAD if c in cols] + [c for c in cols if c not in _FULL_LEAD]
-    heads = "".join(f'<th data-t="{"n" if pd.api.types.is_numeric_dtype(df[c]) else "s"}">{_html.escape(c)}</th>' for c in cols)
+    heads = "".join(
+        f'<th data-t="{"n" if pd.api.types.is_numeric_dtype(df[c]) else "s"}">{_html.escape(c)}</th>' for c in cols
+    )
     rows = []
     for _, r in df[cols].iterrows():
         cells = []
@@ -119,7 +141,7 @@ def _full_table(df: pd.DataFrame, table_id: str) -> str:
             elif isinstance(v, float):
                 cells.append(f'<td class="num">{v:.3f}</td>')
             else:
-                cells.append(f'<td>{_html.escape(str(v))}</td>')
+                cells.append(f"<td>{_html.escape(str(v))}</td>")
         rows.append("<tr>" + "".join(cells) + "</tr>")
     return f'<table class="sortable full" id="{table_id}"><thead><tr>{heads}</tr></thead><tbody>\n{chr(10).join(rows)}\n</tbody></table>'
 
@@ -174,22 +196,32 @@ def write_top30_slim(df: pd.DataFrame, output_dir: Path, top_per_tool: int = 10,
 
     tools = list(d["source_tool"].value_counts().index) if "source_tool" in d.columns else []
 
-    sections = [f'<h2>Overall — Top 30</h2>{_slim_table(d.head(30), cols, "t_overall")}']
+    sections = [f"<h2>Overall — Top 30</h2>{_slim_table(d.head(30), cols, 't_overall')}"]
     for i, tool in enumerate(tools):
         sub = d[d["source_tool"] == tool].head(top_per_tool)
         c = _TOOLCOL.get(tool, "#64748b")
-        sections.append(f'<h2><span class="dot" style="background:{c}"></span>{_html.escape(tool)} — Top {min(top_per_tool, len(sub))}</h2>{_slim_table(sub, cols, f"t_tool{i}")}')
+        sections.append(
+            f'<h2><span class="dot" style="background:{c}"></span>{_html.escape(tool)} — Top {min(top_per_tool, len(sub))}</h2>{_slim_table(sub, cols, f"t_tool{i}")}'
+        )
 
-    rolls = [f'<details><summary>Overall Top-30 — all metrics</summary><div class="scroll">{_full_table(d.head(30), "f_overall")}</div></details>']
+    rolls = [
+        f'<details><summary>Overall Top-30 — all metrics</summary><div class="scroll">{_full_table(d.head(30), "f_overall")}</div></details>'
+    ]
     for i, tool in enumerate(tools):
         sub = d[d["source_tool"] == tool].head(top_per_tool)
-        rolls.append(f'<details><summary>{_html.escape(tool)} Top-{min(top_per_tool, len(sub))} — all metrics</summary><div class="scroll">{_full_table(sub, f"f_tool{i}")}</div></details>')
+        rolls.append(
+            f'<details><summary>{_html.escape(tool)} Top-{min(top_per_tool, len(sub))} — all metrics</summary><div class="scroll">{_full_table(sub, f"f_tool{i}")}</div></details>'
+        )
 
     subtitle = f"Ranked by two-stage cross-engine iPTM · intercalators excluded{f' · n={pool_size} pool' if pool_size else ''}. Click any header to sort."
-    page = (_TEMPLATE
-            .replace("__SUB__", _html.escape(subtitle))
-            .replace("__SECTIONS__", "\n".join(f'<div class="scroll">{s}</div>' if s.startswith("<table") else s for s in sections))
-            .replace("__ROLLS__", "\n".join(rolls)))
+    page = (
+        _TEMPLATE.replace("__SUB__", _html.escape(subtitle))
+        .replace(
+            "__SECTIONS__",
+            "\n".join(f'<div class="scroll">{s}</div>' if s.startswith("<table") else s for s in sections),
+        )
+        .replace("__ROLLS__", "\n".join(rolls))
+    )
     (output_dir / "top30_slim.html").write_text(page)
 
 

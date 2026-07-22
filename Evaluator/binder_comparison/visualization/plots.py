@@ -952,9 +952,14 @@ def save_figure(fig: Figure, path: str | Path) -> None:
 
 # Display labels for the per-tool engine bar chart (kept local to plots.py).
 _ENGINE_BAR_LABEL = {
-    "mosaic": "Mosaic", "pxdesign": "PXDesign", "bindcraft": "BindCraft",
-    "proteina_complexa": "Proteina-C", "protein_hunter": "Protein-Hunter",
-    "rfd3": "RFD3", "boltzgen_protein": "BoltzGen-prot", "boltzgen_nano": "BoltzGen-nano",
+    "mosaic": "Mosaic",
+    "pxdesign": "PXDesign",
+    "bindcraft": "BindCraft",
+    "proteina_complexa": "Proteina-C",
+    "protein_hunter": "Protein-Hunter",
+    "rfd3": "RFD3",
+    "boltzgen_protein": "BoltzGen-prot",
+    "boltzgen_nano": "BoltzGen-nano",
 }
 
 
