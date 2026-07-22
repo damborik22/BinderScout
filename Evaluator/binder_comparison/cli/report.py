@@ -209,6 +209,7 @@ def run(args: argparse.Namespace) -> None:
     # epitope_off_target_residues. ADVISORY — never reorders or drops.
     if getattr(args, "epitope_results", None):
         df = _attach_epitope_results(df, args.epitope_results)
+        df = _attach_binding_mode(df)
 
     # diversity: sequence-similarity clustering into "families" (Item 1).
     # Joined by binder_id; adds family_id / family_size / family_rank. ADVISORY
@@ -821,6 +822,28 @@ def _attach_epitope_results(df: pd.DataFrame, epitope_csv: str) -> pd.DataFrame:
     n = int(ep_sub["epitope_match_fraction"].notna().sum()) if "epitope_match_fraction" in ep_sub.columns else 0
     print(f"[report] Attaching epitope-match panel from {epitope_path.name} ({n} annotated designs)")
     return pd.merge(df, ep_sub, on="binder_id", how="left")
+
+
+def _attach_binding_mode(df: pd.DataFrame) -> pd.DataFrame:
+    """Add ``binding_mode`` (1–8): footprint clusters matching epitope-map's binding_map.html.
+
+    Uses the same defaults as ``epitope-map`` (Jaccard 0.5, min mode size 3, cap 8) on each
+    design's contacted-residue footprint, so the mode numbers correspond to the map's colours.
+    Designs outside the kept modes get <NA>.
+    """
+    if "epitope_matched_residues" not in df.columns or "binder_id" not in df.columns:
+        return df
+    from ..comparison.epitope_map import cluster_binding_modes, design_footprints
+
+    footprints = design_footprints(df.to_dict("records"))
+    if not footprints:
+        return df
+    modes = [m for m in cluster_binding_modes(footprints, threshold=0.5) if len(m["members"]) >= 3][:8]
+    bid_to_mode = {bid: i for i, m in enumerate(modes, 1) for bid in m["members"]}
+    df = df.copy()
+    df["binding_mode"] = df["binder_id"].map(bid_to_mode).astype("Int64")
+    print(f"[report] Binding modes: {len(modes)} (footprint clustering; matches binding_map.html)")
+    return df
 
 
 _BETA_COLS = ("n_xbridge", "n_xbridge2", "beta_intercalates")

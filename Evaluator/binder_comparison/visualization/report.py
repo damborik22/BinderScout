@@ -202,8 +202,6 @@ _HTML_TEMPLATE = """\
 
 {top_table_legend}
 
-{top_per_family_block}
-
 <details style="margin:1em 0;">
   <summary style="cursor:pointer;font-size:1.5em;color:#1a5276;font-weight:bold;
            border-bottom:2px solid #CFE6F6;padding-bottom:4px;margin-bottom:0.5em;">
@@ -1903,7 +1901,6 @@ def generate_report(
             f"&nbsp;{_per}.</p>"
         )
     provenance_footer = _provenance_footer_html(provenance)
-    top_per_family_block = _top_per_family_html(sort_df)
     binding_map_link = _binding_map_link_html(binding_map)
 
     html = _HTML_TEMPLATE.format(
@@ -1920,7 +1917,6 @@ def generate_report(
         binding_map_link=binding_map_link,
         screening_summary_intro=screening_summary_intro,
         top_table_legend=top_table_legend,
-        top_per_family_block=top_per_family_block,
         engines_present_html=engines_present_html,
         tool_counts_str=tool_counts_str or "—",
         engine_threshold_legend=engine_threshold_legend,
@@ -1979,6 +1975,8 @@ def _slim_legend_html(df: pd.DataFrame) -> str:
          "Low &gt; 0.40, Reject ≤ 0.40."),
         ("Epitope ↑", "epitope_match_fraction",
          "Fraction of the binder's interface contacts landing on the intended target pocket."),
+        ("Mode", "binding_mode",
+         "Binding mode (#1–8) — which footprint cluster the design lands in (matches the Target binding map's colours). Blank = outside the top-8 modes."),
         ("Solubility ↑", "native_soluprot_score",
          "SoluProt sequence-only <i>E. coli</i> solubility probability (0–1)."),
         ("Tm ↑", "native_tmprot_tm",
@@ -2465,52 +2463,6 @@ _ADVISORY_SECONDARY = [
 ]
 
 
-def _top_per_family_html(df: pd.DataFrame, n_per_family: int = 1, top_n: int = 15) -> str:
-    """Render the diversity 'Top per family' recommendations block (Item 1).
-
-    Collapses the ranked frame to one representative per family (best
-    active_rank wins), then surfaces the top ``top_n`` families. Renders
-    nothing if no ``family_id`` column is present.
-    """
-    if "family_id" not in df.columns or df.empty:
-        return ""
-    from ..comparison.diversity import top_per_family
-
-    rank_col = next(
-        (c for c in ("active_rank", "two_stage_rank", "consensus_rank", "adaptyv_rank") if c in df.columns),
-        None,
-    )
-    if rank_col is None:
-        return ""
-    representatives = top_per_family(df, n_per_family=n_per_family, sort_col=rank_col, ascending=True)
-    representatives = representatives.head(top_n)
-    cols = [
-        rank_col,
-        "binder_id",
-        "source_tool",
-        "binder_length",
-        "family_id",
-        "family_size",
-    ]
-    if "consensus_iptm_mean" in representatives.columns:
-        cols.append("consensus_iptm_mean")
-    if "epitope_match_fraction" in representatives.columns:
-        cols.append("epitope_match_fraction")
-    if "native_soluprot_score" in representatives.columns:
-        cols.append("native_soluprot_score")
-    cols = [c for c in cols if c in representatives.columns]
-    table_html = _df_to_html(representatives[cols], colour_tool=True)
-    return (
-        "<h2>Top per family — diversity-aware shortlist</h2>"
-        "<p style='font-size:0.85em;color:#555;line-height:1.55;'>"
-        "Designs are clustered into <b>families</b> by sequence similarity (Jaccard on 4-mers; "
-        "threshold set via <code>binder-compare diversity --threshold</code>). This block shows the best-ranked design "
-        "from each of the top families, so the wet-lab portfolio doesn't accidentally test 5 copies of "
-        "one motif. <b>Advisory</b> — the main Top-30 ranking is unchanged."
-        "</p>" + table_html
-    )
-
-
 def _advisory_legend_html(df: pd.DataFrame) -> str:
     """Legend for the advisory SoluProt + qc-annotate + epitope columns, shown only when present."""
     bits = []
@@ -2527,8 +2479,8 @@ def _advisory_legend_html(df: pd.DataFrame) -> str:
         )
     if "family_id" in df.columns:
         bits.append(
-            "<b>family_id / family_size</b> = sequence-similarity cluster (greedy Jaccard k-mer, default "
-            "70% similarity threshold). Use the 'Top per family' block to pick non-redundant wet-lab candidates."
+            "<b>family_id / family_size</b> = sequence-similarity cluster (greedy Jaccard k-mer; threshold via "
+            "<code>binder-compare diversity --threshold</code>). Designs in the same family share a sequence motif."
         )
     if "wetlab_recommended" in df.columns:
         bits.append(

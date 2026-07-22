@@ -32,6 +32,7 @@ _SLIM = [
     ("Agreement", "agreement_count", "n"),
     ("ipSAE_min", "ipsae_min", "n"),
     ("Epitope", "epitope_match_fraction", "n"),
+    ("Mode", "binding_mode", "n"),
     ("Solubility", "native_soluprot_score", "n"),
     ("Tm", "native_tmprot_tm", "n"),
     ("Notes", "wetlab_reason", "s"),
@@ -88,6 +89,8 @@ def _slim_table(df: pd.DataFrame, cols, table_id: str) -> str:
             elif lbl == "Epitope":
                 cls = "na" if pd.isna(v) else ("high" if v >= 0.5 else "med" if v >= 0.3 else "low")
                 cells.append(f'<td class="num"><span class="pill {cls}">{"—" if pd.isna(v) else f"{v * 100:.0f}%"}</span></td>')
+            elif lbl == "Mode":
+                cells.append(f'<td class="num">{"—" if pd.isna(v) else f"#{int(v)}"}</td>')
             elif lbl == "Solubility":
                 cells.append(f'<td class="num">{"—" if pd.isna(v) else f"{float(v):.2f}"}</td>')
             elif lbl == "Tm":
