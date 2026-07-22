@@ -161,6 +161,7 @@ _HTML_TEMPLATE = """\
 {benchmark_provenance_block}
 {qc_rules_block}
 {tool_classification_banner}
+{designed_total_banner}
 {binding_map_link}
 
 <details style="margin:0.8em 0;">
@@ -1462,21 +1463,6 @@ def generate_report(
                 "Expand a tool for its table + 3D structures.</p>\n"
             )
 
-            # Grand-total "designed in total" banner from --tool-meta TOOL='total:N'.
-            _totals = {t: (tool_overrides or {}).get(t, {}).get("total") for t in tools_present}
-            _totals = {t: int(v) for t, v in _totals.items() if v and str(v).isdigit()}
-            if _totals:
-                _grand = sum(_totals.values())
-                _per = " &nbsp;·&nbsp; ".join(
-                    f"{_tool_display(t)} <b>{v:,}</b>" for t, v in sorted(_totals.items(), key=lambda kv: -kv[1])
-                )
-                per_tool_top10 += (
-                    '<p style="font-size:0.92em;color:#222;margin:0 0 0.9em 0;padding:0.55em 0.9em;'
-                    'background:#eef6ff;border:1px solid #b3d4fc;border-radius:6px;">'
-                    f"&#129516; <b>Designed in total: {_grand:,}</b> across {len(_totals)} tools — the 50 best of "
-                    f"each (by cross-engine two-stage ranking) are kept for the pool. &nbsp;{_per}.</p>\n"
-                )
-
             # Build sequence → binder_id + rank lookup. Use the FULL (pre-collapse)
             # frame when available: df/sort_df here is representatives-only, so
             # multi-sequence-per-backbone tools (BindCraft MPNN siblings,
@@ -1897,6 +1883,25 @@ def generate_report(
     screening_summary_intro = _screening_summary_intro_html(rank_method)
     top_table_legend = _slim_legend_html(sort_df)
     tool_classification_banner = _tool_classification_banner_html(sort_df, tool_overrides=tool_overrides)
+
+    # "Designed in total" banner (top of the report) from --tool-meta TOOL='total:N'.
+    _dt = {t: (tool_overrides or {}).get(t, {}).get("total") for t in sort_df["source_tool"].dropna().unique()} \
+        if "source_tool" in sort_df.columns else {}
+    _dt = {t: int(v) for t, v in _dt.items() if v and str(v).isdigit()}
+    designed_total_banner = ""
+    if _dt:
+        _grand = sum(_dt.values())
+        _per = " &nbsp;·&nbsp; ".join(
+            f"{_tool_display(t)} <b>{v:,}</b>" for t, v in sorted(_dt.items(), key=lambda kv: -kv[1])
+        )
+        designed_total_banner = (
+            '<p style="font-size:0.95em;color:#222;margin:0.6em 0 0.4em 0;padding:0.6em 1em;'
+            'background:#eef6ff;border:1px solid #b3d4fc;border-radius:6px;">'
+            f"&#129516; <b>Designed in total: {_grand:,}</b> across {len(_dt)} tools "
+            f"&rarr; <b>{len(sort_df):,}</b> kept in the ranked pool "
+            f"(the best per tool, by cross-engine two-stage ranking, intercalators excluded). "
+            f"&nbsp;{_per}.</p>"
+        )
     provenance_footer = _provenance_footer_html(provenance)
     top_per_family_block = _top_per_family_html(sort_df)
     binding_map_link = _binding_map_link_html(binding_map)
@@ -1905,6 +1910,7 @@ def generate_report(
         n_binders=len(sort_df),
         slim_css=SLIM_REPORT_CSS,
         top30_full_bottom=top30_full_bottom,
+        designed_total_banner=designed_total_banner,
         engine_bars_plot=engine_bars_b64,
         top_per_tool_display=top_per_tool,
         methodology_ranking_html=methodology_ranking_html,
