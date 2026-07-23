@@ -1394,10 +1394,13 @@ def generate_report(
         )
     _full_top30 += _advisory_legend_html(sort_df)
     top30_full_bottom = (
-        '<h2>Top 30 — all metrics</h2>\n'
+        "<h2>Top 30 — all metrics</h2>\n"
         '<details style="margin:0.5em 0;"><summary style="cursor:pointer;color:#1565C0;font-weight:bold;">'
-        "Click to expand — full metric set for the Top 30</summary>\n" + _full_top30
-        + "\n" + _top_table_legend_html(rank_method, top30_primary) + "\n</details>"
+        "Click to expand — full metric set for the Top 30</summary>\n"
+        + _full_top30
+        + "\n"
+        + _top_table_legend_html(rank_method, top30_primary)
+        + "\n</details>"
     )
 
     # Summary statistics table
@@ -1506,7 +1509,9 @@ def generate_report(
                 display_name = _tool_display(tool)
                 # Optional "of N generated" suffix from --tool-meta TOOL='total:N'.
                 _total = (tool_overrides or {}).get(tool, {}).get("total")
-                _of_total = f' <span style="font-weight:normal;color:#777;">of {_total} generated</span>' if _total else ""
+                _of_total = (
+                    f' <span style="font-weight:normal;color:#777;">of {_total} generated</span>' if _total else ""
+                )
 
                 # Try reading from tool's original CSV
                 if tool_csvs and tool in tool_csvs:
@@ -1638,9 +1643,7 @@ def generate_report(
                 tool_df = sort_df[sort_df["source_tool"] == tool].head(top_per_tool)
                 n = len(tool_df)
                 tool_table = (
-                    '<div class="slimreport">'
-                    + slim_table_html(tool_df, top_per_tool, f"tpt_{tool}")
-                    + "</div>"
+                    '<div class="slimreport">' + slim_table_html(tool_df, top_per_tool, f"tpt_{tool}") + "</div>"
                 )
                 # 3D viewer using refolded Boltz-2 PDBs (works for Mosaic etc.
                 # without needing --tool-csv/--tool-pdb-dir flags)
@@ -1883,8 +1886,11 @@ def generate_report(
     tool_classification_banner = _tool_classification_banner_html(sort_df, tool_overrides=tool_overrides)
 
     # "Designed in total" banner (top of the report) from --tool-meta TOOL='total:N'.
-    _dt = {t: (tool_overrides or {}).get(t, {}).get("total") for t in sort_df["source_tool"].dropna().unique()} \
-        if "source_tool" in sort_df.columns else {}
+    _dt = (
+        {t: (tool_overrides or {}).get(t, {}).get("total") for t in sort_df["source_tool"].dropna().unique()}
+        if "source_tool" in sort_df.columns
+        else {}
+    )
     _dt = {t: int(v) for t, v in _dt.items() if v and str(v).isdigit()}
     designed_total_banner = ""
     if _dt:
@@ -1960,29 +1966,59 @@ def _slim_legend_html(df: pd.DataFrame) -> str:
     Solubility · Tm · Notes); optional columns are shown only when present.
     """
     checks = [
-        ("Rank", "two_stage_rank",
-         "Overall rank — Stage-1 mean-iPTM screen survival, then mean engine iPTM (the primary key)."),
-        ("Length", "binder_length",
-         "Designed binder length (aa) — a main difficulty driver (longer tends to lower ipSAE)."),
-        ("Mean ipTM ↑", "consensus_iptm_mean",
-         "<b>Primary ranking metric</b> — mean of the 3 engines' PAE-recomputed iPTM. Higher = stronger "
-         "multi-engine consensus, which resists single-engine gaming."),
-        ("Agreement ↑", "agreement_count",
-         "How many of the 3 engines (Boltz-2 / AF3 / ESMFold2) score ipSAE_min &gt; 0.61 — so 0–3. "
-         "Low = fragile, single-engine signal."),
-        ("ipSAE_min ↑", "ipsae_min",
-         "Interface quality (cross-validation). Tier-banded: High &gt; 0.80, Medium &gt; 0.61, "
-         "Low &gt; 0.40, Reject ≤ 0.40."),
-        ("Epitope ↑", "epitope_match_fraction",
-         "Fraction of the binder's interface contacts landing on the intended target pocket."),
-        ("Mode", "binding_mode",
-         "Binding mode (#1–8) — which footprint cluster the design lands in (matches the Target binding map's colours). Blank = outside the top-8 modes."),
-        ("Solubility ↑", "native_soluprot_score",
-         "SoluProt sequence-only <i>E. coli</i> solubility probability (0–1)."),
-        ("Tm ↑", "native_tmprot_tm",
-         "TmProt predicted melting temperature (°C, ESM2-LoRA). Higher = more thermostable (≥ 60 °C highlighted)."),
-        ("Notes", "wetlab_reason",
-         "Wet-lab advisory (BindCraft interface QC, etc.); blank = no flag. Advisory only — never affects ranking."),
+        (
+            "Rank",
+            "two_stage_rank",
+            "Overall rank — Stage-1 mean-iPTM screen survival, then mean engine iPTM (the primary key).",
+        ),
+        (
+            "Length",
+            "binder_length",
+            "Designed binder length (aa) — a main difficulty driver (longer tends to lower ipSAE).",
+        ),
+        (
+            "Mean ipTM ↑",
+            "consensus_iptm_mean",
+            "<b>Primary ranking metric</b> — mean of the 3 engines' PAE-recomputed iPTM. Higher = stronger "
+            "multi-engine consensus, which resists single-engine gaming.",
+        ),
+        (
+            "Agreement ↑",
+            "agreement_count",
+            "How many of the 3 engines (Boltz-2 / AF3 / ESMFold2) score ipSAE_min &gt; 0.61 — so 0–3. "
+            "Low = fragile, single-engine signal.",
+        ),
+        (
+            "ipSAE_min ↑",
+            "ipsae_min",
+            "Interface quality (cross-validation). Tier-banded: High &gt; 0.80, Medium &gt; 0.61, "
+            "Low &gt; 0.40, Reject ≤ 0.40.",
+        ),
+        (
+            "Epitope ↑",
+            "epitope_match_fraction",
+            "Fraction of the binder's interface contacts landing on the intended target pocket.",
+        ),
+        (
+            "Mode",
+            "binding_mode",
+            "Binding mode (#1–8) — which footprint cluster the design lands in (matches the Target binding map's colours). Blank = outside the top-8 modes.",
+        ),
+        (
+            "Solubility ↑",
+            "native_soluprot_score",
+            "SoluProt sequence-only <i>E. coli</i> solubility probability (0–1).",
+        ),
+        (
+            "Tm ↑",
+            "native_tmprot_tm",
+            "TmProt predicted melting temperature (°C, ESM2-LoRA). Higher = more thermostable (≥ 60 °C highlighted).",
+        ),
+        (
+            "Notes",
+            "wetlab_reason",
+            "Wet-lab advisory (BindCraft interface QC, etc.); blank = no flag. Advisory only — never affects ranking.",
+        ),
     ]
     visible = [(lbl, desc) for lbl, src, desc in checks if src in df.columns]
     lines = ["<table style='font-size:0.8em;border-collapse:collapse;margin:0.5em 0 1.5em 0;color:#555;'>"]

@@ -81,11 +81,19 @@ def add_parser(subparsers) -> None:
     p.add_argument("--pdb-col", default="af3_pdb", help="Column holding the complex PDB path (default af3_pdb).")
     p.add_argument("--target-chain", default="A", metavar="CH", help="Target chain (default A for AF3).")
     p.add_argument("--binder-chain", default="B", metavar="CH", help="Binder chain (default B for AF3).")
-    p.add_argument("--min-both-side", type=int, default=2,
-                   help="Intercalating if ≥ this many binder residues β-bridge the target on BOTH sides "
-                        "(interior threading; the mechanistic augmentation signal). Default 2.")
-    p.add_argument("--min-xbridge", type=int, default=None,
-                   help="Opt-in: also flag if ≥ this many residues bridge on one side (edge contacts). "
-                        "Off by default — edge β-pairing is a normal binding mode, not augmentation.")
+    p.add_argument(
+        "--min-both-side",
+        type=int,
+        default=2,
+        help="Intercalating if ≥ this many binder residues β-bridge the target on BOTH sides "
+        "(interior threading; the mechanistic augmentation signal). Default 2.",
+    )
+    p.add_argument(
+        "--min-xbridge",
+        type=int,
+        default=None,
+        help="Opt-in: also flag if ≥ this many residues bridge on one side (edge contacts). "
+        "Off by default — edge β-pairing is a normal binding mode, not augmentation.",
+    )
     p.add_argument("--output", "-o", required=True, metavar="CSV", help="Output CSV (joinable by binder_id).")
     p.set_defaults(func=run)
