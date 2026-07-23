@@ -787,25 +787,25 @@ def rank_by_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     return result.reset_index(drop=True)
 
 
-def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5, screen_metric: str = "mean") -> pd.DataFrame:
+def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5, screen_metric: str = "max") -> pd.DataFrame:
     """Two-stage ranking — the EVALUATOR benchmark recommendation for wet-lab selection.
 
     Stage 1 — screen by the ``screen_metric`` consensus iptm: keep the top
     ``screen_frac`` as the binder-likely pool (the recall step).
-    ``screen_metric="mean"`` (default) screens by ``consensus_iptm_mean`` — the
-    stronger binder-vs-non-binder screen on the Adaptyv 4-target benchmark with
-    experimental Kd (macro AUC 0.710 vs 0.689 for max; +20 true binders recalled
-    and higher purity at the 50% cut), and more robust to a single engine's
-    per-target blind spots. ``screen_metric="max"`` screens by ``consensus_iptm``
-    instead (the legacy default — best on the ProteinBase 4-target benchmark, macro
-    AUC ~0.755, "trust whichever engine is most confident"). See docs/plans.md Part N.
+    ``screen_metric="max"`` (default) screens by ``consensus_iptm`` (max over
+    engines) — the lenient recall step: keep a design if *any* engine rates it
+    highly, so a genuine binder is not dropped just because one engine's per-target
+    blind spot drags its mean down. Best on the ProteinBase 4-target benchmark
+    (macro AUC ~0.755, "trust whichever engine is most confident").
+    ``screen_metric="mean"`` screens by ``consensus_iptm_mean`` instead (stricter —
+    the average must be high; Adaptyv macro AUC 0.710 vs 0.689). See docs/plans.md
+    Part N.
 
     Stage 2 — rank survivors by ``consensus_iptm_mean`` (mean engine iptm): the
     precision step — at the sharp end of the list you want designs *all* engines
     agree on. On the benchmark this lifts precision@top-10% to 0.92 vs 0.79 for
-    max alone. (With ``screen_metric="mean"`` Stage 1 and Stage 2 share the mean
-    metric — the screen collapses to a single mean-iptm gate+rank, which is fine
-    since mean is both the stronger screen and the validated ranker on Adaptyv.)
+    max alone. The default max-screen → mean-rank pairs a lenient recall screen
+    with a strict consensus rank (the intended two-stage design).
 
     Ranks ALL rows (the screen is a flag + ordering, nothing is dropped):
     ``passes_max_screen`` is the primary sort key, so all screen survivors sort
