@@ -81,21 +81,22 @@ def test_two_stage_screen_keeps_top_frac_by_max():
     assert passed == {"A", "B"}
 
 
-def test_two_stage_screen_metric_max_differs_from_default_mean():
-    """screen_metric='max' screens on consensus_iptm, keeping B (high max, low mean);
-    the default mean-screen keeps C instead — the two screens are genuinely different."""
-    out = rank_by_two_stage(_two_engine_df(), screen_frac=0.5, screen_metric="max")
+def test_two_stage_screen_metric_mean_differs_from_default_max():
+    """screen_metric='mean' screens on consensus_iptm_mean, keeping C (high mean, low
+    max); the default max-screen keeps B instead — the two screens are genuinely different."""
+    out = rank_by_two_stage(_two_engine_df(), screen_frac=0.5, screen_metric="mean")
     passed = set(out.loc[out["passes_max_screen"], "id"])
-    assert passed == {"A", "B"}  # top-2 by max = {A 0.90, B 0.85}; not C (0.60)
+    assert passed == {"A", "C"}  # top-2 by mean = {A 0.90, C 0.60}; not B (0.425)
 
 
-def test_two_stage_default_screen_metric_is_mean():
-    """Omitting screen_metric uses the new default mean-screen (Adaptyv-validated):
-    top-2 by mean = {A 0.90, C 0.60}, so C is kept over B (mean 0.425)."""
+def test_two_stage_default_screen_metric_is_max():
+    """Omitting screen_metric uses the default max-screen (lenient recall): top-2 by
+    max = {A 0.90, B 0.85}, so B (high max, low mean) is kept over C; Stage 2 then
+    ranks the survivors by mean."""
     default = rank_by_two_stage(_two_engine_df(), screen_frac=0.5)
-    explicit = rank_by_two_stage(_two_engine_df(), screen_frac=0.5, screen_metric="mean")
+    explicit = rank_by_two_stage(_two_engine_df(), screen_frac=0.5, screen_metric="max")
     assert default["two_stage_rank"].tolist() == explicit["two_stage_rank"].tolist()
-    assert set(default.loc[default["passes_max_screen"], "id"]) == {"A", "C"}
+    assert set(default.loc[default["passes_max_screen"], "id"]) == {"A", "B"}
 
 
 def test_two_stage_handles_nan_consensus_rows():
