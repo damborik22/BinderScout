@@ -99,7 +99,7 @@ Target structure (.pdb / .mmcif)
        3. Refold with AlphaFold 3 v3.0.2 (binder-eval-af3 env)                 [live, canonical 2nd engine — Spark / H200 / >100 GB VRAM]
        4. Refold with ESMFold2 (binder-eval-esmfold2 env)                      [live, DEFAULT engine — installed by --tool all; auto-detected by evaluate.sh; feeds consensus_iptm + autosize gate]
        4.5 (optional) Refold with Protenix v0.5.0 (bindmaster_pxdesign env)    [live, fits 24 GB GPUs — the ONLY optional refold engine]
-       5. Rank by two-stage cross-engine iPTM (mean-screen → mean iptm; `--screen-metric max` for the legacy max-screen); generate HTML + CSV report
+       5. Rank by two-stage cross-engine iPTM (max-screen → mean iptm; `--screen-metric mean` for the stricter mean-screen); generate HTML + CSV report
 ```
 
 ### Directory layout
@@ -290,7 +290,7 @@ the parameter sweep.
 | **ipTM** | Interface predicted TM-score (0–1, higher = better). Measures binding interface quality |
 | **iPSAE** | Interface Predicted Structural Alignment Error (DunbrackLab 2025 formula). TM-score analogue; **higher is better** |
 | **ipsae_min** | min(binder→target iPSAE, target→binder iPSAE). Secondary metric / tiebreaker (primary is the two-stage cross-engine iPTM ranking — see ranking note) |
-| **consensus_iptm** | max ipTM across independent refolding engines. Legacy Stage-1 screen (`--screen-metric max`); the **default screen is now `consensus_iptm_mean`** (mean across engines, Adaptyv-validated) |
+| **consensus_iptm** | max ipTM across independent refolding engines. **The default Stage-1 screen** — lenient recall (keep a design any engine rates highly). `consensus_iptm_mean` (mean) available via `--screen-metric mean` |
 | **PAE** | Predicted Aligned Error (Angstroms, **lower = better**). Raw error between residue pairs |
 | **pLDDT** | Predicted Local Distance Difference Test (0–1, higher = better). Per-residue confidence |
 | **MPNN** | ProteinMPNN — sequence design neural network |
@@ -311,7 +311,7 @@ the parameter sweep.
 
 ### Evaluation metrics and ranking
 
-**Primary ranking: two-stage cross-engine iPTM** — `binder-compare report --rank-by two_stage` (the default). **Stage 1 (screen):** `consensus_iptm_mean` = mean of the per-engine PAE-recomputed iPTMs (`boltz_pae_iptm`, `af3_pae_iptm`, `esmfold2_pae_iptm`); keep the top 50% (`passes_max_screen`) — the stronger binder-vs-non-binder filter on the Adaptyv 4-target benchmark with experimental Kd (macro AUC 0.710 vs 0.689 for max; +20 binders recalled at the 50% cut), and more robust to one engine's per-target blind spots. The legacy `max` screen (`consensus_iptm`; ProteinBase macro AUC ≈ 0.755) is available via `--screen-metric max`. **Stage 2 (rank):** `consensus_iptm_mean` orders the survivors (precision@top-10% 0.92 vs 0.79 for max alone). `adaptyv_rank` (agreement_count → ipsae_min) and `consensus_rank` (max only) remain as columns but are no longer the default sort.
+**Primary ranking: two-stage cross-engine iPTM** — `binder-compare report --rank-by two_stage` (the default). **Stage 1 (screen):** `consensus_iptm` = **max** of the per-engine PAE-recomputed iPTMs (`boltz_pae_iptm`, `af3_pae_iptm`, `esmfold2_pae_iptm`); keep the top 50% (`passes_max_screen`) — the lenient recall step: keep a design if *any* engine rates it highly, so a true binder isn't dropped because one engine's per-target blind spot drags its mean down (ProteinBase macro AUC ≈ 0.755). The stricter `mean` screen (`consensus_iptm_mean`; Adaptyv macro AUC 0.710 vs 0.689) is available via `--screen-metric mean`. **Stage 2 (rank):** `consensus_iptm_mean` orders the survivors (precision@top-10% 0.92 vs 0.79 for max alone). `adaptyv_rank` (agreement_count → ipsae_min) and `consensus_rank` (max only) remain as columns but are no longer the default sort.
 
 `ipsae_min` (min of binder→target and target→binder iPSAE; DunbrackLab 2025 `max_i[mean_j(1/(1+(PAE_ij/d0)²))]`, d0_res variant, uniform 10 Å PAE cutoff) is retained as a diagnostic and for the quality tiers below — not the primary sort. **Caveat:** no structure-confidence metric ranks *affinity* among binders, only binder-vs-non-binder (see `docs/plans.md` Part N; affinity needs an interface-ΔG metric, planned).
 

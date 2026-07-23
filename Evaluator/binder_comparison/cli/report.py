@@ -343,7 +343,7 @@ def run(args: argparse.Namespace) -> None:
     df = compute_consensus_ipsae(df)
     df = rank_by_adaptyv_method(df)
     df = rank_by_consensus_iptm(df)
-    screen_metric = getattr(args, "screen_metric", "mean") or "mean"
+    screen_metric = getattr(args, "screen_metric", "max") or "max"
     df = rank_by_two_stage(df, screen_metric=screen_metric)
 
     # Item 9: wet-lab-ready badge (SoluProt-passes + agreement_count >= 2 +
@@ -1028,11 +1028,11 @@ def add_parser(subparsers) -> None:
     p.add_argument(
         "--screen-metric",
         choices=["max", "mean"],
-        default="mean",
-        help="Stage-1 screen metric for --rank-by two_stage. 'mean' (default) = consensus_iptm_mean, the "
-        "stronger binder screen on the Adaptyv 4-target benchmark with experimental Kd (macro AUC 0.710 vs "
-        "0.689; +20 true binders recalled at the 50%% cut). 'max' = consensus_iptm (legacy; best on the "
-        "ProteinBase benchmark, ~0.755).",
+        default="max",
+        help="Stage-1 screen metric for --rank-by two_stage. 'max' (default) = consensus_iptm (max over "
+        "engines) — the lenient recall screen (keep a design any engine rates highly; best on ProteinBase, "
+        "~0.755). Stage 2 then ranks survivors by consensus_iptm_mean. 'mean' = consensus_iptm_mean screen "
+        "(stricter; Adaptyv macro AUC 0.710 vs 0.689).",
     )
     p.add_argument(
         "--no-collapse-duplicates",
