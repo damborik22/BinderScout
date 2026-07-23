@@ -7,7 +7,9 @@ from binder_comparison.comparison.beta_intercalation import is_intercalating
 def test_is_intercalating_thresholds():
     assert is_intercalating(0, 0) is False  # clean surface binder
     assert is_intercalating(2, 0) is False  # below any-side threshold, no both-side
-    assert is_intercalating(3, 0) is True  # ≥3 any-side
+    assert (
+        is_intercalating(3, 0) is False
+    )  # any-side alone never triggers by default (single-sided is opt-in via min_xbridge)
     assert is_intercalating(1, 2) is True  # ≥2 both-side (interior) even if few any-side
     assert is_intercalating(-1, -1) is False  # DSSP failed → don't drop on unknown
 

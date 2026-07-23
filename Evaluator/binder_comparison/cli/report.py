@@ -746,8 +746,12 @@ def _attach_tmprot_results(df: pd.DataFrame, tmprot_csv: str) -> pd.DataFrame:
     if tp_df.empty or "sequence" not in tp_df.columns:
         return df
     tm_col = next(
-        (c for c in tp_df.columns if c.strip().lower() in
-         ("native_tmprot_tm", "tmprot_tm", "predicted_tm", "predicted_tm_c", "predicted tm [°c]", "tm", "tm_c")),
+        (
+            c
+            for c in tp_df.columns
+            if c.strip().lower()
+            in ("native_tmprot_tm", "tmprot_tm", "predicted_tm", "predicted_tm_c", "predicted tm [°c]", "tm", "tm_c")
+        ),
         None,
     )
     if tm_col is None:
