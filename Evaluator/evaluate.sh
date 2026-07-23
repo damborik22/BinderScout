@@ -27,6 +27,16 @@
 #                          refolding — saves GPU time on designs we wouldn't pursue.
 #                          Off by default; the score still lands in the report either way.
 #   --primary-engine ENG   primary ranking engine: boltz | protenix | af3 | esmfold2 (default: boltz)
+#   --epitope-residues L   intended hotspot residues (e.g. '15,18,232,263' or 'A15,A18'). Computes
+#                          epitope_match_fraction INLINE in the report from each design's refolded
+#                          structure (selectivity signal for multi-pocket targets, e.g. ApoE4). Cheap.
+#   --with-affinity        opt-in: after the report, run the |dG/dSASA| affinity ranking (Rosetta
+#                          InterfaceAnalyzer, in the BindCraft env) on the top-20 structures, then
+#                          re-generate the report with the affinity_energy_density column. Off by default.
+#   --bindcraft-env ENV    conda env with PyRosetta for --with-affinity (default: BindCraft)
+#   --monomer-dir DIR      opt-in: directory of binder-ALONE refolded structures (named by binder_id).
+#                          Runs the context-dependent-fold check vs the in-complex structures and
+#                          re-generates the report with the fold_robust column. Off by default.
 #   --resume               resume interrupted run
 
 set -euo pipefail
@@ -82,6 +92,10 @@ SOLUPROT_ENV="binder-eval-soluprot"
 SOLUPROT_THRESHOLD=0.5
 SOLUPROT_FILTER=0
 PRIMARY_ENGINE="boltz"
+EPITOPE_RESIDUES=""
+WITH_AFFINITY=0
+BINDCRAFT_ENV="BindCraft"
+MONOMER_DIR=""
 RESUME=0
 
 # --- parse arguments -------------------------------------------------------
@@ -109,9 +123,13 @@ while [[ $# -gt 0 ]]; do
                 *) echo "Error: --primary-engine must be one of: boltz, protenix, af3, esmfold2 (got '$PRIMARY_ENGINE')" >&2; exit 1 ;;
             esac
             shift 2 ;;
+        --epitope-residues) EPITOPE_RESIDUES="$2"; shift 2 ;;
+        --with-affinity)    WITH_AFFINITY=1;        shift ;;
+        --bindcraft-env)    BINDCRAFT_ENV="$2";     shift 2 ;;
+        --monomer-dir)      MONOMER_DIR="$2";       shift 2 ;;
         --resume)         RESUME=1;          shift ;;
         -h|--help)
-            sed -n '2,32p' "$0" | grep '^#' | sed 's/^# \?//'
+            sed -n '2,/^set /p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
@@ -334,7 +352,86 @@ if [[ $SKIP_SOLUPROT -eq 0 && -f "$SOLUPROT_CSV" ]]; then
     REPORT_ARGS+=(--soluprot-results "$SOLUPROT_CSV")
 fi
 REPORT_ARGS+=(--primary-engine "$PRIMARY_ENGINE")
+# Inline epitope match (selectivity) — cheap, no extra pass or GPU.
+if [[ -n "$EPITOPE_RESIDUES" ]]; then
+    REPORT_ARGS+=(--epitope-residues "$EPITOPE_RESIDUES")
+fi
 conda run -n binder-eval binder-compare report "${REPORT_ARGS[@]}"
+
+# --- Advisory post-steps (opt-in): affinity (Rosetta) + monomer fold check ----
+# These need the report's structures + metrics.csv, so they run AFTER pass 1 and
+# trigger a second report pass that threads their columns in. Both are advisory
+# (never reorder/drop) and off by default.
+STRUCT_DIR="$OUTPUT/report/top20_structures"
+# Binder chain + Rosetta interface spec depend on the primary engine's chain layout
+# (Boltz-2 = binder chain A; AF3/ESMFold2/Protenix = binder chain B).
+if [[ "$PRIMARY_ENGINE" == "boltz" ]]; then
+    BINDER_CHAIN="A"; ROSETTA_IFACE="A_B"
+else
+    BINDER_CHAIN="B"; ROSETTA_IFACE="B_A"
+fi
+EXTRA_REPORT_ARGS=()
+
+if [[ $WITH_AFFINITY -eq 1 ]]; then
+    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${BINDCRAFT_ENV}"; then
+        echo "[note] --with-affinity requested but conda env '${BINDCRAFT_ENV}' not found — skipping affinity."
+    elif [[ ! -d "$STRUCT_DIR" ]]; then
+        echo "[note] --with-affinity: no structures at $STRUCT_DIR — skipping affinity."
+    else
+        echo "[affinity] Rosetta |dG/dSASA| ranking on top-20 (env: ${BINDCRAFT_ENV}, interface ${ROSETTA_IFACE})…"
+        # interface_energy.py keys designs by the structure stem; strip the report's
+        # rank-prefix so design_id == binder_id and the affinity join lands.
+        AFF_STRUCT_DIR="$OUTPUT/affinity_structures"
+        rm -rf "$AFF_STRUCT_DIR"; mkdir -p "$AFF_STRUCT_DIR"
+        for f in "$STRUCT_DIR"/rank*_*.pdb "$STRUCT_DIR"/rank*_*.cif; do
+            [[ -e "$f" ]] || continue
+            base="$(basename "$f")"; stem="${base#rank}"; stem="${stem#*_}"  # drop 'rank\d+_'
+            cp "$f" "$AFF_STRUCT_DIR/$stem"
+        done
+        if conda run -n binder-eval binder-compare affinity \
+                --metrics       "$OUTPUT/report/metrics.csv" \
+                --structures-dir "$AFF_STRUCT_DIR" \
+                --run-rosetta --interface "$ROSETTA_IFACE" --bindcraft-env "$BINDCRAFT_ENV" \
+                --energy-out    "$OUTPUT/interface_energy.csv" \
+                -o              "$OUTPUT/affinity.csv"; then
+            EXTRA_REPORT_ARGS+=(--affinity-results "$OUTPUT/affinity.csv")
+        else
+            echo "[note] affinity step failed — report will render without the affinity column."
+        fi
+    fi
+fi
+
+if [[ -n "$MONOMER_DIR" ]]; then
+    if [[ ! -d "$MONOMER_DIR" ]]; then
+        echo "[note] --monomer-dir '$MONOMER_DIR' not a directory — skipping monomer check."
+    elif [[ ! -d "$STRUCT_DIR" ]]; then
+        echo "[note] --monomer-dir: no in-complex structures at $STRUCT_DIR — skipping monomer check."
+    else
+        echo "[monomer] context-dependent-fold check (complex vs alone; binder chain ${BINDER_CHAIN})…"
+        # Match the monomer files by binder_id: rename complex structures to <binder_id>.pdb.
+        CX_DIR="$OUTPUT/monomer_complex_structures"
+        rm -rf "$CX_DIR"; mkdir -p "$CX_DIR"
+        for f in "$STRUCT_DIR"/rank*_*.pdb; do
+            [[ -e "$f" ]] || continue
+            base="$(basename "$f")"; stem="${base#rank}"; stem="${stem#*_}"
+            cp "$f" "$CX_DIR/$stem"
+        done
+        if conda run -n binder-eval binder-compare monomer \
+                --complex-dir "$CX_DIR" \
+                --monomer-dir "$MONOMER_DIR" \
+                --binder-chain "$BINDER_CHAIN" \
+                -o            "$OUTPUT/monomer_validation.csv"; then
+            EXTRA_REPORT_ARGS+=(--monomer-results "$OUTPUT/monomer_validation.csv")
+        else
+            echo "[note] monomer step found no comparable pairs — report will render without fold_robust."
+        fi
+    fi
+fi
+
+if [[ ${#EXTRA_REPORT_ARGS[@]} -gt 0 ]]; then
+    echo "[report] Re-generating report with advisory panels: ${EXTRA_REPORT_ARGS[*]}"
+    conda run -n binder-eval binder-compare report "${REPORT_ARGS[@]}" "${EXTRA_REPORT_ARGS[@]}"
+fi
 
 echo ""
 echo "=== Done ==="
