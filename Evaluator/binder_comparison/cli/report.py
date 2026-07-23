@@ -23,7 +23,9 @@ from pathlib import Path
 import pandas as pd
 
 from ..comparison.candidates import build_candidates_table
+from ..comparison.diversity import cluster_sequences_df
 from ..comparison.ensemble import compute_ensemble_metrics
+from ..comparison.epitope import epitope_match, extract_interface_residues, parse_hotspots
 from ..comparison.merger import merge_refold_results
 from ..comparison.scoring import (
     add_boltz_ipsae_from_files,
@@ -225,6 +227,19 @@ def run(args: argparse.Namespace) -> None:
     if getattr(args, "beta_results", None):
         df = _attach_beta_results(df, args.beta_results, exclude=getattr(args, "exclude_intercalators", False))
 
+    # affinity: Part N interface-energy ranking among binders (|dG/dSASA| gated by
+    # ipsae_min). Computed by 'binder-compare affinity' in the BindCraft/Rosetta env,
+    # then threaded here. Joined by binder_id; adds affinity_energy_density +
+    # passes_affinity_gate. ADVISORY — never reorders or drops.
+    if getattr(args, "affinity_results", None):
+        df = _attach_affinity_results(df, args.affinity_results)
+
+    # monomer: context-dependent-fold flag (binder-alone vs in-complex Cα RMSD).
+    # Computed by 'binder-compare monomer' from a GPU monomer-refold step, then
+    # threaded here. Joined by binder_id; adds monomer_rmsd + fold_robust. ADVISORY.
+    if getattr(args, "monomer_results", None):
+        df = _attach_monomer_results(df, args.monomer_results)
+
     # Step 2: Promote Boltz-2 as primary predictor
     print("[report] Promoting Boltz-2 metrics as primary…")
     df = compute_ensemble_metrics(df)
@@ -387,6 +402,50 @@ def run(args: argparse.Namespace) -> None:
         df_display["active_rank"] = range(1, len(df_display) + 1)
     else:
         df_display = df
+
+    # Epitope match (Item 2) — inline when intended hotspots are given and no sidecar
+    # was passed. Reads each displayed design's refolded structure (primary engine),
+    # scores overlap with the campaign's intended epitope, and adds binding_mode. This
+    # is what surfaces selectivity for multi-pocket targets (e.g. ApoE4) by default.
+    if not getattr(args, "epitope_results", None) and getattr(args, "epitope_residues", None):
+        struct_col, binder_chain = _primary_structure_col(df_display, primary_engine)
+        if struct_col is None:
+            print("[report] WARNING: no refolded structure columns found; skipping inline epitope.")
+        else:
+            base_dir = Path(args.boltz2_results).resolve().parent if args.boltz2_results else None
+            df_display = _compute_epitope_inline(
+                df_display,
+                hotspots_spec=args.epitope_residues,
+                structure_col=struct_col,
+                binder_chain=binder_chain,
+                cutoff=getattr(args, "epitope_cutoff", 8.0),
+                flag_threshold=getattr(args, "epitope_flag_threshold", 0.30),
+                base_dir=base_dir,
+            )
+            df_display = _attach_binding_mode(df_display)
+
+    # Diversity clustering (Item 1) — inline by default, no separate subcommand.
+    # Clusters the DISTINCT displayed designs into sequence-similarity families so a
+    # picker can dedup a top-30 dominated by one motif. Runs on df_display (post-
+    # collapse) so family_size counts distinct designs, and after the rank sort so
+    # family_rank is best-first within a family. --diversity-results (a hand-built
+    # sidecar) still wins; --no-diversity opts out entirely.
+    if not getattr(args, "diversity_results", None) and not getattr(args, "no_diversity", False):
+        df_display = cluster_sequences_df(
+            df_display,
+            sequence_col="sequence",
+            threshold=getattr(args, "diversity_threshold", 0.7),
+        )
+        n_fam = int(df_display["family_id"].nunique()) if "family_id" in df_display.columns else 0
+        print(
+            f"[report] Diversity: {len(df_display)} distinct designs → {n_fam} families (inline; --no-diversity to skip)"
+        )
+        # Propagate family columns onto the full df so metrics.csv carries them for
+        # the representatives (non-representative variants stay blank — advisory only).
+        if "family_id" in df_display.columns and "binder_id" in df.columns:
+            fam = df_display.set_index("binder_id")[["family_id", "family_size", "family_rank"]]
+            for col in ("family_id", "family_size", "family_rank"):
+                df[col] = df["binder_id"].map(fam[col])
 
     # Step 4: Write outputs — metrics.csv = every row; everything else = distinct designs
     write_csv(df, output_dir / "metrics.csv")
@@ -850,6 +909,106 @@ def _attach_binding_mode(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# Per-engine (binder structure column preference, binder chain id). Boltz-2 writes the
+# binder as chain A; AF3/ESMFold2/Protenix put the target first, so the binder is chain B.
+_ENGINE_STRUCT_COLS: dict[str, tuple[list[str], str]] = {
+    "boltz": (["boltz_pdb", "boltz_cif"], "A"),
+    "af3": (["af3_pdb", "af3_cif"], "B"),
+    "esmfold2": (["esmfold2_pdb", "esmfold2_cif"], "B"),
+    "protenix": (["protenix_pdb", "protenix_cif"], "B"),
+}
+
+
+def _primary_structure_col(df: pd.DataFrame, primary_engine: str) -> tuple[str | None, str]:
+    """Pick the structure-path column + binder chain for the primary engine (fallback: any engine)."""
+    cands, chain = _ENGINE_STRUCT_COLS.get(primary_engine, (["boltz_pdb"], "A"))
+    for c in cands:
+        if c in df.columns and df[c].notna().any():
+            return c, chain
+    for _eng, (cc, ch) in _ENGINE_STRUCT_COLS.items():
+        for c in cc:
+            if c in df.columns and df[c].notna().any():
+                return c, ch
+    return None, chain
+
+
+def _resolve_struct_path(src, base_dir: Path | None) -> Path | None:
+    """Resolve a structure path from a df cell (absolute in current CSVs; relative-aware for old ones)."""
+    if not src or not isinstance(src, str):
+        return None
+    p = Path(src)
+    if p.is_absolute():
+        return p if p.exists() else None
+    if base_dir is not None:
+        cand = base_dir / src
+        if cand.exists():
+            return cand
+    return p if p.exists() else None
+
+
+def _compute_epitope_inline(
+    df: pd.DataFrame,
+    *,
+    hotspots_spec: str,
+    structure_col: str,
+    binder_chain: str,
+    cutoff: float,
+    flag_threshold: float,
+    base_dir: Path | None,
+) -> pd.DataFrame:
+    """Compute epitope_match_fraction + status inline from each design's refolded structure.
+
+    Mirrors the standalone 'epitope' subcommand but runs in-process on the displayed
+    designs — no sidecar CSV needed. ADVISORY columns; never reorders or drops."""
+    hotspots = parse_hotspots(hotspots_spec)
+    if not hotspots:
+        print(f"[report] WARNING: --epitope-residues '{hotspots_spec}' empty/unparseable; skipping inline epitope.")
+        return df
+    df = df.copy()
+    out: dict[str, list] = {
+        "epitope_match_fraction": [],
+        "epitope_match_n": [],
+        "epitope_n_interface": [],
+        "epitope_off_target_residues": [],
+        "epitope_matched_residues": [],
+        "epitope_status": [],
+    }
+    n_found = n_missing = 0
+    for _, row in df.iterrows():
+        path = _resolve_struct_path(row.get(structure_col), base_dir)
+        if path is None:
+            n_missing += 1
+            out["epitope_match_fraction"].append(float("nan"))
+            out["epitope_match_n"].append(float("nan"))
+            out["epitope_n_interface"].append(float("nan"))
+            out["epitope_off_target_residues"].append("")
+            out["epitope_matched_residues"].append("")
+            out["epitope_status"].append("NO_STRUCTURE")
+            continue
+        interface = extract_interface_residues(path, binder_chain, None, cutoff=cutoff)
+        fraction, matched, off_target = epitope_match(interface, hotspots)
+        n_found += 1
+        # Numeric columns kept numeric (the sidecar path relies on read_csv to coerce;
+        # inline must match that dtype so downstream threshold comparisons don't hit strings).
+        out["epitope_match_fraction"].append(round(fraction, 3) if fraction == fraction else float("nan"))
+        out["epitope_match_n"].append(len(matched))
+        out["epitope_n_interface"].append(len(interface))
+        out["epitope_off_target_residues"].append(
+            ",".join(f"{c}{r}" if c else str(r) for c, r in sorted(off_target, key=lambda x: (x[0], x[1])))
+        )
+        out["epitope_matched_residues"].append(
+            ",".join(f"{c}{r}" if c else str(r) for c, r in sorted(matched, key=lambda x: (x[0], x[1])))
+        )
+        out["epitope_status"].append("OK" if fraction >= flag_threshold else "OFF_TARGET")
+    for col, vals in out.items():
+        df[col] = vals
+    print(
+        f"[report] Epitope (inline): {n_found} scored, {n_missing} missing structure; "
+        f"{len(hotspots)} hotspots, cutoff {cutoff:g} Å, flag < {flag_threshold:g} (chain {binder_chain})."
+    )
+    return df
+
+
 _BETA_COLS = ("n_xbridge", "n_xbridge2", "beta_intercalates")
 
 
@@ -884,6 +1043,69 @@ def _attach_beta_results(df: pd.DataFrame, beta_csv: str, exclude: bool = False)
     elif flagged is not None:
         print(f"[report] beta-check: {int(flagged.sum())} intercalating designs flagged (advisory — not dropped)")
     return df
+
+
+_AFFINITY_COLS = ("affinity_energy_density", "passes_affinity_gate")
+
+
+def _attach_affinity_results(df: pd.DataFrame, affinity_csv: str) -> pd.DataFrame:
+    """Left-join the 'affinity' CSV (Part N interface-energy ranking) by binder_id.
+
+    Adds affinity_energy_density (|dG/dSASA|) + passes_affinity_gate. ADVISORY —
+    surfaced as columns, never used to reorder or drop (the primary sort stays the
+    two-stage cross-engine iPTM ranking)."""
+    path = Path(affinity_csv)
+    if not path.exists():
+        print(f"[report] WARNING: --affinity-results file not found: {path}; skipping.")
+        return df
+    try:
+        a_df = pd.read_csv(path)
+    except (OSError, pd.errors.ParserError) as exc:
+        print(f"[report] WARNING: could not read --affinity-results {path}: {exc}")
+        return df
+    id_col = next((c for c in ("binder_id", "design_id", "id") if c in a_df.columns), None)
+    if id_col is None:
+        print(f"[report] WARNING: --affinity-results {path} has no id column; skipping.")
+        return df
+    keep = [id_col] + [c for c in _AFFINITY_COLS if c in a_df.columns]
+    a_sub = a_df[keep].rename(columns={id_col: "binder_id"}).copy()
+    a_sub["binder_id"] = a_sub["binder_id"].astype(str)
+    df = df.copy()
+    df["binder_id"] = df["binder_id"].astype(str)
+    n = int(a_sub["affinity_energy_density"].notna().sum()) if "affinity_energy_density" in a_sub.columns else 0
+    print(f"[report] Attaching affinity ranking from {path.name} ({n} scored designs)")
+    return pd.merge(df, a_sub, on="binder_id", how="left")
+
+
+_MONOMER_COLS = ("monomer_rmsd", "fold_robust")
+
+
+def _attach_monomer_results(df: pd.DataFrame, monomer_csv: str) -> pd.DataFrame:
+    """Left-join the 'monomer' CSV (context-dependent-fold flag) by binder_id.
+
+    The monomer CSV keys designs by ``design_id`` (the structure stem); we join it to
+    ``binder_id``. Adds monomer_rmsd + fold_robust. ADVISORY — never reorders or drops."""
+    path = Path(monomer_csv)
+    if not path.exists():
+        print(f"[report] WARNING: --monomer-results file not found: {path}; skipping.")
+        return df
+    try:
+        m_df = pd.read_csv(path)
+    except (OSError, pd.errors.ParserError) as exc:
+        print(f"[report] WARNING: could not read --monomer-results {path}: {exc}")
+        return df
+    id_col = next((c for c in ("binder_id", "design_id", "id") if c in m_df.columns), None)
+    if id_col is None:
+        print(f"[report] WARNING: --monomer-results {path} has no id column; skipping.")
+        return df
+    keep = [id_col] + [c for c in _MONOMER_COLS if c in m_df.columns]
+    m_sub = m_df[keep].rename(columns={id_col: "binder_id"}).copy()
+    m_sub["binder_id"] = m_sub["binder_id"].astype(str)
+    df = df.copy()
+    df["binder_id"] = df["binder_id"].astype(str)
+    n = int(m_sub["fold_robust"].notna().sum()) if "fold_robust" in m_sub.columns else 0
+    print(f"[report] Attaching monomer fold-robustness from {path.name} ({n} validated designs)")
+    return pd.merge(df, m_sub, on="binder_id", how="left")
 
 
 _QC_PANEL_COLS = (
@@ -971,17 +1193,53 @@ def add_parser(subparsers) -> None:
     p.add_argument(
         "--epitope-results",
         metavar="CSV",
-        help="Optional: output from 'epitope' (per-design overlap with intended hotspots). "
-        "Adds advisory epitope_match_fraction + epitope_status columns joined by binder_id. "
-        "Critical for serpins / multi-pocket targets where high iPTM doesn't guarantee the "
-        "right epitope. Advisory only — never reorders or drops designs.",
+        help="Optional: pre-built output from 'epitope' (per-design overlap with intended hotspots). "
+        "Overrides the inline --epitope-residues path. Adds advisory epitope_match_fraction + "
+        "epitope_status columns joined by binder_id. Advisory only — never reorders or drops designs.",
+    )
+    p.add_argument(
+        "--epitope-residues",
+        metavar="LIST",
+        help="Optional: intended hotspot residues (e.g. 'A15,A18,A232,A263'). Computes epitope match "
+        "INLINE from each displayed design's refolded structure — no separate 'epitope' run needed. "
+        "Adds advisory epitope_match_fraction / epitope_status / binding_mode. Critical for multi-pocket "
+        "targets (e.g. ApoE4) where high iPTM doesn't guarantee the intended epitope.",
+    )
+    p.add_argument(
+        "--epitope-cutoff",
+        type=float,
+        default=8.0,
+        metavar="Å",
+        help="Cα-Cα distance cutoff for interface contact in inline epitope scoring (default 8.0).",
+    )
+    p.add_argument(
+        "--epitope-flag-threshold",
+        type=float,
+        default=0.30,
+        metavar="X",
+        help="Below this hotspot-match fraction, inline epitope_status is OFF_TARGET (default 0.30).",
     )
     p.add_argument(
         "--diversity-results",
         metavar="CSV",
-        help="Optional: output from 'diversity' (sequence-similarity clustering into families). "
-        "Adds advisory family_id + family_size + family_rank columns. Surfaces a 'Top per "
-        "family' recommendation block in the report — never reorders or drops the main rank.",
+        help="Optional: pre-built output from 'diversity' (sequence-similarity clustering into families). "
+        "Overrides the inline default. Adds advisory family_id + family_size + family_rank columns — "
+        "never reorders or drops the main rank.",
+    )
+    p.add_argument(
+        "--no-diversity",
+        action="store_true",
+        help="Disable the default inline diversity clustering (family_id / family_size / family_rank on the "
+        "distinct top designs). By default the report clusters displayed designs into sequence-similarity "
+        "families so a picker can dedup a top-30 dominated by one motif — advisory, never reorders/drops.",
+    )
+    p.add_argument(
+        "--diversity-threshold",
+        type=float,
+        default=0.7,
+        metavar="X",
+        help="Jaccard k-mer similarity threshold for inline diversity clustering (default 0.7; higher = "
+        "stricter, more families).",
     )
     p.add_argument(
         "--beta-results",
@@ -994,6 +1252,19 @@ def add_parser(subparsers) -> None:
         action="store_true",
         help="With --beta-results: DROP designs flagged as intercalating (binder strand threaded into the "
         "target β-sheet — non-physical β-augmentation). Off by default (advisory).",
+    )
+    p.add_argument(
+        "--affinity-results",
+        metavar="CSV",
+        help="Optional: output from 'affinity' (Part N |dG/dSASA| interface-energy ranking, run in the "
+        "BindCraft/Rosetta env). Adds advisory affinity_energy_density + passes_affinity_gate joined by "
+        "binder_id. Advisory only — never reorders or drops (a diagnostic; screens binders, does not rank Kd).",
+    )
+    p.add_argument(
+        "--monomer-results",
+        metavar="CSV",
+        help="Optional: output from 'monomer' (context-dependent-fold flag: binder-alone vs in-complex Cα RMSD). "
+        "Adds advisory monomer_rmsd + fold_robust joined by binder_id. Advisory only — never reorders or drops.",
     )
     p.add_argument(
         "--esmfold2-results",
