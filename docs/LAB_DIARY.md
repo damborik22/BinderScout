@@ -977,12 +977,67 @@ engine itself would have been.
 
 **Propositions / TODOs:**
 
-- **In flight:** independent validation of the length crossover on the BindCraft Nature-2025 de-novo
-  set (110 designs / 7 targets / 45 binders, balanced 15/15/15 across length terciles — independent
-  of Adaptyv, and its length range straddles the ~100 aa crossover). `runs/denovo_lengthtest/`.
-  If it replicates → implement **length-conditioned engine weighting** (a free accuracy win, no new
-  engine, no extra GPU). If not → the egfr result was target-specific; drop it.
+- ~~In flight: independent validation of the length crossover~~ → **DONE, and REFUTED** — see the
+  addendum below. Length-conditioned weighting is **not** implemented.
 - Keep the `binder-eval-promera` env + weights on both machines (cheap); Promera's MIT **nanobody
   designer** may still be worth evaluating for **Part V** (would remove the aarch64 PyRosetta blocker).
 - Part U (ProtDBench calibration harness) remains the way to make future metric decisions provable;
   its Cao ground truth is binary binder/non-binder, so it will settle screens, not affinity.
+
+---
+
+## 2026-07-25 (addendum) — Length-crossover **REFUTED** on independent data; uniform consensus stands
+
+Follow-up to the Part T entry above. The per-engine advantage map had suggested a *length-dependent*
+Boltz-2/AF3 crossover — on Adaptyv/egfr, AF3 was **anti-predictive on short binders (0.33)** exactly
+where Boltz-2 peaked (0.85), implying our uniform consensus was averaging a strong signal with a
+harmful one. That would have been a free accuracy win: length-conditioned engine weighting, no new
+engine, no extra GPU. It was the most actionable thing to come out of the Promera benchmark, so it
+was validated before implementing.
+
+**What changed:**
+- Refolded the **BindCraft Nature-2025** de-novo set through all three engines
+  (`runs/denovo_lengthtest/`): 110 designs / 7 targets / **45 binders**, independent of Adaptyv,
+  balanced **15/15/15** across length terciles, 69–178 aa (straddles the ~100 aa crossover).
+  All three engines scored **the same 110 designs**.
+- Found and fixed en route: Boltz-2 refolding was **silently broken on Spark** — master's
+  `refold_boltz2.py` passes `TargetChain(msa_path=…)` but `install/patches/mosaic-offline-msa.patch`
+  had never been applied to Spark's Mosaic. Also fixed the analysis join: refold CSVs key on
+  `run_id`/`idx` + `sequence`, **not** the FASTA design name, so the join must be on sequence.
+
+**Outcome — the crossover does not replicate:**
+
+| tercile | binders | Boltz-2 | AF3 | ESMFold2 |
+|---|---|---|---|---|
+| short (69–92 aa) | 15 | 0.58 | **0.74** | 0.73 |
+| mid (93–111 aa) | 15 | 0.67 | 0.71 | 0.74 |
+| long (113–178 aa) | 15 | 0.42 | 0.50 | 0.50 |
+
+- Discovery predicted short → Boltz-2 **0.85** ≫ AF3 **0.33**; independent set gives
+  short → Boltz-2 **0.58 < AF3 0.74** — **opposite direction**.
+- Within-target on PD1 (53 designs / 13 binders, the only powered independent target):
+  short Boltz-2 0.82 vs **AF3 0.83**; long 0.79 vs 0.73. **AF3 is healthy on short binders.**
+  Its egfr 0.33 was **target-specific**, not an engine property. Opposite-signed point estimates =
+  evidence against, not an underpowered null.
+- **→ Length-conditioned weighting NOT implemented. Uniform consensus stands.**
+
+**What does replicate:**
+- **All engines degrade on long binders** (0.58–0.74 short → 0.42–0.50 long) — a *shared*, not
+  differential, effect. Long binders are harder for everyone; no per-engine action implied.
+- **No engine dominates** (PD1 ESMFold2 0.88 · IFNAR2 Boltz-2 0.72 · DerF7 AF3 0.79 · PD-L1
+  ESMFold2 0.64) — the cross-engine consensus design reconfirmed on a second independent dataset.
+- **ESMFold2 most consistent** here (pooled 0.643, best on 3/5 powered targets), echoing the
+  2026-06-23 BindCraft screen replication (0.91).
+
+**Why it mattered:**
+- Shipping the egfr crossover unvalidated would have baked a **target-specific artifact into the
+  ranking layer** of every future campaign — and it looked compelling (a 0.52 AUC gap).
+- **Third Simpson's-paradox-family trap in one investigation**: pooled `promera_plddt`
+  (0.826 → ~0.60 within-target), Promera's "unique catches" (beaten by a random voter), and now
+  this. Standing rule going forward: **a per-stratum effect found on one target must reproduce on
+  an independent target set before it changes the ranking layer**, and two engines must be compared
+  on the *same designs* — mid-run, Boltz-2 and AF3 had scored nearly disjoint sets and the
+  preliminary table pointed the wrong way.
+
+**Net:** two roadmap negatives banked (Promera not adopted; length-weighting not adopted). Both are
+deliverables — we now know two things not to build. The affinity-ranking gap remains open, untouched.

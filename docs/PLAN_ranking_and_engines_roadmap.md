@@ -84,9 +84,15 @@ correct numbers.
 > **matched-or-beaten by a random selector in 100 % of 200 simulations** — the gate is
 > failed twice over. Kd-rank among binders ≈ 0, so it does not touch the affinity gap either.
 >
-> **Side finding worth more than the engine:** the per-engine advantage map — no engine
-> dominates, and **Boltz-2 / AF3 are anti-correlated by binder length** (short: 0.80 vs 0.44;
-> long: 0.51 vs 0.78). Being validated independently in `runs/denovo_lengthtest/`.
+> **Side finding:** the per-engine advantage map — **no engine dominates** and each catches
+> binders the others miss (AF3 −7, Boltz-2 −4, ESMFold2 −3 if dropped). This **holds** and
+> reconfirms the cross-engine consensus design.
+> A further suggestion — that Boltz-2/AF3 are **anti-correlated by binder length** (egfr:
+> short 0.85 vs 0.33; long 0.63 vs 0.67) — looked like a free accuracy win but was
+> **REFUTED on independent data** (BindCraft de-novo, 110 designs / 7 targets:
+> short Boltz-2 0.58 **<** AF3 0.74; within-PD1 short 0.82 vs **0.83**). The egfr crossover
+> was target-specific. **Do not implement length-conditioned weighting.** See
+> `docs/INVESTIGATION_partT_promera.md` §5.1 and `runs/denovo_lengthtest/`.
 >
 > Env + weights kept installed on Spark and Clara (`binder-eval-promera`); Promera's MIT
 > **nanobody designer** may still be worth a look for Part V.

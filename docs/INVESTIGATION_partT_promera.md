@@ -5,8 +5,11 @@
 > random, and as a 4th consensus voter it is *worse* than adding a random selector.
 > The env and weights stay installed (cheap) in case a future use appears.
 >
-> **The experiment's real payoff was a side finding:** our three incumbent engines have
-> complementary, *length-dependent* blind spots we are not currently exploiting.
+> **Side finding, and its fate:** the benchmark also produced a per-engine advantage map
+> showing no engine dominates and each catches binders the others miss (§5) — this **holds**.
+> It further suggested a *length-dependent* Boltz-2/AF3 crossover that looked like a free
+> accuracy win; that was tested on an independent set and **REFUTED** (§5.1). Do not
+> implement length-conditioned weighting.
 
 ---
 
@@ -137,12 +140,55 @@ Boltz-2 is strongest (0.80 pooled; **0.85 within egfr**). The effect **survives 
 within-target test** on egfr (826 designs, 130 binders, widest length range), so unlike the
 pLDDT number it is not a target confound.
 
-Our uniform consensus averages Boltz-2's best signal together with AF3's actively harmful
-one. A length-conditioned weighting would improve the screen at **zero extra GPU cost**.
+This *looked* like a free accuracy win: length-conditioned weighting, no new engine, no extra
+GPU. It was tested on independent data and **did not survive** — see §5.1.
 
-> **Status:** being validated on the independent BindCraft Nature-2025 de-novo set
-> (110 designs / 7 targets / 45 binders, balanced 15/15/15 across length terciles).
-> See `runs/denovo_lengthtest/`.
+### 5.1 Independent validation of the length crossover — **REFUTED** (2026-07-25)
+
+Refolded the **BindCraft Nature-2025** de-novo set through all three engines
+(`runs/denovo_lengthtest/`): 110 designs / 7 targets / 45 binders, independent of Adaptyv,
+balanced 15/15/15 across length terciles, length range 69–178 aa (straddles the ~100 aa
+crossover). All three engines scored **the same 110 designs**.
+
+| tercile | n | binders | Boltz-2 | AF3 | ESMFold2 |
+|---|---|---|---|---|---|
+| short (69–92 aa) | 39 | 15 | 0.58 | **0.74** | 0.73 |
+| mid (93–111 aa) | 35 | 15 | 0.67 | 0.71 | 0.74 |
+| long (113–178 aa) | 36 | 15 | 0.42 | 0.50 | 0.50 |
+
+**The discovery predicted short → Boltz-2 0.85 ≫ AF3 0.33. The independent set gives
+short → Boltz-2 0.58 < AF3 0.74 — the gap runs the opposite direction.**
+
+Within-target check on PD1 (the only independent target with power — 53 designs, 13 binders),
+mirroring the egfr check that originally validated the finding:
+
+| PD1 | Boltz-2 | AF3 | ESMFold2 |
+|---|---|---|---|
+| short | 0.82 | **0.83** | 0.91 |
+| long | 0.79 | 0.73 | 0.82 |
+
+**AF3 is perfectly healthy on short binders (0.83).** Its 0.33 collapse on egfr was
+**target-specific**, not a property of the engine. The point estimates are *opposite-signed*
+to the prediction — evidence against, not merely an underpowered null.
+
+**→ Do NOT implement length-conditioned engine weighting. Keep the uniform consensus.**
+
+**What does replicate:**
+1. **All engines degrade on long binders** (0.58–0.74 short → 0.42–0.50 long) — a *shared*
+   effect, not a differential one. Long binders are harder to screen for everyone; this does
+   not imply per-engine weighting.
+2. **No engine dominates** — per-target winners vary (PD1 ESMFold2 0.88 · IFNAR2 Boltz-2 0.72 ·
+   DerF7 AF3 0.79 · PD-L1 ESMFold2 0.64). The cross-engine consensus design is reconfirmed on a
+   second independent dataset.
+3. **ESMFold2 is the most consistent** on this set (pooled 0.643; best on 3 of 5 powered
+   targets) — consistent with the earlier BindCraft screen replication (0.91).
+
+**Methodological note.** This is the third Simpson's-paradox-family trap in one investigation:
+pooled `promera_plddt` (0.826 → ~0.60 within-target), Promera's "unique catches" (beaten by a
+random voter), and now the length crossover. **A per-stratum effect discovered on one target
+must be reproduced on an independent target set before it is allowed to change the ranking
+layer.** Two engines must also be compared on the *same designs* — mid-run, Boltz-2 and AF3
+had scored almost disjoint sets and the preliminary table pointed the wrong way.
 
 ---
 
