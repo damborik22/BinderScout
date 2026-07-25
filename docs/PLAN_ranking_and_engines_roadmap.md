@@ -38,9 +38,9 @@ whether the metric that selects its output is even the right one.
 
 | # | Task | Benefit | Cost | Campaign relevance | Do when |
 |---|---|---|---|---|---|
-| **X** | Report gap audit | Highest ROI — unblocks honest reads of every report | ~1 day | Direct (we pick wet-lab designs from these reports) | **Now** |
-| **T** | Promera 5th refold engine + **iCS** metric | Could be the affinity/selectivity ranker `ipsae_min` isn't | ~1 wk | Direct (core ranking weakness) | **Now, after X** |
-| **U** | ProtDBench calibration harness | Objective, data-driven metric comparison (enables T's decision) | ~few days | Direct (makes metric choices provable) | **Now, with T** |
+| **X** | Report gap audit | Highest ROI — unblocks honest reads of every report | ~1 day | Direct (we pick wet-lab designs from these reports) | ✅ **DONE** 2026-07-25 (`be6134e`) |
+| **T** | Promera 5th refold engine + **iCS** metric | Could be the affinity/selectivity ranker `ipsae_min` isn't | ~1 wk | Direct (core ranking weakness) | ❌ **CLOSED — NEGATIVE** 2026-07-25 |
+| **U** | ProtDBench calibration harness | Objective, data-driven metric comparison (enables T's decision) | ~few days | Direct (makes metric choices provable) | Next (settles screens, not affinity) |
 | **O** | Chai-1 refold engine | 4th independent engine hardens anti-gaming consensus | ~days (vendored) | Indirect (consensus robustness) | Spare slot |
 | **V** | OpenGerminal (Ab/Nb designer) | New capability; removes aarch64 PyRosetta blocker | ~1 wk | Future (no current Ab campaign) | On demand |
 | **W** | RFD2-MI (small-mol/PTM designer) | Enables ligand/PTM targets (pairs with Boltz-2 affinity head) | ~1 wk | Future (no current ligand target) | On demand |
@@ -73,23 +73,45 @@ correct numbers.
 
 ## Part T — Promera as 5th refold engine + iCS ranking metric
 
+> ## ❌ CLOSED 2026-07-25 — **NEGATIVE RESULT. Promera not adopted.**
+> Full write-up: **`docs/INVESTIGATION_partT_promera.md`** · data + scripts:
+> `runs/adaptyv_promera_bench/`
+>
+> Benchmarked on 2515/2517 labelled Adaptyv designs (Clara H200) + an 87-design nipah pilot.
+> **Loses on every target with real binder counts** (egfr 0.52 vs 0.76, il7r 0.50 vs 0.68,
+> pd-l1 0.61 vs 0.78; target wins ESMFold2 ×2, Boltz-2 ×1, AF3 ×1, **Promera ×0**), and its
+> binder-catch rate is **at chance** (0.293 vs 0.25). As a 4th consensus voter it is
+> **matched-or-beaten by a random selector in 100 % of 200 simulations** — the gate is
+> failed twice over. Kd-rank among binders ≈ 0, so it does not touch the affinity gap either.
+>
+> **Side finding worth more than the engine:** the per-engine advantage map — no engine
+> dominates, and **Boltz-2 / AF3 are anti-correlated by binder length** (short: 0.80 vs 0.44;
+> long: 0.51 vs 0.78). Being validated independently in `runs/denovo_lengthtest/`.
+>
+> Env + weights kept installed on Spark and Clara (`binder-eval-promera`); Promera's MIT
+> **nanobody designer** may still be worth a look for Part V.
+
 **Goal.** Evaluate whether **Promera**'s interface scores — ipSAE and **iCS (interface
 Contact Score)** — rank binders better than our incumbent `ipsae_min`, and only then wire
 Promera into `evaluate.sh` as a 5th engine.
 
 **Investigate-first checklist:**
-- [ ] T1. Confirm Promera availability/licensing, weights, and GPU footprint on our
+- [x] T1. Confirm Promera availability/licensing, weights, and GPU footprint on our
       hardware (Spark / H200 / 24 GB). Can it run in a dedicated conda env like AF3?
-- [ ] T2. Refold two labelled sets through Promera: **CBG r2 pool** + the **Adaptyv
-      4-target benchmark** (experimental Kd available).
-- [ ] T3. Compute macro-AUC of `iCS` and Promera-`ipSAE` for binder-vs-non-binder, and —
-      the real prize — check any *rank correlation with Kd among binders*.
-- [ ] T4. Coordinate with **Part N** (interface-ΔG): iCS and ΔG attack the same
-      affinity-ranking gap; decide which to pursue or how they compose.
+      → MIT, 1.89 GB ungated weights, Boltz-class GPU; runs on both. aarch64 needs three
+      fixes (cu130 torch + `LD_LIBRARY_PATH` cu12/cu13 + `TRITON_PTXAS_PATH`) — see
+      `Evaluator/scripts/promera_env.sh`.
+- [x] T2. Refold two labelled sets through Promera → **full labelled Adaptyv (2515)** +
+      nipah pilot (87). (CBG r2 not needed; Adaptyv was decisive.)
+- [x] T3. Macro-AUC of `iCS` / Promera-`ipSAE` → **below incumbent on every powered target**;
+      Kd rank-correlation among binders ≈ 0/negative.
+- [x] T4. Coordinate with **Part N** → same verdict from a different direction: no
+      structure-confidence or interface-energy metric ranks affinity among binders.
 
 **Validation gate (hard):** wire Promera into the pipeline **only if `iCS` (or
 Promera-ipSAE) beats the incumbent** `ipsae_min` macro-AUC (~0.71 Adaptyv / ~0.755
 ProteinBase). If it doesn't beat it, document the negative result and stop.
+→ **Gate FAILED; documented; stopped.**
 
 ---
 
