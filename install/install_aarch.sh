@@ -562,7 +562,7 @@ select_tools_interactive() {
         "Binder design via AlphaFold2 (conda, Python 3.10)"
         "Structure generation with Boltz-1 (conda, Python 3.12)"
         "JAX-based protein design with Marimo notebooks (uv venv)"
-        "Evaluate binders: refold with Boltz-2 (+ Protenix, AF3 on DGX Spark), ranked report (requires Mosaic)"
+        "Evaluate binders: refold with Boltz-2 (+ AF3, ESMFold2 if installed), ranked report (requires Mosaic)"
         "Protenix-based de novo binder design (conda)"
     )
 
@@ -1370,9 +1370,9 @@ install_evaluator() {
         "${CONDA_CMD}" run -n binder-eval pip install -q -e "${EVALUATOR_DIR}[report]" \
         || { print_fail "Failed to install binder-compare into binder-eval"; return 1; }
 
-    # (AF2 refolding was removed in the AF3/Protenix refactor; the
-    #  binder-eval-af2 env is no longer created. AF3 refolding on DGX
-    #  Spark / aarch64 is installed separately via `install_af3`.)
+    # (AF2 and Protenix refolding have both been removed; the binder-eval-af2
+    #  env is no longer created. AF3 is installed separately via `install_af3`,
+    #  ESMFold2 via `install_esmfold2`.)
 
     # Smoke test
     smoke_test "binder-compare --help" \
@@ -1574,14 +1574,6 @@ PATCHEOF
     smoke_test "PXDesign import check" \
         "${CONDA_CMD}" run -n bindmaster_pxdesign python -c "import torch; print('PXDesign env OK')" \
         || return 1
-
-    # Install binder-compare into the PXDesign env so Protenix refolding
-    # (Part J) can run via `conda run -n bindmaster_pxdesign binder-compare refold-protenix`.
-    if [[ -d "${EVALUATOR_DIR}" ]]; then
-        run_logged "Installing binder-compare into bindmaster_pxdesign (for Protenix refold)" \
-            "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -e "${EVALUATOR_DIR}[report]" \
-            || print_warn "binder-compare install into bindmaster_pxdesign failed — Protenix refolding will be unavailable"
-    fi
 
     # Shortcut
     mkdir -p "${SHORTCUTS_DIR}"

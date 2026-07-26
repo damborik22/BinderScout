@@ -33,7 +33,7 @@ RMSD_BINDER_PREFILTER = 3.73  # Å, pre-filter from meta-analysis
 
 # PAE cutoff for Dunbrack ipSAE formula (Å).
 # Uniform 10 Å for all engines so that ipSAE scores are directly comparable
-# across Boltz-2 and other refolders (Protenix on x86, AF3 on aarch64).
+# across Boltz-2 and the other refolders (AF3, ESMFold2).
 # Overath et al. (2025) thresholds (0.61, 0.80) were calibrated with a 10 Å
 # cutoff on AF3 data.
 IPSAE_PAE_CUTOFF = 10.0
@@ -243,7 +243,7 @@ def add_boltz_ipsae_from_files(
 
 
 # ---------------------------------------------------------------------------
-# Generic PAE → DunbrackLab ipSAE loader (for Protenix, AF3, and future engines)
+# Generic PAE → DunbrackLab ipSAE loader (for AF3, ESMFold2, and future engines)
 # ---------------------------------------------------------------------------
 
 
@@ -261,7 +261,7 @@ def add_ipsae_from_pae_files(
 
     Engine-agnostic version of ``add_boltz_ipsae_from_files``. Adds columns
     ``{prefix}_bt_ipsae``, ``{prefix}_tb_ipsae``, ``{prefix}_ipsae_min``,
-    ``{prefix}_ipsae_max`` where ``prefix`` is e.g. "protenix" or "af3".
+    ``{prefix}_ipsae_max`` where ``prefix`` is e.g. "af3" or "esmfold2".
 
     Args:
         df:              DataFrame with engine refolding results.
@@ -269,9 +269,9 @@ def add_ipsae_from_pae_files(
         binder_length_col: Column with binder sequence length.
         pae_cutoff:      PAE cutoff in Å (default 10 Å, uniform across engines).
         base_dir:        Base directory for resolving relative PAE file paths.
-        prefix:          Output column prefix (e.g. 'protenix', 'af3').
+        prefix:          Output column prefix (e.g. 'af3', 'esmfold2').
         ordering:        'binder_target' or 'target_binder' — how the PAE matrix
-                         is laid out. Protenix and AF3 both default to
+                         is laid out. AF3 and ESMFold2 both default to
                          'target_binder' because we always put target first in
                          the input JSON.
     """
@@ -340,7 +340,7 @@ def add_iptm_from_pae_files(
         pae_file_col:    Column containing paths to PAE .npy files.
         binder_length_col: Column with binder sequence length.
         ordering:        PAE matrix ordering ('binder_target' or 'target_binder').
-        prefix:          Column name prefix ('boltz', 'protenix', or 'af3').
+        prefix:          Column name prefix ('boltz', 'af3', or 'esmfold2').
         base_dir:        Base directory for resolving relative PAE file paths.
     """
     result = df.copy()
@@ -383,7 +383,6 @@ def add_iptm_from_pae_files(
 # AF2 caps low on short targets (per INVESTIGATION_RANKING_DISCREPANCY.md §6); kept informational.
 DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {
     "boltz": IPSAE_PASS_THRESHOLD,  # 0.61
-    "protenix": IPSAE_PASS_THRESHOLD,  # 0.61
     "af3": IPSAE_PASS_THRESHOLD,  # 0.61 — DunbrackLab cutoff was tuned for AF3
     "esmfold2": IPSAE_PASS_THRESHOLD,  # 0.61 — same cutoff until empirical calibration suggests otherwise
     "af2": 0.30,  # informational only; AF2 distribution caps low
@@ -391,10 +390,9 @@ DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {
 
 # Map engine key → DunbrackLab PAE-derived ipsae_min column.
 # NOTE: Boltz uses the prefixed `boltz_pae_*` columns (special add_boltz_ipsae_from_files
-# pipeline), while Protenix/AF3/AF2 use plain `<engine>_ipsae_min` (from add_ipsae_from_pae_files).
+# pipeline), while AF3/ESMFold2 use plain `<engine>_ipsae_min` (from add_ipsae_from_pae_files).
 _ENGINE_IPSAE_COLS: dict[str, str] = {
     "boltz": "boltz_pae_ipsae_min",
-    "protenix": "protenix_ipsae_min",
     "af3": "af3_ipsae_min",
     "esmfold2": "esmfold2_ipsae_min",
     "af2": "af2_ipsae_min",
@@ -409,7 +407,7 @@ def apply_screening_thresholds(
     """Add Boolean screening flags and quality tier column.
 
     Per-engine flags added (when the corresponding PAE-derived ipsae column is present):
-        passes_boltz_filter, passes_protenix_filter, passes_af3_filter
+        passes_boltz_filter, passes_af3_filter, passes_esmfold2_filter
         passes_af2_filter_informational  (AF2 uses a relaxed 0.30 cutoff; informational only)
 
     Aggregate flags (derived from `primary_engine` so existing reports still work):
@@ -609,13 +607,12 @@ def compute_agreement(
     because its DunbrackLab distribution is mis-calibrated on short targets
     (see INVESTIGATION_RANKING_DISCREPANCY.md §6).
 
-    Adds column 'agreement_count' (0–4: Boltz-2, Protenix, AF3, ESMFold2 over their thresholds).
+    Adds column 'agreement_count' (0–3: Boltz-2, AF3, ESMFold2 over their thresholds).
     """
     result = df.copy()
     thresholds = {**DEFAULT_ENGINE_THRESHOLDS, **(engine_thresholds or {})}
     engine_cols = {
         "boltz": "boltz_pae_ipsae_min",
-        "protenix": "protenix_ipsae_min",
         "af3": "af3_ipsae_min",
         "esmfold2": "esmfold2_ipsae_min",
     }
@@ -641,7 +638,6 @@ _ENGINE_IPTM_COLS: list[str] = [
     "boltz_pae_iptm",
     "af3_pae_iptm",
     "esmfold2_pae_iptm",
-    "protenix_pae_iptm",
 ]
 
 
@@ -722,7 +718,6 @@ _ENGINE_IPSAE_MIN_COLS: list[str] = [
     "boltz_pae_ipsae_min",
     "af3_ipsae_min",
     "esmfold2_ipsae_min",
-    "protenix_ipsae_min",
 ]
 
 
@@ -731,7 +726,7 @@ def compute_consensus_ipsae(df: pd.DataFrame) -> pd.DataFrame:
     DunbrackLab ipSAE_min.
 
     Parallels :func:`compute_consensus_iptm`: averages the independent engines'
-    interface ipSAE_min (boltz / af3 / esmfold2 [/ protenix]). The metric being
+    interface ipSAE_min (boltz / af3 / esmfold2). The metric being
     averaged is each engine's ``ipsae_min`` (hence ``_min_mean``). Diagnostic /
     reporting column — the primary ranker stays the two-stage iptm.
 

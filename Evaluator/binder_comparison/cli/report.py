@@ -1,6 +1,6 @@
 """CLI subcommand: binder-compare report
 
-Load Boltz-2 refolding results (plus Protenix/AF3 when available in future
+Load Boltz-2 refolding results (plus AF3 and ESMFold2 when available in future
 parts), promote Boltz-2 as the primary predictor, z-score normalise, and
 generate the comparison report.
 
@@ -167,7 +167,6 @@ def run(args: argparse.Namespace) -> None:
     df = merge_refold_results(
         boltz2_csv=args.boltz2_results,
         sequences_fasta=args.sequences,
-        protenix_csv=args.protenix_results,
         af3_csv=args.af3_results,
         esmfold2_csv=args.esmfold2_results,
     )
@@ -243,21 +242,6 @@ def run(args: argparse.Namespace) -> None:
             df, pae_file_col="boltz_pae_file", ordering="binder_target", prefix="boltz", base_dir=boltz_base
         )
 
-    # Protenix: DunbrackLab ipSAE + independent ipTM from the saved PAE matrix
-    protenix_base = Path(args.protenix_results).resolve().parent if args.protenix_results else None
-    if "protenix_pae_file" in df.columns:
-        print("[report] Computing Protenix ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
-        df = add_ipsae_from_pae_files(
-            df,
-            pae_file_col="protenix_pae_file",
-            prefix="protenix",
-            ordering="target_binder",
-            base_dir=protenix_base,
-        )
-        df = add_iptm_from_pae_files(
-            df, pae_file_col="protenix_pae_file", ordering="target_binder", prefix="protenix", base_dir=protenix_base
-        )
-
     # AF3 (aarch64 / DGX Spark): identical treatment — Part K wires this up end-to-end.
     af3_base = Path(args.af3_results).resolve().parent if args.af3_results else None
     if "af3_pae_file" in df.columns:
@@ -269,7 +253,7 @@ def run(args: argparse.Namespace) -> None:
             df, pae_file_col="af3_pae_file", ordering="target_binder", prefix="af3", base_dir=af3_base
         )
 
-    # ESMFold2 (biohub): same convention as AF3/Protenix — target first in input, so PAE is target_binder.
+    # ESMFold2 (biohub): same convention as AF3 — target first in input, so PAE is target_binder.
     esmfold2_base = Path(args.esmfold2_results).resolve().parent if args.esmfold2_results else None
     if "esmfold2_pae_file" in df.columns:
         print("[report] Computing ESMFold2 ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
@@ -321,7 +305,6 @@ def run(args: argparse.Namespace) -> None:
     engine_thresholds: dict[str, float] = {}
     for engine, attr in (
         ("boltz", "threshold_boltz"),
-        ("protenix", "threshold_protenix"),
         ("af3", "threshold_af3"),
         ("esmfold2", "threshold_esmfold2"),
         ("af2", "threshold_af2"),
@@ -410,7 +393,6 @@ def run(args: argparse.Namespace) -> None:
         "passes_max_screen",
         "ipsae_min",
         "boltz_pae_ipsae_min",
-        "protenix_pae_ipsae_min",
         "af3_pae_ipsae_min",
         "esmfold2_ipsae_min",
         "consensus_ipsae_min_mean",
@@ -426,7 +408,6 @@ def run(args: argparse.Namespace) -> None:
         "pae_tb_mean",
         "agreement_count",
         "passes_boltz_filter",
-        "passes_protenix_filter",
         "passes_af3_filter",
         "passes_esmfold2_filter",
         "native_bg_design_ipsae_min",
@@ -467,7 +448,6 @@ def run(args: argparse.Namespace) -> None:
     # priority order when a particular engine's file is missing.
     _ENGINE_PDB_PRIORITY: dict[str, list[str]] = {
         "af3": ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"],
-        "protenix": ["protenix_pdb", "protenix_cif", "boltz_pdb", "pdb"],
         "esmfold2": ["esmfold2_pdb", "esmfold2_cif", "boltz_pdb", "pdb"],
         "boltz": ["boltz_pdb", "pdb"],
     }
@@ -937,12 +917,6 @@ def add_parser(subparsers) -> None:
     )
     p.add_argument("--boltz2-results", metavar="CSV", help="Output from 'refold-boltz2' (boltz2_results.csv)")
     p.add_argument(
-        "--protenix-results",
-        metavar="CSV",
-        help="Optional: output from 'refold-protenix' (protenix_results.csv). Adds a "
-        "second engine to the agreement_count.",
-    )
-    p.add_argument(
         "--af3-results",
         metavar="CSV",
         help="Optional: output from 'refold-af3' (af3_results.csv). Adds a third engine to the agreement_count.",
@@ -1010,7 +984,7 @@ def add_parser(subparsers) -> None:
     p.add_argument("--output", "-o", required=True, metavar="DIR", help="Output directory for all report files")
     p.add_argument(
         "--primary-engine",
-        choices=["boltz", "protenix", "af3", "esmfold2"],
+        choices=["boltz", "af3", "esmfold2"],
         default="boltz",
         help="Which engine's DunbrackLab PAE-based ipsae_min to use as the primary ranking metric "
         "(default: boltz). Falls back to boltz if the chosen engine's PAE files are missing.",
@@ -1045,9 +1019,6 @@ def add_parser(subparsers) -> None:
     # Per-engine iPSAE thresholds (defaults from scoring.DEFAULT_ENGINE_THRESHOLDS)
     p.add_argument(
         "--threshold-boltz", type=float, default=None, help="Boltz-2 ipsae_min pass threshold (default 0.61)"
-    )
-    p.add_argument(
-        "--threshold-protenix", type=float, default=None, help="Protenix ipsae_min pass threshold (default 0.61)"
     )
     p.add_argument(
         "--threshold-af3",
