@@ -683,7 +683,7 @@ def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     confident" lands on the right one each time.
 
     NOTE: this scores *binder vs non-binder*; the same benchmark showed it does **not**
-    rank affinity among binders (see docs/plans.md Part N — that needs interface ΔG).
+    rank affinity among binders (see docs/completed_plans.md Part N — that needs interface ΔG).
 
     Adds:
         consensus_iptm        — max over available {engine}_pae_iptm columns (NaN if none).
@@ -703,7 +703,7 @@ def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
         return result
     numeric = result[present].apply(pd.to_numeric, errors="coerce")
     # max = binder screen (recall); mean/min = consensus re-rank (precision). See
-    # rank_by_two_stage and docs/plans.md Part N (exhaustive two-stage analysis).
+    # rank_by_two_stage and docs/completed_plans.md Part N (exhaustive two-stage analysis).
     result["consensus_iptm"] = numeric.max(axis=1)
     result["consensus_iptm_mean"] = numeric.mean(axis=1)
     result["consensus_iptm_min"] = numeric.min(axis=1)
@@ -819,7 +819,7 @@ def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5, screen_metric:
     (every confidence metric inverts against Kd — strongest binders score lowest).
     Affinity ranking needs the interface-ΔG term (see comparison.affinity, Part N).
 
-    See docs/plans.md Part N for the exhaustive two-stage analysis.
+    See docs/completed_plans.md Part N for the exhaustive two-stage analysis.
     """
     result = df.copy()
     if "consensus_iptm" not in result.columns or "consensus_iptm_mean" not in result.columns:
