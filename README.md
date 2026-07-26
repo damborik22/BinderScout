@@ -412,26 +412,23 @@ Both branches: `bindmaster install` or `bash install/install.sh`.
 - **BoltzGen**: PyTorch installed from PyPI without `+cuXXX` suffix (aarch64 wheels already include CUDA).
 - **Mosaic**: `esmj` excluded (no aarch64 wheel). `torchtext` may also fail (no Linux aarch64 wheel).
 - **PXDesign**: Full pipeline works on aarch64 / Blackwell. The installer applies automatic patches for CUDA arch compatibility (sm_120), JSON serialization (`NumpyEncoder`), and dataloader (`num_workers`) config.
-- **Proteina-Complexa**: May need patches — PyTorch Geometric and `torchtext` may lack aarch64 wheels. Core deps (PyTorch 2.7, JAX 0.4.29) are fine. Same approach as Mosaic: mark missing packages with `platform_machine != 'aarch64'` in `pyproject.toml`. **Not yet wired into `install_aarch.sh`** — see the installer gap below.
-- **Protein-Hunter**: **Not supported on aarch64** — PyRosetta has no aarch64 wheels. `install_aarch.sh` rejects the value (currently with a generic "Invalid `--tool` value" rather than the PyRosetta reason).
-- **RFD3**: Technically compatible with aarch64 — `rc-foundry` pip-installs cleanly, no DGL dependency. **But `install_aarch.sh` does not accept `--tool rfd3`** — see the installer gap below.
+- **Proteina-Complexa**: May need patches — PyTorch Geometric and `torchtext` may lack aarch64 wheels. Core deps (PyTorch 2.7, JAX 0.4.29) are fine. Same approach as Mosaic: mark missing packages with `platform_machine != 'aarch64'` in `pyproject.toml`. **Not wired into `install_aarch.sh`** — `--tool proteina-complexa` there exits with that explanation.
+- **Protein-Hunter**: **Not supported on aarch64** — PyRosetta has no aarch64 wheels. `install_aarch.sh` rejects `--tool protein-hunter` with that reason.
+- **RFD3**: `install_aarch.sh --tool rfd3` installs it (cu130 torch wheels, `rc-foundry[rfd3,mpnn]`, weights + ProteinMPNN checkpoint into `weights/foundry/`). Opt-in rather than part of `--tool all` because it is **not yet validated on aarch64 hardware**.
 
-> ⚠️ **aarch64 installer gap.** `install/install_aarch.sh` currently accepts only
-> `all`, `bindcraft`, `boltzgen`, `mosaic`, `evaluator`, `pxdesign`, `af3`,
-> `esmfold2`, `soluprot`. Three consequences on a DGX Spark:
+> **aarch64 tool matrix.** `install/install_aarch.sh` accepts `all`, `bindcraft`,
+> `boltzgen`, `mosaic`, `evaluator`, `pxdesign`, `rfd3`, `af3`, `esmfold2`,
+> `soluprot`. `--tool all` installs BindCraft, BoltzGen, Mosaic, Evaluator, PXDesign
+> and **ESMFold2** (the default refold engine).
 >
-> 1. `--tool rfd3` and `--tool proteina-complexa` exit 1 with *Invalid `--tool` value*,
->    despite RFD3 being documented as aarch64-supported.
-> 2. `--tool all` installs only BindCraft, BoltzGen, Mosaic, Evaluator and PXDesign —
->    it does **not** include ESMFold2, the default refold engine. Install it explicitly
->    with `--tool esmfold2`.
-> 3. `bindmaster install` always execs `install/install.sh` (the **x86_64** script) —
->    there is no architecture dispatch. On aarch64, invoke
->    `bash install/install_aarch.sh …` directly.
->
-> The aarch64 `--tool esmfold2` path also installs a different dependency set than the
-> x86 one and may produce an env that cannot refold. Details and fixes in
-> [the audit](docs/repo_analysis_2026-07-26.html) (F12–F14, F16).
+> - **RFD3 is opt-in on aarch64:** `--tool rfd3`. It is pure pip with no DGL
+>   dependency so it should work, but it has **not been validated on aarch64
+>   hardware** — which is why it is not in `--tool all`. Please report results.
+> - **Protein-Hunter and Proteina-Complexa are refused** with an explicit reason
+>   (PyRosetta has no aarch64 wheels; PyG/torchtext may not either).
+> - `bindmaster install` now selects the installer for the host architecture
+>   automatically, so you no longer need to invoke `install_aarch.sh` by hand — the
+>   TUI's "Install tools" does the same.
 - **AF3 refolding**: Live on aarch64 / DGX Spark via the `binder-eval-af3` conda env and `binder-compare refold-af3`. Not aarch64-exclusive — AF3 runs anywhere with ≥100 GB GPU memory (an H200, GH200, etc. should work too); DGX Spark is just our primary host because Spark is where the unified memory headroom lives.
 
 ---

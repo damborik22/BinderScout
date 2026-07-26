@@ -4,7 +4,7 @@ BindMaster — unified CLI entry point (system Python, stdlib only)
 
 Dispatches sub-commands to their respective scripts:
   (no args) → interactive TUI menu (tui/app.py)
-  install   → bash install/install.sh
+  install   → bash install/install.sh (or install_aarch.sh on aarch64)
   configure → python configurator/configurator.py
   evaluate  → conda run -n binder-eval binder-compare (Evaluator/binder_comparison)
 
@@ -17,6 +17,7 @@ Usage:
 """
 
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -44,13 +45,13 @@ USAGE = f"""{BOLD}BindMaster{RESET} — GPU-accelerated protein binder design to
   {CYAN}evaluate{RESET}   Passthrough to the binder-compare evaluator (extract / refold / report / run)
 
 {BOLD}Environments:{RESET}
-  install    → bash          {REPO}/install/install.sh
+  install    → bash          {REPO}/install/install.sh  (install_aarch.sh on aarch64)
   configure  → system python {REPO}/configurator/configurator.py
   evaluate   → conda env binder-eval → binder-compare (Evaluator/binder_comparison)
 
 {BOLD}Clone:{RESET}
-  git clone https://github.com/damborik22/BindMaster.git
-  # aarch64 (DGX Spark): use install/install_aarch.sh instead of install.sh
+  git clone https://github.com/damborik22/BinderScout.git
+  # `install` auto-selects install_aarch.sh on aarch64 (DGX Spark / Grace-Hopper).
 """
 
 
@@ -102,11 +103,16 @@ def _find_conda_base() -> Path | None:
 def _dispatch(cmd: str, args: list) -> None:
     """Resolve and exec the appropriate sub-command. Never returns."""
     if cmd == "install":
-        script = REPO / "install" / "install.sh"
+        # Pick the installer for THIS machine. Without this, `bindmaster install` on a
+        # DGX Spark ran the x86_64 script: CUDA defaulting to 12.4 instead of 13.0,
+        # conda asked for pytorch-cuda=12.4 and gcc_linux-64 (no linux-aarch64 builds),
+        # and none of the aarch64 patches applied. install.sh warned but proceeded.
+        name = "install_aarch.sh" if platform.machine() == "aarch64" else "install.sh"
+        script = REPO / "install" / name
         if not script.exists():
-            print(f"{RED}✗ install.sh not found: {script}{RESET}", file=sys.stderr)
+            print(f"{RED}✗ {name} not found: {script}{RESET}", file=sys.stderr)
             sys.exit(1)
-        print(f"{BOLD}BindMaster → install{RESET}")
+        print(f"{BOLD}BindMaster → install{RESET}  ({platform.machine()} → {name})")
         os.execv("/bin/bash", ["/bin/bash", str(script)] + args)
 
     elif cmd == "configure":
