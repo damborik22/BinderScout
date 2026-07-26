@@ -420,7 +420,7 @@ being encoded there:
 ### Quick start
 
 ```bash
-git clone https://github.com/damborik22/BindMaster.git ~/BindMaster
+git clone https://github.com/damborik22/BinderScout.git ~/BindMaster
 cd ~/BindMaster
 
 bindmaster install              # interactive menu (auto-detects standalone mode)
