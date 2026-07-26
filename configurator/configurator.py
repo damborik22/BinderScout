@@ -149,6 +149,32 @@ MOSAIC_HALLUCINATE_SRC = MOSAIC_DIR / "examples" / "bindmaster_examples" / "hall
 NANOBODY_SCAFFOLDS_SRC = BOLTZGEN_DIR / "example" / "nanobody_scaffolds"
 NANOBODY_SCAFFOLD_NAMES = ["7eow", "7xl0", "8coh", "8z8v"]
 
+# ── Design tools, in execution order — the single source of truth ────────────
+# (tools_enabled key, run-script filename, display label, output subdir)
+#
+# Every UI surface iterates this: the Step 7 preview tree, the "To run later"
+# list, run_pipeline() and write_run_all(). They were four independently
+# maintained if-chains, and three of them fell behind: the preview tree knew 4
+# of the 7 tools, the next-steps list and run_pipeline knew 5. A user could
+# enable RFD3 or Protein-Hunter, watch the wizard generate run_rfd3.sh, and then
+# never be told the script existed — while "Run the pipeline now?" silently
+# skipped it. Adding a tool must not require editing four places.
+TOOL_SEQUENCE: list[tuple[str, str, str, str]] = [
+    ("mosaic", "run_mosaic.sh", "Mosaic", "mosaic"),
+    ("boltzgen", "run_boltzgen.sh", "BoltzGen", "boltzgen"),
+    ("bindcraft", "run_bindcraft.sh", "BindCraft", "bindcraft"),
+    ("pxdesign_local", "run_pxdesign.sh", "PXDesign", "pxdesign"),
+    ("proteina_complexa", "run_proteina_complexa.sh", "Proteina-Complexa", "proteina_complexa"),
+    ("rfd3", "run_rfd3.sh", "RFD3", "rfd3"),
+    ("protein_hunter", "run_protein_hunter.sh", "Protein-Hunter", "protein_hunter"),
+]
+
+
+def enabled_tools(tools_enabled: dict) -> list[tuple[str, str, str, str]]:
+    """TOOL_SEQUENCE entries whose tools_enabled key is truthy, in execution order."""
+    return [entry for entry in TOOL_SEQUENCE if tools_enabled.get(entry[0])]
+
+
 # ─── Amino-acid 3→1 mapping ──────────────────────────────────────────────────
 
 AA3TO1 = {
@@ -784,15 +810,7 @@ def print_tree(run_dir: Path, tools_enabled: dict, cfg: dict | None = None):
     if tools_enabled.get("evaluator"):
         print(f"  ├── {CYAN}evaluate/{RESET}")
         print("  │   └── evaluate_report/")
-    scripts = []
-    if tools_enabled.get("mosaic"):
-        scripts.append("run_mosaic.sh")
-    if tools_enabled.get("boltzgen"):
-        scripts.append("run_boltzgen.sh")
-    if tools_enabled.get("bindcraft"):
-        scripts.append("run_bindcraft.sh")
-    if tools_enabled.get("pxdesign_local"):
-        scripts.append("run_pxdesign.sh")
+    scripts = [script for _key, script, _label, _subdir in enabled_tools(tools_enabled)]
     if tools_enabled.get("evaluator"):
         scripts.append("run_evaluate.sh")
     scripts.append("run_all.sh")
@@ -1167,8 +1185,14 @@ def _settings_json_block(
 # of grepping run.log.
 GIT_SHA=$(git -C "{BINDMASTER_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(git -C "{BINDMASTER_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i {gpu_id_var} 2>/dev/null | head -1)
-GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i {gpu_id_var} 2>/dev/null | head -1)
+# `|| echo` is load-bearing: every generated script runs under `set -euo pipefail`, and
+# with pipefail a failing nvidia-smi in a command substitution kills the script (exit 127)
+# BEFORE the design step. GIT_SHA/GIT_BRANCH/PY_VER above are already guarded this way;
+# these two were not, so any host without nvidia-smi on PATH — a CPU login node, a
+# container without the NVIDIA runtime, or a wrong --gpu-id — died in the provenance
+# block that exists to improve reproducibility.
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i {gpu_id_var} 2>/dev/null | head -1 || echo "unknown")
+GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i {gpu_id_var} 2>/dev/null | head -1 || echo 0)
 PY_VER=$(python -c 'import sys;print(".".join(map(str,sys.version_info[:3])))' 2>/dev/null || echo "unknown"){extra_env_inner}
 cat > "${settings_dir_var}/settings.json" <<SETTINGS_JSON_EOF
 {{
@@ -1571,12 +1595,17 @@ def write_run_all(path: Path, cfg: dict, tools_enabled: dict):
             "# Mosaic is interactive — run it separately before the pipeline:",
             '#   bash "$RUN_DIR/run_mosaic.sh"',
             "# Then re-run this script. It will skip Mosaic if designs.csv already exists.",
+            "# Missing Mosaic output is a WARNING, not a failure: this block used to `exit 1`,",
+            "# and because it is emitted first that aborted the whole run before BoltzGen,",
+            "# BindCraft, PXDesign, Proteina-Complexa, RFD3 or Protein-Hunter had started —",
+            "# even though `bash runs/<name>/run_all.sh` is the documented one-command path.",
             'echo "=== Step: Mosaic ==="',
             'if [[ -f "$RUN_DIR/mosaic/designs.csv" ]]; then',
             '    echo "  Mosaic designs.csv found — skipping interactive run."',
             "else",
-            '    echo "  Mosaic requires interactive input. Run run_mosaic.sh first, then re-run run_all.sh." >&2',
-            "    exit 1",
+            '    echo "  WARNING: Mosaic needs interactive input and is being SKIPPED." >&2',
+            "    echo \"           Run 'bash $RUN_DIR/run_mosaic.sh' separately, then re-run this\" >&2",
+            '    echo "           script to include its designs. Continuing with the other tools." >&2',
             "fi",
             "",
         ]
@@ -2469,7 +2498,11 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     if tools_enabled.get("protein_hunter"):
         design_dirs.append(("--protein-hunter", str(run_dir / "protein_hunter")))
     if tools_enabled.get("rfd3"):
-        design_dirs.append(("--rfd3", str(run_dir / "rfd3" / "outputs")))
+        # run_rfd3.sh writes RFD3_DIR="$RUN_DIR/rfd3" (sequences.csv + sequences.fasta), and
+        # write_run_all already checks "$RUN_DIR/rfd3/sequences.csv". Pointing the extractor at
+        # rfd3/outputs/ handed it an empty directory, so a completed RFD3 run (23 h GPU on the
+        # documented 2VDY campaign) contributed zero designs to the report, silently.
+        design_dirs.append(("--rfd3", str(run_dir / "rfd3")))
 
     # Build the evaluate.sh invocation
     eval_sh = EVALUATOR_DIR / "evaluate.sh"
@@ -2631,7 +2664,9 @@ def generate(cfg: dict, tools_enabled: dict):
         write_run_proteina_complexa(run_dir / "run_proteina_complexa.sh", cfg)
 
     if tools_enabled.get("rfd3"):
-        (run_dir / "rfd3" / "outputs").mkdir(parents=True, exist_ok=True)
+        # Matches every other tool: create the output dir the run script writes into
+        # (rfd3/sequences.csv), which is also the dir run_evaluate.sh hands the extractor.
+        (run_dir / "rfd3").mkdir(parents=True, exist_ok=True)
         write_run_rfd3(run_dir / "run_rfd3.sh", cfg)
 
     if tools_enabled.get("protein_hunter"):
@@ -2652,50 +2687,18 @@ def run_pipeline(cfg: dict, tools_enabled: dict):
     run_dir = cfg["run_dir"]
     failed = []
 
-    if tools_enabled.get("mosaic"):
-        print_step("Running Mosaic  (interactive — you will be prompted below)")
-        rc = subprocess.run(["bash", str(run_dir / "run_mosaic.sh")]).returncode
+    # Driven by TOOL_SEQUENCE, so a newly added tool is dispatched automatically.
+    # The previous hand-written if-chain covered 5 of the 7 tools: answering "y" to
+    # "Run the pipeline now?" silently ran nothing for RFD3 or Protein-Hunter, and
+    # the Evaluator then reported on an empty pool.
+    for _key, script, label, _subdir in enabled_tools(tools_enabled):
+        print_step(f"Running {label}" + ("  (interactive — you will be prompted below)" if _key == "mosaic" else ""))
+        rc = subprocess.run(["bash", str(run_dir / script)]).returncode
         if rc == 0:
-            print_ok("Mosaic completed")
+            print_ok(f"{label} completed")
         else:
-            print_fail(f"Mosaic failed (exit code {rc})")
-            failed.append("Mosaic")
-
-    if tools_enabled.get("boltzgen"):
-        print_step("Running BoltzGen")
-        rc = subprocess.run(["bash", str(run_dir / "run_boltzgen.sh")]).returncode
-        if rc == 0:
-            print_ok("BoltzGen completed")
-        else:
-            print_fail(f"BoltzGen failed (exit code {rc})")
-            failed.append("BoltzGen")
-
-    if tools_enabled.get("bindcraft"):
-        print_step("Running BindCraft")
-        rc = subprocess.run(["bash", str(run_dir / "run_bindcraft.sh")]).returncode
-        if rc == 0:
-            print_ok("BindCraft completed")
-        else:
-            print_fail(f"BindCraft failed (exit code {rc})")
-            failed.append("BindCraft")
-
-    if tools_enabled.get("pxdesign_local"):
-        print_step("Running PXDesign")
-        rc = subprocess.run(["bash", str(run_dir / "run_pxdesign.sh")]).returncode
-        if rc == 0:
-            print_ok("PXDesign completed")
-        else:
-            print_fail(f"PXDesign failed (exit code {rc})")
-            failed.append("PXDesign")
-
-    if tools_enabled.get("proteina_complexa"):
-        print_step("Running Proteina-Complexa")
-        rc = subprocess.run(["bash", str(run_dir / "run_proteina_complexa.sh")]).returncode
-        if rc == 0:
-            print_ok("Proteina-Complexa completed")
-        else:
-            print_fail(f"Proteina-Complexa failed (exit code {rc})")
-            failed.append("Proteina-Complexa")
+            print_fail(f"{label} failed (exit code {rc})")
+            failed.append(label)
 
     if tools_enabled.get("evaluator"):
         print_step("Running Evaluator  (Boltz-2 refolding + ranked report — this may take a while)")
@@ -3422,21 +3425,12 @@ def wizard():
     else:
         print()
         print_warn("To run later:")
+        # Driven by TOOL_SEQUENCE so every generated script is listed. The old
+        # hand-written chain omitted RFD3 and Protein-Hunter, so a user who enabled
+        # them was never told their run scripts existed.
         step = 1
-        if use_mosaic:
-            print(f"  {step}. bash {run_dir}/run_mosaic.sh")
-            step += 1
-        if use_boltzgen:
-            print(f"  {step}. bash {run_dir}/run_boltzgen.sh")
-            step += 1
-        if use_bindcraft:
-            print(f"  {step}. bash {run_dir}/run_bindcraft.sh")
-            step += 1
-        if use_pxdesign_local:
-            print(f"  {step}. bash {run_dir}/run_pxdesign.sh")
-            step += 1
-        if use_proteina_complexa:
-            print(f"  {step}. bash {run_dir}/run_proteina_complexa.sh")
+        for _key, script, _label, _subdir in enabled_tools(tools_enabled):
+            print(f"  {step}. bash {run_dir}/{script}")
             step += 1
         if use_evaluator:
             print(f"  {step}. bash {run_dir}/run_evaluate.sh")
