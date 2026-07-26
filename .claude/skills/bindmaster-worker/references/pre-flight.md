@@ -130,7 +130,7 @@ python -c "from boltz.main import download_boltz2; from pathlib import Path; dow
 # NOTE: positional Path argument, NOT a string
 ```
 
-### Protenix / PXDesign
+### PXDesign (its internal Protenix — not a refold engine)
 
 ```bash
 echo $PROTENIX_DATA_ROOT_DIR

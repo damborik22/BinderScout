@@ -91,4 +91,4 @@ Wall: <h> on <GPU>. Compute: <GPU-h>.
 Packaged: <TARGET>_Mosaic_<machine>.tar.gz (<size>).
 ```
 
-**Note about cross-validation:** Mosaic's design-time confidence is from Boltz-2 — the same model the evaluator uses by default. Mosaic-output `agreement_count` is most decisive when Protenix and AF3 agree independently. See `bindmaster-orchestrator/references/tools/README.md`.
+**Note about cross-validation:** Mosaic's design-time confidence is from Boltz-2 — the same model the evaluator uses by default. Mosaic-output `agreement_count` is most decisive when AF3 and ESMFold2 agree independently. See `bindmaster-orchestrator/references/tools/README.md`.
