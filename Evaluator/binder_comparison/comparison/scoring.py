@@ -583,8 +583,13 @@ def compute_iptm_from_pae(
             ]
         )
 
-    # Global d0 (uses total chain lengths, no minimum of 27)
-    d0 = max(1.0, 1.24 * (L_b + L_t - 15) ** (1.0 / 3.0) - 1.8)
+    # Global d0 (uses total chain lengths, no minimum of 27 — unlike _d0 for ipSAE).
+    # np.cbrt, not ** (1/3): for a total under 15 residues the base is negative and
+    # Python's ** returns a COMPLEX number, so max(1.0, complex) raised TypeError.
+    # np.cbrt takes the real cube root, giving the negative value the formula intends,
+    # which the max() then floors to 1.0. Unreachable via the configurator (binders are
+    # >= 10 aa and targets larger) but reachable from sequence-only mode.
+    d0 = max(1.0, 1.24 * float(np.cbrt(L_b + L_t - 15)) - 1.8)
 
     pae_bt = pae[:L_b, L_b:]  # shape [L_b, L_t]
     pae_tb = pae[L_b:, :L_b]  # shape [L_t, L_b]
