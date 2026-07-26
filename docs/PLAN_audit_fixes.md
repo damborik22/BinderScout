@@ -360,13 +360,13 @@ ordered table used by all of them:
 # Single source of truth: (tools_enabled key, run-script name, display label, output subdir).
 # Every UI surface iterates this — adding a tool must not require touching four if-chains.
 TOOL_SEQUENCE = [
-    ("mosaic",            "run_mosaic.sh",            "Mosaic",            "mosaic"),
-    ("boltzgen",          "run_boltzgen.sh",          "BoltzGen",          "boltzgen"),
-    ("bindcraft",         "run_bindcraft.sh",         "BindCraft",         "bindcraft"),
-    ("pxdesign_local",    "run_pxdesign.sh",          "PXDesign",          "pxdesign"),
+    ("mosaic", "run_mosaic.sh", "Mosaic", "mosaic"),
+    ("boltzgen", "run_boltzgen.sh", "BoltzGen", "boltzgen"),
+    ("bindcraft", "run_bindcraft.sh", "BindCraft", "bindcraft"),
+    ("pxdesign_local", "run_pxdesign.sh", "PXDesign", "pxdesign"),
     ("proteina_complexa", "run_proteina_complexa.sh", "Proteina-Complexa", "proteina_complexa"),
-    ("protein_hunter",    "run_protein_hunter.sh",    "Protein-Hunter",    "protein_hunter"),
-    ("rfd3",              "run_rfd3.sh",              "RFD3",              "rfd3"),
+    ("protein_hunter", "run_protein_hunter.sh", "Protein-Hunter", "protein_hunter"),
+    ("rfd3", "run_rfd3.sh", "RFD3", "rfd3"),
 ]
 ```
 
@@ -427,6 +427,7 @@ TOOL_FLAGS = [
     ("--protein-hunter", "Protein-Hunter output directory"),
     ("--rfd3", "RFD3 / foundry output directory"),
 ]
+
 
 def add_tool_args(p):
     for flag, help_text in TOOL_FLAGS:

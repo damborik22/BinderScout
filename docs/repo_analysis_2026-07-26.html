@@ -286,32 +286,32 @@ $ python3 -m pytest --collect-only        → No module named pytest</code></pre
 <div class="f">
   <h4><span class="sev c-crit">Critical</span> &nbsp;F1 · The mmCIF chain answer is discarded; the longest entity is used as the target</h4>
   <p class="loc"><code>configurator/configurator.py:551</code> — <code>extract_sequence_from_cif(cif_path, chain_id)</code></p>
-  <p><code>chain_id</code> is accepted and then used <strong>nowhere</strong> — neither branch honours it:</p>
+  <p>The function tries two branches in the wrong order:</p>
   <ul>
     <li><strong>Branch 1</strong> — <code>_cif_entity_poly_seq(text)</code> (<code>:454</code>) takes no
-        chain argument and its docstring says "extract the <em>longest</em> canonical one-letter sequence
-        from <code>_entity_poly</code>". The call site's own comment concedes it:
-        <code># Try canonical _entity_poly first (chain-agnostic, longest entity)</code>. This branch wins for
-        essentially every PDB-derived mmCIF, because they all carry <code>_entity_poly</code>.</li>
-    <li><strong>Branch 2</strong> — <code>_cif_atom_site_seq(text)</code> (<code>:497</code>) is labelled
-        "Fallback: <code>_atom_site</code> CA records <em>for requested chain</em>", but it also takes no
-        chain argument. It accumulates <code>seen[(chain, resnum)]</code> across <em>all</em> chains and
-        returns <code>"".join(seen[k] for k in sorted(seen))</code> (<code>:537</code>) — every chain
-        concatenated.</li>
+        chain argument, and its docstring says it extracts the <em>longest</em> canonical one-letter sequence
+        from <code>_entity_poly</code>. The call site's own comment concedes it:
+        <code># Try canonical _entity_poly first (chain-agnostic, longest entity)</code>.</li>
+    <li><strong>Branch 2</strong> — the inline <code>_atom_site</code> loop (<code>:556–599</code>)
+        <em>is</em> chain-aware: <code>if ch.upper() != chain_id.upper(): continue</code> at <code>:584</code>.
+        But it only runs when branch 1 returned nothing.</li>
   </ul>
-  <p><strong>Failure, two ways.</strong> Step 3 asks "Chain(s) to target" and the user answers <code>A</code>
-     for a 100 aa antigen in an antibody–antigen mmCIF. With <code>_entity_poly</code> present, the 220 aa
-     heavy chain is used instead. Without it, the target becomes chain A + chain B <em>concatenated</em> — a
-     chimeric sequence that exists in no structure. Every one of the seven tools then designs against the
-     wrong target and the Evaluator refolds against it too, so the run is internally consistent and
-     confidently scored. Nothing in the output reveals it; the wizard even prints
-     <code>✓ Auto-extracted sequence for chain A</code>. The residue count on that line is the only signal.</p>
-  <p class="fix"><strong>Fix:</strong> thread <code>chain_id</code> into both helpers — a two-line
-     <code>if chain and chain != chain_id: continue</code> filter in <code>_cif_atom_site_seq</code>, and try
-     that branch <em>first</em> when a chain was requested. Fall back to <code>_entity_poly</code> only when
-     the chain has no coordinates, and warn explicitly that the chain could not be honoured rather than
-     silently substituting. <code>extract_sequence_from_pdb</code> (<code>:364</code>) already does this
-     correctly — <code>.pdb</code> input is unaffected.</p>
+  <p>Since essentially every PDB-derived mmCIF carries <code>_entity_poly</code>, branch 1 nearly always wins
+     and the chain answer is discarded.</p>
+  <p><strong>Failure:</strong> Step 3 asks "Chain(s) to target", the user answers <code>A</code> for a 100 aa
+     antigen in an antibody–antigen mmCIF, and the 220 aa heavy chain is silently used instead. Every one of
+     the seven tools then designs against the wrong protein and the Evaluator refolds against it too, so the
+     run is internally consistent and confidently scored. Nothing in the output reveals it — the wizard even
+     prints <code>✓ Auto-extracted sequence for chain A</code>. The residue count on that line is the only
+     signal.</p>
+  <p class="fix"><strong>Fix (implemented):</strong> try the chain-aware <code>_atom_site</code> branch first
+     and fall back to <code>_entity_poly</code> only when the requested chain has no coordinates, printing an
+     explicit warning that names the chain and the fallback length. <code>extract_sequence_from_pdb</code>
+     (<code>:364</code>) already filtered correctly, so <code>.pdb</code> input was never affected.</p>
+  <p class="fine"><strong>Note.</strong> A separate helper <code>_cif_atom_site_seq</code> (<code>:497</code>)
+     is labelled "for requested chain" but takes no chain argument and would concatenate every chain. It is
+     <em>dead code</em> — nothing calls it — so it is not part of this defect. Flagged rather than deleted,
+     per the repo's own guidance on pre-existing dead code.</p>
 </div>
 
 <div class="f">
