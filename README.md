@@ -614,4 +614,15 @@ docker run --rm -it bindmaster-test bash
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) — covers BindMaster's own source (CLI, configurator, TUI,
+installers, `binder-comparison`).
+
+It does **not** cover the third-party assets redistributed in this tree: the
+NGL viewer, SoluProt and its bundled USEARCH binaries, and the ARM64
+`DAlphaBall.gcc` / `dssp` builds. Those carry their own terms — see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), which also flags that the
+vendored USEARCH binaries are **GPLv3**, and what that does and does not mean
+for redistributing this repository.
+
+The design tools and refolding engines are fetched by the installer rather than
+redistributed here; their licences travel with them.
