@@ -47,6 +47,12 @@ _NATIVE_COL_MAP = {
 }
 
 # Per-design JSON sidecars live under <csv_dir>/diffusion/.
+# Longest sequence the FASTA fallback will accept as a binder. Above this it is almost
+# certainly mpnn's full chain (target prefix + designed binder) rather than a binder —
+# the configurator's own binder-length ceiling is 500 aa (validate_int max_val), and
+# real designs in this pipeline run 60-150 aa.
+_MAX_PLAUSIBLE_BINDER_LEN = 500
+
 _SIDECAR_SUBDIR = "diffusion"
 # Within each sidecar JSON, the structural QC metrics live under data["metrics"].
 # The two n_clashing sub-keys use dot notation in the JSON ("n_clashing.x")
@@ -177,6 +183,19 @@ class RFD3Extractor(SequenceExtractor):
         )
 
     def _extract_from_fasta(self, input_dir: Path) -> list[ExtractedBinder]:
+        """Fallback for a manual foundry workflow that left no aggregated CSV.
+
+        DANGER, and why the length guard below exists: `mpnn` writes the FULL chain —
+        the preserved target prefix followed by the designed binder. CLAUDE.md's own
+        RFD3 gotcha list says you must "strip the target prefix (first len(target_seq)
+        chars)". This code path has no target sequence to strip with, so an unguarded
+        pass-through would hand the refold engines a target+binder concatenation
+        labelled as a binder, and every iPTM computed for it would be meaningless.
+
+        Refusing implausible lengths is the honest option: the aggregated
+        `sequences.csv` that `run_rfd3.sh` produces already carries stripped binders,
+        so anyone hitting this path can generate it instead.
+        """
         from ..io.read import read_fasta
 
         fastas = list(input_dir.rglob("*.fasta")) + list(input_dir.rglob("*.fa"))
@@ -184,6 +203,7 @@ class RFD3Extractor(SequenceExtractor):
             return []
 
         results: list[ExtractedBinder] = []
+        n_rejected = 0
         for fp in fastas:
             try:
                 entries = read_fasta(fp)
@@ -192,6 +212,9 @@ class RFD3Extractor(SequenceExtractor):
             for idx, (header, seq) in enumerate(entries):
                 seq = seq.strip().upper()
                 if not self._validate_sequence(seq):
+                    continue
+                if len(seq) > _MAX_PLAUSIBLE_BINDER_LEN:
+                    n_rejected += 1
                     continue
                 binder_id = header.split()[0] if header else f"rfd3_{fp.stem}_{idx}"
                 results.append(
@@ -202,6 +225,14 @@ class RFD3Extractor(SequenceExtractor):
                         native=NativeMetrics(),
                     )
                 )
+        if n_rejected:
+            warnings.warn(
+                f"RFD3: skipped {n_rejected} FASTA sequence(s) longer than "
+                f"{_MAX_PLAUSIBLE_BINDER_LEN} aa — these look like mpnn's full chain "
+                f"(target prefix + binder), not a binder. Refolding them would produce "
+                f"meaningless iPTM. Generate the aggregated sequences.csv (run_rfd3.sh "
+                f"does this) so the target prefix is stripped properly."
+            )
         return results
 
     def _find_csv(self, input_dir: Path) -> Path | None:
