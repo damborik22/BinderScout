@@ -25,10 +25,19 @@ from ..extractors import (
     RFD3Extractor,
 )
 from ..io.write import write_fasta
+from ._tool_args import add_tool_args
 
 
 def run(args: argparse.Namespace) -> None:
     all_binders: list[ExtractedBinder] = []
+    per_tool: dict[str, int] = {}
+
+    def _take(dest: str, extracted: list[ExtractedBinder]) -> None:
+        """Record and absorb one tool's extraction result."""
+        print(f"  → {len(extracted)} sequences")
+        per_tool[dest] = len(extracted)
+        all_binders.extend(extracted)
+
     # "Best design, not multiple sequences per design" — default on. Collapses
     # BindCraft MPNN variants to best per trajectory and Protein-Hunter cycles to
     # best per run, so the refold pool is clean from the start.
@@ -37,46 +46,54 @@ def run(args: argparse.Namespace) -> None:
     if args.bindcraft:
         print(f"[extract] BindCraft: {args.bindcraft}")
         extracted = BindCraftExtractor(collapse_variants=collapse).extract(args.bindcraft)
-        print(f"  → {len(extracted)} sequences")
-        all_binders.extend(extracted)
+        _take("bindcraft", extracted)
 
     if args.boltzgen:
         print(f"[extract] BoltzGen: {args.boltzgen}")
         extracted = BoltzGenExtractor().extract(args.boltzgen)
-        print(f"  → {len(extracted)} sequences")
-        all_binders.extend(extracted)
+        _take("boltzgen", extracted)
 
     if args.mosaic:
         print(f"[extract] Mosaic: {args.mosaic}")
         top_only = not getattr(args, "all_mosaic_designs", False)
         extracted = MosaicExtractor(top_only=top_only).extract(args.mosaic)
-        print(f"  → {len(extracted)} sequences")
-        all_binders.extend(extracted)
+        _take("mosaic", extracted)
 
     if args.pxdesign:
         print(f"[extract] PXDesign: {args.pxdesign}")
         extracted = PXDesignExtractor().extract(args.pxdesign)
-        print(f"  → {len(extracted)} sequences")
-        all_binders.extend(extracted)
+        _take("pxdesign", extracted)
 
     if args.rfd3:
         print(f"[extract] RFD3: {args.rfd3}")
         extracted = RFD3Extractor().extract(args.rfd3)
-        print(f"  → {len(extracted)} sequences")
-        all_binders.extend(extracted)
+        _take("rfd3", extracted)
 
     if args.proteina_complexa:
         print(f"[extract] Proteina-Complexa: {args.proteina_complexa}")
         extracted = ProteinaComplexaExtractor().extract(args.proteina_complexa)
-        print(f"  → {len(extracted)} sequences")
-        all_binders.extend(extracted)
+        _take("proteina_complexa", extracted)
 
     if args.protein_hunter:
         print(f"[extract] Protein-Hunter: {args.protein_hunter}")
         all_runs = getattr(args, "all_protein_hunter_designs", False)
         extracted = ProteinHunterExtractor(all_runs=all_runs, collapse_variants=collapse).extract(args.protein_hunter)
-        print(f"  → {len(extracted)} sequences")
-        all_binders.extend(extracted)
+        _take("protein_hunter", extracted)
+
+    # A requested tool that yielded nothing is an ERROR, not a shrug. The old guard
+    # only fired when EVERY tool came up empty, so a typo in one of four --tool paths
+    # (or a tool whose run died before writing its CSV) printed "→ 0 sequences" and
+    # exited 0 — and run_evaluate.sh under `set -e` then spent hours of Boltz-2 + AF3 +
+    # ESMFold2 GPU time on a silently partial pool that looked complete in the report.
+    empty = [dest for dest, n in per_tool.items() if n == 0]
+    if empty and not getattr(args, "allow_empty", False):
+        print(
+            f"[extract] ERROR: {', '.join(sorted(empty))} produced 0 sequences. "
+            f"Check the directory path, and that the run finished and wrote its output. "
+            f"Pass --allow-empty to continue anyway.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if not all_binders:
         print("[extract] ERROR: no binders found. Check input directories.", file=sys.stderr)
@@ -174,25 +191,15 @@ def add_parser(subparsers) -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
     )
-    p.add_argument("--bindcraft", metavar="DIR", help="BindCraft output directory")
-    p.add_argument("--boltzgen", metavar="DIR", help="BoltzGen output directory")
-    p.add_argument("--mosaic", metavar="DIR", help="Mosaic output directory (containing designs.csv)")
-    p.add_argument("--pxdesign", metavar="DIR", help="PXDesign output directory (containing summary.csv)")
-    p.add_argument("--rfd3", metavar="DIR", help="RFD3 / foundry output directory")
-    p.add_argument(
-        "--proteina-complexa",
-        metavar="DIR",
-        dest="proteina_complexa",
-        help="Proteina-Complexa output directory (containing sequences.csv)",
-    )
-    p.add_argument(
-        "--protein-hunter",
-        metavar="DIR",
-        dest="protein_hunter",
-        help="Protein-Hunter output directory (containing summary_high_iptm.csv)",
-    )
+    add_tool_args(p)
     p.add_argument("--output", "-o", required=True, metavar="FILE", help="Output FASTA path (e.g. sequences.fasta)")
     p.add_argument("--keep-duplicates", action="store_true", help="Do not deduplicate identical sequences across tools")
+    p.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="Continue when a requested --<tool> directory yields 0 sequences (default: error out, "
+        "so a mistyped path cannot silently shrink the pool before hours of GPU refolding)",
+    )
     p.add_argument(
         "--all-mosaic-designs",
         action="store_true",

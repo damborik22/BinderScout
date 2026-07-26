@@ -299,7 +299,7 @@ ZSCORE_METRICS = list(BOLTZ2_METRIC_MAP.keys()) + [
     "boltz_pae_bt_ipsae",
     "boltz_pae_tb_ipsae",
     "boltz_pae_ipsae_min",
-    # AF3 DunbrackLab ipSAE + summary metrics (aarch64 / DGX Spark only)
+    # AF3 DunbrackLab ipSAE + summary metrics (needs >100 GB unified/device memory)
     "af3_iptm",
     "af3_ptm",
     "af3_ranking_score",
@@ -308,6 +308,18 @@ ZSCORE_METRICS = list(BOLTZ2_METRIC_MAP.keys()) + [
     "af3_tb_ipsae",
     "af3_ipsae_min",
     "af3_pae_iptm",
+    # ESMFold2 — the third engine, and the one feeding chain_iptm_interface (the
+    # autosize gate). Omitting it meant metrics_zscore.csv had no esmfold2_*_z columns
+    # and summary.json no ESMFold2 entries, so the engine driving consensus_iptm was
+    # absent from the very tables a reader uses to judge cross-engine agreement.
+    "esmfold2_iptm",
+    "esmfold2_ptm",
+    "esmfold2_plddt_binder_mean",
+    "esmfold2_bt_ipsae",
+    "esmfold2_tb_ipsae",
+    "esmfold2_ipsae_min",
+    "esmfold2_pae_iptm",
+    "esmfold2_chain_iptm_interface",
     # ipTM computed independently from PAE matrices
     "boltz_pae_iptm",
 ]
