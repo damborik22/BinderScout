@@ -133,8 +133,12 @@ def main():
             print(f"Resuming — skipping {len(skip_indices)} completed binders")
 
     refold_batch_protenix(
-        sequences, args.target_seq, output_dir, csv_path,
-        target_pdb=args.target_pdb, seeds=args.seeds,
+        sequences,
+        args.target_seq,
+        output_dir,
+        csv_path,
+        target_pdb=args.target_pdb,
+        seeds=args.seeds,
         skip_indices=skip_indices,
     )
 
@@ -176,6 +180,7 @@ Use Protenix CLI (`protenix predict`) or Python API. CLI is simpler and more rob
 ```python
 import subprocess
 
+
 def run_protenix_prediction(
     input_json: Path,
     output_dir: Path,
@@ -184,10 +189,14 @@ def run_protenix_prediction(
 ) -> Path:
     """Run Protenix prediction via CLI. Returns path to predictions directory."""
     cmd = [
-        sys.executable, "-m", "protenix.predict",
+        sys.executable,
+        "-m",
+        "protenix.predict",
         input_json.as_posix(),
-        "--dump_dir", output_dir.as_posix(),
-        "--seeds", ",".join(str(s) for s in seeds),
+        "--dump_dir",
+        output_dir.as_posix(),
+        "--seeds",
+        ",".join(str(s) for s in seeds),
     ]
     if not use_msa:
         cmd.append("--no_msa")
@@ -262,10 +271,19 @@ def extract_protenix_metrics(
 
 ```python
 CSV_COLUMNS = [
-    "run_id", "idx", "sequence", "target_sequence", "binder_length",
-    "ranking_score", "iptm", "iptm_bt", "iptm_tb",
-    "binder_ptm", "target_ptm",
-    "cif_path", "confidence_json",
+    "run_id",
+    "idx",
+    "sequence",
+    "target_sequence",
+    "binder_length",
+    "ranking_score",
+    "iptm",
+    "iptm_bt",
+    "iptm_tb",
+    "binder_ptm",
+    "target_ptm",
+    "cif_path",
+    "confidence_json",
 ]
 
 
@@ -297,7 +315,7 @@ def refold_batch_protenix(
                 continue
 
             binder_length = len(seq)
-            print(f"\n{'─'*50}")
+            print(f"\n{'─' * 50}")
             print(f"[{idx}/{len(sequences)}] length={binder_length} seq={seq[:40]}...")
 
             sample_name = f"refold{idx}_{run_id}"
@@ -346,7 +364,7 @@ def refold_batch_protenix(
     finally:
         csv_file.close()
 
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"Done. Results: {csv_path}")
 ```
 
@@ -486,15 +504,17 @@ def build_boltz_yaml(
         doc = tmpl_st.make_mmcif_document()
         doc.write_file(str(cif_path))
 
-        yaml_lines.extend([
-            "",
-            "templates:",
-            f"  - cif: {cif_path}",
-            "    chain_id: [B]",
-            "    template_id: [B]",
-            "    force: true",
-            "    threshold: 2.0",
-        ])
+        yaml_lines.extend(
+            [
+                "",
+                "templates:",
+                f"  - cif: {cif_path}",
+                "    chain_id: [B]",
+                "    template_id: [B]",
+                "    force: true",
+                "    threshold: 2.0",
+            ]
+        )
 
     with open(output_path, "w") as f:
         f.write("\n".join(yaml_lines) + "\n")
@@ -516,16 +536,25 @@ def run_boltz_predict(
 ) -> Path:
     """Run boltz predict CLI. Returns predictions output directory."""
     cmd = [
-        sys.executable, "-m", "boltz.main", "predict",
+        sys.executable,
+        "-m",
+        "boltz.main",
+        "predict",
         str(yaml_path),
-        "--out_dir", str(output_dir),
-        "--recycling_steps", str(recycling_steps),
-        "--sampling_steps", str(sampling_steps),
-        "--diffusion_samples", str(diffusion_samples),
+        "--out_dir",
+        str(output_dir),
+        "--recycling_steps",
+        str(recycling_steps),
+        "--sampling_steps",
+        str(sampling_steps),
+        "--diffusion_samples",
+        str(diffusion_samples),
         "--write_full_pae",
-        "--output_format", "pdb",
+        "--output_format",
+        "pdb",
         "--use_msa_server",
-        "--seed", str(seed),
+        "--seed",
+        str(seed),
     ]
     if use_potentials:
         cmd.append("--use_potentials")
@@ -552,11 +581,17 @@ def parse_boltz_outputs(predictions_dir: Path, binder_length: int) -> dict:
     structure_files = list(predictions_dir.rglob("*.pdb")) or list(predictions_dir.rglob("*.cif"))
 
     metrics = {
-        "iptm": float("nan"), "ptm": float("nan"),
-        "bt_ipsae": float("nan"), "tb_ipsae": float("nan"), "ipsae_min": float("nan"),
-        "plddt_binder_mean": float("nan"), "plddt_target_mean": float("nan"),
-        "pae_bt_mean": float("nan"), "pae_tb_mean": float("nan"),
-        "structure_path": "", "pae_file": "",
+        "iptm": float("nan"),
+        "ptm": float("nan"),
+        "bt_ipsae": float("nan"),
+        "tb_ipsae": float("nan"),
+        "ipsae_min": float("nan"),
+        "plddt_binder_mean": float("nan"),
+        "plddt_target_mean": float("nan"),
+        "pae_bt_mean": float("nan"),
+        "pae_tb_mean": float("nan"),
+        "structure_path": "",
+        "pae_file": "",
     }
 
     # Confidence JSON
