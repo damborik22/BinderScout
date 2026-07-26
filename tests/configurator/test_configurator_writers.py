@@ -263,3 +263,96 @@ class TestHotspotsToEpitopeIdx:
         cfg = self._cfg(two_chain_pdb, "A")
         cfg["hotspots"] = ""
         assert conf.hotspots_to_epitope_idx(cfg) is None
+
+
+# ── All seven tools reachable from every UI surface ───────────────────────────
+
+
+_ALL_SEVEN = {
+    "mosaic": True,
+    "boltzgen": True,
+    "bindcraft": True,
+    "pxdesign_local": True,
+    "proteina_complexa": True,
+    "rfd3": True,
+    "protein_hunter": True,
+    "evaluator": True,
+}
+
+
+class TestToolSequenceCoverage:
+    """Regression: the preview tree, the 'To run later' list and run_pipeline() were
+    three independently maintained if-chains. The tree knew 4 of the 7 tools and the
+    other two knew 5, so enabling RFD3 or Protein-Hunter produced a run script the
+    user was never told about and that 'Run the pipeline now?' silently skipped."""
+
+    def test_sequence_covers_every_design_tool(self):
+        keys = {key for key, _script, _label, _subdir in conf.TOOL_SEQUENCE}
+        assert keys == {
+            "mosaic",
+            "boltzgen",
+            "bindcraft",
+            "pxdesign_local",
+            "proteina_complexa",
+            "rfd3",
+            "protein_hunter",
+        }
+
+    def test_enabled_tools_preserves_execution_order(self):
+        got = [key for key, _s, _l, _d in conf.enabled_tools(_ALL_SEVEN)]
+        assert got == [key for key, _s, _l, _d in conf.TOOL_SEQUENCE]
+
+    def test_enabled_tools_filters_disabled(self):
+        only = dict.fromkeys(_ALL_SEVEN, False)
+        only["rfd3"] = True
+        assert [k for k, *_ in conf.enabled_tools(only)] == ["rfd3"]
+
+    def test_preview_tree_lists_every_generated_script(self, base_cfg, capsys):
+        conf.print_tree(base_cfg["run_dir"], _ALL_SEVEN, base_cfg)
+        out = capsys.readouterr().out
+        for _key, script, _label, _subdir in conf.TOOL_SEQUENCE:
+            assert script in out, f"{script} missing from the Step 7 preview tree"
+        assert "run_all.sh" in out
+        assert "run_evaluate.sh" in out
+
+    def test_run_all_covers_every_enabled_tool(self, base_cfg, tmp_path):
+        script = tmp_path / "run_all.sh"
+        conf.write_run_all(script, base_cfg, _ALL_SEVEN)
+        content = script.read_text()
+        for _key, run_script, _label, _subdir in conf.TOOL_SEQUENCE:
+            assert run_script in content, f"{run_script} missing from run_all.sh"
+
+    def test_run_all_does_not_abort_when_mosaic_output_is_absent(self, base_cfg, tmp_path):
+        """The Mosaic block is emitted first; `exit 1` there aborted the whole run
+        before any other tool started."""
+        script = tmp_path / "run_all.sh"
+        conf.write_run_all(script, base_cfg, _ALL_SEVEN)
+        content = script.read_text()
+        mosaic_block = content[content.index("=== Step: Mosaic ===") :]
+        mosaic_block = mosaic_block[: mosaic_block.index("fi")]
+        assert "exit 1" not in mosaic_block
+        assert "SKIPPED" in mosaic_block
+
+
+class TestRunEvaluateRfd3Path:
+    def test_rfd3_extractor_points_at_the_dir_run_rfd3_writes(self, base_cfg, tmp_path):
+        """run_rfd3.sh writes rfd3/sequences.csv; the flag used to point at
+        rfd3/outputs/, an empty directory, so RFD3 designs never reached the report."""
+        script = tmp_path / "run_evaluate.sh"
+        conf.write_run_evaluate(script, base_cfg, _ALL_SEVEN)
+        content = script.read_text()
+        run_dir = base_cfg["run_dir"]
+        assert f"--rfd3 {run_dir}/rfd3 " in content or f'--rfd3 "{run_dir}/rfd3"' in content or "/rfd3 \\" in content
+        assert "rfd3/outputs" not in content
+
+
+class TestSettingsJsonSurvivesMissingNvidiaSmi:
+    def test_gpu_probes_are_guarded(self, base_cfg, tmp_path):
+        """Every generated script runs under `set -euo pipefail`; with pipefail an
+        unguarded nvidia-smi command substitution exits 127 before the design step."""
+        script = tmp_path / "run_rfd3.sh"
+        conf.write_run_rfd3(script, base_cfg)
+        content = script.read_text()
+        for line in content.splitlines():
+            if line.startswith(("GPU_NAME=", "GPU_MEM=")):
+                assert "|| echo" in line, f"unguarded GPU probe: {line}"
