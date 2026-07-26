@@ -74,6 +74,7 @@ JAX AF2 reward model recompiles per unique sequence length on the first sample o
 - **RF3 ligand atom-completion errors during AME evaluation** → RF3 attempts to add missing atoms based on CCD code, causing shape mismatches. Workaround per README:
   ```python
   from atomworks.io import load_any, to_pdb_file
+
   atom_array = load_any("my_design.pdb")[0]
   ligand_mask = atom_array.chain_id == "A"
   atom_array.res_name[ligand_mask] = "L:0"
