@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import datetime as _dt
 import json
 import os
 import re
@@ -2602,6 +2603,118 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
 # ─── Generation ───────────────────────────────────────────────────────────────
 
 
+# ─── Run config persistence (headless replay) ─────────────────────────────────
+
+CONFIG_FILENAME = "config.json"
+
+
+def _jsonable(value):
+    """Path -> str; everything else passes through."""
+    return str(value) if isinstance(value, Path) else value
+
+
+def write_run_config(path: Path, cfg: dict, tools_enabled: dict) -> None:
+    """Persist the exact answers that produced this run directory.
+
+    The wizard's ~80 answers were previously discarded the moment the scripts were
+    written, so reproducing a campaign meant re-typing every one of them and there was
+    no machine-readable record of what a run was configured with. `cfg` already IS the
+    complete description — it just was never saved.
+
+    Together with `--config`, this closes CLAUDE.md's deferred item F2 ("--headless
+    mode for configurator") and gives any future front-end (GUI, cron, another script)
+    something to read and write instead of re-implementing the interview.
+    """
+    payload = {
+        "_comment": (
+            "Written by `bindmaster configure`. Replay with: "
+            "`python configurator/configurator.py --config <this file>`. "
+            "Edit freely — every key maps to one wizard answer."
+        ),
+        "config_version": 1,
+        "generated_at": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "tools_enabled": dict(sorted(tools_enabled.items())),
+        "cfg": {k: _jsonable(v) for k, v in sorted(cfg.items())},
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+
+
+def load_run_config(path: Path) -> tuple[dict, dict]:
+    """Read a config.json back into (cfg, tools_enabled).
+
+    Path-typed keys are restored, and `run_dir` is re-resolved so a config can be
+    copied to another machine (or edited to point at a new run directory) and replayed.
+    """
+    try:
+        payload = json.loads(Path(path).expanduser().read_text())
+    except (OSError, ValueError) as exc:
+        print_fail(f"Could not read config {path}: {exc}")
+        sys.exit(1)
+
+    if not isinstance(payload, dict) or "cfg" not in payload or "tools_enabled" not in payload:
+        print_fail(f"{path} is not a BindMaster run config (expected 'cfg' and 'tools_enabled' keys).")
+        sys.exit(1)
+
+    version = payload.get("config_version")
+    if version != 1:
+        print_warn(f"config_version {version!r} is not 1 — attempting to load anyway.")
+
+    cfg = dict(payload["cfg"])
+    tools_enabled = dict(payload["tools_enabled"])
+
+    for key in ("run_dir", "target_pdb", "target_pdb_src"):
+        if cfg.get(key):
+            cfg[key] = Path(str(cfg[key])).expanduser()
+
+    missing = [k for k in ("name", "run_dir", "target_pdb_src") if not cfg.get(k)]
+    if missing:
+        print_fail(f"{path} is missing required keys: {', '.join(missing)}")
+        sys.exit(1)
+
+    if not Path(cfg["target_pdb_src"]).exists():
+        print_fail(f"Target structure not found: {cfg['target_pdb_src']}")
+        print_warn("  Edit target_pdb_src in the config, or copy the structure to that path.")
+        sys.exit(1)
+
+    return cfg, tools_enabled
+
+
+def cmd_from_config(config_path: str, run_now: bool) -> None:
+    """Non-interactive path: generate a run directory straight from a saved config."""
+    cfg, tools_enabled = load_run_config(Path(config_path))
+    run_dir = Path(cfg["run_dir"])
+
+    print_step(f"Generating run folder from {config_path}")
+    print(f"  Run folder: {run_dir}")
+    enabled = [label for _k, _s, label, _d in enabled_tools(tools_enabled)]
+    print(f"  Tools:      {', '.join(enabled) if enabled else '(none)'}")
+    if tools_enabled.get("evaluator"):
+        print("  Evaluator:  enabled")
+
+    if not enabled and not tools_enabled.get("evaluator"):
+        print_fail("No tools enabled in this config — nothing to generate.")
+        sys.exit(1)
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    generate(cfg, tools_enabled)
+    print_ok(f"Run folder ready: {run_dir}")
+
+    if run_now:
+        run_pipeline(cfg, tools_enabled)
+    else:
+        print()
+        print_warn("To run:")
+        step = 1
+        for _key, script, _label, _subdir in enabled_tools(tools_enabled):
+            print(f"  {step}. bash {run_dir}/{script}")
+            step += 1
+        if tools_enabled.get("evaluator"):
+            print(f"  {step}. bash {run_dir}/run_evaluate.sh")
+        if len(enabled) > 1:
+            print(f"  Or the whole pipeline:  bash {run_dir}/run_all.sh")
+        print()
+
+
 def generate(cfg: dict, tools_enabled: dict):
     run_dir: Path = cfg["run_dir"]
 
@@ -2677,6 +2790,10 @@ def generate(cfg: dict, tools_enabled: dict):
         write_run_evaluate(run_dir / "run_evaluate.sh", cfg, tools_enabled)
 
     write_run_all(run_dir / "run_all.sh", cfg, tools_enabled)
+
+    # Save the answers that produced this directory, so the run is replayable with
+    # `configurator.py --config` and machine-readable without re-running the wizard.
+    write_run_config(run_dir / CONFIG_FILENAME, cfg, tools_enabled)
 
 
 # ─── Pipeline runner ──────────────────────────────────────────────────────────
@@ -3570,12 +3687,28 @@ def main():
         action="store_true",
         help="Show all runs and their completion state",
     )
+    parser.add_argument(
+        "--config",
+        metavar="JSON",
+        help=(
+            "Generate a run folder non-interactively from a saved config, skipping all "
+            f"prompts. Every wizard run writes one to runs/<name>/{CONFIG_FILENAME} — copy "
+            "it, edit it, and replay. Closes the headless gap for cron / scripts / a GUI."
+        ),
+    )
+    parser.add_argument(
+        "--run",
+        action="store_true",
+        help="With --config: run the pipeline immediately after generating the scripts.",
+    )
     args = parser.parse_args()
 
     if args.archive:
         cmd_archive(args.archive)
     elif args.status:
         cmd_status()
+    elif args.config:
+        cmd_from_config(args.config, run_now=args.run)
     else:
         wizard()
 

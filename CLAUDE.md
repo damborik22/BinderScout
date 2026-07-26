@@ -114,7 +114,8 @@ BindMaster/
 ├── conda/                     ← LOCAL Miniforge3 (standalone mode, gitignored)
 ├── bin/                       ← LOCAL shortcuts (standalone mode, gitignored)
 ├── configurator/
-│   └── configurator.py        ← interactive 5-step setup wizard (~1700 lines)
+│   └── configurator.py        ← setup wizard (steps 1–7, ~80 prompts, 3.7k lines)
+│                                 + `--config JSON` headless replay
 ├── evaluator_legacy/
 │   └── evaluator.py           ← LEGACY single-file evaluator (~955 lines). Retired:
 │                                 `bindmaster evaluate` now passes through to binder-compare.
@@ -361,7 +362,6 @@ the parameter sweep.
 - **Standalone mode** (Part H, v0.7.0): Installer auto-detects whether system conda is writable. If not, downloads Miniforge3 into `BindMaster/conda/` and creates all environments locally. Shortcuts go to `BindMaster/bin/` instead of `~/.local/bin/`. `--standalone` forces this; `--system-conda` opts out. All generated run scripts and Evaluator shell scripts search local conda first.
 - **Mosaic is_top filter**: Both `MosaicExtractor` and legacy `_parse_mosaic()` default to extracting only `is_top=1` designs. `--all-mosaic-designs` flag exposed on `binder-compare extract`, `binder-compare run`, and `bindmaster evaluate`. The `REPLACE_ME` target_sequence placeholder is guarded in the legacy evaluator's CSV fallback path.
 - **Deferred items:**
-  - F2: `--headless` mode for configurator (accept JSON config, skip prompts)
   - F6: Multi-chain binder support in BoltzGen YAML generation
 - **PXDesign** full pipeline integrated: diffusion → MPNN → AF2 complex/monomer eval → summary CSV. Works on both x86_64 and aarch64 (with automated post-install patches).
 - **Proteina-Complexa** integrated: NVIDIA flow matching + inference-time optimization. Uses uv venv (separate from Mosaic). Shares AF2 weights with BindCraft. Supports single-pass, best-of-n, beam-search, and MCTS search algorithms.
@@ -452,7 +452,9 @@ bindmaster install --system-conda --tool all  # use existing system conda
 ### Configure
 
 ```bash
-bindmaster configure             # interactive 5-step wizard
+bindmaster configure             # interactive wizard
+bindmaster configure --config runs/<name>/config.json   # headless replay, no prompts
+bindmaster configure --config run.json --run            # …and start the pipeline
 bindmaster configure --status    # show all runs and completion state
 bindmaster configure --archive <run>  # tar.gz a run directory
 ```
