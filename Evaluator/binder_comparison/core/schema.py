@@ -52,7 +52,7 @@ class NativeMetrics:
     # ---- BoltzGen (Boltz-1 internal eval) ----
     # `bg_design_ipsae_min` is BG's own ipSAE; ρ vs Boltz-2 refold ipSAE = +0.84.
     # `bg_final_rank` is a composite (diversity+pTM+hbond+RMSD); ρ vs refold ipSAE = -0.15.
-    # See INVESTIGATION_RANKING_DISCREPANCY.md §5.
+    # See docs/INVESTIGATION_RANKING_DISCREPANCY.md §5.
     bg_design_ipsae_min: float | None = None
     bg_final_rank: int | None = None
 

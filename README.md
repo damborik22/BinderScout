@@ -391,7 +391,7 @@ bash install/install.sh --uninstall --tool all
 BindMaster works fully standalone — no system conda, no admin, no writes outside the project directory:
 
 ```bash
-git clone https://github.com/damborik22/BindMaster.git
+git clone https://github.com/damborik22/BinderScout.git
 cd BindMaster
 python3 bindmaster.py install --tool all --yes
 

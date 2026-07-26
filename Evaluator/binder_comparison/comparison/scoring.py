@@ -390,7 +390,7 @@ def add_iptm_from_pae_files(
 
 
 # Per-engine iPSAE thresholds — calibrated for the DunbrackLab 2025 formula at 10 Å cutoff.
-# AF2 caps low on short targets (per INVESTIGATION_RANKING_DISCREPANCY.md §6); kept informational.
+# AF2 caps low on short targets (per docs/INVESTIGATION_RANKING_DISCREPANCY.md §6); kept informational.
 DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {
     "boltz": IPSAE_PASS_THRESHOLD,  # 0.61
     "af3": IPSAE_PASS_THRESHOLD,  # 0.61 — DunbrackLab cutoff was tuned for AF3
@@ -620,7 +620,7 @@ def compute_agreement(
     Uses per-engine thresholds (defaulting to *threshold* for backward compat
     when `engine_thresholds` not supplied). AF2 is **excluded** from the count
     because its DunbrackLab distribution is mis-calibrated on short targets
-    (see INVESTIGATION_RANKING_DISCREPANCY.md §6).
+    (see docs/INVESTIGATION_RANKING_DISCREPANCY.md §6).
 
     Adds column 'agreement_count' (0–3: Boltz-2, AF3, ESMFold2 over their thresholds).
     """
