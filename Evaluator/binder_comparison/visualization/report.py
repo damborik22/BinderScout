@@ -17,6 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..comparison.candidates import _NATIVE_SEQ_COLS, collapse_native_df, order_tools
+from ..comparison.scoring import _ENGINE_IPSAE_COLS
 from .plots import (
     METRIC_META,
     fig_to_base64,
@@ -2602,8 +2603,9 @@ def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tupl
         "quality_tier",
         "agreement_count",
         "ipsae_min",
-        "boltz_pae_ipsae_min",
-        "af3_pae_ipsae_min",
+        _ENGINE_IPSAE_COLS["boltz"],
+        _ENGINE_IPSAE_COLS["af3"],
+        _ENGINE_IPSAE_COLS["esmfold2"],
         "iptm",
         "plddt_binder_mean",
     ]
@@ -2631,10 +2633,13 @@ def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tupl
 def _engine_threshold_legend_html(df: pd.DataFrame) -> str:
     """One-line legend showing per-engine thresholds in effect for this report."""
     rows = []
+    # Columns come from the canonical map: boltz uses boltz_pae_*, the rest use
+    # <engine>_ipsae_min. The old hardcoded af3_pae_ipsae_min was never written by
+    # anything, so the AF3 row never rendered. AF2 is gone (Part I).
     for _engine, col, label in (
-        ("boltz", "boltz_pae_ipsae_min", "Boltz-2 ≥ 0.61"),
-        ("af3", "af3_pae_ipsae_min", "AF3 ≥ 0.61"),
-        ("af2", "af2_pae_ipsae_min", "AF2 ≥ 0.30 <i>(informational; mis-calibrated on short targets)</i>"),
+        ("boltz", _ENGINE_IPSAE_COLS["boltz"], "Boltz-2 ≥ 0.61"),
+        ("af3", _ENGINE_IPSAE_COLS["af3"], "AF3 ≥ 0.61"),
+        ("esmfold2", _ENGINE_IPSAE_COLS["esmfold2"], "ESMFold2 ≥ 0.61"),
     ):
         if col in df.columns:
             rows.append(label)

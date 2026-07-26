@@ -18,7 +18,9 @@ Key findings implemented here:
 
 from __future__ import annotations
 
+import math
 import re
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +32,14 @@ IPSAE_HIGH_THRESHOLD = 0.80  # High-confidence binder
 IPSAE_MIN_THRESHOLD = 0.40  # Below this → very unlikely binder
 SHAPE_COMP_PREFILTER = 0.62  # Pre-filter from meta-analysis
 RMSD_BINDER_PREFILTER = 3.73  # Å, pre-filter from meta-analysis
+
+# ---- Cross-engine support gate for the two-stage screen ----
+# The pipeline runs exactly three independent refold engines (Boltz-2, AF3,
+# ESMFold2), so the default demands agreement from all of them. Two is the floor:
+# a "cross-engine" consensus built from one engine is just that engine's opinion,
+# and for Mosaic/Protein-Hunter designs that engine is the one that designed them.
+MIN_ENGINES_DEFAULT = 3
+MIN_ENGINES_FLOOR = 2
 
 # PAE cutoff for Dunbrack ipSAE formula (Å).
 # Uniform 10 Å for all engines so that ipSAE scores are directly comparable
@@ -782,11 +792,27 @@ def rank_by_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     return result.reset_index(drop=True)
 
 
-def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5, screen_metric: str = "max") -> pd.DataFrame:
+def rank_by_two_stage(
+    df: pd.DataFrame,
+    screen_frac: float = 0.5,
+    screen_metric: str = "max",
+    min_engines: int = MIN_ENGINES_DEFAULT,
+) -> pd.DataFrame:
     """Two-stage ranking — the EVALUATOR benchmark recommendation for wet-lab selection.
 
+    Stage 0 — cross-engine support gate. A design scored by a single engine has
+    ``consensus_iptm_mean`` equal to that one engine's value (``DataFrame.mean``
+    skips NaN), so it would compete against 3-engine means on an incomparable
+    scale. Worse, the single engine is often the one biased in the design's favour
+    — Mosaic *is* Boltz-2 gradient hallucination, so a Mosaic design that only
+    Boltz-2 refolded could top the list on the strength of its own designer. Only
+    designs with ``consensus_iptm_n >= min_engines`` are eligible for the screen.
+    Default ``MIN_ENGINES_DEFAULT`` (all three of Boltz-2 / AF3 / ESMFold2);
+    ``MIN_ENGINES_FLOOR`` is the lowest meaningful value, since "cross-engine"
+    requires at least two.
+
     Stage 1 — screen by the ``screen_metric`` consensus iptm: keep the top
-    ``screen_frac`` as the binder-likely pool (the recall step).
+    ``screen_frac`` of the eligible pool (the recall step).
     ``screen_metric="max"`` (default) screens by ``consensus_iptm`` (max over
     engines) — the lenient recall step: keep a design if *any* engine rates it
     highly, so a genuine binder is not dropped just because one engine's per-target
@@ -805,10 +831,14 @@ def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5, screen_metric:
     Ranks ALL rows (the screen is a flag + ordering, nothing is dropped):
     ``passes_max_screen`` is the primary sort key, so all screen survivors sort
     above all non-survivors regardless of their mean; within each group rows are
-    ordered by ``consensus_iptm_mean``. The head of the list is therefore the
-    genuine two-stage result. Adds:
-        passes_max_screen — bool, in the top ``screen_frac`` by the screen metric
+    ordered by ``consensus_iptm_mean``, then by ``consensus_iptm_n`` so a design
+    backed by more engines outranks an equal mean backed by fewer. The head of the
+    list is therefore the genuine two-stage result. Adds:
+        passes_max_screen — bool, eligible AND in the top ``screen_frac``
         two_stage_rank    — 1 = best
+
+    Raises:
+        ValueError: if ``min_engines`` is below ``MIN_ENGINES_FLOOR``.
 
     NOTE: this ranks binder-vs-non-binder *confidence*, NOT affinity among binders
     (every confidence metric inverts against Kd — strongest binders score lowest).
@@ -820,16 +850,37 @@ def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5, screen_metric:
     if "consensus_iptm" not in result.columns or "consensus_iptm_mean" not in result.columns:
         result = compute_consensus_iptm(result)
 
+    if min_engines < MIN_ENGINES_FLOOR:
+        raise ValueError(
+            f"min_engines={min_engines} is below the floor of {MIN_ENGINES_FLOOR}: "
+            f"a cross-engine consensus needs at least {MIN_ENGINES_FLOOR} engines."
+        )
+
     screen_col = "consensus_iptm_mean" if screen_metric == "mean" else "consensus_iptm"
     cons = pd.to_numeric(result[screen_col], errors="coerce")
-    eligible = cons.notna()
+    n_eng = pd.to_numeric(result.get("consensus_iptm_n", 0), errors="coerce").fillna(0)
+    eligible = cons.notna() & (n_eng >= min_engines)
     n_eligible = int(eligible.sum())
-    n_keep = round(n_eligible * screen_frac)
+
+    # Tell the operator when the gate — not the data — emptied the screen, and how
+    # to proceed. Silently returning an all-False passes_max_screen looks like
+    # "no good designs" when it actually means "not enough engines were run".
+    n_available = int(n_eng.max()) if len(n_eng) else 0
+    if n_eligible == 0 and cons.notna().any():
+        warnings.warn(
+            f"[two-stage] no design was refolded by {min_engines}+ engines "
+            f"(best coverage in this pool: {n_available}), so nothing passes the Stage-1 screen. "
+            f"Run the missing engine(s), or lower the gate with --min-engines "
+            f"{max(MIN_ENGINES_FLOOR, n_available)}.",
+            stacklevel=2,
+        )
+
+    n_keep = math.ceil(n_eligible * screen_frac)
     thr = cons[eligible].nlargest(n_keep).min() if n_keep else float("inf")
     result["passes_max_screen"] = eligible & (cons >= thr)
 
-    sort_keys = ["passes_max_screen", "consensus_iptm_mean", "consensus_iptm"]
-    ascending = [False, False, False]
+    sort_keys = ["passes_max_screen", "consensus_iptm_mean", "consensus_iptm_n", "consensus_iptm"]
+    ascending = [False, False, False, False]
     for col in ("plddt_binder_mean", "boltz_plddt_binder_mean"):
         if col in result.columns:
             sort_keys.append(col)

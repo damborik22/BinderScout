@@ -119,4 +119,21 @@ def _attach_fasta_metadata(df: pd.DataFrame, fasta_path: str | Path) -> pd.DataF
         return df
 
     meta_df = pd.DataFrame(meta_rows)
-    return pd.merge(df, meta_df, on="sequence", how="left")
+
+    # One metadata row per sequence. With `extract --keep-duplicates` the FASTA can
+    # carry the same sequence under several binder_ids; a left join against a
+    # duplicated right key multiplies the metrics rows, so one design would occupy
+    # several Top-30 slots and inflate the two-stage screen's eligible count.
+    # cli/autosize.py:160 already guards its equivalent merge the same way.
+    n_before = len(meta_df)
+    meta_df = meta_df.drop_duplicates("sequence", keep="first")
+    n_dupes = n_before - len(meta_df)
+    if n_dupes:
+        warnings.warn(
+            f"[merger] {n_dupes} duplicate sequence(s) in {fasta_path} — keeping the first "
+            f"binder_id for each. Re-run 'extract' without --keep-duplicates to avoid this.",
+            stacklevel=2,
+        )
+    # validate="m:1" turns any future regression here into an error instead of silent
+    # row inflation.
+    return pd.merge(df, meta_df, on="sequence", how="left", validate="m:1")
