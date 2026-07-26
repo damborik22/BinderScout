@@ -519,6 +519,9 @@ def run(args: argparse.Namespace) -> None:
         # that actually ran. A hardcoded copy silently survived the mean->max revert.
         screen_metric=screen_metric,
         min_engines=min_engines,
+        # Same dict the scoring used, so the printed cutoffs are the applied ones.
+        # The legends previously retyped "0.61" regardless of --threshold-*.
+        engine_thresholds=engine_thresholds or None,
         tool_overrides=tool_overrides or None,
         provenance=provenance,
         lightweight=bool(getattr(args, "lightweight", False)),
