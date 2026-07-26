@@ -3338,7 +3338,7 @@ def wizard():
         )
 
     if use_proteina_complexa:
-        print_step("Step 6f — Proteina-Complexa settings")
+        print_step("Step 6e — Proteina-Complexa settings")
         _, pc_algo = ask_choice(
             "  Search algorithm",
             [
@@ -3383,7 +3383,7 @@ def wizard():
         )
 
     if use_rfd3:
-        print_step("Step 6g — RFD3 settings")
+        print_step("Step 6f — RFD3 settings")
         cfg["rfd3_batch_size"] = int(
             ask(
                 "  Diffusion batch size (10 fits 24 GB; drop to 4 for longer binders)",
@@ -3410,7 +3410,7 @@ def wizard():
         )
 
     if use_protein_hunter:
-        print_step("Step 6h — Protein-Hunter settings")
+        print_step("Step 6g — Protein-Hunter settings")
         cfg["protein_hunter_num_cycles"] = int(
             ask(
                 "  Boltz-2 hallucination cycles per design (7 = CALCA-validated)",
