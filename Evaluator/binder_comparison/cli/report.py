@@ -515,6 +515,10 @@ def run(args: argparse.Namespace) -> None:
         primary_engine=primary_engine,
         top_per_tool=args.top_per_tool,
         rank_method=rank_by,
+        # Passed through so the report's methodology paragraph describes the ranking
+        # that actually ran. A hardcoded copy silently survived the mean->max revert.
+        screen_metric=screen_metric,
+        min_engines=min_engines,
         tool_overrides=tool_overrides or None,
         provenance=provenance,
         lightweight=bool(getattr(args, "lightweight", False)),

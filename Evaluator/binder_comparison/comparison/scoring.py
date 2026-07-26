@@ -1041,9 +1041,28 @@ def annotate_wetlab_recommended(
 
     if "agreement_count" in out.columns:
         agreement = pd.to_numeric(out["agreement_count"], errors="coerce")
-        for i, val in enumerate(agreement):
-            if pd.notna(val) and val < agreement_min:
-                reasons[i].append(f"agreement {int(val)} < {agreement_min}")
+        # agreement_count cannot exceed the number of engines that actually ran, and a
+        # single-engine run is a supported, auto-detected configuration (evaluate.sh
+        # skips engines whose conda env is absent). Applying the >= 2 rule there failed
+        # EVERY design for a reason the operator cannot act on by improving a design,
+        # which makes the whole column uninformative. Treat it as unknown instead.
+        # Treated as "unknown", consistent with this function's NaN policy: unknowns do
+        # not block. Warn once so the operator knows the criterion was not applied.
+        n_engines = 0
+        if "consensus_iptm_n" in out.columns:
+            counts = pd.to_numeric(out["consensus_iptm_n"], errors="coerce")
+            n_engines = int(counts.max()) if counts.notna().any() else 0
+        if n_engines and n_engines < agreement_min:
+            warnings.warn(
+                f"[wetlab] only {n_engines} refold engine(s) in this pool, so cross-engine "
+                f"agreement (>= {agreement_min}) could not be assessed and was NOT applied to "
+                f"wetlab_recommended. Run a second engine before trusting this column.",
+                stacklevel=2,
+            )
+        else:
+            for i, val in enumerate(agreement):
+                if pd.notna(val) and val < agreement_min:
+                    reasons[i].append(f"agreement {int(val)} < {agreement_min}")
 
     if "plddt_binder_min" in out.columns:
         plddt_min = pd.to_numeric(out["plddt_binder_min"], errors="coerce")
