@@ -23,5 +23,5 @@ SOFTWARE.
 ---
 
 NOTE: The MIT grant above covers BindMaster's own source. This repository also
-redistributes third-party assets under their own terms — including GPLv3
-binaries. See THIRD_PARTY_NOTICES.md.
+redistributes third-party assets under their own terms. See
+THIRD_PARTY_NOTICES.md.

@@ -42,7 +42,7 @@ The evaluator (`bindmaster evaluate` / `binder-compare`) runs on top of the desi
 | **Boltz-2** | Primary refold engine; ranking reference | `Mosaic/.venv` (rides Mosaic install) | x86_64 + aarch64 | default (with Mosaic) |
 | **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.10) | x86_64 + aarch64 | default (in `--tool all`) |
 | **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion on big-VRAM hosts | conda env `binder-eval-af3` (Python 3.10, gated weights) | x86_64 + aarch64; needs ≥100 GB GPU memory | `--tool af3` (gated weights) |
-| **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64 (aarch64 source-builds scikit-learn 0.20.4 + USEARCH v12 and uses the `--no_tmhmm` model — see [docs/PLAN_soluprot_integration.md](docs/PLAN_soluprot_integration.md)) | `--tool soluprot` |
+| **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model — see [docs/PLAN_soluprot_integration.md](docs/PLAN_soluprot_integration.md) | `--tool soluprot` |
 
 ### Architecture
 
@@ -618,11 +618,11 @@ docker run --rm -it bindmaster-test bash
 installers, `binder-comparison`).
 
 It does **not** cover the third-party assets redistributed in this tree: the
-NGL viewer, SoluProt and its bundled USEARCH binaries, and the ARM64
-`DAlphaBall.gcc` / `dssp` builds. Those carry their own terms — see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), which also flags that the
-vendored USEARCH binaries are **GPLv3**, and what that does and does not mean
-for redistributing this repository.
+NGL viewer, the SoluProt distribution, and the ARM64 `DAlphaBall.gcc` / `dssp`
+builds. Those carry their own terms — see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The GPLv3 USEARCH binaries
+that used to ship here have been removed; both installers now build USEARCH v12
+from source as part of `--tool soluprot`.
 
 The design tools and refolding engines are fetched by the installer rather than
 redistributed here; their licences travel with them.
