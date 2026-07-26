@@ -107,7 +107,7 @@ flowchart TB
     CLI["bindmaster\n(unified CLI, stdlib only)"]:::cli
 
     CLI -->|install| InstallSh["install.sh\n(x86) / install_aarch.sh\n(aarch64 / DGX Spark)"]
-    CLI -->|configure| Configurator["configurator/\nconfigurator.py\n(5-step wizard)"]
+    CLI -->|configure| Configurator["configurator/\nconfigurator.py\n(interactive wizard)"]
     CLI -->|evaluate| EvaluateSh["Evaluator/\nevaluate.sh\n(orchestrator)"]
 
     subgraph GenEnvs["Design-tool environments (one per tool)"]
@@ -153,7 +153,7 @@ BindMaster/
 │   ├── install.sh              ← x86_64 installer
 │   └── install_aarch.sh        ← aarch64 / DGX Spark installer
 ├── configurator/
-│   └── configurator.py         ← interactive 5-step setup wizard
+│   └── configurator.py         ← interactive setup wizard (steps 1–7, ~80 prompts)
 ├── evaluator_legacy/
 │   └── evaluator.py            ← retired single-file evaluator (evaluate now → binder-compare)
 ├── Evaluator/                  ← bundled full evaluation pipeline package
@@ -182,8 +182,8 @@ Tool directories (`BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-C
 
 ```bash
 # 1. Clone (x86_64)
-git clone https://github.com/damborik22/BindMaster.git ~/BindMaster
-cd ~/BindMaster
+git clone https://github.com/damborik22/BinderScout.git ~/BinderScout
+cd ~/BinderScout
 
 # 2. Install tools
 bindmaster install             # interactive menu
@@ -353,6 +353,19 @@ bash install/install.sh --cuda 12.1
 bash install/install.sh --uninstall --tool all
 ```
 
+> ⚠️ **`--yes` is destructive on re-run.** It auto-answers *yes* to the
+> "Remove and reclone?" / "Remove existing env?" prompts, whose displayed default is
+> `[y/N]` (no). Re-running `--tool all --yes` on a **working** machine therefore
+> re-clones tool repos and re-creates conda envs — including deleting
+> `BindCraft/params/*.npz` (~4 GB of AF2 weights that Proteina-Complexa symlinks
+> against). Use `--yes` for a first install or in a fresh container; omit it when
+> repairing an existing install.
+>
+> There is also **no preflight check** for free disk (~60 GB needed for `--tool all`),
+> GPU/driver, or network reachability, and the PXDesign step is **not resumable** —
+> a re-run after a mid-install network failure aborts at `conda create` rather than
+> continuing. See [the audit](docs/repo_analysis_2026-07-26.html) (F11, F18, F26).
+
 ### Server / HPC installation (no admin required)
 
 BindMaster works fully standalone — no system conda, no admin, no writes outside the project directory:
@@ -382,10 +395,10 @@ project directory. To remove everything: `rm -rf BindMaster/`.
 
 ```bash
 # x86_64
-git clone https://github.com/damborik22/BindMaster.git
+git clone https://github.com/damborik22/BinderScout.git
 
 # aarch64 / DGX Spark
-git clone -b aarch64 https://github.com/damborik22/BindMaster.git
+git clone -b aarch64 https://github.com/damborik22/BinderScout.git
 ```
 
 Both branches: `bindmaster install` or `bash install/install.sh`.
@@ -396,9 +409,26 @@ Both branches: `bindmaster install` or `bash install/install.sh`.
 - **BoltzGen**: PyTorch installed from PyPI without `+cuXXX` suffix (aarch64 wheels already include CUDA).
 - **Mosaic**: `esmj` excluded (no aarch64 wheel). `torchtext` may also fail (no Linux aarch64 wheel).
 - **PXDesign**: Full pipeline works on aarch64 / Blackwell. The installer applies automatic patches for CUDA arch compatibility (sm_120), JSON serialization (`NumpyEncoder`), and dataloader (`num_workers`) config.
-- **Proteina-Complexa**: May need patches — PyTorch Geometric and `torchtext` may lack aarch64 wheels. Core deps (PyTorch 2.7, JAX 0.4.29) are fine. Same approach as Mosaic: mark missing packages with `platform_machine != 'aarch64'` in `pyproject.toml`.
-- **Protein-Hunter**: **Not supported on aarch64** — PyRosetta has no aarch64 wheels. The installer prints a warning and skips it.
-- **RFD3**: Fully supported on aarch64 — `rc-foundry` is pip-installed, no DGL dependency.
+- **Proteina-Complexa**: May need patches — PyTorch Geometric and `torchtext` may lack aarch64 wheels. Core deps (PyTorch 2.7, JAX 0.4.29) are fine. Same approach as Mosaic: mark missing packages with `platform_machine != 'aarch64'` in `pyproject.toml`. **Not yet wired into `install_aarch.sh`** — see the installer gap below.
+- **Protein-Hunter**: **Not supported on aarch64** — PyRosetta has no aarch64 wheels. `install_aarch.sh` rejects the value (currently with a generic "Invalid `--tool` value" rather than the PyRosetta reason).
+- **RFD3**: Technically compatible with aarch64 — `rc-foundry` pip-installs cleanly, no DGL dependency. **But `install_aarch.sh` does not accept `--tool rfd3`** — see the installer gap below.
+
+> ⚠️ **aarch64 installer gap.** `install/install_aarch.sh` currently accepts only
+> `all`, `bindcraft`, `boltzgen`, `mosaic`, `evaluator`, `pxdesign`, `af3`,
+> `esmfold2`, `soluprot`. Three consequences on a DGX Spark:
+>
+> 1. `--tool rfd3` and `--tool proteina-complexa` exit 1 with *Invalid `--tool` value*,
+>    despite RFD3 being documented as aarch64-supported.
+> 2. `--tool all` installs only BindCraft, BoltzGen, Mosaic, Evaluator and PXDesign —
+>    it does **not** include ESMFold2, the default refold engine. Install it explicitly
+>    with `--tool esmfold2`.
+> 3. `bindmaster install` always execs `install/install.sh` (the **x86_64** script) —
+>    there is no architecture dispatch. On aarch64, invoke
+>    `bash install/install_aarch.sh …` directly.
+>
+> The aarch64 `--tool esmfold2` path also installs a different dependency set than the
+> x86 one and may produce an env that cannot refold. Details and fixes in
+> [the audit](docs/repo_analysis_2026-07-26.html) (F12–F14, F16).
 - **AF3 refolding**: Live on aarch64 / DGX Spark via the `binder-eval-af3` conda env and `binder-compare refold-af3`. Not aarch64-exclusive — AF3 runs anywhere with ≥100 GB GPU memory (an H200, GH200, etc. should work too); DGX Spark is just our primary host because Spark is where the unified memory headroom lives.
 
 ---
@@ -470,6 +500,80 @@ conda env list                    # shows conda-managed envs
 ls BindMaster/bin/                # shows shortcuts
 ls BindMaster/conda/envs/         # shows local envs (standalone mode)
 ```
+
+---
+
+## Known issues
+
+A full read-only audit of the repository — purpose, data flow, dependencies, defects,
+non-LLM operability, and GUI options — is at
+**[docs/repo_analysis_2026-07-26.html](docs/repo_analysis_2026-07-26.html)**
+(31 findings with file:line and a suggested fix order).
+
+The items below are the ones you are most likely to hit while following this README.
+Finding IDs refer to that document.
+
+### Following the quick start
+
+| Symptom | Cause | Workaround |
+|---|---|---|
+| `run_all.sh` prints *"Mosaic requires interactive input"* and exits 1 before any tool runs | The Mosaic block is emitted first and hard-exits unless `mosaic/designs.csv` already exists (F8) | Run `bash runs/<name>/run_mosaic.sh` first, then `run_all.sh`; or disable Mosaic in the wizard |
+| Answering *y* to "Run the pipeline now?" appears to do nothing for some tools | `run_pipeline()` only dispatches BindCraft, PXDesign, Proteina-Complexa and the Evaluator — BoltzGen, Mosaic, RFD3 and Protein-Hunter have no branch (F9) | Skip the prompt; run `bash runs/<name>/run_all.sh` (with the Mosaic caveat above) |
+| The `evaluate` shortcut dies with `Unknown argument: --target-pdb` | `Evaluator/run.sh` passes a flag `evaluate.sh` does not accept (F10) | Call `bash Evaluator/evaluate.sh --sequences … --target-seq "<SEQ>" --output …` directly, or use `runs/<name>/run_evaluate.sh` |
+| A run script dies immediately with `nvidia-smi: command not found` | The `settings.json` provenance block runs `nvidia-smi` unguarded under `set -euo pipefail` (F15) | Run on a node where `nvidia-smi` is on `PATH`, and check `--gpu-id` is a real device index |
+| RFD3 finished but contributes no designs to the report | `run_evaluate.sh` points `--rfd3` at `rfd3/outputs`, while `run_rfd3.sh` writes `rfd3/sequences.csv` (F3) | Pass `--rfd3 runs/<name>/rfd3` to `binder-compare extract` yourself |
+| `binder-compare run --rfd3 …` is rejected by argparse | `run` accepts only `--bindcraft`, `--boltzgen`, `--mosaic`, `--pxdesign` — RFD3, Protein-Hunter and Proteina-Complexa are `extract`-only (F38) | Use `binder-compare extract` (which accepts all seven) followed by the refold + `report` steps, or `runs/<name>/run_evaluate.sh` |
+| A mistyped tool directory produces a report that looks complete | `extract` treats a per-tool yield of 0 as non-fatal and exits 0; only an all-empty result fails (F40) | Check the `→ N sequences` line for every tool before starting the refold |
+| `binder-compare refold-af2` → `invalid choice` | `Evaluator/README.md` and `docs/pipeline_reference.md` still document the `refold-af2` subcommand and `binder-eval-af2` env, both removed in Part I (F41) | AF2 refolding no longer exists; use Boltz-2 / AF3 / ESMFold2 |
+
+### Correctness caveats worth knowing
+
+- **mmCIF targets ignore your chain answer (F1).** For a `.cif` / `.mmcif` input,
+  `extract_sequence_from_cif` reads `_entity_poly` first, which is chain-agnostic and
+  picks the **longest** polymer entity — so on a multi-chain structure the target
+  sequence may not be the chain you selected. Prefer `.pdb` input, or verify
+  `runs/<name>/*/settings.json` shows the target length you expect before committing GPU time.
+- **Mosaic hotspots resolve against chain A (F2).** The epitope-index helper reads
+  `cfg["target_chain"]` / `cfg["chain"]`, neither of which the wizard sets, so it always
+  falls back to `"A"`.
+- **Protenix refolding is opt-out, not opt-in (F4).** `evaluate.sh` runs it whenever the
+  `bindmaster_pxdesign` env exists, and `protenix_pae_iptm` then enters
+  `consensus_iptm` / `consensus_iptm_mean`. This README's engine table is correct; the
+  `CLAUDE.md` claim that it "runs only when explicitly enabled" is not. Pass
+  `--skip-protenix` for a Boltz-2 + AF3 + ESMFold2 ranking.
+- **Designs refolded by only one engine are ranked against 3-engine designs (F5).**
+  `consensus_iptm_mean` skips missing engines, and the two-stage sort does not gate on
+  `consensus_iptm_n`. Check that column before trusting a top-ranked design.
+- **The report's 3D viewer needs internet (F20).** `report.html` loads NGL from
+  `unpkg.com`, so the structure viewer is blank on an air-gapped node even though
+  `Evaluator/tools/ngl/` is vendored.
+- **`report.html` describes the wrong ranking method (F32).** Its methodology block still
+  says Stage 1 screens on `consensus_iptm_mean` and that mean "was selected as default
+  over max". Commit `5769064` reverted the default to **max** but did not update
+  `visualization/report.py`. The ranking the code performs is max-screen → mean-rank, as
+  documented in this README and `CLAUDE.md`; ignore the report's own methodology text
+  until it is regenerated from `--screen-metric`.
+- **AF3's per-engine ipSAE is missing from `top30_candidates.csv` (F33).** The shortlist
+  reads `af3_pae_ipsae_min` / `protenix_pae_ipsae_min`, but the writer emits
+  `af3_ipsae_min` / `protenix_ipsae_min`, so those columns are silently absent. Read them
+  from `metrics.csv` under the correct names.
+- **`wetlab_recommended` is always `False` on a single-engine install (F34).** The gate
+  requires `agreement_count >= 2`, which is unreachable when only Boltz-2 is present.
+
+### Running without an LLM
+
+The executable pipeline has **no runtime LLM dependency** — the `.claude/skills/`
+packages are an operating manual, not a requirement. Two gaps affect scripted use:
+
+- **The configurator has no headless mode.** Its entire flag surface is `--status` and
+  `--archive`; there is no `--config` / `--headless`, and the wizard's config dict is
+  never serialised, so a run directory cannot be produced non-interactively or replayed
+  (CLAUDE.md deferred item F2).
+- **15 of the 22 `binder-compare` subcommands have no human-facing documentation.**
+  `analyze-target`, `mature`, `monomer`, `affinity` and `wetlab` are documented only
+  inside `.claude/skills/`; `prefilter`, `qc-annotate`, `epitope`, `epitope-map`,
+  `beta-check`, `diversity` and `validate` are documented nowhere. Use
+  `binder-compare <cmd> --help` in the meantime.
 
 ---
 
