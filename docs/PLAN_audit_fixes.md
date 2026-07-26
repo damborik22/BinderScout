@@ -1,13 +1,20 @@
 # PLAN — audit fixes
 
+> **✅ Implemented — all 10 batches are complete.** This plan is left as written, so the reasoning
+> behind each fix stays readable next to the code that landed. The work is on
+> `claude/audit-fixes-nb3kbk` (15 commits after the three docs commits); the four decisions below were
+> taken by the repository owner and implemented as recorded. The test suite went from **213 to 338**
+> passing, with each regression test verified to fail against the pre-fix code before its fix landed.
+> The one thing deliberately not built is the **GUI** — that is a project, not a fix, and still needs a
+> decision on which architecture to pursue.
+
 Proposed fixes for the 43 findings in [`repo_analysis_2026-07-26.html`](repo_analysis_2026-07-26.html).
-Nothing here is implemented yet. Finding IDs (F1, F2, …) refer to that document.
+Finding IDs (F1, F2, …) refer to that document.
 
 Grouped into **10 independently-shippable batches**, ordered by value. Each batch is one PR
 (`CONTRIBUTING.md`: one logical change per PR). Every diff below was written against the code as it
-stands at `a600090` and the surrounding lines were read — but they are proposals, not applied patches.
-
-**Four decisions need your call before the relevant batch lands — see [§Decisions](#decisions).**
+stood at `a600090` and the surrounding lines were read; the code that shipped follows these proposals
+but is not always identical to them — the commits are the record.
 
 ---
 

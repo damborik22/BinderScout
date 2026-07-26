@@ -88,8 +88,32 @@
   Read-only audit · 2026-07-26 · working tree at <code>a600090</code>, branch
   <code>claude/repo-analysis-non-agentic-nb3kbk</code><br>
   Scope: purpose, data flow, dependencies, defects, <strong>non-agentic (no-LLM) operability</strong>, GUI options.
-  No source code was modified. Every finding below was confirmed by opening the cited file and line.
+  No source code was modified <em>for this audit</em>. Every finding below was confirmed by opening the cited file and line.
 </p>
+
+<div class="note" style="border-left-color:#2e7d32">
+  <strong>Status update — the fixes have landed.</strong> This document is the original read-only audit and is
+  left as written, so the "before" state stays legible. The proposed fixes
+  (<a href="PLAN_audit_fixes.md">PLAN_audit_fixes.md</a>, 10 batches) were subsequently implemented on
+  <code>claude/audit-fixes-nb3kbk</code> across 15 commits. <strong>All 10 batches are complete.</strong>
+  <br><br>
+  Everything in §4.1 (wrong results), §4.2 (broken commands), §4.3 (installer), §4.4 (report truthfulness)
+  and §4.5 (ingestion) is fixed, plus the non-agentic blocker in §3 — the configurator now has
+  <code>--config</code> headless replay, closing CLAUDE.md's long-deferred item F2. The test suite went from
+  <strong>213 to 338</strong> passing, with regression coverage written to fail against the pre-fix code
+  before each fix landed.
+  <br><br>
+  <strong>Four product decisions</strong> were taken by the repository owner and implemented: Protenix
+  refolding removed (AF3 is the canonical second engine); the cross-engine gate defaults to 3 engines with a
+  floor of 2; aarch64 reaches parity with x86_64 as a first-class platform; NGL is inlined from the vendored
+  copy so the 3D viewer works air-gapped.
+  <br><br>
+  <strong>Deliberately not done:</strong> the GUI in §5 — that is a build, not a fix, and needs a decision on
+  which of the three architectures to pursue. Two items are recorded rather than actioned:
+  aarch64 RFD3 ships opt-in until it can be validated on Spark hardware, and the GPLv3 USEARCH binaries
+  remain in the tree with the licensing exposure now documented in
+  <a href="../THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a> for the owner to decide on.
+</div>
 
 <div class="cards">
   <div class="card"><div class="k">Tracked code</div><div class="v">34.5k</div><div class="d">lines Python + shell</div></div>
@@ -97,7 +121,7 @@
   <div class="card"><div class="k">Conda envs</div><div class="v">11</div><div class="d">4 have a <code>.yml</code> spec</div></div>
   <div class="card"><div class="k">CLI subcommands</div><div class="v">22</div><div class="d">7 documented for humans</div></div>
   <div class="card"><div class="k">Wizard questions</div><div class="v">80</div><div class="d">0 non-interactive paths</div></div>
-  <div class="card"><div class="k">Findings</div><div class="v">43</div><div class="d">1 critical, 18 high</div></div>
+  <div class="card"><div class="k">Findings</div><div class="v">43</div><div class="d">1 critical, 18 high — <strong>all 10 batches fixed</strong></div></div>
 </div>
 
 <div class="note">
