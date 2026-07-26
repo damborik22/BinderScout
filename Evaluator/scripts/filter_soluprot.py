@@ -2,7 +2,7 @@
 
 Run inside the ``binder-eval-soluprot`` conda env. Functionally equivalent to
 ``binder-compare filter-soluprot`` — kept in scripts/ to match the existing
-pattern (refold_boltz2.py, refold_protenix.py, refold_af3.py, refold_esmfold2.py
+pattern (refold_boltz2.py, refold_af3.py, refold_esmfold2.py
 all have a script form alongside the CLI form).
 
 Usage:

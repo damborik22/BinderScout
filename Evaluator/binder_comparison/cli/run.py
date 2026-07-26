@@ -1,8 +1,8 @@
 """CLI subcommand: binder-compare run
 
-Full orchestrator: extract → refold-boltz2 → refold-protenix (optional) → report.
-AF3 refolding (aarch64 / DGX Spark only, Part K) is wired separately via the
-``--af3-results`` flag on the ``report`` subcommand.
+Full orchestrator: extract → refold-boltz2 → report.
+AF3 and ESMFold2 refolding run in their own conda envs and are wired in via the
+``--af3-results`` / ``--esmfold2-results`` flags on the ``report`` subcommand.
 
 Usage:
     binder-compare run \\
@@ -10,13 +10,11 @@ Usage:
         --boltzgen   ./boltzgen_results \\
         --mosaic     ./mosaic_results \\
         --target-seq "MKTAYIAKQRQ..." \\
-        --output     ./comparison_report \\
-        --protenix-env bindmaster_pxdesign  # omit or pass "" to skip Protenix
+        --output     ./comparison_report
 
 Environment requirements:
     Boltz-2 refolding:  uv venv at ~/BindMaster/Mosaic/.venv (preferred)
                         OR conda env 'mosaic' if populated
-    Protenix refolding: conda env 'bindmaster_pxdesign' (shipped by PXDesign installer)
     Other steps:        any env with binder_comparison installed
 
 Boltz-2 environment selection (in order of precedence):
@@ -38,7 +36,6 @@ def run(args: argparse.Namespace) -> None:
 
     sequences_fasta = output_dir / "sequences.fasta"
     boltz2_csv = output_dir / "boltz2_results.csv"
-    protenix_csv = output_dir / "protenix_results.csv"
 
     # ------------------------------------------------------------------
     # Step 1: Extract sequences
@@ -93,44 +90,10 @@ def run(args: argparse.Namespace) -> None:
     _run_step(boltz2_cmd, "refold-boltz2")
 
     # ------------------------------------------------------------------
-    # Step 3: Refold with Protenix (optional — requires bindmaster_pxdesign env)
+    # Step 3: Report
     # ------------------------------------------------------------------
-    run_protenix = bool(args.protenix_env)
-    if run_protenix:
-        print("\n" + "=" * 60)
-        print(f"STEP 3/4 — Protenix refolding  [conda: {args.protenix_env}]")
-        print("=" * 60)
-        protenix_cmd = _conda_cmd(
-            args.protenix_env,
-            [
-                "python",
-                "-m",
-                "binder_comparison",
-                "refold-protenix",
-                "--sequences",
-                str(sequences_fasta),
-                "--target-seq",
-                args.target_seq,
-                "--output",
-                str(protenix_csv),
-                "--output-dir",
-                str(output_dir / "refold_protenix"),
-                "--num-samples",
-                str(args.protenix_num_samples),
-                "--num-seeds",
-                str(args.protenix_num_seeds),
-            ],
-        )
-        _run_step(protenix_cmd, "refold-protenix")
-    else:
-        print("\n[run] Protenix refolding skipped (pass --protenix-env to enable).")
-
-    # ------------------------------------------------------------------
-    # Step 4: Report
-    # ------------------------------------------------------------------
-    n_steps = 4 if run_protenix else 3
     print("\n" + "=" * 60)
-    print(f"STEP {n_steps}/{n_steps} — Generating comparison report")
+    print("STEP 3/3 — Generating comparison report")
     print("=" * 60)
 
     report_cmd = [
@@ -145,8 +108,6 @@ def run(args: argparse.Namespace) -> None:
         "--output",
         str(output_dir / "report"),
     ]
-    if run_protenix and protenix_csv.exists():
-        report_cmd += ["--protenix-results", str(protenix_csv)]
     if args.bindcraft:
         bindcraft_dir = Path(args.bindcraft)
         final_csv = next(bindcraft_dir.glob("final_design_stats.csv"), None)
@@ -219,18 +180,4 @@ def add_parser(subparsers) -> None:
         action="store_true",
         help="Include all Mosaic designs (default: only is_top=1 refolded designs)",
     )
-    # Protenix refolding (optional)
-    p.add_argument(
-        "--protenix-env",
-        default="",
-        metavar="ENV",
-        help=(
-            "Conda env for Protenix refolding (typically 'bindmaster_pxdesign'). "
-            "Omit or pass empty string to skip Protenix."
-        ),
-    )
-    p.add_argument(
-        "--protenix-num-samples", type=int, default=5, metavar="N", help="Protenix samples per seed (default: 5)"
-    )
-    p.add_argument("--protenix-num-seeds", type=int, default=1, metavar="N", help="Protenix random seeds (default: 1)")
     p.set_defaults(func=run)

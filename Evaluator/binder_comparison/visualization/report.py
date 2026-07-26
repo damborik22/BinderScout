@@ -504,7 +504,6 @@ def _build_per_tool_refold_viewer(
     # Engine-specific PDB column preference (mirrors cli/report.py _ENGINE_PDB_PRIORITY)
     _PRI: dict[str, list[str]] = {
         "af3": ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"],
-        "protenix": ["protenix_pdb", "protenix_cif", "boltz_pdb", "pdb"],
         "boltz": ["boltz_pdb", "pdb"],
     }
     pdb_cols = [c for c in _PRI.get(primary_engine, ["boltz_pdb", "pdb"]) if c in tool_df.columns]
@@ -576,7 +575,7 @@ def _build_per_tool_refold_viewer(
         for e in entries
     )
     default_rank = entries[0]["rank"]
-    _engine_label = {"af3": "AlphaFold 3", "protenix": "Protenix", "boltz": "Boltz-2"}.get(
+    _engine_label = {"af3": "AlphaFold 3", "esmfold2": "ESMFold2", "boltz": "Boltz-2"}.get(
         primary_engine, primary_engine.upper()
     )
     html = f"""
@@ -1617,7 +1616,6 @@ def generate_report(
                                         if viewer_block:
                                             _eng = {
                                                 "af3": "AlphaFold 3",
-                                                "protenix": "Protenix",
                                                 "boltz": "Boltz-2",
                                             }.get(primary_engine, primary_engine.upper())
                                             viewer_block = (
@@ -1726,7 +1724,7 @@ def generate_report(
     else:
         ngl_viewer_block = "<p style='color:#888;'><em>No refolded structures available.</em></p>"
 
-    engine_label_map = {"af3": "AlphaFold 3", "protenix": "Protenix", "boltz": "Boltz-2"}
+    engine_label_map = {"af3": "AlphaFold 3", "esmfold2": "ESMFold2", "boltz": "Boltz-2"}
     primary_engine_label = engine_label_map.get(primary_engine, primary_engine.upper())
 
     _pri_engine_label = engine_label_map.get(primary_engine, primary_engine.upper())
@@ -1861,7 +1859,6 @@ def generate_report(
         ("<b>Boltz-2</b>", ("boltz_pae_iptm", "boltz_iptm")),
         ("<b>AlphaFold 3</b>", ("af3_iptm",)),
         ("<b>ESMFold2</b>", ("esmfold2_iptm",)),
-        ("<b>Protenix</b>", ("protenix_iptm",)),
     ]
     _engines = [
         lbl
@@ -2606,7 +2603,6 @@ def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tupl
         "agreement_count",
         "ipsae_min",
         "boltz_pae_ipsae_min",
-        "protenix_pae_ipsae_min",
         "af3_pae_ipsae_min",
         "iptm",
         "plddt_binder_mean",
@@ -2637,7 +2633,6 @@ def _engine_threshold_legend_html(df: pd.DataFrame) -> str:
     rows = []
     for _engine, col, label in (
         ("boltz", "boltz_pae_ipsae_min", "Boltz-2 ≥ 0.61"),
-        ("protenix", "protenix_pae_ipsae_min", "Protenix ≥ 0.61"),
         ("af3", "af3_pae_ipsae_min", "AF3 ≥ 0.61"),
         ("af2", "af2_pae_ipsae_min", "AF2 ≥ 0.30 <i>(informational; mis-calibrated on short targets)</i>"),
     ):
@@ -2939,7 +2934,7 @@ _METRIC_DESCRIPTION = {
     ),
     "agreement_count": (
         "Number of independent prediction engines that score ipSAE_min above the 0.61 pass threshold. "
-        "Currently Boltz-2 only (0 or 1); Protenix (x86) and AlphaFold 3 (aarch64 / DGX Spark) "
+        "Currently Boltz-2 only (0 or 1); AlphaFold 3 and ESMFold2 "
         "will be added as the refactor progresses. Higher = more engines agree = stronger candidate."
     ),
     "intra_contact": (

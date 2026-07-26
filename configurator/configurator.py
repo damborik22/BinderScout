@@ -2539,8 +2539,6 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     # Engine selection flags (skip flags omit engines NOT selected)
     if not cfg.get("use_boltz", True):
         lines.append("    --skip-boltz2 \\")
-    if not cfg.get("use_protenix", False):
-        lines.append("    --skip-protenix \\")
     if not cfg.get("use_af3", False):
         lines.append("    --skip-af3 \\")
     if not cfg.get("use_esmfold2", False):
@@ -2918,7 +2916,7 @@ def wizard():
     use_evaluator = ask_yn("  Enable cross-evaluation (refolding + ranked report)?", default=False)
 
     # ── Refolding engine selection ──
-    use_boltz = use_protenix = use_af3 = use_esmfold2 = False
+    use_boltz = use_af3 = use_esmfold2 = False
     primary_engine = "boltz"
     if use_evaluator:
         print(f"  {BOLD}Refolding engines for evaluation{RESET}")
@@ -2927,10 +2925,6 @@ def wizard():
             engines_available.append(("boltz", "Boltz-2 (Mosaic venv)", True))
         else:
             print(f"    Boltz-2: {RED}requires Mosaic install{RESET} — skipped")
-        if installed.get("pxdesign_local"):
-            engines_available.append(("protenix", "Protenix v0.5.0 (PXDesign env)", False))
-        else:
-            print(f"    Protenix: {RED}requires PXDesign install{RESET} — skipped")
         if installed.get("af3"):
             engines_available.append(("af3", "AlphaFold 3 v3.0.2 (binder-eval-af3 env)", False))
         else:
@@ -2943,14 +2937,12 @@ def wizard():
             ans = ask_yn(f"    Use {label}?", default=default_on)
             if key == "boltz":
                 use_boltz = ans
-            elif key == "protenix":
-                use_protenix = ans
             elif key == "af3":
                 use_af3 = ans
             elif key == "esmfold2":
                 use_esmfold2 = ans
         # Require at least one engine
-        if not (use_boltz or use_protenix or use_af3 or use_esmfold2):
+        if not (use_boltz or use_af3 or use_esmfold2):
             print_warn("No refolding engine selected — Evaluator disabled.")
             use_evaluator = False
         else:
@@ -2959,7 +2951,6 @@ def wizard():
                 k
                 for k, on in (
                     ("boltz", use_boltz),
-                    ("protenix", use_protenix),
                     ("af3", use_af3),
                     ("esmfold2", use_esmfold2),
                 )
@@ -3008,7 +2999,6 @@ def wizard():
         "rfd3": use_rfd3,
         "evaluator": use_evaluator,
         "use_boltz": use_boltz,
-        "use_protenix": use_protenix,
         "use_af3": use_af3,
         "use_esmfold2": use_esmfold2,
         "primary_engine": primary_engine,
@@ -3021,7 +3011,6 @@ def wizard():
     _meta_keys = {
         "evaluator",
         "use_boltz",
-        "use_protenix",
         "use_af3",
         "use_esmfold2",
         "primary_engine",
@@ -3051,7 +3040,6 @@ def wizard():
         "boltzgen_mode": "protein",
         "boltzgen_intermediate": 10000,
         "use_boltz": use_boltz,
-        "use_protenix": use_protenix,
         "use_af3": use_af3,
         "use_esmfold2": use_esmfold2,
         "primary_engine": primary_engine,
@@ -3401,10 +3389,10 @@ def wizard():
         engines = []
         if cfg.get("use_boltz"):
             engines.append("Boltz-2")
-        if cfg.get("use_protenix"):
-            engines.append("Protenix")
         if cfg.get("use_af3"):
             engines.append("AF3")
+        if cfg.get("use_esmfold2"):
+            engines.append("ESMFold2")
         engines_str = " + ".join(engines) if engines else "Boltz-2"
         primary = cfg.get("primary_engine", "boltz")
         print(f"  {CYAN}Evaluator{RESET}:     {engines_str}  |  primary={primary}  → ranked report")
