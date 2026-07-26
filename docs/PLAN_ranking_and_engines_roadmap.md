@@ -12,9 +12,12 @@
 >   `target_analysis.py`, `scoring.py`. Report renderers:
 >   `visualization/{report.py, plots.py, top30_slim.py}`. → **Part X premise is real.**
 > - `Protein-Hunter/chai_ph/` (chai-lab) is already vendored. → **Part O install cost is low.**
-> - Related existing plan: **Part N** (`docs/plans.md`) — Rosetta/Boltz-2 interface-ΔG
->   metric (NR1–NR4). Part T (iCS) and Part N (ΔG) both target the same gap; keep them
->   coordinated, don't duplicate.
+> - Related **completed** plan: **Part N** (`docs/completed_plans.md`) — Rosetta interface-ΔG.
+>   Landed 2026-06-16 **with a negative result**: ΔG, `|dG/dSASA|`, PRODIGY and the BindCraft
+>   14-metric panel do not rank affinity among binders (best pooled |ρ| ≈ 0.34 on 2/4
+>   targets; corroborated on OpenBind + SKEMPI). Part T (iCS) attacks the same gap, so it
+>   **inherits Part N's bar**: beat the incumbent on labelled data, or document the negative
+>   and stop.
 
 ---
 
@@ -84,8 +87,10 @@ Promera into `evaluate.sh` as a 5th engine.
       4-target benchmark** (experimental Kd available).
 - [ ] T3. Compute macro-AUC of `iCS` and Promera-`ipSAE` for binder-vs-non-binder, and —
       the real prize — check any *rank correlation with Kd among binders*.
-- [ ] T4. Coordinate with **Part N** (interface-ΔG): iCS and ΔG attack the same
-      affinity-ranking gap; decide which to pursue or how they compose.
+- [ ] T4. Read **Part N**'s negative result first (`docs/completed_plans.md`) — it already
+      ruled out ΔG, `|dG/dSASA|`, PRODIGY and the BindCraft panel as affinity rankers, and
+      documents the traps (length confound, Simpson's-paradox "screen-then-invert"). iCS
+      must clear that bar, and must be tested against the same labelled sets.
 
 **Validation gate (hard):** wire Promera into the pipeline **only if `iCS` (or
 Promera-ipSAE) beats the incumbent** `ipsae_min` macro-AUC (~0.71 Adaptyv / ~0.755
