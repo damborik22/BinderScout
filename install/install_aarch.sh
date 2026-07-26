@@ -22,6 +22,7 @@ BINDCRAFT_DIR="${BINDMASTER_DIR}/BindCraft"
 BOLTZGEN_DIR="${BINDMASTER_DIR}/BoltzGen"
 MOSAIC_DIR="${BINDMASTER_DIR}/Mosaic"
 EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
+FOUNDRY_WEIGHTS_DIR="${BINDMASTER_DIR}/weights/foundry"
 # AlphaFold 3 (DeepMind, Evaluator refolding). NOT a real PyPI package — the
 # "alphafold3" PyPI name is an unrelated stub. Installed from the official repo
 # (pinned); refold_af3.py resolves run_alphafold.py at ${AF3_DIR}. alphafold3/ gitignored.
@@ -40,6 +41,7 @@ PXDESIGN_DIR="${BINDMASTER_DIR}/PXDesign"
 
 ARCH="$(uname -m)"     # expected: aarch64
 CUDA_VERSION="13.0"    # DGX Spark GB10 (Blackwell, sm_121)
+FOUNDRY_VERSION="0.1.9"   # rc-foundry release pinned for RFD3 (matches install.sh)
 
 # Pre-cached resources: two levels up → Documents/OLD/BindMaster/bindcraft-tools
 _default_tools="$(cd "${BINDMASTER_DIR}" && cd ../../Documents/OLD/BindMaster/bindcraft-tools 2>/dev/null && pwd || true)"
@@ -69,7 +71,9 @@ DO_MOSAIC=false
 DO_EVALUATOR=false
 DO_PXDESIGN=false
 DO_AF3=false            # opt-in via --tool af3 (gated weights; not in --tool all)
-DO_ESMFOLD2=false       # opt-in via --tool esmfold2 (lightweight 4th refold engine; no gated weights)
+DO_RFD3=false           # opt-in via --tool rfd3. Should work (pip-only, no DGL) but is
+                        # UNVALIDATED on aarch64 hardware, so it is kept out of --tool all.
+DO_ESMFOLD2=false       # in --tool all (default refold engine) (lightweight 4th refold engine; no gated weights)
 DO_SOLUPROT=false       # opt-in via --tool soluprot (sequence-only E. coli solubility screen; aarch64-enabled via source-built USEARCH v12 + --no_tmhmm model)
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
@@ -79,7 +83,11 @@ while [[ $# -gt 0 ]]; do
             TOOL_SPECIFIED=true
             case "${2,,}" in
                 all)
-                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true ;;
+                    # ESMFold2 is the DEFAULT refold engine, so `all` must include it —
+                    # otherwise evaluate.sh skips it and consensus_iptm is built from
+                    # fewer engines than the two-stage ranking assumes.
+                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true
+                    DO_ESMFOLD2=true ;;   # RFD3 is opt-in here: --tool rfd3 (see the note on DO_RFD3)
                 bindcraft)
                     DO_BINDCRAFT=true ;;
                 boltzgen)
@@ -90,6 +98,15 @@ while [[ $# -gt 0 ]]; do
                     DO_EVALUATOR=true ;;
                 pxdesign)
                     DO_PXDESIGN=true ;;
+                rfd3|foundry)
+                    DO_RFD3=true ;;
+                protein-hunter|protein_hunter|phunter)
+                    echo -e "${RED}Protein-Hunter is not supported on aarch64: PyRosetta publishes no aarch64 wheels.${RESET}"
+                    exit 1 ;;
+                proteina-complexa|proteina_complexa|complexa)
+                    echo -e "${RED}Proteina-Complexa is not yet wired into the aarch64 installer.${RESET}"
+                    echo -e "${YELLOW}  PyTorch Geometric and torchtext may lack aarch64 wheels — see README aarch64 notes.${RESET}"
+                    exit 1 ;;
                 af3|alphafold3|alphafold)
                     DO_AF3=true ;;
                 esmfold2|esm|esmfold)
@@ -97,7 +114,7 @@ while [[ $# -gt 0 ]]; do
                 soluprot|solu|solubility)
                     DO_SOLUPROT=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, pxdesign, af3, esmfold2, soluprot${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, pxdesign, rfd3, af3, esmfold2, soluprot${RESET}"
                     exit 1
                     ;;
             esac
@@ -139,9 +156,13 @@ Usage: $0 [--tool TOOL] [--tools-dir PATH] [--cuda VERSION] [--skip-examples] [-
 DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstream on first install.
 
   --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
-                  all                  bindcraft, boltzgen, mosaic, evaluator, pxdesign
+                  all                  bindcraft, boltzgen, mosaic, evaluator, pxdesign,
+                                       esmfold2 (the default refold engine)
                   bindcraft|boltzgen|mosaic|evaluator|pxdesign
                                        install one tool
+                  rfd3                 RFD3 / foundry — opt-in on aarch64. Pure pip (no DGL),
+                                       so it should work, but it is UNVALIDATED on aarch64
+                                       hardware and is therefore not in --tool all.
                   af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
                                        gated AF3 weights you obtain from
                                        https://github.com/google-deepmind/alphafold3
@@ -634,7 +655,8 @@ select_tools_interactive() {
     [[ "$DO_EVALUATOR" == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
     [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
     [[ "$DO_AF3"       == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; weights required)${RESET}"
-    [[ "$DO_ESMFOLD2"  == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (opt-in refolder)"
+    [[ "$DO_RFD3"      == true ]] && echo -e "    ${GREEN}✓${RESET} RFD3 (opt-in; unvalidated on aarch64)"
+    [[ "$DO_ESMFOLD2"  == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (default refolder)"
     [[ "$DO_SOLUPROT"  == true ]] && echo -e "    ${GREEN}✓${RESET} SoluProt (opt-in solubility screen; aarch64 via source build)"
     echo ""
 
@@ -1705,6 +1727,98 @@ AF3EOF
 
 # ─── ESMFold2 (refolder, opt-in) ────────────────────────────────────────────
 
+install_rfd3() {
+    print_step "Installing RFD3 (foundry) — aarch64"
+    ensure_conda_in_path
+
+    # NOTE: UNVALIDATED on aarch64 hardware. RFD3 should port cleanly (pure pip, no
+    # DGL / SE3-Transformer), which is why the docs claim aarch64 support — but the
+    # aarch64 installer had no --tool rfd3 case at all, so that claim was untestable.
+    # Kept out of `--tool all` until someone confirms it on a Spark / GH200.
+    # Mirrors install.sh's install_rfd3(); the only difference is the CUDA wheel index.
+    if env_exists bindmaster_rfd3; then
+        print_warn "Conda environment 'bindmaster_rfd3' already exists — skipping creation."
+    else
+        run_logged "Creating bindmaster_rfd3 env" \
+            "${CONDA_CMD}" create -n bindmaster_rfd3 -y python=3.12 pip \
+            -c conda-forge \
+            || { print_fail "Failed to create bindmaster_rfd3 env"; return 1; }
+    fi
+
+    # cu130 wheels for Blackwell/GB10 (the x86 installer pins cu121).
+    run_logged "Installing PyTorch (cu130, aarch64)" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 \
+        pip install -q torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130 \
+        || { print_fail "Failed to install PyTorch"; return 1; }
+
+    run_logged "Installing rc-foundry[rfd3]==${FOUNDRY_VERSION}" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 \
+        pip install -q "rc-foundry[rfd3]==${FOUNDRY_VERSION}" \
+        || { print_fail "Failed to install rc-foundry"; return 1; }
+
+    run_logged "Installing rc-foundry[mpnn]==${FOUNDRY_VERSION}" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 \
+        pip install -q "rc-foundry[mpnn]==${FOUNDRY_VERSION}" \
+        || print_warn "rc-foundry[mpnn] install failed — MPNN redesign step may not work"
+
+    mkdir -p "${FOUNDRY_WEIGHTS_DIR}"
+    if [[ -n "$(ls -A "${FOUNDRY_WEIGHTS_DIR}" 2>/dev/null)" ]]; then
+        print_ok "Foundry weights dir already populated at ${FOUNDRY_WEIGHTS_DIR}"
+    else
+        run_logged "Downloading RFD3 weights (~2.5 GB)" \
+            "${CONDA_CMD}" run -n bindmaster_rfd3 \
+            foundry install rfd3 --checkpoint-dir "${FOUNDRY_WEIGHTS_DIR}" \
+            || print_warn "RFD3 weight download failed — retry: conda run -n bindmaster_rfd3 foundry install rfd3 --checkpoint-dir ${FOUNDRY_WEIGHTS_DIR}"
+    fi
+
+    # ProteinMPNN weights are NOT bundled with rfd3 (foundry install rfd3 fetches only
+    # rfd3_latest.ckpt) — the MPNN sequence-design stage needs this ~7 MB file.
+    run_logged "Downloading ProteinMPNN weights (~7 MB)" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 \
+        foundry install proteinmpnn --checkpoint-dir "${FOUNDRY_WEIGHTS_DIR}" \
+        || print_warn "ProteinMPNN weight download failed — 'mpnn' will not run until it is fetched"
+
+    smoke_test "RFD3 CLI check" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 rfd3 --help \
+        || print_warn "rfd3 CLI smoke test failed — env may need foundry weights first"
+
+    _write_rfd3_shortcut
+
+    print_ok "RFD3 installation complete (aarch64 — please report whether it works)"
+    print_ok "  Usage: rfd3 design out_dir=./run inputs=config.yaml"
+}
+
+
+_write_rfd3_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# RFD3 shortcut — runs 'rfd3 design ...' in the bindmaster_rfd3 env."
+        echo "# With no args: opens an interactive env shell."
+        echo ""
+        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "FOUNDRY_WEIGHTS_DIR=\"${FOUNDRY_WEIGHTS_DIR}\""
+    } > "${SHORTCUTS_DIR}/rfd3"
+    cat >> "${SHORTCUTS_DIR}/rfd3" << 'EOF'
+
+# Surface the weights dir for the foundry checkpoint registry.
+# (The registry reads FOUNDRY_CHECKPOINT_DIRS / FOUNDRY_CHECKPOINTS_DIR; the
+# singular form FOUNDRY_CHECKPOINT_DIR is silently ignored.)
+export FOUNDRY_CHECKPOINT_DIRS="${FOUNDRY_WEIGHTS_DIR}"
+
+if [[ $# -eq 0 ]]; then
+    echo "RFD3 environment (bindmaster_rfd3). Weights: ${FOUNDRY_WEIGHTS_DIR}"
+    echo "Examples:"
+    echo "  rfd3 design out_dir=./run inputs=examples/ppi.yaml"
+    echo "  foundry list-installed"
+    exec "${CONDA_CMD}" run --live-stream -n bindmaster_rfd3 bash
+fi
+
+exec "${CONDA_CMD}" run --live-stream -n bindmaster_rfd3 rfd3 "$@"
+EOF
+    chmod +x "${SHORTCUTS_DIR}/rfd3"
+}
+
 install_esmfold2() {
     print_step "Installing ESMFold2 refolder (binder-eval-esmfold2 env)"
     ensure_conda_in_path
@@ -1727,10 +1841,25 @@ install_esmfold2() {
             || { print_fail "Failed to create binder-eval-esmfold2 conda env"; return 1; }
     fi
 
-    # esmfold + gemmi (producer side). ESMFold2 has linux aarch64 wheels.
-    run_logged "Installing esmfold + gemmi into binder-eval-esmfold2" \
-        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q esmfold gemmi \
-        || { print_fail "Failed to install esmfold + gemmi (check PyPI access and aarch64 wheel availability)"; return 1; }
+    # NOTE: there is NO `esmfold` PyPI package — this used to pip install one, which
+    # either hard-failed or produced an env with no torch, no transformers and no
+    # biohub `esm`, so `binder-compare refold-esmfold2` died at import while the
+    # --help-only smoke test below still passed. The runtime is transformers'
+    # ESMFold2Model + biohub's `esm` SDK (ESMFold2InputBuilder + the ProteinInput /
+    # StructurePredictionInput dataclasses) + gemmi for CIF->PDB. refold_esmfold2.py
+    # imports exactly these. Kept in sync with install.sh's install_esmfold2().
+    run_logged "Installing torch (cu130) into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 \
+        pip install -q --index-url https://download.pytorch.org/whl/cu130 torch \
+        || { print_fail "Failed to install torch into binder-eval-esmfold2"; return 1; }
+    run_logged "Installing transformers + gemmi + safetensors into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'transformers>=4.50' gemmi safetensors \
+        || { print_fail "Failed to install transformers/gemmi/safetensors into binder-eval-esmfold2"; return 1; }
+    # biohub/esm: pinned commit per the HuggingFace model card (no PyPI release yet).
+    run_logged "Installing biohub esm SDK into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 \
+        pip install -q 'esm @ git+https://github.com/Biohub/esm.git@c94ed8d' \
+        || { print_fail "Failed to install biohub esm SDK (check network / git access)"; return 1; }
 
     run_logged "Installing binder-compare into binder-eval-esmfold2" \
         "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q -e "${EVALUATOR_DIR}[report]" \
@@ -1836,6 +1965,14 @@ uninstall_tool() {
             rm -f "${SHORTCUTS_DIR}/pxdesign"
             [[ -d "${PXDESIGN_DIR}" ]] && { rm -rf "${PXDESIGN_DIR}"; print_ok "Removed ${PXDESIGN_DIR}"; }
             print_ok "PXDesign uninstalled"
+            ;;
+        rfd3|foundry)
+            print_step "Uninstalling RFD3 (foundry)"
+            env_exists bindmaster_rfd3 && run_logged "Removing bindmaster_rfd3 conda env" \
+                "${CONDA_CMD}" env remove -n bindmaster_rfd3 -y
+            rm -f "${SHORTCUTS_DIR}/rfd3"
+            [[ -d "${FOUNDRY_WEIGHTS_DIR}" ]] && { rm -rf "${FOUNDRY_WEIGHTS_DIR}"; print_ok "Removed ${FOUNDRY_WEIGHTS_DIR}"; }
+            print_ok "RFD3 uninstalled"
             ;;
         af3|alphafold3|alphafold)
             print_step "Uninstalling AlphaFold 3 refolder"
@@ -2192,6 +2329,7 @@ main() {
     [[ "${DO_MOSAIC}"    == true ]] && (( total++ ))
     [[ "${DO_EVALUATOR}" == true ]] && (( total++ ))
     [[ "${DO_PXDESIGN}"  == true ]] && (( total++ ))
+    [[ "${DO_RFD3}"      == true ]] && (( total++ ))
     [[ "${DO_AF3}"       == true ]] && (( total++ ))
     [[ "${DO_ESMFOLD2}"  == true ]] && (( total++ ))
     [[ "${DO_SOLUPROT}"  == true ]] && (( total++ ))
@@ -2204,6 +2342,7 @@ main() {
     [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
     [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
+    [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}"; install_rfd3 || failed_tools+=("RFD3"); }
     [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
     [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
     [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; install_soluprot || failed_tools+=("SoluProt"); }
