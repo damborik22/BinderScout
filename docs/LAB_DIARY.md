@@ -1041,3 +1041,59 @@ was validated before implementing.
 
 **Net:** two roadmap negatives banked (Promera not adopted; length-weighting not adopted). Both are
 deliverables — we now know two things not to build. The affinity-ranking gap remains open, untouched.
+
+---
+
+## 2026-07-26 — Cao 2022 staged as the large-scale metric benchmark (654k designs / 12 targets); Clara node-hogging incident found and fixed
+
+**What changed:**
+
+1. **Part U — Cao et al. 2022 benchmark staged and running** (`docs/INVESTIGATION_partU_cao_benchmark.md`).
+   Every metric comparison so far was **noise-limited**: on our two labelled sets only 4–6 targets
+   are scorable, ~45 candidate metrics all land in **0.71–0.74 macro-AUC**, and the metric
+   *ranking* correlates **ρ = −0.107** between datasets — i.e. which metric "wins" has been
+   essentially random. That is how the (later refuted) length crossover arose. Fixing it needs
+   many targets **and** many binders per target.
+   Assembled the Cao yeast-display data — **654,716 designs / 12 targets**, 40–67 aa minibinders —
+   by joining `ngs_analysis/affinities/<T>.sc` with `sorting_ngs_data/<T>/sequences.list` (index-aligned).
+   Refolding a **4,442-design / 2,042-binder / 12-target** subsample through Boltz-2 + AF3 (Clara
+   H200 arrays) and ESMFold2 (Spark). Target constructs taken from chain B of the 13
+   `*_mb.pdb` complexes (chain A = minibinder), i.e. the paper's exact constructs.
+2. **Clara node-hogging incident.** A colleague (Anička) emailed that our AF3 jobs were "blocking a
+   whole node with a 1-GPU job". Correct: the sbatch had `--gres=gpu:H200:1` and `-c 8` but **no
+   `--mem`**, and Slurm then reserves the node's entire `RealMemory` (h200 = 2,321,905 MB). Four
+   running array tasks held **four whole nodes — 32 GPUs of capacity to use 4**. Cancelled, added
+   `--cpus-per-gpu=32 / --mem-per-gpu=250G / --gpu-bind=closest`, resubmitted with `--resume`.
+   Rule written into `references/clara-deploy.md` §2 / §3.3 / §5 (commit `9b9614b`).
+
+**Why it mattered:**
+
+- The metric question cannot be settled at 5 targets; Cao is the only labelled set big enough
+  (12 targets, ~2,000 binders in the subsample) to resolve differences that were noise.
+- The Slurm default is silent and invisible in `squeue` — it looked like a normal 1-GPU job.
+  Only `scontrol show job <id> | grep TRES` reveals it. Worth a permanent rule, not a one-off fix.
+
+**Outcome:**
+
+- **Two findings that bound the scope, recorded up front:**
+  - *Label:* the naive "finite Kd" label marks 55,886 binders but their **median Kd is 8 µM** —
+    not binding, and it inflates FGFR2 to a 56 % hit rate. Use **`kd_lb < 1000 nM`** → 11,629
+    binders (1.79 %). The resulting 275× per-target spread (FGFR2 11.1 % → Tie2 0.04 %) is
+    **expected**, not an artifact — Cao's own protocol guide grades target tractability.
+  - *Affinity:* **this dataset cannot settle affinity ranking.** Only **495 of 11,629** binders have
+    trustworthy Kd bounds, and they cluster against the assay's ~1 µM dynamic-range limit
+    (PDGFR IQR **0.11 logs**). Only **FGFR2** has a real gradient (225 binders, 2.2 logs). Scope is
+    therefore a well-powered **screen** benchmark + a single-target affinity probe. The subsample
+    deliberately retains all 495 clean-Kd binders.
+- **Provenance:** all Cao designs come from **one Rosetta pipeline** (RIF docking + motif grafting),
+  not different design tools; what varies is scaffold topology — and β-containing folds
+  (HEEH 4.39 %, EHEE 4.38 %) hit ~5× more often than all-helical HHH (0.92 %). So Cao (1 method ×
+  12 targets) and Adaptyv (many methods × few targets) are **complementary**, testing different things.
+- **Refold status:** Boltz-2 **4,442/4,442** ✅, ESMFold2 **4,442/4,442** ✅ (zero errors), AF3 running.
+  After the resource fix the same array packs 8 tasks per node and runs ~3× more concurrently.
+- **Data note:** only `experimental_data_and_analysis.tar.gz` (234 MB) is needed; the
+  `design_models_pdb`/`silent` tarballs (**109 GB**) are Cao's own predicted structures and are
+  irrelevant — we refold from sequence.
+- **Archived to MUNI** (`EVALUATOR/promera_partT_2026-07/`, `EVALUATOR/denovo_lengthtest_2026-07/`):
+  the completed Part T Promera benchmark and the 3-engine de-novo length test (refold CSVs +
+  analyses; structures left local). Cao waits until AF3 finishes.
