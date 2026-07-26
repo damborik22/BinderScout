@@ -548,12 +548,10 @@ def extract_sequence_from_cif(cif_path: str, chain_id: str) -> str | None:
     except OSError:
         return None
 
-    # Try canonical _entity_poly first (chain-agnostic, longest entity)
-    seq = _cif_entity_poly_seq(text)
-    if seq:
-        return seq
-
-    # Fallback: _atom_site CA records for requested chain
+    # _atom_site CA records for the requested chain FIRST: this is the only branch that can
+    # honour chain_id. _entity_poly is chain-agnostic (it returns the longest entity), so trying
+    # it first silently discarded the user's chain answer for every mmCIF that has one — i.e.
+    # essentially every structure downloaded from the PDB.
     tokens = _cif_tokenize(text)
     i = 0
     while i < len(tokens):
@@ -596,6 +594,18 @@ def extract_sequence_from_cif(cif_path: str, chain_id: str) -> str | None:
             i += n_cols
         if seen:
             return "".join(seen[k] for k in sorted(seen))
+
+    # No CA records for that chain (or no _atom_site at all — e.g. a sequence-only mmCIF).
+    # _entity_poly is the last resort, but it cannot honour chain_id, so say so rather than
+    # returning a different chain's sequence as if it were the requested one.
+    seq = _cif_entity_poly_seq(text)
+    if seq:
+        print_warn(
+            f"Chain {chain_id} has no CA records in {Path(cif_path).name} — falling back to the "
+            f"longest _entity_poly entity ({len(seq)} aa), which may be a different chain. "
+            f"Check the length before continuing."
+        )
+        return seq
     return None
 
 
@@ -910,7 +920,10 @@ def hotspots_to_epitope_idx(cfg: dict) -> list[int] | None:
         return None
     target_seq = cfg.get("target_sequence", "") or ""
     target_pdb = str(cfg.get("target_pdb", "") or "")
-    chain = cfg.get("target_chain") or cfg.get("chain") or "A"
+    # The wizard stores the chain selection in cfg["chains"] (Step 3). Neither "target_chain"
+    # nor "chain" is ever assigned, so those lookups always fell through to "A" and hotspot
+    # residue numbers were resolved against chain A no matter what the user picked.
+    chain = (cfg.get("chains") or "A").split(",")[0].strip() or "A"
     resnums = pdb_chain_residue_numbers(target_pdb, chain) if target_pdb else []
     if resnums:
         pdb_seq = extract_sequence_from_pdb(target_pdb, chain) or ""
