@@ -425,18 +425,22 @@ $ python3 -m pytest --collect-only        → No module named pytest</code></pre
 </div>
 
 <div class="f">
-  <h4><span class="sev c-high">High</span> &nbsp;F9 · "Run the pipeline now?" silently skips four of the seven tools</h4>
-  <p class="loc"><code>configurator/configurator.py:2662–2695</code> — <code>run_pipeline()</code> branches on
-     <code>bindcraft</code>, <code>pxdesign_local</code>, <code>proteina_complexa</code>,
-     <code>evaluator</code> only</p>
-  <p>No branch exists for <code>boltzgen</code>, <code>mosaic</code>, <code>rfd3</code> or
-     <code>protein_hunter</code>, even though <code>tools_enabled</code> carries those keys
-     (<code>:2994–2995</code>) and <code>generate()</code> writes their run scripts.</p>
+  <h4><span class="sev c-high">High</span> &nbsp;F9 · "Run the pipeline now?" silently skips RFD3 and Protein-Hunter</h4>
+  <p class="loc"><code>configurator/configurator.py:2662</code> — <code>run_pipeline()</code> branches on
+     <code>mosaic</code>, <code>boltzgen</code>, <code>bindcraft</code>, <code>pxdesign_local</code>,
+     <code>proteina_complexa</code> and <code>evaluator</code></p>
+  <p>No branch exists for <code>rfd3</code> or <code>protein_hunter</code> — the Part L and Part M additions —
+     even though <code>tools_enabled</code> carries those keys (<code>:2994–2995</code>) and
+     <code>generate()</code> writes <code>run_rfd3.sh</code> and <code>run_protein_hunter.sh</code>.
+     The same two are missing from the Step 7 preview tree (<code>print_tree</code>, <code>:743</code>,
+     which also omits Proteina-Complexa) and from the "To run later" list (<code>:3423</code>), so a user who
+     enables them is never even told the scripts exist.</p>
   <p><strong>Failure:</strong> a user enables RFD3 + Protein-Hunter + Evaluator and answers "y" to "Run the
-     pipeline now?". Nothing runs for either design tool; the Evaluator then runs on an empty pool and emits
-     a report with no designs. No error, no warning.</p>
+     pipeline now?" (the default). Nothing runs for either design tool; the Evaluator then runs on an empty
+     pool and emits a report with no designs. No error, no warning.</p>
   <p class="fix"><strong>Fix:</strong> drive the loop from <code>tools_enabled</code> and the generated
-     <code>run_&lt;tool&gt;.sh</code> files rather than a hand-maintained if-chain.</p>
+     <code>run_&lt;tool&gt;.sh</code> files rather than a hand-maintained if-chain — and do the same in
+     <code>print_tree</code> and the next-steps block.</p>
 </div>
 
 <div class="f">

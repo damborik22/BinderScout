@@ -203,6 +203,13 @@ bindmaster evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bind
                         --target-seq "<TARGET_SEQ>" -o runs/<name>/evaluate
 ```
 
+> **Prefer menus to flags?** Run `bindmaster` with no arguments for the interactive TUI —
+> installer checkbox menu, configurator wizard, run launcher and status view.
+> **[docs/walkthrough_and_dataflow.html](docs/walkthrough_and_dataflow.html)** reproduces
+> every screen you will see, verbatim, and traces the full data flow: what each of the seven
+> tools writes, which file and column the pipeline reads from it, and what happens to those
+> numbers on the way to the report.
+
 ---
 
 ## `bindmaster` CLI reference
@@ -518,7 +525,7 @@ Finding IDs refer to that document.
 | Symptom | Cause | Workaround |
 |---|---|---|
 | `run_all.sh` prints *"Mosaic requires interactive input"* and exits 1 before any tool runs | The Mosaic block is emitted first and hard-exits unless `mosaic/designs.csv` already exists (F8) | Run `bash runs/<name>/run_mosaic.sh` first, then `run_all.sh`; or disable Mosaic in the wizard |
-| Answering *y* to "Run the pipeline now?" appears to do nothing for some tools | `run_pipeline()` only dispatches BindCraft, PXDesign, Proteina-Complexa and the Evaluator — BoltzGen, Mosaic, RFD3 and Protein-Hunter have no branch (F9) | Skip the prompt; run `bash runs/<name>/run_all.sh` (with the Mosaic caveat above) |
+| Answering *y* to "Run the pipeline now?" never runs RFD3 or Protein-Hunter | `run_pipeline()` dispatches Mosaic, BoltzGen, BindCraft, PXDesign and Proteina-Complexa, but has no branch for RFD3 or Protein-Hunter. They are also absent from the Step 7 preview tree and the "To run later" list (F9) | Run `bash runs/<name>/run_rfd3.sh` / `run_protein_hunter.sh` by hand, or `run_all.sh` (which does cover all seven — with the Mosaic caveat above) |
 | The `evaluate` shortcut dies with `Unknown argument: --target-pdb` | `Evaluator/run.sh` passes a flag `evaluate.sh` does not accept (F10) | Call `bash Evaluator/evaluate.sh --sequences … --target-seq "<SEQ>" --output …` directly, or use `runs/<name>/run_evaluate.sh` |
 | A run script dies immediately with `nvidia-smi: command not found` | The `settings.json` provenance block runs `nvidia-smi` unguarded under `set -euo pipefail` (F15) | Run on a node where `nvidia-smi` is on `PATH`, and check `--gpu-id` is a real device index |
 | RFD3 finished but contributes no designs to the report | `run_evaluate.sh` points `--rfd3` at `rfd3/outputs`, while `run_rfd3.sh` writes `rfd3/sequences.csv` (F3) | Pass `--rfd3 runs/<name>/rfd3` to `binder-compare extract` yourself |
