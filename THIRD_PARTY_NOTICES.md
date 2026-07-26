@@ -23,7 +23,6 @@ especially before any commercial use.
 | Path | What it is | Version (verified in-tree) | Upstream | Licence |
 |---|---|---|---|---|
 | `Evaluator/tools/ngl/ngl-2.3.1.min.js` (1.3 MB) | NGL Viewer — the WebGL molecular viewer inlined into `report.html` and `epitope_map.html` | 2.3.1 (filename) | [nglviewer/ngl](https://github.com/nglviewer/ngl) | MIT (per upstream repository) |
-| `Evaluator/tools/soluprot/usearch.x86_64` (2.3 MB)<br>`Evaluator/tools/soluprot/usearch.aarch64` (1.9 MB) | USEARCH — sequence search, called by SoluProt's max-identity feature | `usearch v12.0`, `(C) Copyright 2013-24 Robert C. Edgar.` (binary strings) | [rcedgar/usearch12](https://github.com/rcedgar/usearch12) | **GPLv3** — see §2 |
 | `Evaluator/tools/soluprot/` (≈51 MB, excluding the USEARCH binaries) | SoluProt 1.0 — sequence-only *E. coli* solubility predictor. Includes `soluprot.py`, `feature_scripts/`, the trained classifiers (`data/grad_clf_v1_tc.pkl`, `grad_clf_v1_tc_notmhmm.pkl`, `grad_best_clf_v1.pkl`) and the reference FASTA databases | 1.0 | Hon, Borko, Stourac et al., *SoluProt: prediction of soluble protein expression in Escherichia coli*, **Bioinformatics** 37(1), 2021. [doi:10.1093/bioinformatics/btaa1102](https://doi.org/10.1093/bioinformatics/btaa1102) · Loschmidt Laboratories, Masaryk University · <https://loschmidt.chemi.muni.cz/soluprot/> | **Not stated in the vendored copy — confirm with upstream** |
 | `tools/aarch64/DAlphaBall.gcc` (325 KB) | Alpha-ball surface/SASA scoring binary that BindCraft calls; ARM64 build, installed to `BindCraft/functions/DAlphaBall.gcc` | ARM64 Fortran build (`libgfortran.so.5`) | Rosetta / RosettaCommons `DAlphaBall` component, as required by [martinpacesa/BindCraft](https://github.com/martinpacesa/BindCraft) | **Rosetta terms — confirm with upstream.** Rosetta is free for academic and non-commercial use; commercial use requires a separate licence from UW TechTransfer / Rosetta Commons |
 | `tools/aarch64/dssp` (9.4 MB) | `mkdssp` — secondary-structure assignment, called by BindCraft; ARM64 build, installed to `BindCraft/functions/dssp` | `mkdssp 3.1.4`, `DSSP, CMBI version 3.1.4` (binary strings) | [cmbi/dssp](https://github.com/cmbi/dssp) | Boost Software License 1.0 (per upstream, DSSP 3.x) — **confirm with upstream** |
@@ -32,26 +31,32 @@ The two `tools/aarch64/` binaries exist because BindCraft ships x86_64 builds
 only; they are the same components BindCraft expects, rebuilt for ARM64, and
 are copied into `BindCraft/functions/` by `install/install_aarch.sh`.
 
-## 2. GPLv3 in an MIT repository — what this means
+## 2. USEARCH — removed from the tree, built at install time
 
-The `usearch.x86_64` / `usearch.aarch64` binaries are **GPLv3**. USEARCH v12 was
-open-sourced by its author under GPLv3; the binaries in this tree self-report
-`usearch v12.0`.
+USEARCH v12 is **GPLv3**. It used to be committed here as `usearch.x86_64` and
+`usearch.aarch64`, which put a copyleft redistribution obligation on every clone
+of this MIT-licensed repository. Both binaries have been **removed**. Both
+installers now build USEARCH v12 from source
+([rcedgar/usearch12](https://github.com/rcedgar/usearch12)) as part of
+`--tool soluprot`, so the binary is produced on the user's machine and is never
+redistributed by us.
 
-- **It does not relicense BindMaster.** BindMaster does not link against USEARCH
-  — SoluProt invokes it as a separate process. That is aggregation, and our own
-  MIT-licensed source stays MIT.
-- **It does add obligations to *this repository's* distribution.** Anyone
-  distributing this repository is distributing GPLv3 binaries, which requires
-  passing on the GPLv3 terms and offering the corresponding source for them.
-- **The practical fix, if this matters to you:** drop the two binaries from the
-  tree and have `install/install.sh --tool soluprot` fetch or build them, the
-  way `install/install_aarch.sh` already builds USEARCH v12 from source. That
-  removes the redistribution obligation entirely and costs one download at
-  install time. The x86_64 binary is the only reason the obligation exists on
-  the `master` branch today.
+Two notes for anyone auditing this:
 
-This is a note for whoever owns the repository's licensing, not a legal opinion.
+- **The binaries remain in git history** (they entered in `b8d2b87`). Removing
+  them from `HEAD` stops future release tarballs and source archives from
+  carrying them, but a full `git clone` still fetches them from history. Ending
+  the obligation completely would need a history rewrite, which breaks every
+  existing clone — that trade-off has not been taken.
+- **Do not substitute the drive5 build.** `https://drive5.com/usearch/` serves
+  the older proprietary 32-bit USEARCH under an academic-use-only licence. That
+  is *stricter* than the GPLv3 v12 it would replace, and it is not the version
+  SoluProt is patched for (`usearch_global` vs `search_global`). Both installers
+  now say so where they used to recommend it.
+
+Verified equivalent before removal: the source build and the previously
+committed binary, given SoluProt's exact `-usearch_global` command against
+SoluProt's own *E. coli* reference database, produce **byte-identical** output.
 
 ## 3. Not vendored — fetched at install time
 

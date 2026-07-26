@@ -2127,6 +2127,47 @@ PYEOF
     return $rc
 }
 
+# Resolve the USEARCH binary the same way soluprot_runner._resolve_usearch does
+# ($SOLUPROT_USEARCH, then <dir>/usearch.<arch>, then <dir>/usearch, then PATH),
+# so what the installer validates is what the runner will actually execute.
+# Echoes the path and returns 0, or returns 1 if none is usable.
+_resolve_usearch() {
+    local cand
+    for cand in "${SOLUPROT_USEARCH:-}" \
+                "${SOLUPROT_DIR}/usearch.$(uname -m)" \
+                "${SOLUPROT_DIR}/usearch"; do
+        if [[ -n "${cand}" && -x "${cand}" ]]; then
+            echo "${cand}"
+            return 0
+        fi
+    done
+    if command -v usearch >/dev/null 2>&1; then
+        command -v usearch
+        return 0
+    fi
+    return 1
+}
+
+# Verify the resolved binary can actually START. `-x` only checks the mode bit,
+# which passes for a wrong-architecture or missing-libstdc++ binary -- and the
+# bioconda usearch 12.0_beta build is known to crash at startup on aarch64. We
+# do not assume any particular CLI, so ANY ordinary exit status counts as
+# success; only a failure to exec (126/127) or a fatal signal (>=128) fails.
+_check_usearch_runs() {
+    local bin="$1" rc=0
+    print_step "Checking USEARCH runs: ${bin}"
+    "${bin}" --version >/dev/null 2>&1 || rc=$?
+    if (( rc == 126 || rc == 127 || rc >= 128 )); then
+        print_fail "USEARCH at ${bin} could not be executed (exit ${rc})."
+        print_warn "  Usually a wrong-architecture binary or a missing shared library."
+        print_warn "  Check with: file '${bin}' && ldd '${bin}'"
+        print_warn "  Then delete it and re-run --tool soluprot to rebuild from source."
+        return 1
+    fi
+    print_ok "USEARCH executes"
+    return 0
+}
+
 # Compile open-source USEARCH v12 for the identity feature. The bioconda
 # usearch 12.0_beta build crashes at startup on aarch64, so we build from
 # source (clean on GB10/Grace-Hopper with gcc 13). TMHMM is sidestepped via
@@ -2254,17 +2295,19 @@ install_soluprot() {
     #    without it (it aborts on a USEARCH failure), so a missing binary is a
     #    hard install failure — the --help smoke test below would NOT catch it
     #    (argparse exits before the USEARCH path runs).
-    if [[ -x "${SOLUPROT_DIR}/usearch.aarch64" ]] || command -v usearch >/dev/null 2>&1; then
-        print_ok "USEARCH binary present (${SOLUPROT_DIR}/usearch.aarch64 or on PATH)"
+    if _resolve_usearch >/dev/null; then
+        print_ok "USEARCH binary present ($(_resolve_usearch))"
     else
         _build_usearch_v12 || true
-        if [[ ! -x "${SOLUPROT_DIR}/usearch.aarch64" ]] && ! command -v usearch >/dev/null 2>&1; then
+        if ! _resolve_usearch >/dev/null; then
             print_fail "USEARCH is required for SoluProt's identity feature and could not be built."
             print_warn "  Install a C/C++ toolchain (git make g++) and re-run, or place a 'usearch.aarch64'"
             print_warn "  binary at ${SOLUPROT_DIR}/usearch.aarch64 (or on PATH), then re-run --tool soluprot."
+            print_warn "  Source: ${USEARCH12_REPO} (GPLv3)."
             return 1
         fi
     fi
+    _check_usearch_runs "$(_resolve_usearch)" || return 1
 
     # 5. binder-compare runs in the 'binder-eval' env (Python 3.10+), NOT here.
     # binder-comparison is requires-python>=3.10 (numpy>=1.24 / pandas>=2.0), so

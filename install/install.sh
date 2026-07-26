@@ -2372,6 +2372,97 @@ ESMFOLD2EOF
 # Python runner's default _resolve_scripts_path() finds it without env vars.
 SOLUPROT_DIR="${EVALUATOR_DIR}/tools/soluprot"
 SOLUPROT_ZIP_URL="https://loschmidt.chemi.muni.cz/soluprot/?page=download&f=soluprot.zip"
+USEARCH12_REPO="https://github.com/rcedgar/usearch12"
+
+# Resolve the USEARCH binary the same way soluprot_runner._resolve_usearch does
+# ($SOLUPROT_USEARCH, then <dir>/usearch.<arch>, then <dir>/usearch, then PATH),
+# so what the installer validates is what the runner will actually execute.
+# Echoes the path and returns 0, or returns 1 if none is usable.
+_resolve_usearch() {
+    local cand
+    for cand in "${SOLUPROT_USEARCH:-}" \
+                "${SOLUPROT_DIR}/usearch.$(uname -m)" \
+                "${SOLUPROT_DIR}/usearch"; do
+        if [[ -n "${cand}" && -x "${cand}" ]]; then
+            echo "${cand}"
+            return 0
+        fi
+    done
+    if command -v usearch >/dev/null 2>&1; then
+        command -v usearch
+        return 0
+    fi
+    return 1
+}
+
+# Verify the resolved binary can actually START. `-x` only checks the mode bit,
+# which passes for a wrong-architecture or missing-libstdc++ binary -- and the
+# bioconda usearch 12.0_beta build is known to crash at startup on aarch64. We
+# do not assume any particular CLI, so ANY ordinary exit status counts as
+# success; only a failure to exec (126/127) or a fatal signal (>=128) fails.
+_check_usearch_runs() {
+    local bin="$1" rc=0
+    print_step "Checking USEARCH runs: ${bin}"
+    "${bin}" --version >/dev/null 2>&1 || rc=$?
+    if (( rc == 126 || rc == 127 || rc >= 128 )); then
+        print_fail "USEARCH at ${bin} could not be executed (exit ${rc})."
+        print_warn "  Usually a wrong-architecture binary or a missing shared library."
+        print_warn "  Check with: file '${bin}' && ldd '${bin}'"
+        print_warn "  Then delete it and re-run --tool soluprot to rebuild from source."
+        return 1
+    fi
+    print_ok "USEARCH executes"
+    return 0
+}
+
+# Compile open-source USEARCH v12 for SoluProt's E. coli identity feature.
+# Built here rather than committed: USEARCH v12 is GPLv3, and shipping the
+# binary in this MIT-licensed repository put a copyleft redistribution
+# obligation on every clone. x86_64 is usearch12's native platform, so this is
+# the same source build install_aarch.sh has always used, minus the aarch64
+# workarounds. The old proprietary drive5 32-bit build is NOT a substitute --
+# it is academic-use-only, which is stricter than what it would replace.
+_build_usearch_v12() {
+    print_step "Building open-source USEARCH v12 for the identity feature"
+    local t
+    for t in git make g++ gcc; do
+        if ! command -v "${t}" >/dev/null 2>&1; then
+            print_warn "USEARCH build needs git + make + gcc/g++ (missing: ${t})."
+            print_warn "  Install a toolchain and re-run, or place a 'usearch.x86_64' binary at"
+            print_warn "  ${SOLUPROT_DIR}/usearch.x86_64 (or 'usearch' on PATH)."
+            return 1
+        fi
+    done
+    local src_dir="${SOLUPROT_DIR}/usearch12-src"
+    rm -rf "${src_dir}"
+    run_logged "Cloning ${USEARCH12_REPO}" \
+        git clone --depth 1 "${USEARCH12_REPO}" "${src_dir}" \
+        || { print_warn "git clone of ${USEARCH12_REPO} failed"; return 1; }
+    # The generated Makefile hardcodes 'ccache g++'; override CC/CXX. Static
+    # link is preferred so the binary does not depend on this host's libstdc++;
+    # fall back to dynamic where static libs are unavailable.
+    if ! run_logged "Compiling usearch12 (static)" \
+        make -C "${src_dir}/src" -j"$(nproc)" CC=gcc CXX=g++; then
+        print_warn "Static build failed; retrying without -static"
+        # NB: the Makefile appends '-static' to LDFLAGS, and a command-line
+        # LDFLAGS= override does NOT win against that '+=' -- so strip it from
+        # the Makefile directly, then re-link (objects are already built).
+        sed -i 's/[[:space:]]*-static//g' "${src_dir}/src/Makefile"
+        run_logged "Compiling usearch12 (dynamic)" \
+            make -C "${src_dir}/src" -j"$(nproc)" CC=gcc CXX=g++ \
+            || { print_warn "USEARCH v12 build failed"; return 1; }
+    fi
+    if [[ -x "${src_dir}/bin/usearch12" ]]; then
+        cp "${src_dir}/bin/usearch12" "${SOLUPROT_DIR}/usearch.x86_64"
+        chmod +x "${SOLUPROT_DIR}/usearch.x86_64"
+        rm -rf "${src_dir}"
+        print_ok "USEARCH v12 built -> ${SOLUPROT_DIR}/usearch.x86_64"
+        return 0
+    fi
+    print_warn "USEARCH v12 binary not found after build (${src_dir}/bin/usearch12)"
+    return 1
+}
+
 
 install_soluprot() {
     print_step "Installing SoluProt 1.0 solubility screen (binder-eval-soluprot env)"
@@ -2460,17 +2551,26 @@ install_soluprot() {
         echo ""
     fi
 
-    # 4. Check USEARCH (x86_64). The committed usearch.x86_64 is open-source v12;
-    #    for bit-exact public-server scores use the drive5 32-bit academic build.
-    if [[ ! -x "${SOLUPROT_DIR}/usearch.x86_64" ]] && [[ ! -x "${SOLUPROT_DIR}/usearch" ]] \
-        && ! command -v usearch >/dev/null 2>&1; then
-        echo ""
-        print_warn "USEARCH is not installed. SoluProt needs it for the E. coli identity feature."
-        print_warn "  Download (32-bit, free for academic):  https://drive5.com/usearch/"
-        print_warn "  Place at:                              ${SOLUPROT_DIR}/usearch.x86_64  (chmod +x)"
-        print_warn "  Or add 'usearch' to PATH; the runner finds it as a fallback."
-        echo ""
+    # 4. Build USEARCH v12 for the identity feature. SoluProt cannot score
+    #    without it, and it fails SILENTLY: soluprot.py catches UsearchInvalidPath,
+    #    prints to stderr and returns, so the process exits 0 having written no
+    #    output CSV. A missing binary is therefore a hard install failure -- the
+    #    --help smoke test below would NOT catch it (argparse exits before the
+    #    USEARCH path runs).
+    if _resolve_usearch >/dev/null; then
+        print_ok "USEARCH binary present ($(_resolve_usearch))"
+    else
+        _build_usearch_v12 || true
+        if ! _resolve_usearch >/dev/null; then
+            print_fail "USEARCH is required for SoluProt's identity feature and could not be built."
+            print_warn "  Install a C/C++ toolchain (git make g++) and re-run, or place a 'usearch.x86_64'"
+            print_warn "  binary at ${SOLUPROT_DIR}/usearch.x86_64 (or on PATH), then re-run --tool soluprot."
+            print_warn "  Source: ${USEARCH12_REPO} (GPLv3). Do NOT substitute the drive5 32-bit build --"
+            print_warn "  it is academic-use-only and is not the version SoluProt is patched for."
+            return 1
+        fi
     fi
+    _check_usearch_runs "$(_resolve_usearch)" || return 1
 
     # 5. binder-compare runs in the 'binder-eval' env (Python 3.10+), NOT here.
     # binder-comparison is requires-python>=3.10 (numpy>=1.24 / pandas>=2.0), so
