@@ -62,7 +62,8 @@ Before running, verify:
    ```python
    from boltz.main import download_boltz2
    from pathlib import Path
-   download_boltz2(cache=Path.home()/'.boltz')  # positional Path arg, not str
+
+   download_boltz2(cache=Path.home() / ".boltz")  # positional Path arg, not str
    ```
 4. **GPU memory available** for the refold pass. Cross-engine refold can stack peak memory if not pipelined carefully. The evaluator's default sequential mode is safe on a single H200 / GH200.
 5. **`expandable_segments:True`** if running on Ampere-class card with mixed batch sizes:
@@ -109,11 +110,8 @@ After unification, all three engines' confidence numbers are on the same scale a
 Per design, after all available refolders run:
 
 ```python
-ipsae_threshold = 0.61   # the agreement threshold
-agreement_count = sum(
-    1 for engine in available_engines
-    if engine.ipsae_min > ipsae_threshold
-)
+ipsae_threshold = 0.61  # the agreement threshold
+agreement_count = sum(1 for engine in available_engines if engine.ipsae_min > ipsae_threshold)
 ```
 
 **Quality tiers** (applied to the best of {boltz_ipsae_min, protenix_ipsae_min, af3_ipsae_min}, *or* a campaign-defined function — typically `mean` or `min`; orchestrator decides):
