@@ -223,3 +223,55 @@ def test_select_display_cols_two_stage_promotes_agreement_and_spread():
     primary, _secondary = _select_display_cols(df, rank_method="two_stage")
     assert "agreement_count" in primary
     assert "consensus_iptm_spread" in primary
+
+
+# --- Methodology text must describe the ranking that actually ran (F32) --------
+
+
+class TestTwoStageMethodologyText:
+    """Regression: the blurb was a fixed string. Commit 5769064 flipped the screen
+    default mean -> max and updated CHANGELOG, CLAUDE.md, cli/report.py, scoring.py
+    and test_scoring.py — but not visualization/report.py. Every report afterwards
+    ran a max screen while telling the reader it had run a mean screen, called mean
+    "the default" and called max "legacy"."""
+
+    def _render(self, screen_metric, min_engines=3):
+        from binder_comparison.visualization.report import _two_stage_methodology_html
+
+        return _two_stage_methodology_html(screen_metric, min_engines, "ipsae-link")
+
+    def test_max_screen_is_described_as_max(self):
+        html = self._render("max")
+        assert "<b>max</b> of the per-engine" in html
+        assert "lenient recall" in html
+
+    def test_max_screen_does_not_claim_mean_is_the_default(self):
+        html = self._render("max")
+        assert "Mean was selected as default" not in html
+        assert "legacy max-screen" not in html
+
+    def test_mean_screen_is_described_as_mean(self):
+        html = self._render("mean")
+        assert "the mean of the per-engine" in html
+        assert "stricter screen" in html
+
+    def test_the_two_screens_render_differently(self):
+        assert self._render("max") != self._render("mean")
+
+    def test_engine_gate_is_stated_from_the_argument(self):
+        assert "at least <b>3</b>" in self._render("max", min_engines=3)
+        assert "at least <b>2</b>" in self._render("max", min_engines=2)
+
+
+class TestVendoredNglIsInlined:
+    """Regression (F20): report.html <script src>'d unpkg.com, so the 3D viewer was a
+    blank black box on air-gapped nodes — the environment this pipeline otherwise
+    engineers around carefully. cli/epitope_map.py already inlined the vendored copy."""
+
+    def test_script_tag_is_inline_not_cdn(self):
+        from binder_comparison.visualization.report import _ngl_script_tag
+
+        tag = _ngl_script_tag()
+        assert tag.startswith("<script>")
+        assert "unpkg.com" not in tag
+        assert len(tag) > 100_000, "should carry the real vendored library, not a stub"

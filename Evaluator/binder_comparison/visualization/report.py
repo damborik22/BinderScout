@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..comparison.candidates import _NATIVE_SEQ_COLS, collapse_native_df, order_tools
-from ..comparison.scoring import _ENGINE_IPSAE_COLS
+from ..comparison.scoring import _ENGINE_IPSAE_COLS, MIN_ENGINES_DEFAULT
 from .plots import (
     METRIC_META,
     fig_to_base64,
@@ -383,6 +383,7 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path, target_seq: st
     )
 
     default_rank = entries[0]["rank"]
+    ngl_script_tag = _ngl_script_tag()
 
     html = f"""
 <div style="margin:1em 0;">
@@ -398,7 +399,7 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path, target_seq: st
   </div>
 </div>
 
-<script src="https://unpkg.com/ngl@2.3.1/dist/ngl.js"></script>
+{ngl_script_tag}
 <script>
 (function() {{
   const designs = {{
@@ -1293,6 +1294,81 @@ _TOOL_PDB_HINTS = {
 }
 
 
+# Vendored NGL (relative to the Evaluator package root). Inlined so report.html is
+# self-contained: the 3D viewer used to <script src> unpkg.com, which renders a blank
+# black box on the air-gapped compute nodes this pipeline otherwise engineers around.
+# cli/epitope_map.py already did this; report.py was never brought along.
+_VENDORED_NGL = "tools/ngl/ngl-2.3.1.min.js"
+_NGL_CDN_TAG = '<script src="https://unpkg.com/ngl@2.3.1/dist/ngl.js"></script>'
+
+
+def _ngl_script_tag() -> str:
+    """Return an inline <script> with the vendored NGL, or the CDN tag if it is absent."""
+    ngl_path = Path(__file__).resolve().parents[2] / _VENDORED_NGL
+    if ngl_path.is_file():
+        return f"<script>{ngl_path.read_text()}</script>"
+    print(
+        f"[report] note: vendored NGL not found at {ngl_path}; falling back to the unpkg CDN "
+        f"(the 3D viewer will not render offline)."
+    )
+    return _NGL_CDN_TAG
+
+
+def _two_stage_methodology_html(screen_metric: str, min_engines: int, ipsae_link: str) -> str:
+    """Methodology paragraph for --rank-by two_stage, derived from the ACTIVE settings.
+
+    MUST NOT be a fixed string. The screen default flipped mean -> max in 5769064,
+    which updated CHANGELOG.md, CLAUDE.md, cli/report.py, comparison/scoring.py and
+    test_scoring.py — but not this file. Every report generated afterwards ran a max
+    screen while telling the reader it had run a mean screen, called mean "the
+    default" and called max "legacy". Rendering from the arguments makes that class
+    of drift impossible.
+    """
+    if screen_metric == "mean":
+        stage1 = (
+            "<b>Stage 1 — screen:</b> <code>consensus_iptm_mean</code> = the mean of the per-engine "
+            "PAE-recomputed iPTMs; the top 50% (<code>passes_max_screen</code>) form the binder-likely "
+            "pool. This is the stricter screen — the average must be high (Adaptyv macro AUC "
+            "<b>0.710 vs 0.689</b> for max; ~20 more true binders recalled at the 50% cut). "
+            "<code>--screen-metric max</code> switches to the lenient recall screen."
+        )
+        stage2 = (
+            "<b>Stage 2 — rank:</b> survivors are ordered by <code>consensus_iptm_mean</code> — the same "
+            "metric, so with a mean screen the two stages collapse to a single mean-iPTM gate-then-rank."
+        )
+    else:
+        stage1 = (
+            "<b>Stage 1 — screen:</b> <code>consensus_iptm</code> = the <b>max</b> of the per-engine "
+            "PAE-recomputed iPTMs; the top 50% (<code>passes_max_screen</code>) form the binder-likely "
+            "pool. This is the lenient recall step — keep a design if <em>any</em> engine rates it highly, "
+            "so a true binder is not dropped because one engine's per-target blind spot drags its mean "
+            "down (ProteinBase macro AUC <b>~0.755</b>). <code>--screen-metric mean</code> switches to the "
+            "stricter mean screen (Adaptyv macro AUC <b>0.710 vs 0.689</b>)."
+        )
+        stage2 = (
+            "<b>Stage 2 — rank:</b> survivors are ordered by <code>consensus_iptm_mean</code> — the "
+            "precision step, where you want the designs <em>all</em> engines agree on. This lifts "
+            "<b>precision@top-10% to 0.92 vs 0.79</b> for max alone."
+        )
+    return (
+        f"Ranking is <b>two-stage cross-engine iPTM</b> ({screen_metric}-screen → mean-rank), validated on "
+        f"two <em>internal</em> 4-target benchmarks (Adaptyv: Nipah / EGFR / IL7R / PD-L1, Kd-screened, "
+        f"n = 662; ProteinBase: the same 4 targets, n = 175). "
+        f"<b>Stage 0 — cross-engine gate:</b> a design must have been refolded by at least "
+        f"<b>{min_engines}</b> independent engines to be eligible. <code>consensus_iptm_mean</code> skips "
+        f"missing engines, so without this a single-engine design's mean <em>is</em> that one engine's "
+        f"score, competing against multi-engine means on an incomparable scale — and for a Mosaic or "
+        f"Protein-Hunter design that engine is the one that designed it. {stage1} {stage2} "
+        f"All designs are ranked — the screen is a flag, nothing is dropped. "
+        f"<b>ipSAE_min</b> ({ipsae_link}) and <b>agreement_count</b> are computed and shown per design as "
+        f"cross-validation — and surfaced in the Top-30 as the <span style='color:#c62828;"
+        f"font-weight:bold;'>⚠</span> engine-disagreement flag — but are <em>not</em> the ranking key. "
+        f"<b>Caveat:</b> both benchmarks comprise compact globular targets; transferability to serpins "
+        f"(e.g. 2VDY), small peptide receptors (CALCA), or flexible/membrane targets is currently "
+        f"<em>unvalidated</em>. Treat the rank as a strong shortlist signal, not a guarantee."
+    )
+
+
 def generate_report(
     df: pd.DataFrame,
     summary: dict,
@@ -1303,6 +1379,8 @@ def generate_report(
     primary_engine: str = "boltz",
     top_per_tool: int = 10,
     rank_method: str = "adaptyv",
+    screen_metric: str = "max",
+    min_engines: int = MIN_ENGINES_DEFAULT,
     full_df: pd.DataFrame | None = None,
     tool_overrides: dict[str, dict] | None = None,
     provenance: dict | None = None,
@@ -1832,26 +1910,7 @@ def generate_report(
             f"confident engine wins; macro-AUC ≈ 0.76). <b>ipSAE_min</b> ({_ipsae_link}) and "
             f"<b>agreement_count</b> are still computed and shown per design as secondary cross-validation."
         ),
-        "two_stage": (
-            f"Ranking is <b>two-stage mean iPTM</b>, validated on two <em>internal</em> 4-target benchmarks "
-            f"(Adaptyv: 4 targets — Nipah / EGFR / IL7R / PD-L1 — Kd-screened, n = 662; ProteinBase: the "
-            f"same 4 targets, n = 175). <b>Stage 1 — screen:</b> <code>consensus_iptm_mean</code> = "
-            f"mean(boltz2, af3, esmfold2 iPTM); the top 50% (<code>passes_max_screen</code>) form the "
-            f"binder-likely pool. Mean was selected as default over max because it is more robust to "
-            f"per-target engine blind spots (Adaptyv macro AUC <b>0.710 vs 0.689</b> for max; ~20 more "
-            f"true binders recalled at the 50% cut). The legacy max-screen (<code>--screen-metric max</code>) "
-            f"is the precision-leaning alternative (ProteinBase macro AUC <b>~0.755</b>). "
-            f"<b>Stage 2 — rank:</b> survivors are ordered by <code>consensus_iptm_mean</code> (the same "
-            f"metric — so Stage 1 + Stage 2 collapse to a single mean-iPTM gate-then-rank). Demanding "
-            f"multi-engine consensus at the sharp end lifts <b>precision@top-10% to 0.92 vs 0.79</b> for "
-            f"max alone. All designs are ranked — the screen is a flag, nothing is dropped. "
-            f"<b>ipSAE_min</b> ({_ipsae_link}) and <b>agreement_count</b> are computed and shown per "
-            f"design as cross-validation — and are surfaced in the Top-30 as the <span style='color:#c62828;"
-            f"font-weight:bold;'>⚠</span> engine-disagreement flag — but are <em>not</em> the ranking key. "
-            f"<b>Caveat:</b> both benchmarks comprise compact globular targets; transferability to serpins "
-            f"(e.g. 2VDY), small peptide receptors (CALCA), or flexible/membrane targets is currently "
-            f"<em>unvalidated</em>. Treat the rank as a strong shortlist signal, not a guarantee."
-        ),
+        "two_stage": _two_stage_methodology_html(screen_metric, min_engines, _ipsae_link),
     }
     methodology_ranking_html = _rank_desc.get(rank_method, _rank_desc["adaptyv"])
 

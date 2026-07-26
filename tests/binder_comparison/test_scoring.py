@@ -254,3 +254,44 @@ def test_screen_keeps_ceil_half_of_the_eligible_pool(n, expected):
     out = rank_by_two_stage(df, screen_frac=0.5, min_engines=2)
     assert int(out["passes_max_screen"].sum()) == expected
     assert expected == math.ceil(n * 0.5)
+
+
+# --- Report truthfulness -------------------------------------------------------
+
+
+def test_wetlab_not_blocked_by_unassessable_agreement():
+    """Regression: agreement_count cannot exceed the engines that ran, so on a
+    single-engine install the >=2 rule failed EVERY design for a reason no design
+    change could fix, making the column uninformative."""
+    from binder_comparison.comparison.scoring import annotate_wetlab_recommended
+
+    df = pd.DataFrame(
+        {
+            "id": ["A", "B"],
+            "agreement_count": [1, 1],
+            "consensus_iptm_n": [1, 1],
+            "plddt_binder_min": [0.90, 0.85],
+        }
+    )
+    with pytest.warns(UserWarning, match="could not be assessed"):
+        out = annotate_wetlab_recommended(df)
+    assert out["wetlab_recommended"].all(), "a 1-engine run must not fail every design"
+
+
+def test_wetlab_still_blocks_real_disagreement():
+    """With enough engines present, a genuinely low agreement_count must still block."""
+    from binder_comparison.comparison.scoring import annotate_wetlab_recommended
+
+    df = pd.DataFrame(
+        {
+            "id": ["good", "lonely"],
+            "agreement_count": [3, 1],
+            "consensus_iptm_n": [3, 3],
+            "plddt_binder_min": [0.90, 0.90],
+        }
+    )
+    out = annotate_wetlab_recommended(df)
+    rec = dict(zip(out["id"], out["wetlab_recommended"]))
+    assert rec["good"] is True or rec["good"]
+    assert not rec["lonely"]
+    assert "agreement 1 < 2" in out.loc[out["id"] == "lonely", "wetlab_reason"].iloc[0]
