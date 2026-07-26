@@ -26,6 +26,9 @@ from ..comparison.candidates import build_candidates_table
 from ..comparison.ensemble import compute_ensemble_metrics
 from ..comparison.merger import merge_refold_results
 from ..comparison.scoring import (
+    _ENGINE_IPSAE_COLS,
+    MIN_ENGINES_DEFAULT,
+    MIN_ENGINES_FLOOR,
     add_boltz_ipsae_from_files,
     add_chain_iptm_interface,
     add_design_groups,
@@ -327,7 +330,8 @@ def run(args: argparse.Namespace) -> None:
     df = rank_by_adaptyv_method(df)
     df = rank_by_consensus_iptm(df)
     screen_metric = getattr(args, "screen_metric", "max") or "max"
-    df = rank_by_two_stage(df, screen_metric=screen_metric)
+    min_engines = getattr(args, "min_engines", None) or MIN_ENGINES_DEFAULT
+    df = rank_by_two_stage(df, screen_metric=screen_metric, min_engines=min_engines)
 
     # Item 9: wet-lab-ready badge (SoluProt-passes + agreement_count >= 2 +
     # min binder pLDDT >= 0.50 + no FAILED RUN). Advisory only — the rank is
@@ -345,8 +349,8 @@ def run(args: argparse.Namespace) -> None:
         df = df.sort_values(["consensus_rank"], ascending=[True]).reset_index(drop=True)
     elif rank_by == "two_stage":
         print(
-            f"[report] Ranking by two_stage ({screen_metric}-screen top 50% → mean-rank — "
-            "benchmark-validated for selection)"
+            f"[report] Ranking by two_stage ({screen_metric}-screen top 50% → mean-rank, "
+            f"min {min_engines} engines — benchmark-validated for selection)"
         )
         df = df.sort_values(["two_stage_rank"], ascending=[True]).reset_index(drop=True)
     else:
@@ -392,8 +396,14 @@ def run(args: argparse.Namespace) -> None:
         "consensus_iptm_n",
         "passes_max_screen",
         "ipsae_min",
-        "boltz_pae_ipsae_min",
-        "af3_pae_ipsae_min",
+        # Per-engine ipSAE. Boltz uses the boltz_pae_* convention (add_boltz_ipsae_from_files);
+        # every other engine uses <engine>_ipsae_min (add_ipsae_from_pae_files). Taken from the
+        # canonical map so these can never drift out of sync again — the hardcoded
+        # "af3_pae_ipsae_min" / "protenix_pae_ipsae_min" names were never written by anything,
+        # so AF3's ipSAE silently vanished from the wet-lab shortlist.
+        _ENGINE_IPSAE_COLS["boltz"],
+        _ENGINE_IPSAE_COLS["af3"],
+        _ENGINE_IPSAE_COLS["esmfold2"],
         "esmfold2_ipsae_min",
         "consensus_ipsae_min_mean",
         "esmfold2_chain_iptm_interface",
@@ -1007,6 +1017,18 @@ def add_parser(subparsers) -> None:
         "engines) — the lenient recall screen (keep a design any engine rates highly; best on ProteinBase, "
         "~0.755). Stage 2 then ranks survivors by consensus_iptm_mean. 'mean' = consensus_iptm_mean screen "
         "(stricter; Adaptyv macro AUC 0.710 vs 0.689).",
+    )
+    p.add_argument(
+        "--min-engines",
+        type=int,
+        default=MIN_ENGINES_DEFAULT,
+        metavar="N",
+        help=f"Minimum independent refold engines a design needs to be eligible for the Stage-1 screen "
+        f"(default: {MIN_ENGINES_DEFAULT} — all of Boltz-2/AF3/ESMFold2; floor: {MIN_ENGINES_FLOOR}). "
+        f"consensus_iptm_mean skips missing engines, so a single-engine design would otherwise compete "
+        f"against 3-engine means on an incomparable scale — and for Mosaic/Protein-Hunter that single "
+        f"engine is the one that designed it. Lower to {MIN_ENGINES_FLOOR} when only two engines are "
+        f"installed.",
     )
     p.add_argument(
         "--no-collapse-duplicates",
