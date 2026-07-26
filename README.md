@@ -245,10 +245,21 @@ Interactive wizard that:
 5. Optionally runs the full pipeline immediately
 
 ```bash
-bindmaster configure
-bindmaster configure --status     # show all runs and completion state
-bindmaster configure --archive <run>  # tar.gz a run directory
+bindmaster configure                                     # interactive wizard
+bindmaster configure --status                            # all runs + completion state
+bindmaster configure --archive <run>                     # tar.gz a run directory
+
+# Headless: replay a saved config, no prompts at all
+bindmaster configure --config runs/<name>/config.json
+bindmaster configure --config my_run.json --run          # …and start the pipeline
 ```
+
+Every wizard run writes its answers to `runs/<name>/config.json`, so a campaign is
+reproducible without re-typing the interview: copy the file, edit what you want to
+change (binder lengths, design counts, which tools), and replay it. Generation is
+deterministic — a replay produces byte-identical run scripts. This is also the seam
+any front-end should use: a GUI, a cron job or another script reads and writes this
+file rather than re-implementing the wizard.
 
 #### What gets generated
 
@@ -566,10 +577,10 @@ Finding IDs refer to that document.
 The executable pipeline has **no runtime LLM dependency** — the `.claude/skills/`
 packages are an operating manual, not a requirement. Two gaps affect scripted use:
 
-- **The configurator has no headless mode.** Its entire flag surface is `--status` and
-  `--archive`; there is no `--config` / `--headless`, and the wizard's config dict is
-  never serialised, so a run directory cannot be produced non-interactively or replayed
-  (CLAUDE.md deferred item F2).
+- ~~**The configurator has no headless mode.**~~ **Fixed:** every wizard run now writes
+  `runs/<name>/config.json`, and `configurator --config <file>` regenerates a run
+  directory with no prompts (`--run` also starts the pipeline). Replays are
+  byte-identical.
 - **15 of the 22 `binder-compare` subcommands have no human-facing documentation.**
   `analyze-target`, `mature`, `monomer`, `affinity` and `wetlab` are documented only
   inside `.claude/skills/`; `prefilter`, `qc-annotate`, `epitope`, `epitope-map`,

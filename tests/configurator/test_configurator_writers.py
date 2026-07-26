@@ -1,5 +1,6 @@
 """Tests for new configurator run script writers and config generators."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -356,3 +357,80 @@ class TestSettingsJsonSurvivesMissingNvidiaSmi:
         for line in content.splitlines():
             if line.startswith(("GPU_NAME=", "GPU_MEM=")):
                 assert "|| echo" in line, f"unguarded GPU probe: {line}"
+
+
+# ── Headless replay: config.json round-trip (CLAUDE.md deferred item F2) ──────
+
+
+class TestRunConfigRoundTrip:
+    """The wizard's ~80 answers used to be discarded the moment the scripts were
+    written: reproducing a campaign meant re-typing every one, and nothing recorded
+    what a run was configured with. `cfg` already was the full description."""
+
+    def test_generate_writes_a_config(self, base_cfg, tmp_path):
+        tools = {"rfd3": True, "evaluator": True}
+        conf.generate(base_cfg, tools)
+        written = base_cfg["run_dir"] / conf.CONFIG_FILENAME
+        assert written.is_file()
+        payload = json.loads(written.read_text())
+        assert payload["config_version"] == 1
+        assert payload["tools_enabled"]["rfd3"] is True
+        assert payload["cfg"]["name"] == base_cfg["name"]
+
+    def test_paths_survive_the_round_trip_as_paths(self, base_cfg, tmp_path):
+        conf.write_run_config(tmp_path / "c.json", base_cfg, {"rfd3": True})
+        cfg, tools = conf.load_run_config(tmp_path / "c.json")
+        assert isinstance(cfg["run_dir"], Path)
+        assert cfg["run_dir"] == base_cfg["run_dir"]
+        assert tools == {"rfd3": True}
+
+    def test_replay_reproduces_identical_scripts(self, base_cfg, tmp_path):
+        """The load-bearing property: --config must generate exactly what the wizard did."""
+        tools = {"rfd3": True, "evaluator": True}
+        conf.generate(base_cfg, tools)
+        first = (base_cfg["run_dir"] / "run_rfd3.sh").read_text()
+
+        cfg2, tools2 = conf.load_run_config(base_cfg["run_dir"] / conf.CONFIG_FILENAME)
+        second_dir = tmp_path / "replay"
+        cfg2["run_dir"] = second_dir
+        second_dir.mkdir(parents=True)
+        conf.generate(cfg2, tools2)
+        second = (second_dir / "run_rfd3.sh").read_text()
+
+        # Only the run directory should differ.
+        assert first.replace(str(base_cfg["run_dir"]), "RUNDIR") == second.replace(str(second_dir), "RUNDIR")
+
+    def test_every_enabled_tool_is_recorded(self, base_cfg):
+        tools = dict.fromkeys([k for k, *_ in conf.TOOL_SEQUENCE], True)
+        tools["evaluator"] = True
+        conf.write_run_config(base_cfg["run_dir"] / "c.json", base_cfg, tools)
+        payload = json.loads((base_cfg["run_dir"] / "c.json").read_text())
+        assert set(payload["tools_enabled"]) == set(tools)
+
+
+class TestRunConfigValidation:
+    def test_missing_file_exits(self, tmp_path):
+        with pytest.raises(SystemExit):
+            conf.load_run_config(tmp_path / "nope.json")
+
+    def test_wrong_shape_exits(self, tmp_path):
+        p = tmp_path / "c.json"
+        p.write_text('{"hello": "world"}')
+        with pytest.raises(SystemExit):
+            conf.load_run_config(p)
+
+    def test_missing_target_structure_exits(self, base_cfg, tmp_path):
+        cfg = dict(base_cfg)
+        cfg["target_pdb_src"] = str(tmp_path / "absent.pdb")
+        p = tmp_path / "c.json"
+        conf.write_run_config(p, cfg, {"rfd3": True})
+        with pytest.raises(SystemExit):
+            conf.load_run_config(p)
+
+    def test_missing_required_key_exits(self, base_cfg, tmp_path):
+        cfg = dict(base_cfg)
+        del cfg["name"]
+        p = tmp_path / "c.json"
+        conf.write_run_config(p, cfg, {"rfd3": True})
+        with pytest.raises(SystemExit):
+            conf.load_run_config(p)
