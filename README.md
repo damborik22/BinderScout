@@ -353,21 +353,27 @@ Each tool goes through:
 bash install/install.sh --tool all --yes --skip-examples
 bash install/install.sh --tool mosaic
 bash install/install.sh --cuda 12.1
+bash install/install.sh --tool all --yes --force        # replace existing checkouts/envs
+bash install/install.sh --tool all --yes --skip-preflight
 bash install/install.sh --uninstall --tool all
 ```
 
-> ⚠️ **`--yes` is destructive on re-run.** It auto-answers *yes* to the
-> "Remove and reclone?" / "Remove existing env?" prompts, whose displayed default is
-> `[y/N]` (no). Re-running `--tool all --yes` on a **working** machine therefore
-> re-clones tool repos and re-creates conda envs — including deleting
-> `BindCraft/params/*.npz` (~4 GB of AF2 weights that Proteina-Complexa symlinks
-> against). Use `--yes` for a first install or in a fresh container; omit it when
-> repairing an existing install.
+> **`--yes` is safe to re-run.** It auto-confirms the *safe* prompts ("Proceed with
+> installation?", "Run the example?") but auto-answers **no** to the destructive ones
+> — re-cloning a tool repo, re-creating a conda env, removing the local Miniforge3 —
+> so a repeat install keeps existing checkouts and downloaded weights. Add
+> **`--force`** to accept those too, which will delete what is there (including
+> `BindCraft/params/*.npz`, ~4 GB of AF2 weights).
 >
-> There is also **no preflight check** for free disk (~60 GB needed for `--tool all`),
-> GPU/driver, or network reachability, and the PXDesign step is **not resumable** —
-> a re-run after a mid-install network failure aborts at `conda create` rather than
-> continuing. See [the audit](docs/repo_analysis_2026-07-26.html) (F11, F18, F26).
+> ```bash
+> bash install/install.sh --tool all --yes            # first install, or safe repair
+> bash install/install.sh --tool pxdesign --yes       # resumes; reuses the existing env
+> bash install/install.sh --tool pxdesign --yes --force   # rebuilds it from scratch
+> ```
+>
+> A **preflight check** runs before any download: free disk against a per-tool
+> estimate (aborts if short), GPU presence and pypi.org reachability (advisory).
+> `--skip-preflight` bypasses it.
 
 ### Server / HPC installation (no admin required)
 

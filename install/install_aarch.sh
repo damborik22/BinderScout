@@ -60,8 +60,11 @@ RESET='\033[0m'
 # ─── Defaults ─────────────────────────────────────────────────────────────────
 SKIP_EXAMPLES=false
 AUTO_YES=false
+SKIP_PREFLIGHT=false
+FORCE=false      # --force: allow --yes to accept DESTRUCTIVE prompts (reclone / env re-create)
 UNINSTALL_MODE=false
-TOOL_SPECIFIED=false   # set to true when --tool is passed on CLI
+TOOL_SPECIFIED=false
+TOOL_ALL=false         # --tool all was given; uninstall widens this to every optional add-on   # set to true when --tool is passed on CLI
 STANDALONE="auto"      # auto | true | false — controls local Miniforge install
 
 # Per-tool install flags (set by arg parsing or interactive menu)
@@ -83,6 +86,7 @@ while [[ $# -gt 0 ]]; do
             TOOL_SPECIFIED=true
             case "${2,,}" in
                 all)
+                    TOOL_ALL=true
                     # ESMFold2 is the DEFAULT refold engine, so `all` must include it —
                     # otherwise evaluate.sh skips it and consensus_iptm is built from
                     # fewer engines than the two-stage ranking assumes.
@@ -136,6 +140,14 @@ while [[ $# -gt 0 ]]; do
             AUTO_YES=true
             shift
             ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
+        --skip-preflight)
+            SKIP_PREFLIGHT=true
+            shift
+            ;;
         --standalone)
             STANDALONE=true
             shift
@@ -150,7 +162,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--tool TOOL] [--tools-dir PATH] [--cuda VERSION] [--skip-examples] [--yes]
+Usage: $0 [--tool TOOL] [--tools-dir PATH] [--cuda VERSION] [--skip-examples] [--yes] [--force]
        $0 --uninstall --tool <tool|all> [--yes]
 
 DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstream on first install.
@@ -178,7 +190,15 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
   --cuda        CUDA version (default: 13.0). Only 13.0 has been tested on DGX Spark (GB10).
   --skip-examples
                 Do not prompt to run bundled examples after install.
-  --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
+  --yes, -y     Auto-confirm SAFE prompts (proceed?, run the example?) — for
+                non-interactive / CI runs. Destructive prompts (re-clone a tool
+                repo, re-create a conda env, remove the local Miniforge3) are
+                auto-answered NO, so a repeat install keeps existing files and
+                downloaded weights. Pair with --force to replace them.
+  --skip-preflight  Skip the disk/GPU/network checks run before downloading.
+  --force       Let --yes accept the destructive prompts too. Re-clones tool
+                repos and re-creates conda envs, DELETING what is there —
+                including BindCraft/params/*.npz (~4 GB of AF2 weights).
   --standalone  Force local Miniforge3 install into BindMaster/conda/ (server-friendly).
                 All envs and shortcuts stay inside the project directory.
   --system-conda
@@ -285,14 +305,10 @@ run_logged() {
     return ${rc}
 }
 
-# confirm <prompt>
-# Returns 0 (yes) or 1 (no).
-confirm() {
+# _confirm_interactive <prompt>
+# The shared read loop. Default (bare Enter) is NO for every prompt in this script.
+_confirm_interactive() {
     local prompt="${1:-Are you sure?}"
-    if [[ "${AUTO_YES}" == true ]]; then
-        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}y (auto-yes)"
-        return 0
-    fi
     while true; do
         read -rp "$(echo -e "${YELLOW}${prompt} [y/N]: ${RESET}")" answer
         case "${answer,,}" in
@@ -301,6 +317,38 @@ confirm() {
             *) echo "Please answer y or n." ;;
         esac
     done
+}
+
+# confirm <prompt>
+# For SAFE prompts (proceed?, run the example?). --yes auto-accepts.
+# Returns 0 (yes) or 1 (no).
+confirm() {
+    local prompt="${1:-Are you sure?}"
+    if [[ "${AUTO_YES}" == true ]]; then
+        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}y (auto-yes)"
+        return 0
+    fi
+    _confirm_interactive "$prompt"
+}
+
+# confirm_destructive <prompt>
+# For prompts that DELETE existing work (re-clone a tool repo, re-create a conda env,
+# remove the local Miniforge3). --yes must NOT accept these: `--tool all --yes` is both
+# the documented non-interactive install AND the documented repair step, so auto-yes
+# turned a repeat run into `rm -rf BindCraft/` — including params/*.npz, ~4 GB of AF2
+# weights that Proteina-Complexa symlinks against. It also inverted the prompt's own
+# displayed default of [y/N]. --force opts in explicitly.
+confirm_destructive() {
+    local prompt="${1:-Are you sure?}"
+    if [[ "${FORCE}" == true ]]; then
+        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}y (--force)"
+        return 0
+    fi
+    if [[ "${AUTO_YES}" == true ]]; then
+        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}n (auto-yes keeps existing files; use --force to replace)"
+        return 1
+    fi
+    _confirm_interactive "$prompt"
 }
 
 # smoke_test <label> <command...>
@@ -824,7 +872,7 @@ install_bindcraft() {
     print_step "Cloning BindCraft repository"
     if [[ -d "${BINDCRAFT_DIR}" ]]; then
         print_warn "Directory ${BINDCRAFT_DIR} already exists."
-        if confirm "Remove and reclone?"; then
+        if confirm_destructive "Remove and reclone?"; then
             rm -rf "${BINDCRAFT_DIR}" || { print_fail "Failed to remove ${BINDCRAFT_DIR}"; return 1; }
         else
             print_warn "Skipping reclone; using existing directory."
@@ -867,7 +915,7 @@ install_bindcraft() {
 
     if env_exists BindCraft; then
         print_warn "Conda environment 'BindCraft' already exists."
-        if confirm "Remove and recreate the BindCraft conda environment?"; then
+        if confirm_destructive "Remove and recreate the BindCraft conda environment?"; then
             run_logged "Removing BindCraft conda env" \
                 "${CONDA_CMD}" env remove -n BindCraft -y || return 1
         else
@@ -1054,7 +1102,7 @@ install_boltzgen() {
     print_step "Cloning BoltzGen repository"
     if [[ -d "${BOLTZGEN_DIR}" ]]; then
         print_warn "Directory ${BOLTZGEN_DIR} already exists."
-        if confirm "Remove and reclone?"; then
+        if confirm_destructive "Remove and reclone?"; then
             rm -rf "${BOLTZGEN_DIR}" || { print_fail "Failed to remove ${BOLTZGEN_DIR}"; return 1; }
         else
             print_warn "Skipping reclone; using existing directory."
@@ -1073,7 +1121,7 @@ install_boltzgen() {
 
     if env_exists BoltzGen; then
         print_warn "Conda environment 'BoltzGen' already exists."
-        if confirm "Remove and recreate the BoltzGen conda environment?"; then
+        if confirm_destructive "Remove and recreate the BoltzGen conda environment?"; then
             run_logged "Removing BoltzGen conda env" \
                 "${CONDA_CMD}" env remove -n BoltzGen -y || return 1
         else
@@ -1219,7 +1267,7 @@ install_mosaic() {
     print_step "Cloning Mosaic repository"
     if [[ -d "${MOSAIC_DIR}" ]]; then
         print_warn "Directory ${MOSAIC_DIR} already exists."
-        if confirm "Remove and reclone?"; then
+        if confirm_destructive "Remove and reclone?"; then
             rm -rf "${MOSAIC_DIR}" || { print_fail "Failed to remove ${MOSAIC_DIR}"; return 1; }
         else
             print_warn "Skipping reclone; using existing directory."
@@ -1444,11 +1492,27 @@ install_pxdesign() {
     fi
 
     # Create conda env (gcc needed for Triton JIT compilation used by deepspeed)
+    #
+    # env_exists guard so a re-run after a mid-install network failure resumes rather
+    # than aborting here — every remaining step in this function is network-bound.
+    # Mirrors install.sh. Use --force to rebuild from scratch.
     print_step "Creating bindmaster_pxdesign conda environment"
-    run_logged "Creating bindmaster_pxdesign env" \
-        "${CONDA_CMD}" create -n bindmaster_pxdesign -y python=3.11 \
-            gcc_linux-aarch64 gxx_linux-aarch64 -c conda-forge \
-        || { print_fail "Failed to create bindmaster_pxdesign env"; return 1; }
+    if env_exists bindmaster_pxdesign; then
+        if [[ "${FORCE}" == true ]]; then
+            run_logged "Removing existing bindmaster_pxdesign env (--force)" \
+                "${CONDA_CMD}" env remove -n bindmaster_pxdesign -y \
+                || { print_fail "Failed to remove bindmaster_pxdesign env"; return 1; }
+        else
+            print_warn "Conda environment 'bindmaster_pxdesign' already exists — reusing it."
+            print_warn "  The remaining steps are idempotent; pass --force to rebuild from scratch."
+        fi
+    fi
+    if ! env_exists bindmaster_pxdesign; then
+        run_logged "Creating bindmaster_pxdesign env" \
+            "${CONDA_CMD}" create -n bindmaster_pxdesign -y python=3.11 \
+                gcc_linux-aarch64 gxx_linux-aarch64 -c conda-forge \
+            || { print_fail "Failed to create bindmaster_pxdesign env"; return 1; }
+    fi
 
     # aarch64: install PyTorch from PyPI with cu130 index (no conda pytorch-cuda for aarch64)
     run_logged "Installing PyTorch (aarch64, CUDA 13.0)" \
@@ -1964,6 +2028,9 @@ uninstall_tool() {
                 "${CONDA_CMD}" env remove -n bindmaster_pxdesign -y
             rm -f "${SHORTCUTS_DIR}/pxdesign"
             [[ -d "${PXDESIGN_DIR}" ]] && { rm -rf "${PXDESIGN_DIR}"; print_ok "Removed ${PXDESIGN_DIR}"; }
+            # CUTLASS v3.5.1 headers (~150 MB) cloned by install_pxdesign for the
+            # DS4Sci EvoformerAttention JIT — nothing else uses them.
+            [[ -d "${HOME}/cutlass" ]] && { rm -rf "${HOME}/cutlass"; print_ok "Removed ${HOME}/cutlass"; }
             print_ok "PXDesign uninstalled"
             ;;
         rfd3|foundry)
@@ -2255,6 +2322,61 @@ SOLUPROTEOF
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
+# preflight
+# Cheap sanity checks BEFORE the installer starts downloading tens of GB. Without
+# this, a host with too little free space failed an hour in with an opaque tar/pip
+# error deep inside install.log, leaving half-built envs behind. Advisory by
+# default for GPU/network (an install can legitimately precede the driver, or run
+# behind a proxy); only disk space aborts, and --skip-preflight bypasses all of it.
+preflight() {
+    [[ "${SKIP_PREFLIGHT}" == true ]] && return 0
+    print_step "Preflight checks"
+
+    # Rough per-tool download+install footprints, GB. Deliberate over-estimates.
+    local need=0
+    [[ "${DO_BINDCRAFT}" == true ]]         && need=$(( need + 8 ))   # AF2 params ~4 GB + env
+    [[ "${DO_BOLTZGEN}"  == true ]]         && need=$(( need + 10 ))  # Boltz-1 weights ~6 GB + env
+    [[ "${DO_MOSAIC}"    == true ]]         && need=$(( need + 8 ))   # JAX/CUDA venv + Boltz-2 cache
+    [[ "${DO_EVALUATOR}" == true ]]         && need=$(( need + 2 ))
+    [[ "${DO_PXDESIGN}"  == true ]]         && need=$(( need + 12 ))  # torch + CUTLASS + weights
+    [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && need=$(( need + 8 ))
+    [[ "${DO_PROTEIN_HUNTER}" == true ]]    && need=$(( need + 8 ))   # vendored Boltz-2 + Chai-1
+    [[ "${DO_RFD3}"      == true ]]         && need=$(( need + 6 ))   # rfd3_latest.ckpt ~2.5 GB
+    [[ "${DO_AF3}"       == true ]]         && need=$(( need + 6 ))
+    [[ "${DO_ESMFOLD2}"  == true ]]         && need=$(( need + 6 ))
+    [[ "${DO_SOLUPROT}"  == true ]]         && need=$(( need + 2 ))
+    [[ "${CONDA_BASE}" == "${LOCAL_CONDA_DIR}" ]] && need=$(( need + 1 ))
+
+    local avail
+    avail="$(df -BG --output=avail "${BINDMASTER_DIR}" 2>/dev/null | tail -1 | tr -dc '0-9')"
+    if [[ -z "${avail}" ]]; then
+        print_warn "Could not determine free space on ${BINDMASTER_DIR} — skipping the disk check."
+    elif (( avail < need )); then
+        print_fail "Not enough free space: ${avail} GB available, ~${need} GB needed for the selected tools."
+        print_warn "  Free some space, install fewer tools, or re-run with --skip-preflight to override."
+        return 1
+    else
+        print_ok "Disk: ${avail} GB free, ~${need} GB needed"
+    fi
+
+    if command -v nvidia-smi &>/dev/null; then
+        local _gpu
+        _gpu="$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1)"
+        [[ -n "${_gpu}" ]] && print_ok "GPU: ${_gpu}" || print_warn "nvidia-smi present but reported no GPU."
+    else
+        print_warn "nvidia-smi not found — install will proceed, but the tools need an NVIDIA GPU to run."
+    fi
+
+    if command -v curl &>/dev/null; then
+        if curl -fsS --max-time 10 -o /dev/null https://pypi.org/simple/ 2>/dev/null; then
+            print_ok "Network: pypi.org reachable"
+        else
+            print_warn "Could not reach pypi.org in 10 s — downloads may fail (proxy? offline?)."
+        fi
+    fi
+    return 0
+}
+
 main() {
     echo ""
     echo -e "${BOLD}=== BindMaster Installer — DGX Spark (aarch64) — $(date) ===${RESET}"
@@ -2280,6 +2402,12 @@ main() {
         select_tools_interactive
     fi
 
+    # Preflight runs after tool selection (so the disk estimate matches the choice)
+    # and before any download. Uninstall skips it — it frees space, not consumes it.
+    if [[ "${UNINSTALL_MODE}" != true ]]; then
+        preflight || exit 1
+    fi
+
     # ── Uninstall mode ───────────────────────────────────────────────────────
     if [[ "${UNINSTALL_MODE}" == true ]]; then
         echo ""
@@ -2287,6 +2415,16 @@ main() {
         echo -e "This removes conda envs, venvs, and shortcuts."
         echo -e "User data (runs/, configs, logs) is ${GREEN}preserved${RESET}."
         confirm "Proceed with uninstall?" || { echo "Aborted."; exit 0; }
+
+        # `--tool all` means "everything installed" when uninstalling. The install-side
+        # `all` deliberately omits AF3 (gated weights) and SoluProt (opt-in screen), so
+        # without this their envs — plus alphafold3/ and Evaluator/tools/soluprot —
+        # survived an "uninstall everything" and the script still said it was complete.
+        if [[ "${TOOL_ALL}" == true ]]; then
+            DO_AF3=true
+            DO_ESMFOLD2=true
+            DO_SOLUPROT=true
+        fi
 
         local failed_uninstalls=()
         [[ "${DO_BINDCRAFT}" == true ]] && { uninstall_tool bindcraft  || failed_uninstalls+=("BindCraft"); }
@@ -2302,7 +2440,7 @@ main() {
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
               "${DO_MOSAIC}" == true && "${DO_EVALUATOR}" == true ]]; then
             if [[ -d "${LOCAL_CONDA_DIR}" ]]; then
-                if confirm "Also remove local Miniforge3 installation (${LOCAL_CONDA_DIR})?"; then
+                if confirm_destructive "Also remove local Miniforge3 installation (${LOCAL_CONDA_DIR})?"; then
                     rm -rf "${LOCAL_CONDA_DIR}"
                     print_ok "Removed local Miniforge3"
                 fi
@@ -2315,6 +2453,20 @@ main() {
         else
             print_fail "Failed to uninstall: ${failed_uninstalls[*]}"
         fi
+
+        # Be explicit about what is still on disk. "Uninstall complete." used to be
+        # printed while multi-GB artefacts remained, so a user reclaiming space had no
+        # idea where it went. These are NOT removed automatically: runs/ is the user's
+        # data, and editing ~/.bashrc on their behalf is not ours to do.
+        echo ""
+        print_warn "Left in place (remove by hand if you want the space back):"
+        [[ -d "${BINDMASTER_DIR}/runs" ]] && print_warn "  ${BINDMASTER_DIR}/runs/        — your run directories and results"
+        [[ -f "${LOG_FILE}" ]] && print_warn "  ${LOG_FILE}"
+        [[ -d "${HOME}/.boltz" ]] && print_warn "  ${HOME}/.boltz/                — Boltz-2 weight cache (~4.5 GB)"
+        [[ -d "${HOME}/.cache/bindmaster" ]] && print_warn "  ${HOME}/.cache/bindmaster/     — shared target-MSA cache"
+        [[ -d "${HOME}/.cache/huggingface" ]] && print_warn "  ${HOME}/.cache/huggingface/    — ESMFold2 weights (shared with other tools)"
+        grep -q "${SHORTCUTS_DIR}" "${HOME}/.bashrc" 2>/dev/null && \
+            print_warn "  the PATH line for ${SHORTCUTS_DIR} in ~/.bashrc"
         [[ ${#failed_uninstalls[@]} -gt 0 ]] && exit 1 || exit 0
     fi
 
