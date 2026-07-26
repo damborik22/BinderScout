@@ -15,9 +15,9 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 | Component | What it does | Runs in |
 |---|---|---|
-| `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the default refold engine ESMFold2; AF3 / Protenix / SoluProt are separate `--tool` adds | bash |
+| `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the default refold engine ESMFold2; AF3 / SoluProt are separate `--tool` adds | bash |
 | `bindmaster configure` | Interactive wizard: target → configs → run scripts | system Python |
-| `bindmaster evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2 (+ optional Protenix), rank by two-stage cross-engine iPTM, generate HTML report | conda env `binder-eval` |
+| `bindmaster evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by two-stage cross-engine iPTM, generate HTML report | conda env `binder-eval` |
 
 ### Installed tools
 
@@ -35,14 +35,13 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 ### Evaluator engines & filters
 
-The evaluator (`bindmaster evaluate` / `binder-compare`) runs on top of the design tools. Boltz-2 rides the Mosaic venv; ESMFold2 has its own env and is installed by default; AF3 is the canonical big-VRAM cross-check (separate install — gated weights); Protenix is the **only optional** refold engine. `evaluate.sh` auto-detects and runs whichever engine envs are present (`--skip-<engine>` to disable). SoluProt is a sequence-only solubility screen that runs **before** refolding so unsoluble designs can be dropped from the FASTA without burning GPU time.
+The evaluator (`bindmaster evaluate` / `binder-compare`) runs on top of the design tools. Boltz-2 rides the Mosaic venv; ESMFold2 has its own env and is installed by default; AF3 is the canonical big-VRAM cross-check (separate install — gated weights). `evaluate.sh` auto-detects and runs whichever engine envs are present (`--skip-<engine>` to disable). SoluProt is a sequence-only solubility screen that runs **before** refolding so unsoluble designs can be dropped from the FASTA without burning GPU time.
 
 | Engine / filter | Role | Environment | Platform | Install |
 |---|---|---|---|---|
 | **Boltz-2** | Primary refold engine; ranking reference | `Mosaic/.venv` (rides Mosaic install) | x86_64 + aarch64 | default (with Mosaic) |
 | **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.10) | x86_64 + aarch64 | default (in `--tool all`) |
 | **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion on big-VRAM hosts | conda env `binder-eval-af3` (Python 3.10, gated weights) | x86_64 + aarch64; needs ≥100 GB GPU memory | `--tool af3` (gated weights) |
-| **Protenix v0.5.0** | **Optional** extra refold engine; ByteDance AF3 re-impl | `bindmaster_pxdesign` (rides PXDesign install) | x86_64 + aarch64 | optional (`--tool pxdesign`) |
 | **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64 (aarch64 source-builds scikit-learn 0.20.4 + USEARCH v12 and uses the `--no_tmhmm` model — see [docs/PLAN_soluprot_integration.md](docs/PLAN_soluprot_integration.md)) | `--tool soluprot` |
 
 ### Architecture
@@ -70,7 +69,6 @@ flowchart LR
 
     subgraph Refold["Refolding engines (evaluator domain — independent cross-validation)"]
         Boltz2["Boltz-2\n(Mosaic venv;\nprimary engine)"]
-        Protenix["Protenix v0.5.0\n(bindmaster_pxdesign;\nfits 24 GB GPU)"]
         AF3["AF3 v3.0.2\n(binder-eval-af3;\nneeds ≥100 GB GPU)"]
         ESMFold2["ESMFold2\n(binder-eval-esmfold2;\nlightweight, no gated weights)"]
     end
@@ -83,16 +81,14 @@ flowchart LR
     Extract -->|FASTA of binders| SoluProt
     SoluProt -->|"filtered FASTA — only with --soluprot-filter"| Drop
     SoluProt -->|FASTA + soluprot_results.csv| Boltz2
-    SoluProt --> Protenix
     SoluProt --> AF3
     SoluProt --> ESMFold2
     Boltz2 --> Report
-    Protenix --> Report
     AF3 --> Report
     ESMFold2 --> Report
 ```
 
-Three of the four refolding engines are opt-in (Protenix auto-detects from a PXDesign install; AF3 and ESMFold2 are explicit `--tool` flags). SoluProt is fully opt-in and acts as a filter, never as a re-ranker — its `soluprot_score` and `soluprot_passes` columns show up in `metrics.csv` alongside the refold scores so users can sort on them if they want.
+AF3 and ESMFold2 are explicit `--tool` installs; all three engines are then auto-detected by `evaluate.sh` from their conda envs. SoluProt is fully opt-in and acts as a filter, never as a re-ranker — its `soluprot_score` and `soluprot_passes` columns show up in `metrics.csv` alongside the refold scores so users can sort on them if they want.
 
 ### Components at a glance
 
@@ -128,7 +124,7 @@ flowchart TB
     end
 
     subgraph Artifacts["Per-run artifacts"]
-        Runs["runs/&lt;name&gt;/\n├── target/\n├── &lt;tool&gt;/        # one per enabled tool\n│   └── settings.json\n├── evaluate/\n│   ├── sequences.fasta\n│   ├── sequences_native_metrics.csv\n│   ├── boltz2_results.csv\n│   ├── protenix_results.csv      (opt)\n│   ├── af3_results.csv           (opt)\n│   ├── esmfold2_results.csv      (opt)\n│   ├── soluprot_results.csv      (opt)\n│   └── report/\n│       ├── metrics.csv\n│       ├── top20_candidates.csv\n│       ├── top20_structures/\n│       └── report.html\n├── run_&lt;tool&gt;.sh\n├── run_evaluate.sh\n└── run_all.sh"]:::arti
+        Runs["runs/&lt;name&gt;/\n├── target/\n├── &lt;tool&gt;/        # one per enabled tool\n│   └── settings.json\n├── evaluate/\n│   ├── sequences.fasta\n│   ├── sequences_native_metrics.csv\n│   ├── boltz2_results.csv\n│   ├── af3_results.csv           (opt)\n│   ├── esmfold2_results.csv      (opt)\n│   ├── soluprot_results.csv      (opt)\n│   └── report/\n│       ├── metrics.csv\n│       ├── top20_candidates.csv\n│       ├── top20_structures/\n│       └── report.html\n├── run_&lt;tool&gt;.sh\n├── run_evaluate.sh\n└── run_all.sh"]:::arti
     end
 
     InstallSh -->|creates| GenEnvs
@@ -158,7 +154,7 @@ BindMaster/
 │   └── evaluator.py            ← retired single-file evaluator (evaluate now → binder-compare)
 ├── Evaluator/                  ← bundled full evaluation pipeline package
 │   ├── binder_comparison/      ← core Python package (extractors, refolding, scoring)
-│   ├── scripts/                ← standalone refold scripts (refold_boltz2.py, refold_protenix.py)
+│   ├── scripts/                ← standalone refold scripts (refold_boltz2.py, refold_af3.py, refold_esmfold2.py)
 │   ├── docs/                   ← pipeline reference, analysis notes
 │   └── envs/                   ← conda env specs (binder-eval, binder-eval-af3 [needs ≥100 GB GPU memory])
 ├── .claude/
@@ -300,7 +296,7 @@ cross-ranks all designs by a configurable metric, and writes a summary.
 
 Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). The **default ranking is two-stage**: stage 1 screens by `consensus_iptm` (max engine iPTM) keeping the top 50%, stage 2 ranks survivors by the mean engine iPTM (`binder-compare report --rank-by two_stage`). `ipsae_min` (DunbrackLab 2025 formula) and `agreement_count` remain as secondary/diagnostic columns. AF3 and ESMFold2 produce token-order PAE which the evaluator transposes to match Boltz-2's `[binder|target]` order.
 
-> Canonical evaluation = Boltz-2 + AF3 + ESMFold2. Protenix v0.5.0 (`binder-compare refold-protenix`) is the **only optional** refold engine — enable it explicitly via `evaluate.sh` if you want the extra signal.
+> Evaluation = Boltz-2 + AF3 + ESMFold2, exactly three independent engines. Each is auto-detected from its conda env and can be skipped with `--skip-<engine>`.
 
 #### Usage — `bindmaster evaluate` forwards to `binder-compare`
 
@@ -543,11 +539,6 @@ Finding IDs refer to that document.
 - **Mosaic hotspots resolve against chain A (F2).** The epitope-index helper reads
   `cfg["target_chain"]` / `cfg["chain"]`, neither of which the wizard sets, so it always
   falls back to `"A"`.
-- **Protenix refolding is opt-out, not opt-in (F4).** `evaluate.sh` runs it whenever the
-  `bindmaster_pxdesign` env exists, and `protenix_pae_iptm` then enters
-  `consensus_iptm` / `consensus_iptm_mean`. This README's engine table is correct; the
-  `CLAUDE.md` claim that it "runs only when explicitly enabled" is not. Pass
-  `--skip-protenix` for a Boltz-2 + AF3 + ESMFold2 ranking.
 - **Designs refolded by only one engine are ranked against 3-engine designs (F5).**
   `consensus_iptm_mean` skips missing engines, and the two-stage sort does not gate on
   `consensus_iptm_n`. Check that column before trusting a top-ranked design.
@@ -561,8 +552,8 @@ Finding IDs refer to that document.
   documented in this README and `CLAUDE.md`; ignore the report's own methodology text
   until it is regenerated from `--screen-metric`.
 - **AF3's per-engine ipSAE is missing from `top30_candidates.csv` (F33).** The shortlist
-  reads `af3_pae_ipsae_min` / `protenix_pae_ipsae_min`, but the writer emits
-  `af3_ipsae_min` / `protenix_ipsae_min`, so those columns are silently absent. Read them
+  reads `af3_pae_ipsae_min`, but the writer emits `af3_ipsae_min`, so that column is
+  silently absent. Read it
   from `metrics.csv` under the correct names.
 - **`wetlab_recommended` is always `False` on a single-engine install (F34).** The gate
   requires `agreement_count >= 2`, which is unreachable when only Boltz-2 is present.
