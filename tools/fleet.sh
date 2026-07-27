@@ -15,6 +15,13 @@ die()  { printf '%s%s%s\n' "$RED"    "$*" "$RESET" >&2; exit 1; }
 warn() { printf '%s%s%s\n' "$YELLOW" "$*" "$RESET" >&2; }
 ok()   { printf '%s%s%s\n' "$GREEN"  "$*" "$RESET"; }
 
+# Escape a value for safe embedding inside a single-quoted argument of a
+# remote-shell command string: close the quote, emit an escaped literal
+# quote, reopen the quote. Without this, a job name or dir containing a
+# single quote could break out of the '...' wrapper used below and inject
+# arbitrary commands into the remote ssh session.
+sq() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
+
 # Emit 10 newline-separated raw fields describing a remote machine:
 # host, arch, gpu, gpu_procs, ram_gb, disk_free, envs, git_sha, git_branch, tmux.
 # Raw values (not JSON) so the caller can assemble JSON with `jq --arg`, which
@@ -98,12 +105,47 @@ cmd_status() {
     printf 'inventory generated: %s\n' "$(jq -r .generated "$INVENTORY")"
 }
 
+cmd_launch() {
+    [ $# -eq 4 ] || die "usage: fleet.sh launch <machine> <job> <remote-dir> <script>"
+    local m=$1 job=$2 rundir=$3 script=$4
+    [ -f "$script" ] || die "no such script: $script"
+    case " ${FLEET_MACHINES[*]} " in *" $m "*) ;; *) die "unknown machine: $m" ;; esac
+
+    # job/rundir are attacker-shaped values (caller-supplied strings) that get
+    # embedded in single-quoted remote-shell arguments below; sq() escapes them.
+    local qjob qdir
+    qjob=$(sq "$job")
+    qdir=$(sq "$rundir")
+
+    # Admission check 1 — job-name collision (deterministic).
+    if ssh "$m" "tmux has-session -t '$qjob'" 2>/dev/null; then
+        die "$m: tmux session '$job' already exists — refusing"
+    fi
+
+    # Admission check 2 — GPU occupancy, ignoring sub-threshold desktop processes.
+    local busy
+    busy=$(ssh "$m" "nvidia-smi --query-compute-apps=pid,used_memory \
+        --format=csv,noheader,nounits 2>/dev/null | awk -F', *' '\$2+0 > $GPU_BUSY_MIB'")
+    if [ -n "$busy" ] && [ "${FLEET_FORCE:-0}" != 1 ]; then
+        die "$m: GPU busy (pid, MiB): $busy — refusing. FLEET_FORCE=1 overrides."
+    fi
+    [ -z "$busy" ] || warn "$m: GPU busy but FLEET_FORCE=1 — launching anyway"
+
+    ssh "$m" "mkdir -p '$qdir'"
+    scp -q "$script" "$m:$rundir/run.sh"
+    ssh "$m" "cd '$qdir' && tmux new-session -d -s '$qjob' \
+        'export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True; \
+         bash run.sh > run.log 2>&1'"
+    ok "$m: launched '$job' in $rundir (tmux attach -t $job to watch)"
+}
+
 usage() {
     cat <<'USAGE'
 usage: fleet.sh <command> [args]
 
   probe                                   refresh ~/.claude/fleet/inventory.json
   status                                  fleet + Clara state (uses cached inventory)
+  launch <machine> <job> <remote-dir> <script>   tmux-launch a run script
 USAGE
     exit 1
 }
@@ -111,5 +153,6 @@ USAGE
 case "${1:-}" in
     probe)  shift; cmd_probe "$@" ;;
     status) shift; cmd_status "$@" ;;
+    launch) shift; cmd_launch "$@" ;;
     *)      usage ;;
 esac
