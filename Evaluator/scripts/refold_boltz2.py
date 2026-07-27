@@ -27,6 +27,33 @@ _interrupt_state = {
     "checkpoint_path": None,
 }
 
+# --- shared target MSA: pre-warm + enforce (F21) -----------------------------
+# The target MSA is fetched ONCE per target into the shared on-disk cache, so
+# every engine folds the target with the same evolutionary context.  An engine
+# that quietly ran single-sequence is systematically penalised (the MSA drives
+# target fold confidence and iPTM is an interface metric over both chains), so
+# it drags consensus_iptm_mean down and can demote a good design invisibly.
+# Default: abort.  Explicit opt-out: --allow-no-msa / BINDMASTER_ALLOW_NO_MSA=1.
+try:
+    from binder_comparison.refolding.target_msa import MissingTargetMSA, prepare_target_msa
+except Exception as _exc:  # binder_comparison unavailable in this env
+    _MSA_IMPORT_ERROR = _exc
+
+    class MissingTargetMSA(RuntimeError):
+        pass
+
+    def prepare_target_msa(target_seq, *, engine, cache_dir=None, out_dir=None, use_msa=True, allow_no_msa=False):
+        if use_msa and not (allow_no_msa or os.environ.get("BINDMASTER_ALLOW_NO_MSA", "").lower() in ("1", "true")):
+            raise MissingTargetMSA(
+                f"[{engine}] ABORTING: cannot reach the shared target-MSA cache — "
+                f"binder_comparison is not importable here ({_MSA_IMPORT_ERROR}). "
+                f"Install it in this environment (pip install -e Evaluator --no-deps), or re-run with "
+                f"--allow-no-msa (BINDMASTER_ALLOW_NO_MSA=1) to fold single-sequence with scores that are "
+                f"NOT comparable to engines that used an MSA."
+            )
+        print(f"[{engine}] WARNING: no target MSA — scores not comparable to MSA-using engines", flush=True)
+        return "", "single_sequence"
+
 
 # ============================
 # HELPER FUNCTIONS
@@ -238,6 +265,9 @@ def refold_batch(
     recycling_steps: int = 3,
     checkpoint_path: str | None = None,
     skip_indices: set[int] | None = None,
+    use_msa: bool = True,
+    msa_cache_dir: str | None = None,
+    allow_no_msa: bool = False,
 ):
     """Refold a batch of binder sequences against a target.
 
@@ -254,6 +284,11 @@ def refold_batch(
         recycling_steps: Number of recycling steps (default: 3).
         skip_indices:    Set of 1-based binder indices to skip (already completed).
                          When resuming, pass indices read from existing CSV.
+        use_msa:         False = the operator explicitly asked for single-sequence
+                         mode; no abort, the state is recorded.
+        msa_cache_dir:   Override the shared target-MSA cache directory.
+        allow_no_msa:    True = proceed without a target MSA if it cannot be
+                         obtained (air-gapped node).  Default is to abort.
     """
     if skip_indices is None:
         skip_indices = set()
@@ -274,25 +309,37 @@ def refold_batch(
         n_res = sum(1 for _ in target_template_chain)
         print(f"Target template: {target_pdb} ({n_res} residues, force=True)")
 
-    # Resolve a cached target MSA (offline-safe — never triggers an online fetch).
-    # If present, the target is folded WITH its MSA even on no-internet compute
-    # nodes; otherwise we fall back to single-sequence (template) / online co-fold.
+    # Pre-warm the shared target MSA: fetched ONCE per target, then a disk hit
+    # for every engine and every later run.  Aborts unless the operator opted
+    # out (--allow-no-msa / --no-msa) — an engine that quietly folds the target
+    # single-sequence while the others used an MSA is systematically penalised
+    # and silently drags consensus_iptm_mean down.
     target_msa_path = None
-    try:
-        from binder_comparison.refolding.target_msa import target_msa_cache_path
+    a3m, _msa_mode = prepare_target_msa(
+        target_sequence,
+        engine="boltz2",
+        cache_dir=msa_cache_dir,
+        out_dir=output_dir,
+        use_msa=use_msa,
+        allow_no_msa=allow_no_msa,
+    )
+    if a3m:
+        # Boltz needs the a3m as a *file*; the pre-warm guarantees it is cached.
+        try:
+            from binder_comparison.refolding.target_msa import target_msa_cache_path
 
-        _cached = target_msa_cache_path(target_sequence)
-        if _cached is not None:
-            target_msa_path = str(_cached)
-            print(f"Target MSA (cached): {target_msa_path}")
-        else:
-            print(
-                "Target MSA: none cached — using single-sequence/template"
-                if target_template_chain
-                else "Target MSA: none cached — online co-fold"
-            )
-    except Exception as e:  # MSA is best-effort; never block the refold
-        print(f"Target MSA lookup skipped ({e})")
+            _cached = target_msa_cache_path(target_sequence, cache_dir=msa_cache_dir)
+            if _cached is not None:
+                target_msa_path = str(_cached)
+                print(f"Target MSA (cached): {target_msa_path}")
+        except Exception as e:  # path lookup only; the MSA itself is already in hand
+            print(f"Target MSA path lookup skipped ({e})")
+    if target_msa_path is None:
+        print(
+            "Target MSA: none — using single-sequence/template"
+            if target_template_chain
+            else "Target MSA: none — online co-fold"
+        )
 
     folder = Boltz2()
 
@@ -449,7 +496,9 @@ def refold_batch(
                         # fetches online; template mode goes single-sequence (the
                         # template already fixes the backbone) when no MSA is cached.
                         sequence=target_sequence,
-                        use_msa=target_template_chain is None,
+                        # use_msa=False here honours an explicit --no-msa: without it
+                        # Boltz would still co-fold an online MSA behind the operator.
+                        use_msa=use_msa and target_template_chain is None,
                         template_chain=target_template_chain,
                         msa_path=target_msa_path,
                     ),
@@ -691,6 +740,14 @@ def main():
         "--output-dir", default=OUTPUT_DIR, metavar="DIR", help=f"Output directory (default: {OUTPUT_DIR})"
     )
     parser.add_argument("--resume", action="store_true", help="Skip binders already present in existing CSV")
+    parser.add_argument("--no-msa", action="store_true", help="Disable target MSA (single-sequence mode)")
+    parser.add_argument(
+        "--allow-no-msa",
+        action="store_true",
+        help="Proceed single-sequence if the shared target MSA cannot be obtained (air-gapped nodes). "
+        "Default is to abort — scores from an MSA-less engine are not comparable to the others.",
+    )
+    parser.add_argument("--msa-cache-dir", default=None, help="Override MSA cache directory")
     args = parser.parse_args()
 
     print("=== Boltz2 Refolding Tool (Version 6) ===\n")
@@ -731,14 +788,21 @@ def main():
         checkpoint_path_fn=lambda: _interrupt_state["checkpoint_path"],
     )
 
-    refold_batch(
-        binder_sequences,
-        target_seq,
-        output_dir=args.output_dir,
-        target_pdb=args.target_pdb,
-        num_samples=args.num_samples,
-        recycling_steps=args.recycling_steps,
-    )
+    try:
+        refold_batch(
+            binder_sequences,
+            target_seq,
+            output_dir=args.output_dir,
+            target_pdb=args.target_pdb,
+            num_samples=args.num_samples,
+            recycling_steps=args.recycling_steps,
+            use_msa=not args.no_msa,
+            msa_cache_dir=args.msa_cache_dir,
+            allow_no_msa=args.allow_no_msa,
+        )
+    except MissingTargetMSA as exc:
+        print(f"\n{exc}", file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

@@ -3,9 +3,15 @@
 Handles two output layouts:
 
 1. **Configurator-aggregated** — `sequences.csv` produced by the BindMaster
-   run script's collector. Columns include a string ``sequence``,
-   ``self_complex_i_pTM`` / ``_i_pAE`` / ``_pLDDT``, ``self_binder_scRMSD``,
-   and (when reward models were active) ``af2_reward`` / ``rf3_reward``.
+   run script's collector. Columns include a string ``sequence`` and a
+   ``design_id``. The collector **renames** the raw evaluation metrics on the
+   way out: ``self_complex_i_pTM`` → ``iptm``, ``self_complex_pLDDT`` →
+   ``plddt_binder_mean``, ``self_complex_i_pAE`` → ``pae_bt_mean``,
+   ``self_binder_scRMSD`` → ``scrmsd_binder`` (same mapping the legacy
+   evaluator's ``_normalize_complexa_row`` applies). Both spellings are
+   accepted below — older aggregated CSVs and hand-assembled ones still carry
+   the raw ``self_*`` names, and (when reward models were active)
+   ``af2_reward`` / ``rf3_reward``.
 
 2. **NVIDIA native output** — `top_samples_search_binder_local_pipeline.csv`
    (or any ``top_samples_*.csv``). This is what the upstream Proteina-Complexa
@@ -56,18 +62,22 @@ _AATYPE_COL = "aatype"
 _RESTYPES = "ARNDCQEGHILKMFPSTWYV"
 
 # Each schema field maps to a tuple of candidate CSV column names. First match
-# wins. The legacy "self_complex_*" / "self_binder_*" / "af2_reward" /
-# "rf3_reward" columns come from configurator-aggregated CSVs; the
+# wins. The raw "self_complex_*" / "self_binder_*" / "af2_reward" /
+# "rf3_reward" names come from Proteina-Complexa's evaluation CSVs; the
 # "af2folding_*" / "total_reward" columns come from NVIDIA's native
-# top_samples_*.csv. Where the column is genuinely missing in a variant, the
-# field stays None — same behavior as the other extractors.
+# top_samples_*.csv; the generic "iptm" / "plddt_binder_mean" / "pae_bt_mean" /
+# "scrmsd_binder" names are what the configurator's collector writes into the
+# aggregated sequences.csv (it renames the raw columns — see module docstring).
+# The generic names are listed LAST so a CSV carrying both keeps its raw value.
+# Where the column is genuinely missing in a variant, the field stays None —
+# same behavior as the other extractors.
 _NATIVE_COL_MAP: dict[str, tuple[str, ...]] = {
-    "complexa_self_iptm": ("self_complex_i_pTM", "af2folding_i_ptm_log"),
-    "complexa_self_ipae": ("self_complex_i_pAE", "af2folding_i_pae_log", "af2folding_i_pae"),
+    "complexa_self_iptm": ("self_complex_i_pTM", "af2folding_i_ptm_log", "iptm"),
+    "complexa_self_ipae": ("self_complex_i_pAE", "af2folding_i_pae_log", "af2folding_i_pae", "pae_bt_mean"),
     # plddt: prefer the _log column — see module docstring. The non-_log
     # variant is reward-shaped (≈ 1 - plddt) and would mis-rank designs.
-    "complexa_self_plddt": ("self_complex_pLDDT", "af2folding_plddt_log"),
-    "complexa_self_scrmsd": ("self_binder_scRMSD", "af2folding_rmsd_log", "af2folding_rmsd"),
+    "complexa_self_plddt": ("self_complex_pLDDT", "af2folding_plddt_log", "plddt_binder_mean"),
+    "complexa_self_scrmsd": ("self_binder_scRMSD", "af2folding_rmsd_log", "af2folding_rmsd", "scrmsd_binder"),
     "complexa_af2_reward": ("af2_reward", "total_reward"),
     "complexa_rf3_reward": ("rf3_reward",),
 }

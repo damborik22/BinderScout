@@ -15,15 +15,30 @@ COMPLETE, download the tar.gz, extract the .a3m.
 
 Only the *target* MSA is generated.  For de novo binders there is no
 homology and the binder MSA is left empty (single-sequence).
+
+Cache integrity: the a3m is written atomically (temp file in the same
+directory + ``os.replace``) and validated on every read, so two engines
+started together on a cold cache can never hand each other a
+half-written MSA.
+
+MSA provenance: ``get_target_msa_with_mode`` reports whether the MSA came
+from the cache, was freshly fetched, or is unavailable.  ``note_msa_mode``
+prints that fact (a warning when an engine proceeds without an MSA) and
+records it next to the refold outputs — cross-engine iPTMs are only
+comparable when every engine saw the same evolutionary context.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
+import json
 import os
 import tarfile
+import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -32,6 +47,16 @@ COLABFOLD_HOST = "https://api.colabfold.com"
 DEFAULT_MODE = "mmseqs2_uniref_env"
 DEFAULT_POLL_INTERVAL_S = 5
 DEFAULT_TIMEOUT_S = 60 * 60  # 1 h hard cap
+
+#: MSA came from the shared on-disk cache (no server call).
+MSA_MODE_CACHED = "cached"
+#: MSA was fetched from the ColabFold server this run and cached.
+MSA_MODE_FETCHED = "fetched"
+#: No MSA — the engine folds the target single-sequence.
+MSA_MODE_NONE = "single_sequence"
+
+#: Filename of the per-engine provenance record written by ``note_msa_mode``.
+MSA_MODE_FILENAME = "target_msa_mode.json"
 
 
 def get_target_msa(target_seq: str, cache_dir: str | Path | None = None) -> str:
@@ -46,20 +71,38 @@ def get_target_msa(target_seq: str, cache_dir: str | Path | None = None) -> str:
         The A3M MSA as a single string (suitable for AF3's ``unpairedMsa``
         JSON field or for parsing into ESMFold2's MSA object).
     """
+    return get_target_msa_with_mode(target_seq, cache_dir)[0]
+
+
+def get_target_msa_with_mode(target_seq: str, cache_dir: str | Path | None = None) -> tuple[str, str]:
+    """Like :func:`get_target_msa`, but also report where the MSA came from.
+
+    Returns:
+        ``(a3m, mode)`` where *mode* is :data:`MSA_MODE_CACHED` (disk hit) or
+        :data:`MSA_MODE_FETCHED` (queried the ColabFold server this call).
+        A cached file that fails validation (truncated / corrupt / not an
+        a3m) is discarded and re-fetched rather than returned.
+    """
     cache_dir = _resolve_cache_dir(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     key = _cache_key(target_seq)
     cache_file = cache_dir / f"target_{key}.a3m"
-    if cache_file.exists() and cache_file.stat().st_size > 0:
-        return cache_file.read_text()
+    cached = _read_valid_a3m(cache_file)
+    if cached is not None:
+        _warn_on_query_mismatch(cached, target_seq, str(cache_file))
+        return cached, MSA_MODE_CACHED
 
     print(f"[target-msa] cache miss for {key} — querying ColabFold MSA server (~30-60 s)")
     a3m = _query_colabfold(target_seq)
-    cache_file.write_text(a3m)
+    problem = _a3m_problem(a3m)
+    if problem is not None:
+        raise RuntimeError(f"ColabFold returned an unusable MSA for {key}: {problem}")
+    _warn_on_query_mismatch(a3m, target_seq, "ColabFold response")
+    _atomic_write_text(cache_file, a3m)
     n_seqs = a3m.count(">")
     print(f"[target-msa] cached {len(a3m)} bytes / {n_seqs} sequences → {cache_file}")
-    return a3m
+    return a3m, MSA_MODE_FETCHED
 
 
 def target_msa_cache_path(target_seq: str, cache_dir: str | Path | None = None) -> Path | None:
@@ -69,12 +112,171 @@ def target_msa_cache_path(target_seq: str, cache_dir: str | Path | None = None) 
     whether a usable cached A3M already exists.  Offline consumers (e.g. the
     Boltz-2 refold) need the a3m *file path* for the Boltz input YAML, and must
     not trigger an online fetch on a no-internet compute node.
+
+    A cached file that fails validation counts as *not cached* (None) — the
+    caller must not feed a truncated MSA to a folding engine.
     """
     cache_dir = _resolve_cache_dir(cache_dir)
     cache_file = cache_dir / f"target_{_cache_key(target_seq)}.a3m"
-    if cache_file.exists() and cache_file.stat().st_size > 0:
+    if _read_valid_a3m(cache_file) is not None:
         return cache_file
     return None
+
+
+# ---------------------------------------------------------------------------
+# MSA provenance + enforcement (F21)
+# ---------------------------------------------------------------------------
+
+
+class MissingTargetMSA(RuntimeError):
+    """A refold engine could not obtain the shared target MSA and must not run.
+
+    Refolding without an MSA is not a silent fallback: the MSA drives *target*
+    fold confidence, and iPTM is an interface metric over both chains — so an
+    engine that quietly missed the MSA is *systematically* penalised.  It drags
+    ``consensus_iptm_mean`` down and can demote a good design with nothing
+    visible in the report.  Consistency across engines is the property that
+    matters, so the default is to abort; the operator opts out explicitly.
+    """
+
+
+#: Env-var opt-out, for callers that cannot pass ``allow_no_msa`` (shared CLI).
+ALLOW_NO_MSA_ENV = "BINDMASTER_ALLOW_NO_MSA"
+
+
+def allow_no_msa_default() -> bool:
+    """True when ``$BINDMASTER_ALLOW_NO_MSA`` opts this host out of the MSA gate."""
+    return os.environ.get(ALLOW_NO_MSA_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def prepare_target_msa(
+    target_seq: str,
+    *,
+    engine: str,
+    cache_dir: str | Path | None = None,
+    out_dir: str | Path | None = None,
+    use_msa: bool = True,
+    allow_no_msa: bool = False,
+) -> tuple[str, str]:
+    """Pre-warm the shared target MSA for *engine*, or abort.
+
+    The MSA is fetched once per target and cached on disk, so the first engine
+    to call this pays the ColabFold round-trip and every later engine — in this
+    run or a later one — is a disk hit.  That is what makes the per-engine
+    iPTMs comparable.
+
+    Args:
+        target_seq:   target amino acid sequence.
+        engine:       engine name for log lines (``af3`` / ``esmfold2`` / ``boltz2``).
+        cache_dir:    override the shared MSA cache directory.
+        out_dir:      refold output directory; a ``target_msa_mode.json``
+                      provenance record is written there.
+        use_msa:      False = the operator explicitly asked for single-sequence
+                      mode (``--no-msa``); no abort, the state is recorded.
+        allow_no_msa: True = proceed without an MSA if it cannot be obtained
+                      (air-gapped nodes).  The state is recorded either way.
+
+    Returns:
+        ``(a3m, mode)`` — ``a3m`` is ``""`` when running without an MSA.
+
+    Raises:
+        MissingTargetMSA: the MSA could not be obtained and neither
+            ``allow_no_msa`` nor ``$BINDMASTER_ALLOW_NO_MSA`` was set.
+    """
+    if not use_msa:
+        note_msa_mode(engine, MSA_MODE_NONE, out_dir=out_dir, detail="explicit --no-msa (single-sequence requested)")
+        return "", MSA_MODE_NONE
+
+    try:
+        a3m, mode = get_target_msa_with_mode(target_seq, cache_dir=cache_dir)
+    except Exception as exc:
+        if not (allow_no_msa or allow_no_msa_default()):
+            raise MissingTargetMSA(no_msa_abort_message(engine, target_seq, exc, cache_dir=cache_dir)) from exc
+        note_msa_mode(engine, MSA_MODE_NONE, out_dir=out_dir, detail=f"MSA unavailable ({exc}); --allow-no-msa given")
+        return "", MSA_MODE_NONE
+
+    note_msa_mode(engine, mode, out_dir=out_dir, n_seqs=a3m.count(">"))
+    return a3m, mode
+
+
+def no_msa_abort_message(
+    engine: str,
+    target_seq: str,
+    reason: object,
+    cache_dir: str | Path | None = None,
+) -> str:
+    """The operator-facing abort text: why we stopped, and the two ways forward."""
+    cache_file = _resolve_cache_dir(cache_dir) / f"target_{_cache_key(target_seq)}.a3m"
+    return (
+        f"[{engine}] ABORTING: the shared target MSA could not be obtained ({reason}).\n"
+        f"\n"
+        f"Refolding without an MSA is not allowed by default. The MSA drives target fold\n"
+        f"confidence and iPTM is an interface metric over both chains, so an engine that\n"
+        f"silently ran single-sequence is systematically penalised: it drags\n"
+        f"consensus_iptm_mean down and can demote a good design with nothing visible in\n"
+        f"the report. Every engine must see the same evolutionary context.\n"
+        f"\n"
+        f"Do one of:\n"
+        f"  1. Pre-warm the shared cache once for this target (on any host with network):\n"
+        f"       python -m binder_comparison.refolding.target_msa --target-seq <TARGET_SEQ>\n"
+        f"     All three engines then read {cache_file} — no further server calls.\n"
+        f"     (Copy that .a3m over to run air-gapped nodes with a full MSA.)\n"
+        f"  2. If this node is air-gapped and you accept scores that are NOT comparable\n"
+        f"     to MSA-using engines, re-run with --allow-no-msa (or set\n"
+        f"     {ALLOW_NO_MSA_ENV}=1). The no-MSA state is recorded in\n"
+        f"     {MSA_MODE_FILENAME} next to the outputs."
+    )
+
+
+def note_msa_mode(
+    engine: str,
+    mode: str,
+    *,
+    out_dir: str | Path | None = None,
+    n_seqs: int | None = None,
+    detail: str | None = None,
+) -> dict:
+    """Print — and optionally record — which MSA mode *engine* ran under.
+
+    When *mode* is :data:`MSA_MODE_NONE` this prints a WARNING naming the
+    consequence: the engine's scores are not directly comparable to engines
+    that used an MSA, and ``consensus_iptm`` mixes them.
+
+    When *out_dir* is given, a ``target_msa_mode.json`` record is written
+    there so a later reader can tell a cold cache from a bad design.
+    Recording is best-effort — a failure never blocks a refold.
+    """
+    record = {
+        "engine": engine,
+        "target_msa_mode": mode,
+        "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    if n_seqs is not None:
+        record["n_sequences"] = n_seqs
+    if detail:
+        record["detail"] = detail
+
+    if mode == MSA_MODE_NONE:
+        print(
+            f"[{engine}] WARNING: no target MSA — folding the target single-sequence. "
+            f"This engine's scores are not directly comparable to engines that used an MSA "
+            f"(consensus_iptm / consensus_iptm_mean average across engines). "
+            f"Pre-warm the shared cache "
+            f"(python -m binder_comparison.refolding.target_msa --target-seq <seq>) "
+            f"so every engine sees the same evolutionary context.",
+            flush=True,
+        )
+    else:
+        suffix = f", {n_seqs} sequences" if n_seqs is not None else ""
+        extra = f" ({detail})" if detail else ""
+        print(f"[{engine}] target MSA mode: {mode}{suffix}{extra}", flush=True)
+
+    if out_dir is not None:
+        with contextlib.suppress(OSError, TypeError, ValueError):
+            path = Path(out_dir)
+            path.mkdir(parents=True, exist_ok=True)
+            (path / MSA_MODE_FILENAME).write_text(json.dumps(record, indent=2) + "\n")
+    return record
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +364,99 @@ def _sanitise_a3m(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _a3m_problem(text: str | None) -> str | None:
+    """Return a human reason why *text* is not a usable A3M, or None if it is.
+
+    ``st_size > 0`` does not validate anything — a half-written file passes it.
+    An a3m must start with a FASTA header, carry at least one sequence, and end
+    with a complete record (trailing newline, last record not a bare header).
+    """
+    if not text or not text.strip():
+        return "empty file"
+    lines = text.splitlines()
+    first = next((ln for ln in lines if ln.strip()), "")
+    if not first.startswith(">"):
+        return f"does not start with a FASTA header (first line: {first[:40]!r})"
+    if not any(ln.strip() and not ln.startswith(">") for ln in lines):
+        return "no sequence records (headers only)"
+    if not text.endswith("\n"):
+        return "truncated: file does not end with a newline"
+    last = next((ln for ln in reversed(lines) if ln.strip()), "")
+    if last.startswith(">"):
+        return "truncated: last record is a header with no sequence"
+    return None
+
+
+def _read_valid_a3m(cache_file: Path) -> str | None:
+    """Read *cache_file* and return its text, or None if missing/unusable.
+
+    An unreadable or invalid cache entry is reported and treated as a miss so
+    the caller re-fetches instead of feeding a truncated MSA to an engine.
+    """
+    try:
+        text = cache_file.read_text()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        print(f"[target-msa] WARNING: cannot read cache {cache_file} ({exc}) — re-fetching")
+        return None
+    problem = _a3m_problem(text)
+    if problem is not None:
+        print(f"[target-msa] WARNING: discarding invalid cached MSA {cache_file} ({problem}) — re-fetching")
+        return None
+    return text
+
+
+def _first_record_sequence(text: str) -> str | None:
+    """Return the first record's sequence (gaps and a3m inserts stripped)."""
+    seen_header = False
+    parts: list[str] = []
+    for line in text.splitlines():
+        if line.startswith(">"):
+            if seen_header:
+                break
+            seen_header = True
+            continue
+        if seen_header:
+            parts.append(line.strip())
+    if not parts:
+        return None
+    seq = "".join(parts)
+    return "".join(c for c in seq if c.isupper())
+
+
+def _warn_on_query_mismatch(a3m: str, target_seq: str, source: str) -> None:
+    """Warn (never reject) when the a3m query row is not the target sequence."""
+    first = _first_record_sequence(a3m)
+    if first is None or first == target_seq.upper():
+        return
+    print(
+        f"[target-msa] WARNING: {source} query row does not match the target sequence "
+        f"(msa {len(first)} aa vs target {len(target_seq)} aa) — the MSA may belong to a different target"
+    )
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write *text* to *path* atomically (temp file in the same dir + replace).
+
+    Readers only ever see the complete file: ``os.replace`` is atomic within a
+    filesystem on POSIX, so a concurrent engine either sees the old entry or
+    the new one — never a partial write.
+    """
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f"{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def _resolve_cache_dir(override: str | Path | None) -> Path:
     if override is not None:
         return Path(override)
@@ -188,6 +483,6 @@ if __name__ == "__main__":
     p.add_argument("--cache-dir", default=None, help="MSA cache directory")
     args = p.parse_args()
 
-    a3m = get_target_msa(args.target_seq, cache_dir=args.cache_dir)
+    a3m, mode = get_target_msa_with_mode(args.target_seq, cache_dir=args.cache_dir)
     n = a3m.count(">")
-    print(f"OK — {n} sequences, {len(a3m)} bytes")
+    print(f"OK — {n} sequences, {len(a3m)} bytes (mode={mode})")

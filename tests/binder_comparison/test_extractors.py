@@ -12,6 +12,7 @@ rename upstream shows up here rather than as a silently empty pool.
 """
 
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -183,6 +184,89 @@ class TestPXDesign:
         assert PXDesignExtractor().extract(tmp_path)[0].sequence == _SEQ_B
 
 
+# Two rows in the shape the configurator's PXDesign collector writes: a
+# per-design `design_id`, already "pxdesign_"-prefixed.
+_PXD_COLLECTOR_ROWS = [
+    {"sequence": _SEQ_A, "design_id": "pxdesign_len60_s3", "af2_iptm": 0.71},
+    {"sequence": _SEQ_B, "design_id": "pxdesign_len80_s9", "af2_iptm": 0.85},
+]
+
+
+class TestPXDesignBinderIdStability:
+    """F43(a): binder_id must survive a re-sort of the source CSV.
+
+    The configurator's PXDesign collector writes a ``design_id`` per row
+    (``pxdesign_<name>``). Ignoring it made the id row-position-derived, so a
+    ``pxdesign_12`` in the report could not be grepped back to sequences.csv and
+    a re-run renamed every design.
+    """
+
+    def test_prefers_the_collectors_design_id(self, tmp_path):
+        _csv(tmp_path / "sequences.csv", _PXD_COLLECTOR_ROWS)
+        got = PXDesignExtractor().extract(tmp_path)
+        # Already "pxdesign_"-prefixed by the collector — kept verbatim so the id
+        # greps straight back to the source CSV.
+        assert [b.binder_id for b in got] == ["pxdesign_len60_s3", "pxdesign_len80_s9"]
+
+    def test_ids_are_unchanged_by_a_reordered_csv(self, tmp_path):
+        forward, reverse = tmp_path / "fwd", tmp_path / "rev"
+        _csv(forward / "sequences.csv", _PXD_COLLECTOR_ROWS)
+        _csv(reverse / "sequences.csv", list(reversed(_PXD_COLLECTOR_ROWS)))
+        by_seq_fwd = {b.sequence: b.binder_id for b in PXDesignExtractor().extract(forward)}
+        by_seq_rev = {b.sequence: b.binder_id for b in PXDesignExtractor().extract(reverse)}
+        assert by_seq_fwd == by_seq_rev, "re-sorting the CSV must not rename designs"
+
+    def test_uses_pxdesigns_own_name_column(self, tmp_path):
+        """PXDesign's filtered_summary.csv / sample_level_output.csv name column,
+        which the collector reads but which also reaches the extractor directly."""
+        _csv(tmp_path / "summary.csv", [{"sequence": _SEQ_A, "name": "len60_s3", "rank": 1}])
+        assert PXDesignExtractor().extract(tmp_path)[0].binder_id == "pxdesign_len60_s3"
+
+    def test_positional_fallback_is_explicit(self, tmp_path):
+        """Nothing stable in the row → row position, but say so out loud."""
+        _csv(tmp_path / "sequences.csv", [{"sequence": _SEQ_A}, {"sequence": _SEQ_B}])
+        with pytest.warns(UserWarning, match="ROW POSITION"):
+            got = PXDesignExtractor().extract(tmp_path)
+        assert [b.binder_id for b in got] == ["pxdesign_0", "pxdesign_1"]
+
+    def test_no_positional_warning_when_ids_are_stable(self, tmp_path):
+        _csv(tmp_path / "sequences.csv", _PXD_COLLECTOR_ROWS)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert len(PXDesignExtractor().extract(tmp_path)) == 2
+
+    def test_colliding_design_ids_stay_distinct(self, tmp_path):
+        """Length-scan runs aggregate one filtered_summary.csv per bucket and the
+        collector falls back to the file stem when a row has no name, so the same
+        design_id can arrive twice. binder_id is what add_design_groups keys on —
+        duplicates there silently collapse two designs into one group."""
+        _csv(
+            tmp_path / "sequences.csv",
+            [
+                {"sequence": _SEQ_A, "design_id": "pxdesign_filtered_summary"},
+                {"sequence": _SEQ_B, "design_id": "pxdesign_filtered_summary"},
+            ],
+        )
+        with pytest.warns(UserWarning, match="not unique"):
+            got = PXDesignExtractor().extract(tmp_path)
+        ids = [b.binder_id for b in got]
+        assert len(set(ids)) == 2, f"duplicate binder_id would drop a design: {ids}"
+        assert all(i.startswith("pxdesign_filtered_summary_") for i in ids)
+
+    def test_collision_suffix_is_order_independent(self, tmp_path):
+        rows = [
+            {"sequence": _SEQ_A, "design_id": "pxdesign_filtered_summary"},
+            {"sequence": _SEQ_B, "design_id": "pxdesign_filtered_summary"},
+        ]
+        forward, reverse = tmp_path / "fwd", tmp_path / "rev"
+        _csv(forward / "sequences.csv", rows)
+        _csv(reverse / "sequences.csv", list(reversed(rows)))
+        with pytest.warns(UserWarning):
+            fwd = {b.sequence: b.binder_id for b in PXDesignExtractor().extract(forward)}
+            rev = {b.sequence: b.binder_id for b in PXDesignExtractor().extract(reverse)}
+        assert fwd == rev
+
+
 class TestProteinaComplexa:
     def test_reads_sequences_csv(self, tmp_path):
         _csv(tmp_path / "sequences.csv", [{"sequence": _SEQ_A, "design_id": "c7"}])
@@ -198,6 +282,43 @@ class TestProteinaComplexa:
         _csv(tmp_path / "sequences.csv", [{"aatype": ",".join(map(str, idxs)), "design_id": "c1"}])
         got = ProteinaComplexaExtractor().extract(tmp_path)
         assert got and got[0].sequence == restypes
+
+    def test_reads_the_collectors_renamed_metric_columns(self, tmp_path):
+        """F43(b): the configurator collector renames the raw evaluation columns
+        (self_complex_i_pTM → iptm, _pLDDT → plddt_binder_mean, _i_pAE →
+        pae_bt_mean, self_binder_scRMSD → scrmsd_binder) before writing
+        sequences.csv, so a map keyed only on the raw names picks up nothing for
+        the very layout this extractor documents as its primary input."""
+        _csv(
+            tmp_path / "sequences.csv",
+            [
+                {
+                    "design_id": "complexa_CALCA_b1_007",
+                    "sequence": _SEQ_A,
+                    "length": len(_SEQ_A),
+                    "iptm": 0.83,
+                    "plddt_binder_mean": 0.91,
+                    "pae_bt_mean": 4.2,
+                    "scrmsd_binder": 1.3,
+                    "source": "proteina_complexa",
+                }
+            ],
+        )
+        native = ProteinaComplexaExtractor().extract(tmp_path)[0].native
+        assert native.complexa_self_iptm == pytest.approx(0.83)
+        assert native.complexa_self_plddt == pytest.approx(0.91)
+        assert native.complexa_self_ipae == pytest.approx(4.2)
+        assert native.complexa_self_scrmsd == pytest.approx(1.3)
+
+    def test_raw_evaluation_names_still_win(self, tmp_path):
+        """The generic aliases are appended last, so a CSV carrying both spellings
+        keeps the raw evaluation value."""
+        _csv(
+            tmp_path / "sequences.csv",
+            [{"sequence": _SEQ_A, "design_id": "c1", "self_complex_i_pTM": 0.9, "iptm": 0.1}],
+        )
+        got = ProteinaComplexaExtractor().extract(tmp_path)
+        assert got[0].native.complexa_self_iptm == pytest.approx(0.9)
 
 
 class TestProteinHunter:
