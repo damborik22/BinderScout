@@ -30,13 +30,19 @@ _TOOL_PATTERNS: dict[str, list[str]] = {
     "mosaic": ["**/mosaic/designs.csv"],
     "pxdesign": [
         "**/pxdesign/pxdesign_top700.csv",  # SPARK-style pre-ranked top-N
-        "**/pxdesign/summary.csv",
+        "**/pxdesign/sequences.csv",  # canonical configurator layout (run_pxdesign.sh collector)
+        "**/pxdesign/summary.csv",  # legacy single-length PXDesign output
     ],
     "rfd3": ["**/rfd3/rfd3_top700.csv", "**/rfd3/sequences.csv"],
     "proteina_complexa": ["**/proteina_complexa/proteina_complexa_top700.csv", "**/proteina_complexa/sequences.csv"],
     "protein_hunter": [
         "**/protein_hunter_merged/protein_hunter_top700.csv",
-        "**/protein_hunter_*/summary_all_runs.csv",
+        # Canonical configurator layout: run_protein_hunter.sh aggregates into
+        # protein_hunter/sequences.csv, while boltz_ph itself writes its raw
+        # summaries one level deeper, in protein_hunter/<run-name>/. The trailing
+        # "*" also keeps ad-hoc protein_hunter_v2/ style dirs matching.
+        "**/protein_hunter*/sequences.csv",
+        "**/protein_hunter*/**/summary_all_runs.csv",
     ],
 }
 
@@ -59,7 +65,9 @@ _TOOL_PDB_DIR_PATTERNS: dict[str, list[str]] = {
     "pxdesign": ["**/pxdesign"],  # has nested outputs_len*/ subdirs; per-tool viewer rglobs
     "proteina_complexa": ["**/proteina_complexa/raw_evaluation_results", "**/proteina_complexa"],
     "rfd3": ["**/rfd3"],
-    "protein_hunter": ["**/protein_hunter_merged", "**/protein_hunter_*"],
+    # "protein_hunter*" (not "protein_hunter_*") so the canonical
+    # protein_hunter/ dir matches alongside ad-hoc protein_hunter_v2/ ones.
+    "protein_hunter": ["**/protein_hunter_merged", "**/protein_hunter*"],
 }
 
 

@@ -33,6 +33,33 @@ from pathlib import Path
 import gemmi
 import numpy as np
 
+# --- shared target MSA: pre-warm + enforce (F21) -----------------------------
+# The target MSA is fetched ONCE per target into the shared on-disk cache, so
+# every engine folds the target with the same evolutionary context.  An engine
+# that quietly ran single-sequence is systematically penalised (the MSA drives
+# target fold confidence and iPTM is an interface metric over both chains), so
+# it drags consensus_iptm_mean down and can demote a good design invisibly.
+# Default: abort.  Explicit opt-out: --allow-no-msa / BINDMASTER_ALLOW_NO_MSA=1.
+try:
+    from binder_comparison.refolding.target_msa import MissingTargetMSA, prepare_target_msa
+except Exception as _exc:  # binder_comparison unavailable in this env
+    _MSA_IMPORT_ERROR = _exc
+
+    class MissingTargetMSA(RuntimeError):
+        pass
+
+    def prepare_target_msa(target_seq, *, engine, cache_dir=None, out_dir=None, use_msa=True, allow_no_msa=False):
+        if use_msa and not (allow_no_msa or os.environ.get("BINDMASTER_ALLOW_NO_MSA", "").lower() in ("1", "true")):
+            raise MissingTargetMSA(
+                f"[{engine}] ABORTING: cannot reach the shared target-MSA cache — "
+                f"binder_comparison is not importable here ({_MSA_IMPORT_ERROR}). "
+                f"Install it in this environment (pip install -e Evaluator --no-deps), or re-run with "
+                f"--allow-no-msa (BINDMASTER_ALLOW_NO_MSA=1) to fold single-sequence with scores that are "
+                f"NOT comparable to engines that used an MSA."
+            )
+        print(f"[{engine}] WARNING: no target MSA — scores not comparable to MSA-using engines", flush=True)
+        return "", "single_sequence"
+
 
 def refold_batch(
     binder_sequences: list[str],
@@ -46,6 +73,7 @@ def refold_batch(
     skip_indices: set[int] | None = None,
     use_msa: bool = True,
     msa_cache_dir: str | os.PathLike | None = None,
+    allow_no_msa: bool = False,
 ) -> None:
     """Refold each binder against target using AlphaFold 3; write metrics CSV.
 
@@ -68,18 +96,18 @@ def refold_batch(
         print("[af3] Nothing to do (all indices skipped).")
         return
 
-    # Fetch / load the target MSA once for the whole batch.
-    target_msa = ""
-    if use_msa:
-        try:
-            from binder_comparison.refolding.target_msa import get_target_msa
-
-            target_msa = get_target_msa(target_sequence, cache_dir=msa_cache_dir)
-            n_seqs = target_msa.count(">")
-            print(f"[af3] Target MSA loaded: {n_seqs} sequences, {len(target_msa)} bytes")
-        except Exception as exc:
-            print(f"[af3] WARNING: could not fetch target MSA ({exc}); falling back to single-sequence mode")
-            target_msa = ""
+    # Pre-warm / load the shared target MSA once for the whole batch.  Raises
+    # MissingTargetMSA (abort) if it cannot be obtained and no opt-out was given.
+    target_msa, _msa_mode = prepare_target_msa(
+        target_sequence,
+        engine="af3",
+        cache_dir=msa_cache_dir,
+        out_dir=out_dir,
+        use_msa=use_msa,
+        allow_no_msa=allow_no_msa,
+    )
+    if target_msa:
+        print(f"[af3] Target MSA loaded: {target_msa.count('>')} sequences, {len(target_msa)} bytes")
 
     print(
         f"[af3] Running {len(jobs)} binder(s) with {num_samples} sample(s) "
@@ -534,6 +562,12 @@ if __name__ == "__main__":
     parser.add_argument("--num-samples", type=int, default=5)
     parser.add_argument("--resume", action="store_true", help="Skip binders already in output CSV")
     parser.add_argument("--no-msa", action="store_true", help="Disable target MSA (single-sequence mode)")
+    parser.add_argument(
+        "--allow-no-msa",
+        action="store_true",
+        help="Proceed single-sequence if the shared target MSA cannot be obtained (air-gapped nodes). "
+        "Default is to abort — scores from an MSA-less engine are not comparable to the others.",
+    )
     parser.add_argument("--msa-cache-dir", default=None, help="Override MSA cache directory")
     args = parser.parse_args()
 
@@ -559,15 +593,20 @@ if __name__ == "__main__":
         if skip:
             print(f"[af3] Resuming — skipping {len(skip)} already-completed binders")
 
-    refold_batch(
-        binder_sequences=seqs,
-        target_sequence=args.target_seq,
-        output_dir=args.output_dir,
-        output_csv=args.output,
-        model_dir=args.model_dir,
-        num_seeds=args.num_seeds,
-        num_samples=args.num_samples,
-        skip_indices=skip,
-        use_msa=not args.no_msa,
-        msa_cache_dir=args.msa_cache_dir,
-    )
+    try:
+        refold_batch(
+            binder_sequences=seqs,
+            target_sequence=args.target_seq,
+            output_dir=args.output_dir,
+            output_csv=args.output,
+            model_dir=args.model_dir,
+            num_seeds=args.num_seeds,
+            num_samples=args.num_samples,
+            skip_indices=skip,
+            use_msa=not args.no_msa,
+            msa_cache_dir=args.msa_cache_dir,
+            allow_no_msa=args.allow_no_msa,
+        )
+    except MissingTargetMSA as exc:
+        print(f"\n{exc}", file=sys.stderr)
+        raise SystemExit(2) from None

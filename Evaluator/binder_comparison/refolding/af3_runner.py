@@ -41,6 +41,7 @@ def run_af3_refold(
     resume: bool = False,
     use_msa: bool = True,
     msa_cache_dir: str | Path | None = None,
+    allow_no_msa: bool = False,
 ) -> None:
     """Refold *sequences* against *target_sequence* using AlphaFold 3.
 
@@ -60,6 +61,10 @@ def run_af3_refold(
                          ColabFold server and embed it in AF3's input JSON.
                          Binder MSA always empty.
         msa_cache_dir:   Override MSA cache directory.
+        allow_no_msa:    Proceed single-sequence when the target MSA cannot be
+                         obtained. Default False = abort, so an engine never
+                         silently produces scores that are not comparable to
+                         engines that did use an MSA.
     """
     output_dir = Path(output_dir).resolve()
     output_csv = Path(output_csv).resolve()
@@ -90,6 +95,7 @@ def run_af3_refold(
             skip_indices=skip_indices,
             use_msa=use_msa,
             msa_cache_dir=str(msa_cache_dir) if msa_cache_dir else None,
+            allow_no_msa=allow_no_msa,
         )
     finally:
         os.chdir(old_cwd)

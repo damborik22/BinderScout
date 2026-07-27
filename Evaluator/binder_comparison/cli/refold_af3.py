@@ -20,6 +20,7 @@ import sys
 
 from ..io.read import read_fasta
 from ..refolding.af3_runner import run_af3_refold
+from ..refolding.target_msa import MissingTargetMSA
 
 
 def run(args: argparse.Namespace) -> None:
@@ -31,19 +32,24 @@ def run(args: argparse.Namespace) -> None:
     sequences = [seq for _, seq in entries]
     print(f"[refold-af3] Loaded {len(sequences)} sequences from {args.sequences}")
 
-    run_af3_refold(
-        sequences=sequences,
-        target_sequence=args.target_seq,
-        output_dir=args.output_dir,
-        output_csv=args.output,
-        num_seeds=args.num_seeds,
-        num_samples=args.num_samples,
-        model_dir=args.model_dir,
-        scripts_path=args.scripts_path,
-        resume=args.resume,
-        use_msa=not args.no_msa,
-        msa_cache_dir=args.msa_cache_dir,
-    )
+    try:
+        run_af3_refold(
+            sequences=sequences,
+            target_sequence=args.target_seq,
+            output_dir=args.output_dir,
+            output_csv=args.output,
+            num_seeds=args.num_seeds,
+            num_samples=args.num_samples,
+            model_dir=args.model_dir,
+            scripts_path=args.scripts_path,
+            resume=args.resume,
+            use_msa=not args.no_msa,
+            msa_cache_dir=args.msa_cache_dir,
+            allow_no_msa=args.allow_no_msa,
+        )
+    except MissingTargetMSA as exc:
+        print(f"[refold-af3] {exc}", file=sys.stderr)
+        sys.exit(2)
 
 
 def add_parser(subparsers) -> None:
@@ -76,6 +82,13 @@ def add_parser(subparsers) -> None:
     )
     p.add_argument(
         "--scripts-path", default=None, metavar="DIR", help="Path to scripts/ directory (auto-detected if not set)"
+    )
+    p.add_argument(
+        "--allow-no-msa",
+        action="store_true",
+        help="Proceed with a single-sequence target when the MSA cannot be obtained "
+        "(default: abort). Scores from an MSA-less engine are NOT comparable to engines "
+        "that used one, so this is opt-in and is recorded in target_msa_mode.json.",
     )
     p.add_argument("--resume", action="store_true", help="Skip binders already present in existing output CSV")
     p.add_argument(
