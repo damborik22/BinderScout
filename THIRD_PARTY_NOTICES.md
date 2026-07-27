@@ -46,8 +46,11 @@ Two notes for anyone auditing this:
 - **The binaries remain in git history** (they entered in `b8d2b87`). Removing
   them from `HEAD` stops future release tarballs and source archives from
   carrying them, but a full `git clone` still fetches them from history. Ending
-  the obligation completely would need a history rewrite, which breaks every
-  existing clone — that trade-off has not been taken.
+  that outright would need a history rewrite, which would break every existing
+  clone and invalidate the `bindmaster_git_sha` recorded in every past run's
+  `settings.json` — the provenance record this project deliberately keeps. That
+  trade-off has not been taken; the **written offer below** covers the
+  historical distribution instead.
 - **Do not substitute the drive5 build.** `https://drive5.com/usearch/` serves
   the older proprietary 32-bit USEARCH under an academic-use-only licence. That
   is *stricter* than the GPLv3 v12 it would replace, and it is not the version
@@ -57,6 +60,52 @@ Two notes for anyone auditing this:
 Verified equivalent before removal: the source build and the previously
 committed binary, given SoluProt's exact `-usearch_global` command against
 SoluProt's own *E. coli* reference database, produce **byte-identical** output.
+
+### Written offer for the USEARCH binaries previously distributed here
+
+This offer covers the GPLv3 object code that was distributed from this
+repository between **2026-06-30** (commit `b8d2b87`, which added it) and
+**2026-07-26** (commit `2ae1bdb`, which removed it), and which remains reachable
+in this repository's git history:
+
+| File | Size | SHA-256 |
+|---|---|---|
+| `Evaluator/tools/soluprot/usearch.x86_64` | 2,306,888 B | `4193abead8c7e1609dd28148bb36ad9667c67647c6f784f2bdd72af9de27f3dc` |
+| `Evaluator/tools/soluprot/usearch.aarch64` | 1,934,208 B | `0844dae577ac30595930b7f908042f3942c351472a6a5721e958fc84ccabed32` |
+
+Both are builds of **USEARCH v12** by Robert C. Edgar, licensed under the **GNU
+General Public License, version 3** ([full text](https://www.gnu.org/licenses/gpl-3.0.txt);
+also shipped as `LICENSE` in the source repository below).
+
+**Corresponding source.** The complete corresponding source is publicly
+available at <https://github.com/rcedgar/usearch12>. Building commit
+[`8797c9a`](https://github.com/rcedgar/usearch12/commit/8797c9a80f4bf2035ee6c279cab984db44ef6304)
+(2026-05-23) with `make -C src CC=gcc CXX=g++` on x86_64 produces a binary whose
+output is byte-identical to the `usearch.x86_64` above on SoluProt's own
+reference inputs, which is why that repository is identified as the source.
+
+Stated precisely, because this is the part worth being careful about: this
+project applies **no source patches** to USEARCH — the installers clone upstream
+and build it, and the only build-time deviation is that the aarch64 fallback
+path strips `-static` from the upstream `Makefile`'s link flags when static
+libraries are unavailable. The two binaries above predate the current
+maintainer's records of how they were built; the byte-identical output is strong
+evidence that they came from this same upstream source, but it is not a claim of
+bit-for-bit reproducibility (their sizes differ from a present-day build, as
+expected across compiler and upstream-commit versions).
+
+Together with the offer below, this is intended to meet GPLv3 §6 — §6(d) permits
+the corresponding source to live on a third-party server given clear directions
+next to the object code, and §6(b) covers it by written offer regardless.
+
+**In addition**, for at least three years from 2026-07-26, the maintainers of
+this repository will provide a copy of the complete corresponding source for
+either binary above, on request, at no charge beyond the cost of transfer.
+Open an issue on this repository to request it.
+
+Nothing in this offer relieves anyone redistributing those historical binaries
+of their own GPLv3 obligations, and nothing here restricts the rights GPLv3
+grants you in that code.
 
 ## 3. Not vendored — fetched at install time
 
