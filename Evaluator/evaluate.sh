@@ -12,6 +12,10 @@
 #   --output       output directory
 #
 # Optional:
+#   --allow-no-msa         proceed even if the shared target MSA cannot be fetched.
+#                          Default: abort. An engine folding single-sequence while the
+#                          others use an MSA produces scores that are NOT comparable,
+#                          and consensus_iptm_mean averages across engines.
 #   --skip-boltz2          skip Boltz-2 refolding (use existing boltz2_results.csv)
 #   --skip-af3             skip AF3 refolding (default: auto-detect binder-eval-af3 env)
 #   --af3-env ENV          conda env for AF3 (default: binder-eval-af3)
@@ -77,6 +81,7 @@ fi
 SEQUENCES=""
 TARGET_SEQ=""
 OUTPUT=""
+ALLOW_NO_MSA=${BINDMASTER_ALLOW_NO_MSA:-0}
 SKIP_BOLTZ2=0
 SKIP_AF3=0
 AF3_ENV="binder-eval-af3"
@@ -100,6 +105,7 @@ while [[ $# -gt 0 ]]; do
         --sequences)      SEQUENCES="$2";    shift 2 ;;
         --target-seq)     TARGET_SEQ="$2";   shift 2 ;;
         --output|-o)      OUTPUT="$2";       shift 2 ;;
+        --allow-no-msa)   ALLOW_NO_MSA=1;    shift ;;
         --skip-boltz2)    SKIP_BOLTZ2=1;     shift ;;
         --skip-af3)       SKIP_AF3=1;        shift ;;
         --af3-env)        AF3_ENV="$2";      shift 2 ;;
@@ -254,6 +260,37 @@ PY
         echo "[soluprot-filter] downstream refolding will run on $SEQUENCES"
     fi
     (( STEP++ ))
+fi
+
+# --- Step 0.9: pre-warm the shared target MSA ──────────────────────────────
+# Fetch ONCE, before any engine loads a model, so all three read the same cached
+# a3m. Each engine also enforces this itself, so correctness does not depend on
+# this step -- but without it a cold-cache failure surfaces only after the first
+# engine has loaded its weights, which on AF3 is minutes of GPU time.
+if [[ $SKIP_BOLTZ2 -eq 0 || $SKIP_AF3 -eq 0 || $SKIP_ESMFOLD2 -eq 0 ]]; then
+    echo "[msa] Pre-warming shared target MSA cache..."
+    if conda run -n binder-eval python -m binder_comparison.refolding.target_msa \
+            --target-seq "$TARGET_SEQ" >/dev/null 2>&1; then
+        echo "[msa] Target MSA ready — all engines will read the same cached a3m."
+    elif [[ $ALLOW_NO_MSA -eq 1 ]]; then
+        echo "[msa] WARNING: could not obtain the target MSA; --allow-no-msa given, so engines"
+        echo "[msa]          will fold the target single-sequence. Their scores are NOT directly"
+        echo "[msa]          comparable to an MSA run, and this is recorded in target_msa_mode.json."
+        export BINDMASTER_ALLOW_NO_MSA=1
+    else
+        echo "Error: could not obtain the target MSA, and engines would otherwise disagree on" >&2
+        echo "       whether they used one. The MSA drives target fold confidence, so an" >&2
+        echo "       MSA-less engine is systematically penalised and silently drags" >&2
+        echo "       consensus_iptm_mean down." >&2
+        echo "" >&2
+        echo "  Pre-warm once (also works for copying to an air-gapped node):" >&2
+        echo "    conda run -n binder-eval python -m binder_comparison.refolding.target_msa \\" >&2
+        echo "        --target-seq '<TARGET_SEQ>'" >&2
+        echo "" >&2
+        echo "  Or proceed single-sequence on every engine (recorded in the report):" >&2
+        echo "    $0 --allow-no-msa ...   (or BINDMASTER_ALLOW_NO_MSA=1)" >&2
+        exit 2
+    fi
 fi
 
 if [[ $SKIP_BOLTZ2 -eq 1 ]]; then
