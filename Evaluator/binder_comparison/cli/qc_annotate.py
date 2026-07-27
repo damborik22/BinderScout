@@ -3,15 +3,28 @@
 ADVISORY interface-quality annotation for a binder shortlist. Relaxes + scores the
 BindCraft interface panel (shape complementarity, packstat, ΔG, # interface H-bonds,
 # buried unsatisfied H-bonds, # interface residues, hydrophobicity) and annotates
-each design with ``qc_pass`` + ``qc_fail_reasons`` + the panel values — WITHOUT
-dropping or reordering rows. A human reviews the flagged designs (especially extreme
-pathologies: positive ΔG, grossly high unsatisfied H-bonds) before ordering.
+each design with ``qc_pass`` + ``qc_covered`` + ``qc_fail_reasons`` +
+``qc_missing_metrics`` + the panel values — WITHOUT dropping or reordering rows. A
+human reviews the flagged designs (especially extreme pathologies: positive ΔG,
+grossly high unsatisfied H-bonds) before ordering.
+
+``qc_pass`` is THREE-STATE — "measured and failed" is not the same as "never
+measured", and only the first is a defect of the design:
+
+* ``True``  — all five metrics present, all thresholds cleared.
+* ``False`` — a metric was measured and violated its threshold. A genuine failure.
+* ``NA``    — nothing violated a threshold but the panel did not produce every
+  metric (the metrics↔panel join is a LEFT join, so a design the Rosetta panel
+  could not process has NaN everywhere). ``qc_covered=False`` marks these and
+  ``qc_missing_metrics`` names the absent columns. Absence of evidence, not
+  evidence of a bad interface — so ``--drop-failures`` NEVER removes them.
 
 WHY advisory, not a hard filter: on the 4-target Adaptyv benchmark, hard-gating with
 BindCraft's default thresholds removed ~2/3 of true binders from the shortlist (the
 panel is a ~0.52-AUC binder classifier on PREDICTED structures — BindCraft's cuts are
 tuned for its own AF2-optimised designs). So the panel flags QUALITY, but must not
-auto-drop. Pass ``--drop-failures`` to hard-filter anyway (off by default).
+auto-drop. Pass ``--drop-failures`` to hard-filter the genuine ``qc_pass=False``
+failures anyway (off by default).
 
 Either pass a precomputed panel CSV (``--panel``) or relax+score a structures dir in
 the BindCraft conda env (``--structures-dir --run-rosetta``).
@@ -38,9 +51,17 @@ _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "interface_qc.py"
 DEFAULT_QC = {"dg_max": 0.0, "sc_min": 0.55, "hbonds_min": 3, "unsat_max": 4, "nres_min": 7}
 
 
-def _evaluate(row, th) -> tuple[bool, str]:
-    """Return (pass, reasons) for one design against the QC thresholds."""
-    reasons = []
+def _evaluate(row, th) -> tuple[list[str], list[str]]:
+    """Return (threshold_failures, missing_metrics) for one design.
+
+    The two are deliberately kept apart. A metric the panel never produced is
+    *absence of evidence*, not evidence of a bad interface — the metrics/panel
+    join is a LEFT join, so a design the Rosetta panel could not process gets
+    NaN for all five columns. Only ``threshold_failures`` makes a design a
+    genuine QC failure; ``missing_metrics`` makes it *uncovered*.
+    """
+    failures: list[str] = []
+    missing: list[str] = []
     checks = [
         ("interface_dG", lambda v: v <= th["dg_max"], f"dG>{th['dg_max']}"),
         ("interface_sc", lambda v: v >= th["sc_min"], f"sc<{th['sc_min']}"),
@@ -51,10 +72,25 @@ def _evaluate(row, th) -> tuple[bool, str]:
     for col, ok, why in checks:
         v = row.get(col)
         if v is None or (isinstance(v, float) and v != v) or v == "":
-            reasons.append(f"{col}=NA")
+            missing.append(col)
         elif not ok(float(v)):
-            reasons.append(why)
-    return (len(reasons) == 0, ";".join(reasons))
+            failures.append(why)
+    return failures, missing
+
+
+def _verdict(failures: list[str], missing: list[str]) -> bool | None:
+    """Three-state QC verdict.
+
+    * ``False`` — a metric was measured and violated its threshold. A genuine
+      failure; this is the only state ``--drop-failures`` removes.
+    * ``None``  — nothing violated a threshold but the panel did not produce
+      every metric, so "passes" cannot be asserted. Uncovered, never dropped.
+      Matches the NaN that un-annotated rows already get downstream.
+    * ``True``  — all five metrics present and all thresholds cleared.
+    """
+    if failures:
+        return False
+    return None if missing else True
 
 
 def run(args: argparse.Namespace) -> None:
@@ -81,21 +117,33 @@ def run(args: argparse.Namespace) -> None:
         "unsat_max": args.unsat_max,
         "nres_min": args.nres_min,
     }
-    verdicts = merged.apply(lambda r: _evaluate(r, th), axis=1)
-    merged["qc_pass"] = [v[0] for v in verdicts]
-    merged["qc_fail_reasons"] = [v[1] for v in verdicts]
+    verdicts = [_evaluate(r, th) for _, r in merged.iterrows()]
+    qc_pass = [_verdict(f, m) for f, m in verdicts]
+    merged["qc_pass"] = qc_pass
+    # Coverage is its own axis: True only when the panel produced all five metrics.
+    merged["qc_covered"] = [not m for _, m in verdicts]
+    # qc_fail_reasons now holds ONLY measured threshold violations; the metrics the
+    # panel never produced moved to qc_missing_metrics (they are not failures).
+    merged["qc_fail_reasons"] = [";".join(f) for f, _ in verdicts]
+    merged["qc_missing_metrics"] = [";".join(m) for _, m in verdicts]
 
-    # ADVISORY by default: preserve the input ranking, annotate only. Opt-in hard filter.
+    n_pass = sum(v is True for v in qc_pass)
+    n_fail = sum(v is False for v in qc_pass)
+    n_uncovered = sum(v is None for v in qc_pass)
+
+    # ADVISORY by default: preserve the input ranking, annotate only. Opt-in hard
+    # filter — and even then it drops ONLY measured threshold failures. Designs the
+    # panel could not cover are absence of evidence, so they are always kept.
     if args.drop_failures:
-        merged = merged[merged["qc_pass"]]
+        merged = merged[[v is not False for v in qc_pass]]
 
     merged.to_csv(args.output, index=False)
-    scored = int(merged["interface_dG"].notna().sum()) if "interface_dG" in merged else 0
-    flagged = int((~merged["qc_pass"]).sum())
     mode = "DROPPED (hard filter)" if args.drop_failures else "kept (advisory — not dropped)"
     print(
-        f"[qc-annotate] {args.output}: {scored} scored on the interface panel; "
-        f"{flagged} flagged qc_pass=False, {mode}. "
+        f"[qc-annotate] {args.output}: {n_pass + n_fail} covered by the interface panel "
+        f"({n_pass} qc_pass=True, {n_fail} qc_pass=False — threshold failures, {mode}); "
+        f"{n_uncovered} NOT covered by the panel (qc_pass=NA, always kept — "
+        f"missing metrics listed in qc_missing_metrics). "
         f"Thresholds: dG≤{th['dg_max']}, sc≥{th['sc_min']}, hbonds≥{th['hbonds_min']}, "
         f"unsat≤{th['unsat_max']}, nres≥{th['nres_min']}."
     )
@@ -149,7 +197,9 @@ def add_parser(subparsers) -> None:
     p.add_argument(
         "--drop-failures",
         action="store_true",
-        help="Hard-filter: drop qc_pass=False rows (OFF by default; culls binders on predicted structures)",
+        help="Hard-filter: drop rows that MEASURABLY failed a threshold (qc_pass=False). Rows the panel "
+        "did not cover (qc_pass=NA / qc_covered=False) are never dropped. OFF by default; culls "
+        "binders on predicted structures",
     )
     p.add_argument("--output", "-o", required=True, metavar="CSV", help="Annotated output CSV")
     p.set_defaults(func=run)

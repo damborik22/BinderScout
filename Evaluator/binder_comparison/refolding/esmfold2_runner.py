@@ -42,6 +42,7 @@ def run_esmfold2_refold(
     resume: bool = False,
     use_msa: bool = True,
     msa_cache_dir: str | Path | None = None,
+    allow_no_msa: bool = False,
 ) -> None:
     """Refold *sequences* against *target_sequence* using ESMFold2.
 
@@ -93,6 +94,7 @@ def run_esmfold2_refold(
             skip_indices=skip_indices,
             use_msa=use_msa,
             msa_cache_dir=str(msa_cache_dir) if msa_cache_dir else None,
+            allow_no_msa=allow_no_msa,
         )
     finally:
         os.chdir(old_cwd)

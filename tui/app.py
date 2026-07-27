@@ -22,6 +22,29 @@ DIM = "\033[2m"
 RESET = "\033[0m"
 
 
+# ── Design tools, in execution order — the single source of truth ────────────
+# (output subdir under runs/<name>/, display label, install marker relative to repo)
+#
+# Every TUI surface iterates this: the header "Tools:" bar, the run-picker hints
+# and both "Run status" views. They were four independently maintained literals
+# and three of them named only mosaic / boltzgen / bindcraft / pxdesign, so a run
+# that produced Proteina-Complexa, RFD3 or Protein-Hunter designs showed as
+# having no tool output at all — while configurator.cmd_status listed all seven,
+# so the two status views disagreed. Order and subdirs match
+# configurator.TOOL_SEQUENCE; adding a tool must not require editing four places.
+TOOL_SEQUENCE: list[tuple[str, str, str]] = [
+    ("mosaic", "Mosaic", "Mosaic/.venv/bin/python"),
+    ("boltzgen", "BoltzGen", "BoltzGen/boltzgen/__init__.py"),
+    ("bindcraft", "BindCraft", "BindCraft/bindcraft_environment.yml"),
+    ("pxdesign", "PXDesign", "PXDesign/pxdesign"),
+    ("proteina_complexa", "Proteina-Complexa", "Proteina-Complexa/.venv/bin/python"),
+    # RFD3 has no clone dir (rc-foundry is pip-installed); the checkpoint fetched
+    # by `foundry install rfd3` is what run_rfd3.sh actually needs.
+    ("rfd3", "RFD3", "weights/foundry/rfd3_latest.ckpt"),
+    ("protein_hunter", "Protein-Hunter", "Protein-Hunter/boltz_ph/design.py"),
+]
+
+
 # ── Tool / run detection ─────────────────────────────────────────────────────
 
 
@@ -37,12 +60,17 @@ def _installer_for_host(repo: Path) -> Path:
 
 def _detect_tools(repo: Path) -> dict[str, bool]:
     """Lightweight check for installed design tools (no heavy imports)."""
-    return {
-        "BindCraft": (repo / "BindCraft" / "bindcraft_environment.yml").exists(),
-        "BoltzGen": (repo / "BoltzGen" / "boltzgen" / "__init__.py").exists(),
-        "Mosaic": (repo / "Mosaic" / ".venv" / "bin" / "python").exists(),
-        "PXDesign": (repo / "PXDesign" / "pxdesign").is_dir(),
-    }
+    return {label: (repo / marker).exists() for _subdir, label, marker in TOOL_SEQUENCE}
+
+
+def _tool_outputs(run_dir: Path) -> list[str]:
+    """Display labels of the tools that have written output into this run directory."""
+    labels = []
+    for subdir, label, _marker in TOOL_SEQUENCE:
+        tool_dir = run_dir / subdir
+        if tool_dir.is_dir() and any(tool_dir.iterdir()):
+            labels.append(label)
+    return labels
 
 
 def _find_conda_base(repo: Path) -> Path | None:
@@ -80,10 +108,7 @@ def _run_status_line(run_dir: Path) -> str:
     parts = []
     if (run_dir / "evaluation").is_dir():
         parts.append(f"{GREEN}evaluated{RESET}")
-    for tool in ("mosaic", "boltzgen", "bindcraft", "pxdesign"):
-        tool_dir = run_dir / tool
-        if tool_dir.is_dir() and any(tool_dir.iterdir()):
-            parts.append(tool)
+    parts.extend(_tool_outputs(run_dir))
     if not parts:
         parts.append(f"{DIM}configured{RESET}")
     return ", ".join(parts)
@@ -332,11 +357,7 @@ def _curses_submenu_status(stdscr, repo: Path) -> None:  # type: ignore[type-arg
             stdscr.addnstr(y, 4, " ", 1)
         stdscr.addnstr(y, 6, name, w - 20)
         # tool indicators
-        info = []
-        for tool in ("mosaic", "boltzgen", "bindcraft", "pxdesign"):
-            td = run / tool
-            if td.is_dir() and any(td.iterdir()):
-                info.append(tool)
+        info = _tool_outputs(run)
         if evaluated:
             info.append("evaluated")
         detail = ", ".join(info) if info else "configured"
@@ -480,11 +501,7 @@ def _simple_submenu_status(repo: Path) -> None:
     for r in runs:
         evaluated = (r / "evaluation").is_dir()
         marker = f"{GREEN}*{RESET}" if evaluated else " "
-        info = []
-        for tool in ("mosaic", "boltzgen", "bindcraft", "pxdesign"):
-            td = r / tool
-            if td.is_dir() and any(td.iterdir()):
-                info.append(tool)
+        info = _tool_outputs(r)
         if evaluated:
             info.append("evaluated")
         detail = ", ".join(info) if info else "configured"

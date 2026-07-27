@@ -2,9 +2,14 @@
 
 PXDesign (protenix-server.com) output files:
   - summary.csv — one row per design, ranked by confidence
+  - sequences.csv — the configurator's PXDesign collector aggregates every
+    per-length ``filtered_summary.csv`` into this one file
 
 Key columns:
   - 'sequence'   — binder amino acid sequence
+  - 'design_id'  — per-design name written by the configurator collector
+                   (already ``pxdesign_<name>``-prefixed); 'name' is the
+                   equivalent column in PXDesign's own CSVs
   - 'rank'       — design rank (1 = best)
   - 'task_name'  — run name (e.g. 'protenix_CALCA_120')
   - 'af2_iptm', 'af2_ipAE' — AF2-IG metrics from internal pipeline
@@ -16,7 +21,9 @@ toward PXDesign-optimised sequences. We re-fold everything standardly.
 
 from __future__ import annotations
 
+import hashlib
 import warnings
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
@@ -30,6 +37,12 @@ _CSV_CANDIDATES = [
 ]
 
 _SEQUENCE_COL = "sequence"
+
+# Columns carrying a per-design NAME. A name survives a re-sort or a re-run of
+# the source CSV, so it is preferred over row position when building binder_id.
+# 'design_id' is what the configurator's PXDesign collector writes; 'name' is
+# PXDesign's own column in filtered_summary.csv / sample_level_output.csv.
+_ID_COL_CANDIDATES = ("design_id", "name")
 
 # Schema field name → PXDesign CSV column name(s). Multiple candidates per field
 # tolerate the column-name drift PXDesign has between releases (e.g. af2_ipae
@@ -50,6 +63,31 @@ def _safe_float(val) -> float | None:
         return float(val)
     except (TypeError, ValueError):
         return None
+
+
+def _disambiguate_ids(binders: list[ExtractedBinder]) -> None:
+    """Make binder_ids unique, in place.
+
+    Length-scan runs aggregate one ``filtered_summary.csv`` per length bucket into
+    a single sequences.csv, and the collector falls back to the CSV's *file stem*
+    when a row carries no name — so distinct designs can legitimately arrive with
+    the same ``design_id``. binder_id is what ``add_design_groups`` keys on, and
+    duplicates there collapse distinct designs into one group (only the
+    best-ranked survivor is kept), so a silent drop. Break ties with a short hash
+    of the sequence: deterministic and order-independent, so the id stays stable
+    across a re-sorted CSV.
+    """
+    dupes = {bid for bid, n in Counter(b.binder_id for b in binders).items() if n > 1}
+    if not dupes:
+        return
+    for b in binders:
+        if b.binder_id in dupes:
+            b.binder_id = f"{b.binder_id}_{hashlib.sha1(b.sequence.encode()).hexdigest()[:6]}"
+    warnings.warn(
+        f"PXDesign: {len(dupes)} binder_id(s) were not unique across the extracted pool "
+        f"(e.g. {sorted(dupes)[0]!r}); disambiguated with a sequence hash suffix.",
+        stacklevel=2,
+    )
 
 
 class PXDesignExtractor(SequenceExtractor):
@@ -73,6 +111,7 @@ class PXDesignExtractor(SequenceExtractor):
             )
 
         results: list[ExtractedBinder] = []
+        self._n_positional_ids = 0
 
         for idx, row in df.iterrows():
             seq = str(row[_SEQUENCE_COL]).strip().upper()
@@ -95,6 +134,15 @@ class PXDesignExtractor(SequenceExtractor):
                 )
             )
 
+        if self._n_positional_ids:
+            warnings.warn(
+                f"PXDesign: {self._n_positional_ids} of {len(results)} design(s) in {csv_path} carry no "
+                f"design_id/name/rank column, so their binder_id is the ROW POSITION "
+                f"(pxdesign_0, pxdesign_1, …). Those ids change if the CSV is re-sorted or the "
+                f"run is repeated, and cannot be grepped back to the source CSV.",
+                stacklevel=2,
+            )
+        _disambiguate_ids(results)
         return results
 
     def _extract_native(self, row: pd.Series) -> NativeMetrics:
@@ -125,10 +173,27 @@ class PXDesignExtractor(SequenceExtractor):
         return None
 
     def _make_id(self, row: pd.Series, fallback_idx: int) -> str:
+        """Build a binder_id, preferring keys that survive a re-sort of the CSV.
+
+        Order: ``design_id`` / ``name`` (per-design names) → ``task_name``+``rank``
+        → ``rank`` → row position. Row position is the LAST RESORT only: it
+        renames every design when the source CSV is re-sorted or the run is
+        repeated, and binder_id is the label the report, the
+        ``*_native_metrics.csv`` sidecar and ``add_design_groups`` carry for the
+        rest of the pipeline. ``extract`` warns once when it fires.
+        """
+        for col in _ID_COL_CANDIDATES:
+            if col in row.index and pd.notna(row[col]):
+                val = str(row[col]).strip()
+                if val:
+                    # The collector already prefixes design_id with "pxdesign_";
+                    # keep it verbatim so the id greps back to the source CSV.
+                    return val if val.startswith("pxdesign_") else f"pxdesign_{val}"
         has_task = "task_name" in row.index and pd.notna(row["task_name"])
         has_rank = "rank" in row.index and pd.notna(row["rank"])
         if has_task and has_rank:
             return f"pxdesign_{row['task_name']}_{int(row['rank'])}"
         if has_rank:
             return f"pxdesign_{int(row['rank'])}"
+        self._n_positional_ids += 1
         return f"pxdesign_{fallback_idx}"
