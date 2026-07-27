@@ -291,7 +291,7 @@
 
 **What changed:**
 - Scientific audit on `CALCA_helix_BM4` pool (4 005 designs, 5 tools; this is a separate, earlier CALCA run).
-- Analysis run 2026-05-16 on BM5/Spark; findings documented in `INVESTIGATION_RANKING_DISCREPANCY.md`.
+- Analysis run 2026-05-16 on BM5/Spark; findings documented in `docs/INVESTIGATION_RANKING_DISCREPANCY.md`.
 - **Finding H1 (model-origin bias)**: Mosaic and BoltzGen designs game Boltz-2 ipSAE by construction (Mosaic ρ = 0.63, BoltzGen `design_ipsae_min` ρ = 0.84 to refold ipSAE). Boltz-2 top-20 is 11/20 Mosaic, 4/20 PXDesign, 4/20 BoltzGen — biased toward tools that optimized for Boltz-2-style features.
 - **Finding H2 (AF2 ipSAE mis-calibration)**: AF2 ipSAE 0% pass rate on 32-aa target (mean BT PAE 11.32 Å vs 10 Å cutoff). Calibration issue, not sequence quality.
 - **Finding H3 (selection bias)**: 3× enrichment of short binders (≤40 aa) in Boltz-2 top-20 vs full pool (40% vs 5.7%).

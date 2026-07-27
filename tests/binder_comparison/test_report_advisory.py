@@ -378,13 +378,68 @@ def test_compute_epitope_inline_missing_structure_marks_no_structure(tmp_path):
 
 
 def test_engine_radar_uses_real_pae_mean_columns():
-    """Regression: the AF3/Protenix radars referenced non-existent af3_pae_bt/tb (the real
-    merged columns are *_pae_bt_mean). ESMFold2 (default engine) must now have a radar panel."""
+    """Regression: the AF3 radar referenced non-existent af3_pae_bt/tb (the real
+    merged columns are *_pae_bt_mean). ESMFold2 (default engine) must now have a radar panel.
+
+    Protenix was in this list until its refolding was removed (see CHANGELOG,
+    "Protenix refolding removed; AF3 is the 2nd engine") — it has no radar to check."""
     from binder_comparison.visualization.plots import _ENGINE_RADAR_METRICS, _ENGINE_RANK_COLS
 
-    for engine in ("af3", "protenix", "esmfold2"):
+    for engine in ("af3", "esmfold2"):
         cols = {c for c, _lbl, _dir in _ENGINE_RADAR_METRICS[engine]}
         assert f"{engine}_pae_bt_mean" in cols, f"{engine} radar must use {engine}_pae_bt_mean"
         assert f"{engine}_pae_tb_mean" in cols
         assert f"{engine}_pae_bt" not in cols  # the bare (non-existent) column must be gone
     assert _ENGINE_RANK_COLS["esmfold2"] == "esmfold2_ipsae_min"
+
+
+# --- Methodology text must describe the ranking that actually ran (F32) --------
+
+
+class TestTwoStageMethodologyText:
+    """Regression: the blurb was a fixed string. Commit 5769064 flipped the screen
+    default mean -> max and updated CHANGELOG, CLAUDE.md, cli/report.py, scoring.py
+    and test_scoring.py — but not visualization/report.py. Every report afterwards
+    ran a max screen while telling the reader it had run a mean screen, called mean
+    "the default" and called max "legacy"."""
+
+    def _render(self, screen_metric, min_engines=3):
+        from binder_comparison.visualization.report import _two_stage_methodology_html
+
+        return _two_stage_methodology_html(screen_metric, min_engines, "ipsae-link")
+
+    def test_max_screen_is_described_as_max(self):
+        html = self._render("max")
+        assert "<b>max</b> of the per-engine" in html
+        assert "lenient recall" in html
+
+    def test_max_screen_does_not_claim_mean_is_the_default(self):
+        html = self._render("max")
+        assert "Mean was selected as default" not in html
+        assert "legacy max-screen" not in html
+
+    def test_mean_screen_is_described_as_mean(self):
+        html = self._render("mean")
+        assert "the mean of the per-engine" in html
+        assert "stricter screen" in html
+
+    def test_the_two_screens_render_differently(self):
+        assert self._render("max") != self._render("mean")
+
+    def test_engine_gate_is_stated_from_the_argument(self):
+        assert "at least <b>3</b>" in self._render("max", min_engines=3)
+        assert "at least <b>2</b>" in self._render("max", min_engines=2)
+
+
+class TestVendoredNglIsInlined:
+    """Regression (F20): report.html <script src>'d unpkg.com, so the 3D viewer was a
+    blank black box on air-gapped nodes — the environment this pipeline otherwise
+    engineers around carefully. cli/epitope_map.py already inlined the vendored copy."""
+
+    def test_script_tag_is_inline_not_cdn(self):
+        from binder_comparison.visualization.report import _ngl_script_tag
+
+        tag = _ngl_script_tag()
+        assert tag.startswith("<script>")
+        assert "unpkg.com" not in tag
+        assert len(tag) > 100_000, "should carry the real vendored library, not a stub"

@@ -1,7 +1,7 @@
 """Interface-energy affinity ranking (Part N).
 
 The two-stage / consensus ranking separates binders from non-binders but does **not** rank
-*affinity among binders* (see docs/plans.md Part N). The affinity score here is the interface
+*affinity among binders* (see docs/completed_plans.md Part N). The affinity score here is the interface
 energy *density* ``|dG / dSASA|`` — interface energy per buried Å² — computed by Rosetta's
 InterfaceAnalyzer in the ``BindCraft`` conda env (PyRosetta is installed there on every
 platform we run BindCraft on, including aarch64 / Spark). Structure confidence (``ipsae_min``)

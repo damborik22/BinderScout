@@ -10,8 +10,8 @@
 # is used. Mosaic must be installed first:
 #   cd /path/to/BindMaster && bash install/install.sh --tool mosaic
 #
-# Future refolding engines (Protenix on x86, AF3 on aarch64 / DGX Spark) are
-# installed by the main BindMaster installer's `--tool protenix` and `--tool af3`
+# The additional refolding engines (AF3, ESMFold2) are
+# installed by the main BindMaster installer's `--tool af3` and `--tool esmfold2`
 # flags — not here.
 #
 # Prerequisites:
@@ -113,7 +113,6 @@ echo ""
 echo "Usage:"
 echo "  bash evaluate.sh --sequences seqs.fasta --target-seq SEQ --output ./results"
 echo ""
-echo "Note: additional refolding engines (Protenix on x86, AlphaFold 3 on"
-echo "      aarch64 / DGX Spark) are installed via the main BindMaster"
-echo "      installer (--tool protenix / --tool af3) and will be wired into"
-echo "      the evaluate.sh orchestrator by later refactor parts."
+echo "Note: the additional refolding engines are installed via the main"
+echo "      BindMaster installer (--tool af3 / --tool esmfold2) and are"
+echo "      auto-detected by evaluate.sh when their conda envs exist."

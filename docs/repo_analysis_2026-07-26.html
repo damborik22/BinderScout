@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BinderScout / BindMaster — Repository Analysis, 2026-07-26</title>
+<style>
+  :root{
+    --bg:#fbfbfa; --fg:#1c1c1a; --muted:#6b6b66; --line:#e2e0da; --card:#fff;
+    --crit:#a01b1b; --high:#b8590a; --med:#8a6d0b; --low:#4a6b3f; --ok:#2c6e49;
+    --code-bg:#f3f2ee; --accent:#2f5d8a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#16171a; --fg:#e6e5e1; --muted:#9a9a94; --line:#2d2f34; --card:#1d1f23;
+      --crit:#ff7b72; --high:#f0a14a; --med:#d9c163; --low:#8fc27a; --ok:#6fcf97;
+      --code-bg:#22252a; --accent:#7fb0e0;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#16171a; --fg:#e6e5e1; --muted:#9a9a94; --line:#2d2f34; --card:#1d1f23;
+    --crit:#ff7b72; --high:#f0a14a; --med:#d9c163; --low:#8fc27a; --ok:#6fcf97;
+    --code-bg:#22252a; --accent:#7fb0e0;
+  }
+  :root[data-theme="light"]{
+    --bg:#fbfbfa; --fg:#1c1c1a; --muted:#6b6b66; --line:#e2e0da; --card:#fff;
+    --crit:#a01b1b; --high:#b8590a; --med:#8a6d0b; --low:#4a6b3f; --ok:#2c6e49;
+    --code-bg:#f3f2ee; --accent:#2f5d8a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-text-size-adjust:100%;
+  }
+  .wrap{max-width:1100px; margin:0 auto; padding:2.5rem 1.25rem 5rem}
+  h1{font-size:1.75rem; line-height:1.25; margin:0 0 .35rem; letter-spacing:-.01em}
+  h2{font-size:1.2rem; margin:2.8rem 0 .8rem; padding-bottom:.35rem; border-bottom:1px solid var(--line)}
+  h3{font-size:1rem; margin:1.8rem 0 .5rem}
+  h4{font-size:.94rem; margin:1.4rem 0 .3rem}
+  p{margin:.6rem 0}
+  .sub{color:var(--muted); font-size:.9rem; margin:0 0 1.5rem}
+  code,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em;
+    background:var(--code-bg); padding:.1em .35em; border-radius:3px; word-break:break-word}
+  pre{background:var(--code-bg); padding:.85rem 1rem; border-radius:6px; overflow-x:auto; margin:.7rem 0}
+  pre code{background:none; padding:0}
+  .tw{overflow-x:auto; margin:.8rem 0; border:1px solid var(--line); border-radius:6px}
+  table{border-collapse:collapse; width:100%; font-size:.87rem; background:var(--card)}
+  th,td{text-align:left; padding:.5rem .7rem; border-bottom:1px solid var(--line); vertical-align:top}
+  th{font-weight:600; font-size:.76rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); background:var(--bg)}
+  tr:last-child td{border-bottom:none}
+  td.n{white-space:nowrap; font-variant-numeric:tabular-nums}
+  .sev{font-weight:700; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; white-space:nowrap}
+  .c-crit{color:var(--crit)} .c-high{color:var(--high)} .c-med{color:var(--med)} .c-low{color:var(--low)} .c-ok{color:var(--ok)}
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(185px,1fr)); gap:.75rem; margin:1.2rem 0}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.85rem 1rem}
+  .card .k{font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)}
+  .card .v{font-size:1.35rem; font-weight:650; margin-top:.15rem; font-variant-numeric:tabular-nums}
+  .card .d{font-size:.79rem; color:var(--muted); margin-top:.1rem}
+  .verdict{display:grid; grid-template-columns:repeat(auto-fit,minmax(255px,1fr)); gap:.75rem; margin:1.2rem 0}
+  .v-box{border:1px solid var(--line); border-left-width:4px; border-radius:6px; padding:.85rem 1rem; background:var(--card)}
+  .v-works{border-left-color:var(--ok)} .v-gaps{border-left-color:var(--med)} .v-blocked{border-left-color:var(--crit)}
+  .v-box .t{font-weight:650; margin-bottom:.1rem}
+  .v-box .s{font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em}
+  .note{background:var(--card); border:1px solid var(--line); border-left:4px solid var(--accent);
+        border-radius:6px; padding:.8rem 1rem; margin:1rem 0; font-size:.92rem}
+  .f{background:var(--card); border:1px solid var(--line); border-radius:7px; padding:.9rem 1.05rem; margin:.8rem 0}
+  .f h4{margin:0 0 .35rem; font-size:.97rem}
+  .f .loc{font-size:.8rem; color:var(--muted); margin:.3rem 0}
+  .f .loc code{font-size:.95em}
+  .f p{margin:.4rem 0; font-size:.92rem}
+  .f .fix{font-size:.9rem}
+  ul,ol{margin:.5rem 0 .5rem 1.2rem; padding:0}
+  li{margin:.3rem 0}
+  .flow{background:var(--code-bg); padding:1rem; border-radius:6px; overflow-x:auto; font-size:.79rem;
+        font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; line-height:1.55; white-space:pre; margin:.8rem 0}
+  hr{border:none; border-top:1px solid var(--line); margin:2.5rem 0}
+  .fine{font-size:.84rem; color:var(--muted)}
+  .tag{display:inline-block; font-size:.68rem; padding:.08rem .38rem; border:1px solid var(--line);
+       border-radius:3px; color:var(--muted); white-space:nowrap; vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>BinderScout / BindMaster — repository analysis</h1>
+<p class="sub">
+  Read-only audit · 2026-07-26 · working tree at <code>a600090</code>, branch
+  <code>claude/repo-analysis-non-agentic-nb3kbk</code><br>
+  Scope: purpose, data flow, dependencies, defects, <strong>non-agentic (no-LLM) operability</strong>, GUI options.
+  No source code was modified <em>for this audit</em>. Every finding below was confirmed by opening the cited file and line.
+</p>
+
+<div class="note" style="border-left-color:#2e7d32">
+  <strong>Status update — the fixes have landed.</strong> This document is the original read-only audit and is
+  left as written, so the "before" state stays legible. The proposed fixes
+  (<a href="PLAN_audit_fixes.md">PLAN_audit_fixes.md</a>, 10 batches) were subsequently implemented on
+  <code>claude/audit-fixes-nb3kbk</code> across 15 commits. <strong>All 10 batches are complete.</strong>
+  <br><br>
+  Everything in §4.1 (wrong results), §4.2 (broken commands), §4.3 (installer), §4.4 (report truthfulness)
+  and §4.5 (ingestion) is fixed, plus the non-agentic blocker in §3 — the configurator now has
+  <code>--config</code> headless replay, closing CLAUDE.md's long-deferred item F2. The test suite went from
+  <strong>213 to 338</strong> passing, with regression coverage written to fail against the pre-fix code
+  before each fix landed.
+  <br><br>
+  <strong>Four product decisions</strong> were taken by the repository owner and implemented: Protenix
+  refolding removed (AF3 is the canonical second engine); the cross-engine gate defaults to 3 engines with a
+  floor of 2; aarch64 reaches parity with x86_64 as a first-class platform; NGL is inlined from the vendored
+  copy so the 3D viewer works air-gapped.
+  <br><br>
+  <strong>Deliberately not done:</strong> the GUI in §5 — that is a build, not a fix, and needs a decision on
+  which of the three architectures to pursue. Two items are recorded rather than actioned:
+  aarch64 RFD3 ships opt-in until it can be validated on Spark hardware, and the GPLv3 USEARCH binaries
+  remain in the tree with the licensing exposure now documented in
+  <a href="../THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a> for the owner to decide on.
+</div>
+
+<div class="cards">
+  <div class="card"><div class="k">Tracked code</div><div class="v">34.5k</div><div class="d">lines Python + shell</div></div>
+  <div class="card"><div class="k">Design tools</div><div class="v">7</div><div class="d">+4 refold engines, 1 screen</div></div>
+  <div class="card"><div class="k">Conda envs</div><div class="v">11</div><div class="d">4 have a <code>.yml</code> spec</div></div>
+  <div class="card"><div class="k">CLI subcommands</div><div class="v">22</div><div class="d">7 documented for humans</div></div>
+  <div class="card"><div class="k">Wizard questions</div><div class="v">80</div><div class="d">0 non-interactive paths</div></div>
+  <div class="card"><div class="k">Findings</div><div class="v">43</div><div class="d">1 critical, 18 high — <strong>all 10 batches fixed</strong></div></div>
+</div>
+
+<div class="note">
+  <strong>Headline.</strong> The architecture and the scientific reasoning are sound — cross-engine refolding to
+  defeat self-scoring bias is the right idea, and the installer solves a genuinely hard problem. The risk is
+  not in the design, it is in the <strong>seams</strong>: seven defects cause the pipeline to silently produce
+  or rank the wrong thing (§4.1), eight documented commands fail outright when you type them (§4.2), and the
+  generated report describes a ranking method the code stopped using (§4.4). Most are a handful of lines each.
+  Non-agentic operability is better than expected — the configurator's missing headless mode is the only true
+  blocker (§3).
+</div>
+
+<h2>1. What this repository is</h2>
+
+<p>
+BinderScout (the package, CLI and docs all call it <em>BindMaster</em>) is an integration layer for
+<strong>GPU protein-binder design</strong>. It implements no design method of its own. It installs seven
+third-party design tools, generates run scripts for them from one interactive interview, then
+cross-validates whatever they produce by re-folding the designed sequences with independent structure
+predictors and ranking the results.
+</p>
+
+<p>Two parts carry the value:</p>
+<ul>
+  <li><strong>The installer</strong> (<code>install/install.sh</code>, 2752 lines) — makes seven mutually
+      incompatible CUDA/JAX/PyTorch stacks coexist on one host, including a from-source aarch64 path and a
+      standalone mode needing no system permissions. This is hard, unglamorous work and it is mostly good.</li>
+  <li><strong>The Evaluator</strong> (<code>Evaluator/binder_comparison/</code>, 22 subcommands) — a
+      cross-engine scoring pipeline built on a correct insight: a design engine's own confidence score is
+      gameable by the engine that produced it, so ranking must come from <em>independent</em> refolders.</li>
+</ul>
+
+<p>The configurator sits between them, and is where most of the serious defects live.</p>
+
+<h2>2. Data flow</h2>
+
+<div class="flow">target.pdb / .mmcif
+  │
+  ├─▶ configurator/configurator.py        [system python, stdlib]   80 questions, 14 screens
+  │     writes  runs/&lt;name&gt;/
+  │              ├── run_&lt;tool&gt;.sh          one per enabled tool
+  │              ├── run_all.sh            sequential driver          ← breaks with Mosaic (F8)
+  │              ├── run_evaluate.sh       wrapper on evaluate.sh     ← wrong RFD3 path (F3)
+  │              └── bindcraft/target_settings.json
+  │
+  ├─▶ run_all.sh ─▶ 7 design tools, each in its OWN environment
+  │     BindCraft │ BoltzGen │ Mosaic/.venv │ bindmaster_pxdesign │
+  │     Proteina-Complexa/.venv │ bindmaster_protein_hunter │ bindmaster_rfd3
+  │     raw output ─▶ runs/&lt;name&gt;/&lt;tool&gt;/…   (designs.csv, summary_high_iptm.csv, *.cif.gz, …)
+  │
+  ├─▶ binder-compare extract                                      [binder-eval]
+  │     one extractor per tool ─▶ dedup by sequence ─▶ sequences.fasta
+  │     ⚑ JOIN KEY from here on is the amino-acid sequence string, not a design id
+  │
+  ├─▶ (optional) binder-compare filter-soluprot                   [binder-eval-soluprot, py3.7]
+  │
+  ├─▶ refold — each engine writes its own CSV:
+  │     Boltz-2    ─▶ boltz2_results.csv      [Mosaic/.venv]
+  │     AF3 3.0.2  ─▶ af3_results.csv         [binder-eval-af3,  &gt;100 GB VRAM]
+  │     ESMFold2   ─▶ esmfold2_results.csv    [binder-eval-esmfold2]   ← documented default
+  │     Protenix   ─▶ protenix_results.csv    [bindmaster_pxdesign]    ← "optional", but opt-OUT (F4)
+  │     all read ONE shared target MSA:  ~/.cache/bindmaster/target_msa/target_&lt;sha256[:16]&gt;.a3m
+  │
+  ├─▶ comparison/merger.py       outer-join every engine CSV  ON sequence   ← fan-out risk (F6)
+  ├─▶ comparison/scoring.py      iPSAE · PAE-recomputed per-engine iPTM ·
+  │                              consensus_iptm (max) / _mean · two-stage rank   ← F5, F7
+  └─▶ visualization/report.py    report.html + CSV + NGL 3D viewer          ← CDN dependency (F19)</div>
+
+<p class="fine">
+  The one structural weakness: <strong>the join key is the sequence string</strong>. It is a defensible choice
+  (each engine independently folds a sequence, so the sequence is what they share) but it makes every
+  downstream merge sensitive to duplicate sequences — see F6.
+</p>
+
+<h2>3. Non-agentic mode — can a human run this without an LLM?</h2>
+
+<p>
+This was the main question, and the answer is <strong>mostly yes, with one hard blocker</strong>. The executable
+pipeline has <strong>zero runtime LLM dependency</strong>: no <code>anthropic</code>, <code>openai</code> or
+model-endpoint call exists anywhere in <code>bindmaster.py</code>, <code>configurator/</code>,
+<code>install/</code> or <code>Evaluator/</code>. The five <code>.claude/skills/</code> packages are an
+operating manual, not a dependency.
+</p>
+
+<div class="verdict">
+  <div class="v-box v-gaps">
+    <div class="s c-med">Works with gaps</div>
+    <div class="t">Installer</div>
+    <p class="fine" style="margin:.4rem 0 0">
+      <code>bash install/install.sh --tool all --yes --skip-examples</code> is genuinely non-interactive.
+      But it is <strong>destructive on re-run</strong> (F11), has no preflight, and on aarch64 three tools
+      cannot be installed at all (F12–F14).
+    </p>
+  </div>
+  <div class="v-box v-blocked">
+    <div class="s c-crit">Blocked</div>
+    <div class="t">Configurator</div>
+    <p class="fine" style="margin:.4rem 0 0">
+      The entire flag surface is <code>--archive</code> and <code>--status</code>. No
+      <code>--config</code>, no <code>--headless</code>, no <code>json.load</code> anywhere in the 3593-line
+      file, and the <code>cfg</code> dict is never serialised. A cron job cannot produce a run directory.
+    </p>
+  </div>
+  <div class="v-box v-works">
+    <div class="s c-ok">Works</div>
+    <div class="t">Evaluator</div>
+    <p class="fine" style="margin:.4rem 0 0">
+      <code>Evaluator/evaluate.sh</code> is a real orchestrator: engine auto-detection, graceful skip with a
+      printed note, <code>--resume</code>, standalone-conda discovery, per-engine env overrides. The gap is
+      documentation, not capability.
+    </p>
+  </div>
+</div>
+
+<h3>3.1 The deterministic machinery mostly exists — it is just undocumented for humans</h3>
+
+<p>
+The hypothesis going in was that campaign logic lives as prose in the skill files. That turned out to be
+<strong>largely wrong</strong>: the code is better than its documentation. Two examples that matter:
+</p>
+
+<ul>
+  <li>The autosize loop is <strong>real code</strong>, not prose. <code>run_autosize_loop()</code>
+      (<code>comparison/autosize.py:134</code>) drives generate → score → decide with a
+      <code>budget_cap</code>, <code>max_rounds</code> and a <code>margin</code>, exposed as
+      <code>binder-compare autosize --loop --generate-cmd …</code>. It appears <strong>once</strong> in
+      README and <strong>zero times</strong> in the skills.</li>
+  <li>Gate tiers are code (<code>GATE_TIERS</code>, same module), not a threshold the operator has to recall.</li>
+</ul>
+
+<p>What genuinely is LLM-only is the <em>documentation of the CLI</em>, and that is measurable. Counting literal
+<code>binder-compare &lt;cmd&gt;</code> invocations:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Subcommand</th><th class="n">In README +<br>CLAUDE.md + Eval-README</th><th class="n">In<br>.claude/skills</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr><td><code>analyze-target</code></td><td class="n">0</td><td class="n">6</td><td class="c-high">LLM-only docs</td></tr>
+    <tr><td><code>mature</code></td><td class="n">0</td><td class="n">5</td><td class="c-high">LLM-only docs</td></tr>
+    <tr><td><code>affinity</code></td><td class="n">0</td><td class="n">4</td><td class="c-high">LLM-only docs</td></tr>
+    <tr><td><code>monomer</code></td><td class="n">0</td><td class="n">3</td><td class="c-high">LLM-only docs</td></tr>
+    <tr><td><code>wetlab</code></td><td class="n">0</td><td class="n">2</td><td class="c-high">LLM-only docs</td></tr>
+    <tr><td><code>autosize</code></td><td class="n">1</td><td class="n">3</td><td class="c-med"><code>--loop</code> mode undocumented</td></tr>
+    <tr><td><code>prefilter</code> · <code>qc-annotate</code> · <code>epitope</code> · <code>epitope-map</code><br>
+            <code>beta-check</code> · <code>diversity</code> · <code>validate</code></td>
+        <td class="n">0</td><td class="n">0</td><td class="c-med">documented nowhere</td></tr>
+    <tr><td><code>parse-seqs</code> · <code>filter-soluprot</code></td><td class="n">0</td><td class="n">0</td>
+        <td class="c-ok">internal to <code>evaluate.sh</code> — fine</td></tr>
+  </tbody>
+</table></div>
+
+<p>
+So: <strong>5 subcommands whose only operating instructions live in <code>.claude/skills/</code></strong> — in
+practice readable only by an LLM — and <strong>7 more that no document mentions at all</strong>. They are
+implemented, mostly unit-tested, and undiscoverable except via <code>binder-compare --help</code>.
+</p>
+
+<div class="note">
+  <strong>The cheapest high-value fix in this report.</strong> Two of three modules already run headlessly.
+  Add <code>configurator --config run.json</code> (dump the <code>cfg</code> dict on every wizard exit; load
+  it to skip all prompts) plus one "Operator's manual" page listing all 22 subcommands, and the system moves
+  from "needs an operator who has read the skills" to "runnable from a shell script or cron". That is roughly
+  150 lines and one markdown page — cheaper than any GUI (§5), and a prerequisite for one.
+</div>
+
+<h3>3.2 Verified by running it</h3>
+<pre><code>$ python3 bindmaster.py --help            → works, but writes bin/bindmaster as a side effect (F24)
+$ python3 bindmaster.py configure --help  → only --archive / --status
+$ python3 -m py_compile &lt;all main modules&gt; → all parse clean
+$ PYTHONPATH=Evaluator python3 -m binder_comparison --help
+    ModuleNotFoundError: No module named 'numpy'
+$ python3 -m pytest --collect-only        → No module named pytest</code></pre>
+<p class="fine">
+  The last two are expected (the CLI is meant to run inside <code>binder-eval</code>), but a newcomer's first
+  contact is a bare <code>ModuleNotFoundError</code> rather than "activate the binder-eval env". A one-line
+  <code>try/except ImportError</code> in <code>main.py</code> would fix that.
+</p>
+
+<h2>4. Findings</h2>
+<p class="fine">
+  31 findings, grouped by consequence. <span class="tag">documented</span> marks issues already in CLAUDE.md's
+  "Known issues" that are still unfixed and still affect results.
+</p>
+
+<h3>4.1 Silently wrong science — these change which designs you would order</h3>
+
+<div class="f">
+  <h4><span class="sev c-crit">Critical</span> &nbsp;F1 · The mmCIF chain answer is discarded; the longest entity is used as the target</h4>
+  <p class="loc"><code>configurator/configurator.py:551</code> — <code>extract_sequence_from_cif(cif_path, chain_id)</code></p>
+  <p>The function tries two branches in the wrong order:</p>
+  <ul>
+    <li><strong>Branch 1</strong> — <code>_cif_entity_poly_seq(text)</code> (<code>:454</code>) takes no
+        chain argument, and its docstring says it extracts the <em>longest</em> canonical one-letter sequence
+        from <code>_entity_poly</code>. The call site's own comment concedes it:
+        <code># Try canonical _entity_poly first (chain-agnostic, longest entity)</code>.</li>
+    <li><strong>Branch 2</strong> — the inline <code>_atom_site</code> loop (<code>:556–599</code>)
+        <em>is</em> chain-aware: <code>if ch.upper() != chain_id.upper(): continue</code> at <code>:584</code>.
+        But it only runs when branch 1 returned nothing.</li>
+  </ul>
+  <p>Since essentially every PDB-derived mmCIF carries <code>_entity_poly</code>, branch 1 nearly always wins
+     and the chain answer is discarded.</p>
+  <p><strong>Failure:</strong> Step 3 asks "Chain(s) to target", the user answers <code>A</code> for a 100 aa
+     antigen in an antibody–antigen mmCIF, and the 220 aa heavy chain is silently used instead. Every one of
+     the seven tools then designs against the wrong protein and the Evaluator refolds against it too, so the
+     run is internally consistent and confidently scored. Nothing in the output reveals it — the wizard even
+     prints <code>✓ Auto-extracted sequence for chain A</code>. The residue count on that line is the only
+     signal.</p>
+  <p class="fix"><strong>Fix (implemented):</strong> try the chain-aware <code>_atom_site</code> branch first
+     and fall back to <code>_entity_poly</code> only when the requested chain has no coordinates, printing an
+     explicit warning that names the chain and the fallback length. <code>extract_sequence_from_pdb</code>
+     (<code>:364</code>) already filtered correctly, so <code>.pdb</code> input was never affected.</p>
+  <p class="fine"><strong>Note.</strong> A separate helper <code>_cif_atom_site_seq</code> (<code>:497</code>)
+     is labelled "for requested chain" but takes no chain argument and would concatenate every chain. It is
+     <em>dead code</em> — nothing calls it — so it is not part of this defect. Flagged rather than deleted,
+     per the repo's own guidance on pre-existing dead code.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F2 · Mosaic epitope indices always resolve against chain A</h4>
+  <p class="loc"><code>configurator/configurator.py:913</code> —
+     <code>chain = cfg.get("target_chain") or cfg.get("chain") or "A"</code></p>
+  <p>Neither <code>cfg["target_chain"]</code> nor <code>cfg["chain"]</code> is ever assigned. The wizard only
+     writes <code>cfg["chains"]</code> (plural, <code>:803</code>, <code>:826</code>), so the fallback
+     <code>"A"</code> is used on every run.</p>
+  <p><strong>Failure:</strong> target is a two-chain complex, the user selects chain B and hotspots
+     <code>32,36,39</code>. <code>hotspots_to_epitope_idx</code> resolves those residue numbers against
+     chain <em>A</em>'s numbering, so Mosaic hallucinates against a different surface than the one requested.
+     Silent — the run looks normal and the designs look fine.</p>
+  <p class="fix"><strong>Fix:</strong> read the primary chain from <code>cfg["chains"]</code> (first entry),
+     the same value Step 3 stores.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F3 · RFD3 designs never reach the Evaluator</h4>
+  <p class="loc"><code>configurator/configurator.py:2459</code> —
+     <code>design_dirs.append(("--rfd3", str(run_dir / "rfd3" / "outputs")))</code><br>
+     but <code>:1963</code> <code>RFD3_DIR="$RUN_DIR/rfd3"</code> and <code>:1610</code>
+     <code>check_outputs "$RUN_DIR/rfd3/sequences.csv"</code></p>
+  <p>The generated <code>run_evaluate.sh</code> points the extractor at <code>rfd3/outputs</code>, and
+     <code>:2623</code> dutifully creates that directory — but nothing ever writes into it.
+     <code>run_rfd3.sh</code> writes <code>rfd3/sequences.csv</code> one level up, which the same file's
+     <code>run_all.sh</code> generator correctly checks. <code>RFD3Extractor._find_csv</code> searches
+     <code>input_dir</code> and <code>input_dir.rglob()</code>; it never walks upward.</p>
+  <p><strong>Failure:</strong> a completed RFD3 run (23 h on a 24 GB Ampere, per CLAUDE.md's own notes)
+     contributes zero designs to the report, with no error — the extractor just finds an empty directory.
+     Two lines of the same file disagree about the path.</p>
+  <p class="fix"><strong>Fix:</strong> <code>str(run_dir / "rfd3")</code>, matching <code>:1610</code>; drop
+     the <code>:2623</code> <code>mkdir</code>.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F4 · Protenix silently joins the consensus, contradicting the docs three times over</h4>
+  <p class="loc"><code>Evaluator/evaluate.sh:135–143</code> — <code>SKIP_PROTENIX</code> starts at
+     <code>0</code> and is set to <code>1</code> only when the env is <em>missing</em></p>
+  <p>CLAUDE.md states the opposite in three places: "Protenix runs only when explicitly enabled"
+     (<code>:125</code>), "<code>evaluate.sh</code> orchestrates Boltz-2 + AF3 + ESMFold2 by default"
+     (<code>:197</code>), and "Opt-in via <code>evaluate.sh</code> flags; <strong>not part of the default
+     Boltz-2 + AF3 + ESMFold2 pipeline</strong>" (<code>:359</code>). The code is opt-<em>out</em>.
+     Note that README's engine table is <em>correct</em> here — "<code>evaluate.sh</code> auto-detects and
+     runs whichever engine envs are present" — so the contradiction is CLAUDE.md against both the code and
+     the README.</p>
+  <p><strong>Failure:</strong> <code>bindmaster install --tool all</code> creates
+     <code>bindmaster_pxdesign</code>, so on any full x86 install <code>evaluate.sh</code> runs a fourth,
+     unrequested GPU refold pass over the whole pool — then folds <code>protenix_pae_iptm</code> into
+     <code>consensus_iptm</code> and <code>consensus_iptm_mean</code>, the primary two-stage ranking. Two
+     operators with identical designs get <em>different rankings</em> depending on whether they happened to
+     install PXDesign. That is a reproducibility break in the headline metric.</p>
+  <p class="fix"><strong>Fix:</strong> default <code>SKIP_PROTENIX=1</code> and add
+     <code>--with-protenix</code>, or correct the three documentation claims. Either is fine; the current
+     mismatch is not.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F5 · Single-engine designs are ranked against multi-engine designs on the same scale</h4>
+  <p class="loc"><code>Evaluator/binder_comparison/comparison/scoring.py:828–836</code><br>
+     <code>sort_keys = ["passes_max_screen", "consensus_iptm_mean", "consensus_iptm"]</code> —
+     <code>consensus_iptm_n</code> is computed at <code>:713</code> and never used in the sort</p>
+  <p><code>DataFrame.mean(axis=1)</code> skips NaN, so a design only Boltz-2 refolded gets
+     <code>consensus_iptm_mean</code> equal to its single Boltz iPTM, competing directly with means over
+     three engines.</p>
+  <p><strong>Failure:</strong> Mosaic <em>is</em> Boltz-2 gradient hallucination, so a Mosaic design AF3 never
+     saw can pass the max screen <em>and</em> top the mean rank on the strength of the one engine that is
+     biased in its favour. This violates the repo's own stated rule — "iptm is gameable by the designing
+     engine … Never rank on a single engine's ipTM" (CLAUDE.md, Critical domain facts). The mechanism
+     designed to prevent exactly this is not enforced.</p>
+  <p class="fix"><strong>Fix:</strong> require <code>consensus_iptm_n &gt;= 2</code> for
+     <code>passes_max_screen</code>, and/or add <code>consensus_iptm_n</code> as a leading sort key so
+     multi-engine agreement outranks single-engine confidence.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F6 · Duplicate sequences fan out report rows and shift the screen threshold</h4>
+  <p class="loc"><code>comparison/merger.py:68</code> <code>pd.merge(…, on="sequence", how="outer")</code><br>
+     <code>merger.py:127</code> <code>pd.merge(df, meta_df, on="sequence", how="left")</code> — no
+     <code>drop_duplicates</code>, no <code>validate=</code></p>
+  <p>Two FASTA entries with the same sequence but different <code>binder_id</code> put two rows in
+     <code>meta_df</code>, and the left merge then duplicates every matching metrics row.</p>
+  <p><strong>Failure:</strong> one design occupies two Top-30 slots with identical metrics, and
+     <code>n_eligible</code> inflates so the top-50% screen threshold moves. <code>extract</code> dedups by
+     default, but <code>--keep-duplicates</code> (<code>cli/extract.py:195</code>) re-enables the hazard, and
+     append-mode refold CSVs can carry duplicate rows independently. Telling detail:
+     <code>cli/autosize.py:160</code> already guards the analogous merge with
+     <code>.drop_duplicates("sequence")</code> — the defence exists, in the wrong file.</p>
+  <p class="fix"><strong>Fix:</strong> the same <code>.drop_duplicates("sequence")</code> on
+     <code>meta_df</code>, plus <code>validate="m:1"</code> so a future regression raises instead of
+     inflating.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-med">Medium</span> &nbsp;F7 · The Mosaic column-mismatch "Fix" does not fix misalignment
+      <span class="tag">documented</span></h4>
+  <p class="loc"><code>extractors/mosaic.py:43–68</code> — docstring claims "<em>Fix: … extend the header with
+     anonymous extra columns … The named columns … stay correct since they're always in the same
+     position</em>", while <code>:89</code> says the extra columns are "inserted <strong>after the sequence
+     column</strong>"</p>
+  <p>Padding the header at the <em>end</em> cannot realign rows whose extra columns were inserted in the
+     <em>middle</em>. For those rows every field after <code>sequence</code> shifts by two.</p>
+  <p><strong>Failure:</strong> <code>is_top</code> reads a neighbouring column's value, so the
+     <code>is_top == 1</code> filter (<code>:101</code>) selects the wrong ~40 designs out of ~800 for
+     refolding. The code prevents row <em>dropping</em> only; the docstring overstates it, which is worse
+     than not fixing it, because a reader stops worrying.</p>
+  <p class="fix"><strong>Fix:</strong> detect the wide-row header variant and reindex per row, or fail loudly
+     on a column-count mismatch. At minimum correct the docstring.</p>
+</div>
+
+<h3>4.2 Documented commands that fail when you type them</h3>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F8 · <code>run_all.sh</code> exits 1 before any tool runs, whenever Mosaic is enabled</h4>
+  <p class="loc"><code>configurator/configurator.py:1556–1567</code> — the Mosaic block is emitted
+     <em>first</em> and ends in <code>exit 1</code> unless <code>mosaic/designs.csv</code> already exists</p>
+  <p><strong>Failure:</strong> <code>bash runs/&lt;name&gt;/run_all.sh</code> is the documented one-command way
+     to execute a campaign (CLAUDE.md:429, README.md:196). On a fresh run directory with Mosaic enabled — a
+     normal choice — it prints "Mosaic requires interactive input" and exits 1 before BoltzGen, BindCraft,
+     RFD3 or Protein-Hunter start.</p>
+  <p class="fix"><strong>Fix:</strong> emit the Mosaic block <em>last</em>, or <code>continue</code> past it
+     with a warning instead of <code>exit 1</code>.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F9 · "Run the pipeline now?" silently skips RFD3 and Protein-Hunter</h4>
+  <p class="loc"><code>configurator/configurator.py:2662</code> — <code>run_pipeline()</code> branches on
+     <code>mosaic</code>, <code>boltzgen</code>, <code>bindcraft</code>, <code>pxdesign_local</code>,
+     <code>proteina_complexa</code> and <code>evaluator</code></p>
+  <p>No branch exists for <code>rfd3</code> or <code>protein_hunter</code> — the Part L and Part M additions —
+     even though <code>tools_enabled</code> carries those keys (<code>:2994–2995</code>) and
+     <code>generate()</code> writes <code>run_rfd3.sh</code> and <code>run_protein_hunter.sh</code>.
+     The same two are missing from the Step 7 preview tree (<code>print_tree</code>, <code>:743</code>,
+     which also omits Proteina-Complexa) and from the "To run later" list (<code>:3423</code>), so a user who
+     enables them is never even told the scripts exist.</p>
+  <p><strong>Failure:</strong> a user enables RFD3 + Protein-Hunter + Evaluator and answers "y" to "Run the
+     pipeline now?" (the default). Nothing runs for either design tool; the Evaluator then runs on an empty
+     pool and emits a report with no designs. No error, no warning.</p>
+  <p class="fix"><strong>Fix:</strong> drive the loop from <code>tools_enabled</code> and the generated
+     <code>run_&lt;tool&gt;.sh</code> files rather than a hand-maintained if-chain — and do the same in
+     <code>print_tree</code> and the next-steps block.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F10 · The installer's own <code>evaluate</code> shortcut always fails</h4>
+  <p class="loc"><code>Evaluator/run.sh:91</code> passes <code>--target-pdb "$TARGET_PDB"</code>;
+     <code>Evaluator/evaluate.sh:116</code> is
+     <code>*) echo "Unknown argument: $1"; exit 1 ;;</code> and has no <code>--target-pdb</code> case</p>
+  <p><strong>Failure:</strong> a human runs <code>evaluate</code> (the shortcut both installers write,
+     <code>install.sh:1192</code>), pastes their sequences, gives a target PDB, accepts the output directory,
+     waits while the target sequence is extracted — and <code>evaluate.sh</code> dies immediately with
+     <code>Unknown argument: --target-pdb</code>. The documented human entry point to the Evaluator has
+     never worked; you must know to call <code>evaluate.sh</code> directly with <code>--target-seq</code>
+     and a bare amino-acid string.</p>
+  <p class="fix"><strong>Fix:</strong> drop the <code>--target-pdb</code> line from <code>run.sh</code>
+     (it already computes <code>$TARGET_SEQ</code>), or accept and ignore the flag in
+     <code>evaluate.sh</code>.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F11 · <code>--yes</code> turns every "reuse existing?" prompt into <code>rm -rf</code></h4>
+  <p class="loc"><code>install/install.sh:282</code> — <code>confirm()</code> returns 0 unconditionally when
+     <code>AUTO_YES=true</code><br>
+     <code>install/install.sh:706</code> —
+     <code>if confirm "Remove and reclone?"; then rm -rf "${BINDCRAFT_DIR}"</code></p>
+  <p>The prompt renders as <code>[y/N]</code> — default <em>no</em> — but <code>--yes</code> forces yes,
+     inverting the displayed default on precisely the destructive prompts.</p>
+  <p><strong>Failure:</strong> <code>bash install/install.sh --tool all --yes --skip-examples</code> is the
+     documented non-interactive command (CLAUDE.md Commands, <code>Dockerfile.test:60</code>,
+     <code>test_env.sh:136</code>) and the skills' recommended repair step. Run it a second time on a
+     <em>working</em> machine and it deletes <code>BindCraft/</code>, including
+     <code>params/*.npz</code> — roughly 4 GB of AF2 weights that Proteina-Complexa symlinks against.
+     A re-install is not idempotent; it is lossy.</p>
+  <p class="fix"><strong>Fix:</strong> give destructive prompts their own helper that keeps the
+     <code>[y/N]</code> default under <code>--yes</code>, and gate reclone/re-create behind an explicit
+     <code>--force</code>.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F12 · The aarch64 installer rejects <code>rfd3</code>, <code>proteina-complexa</code> and <code>protein-hunter</code></h4>
+  <p class="loc"><code>install/install_aarch.sh:81–100</code> — accepted values are
+     <code>all</code>, <code>bindcraft</code>, <code>boltzgen</code>, <code>mosaic</code>,
+     <code>evaluator</code>, <code>pxdesign</code>, <code>af3</code>, <code>esmfold2</code>,
+     <code>soluprot</code></p>
+  <p>CLAUDE.md states "<strong>Part M — RFD3</strong> installable via
+     <code>bindmaster install --tool rfd3</code> (x86 + aarch64)" and "RFD3: fully supported on aarch64 (no
+     DGL dependency; pip-installs cleanly)".</p>
+  <p><strong>Failure:</strong> on a DGX Spark, <code>bash install/install_aarch.sh --tool rfd3</code> exits 1
+     with <code>Invalid --tool value: rfd3</code>. There is no way to install a feature documented as landed
+     and supported. Proteina-Complexa is in the same position; Protein-Hunter is legitimately
+     aarch64-blocked (PyRosetta) but the error message does not say so.</p>
+  <p class="fix"><strong>Fix:</strong> add the <code>rfd3|foundry</code> and
+     <code>proteina-complexa</code> cases, or correct the support matrix. For Protein-Hunter, print the
+     PyRosetta reason instead of "Invalid --tool value".</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F13 · <code>--tool all</code> on aarch64 omits the default refold engine</h4>
+  <p class="loc"><code>install/install_aarch.sh:82</code> — sets
+     <code>DO_BINDCRAFT · DO_BOLTZGEN · DO_MOSAIC · DO_EVALUATOR · DO_PXDESIGN</code> only</p>
+  <p>CLAUDE.md describes ESMFold2 as the "<strong>Default refold engine</strong> — installed by
+     <code>--tool all</code>".</p>
+  <p><strong>Failure:</strong> an aarch64 user who runs <code>--tool all</code> gets no ESMFold2 env, so
+     <code>evaluate.sh</code> prints "will be skipped" and <code>consensus_iptm</code> is computed from
+     fewer engines than the ranking design assumes — which, given F5, changes the ranking rather than just
+     shrinking it.</p>
+  <p class="fix"><strong>Fix:</strong> add <code>DO_ESMFOLD2=true</code> to the aarch64 <code>all</code> case.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F14 · The aarch64 ESMFold2 install pins a package the x86 installer documents as nonexistent</h4>
+  <p class="loc"><code>install/install_aarch.sh:1740</code> —
+     <code>pip install -q esmfold gemmi</code><br>
+     <code>install/install.sh:2245</code> —
+     <code># NOTE: there is NO `esmfold` PyPI package. The runtime is transformers' ESMFold2Model
+     + biohub's `esm` SDK … + gemmi …</code></p>
+  <p>The x86 path installs four things the aarch64 path omits entirely: <code>torch</code> (from an
+     <em>already arch-aware</em> index — <code>install.sh:2249</code> selects cu130 for aarch64),
+     <code>transformers&gt;=4.50</code>, <code>safetensors</code>, and
+     <code>esm @ git+https://github.com/Biohub/esm.git@c94ed8d</code>. The env yml supplies only
+     python 3.12, pip and numpy.</p>
+  <p><strong>Failure:</strong> on DGX Spark, <code>--tool esmfold2</code> either hard-fails on the bogus
+     requirement or produces an env with no torch and no <code>esm</code> SDK, where
+     <code>refold-esmfold2</code> dies at import. The <code>--help</code>-only smoke test
+     (<code>:1747</code>) can still pass, so the installer may report success. Combined with F13, the
+     documented default refold engine is doubly unavailable on the flagship platform.</p>
+  <p class="fix"><strong>Fix:</strong> delete the aarch64 copy and call <code>install.sh</code>'s
+     <code>install_esmfold2()</code> — it is already architecture-aware. This is duplication drift, not a
+     platform limitation.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F15 · The provenance block kills every run script on a host without <code>nvidia-smi</code></h4>
+  <p class="loc"><code>configurator/configurator.py:1157–1158</code><br>
+     <code>GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i {gpu_id} 2&gt;/dev/null | head -1)</code><br>
+     — while the neighbouring <code>GIT_SHA</code>, <code>GIT_BRANCH</code> and <code>PY_VER</code>
+     <em>are</em> guarded with <code>|| echo "unknown"</code></p>
+  <p>Every generated script starts <code>set -euo pipefail</code>. Reproduced here:</p>
+  <pre><code>$ cat t.sh
+set -euo pipefail
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i 0 | head -1)
+echo "REACHED-AFTER-GPU_NAME"
+$ bash t.sh
+t.sh: line 2: nvidia-smi: command not found
+exit=127          # "REACHED-AFTER-GPU_NAME" never prints</code></pre>
+  <p><strong>Failure:</strong> on a CPU login node, in a container without the NVIDIA runtime, or with a
+     wrong <code>--gpu-id</code>, the run scripts for PXDesign, Proteina-Complexa, RFD3 and Protein-Hunter
+     die at the provenance block <em>before</em> the design step. The block added to improve
+     reproducibility is the thing that stops the run — and only the four tools that <em>have</em> it are
+     affected (see F28).</p>
+  <p class="fix"><strong>Fix:</strong> append <code>|| echo "unknown"</code> to the
+     <code>GPU_NAME</code> and <code>GPU_MEM</code> assignments, matching the three lines above them.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-med">Medium</span> &nbsp;F16 · No architecture dispatch in any entry point</h4>
+  <p class="loc"><code>bindmaster.py:105</code> <code>script = REPO / "install" / "install.sh"</code>;
+     <code>tui/app.py:259, 418</code> hardcode the same path</p>
+  <p><strong>Failure:</strong> a DGX Spark operator following README:391 runs
+     <code>bindmaster install --tool all</code> and silently gets the x86_64 installer — CUDA defaulting to
+     12.4 instead of 13.0, conda asked for <code>pytorch-cuda=12.4</code> and <code>gcc_linux-64</code>
+     (no linux-aarch64 builds), and none of the aarch64 patches applied. <code>install.sh:2615</code> warns
+     but proceeds.</p>
+  <p class="fix"><strong>Fix:</strong> in <code>_dispatch</code>, select <code>install_aarch.sh</code> when
+     <code>platform.machine() == "aarch64"</code>; have the TUI call the same dispatcher.</p>
+</div>
+
+<div class="f">
+  <h4><span class="sev c-med">Medium</span> &nbsp;F17 · The skills prescribe a recovery flag that does not exist</h4>
+  <p class="loc"><code>.claude/skills/bindmaster-worker/references/troubleshooting.md:238</code> and
+     <code>references/tools/pxdesign.md:21</code> and
+     <code>.claude/skills/bindmaster-orchestrator/references/evaluation.md:216</code> —
+     "<em>rerun <code>install/install.sh --pxdesign</code> to reapply the patches</em>"</p>
+  <p><strong>Failure:</strong> this is the documented recovery for the exact failure CLAUDE.md's Known Issues
+     warns about ("patches … would be lost if packages are upgraded manually"). Typing it yields
+     <code>Unknown option: --pxdesign</code>, exit 1. The correct form is
+     <code>--tool pxdesign</code>, which per F18 then aborts at <code>conda create</code> anyway.</p>
+  <p class="fix"><strong>Fix:</strong> correct all three references to <code>--tool pxdesign</code>, and add
+     a genuine <code>--reapply-patches</code> path.</p>
+</div>
+
+<h3>4.3 Robustness, reproducibility and hygiene</h3>
+
+<div class="tw"><table>
+  <thead><tr><th class="n">#</th><th class="n">Sev</th><th>Finding</th><th>Location</th><th>Consequence &amp; fix</th></tr></thead>
+  <tbody>
+
+  <tr><td class="n">F18</td><td class="sev c-high">Med</td>
+    <td>PXDesign install is not resumable — no <code>env_exists</code> guard, so any re-run aborts at
+        <code>conda create</code></td>
+    <td><code>install/install.sh:1236</code></td>
+    <td><code>install_pxdesign</code> is a ~25-step function whose later steps are all network-bound
+        (Protenix, PXDesignBench, ColabDesign, deepspeed, CUTLASS, weights). When one drops out — the common
+        case — the operator's natural re-run fails immediately instead of resuming.
+        <em>Fix:</em> the <code>env_exists</code> + skip pattern already used for
+        <code>binder-eval-esmfold2</code>.</td></tr>
+
+  <tr><td class="n">F19</td><td class="sev c-high">Med</td>
+    <td>Commit pins are advisory: shallow clone plus warn-only checkout silently falls back to upstream HEAD</td>
+    <td><code>install/install.sh:716</code><br><code>git clone --depth 50</code> then
+        <code>git checkout "${BINDCRAFT_COMMIT}" || print_warn "… using latest"</code></td>
+    <td>A 50-commit shallow clone no longer contains the pinned object once upstream moves 50+ commits past
+        it — and BindCraft, BoltzGen and Mosaic are all actively developed. The checkout then fails, one
+        yellow line lands in <code>install.log</code>, and the install reports success on upstream HEAD.
+        Combined with <code>PXDESIGN_COMMIT="HEAD"</code> and
+        <code>PROTEINA_COMPLEXA_COMMIT="HEAD"</code> (<code>:31</code>, <code>:34</code>), the documented
+        "pinned commits … for reproducible installs" holds for none of the seven tools reliably.
+        <em>Fix:</em> <code>git fetch --depth 1 origin &lt;sha&gt;</code>, and treat a failed checkout as
+        fatal.</td></tr>
+
+  <tr><td class="n">F20</td><td class="sev c-high">Med</td>
+    <td>The report's 3D viewer loads NGL from a CDN, though the repo vendors it and another module already
+        inlines it</td>
+    <td><code>visualization/report.py:400</code>
+        <code>&lt;script src="https://unpkg.com/ngl@2.3.1/dist/ngl.js"&gt;</code><br>
+        vs <code>cli/epitope_map.py:40</code>
+        <code>_VENDORED_NGL = "tools/ngl/ngl-2.3.1.min.js"</code></td>
+    <td>The main deliverable's "3D Structure Viewer — Top 20" renders a black box with no error on any
+        air-gapped node — the exact environment the repo engineers around for MSAs. The fix already exists in
+        <code>epitope_map.py</code> (itself an undocumented subcommand) and was never back-ported.
+        <em>Fix:</em> inline <code>_VENDORED_NGL</code> in <code>report.py</code> too.</td></tr>
+
+  <tr><td class="n">F21</td><td class="sev c-med">Med</td>
+    <td>Cross-engine iPTMs are not always comparable: on a cold MSA cache Boltz-2 folds single-sequence
+        while AF3/ESMFold2 fetch a full MSA — and nothing records which happened</td>
+    <td><code>scripts/refold_boltz2.py:284–295</code> uses
+        <code>target_msa_cache_path()</code> (never fetches)<br>
+        vs <code>refolding/target_msa.py:58</code> <code>get_target_msa()</code> (fetches)</td>
+    <td>Deliberate and correct for offline nodes, but the consensus mean then averages an MSA-informed
+        prediction with an MSA-free one, and no column or report field says so. A reader cannot distinguish
+        a bad design from a cold cache. <em>Fix:</em> emit a <code>boltz_target_msa_mode</code> column and
+        surface it in the report's provenance footer.</td></tr>
+
+  <tr><td class="n">F22</td><td class="sev c-med">Med</td>
+    <td>MSA cache write is not atomic and is never validated on read</td>
+    <td><code>refolding/target_msa.py:54–59</code><br>
+        <code>if cache_file.exists() and cache_file.stat().st_size &gt; 0: return …read_text()</code> /
+        <code>cache_file.write_text(a3m)</code></td>
+    <td>Two engines started together on an uncached target both miss, both query and both write the same
+        path; a concurrent reader can see a partial file and <code>st_size &gt; 0</code> will not catch it.
+        Once a bad a3m lands, the only recovery is a manual <code>rm</code> — there is no
+        <code>--refresh-msa</code>. <em>Fix:</em> temp file + <code>os.replace()</code>, and check the first
+        record matches the target sequence.</td></tr>
+
+  <tr><td class="n">F23</td><td class="sev c-med">Med</td>
+    <td>The top-50% screen uses banker's rounding, so N=1 keeps nothing and N=5 keeps 40%</td>
+    <td><code>comparison/scoring.py:832</code>
+        <code>n_keep = round(n_eligible * screen_frac)</code></td>
+    <td>Measured: N=1→0, N=3→2, N=5→2, N=7→4. A single-design evaluation reports
+        <code>passes_max_screen = False</code> for its only candidate, and odd N jitters either side of the
+        documented 50%. <em>Fix:</em> <code>math.ceil(n_eligible * screen_frac)</code>.</td></tr>
+
+  <tr><td class="n">F24</td><td class="sev c-med">Med</td>
+    <td><code>--uninstall --tool all</code> reports success while leaving multi-GB artefacts behind</td>
+    <td><code>install/install.sh:2651</code></td>
+    <td>Leaves the <code>binder-eval-af3</code> env and <code>alphafold3/</code> clone, the
+        <code>binder-eval-soluprot</code> env, the <code>~/cutlass</code> build dir (~150 MB), and a
+        <code>~/.bashrc</code> line prepending a now-empty <code>bin/</code> to PATH. A user reclaiming disk
+        is told "Uninstall complete." <em>Fix:</em> extend the removal list; print what was intentionally
+        preserved (<code>runs/</code>) versus removed.</td></tr>
+
+  <tr><td class="n">F25</td><td class="sev c-med">Med</td>
+    <td>A stale helper script destroys the live PXDesign env and carries another user's absolute paths</td>
+    <td><code>scripts/install_pxdesign.sh:83</code> <code>conda env create --force</code>, plus
+        hardcoded <code>/home/david</code> paths</td>
+    <td>It looks like the way to install PXDesign, but <code>--force</code> deletes the existing
+        <code>bindmaster_pxdesign</code> env — the env that also hosts the Protenix refolder plus the
+        CPATH/CUTLASS <code>activate.d</code> hooks written by <code>install.sh</code>. <em>Fix:</em> delete
+        the script, or reduce it to a thin call into <code>install.sh --tool pxdesign</code>.</td></tr>
+
+  <tr><td class="n">F26</td><td class="sev c-med">Med</td>
+    <td>No preflight: neither installer checks disk, GPU/driver or network before ~60 GB of downloads</td>
+    <td><code>install/install.sh:2606</code></td>
+    <td><code>--tool all</code> pulls AF2 weights (~4 GB), Boltz caches (~6 GB), RFD3 checkpoints (~2.5 GB),
+        CUTLASS and a dozen envs. On a host with 40 GB free the failure surfaces an hour in as an opaque
+        tar/pip error deep in <code>install.log</code>, leaving half-built envs that per F18 cannot be
+        resumed. <em>Fix:</em> a ~20-line preflight — <code>df</code>, <code>nvidia-smi</code>, one
+        HTTPS reachability probe — with a single clear abort.</td></tr>
+
+  <tr><td class="n">F27</td><td class="sev c-med">Med</td>
+    <td>The TUI knows only 4 of the 7 tools, hardcoded in three places</td>
+    <td><code>tui/app.py:72, 325, 473</code>
+        <code>for tool in ("mosaic", "boltzgen", "bindcraft", "pxdesign"):</code></td>
+    <td>A run that produced RFD3, Protein-Hunter or Proteina-Complexa designs shows as having no tools in
+        "Run status" and in the run picker. <code>configurator.cmd_status</code> handles all seven, so the
+        two status views disagree. <em>Fix:</em> one shared module-level tuple.</td></tr>
+
+  <tr><td class="n">F28</td><td class="sev c-med">Med</td>
+    <td>3 of 7 run-script writers skip the mandated <code>settings.json</code> — and they are the three
+        oldest, most-used tools</td>
+    <td>helper at <code>configurator.py:1116</code>, called only at <code>:1429</code> (pxdesign),
+        <code>:1678</code> (proteina), <code>:1919</code> (rfd3), <code>:2199</code> (protein-hunter).
+        Absent from <code>write_run_bindcraft:966</code>, <code>write_run_boltzgen:1017</code>,
+        <code>write_run_mosaic:1066</code></td>
+    <td>CLAUDE.md: "Every tool run script <strong>MUST</strong> write a <code>settings.json</code> … before
+        the design step starts." Since <code>cfg</code> is never serialised anywhere else, a BindCraft-only
+        or Mosaic-only run leaves <em>zero</em> machine-readable record of its parameters. (BindCraft writes
+        <code>target_settings.json</code> — BindCraft's own input format, not the convention.)
+        <em>Fix:</em> add the existing <code>_settings_json_block()</code> call — after fixing F15, or the
+        three newly-compliant tools inherit that crash too.</td></tr>
+
+  <tr><td class="n">F29</td><td class="sev c-med">Med</td>
+    <td>The only parser tests target retired dead code; the live ingestion layer has none</td>
+    <td><code>tests/evaluator/test_evaluator_parsers.py:9</code>
+        <code>sys.path.insert(0, … / "evaluator_legacy")</code></td>
+    <td>CI runs 5 tests pinning <code>evaluator_legacy/evaluator.py</code> — documented as retired — on every
+        PR, and 0 tests on the 7 live extractors, the 5 refold runners, or
+        <code>merger.py</code>/<code>ensemble.py</code>/<code>statistics.py</code>. F6 and F7 both sit in
+        untested modules; the configurator has 8 tests for 3593 lines and the installers have none beyond
+        shellcheck. <em>Fix:</em> port the legacy fixtures onto the real extractors; add one round-trip test
+        for <code>merge_refold_results</code>.</td></tr>
+
+  <tr><td class="n">F30</td><td class="sev c-med">Med</td>
+    <td>No attribution or licence text for any vendored third-party component, in an MIT repo</td>
+    <td>Only <code>./LICENSE</code> exists (MIT).<br>
+        Vendored: <code>Evaluator/tools/soluprot/**</code> (whole tool, 3 trained models, 44 MB reference
+        FASTA), <code>usearch.{x86_64,aarch64}</code> — CLAUDE.md itself calls USEARCH v12
+        <strong>GPLv3</strong> — <code>tools/ngl/ngl-2.3.1.min.js</code>,
+        <code>tools/aarch64/DAlphaBall.gcc</code> (Rosetta-derived), <code>tools/aarch64/dssp</code></td>
+    <td>Shipping GPLv3 binaries and a Rosetta-derived binary in an MIT tree with no NOTICE, no upstream
+        licence text and no source offer is a real compliance exposure — and it matters commercially,
+        because the repo advertises RFD3's BSD-3 licence as "commercial-use OK" while Rosetta's terms are
+        restrictive. <em>Fix:</em> add <code>THIRD_PARTY_NOTICES.md</code> naming each component, its
+        upstream and its licence; drop binaries the code does not use.</td></tr>
+
+  <tr><td class="n">F31</td><td class="sev c-low">Low</td>
+    <td>Assorted: filesystem side effects on <code>--help</code>, tracked blobs, and documentation drift</td>
+    <td>see cells →</td>
+    <td>
+      <strong>(a)</strong> <code>bindmaster.py:142</code> — <code>_install_bindmaster_shortcut()</code> is the
+      first statement of <code>main()</code>, so <code>--help</code> writes <code>bin/bindmaster</code> and
+      <code>~/.local/bin/bindmaster</code> and prints "✓ Shortcut installed" into the help output. Move it
+      after the <code>--help</code> branch.<br>
+      <strong>(b)</strong> ~65 MB of tracked binaries and data (44 MB SoluProt FASTAs, 8.6 MB pickles,
+      4.2 MB USEARCH, 9.4 MB dssp, 1.3 MB NGL) with no LFS; and
+      <code>Evaluator/tools/soluprot/soluprot.py:131</code> <code>joblib.load(model_path)</code> executes
+      pickle contents with no checksum.<br>
+      <strong>(c)</strong> <code>install.sh --help</code> still says SoluProt is "x86 only" and needs TMHMM +
+      drive5 downloads — contradicted by the shipped <code>usearch.aarch64</code> and the
+      <code>--no_tmhmm</code> model.<br>
+      <strong>(d)</strong> Docs call the configurator an "interactive <strong>5-step</strong> wizard
+      (<strong>~1700 lines</strong>)" (CLAUDE.md:118, README:110/156); it is Steps 1–7 plus 6a–6h — up to 14
+      screens, <strong>80</strong> questions, <strong>3593</strong> lines. <code>Step 6d</code> is also
+      printed twice (<code>:3148</code>, <code>:3210</code>) with no <code>6e</code>.<br>
+      <strong>(e)</strong> <code>INVESTIGATION_RANKING_DISCREPANCY.md</code> is byte-identical at the repo
+      root and in <code>docs/</code> (both 32 816 B) — two copies that will diverge on first edit. Same for
+      root-level <code>PLAN_chai_and_designers.md</code>.<br>
+      <strong>(f)</strong> <code>git clone …/BindMaster.git</code> appears in <code>bindmaster.py:52</code>,
+      <code>CLAUDE.md:424</code> and <code>CONTRIBUTING.md:16</code>. README:10 documents the rename and
+      states the old URL redirects, so this is a consistency nit rather than a breakage — but the README's own
+      quick start used the old URL too, contradicting its rename note. (Corrected in the README as part of
+      this audit.)
+    </td></tr>
+
+  </tbody>
+</table></div>
+
+<h3>4.4 Report truthfulness and shortlist integrity</h3>
+
+<p class="fine">
+  These concern what the generated <code>report.html</code> and <code>top30_candidates.csv</code>
+  <em>tell you</em> — the artefacts a scientist actually reads before spending money on synthesis.
+</p>
+
+<div class="f">
+  <h4><span class="sev c-high">High</span> &nbsp;F32 · Every report describes a ranking method the code no longer uses</h4>
+  <p class="loc"><code>visualization/report.py:1837–1846</code> (the rendered <code>two_stage</code> methodology
+     block) vs <code>cli/report.py:346</code>
+     <code>screen_metric = getattr(args, "screen_metric", "max") or "max"</code></p>
+  <p>The report tells the reader, verbatim: "Ranking is <b>two-stage mean iPTM</b> … <b>Stage 1 — screen:</b>
+     <code>consensus_iptm_mean</code> = mean(boltz2, af3, esmfold2 iPTM) … Mean was selected as default over
+     max because it is more robust to per-target engine blind spots … The <em>legacy</em> max-screen
+     (<code>--screen-metric max</code>) is the precision-leaning alternative … so Stage 1 + Stage 2 collapse
+     to a single mean-iPTM gate-then-rank."</p>
+  <p>Every one of those statements is now false. Commit <code>5769064</code>
+     ("evaluator: revert two-stage screen default to max") changed the default back to
+     <strong>max</strong> — and <code>git show --stat</code> confirms it touched
+     <code>CHANGELOG.md</code>, <code>CLAUDE.md</code>, <code>cli/report.py</code>,
+     <code>comparison/scoring.py</code> and <code>test_scoring.py</code>, but
+     <strong>not <code>visualization/report.py</code></strong>.</p>
+  <p><strong>Failure:</strong> every <code>report.html</code> generated on current master runs a max screen
+     while its own methodology section says it ran a mean screen, calls mean "the default", calls max
+     "legacy", and claims the two stages "collapse to a single mean-iPTM gate-then-rank" — precisely the
+     behaviour the revert was meant to undo. A scientist deciding what to order is reading the wrong method,
+     with benchmark AUC numbers attached to lend it authority. Arguably the most consequential drift in the
+     repository, because it is embedded in the deliverable rather than in a doc someone might skip.</p>
+  <p class="fix"><strong>Fix:</strong> render the methodology text from the actual <code>screen_metric</code>
+     argument instead of a hardcoded string, so it cannot desync again.</p>
+</div>
+
+<div class="tw"><table>
+  <thead><tr><th class="n">#</th><th class="n">Sev</th><th>Finding</th><th>Location</th><th>Consequence &amp; fix</th></tr></thead>
+  <tbody>
+
+  <tr><td class="n">F33</td><td class="sev c-high">Med</td>
+    <td>AF3's and Protenix's per-engine ipSAE silently never reach the wet-lab shortlist — the column names
+        are read but never written</td>
+    <td>read at <code>cli/report.py:413–414</code> and
+        <code>visualization/report.py:2609–2610, 2640–2641</code> as
+        <code>af3_pae_ipsae_min</code> / <code>protenix_pae_ipsae_min</code><br>
+        written at <code>scoring.py:313–316</code> as
+        <code>result[f"{prefix}_ipsae_min"]</code> → <code>af3_ipsae_min</code></td>
+    <td>A grep for <code>af3_pae_ipsae_min</code> finds only read sites — nothing in the repo creates it.
+        Because the column selector silently filters to existing columns,
+        <code>top30_candidates.csv</code> (the shortlist the wet-lab handoff reads) carries
+        <code>boltz_pae_ipsae_min</code> and <code>esmfold2_ipsae_min</code> but never AF3's, and the
+        per-engine threshold legend drops its "AF3 ≥ 0.61" row. The canonical second engine is invisible in
+        exactly the table where cross-validation matters most. <em>Fix:</em> use
+        <code>af3_ipsae_min</code> / <code>protenix_ipsae_min</code> at the read sites, or emit both names.
+        Better: fail loudly on a missing expected column rather than filtering silently.</td></tr>
+
+  <tr><td class="n">F34</td><td class="sev c-med">Med</td>
+    <td>On a single-engine install every design is marked <code>wetlab_recommended = False</code></td>
+    <td><code>comparison/scoring.py:965</code> —
+        <code>annotate_wetlab_recommended(…, agreement_min: int = 2, …)</code>, appending
+        <code>f"agreement {int(val)} &lt; {agreement_min}"</code></td>
+    <td><code>compute_agreement</code> cannot exceed 1 when only one engine is present, and a single-engine
+        run is a supported, auto-detected configuration — <code>evaluate.sh:146–163</code> sets
+        <code>SKIP_AF3=1</code> / <code>SKIP_ESMFOLD2=1</code> when those envs are absent (the documented
+        24 GB path). Every design then reads <code>wetlab_recommended = False</code>,
+        <code>wetlab_reason = "agreement 1 &lt; 2"</code>, so the column conveys nothing except that the user
+        has one engine. <em>Fix:</em> skip the agreement clause when only one engine contributed, and say so
+        in the reason string.</td></tr>
+
+  <tr><td class="n">F35</td><td class="sev c-med">Med</td>
+    <td>ipSAE tier thresholds are hardcoded throughout the HTML layer, so the advertised
+        <code>--threshold-*</code> flags produce a mislabelled report</td>
+    <td>canonical constants at <code>comparison/scoring.py:28–30</code>
+        (<code>IPSAE_PASS_THRESHOLD = 0.61</code> …), but the literal <code>0.61</code> appears
+        <strong>18×</strong> in <code>visualization/report.py</code> and again in
+        <code>visualization/top30_slim.py</code></td>
+    <td><code>report --threshold-boltz 0.50</code> is a documented flag
+        (<code>cli/report.py:1046</code>) and it genuinely changes
+        <code>apply_screening_thresholds</code> and <code>compute_agreement</code> — but nothing downstream
+        knows. <code>top30_slim._tier</code> still splits at 0.61, so the decision table labels a 0.55 design
+        "low" while the agreement count that drove its rank counted it as a pass. <em>Fix:</em> thread the
+        resolved threshold into the renderers; import the constants rather than retyping them.</td></tr>
+
+  <tr><td class="n">F36</td><td class="sev c-med">Med</td>
+    <td><code>qc-annotate</code> marks any design the interface panel did not cover as
+        <code>qc_pass=False</code>, and <code>--drop-failures</code> then deletes it</td>
+    <td><code>cli/qc_annotate.py:53</code> — a missing value appends
+        <code>f"{col}=NA"</code> to <code>reasons</code>, and
+        <code>qc_pass = (len(reasons) == 0)</code></td>
+    <td>The metrics join is a LEFT join, so a design with no interface row gets NaN for all five
+        <code>interface_*</code> columns and is failed for absence of evidence rather than bad evidence —
+        with <code>qc_fail_reasons</code> reading <code>interface_dG=NA;interface_sc=NA;…</code>. With
+        <code>--drop-failures</code> those designs vanish from the shortlist. <em>Fix:</em> distinguish
+        "not evaluated" from "failed"; never drop on the former.</td></tr>
+
+  <tr><td class="n">F37</td><td class="sev c-med">Med</td>
+    <td>The two functions that produce every ranked number have no tests, despite a docstring claiming
+        external cross-validation</td>
+    <td><code>comparison/scoring.py:88</code> — docstring of
+        <code>compute_ipsae_from_pae</code>: "<em>Implements the DunbrackLab (2025) d0res formula …
+        Cross-validated against DunbrackLab ipsae package v1.0.1</em>"</td>
+    <td><code>compute_iptm_from_pae</code> produces every <code>{engine}_pae_iptm</code> — the sole input to
+        <code>consensus_iptm</code> and <code>consensus_iptm_mean</code>, i.e. both ranking stages — and
+        <code>compute_ipsae_from_pae</code> produces every <code>*_ipsae_min</code>,
+        <code>quality_tier</code> and <code>agreement_count</code>. Neither has a single test, so the claimed
+        cross-validation is not reproducible in CI and a transpose or d0 regression would pass silently.
+        <em>Fix:</em> pin 2–3 known PAE matrices with expected outputs; if the DunbrackLab comparison was
+        really run, commit its fixtures.</td></tr>
+
+  </tbody>
+</table></div>
+
+<h3>4.5 Ingestion coverage — tools that quietly do not make it into the report</h3>
+
+<div class="tw"><table>
+  <thead><tr><th class="n">#</th><th class="n">Sev</th><th>Finding</th><th>Location</th><th>Consequence &amp; fix</th></tr></thead>
+  <tbody>
+
+  <tr><td class="n">F38</td><td class="sev c-high">High</td>
+    <td><code>binder-compare run</code> — the advertised single-command path — cannot ingest RFD3,
+        Protein-Hunter or Proteina-Complexa</td>
+    <td><code>cli/run.py:184–187</code> accepts only <code>--bindcraft</code>, <code>--boltzgen</code>,
+        <code>--mosaic</code>, <code>--pxdesign</code><br>
+        while <code>cli/extract.py:177–181</code> accepts <code>--rfd3</code> and the rest</td>
+    <td>A human following <code>binder-compare run --help</code> — or README's quick start, which uses
+        <code>bindmaster evaluate run --mosaic … --bindcraft …</code> — gets a report that silently omits
+        every design from the three newest tools, including both Part L and Part M additions. Passing
+        <code>--rfd3</code> is rejected by argparse outright, with no hint that <code>extract</code> supports
+        it. <em>Fix:</em> mirror <code>extract</code>'s tool flags in <code>run</code>; better, share one
+        argparse group between them so they cannot diverge again.</td></tr>
+
+  <tr><td class="n">F39</td><td class="sev c-high">High</td>
+    <td>The RFD3 FASTA fallback can ingest MPNN <em>target+binder</em> sequences as if they were binders</td>
+    <td><code>extractors/rfd3.py:182</code> — <code>_extract_from_fasta</code></td>
+    <td>A worker following the manual foundry workflow CLAUDE.md documents (<code>rfd3 design</code>, then
+        <code>mpnn</code> per backbone) has no aggregated <code>sequences.csv</code>, so
+        <code>extract --rfd3</code> falls through to the FASTA path. MPNN writes the full chain — target
+        prefix included — and CLAUDE.md's own gotcha list says you must "strip the target prefix (first
+        <code>len(target_seq)</code> chars)". If that strip does not happen here, the refold engines fold a
+        target+binder concatenation as a "binder", producing meaningless iPTM for those rows.
+        <em>Fix:</em> strip the target prefix in the fallback path, and refuse sequences longer than a
+        plausible binder rather than passing them through.</td></tr>
+
+  <tr><td class="n">F40</td><td class="sev c-med">Med</td>
+    <td>A tool that yields zero sequences is not an error, so a typo'd path silently shrinks the pool</td>
+    <td><code>cli/extract.py:81</code> — <code>if not all_binders: … sys.exit(1)</code></td>
+    <td>The guard only fires when <em>every</em> tool yields nothing. With four <code>--tool DIR</code> flags
+        and a typo in one, <code>extract</code> prints "<code>→ 0 sequences</code>" for that tool and exits 0;
+        <code>run_evaluate.sh</code> under <code>set -e</code> then spends hours of Boltz-2 + AF3 + ESMFold2
+        GPU time on a partial pool, and the report looks complete. <em>Fix:</em> fail (or require an explicit
+        <code>--allow-empty</code>) when a directory was requested but produced nothing.</td></tr>
+
+  <tr><td class="n">F41</td><td class="sev c-med">Med</td>
+    <td>The Evaluator's own README documents an env and a subcommand deleted in Part I</td>
+    <td><code>Evaluator/README.md:77, 158, 207, 231, 241</code> and
+        <code>Evaluator/docs/pipeline_reference.md:26, 41</code> — all reference
+        <code>binder-eval-af2</code> / <code>refold-af2</code></td>
+    <td>Part I deleted <code>refold_af2.py</code>, <code>af2_runner.py</code> and
+        <code>binder-eval-af2.yml</code>. The Evaluator README is the only per-subcommand reference a human
+        has, and it still carries a <code>refold-af2</code> section plus a troubleshooting entry
+        ("<code>binder-eval-af2</code> environment not found") that now describes a permanent condition.
+        Following it yields <code>invalid choice: 'refold-af2'</code>. Its <code>extract</code> section also
+        predates <code>--rfd3</code> and <code>--protein-hunter</code>. <em>Fix:</em> regenerate the
+        subcommand list from argparse rather than maintaining it by hand.</td></tr>
+
+  <tr><td class="n">F42</td><td class="sev c-med">Med</td>
+    <td>ESMFold2 — the default engine — has no z-score or summary columns, so it is missing from the
+        per-engine comparison tables</td>
+    <td><code>core/schema.py:308</code> — <code>ZSCORE_METRICS</code> carries no
+        <code>esmfold2_*</code> entries</td>
+    <td><code>metrics_zscore.csv</code> has no <code>esmfold2_*_z</code> columns and
+        <code>summary.json</code> no ESMFold2 entries, so the report's per-tool "mean ± std" comparison shows
+        AF3 and Boltz rows but not the engine CLAUDE.md calls the default. The engine drives
+        <code>consensus_iptm</code> and the autosize gate, yet is absent from the tables a reader uses to
+        judge engine agreement. <em>Fix:</em> add the <code>esmfold2_*</code> entries alongside the
+        <code>af3_*</code> ones.</td></tr>
+
+  <tr><td class="n">F43</td><td class="sev c-med">Med</td>
+    <td>Two smaller ingestion mismatches worth a look</td>
+    <td><code>extractors/pxdesign.py:127</code>; <code>extractors/proteina_complexa.py:64</code>;
+        <code>scripts/discover_tool_csvs.py:31</code></td>
+    <td><strong>(a)</strong> PXDesign <code>binder_id</code>s are positional (<code>pxdesign_0</code>,
+        <code>pxdesign_1</code>, …) because <code>_make_id</code> ignores the <code>design_id</code> the
+        collector writes — so a <code>pxdesign_12</code> in the report cannot be grepped back to
+        <code>sequences.csv</code>, and the id encodes neither the length bucket nor the PXDesign rank.
+        <strong>(b)</strong> The Proteina-Complexa native-metric column map expects the raw evaluation names
+        (<code>self_complex_i_pTM</code> …) but the collector renames them to <code>iptm</code>,
+        <code>plddt_binder_mean</code>, … before writing <code>sequences.csv</code>, so no native metric is
+        picked up for the layout the extractor's own docstring says it supports.
+        <strong>(c)</strong> <code>discover_tool_csvs.py</code>'s glob patterns
+        (<code>**/pxdesign/summary.csv</code>, <code>**/protein_hunter_*/summary_all_runs.csv</code>) do not
+        match the canonical configurator layout, so the discovery helper finds neither tool.</td></tr>
+
+  </tbody>
+</table></div>
+
+<h2>5. GUI options</h2>
+
+<p>
+The honest recommendation is <strong>do the config-file work first and the GUI second</strong>. Most of what
+feels like a UI problem here is a state problem: there is no machine-readable description of a run, so every
+front-end has to re-ask 80 questions. Fix that and a GUI becomes a thin optional layer; skip it and every GUI
+inherits the wizard's shape.
+</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Option</th><th>What it is</th><th class="n">Effort</th><th>Verdict</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>A · Richer curses TUI</strong><br><span class="fine">extend <code>tui/app.py</code></span></td>
+      <td>Stays stdlib-only and works over bare ssh with no port forwarding. Add a form-based run editor, a
+          live log tail, and per-tool progress to the existing 5-item menu.</td>
+      <td class="n">~2–3 wk</td>
+      <td class="c-med">Works everywhere, but hand-rolling curses forms for 80 fields is a lot of widget code
+          for a modest payoff, and it can never show structures or plots.</td>
+    </tr>
+    <tr>
+      <td><strong>B · Local web UI</strong><br><span class="fine">one Python process + ssh port-forward</span></td>
+      <td>A stdlib <code>http.server</code>-class app (or a small FastAPI) serving four routes and shelling
+          out to the existing CLI. Reuses <code>visualization/report.py</code> and the vendored NGL viewer,
+          so results rendering is already built.</td>
+      <td class="n">~1 wk for phase 1</td>
+      <td class="c-ok"><strong>Recommended</strong> — see below.</td>
+    </tr>
+    <tr>
+      <td><strong>C · Config-as-JSON + static status page</strong><br><span class="fine">no server at all</span></td>
+      <td><code>configurator --config run.json</code> for input, and
+          <code>binder-compare status --html</code> writing a static file you <code>scp</code> or open
+          locally. No process to keep alive, no port, nothing to secure.</td>
+      <td class="n">~2–3 days</td>
+      <td class="c-ok">Best value per line in this report, and a strict prerequisite for A and B. Do it first.</td>
+    </tr>
+  </tbody>
+</table></div>
+
+<h3>Why B, and what phase 1 looks like</h3>
+
+<p>
+The decisive argument for the browser is that <strong>the hard part is already done</strong>.
+<code>visualization/report.py</code> already emits a self-contained HTML report with base64 plots, sortable
+metric tables and an NGL structure viewer, and <code>tools/ngl/</code> is already vendored. A web UI does not
+need a charting stack or a 3D viewer — it needs a shell around artefacts that already exist. Neither A nor C
+can show the structures at all.
+</p>
+
+<p>Phase 1, deliberately small — target under 400 lines, stdlib <code>http.server</code> only:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Route</th><th>Shows</th><th>Calls</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET /</code></td>
+        <td>Run list: name, tools configured, design counts, evaluated yes/no</td>
+        <td>the same <code>runs/</code> scan as <code>configurator.cmd_status()</code> — reuse it rather than
+            reimplement, and fix F27 in the process</td></tr>
+    <tr><td><code>GET /run/&lt;name&gt;</code></td>
+        <td>Per-tool status, last 200 lines of each <code>run.log</code>, the <code>settings.json</code>
+            provenance block</td>
+        <td>file reads only, no subprocess</td></tr>
+    <tr><td><code>GET /run/&lt;name&gt;/report</code></td>
+        <td>The existing <code>report.html</code>, served as-is</td>
+        <td>nothing — it is already a file on disk</td></tr>
+    <tr><td><code>POST /run/&lt;name&gt;/evaluate</code></td>
+        <td>Fire-and-forget, streaming the log back to <code>/run/&lt;name&gt;</code></td>
+        <td><code>subprocess.Popen(["bash", run_dir/"run_evaluate.sh"])</code> — the wrapper the configurator
+            already generates</td></tr>
+  </tbody>
+</table></div>
+
+<p>
+That is useful on day one, from a laptop over <code>ssh -L 8765:localhost:8765</code>, with no new
+dependency. Phase 2 adds a run <em>editor</em> reading and writing the <code>run.json</code> from option C —
+which is why C comes first. Phase 3, only if wanted, adds a cross-machine queue view.
+</p>
+
+<h4>The multi-env and multi-day problems</h4>
+<ul>
+  <li><strong>Environments:</strong> the UI should never activate a conda env. It launches
+      <code>run_evaluate.sh</code> / <code>run_all.sh</code>, which already do standalone-vs-system conda
+      discovery (<code>evaluate.sh:36–45</code>). Keeping that in one place is why this stays small.</li>
+  <li><strong>Multi-day runs:</strong> never hold a connection. Poll artefacts on disk — the per-tool output
+      dir, <code>settings.json</code>, <code>run.log</code> — exactly as the TUI status screen does. A server
+      restart then costs nothing, which matters when jobs outlive ssh sessions.</li>
+</ul>
+
+<h4>What a GUI should not do here</h4>
+<ul>
+  <li><strong>Not run the installer.</strong> It is a 2752-line interactive bash script that wants a terminal
+      for progress. <code>--tool all --yes</code> already covers automation (once F11 is fixed).</li>
+  <li><strong>Not reimplement scoring or plots.</strong> Everything must go through
+      <code>binder-compare</code>, or the report and the UI will drift apart — the same drift that produced
+      F20 and F27.</li>
+  <li><strong>Not become the only way to configure a run.</strong> That is today's problem with a nicer skin.
+      <code>run.json</code> stays the source of truth, with the GUI as one editor among several (wizard,
+      hand-edited file, cron).</li>
+  <li><strong>Not listen on a public interface.</strong> Bind <code>127.0.0.1</code> and require an ssh
+      tunnel. It runs shell commands as the user; there should be no auth surface to get wrong.</li>
+</ul>
+
+<h2>6. What is already good</h2>
+
+<p>Worth stating plainly, because several things here are better than the documentation suggests:</p>
+<ul>
+  <li><strong>The core scientific insight is right.</strong> Ranking on independent refolders rather than the
+      designer's own confidence is correct, and the two-stage max-screen → mean-rank design
+      (<code>scoring.py:790</code>) is a thoughtful answer to a real problem. F5 is a gap in enforcing it,
+      not a flaw in the idea.</li>
+  <li><strong><code>evaluate.sh</code> is a genuinely good orchestrator</strong> — engine auto-detection,
+      graceful skip with a printed note, <code>--resume</code>, standalone-conda discovery, per-engine env
+      overrides. This is what non-agentic operability should look like everywhere else.</li>
+  <li><strong>The autosize loop is real code</strong> with a budget cap and a round limit
+      (<code>comparison/autosize.py:134</code>) — not an LLM-driven loop. It deserves documentation.</li>
+  <li><strong>The shared MSA cache design is sound</strong> and solves a real rate-limit failure across three
+      engines; F21 and F22 are refinements to a correct idea.</li>
+  <li><strong>Both documented extractor traps are genuinely handled in code</strong> —
+      <code>BoltzGenExtractor</code> prefers <code>designed_chain_sequence</code>
+      (<code>boltzgen.py:38</code>), and the Mosaic reader widens the header rather than dropping rows
+      (F7 is about how far that goes, not whether it was attempted).</li>
+  <li><strong>~200 unit tests</strong> on the comparison layer, plus shellcheck and ruff in CI, and a
+      "Known issues" section that is unusually honest about its own limitations.</li>
+</ul>
+
+<h2>7. Suggested order</h2>
+
+<ol>
+  <li><strong>Stop producing wrong answers</strong> — F1 (chain selection), F2 (hotspot chain), F3 (RFD3
+      path), F4 (Protenix default), F5 (engine-count gate), F6 (merge dedup), F23 (ceil), F33 (AF3 ipSAE
+      missing from the shortlist). These change which designs a wet lab is told to order. F1 is the one to
+      fix today.</li>
+  <li><strong>Make the report tell the truth</strong> — F32 (methodology text describes the reverted
+      mean-screen), F34, F35, F36. F32 is a one-line change and it is currently misinforming every reader of
+      every report.</li>
+  <li><strong>Unbreak the documented commands</strong> — F8, F9, F10, F11, F15, F17. All small; all
+      currently fail for anyone following the README.</li>
+  <li><strong>Fix the aarch64 matrix</strong> — F12, F13, F14, F16. Cheap, and they block the flagship
+      platform. F14 is deletion, not new code.</li>
+  <li><strong>Close the non-agentic gap</strong> — <code>configurator --config run.json</code> plus an
+      operator's manual covering all 22 subcommands. Highest leverage item in the report, and it unlocks the
+      GUI work.</li>
+  <li><strong>Close the ingestion holes</strong> — F38 (<code>run</code> missing three tools), F39 (RFD3
+      FASTA fallback), F40 (zero-yield is not an error), F41 (Evaluator README documents a deleted engine),
+      F42, F43. These decide whether a tool's designs appear in the report at all.</li>
+  <li><strong>Then robustness and provenance</strong> — F18–F22, F24–F26, F28.</li>
+  <li><strong>Then hygiene</strong> — F29 + F37 (test the live extractors and the two scoring kernels),
+      F30 (third-party notices), F31.</li>
+  <li><strong>GUI last</strong> — option C, then web-UI phase 1.</li>
+</ol>
+
+<hr>
+<p class="fine">
+  <strong>Method.</strong> Static read of the working tree at <code>a600090</code>, combined from a direct
+  review and a parallel fan-out of area auditors (installer, configurator, evaluator, CLI/TUI, dependencies,
+  documentation, non-agentic operability). Every finding published here was confirmed by opening the cited
+  file and line; behavioural claims were checked by running <code>--help</code>, <code>py_compile</code>,
+  and small reproductions — the <code>round()</code> table in F23 and the <code>set -euo pipefail</code>
+  failure in F15 were reproduced directly. No installer, GPU workload or test suite was executed:
+  <code>numpy</code> and <code>pytest</code> are absent from the analysis environment, so the runtime
+  behaviour of the refold engines and the report generator was assessed by reading only. No repository source
+  code was modified by this analysis.
+</p>
+
+</div>
+</body>
+</html>

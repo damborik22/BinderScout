@@ -160,7 +160,7 @@ def plot_pae_heatmaps(
 ) -> Figure:
     """Boltz-2 PAE heatmaps for the top binders.
 
-    Additional engines (Protenix on x86, AF3 on aarch64) will be added as
+    Additional engines (AF3, ESMFold2) will be added as
     extra columns in later refactor parts.
     """
     seqs = [s for s in sequences if s in boltz_pae_data][:max_binders]
@@ -238,7 +238,7 @@ def load_pae_data_from_df(
 
 _ENGINE_RADAR_METRICS: dict[str, list[tuple[str, str, str]]] = {
     # engine_key -> list of (df_col, label, direction)  direction: "↑" or "↓"
-    # Column naming: boltz uses `boltz_pae_*`; protenix/af3 use `<engine>_*` (no _pae_).
+    # Column naming: boltz uses `boltz_pae_*`; af3/esmfold2 use `<engine>_*` (no _pae_).
     "boltz": [
         ("boltz_pae_ipsae_min", "ipSAE_min", "↑"),
         ("boltz_pae_iptm", "ipTM", "↑"),
@@ -246,13 +246,6 @@ _ENGINE_RADAR_METRICS: dict[str, list[tuple[str, str, str]]] = {
         ("binder_ptm", "binder pTM", "↑"),
         ("boltz_pae_bt_mean", "PAE b→t", "↓"),
         ("boltz_pae_tb_mean", "PAE t→b", "↓"),
-    ],
-    "protenix": [
-        ("protenix_ipsae_min", "ipSAE_min", "↑"),
-        ("protenix_iptm", "ipTM", "↑"),
-        ("protenix_plddt_binder_mean", "pLDDT binder", "↑"),
-        ("protenix_pae_bt_mean", "PAE b→t", "↓"),
-        ("protenix_pae_tb_mean", "PAE t→b", "↓"),
     ],
     "af3": [
         ("af3_ipsae_min", "ipSAE_min", "↑"),
@@ -275,12 +268,11 @@ _ENGINE_RADAR_METRICS: dict[str, list[tuple[str, str, str]]] = {
 # cross-package import.
 _ENGINE_RANK_COLS: dict[str, str] = {
     "boltz": "boltz_pae_ipsae_min",
-    "protenix": "protenix_ipsae_min",
     "af3": "af3_ipsae_min",
     "esmfold2": "esmfold2_ipsae_min",
 }
 
-_ENGINE_DISPLAY = {"boltz": "Boltz-2", "protenix": "Protenix", "af3": "AF3", "esmfold2": "ESMFold2"}
+_ENGINE_DISPLAY = {"boltz": "Boltz-2", "af3": "AF3", "esmfold2": "ESMFold2"}
 
 
 def plot_radar_per_engine(df: pd.DataFrame, top_n: int = 10) -> Figure:
@@ -581,7 +573,6 @@ _IPTM_RADAR_SPOKES: list[tuple[str, str]] = [
     ("boltz_pae_iptm", "Boltz-2 iPTM"),
     ("af3_pae_iptm", "AF3 iPTM"),
     ("esmfold2_pae_iptm", "ESMFold2 iPTM"),
-    ("protenix_pae_iptm", "Protenix iPTM"),
 ]
 
 

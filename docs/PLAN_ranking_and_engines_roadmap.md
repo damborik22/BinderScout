@@ -12,9 +12,12 @@
 >   `target_analysis.py`, `scoring.py`. Report renderers:
 >   `visualization/{report.py, plots.py, top30_slim.py}`. → **Part X premise is real.**
 > - `Protein-Hunter/chai_ph/` (chai-lab) is already vendored. → **Part O install cost is low.**
-> - Related existing plan: **Part N** (`docs/plans.md`) — Rosetta/Boltz-2 interface-ΔG
->   metric (NR1–NR4). Part T (iCS) and Part N (ΔG) both target the same gap; keep them
->   coordinated, don't duplicate.
+> - Related **completed** plan: **Part N** (`docs/completed_plans.md`) — Rosetta interface-ΔG.
+>   Landed 2026-06-16 **with a negative result**: ΔG, `|dG/dSASA|`, PRODIGY and the BindCraft
+>   14-metric panel do not rank affinity among binders (best pooled |ρ| ≈ 0.34 on 2/4
+>   targets; corroborated on OpenBind + SKEMPI). Part T (iCS) attacks the same gap, so it
+>   **inherits Part N's bar**: beat the incumbent on labelled data, or document the negative
+>   and stop.
 
 ---
 

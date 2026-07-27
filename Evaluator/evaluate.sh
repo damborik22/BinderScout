@@ -13,8 +13,6 @@
 #
 # Optional:
 #   --skip-boltz2          skip Boltz-2 refolding (use existing boltz2_results.csv)
-#   --skip-protenix        skip Protenix refolding (default: auto-detect bindmaster_pxdesign env)
-#   --protenix-env ENV     conda env for Protenix (default: bindmaster_pxdesign)
 #   --skip-af3             skip AF3 refolding (default: auto-detect binder-eval-af3 env)
 #   --af3-env ENV          conda env for AF3 (default: binder-eval-af3)
 #   --skip-esmfold2        skip ESMFold2 refolding (default: auto-detect binder-eval-esmfold2 env)
@@ -26,7 +24,7 @@
 #   --soluprot-filter      drop sequences scoring below the threshold from FASTA BEFORE
 #                          refolding — saves GPU time on designs we wouldn't pursue.
 #                          Off by default; the score still lands in the report either way.
-#   --primary-engine ENG   primary ranking engine: boltz | protenix | af3 | esmfold2 (default: boltz)
+#   --primary-engine ENG   primary ranking engine: boltz | af3 | esmfold2 (default: boltz)
 #   --epitope-residues L   intended hotspot residues (e.g. '15,18,232,263' or 'A15,A18'). Computes
 #                          epitope_match_fraction INLINE in the report from each design's refolded
 #                          structure (selectivity signal for multi-pocket targets, e.g. ApoE4). Cheap.
@@ -80,8 +78,6 @@ SEQUENCES=""
 TARGET_SEQ=""
 OUTPUT=""
 SKIP_BOLTZ2=0
-SKIP_PROTENIX=0
-PROTENIX_ENV="bindmaster_pxdesign"
 SKIP_AF3=0
 AF3_ENV="binder-eval-af3"
 SKIP_ESMFOLD2=0
@@ -105,8 +101,6 @@ while [[ $# -gt 0 ]]; do
         --target-seq)     TARGET_SEQ="$2";   shift 2 ;;
         --output|-o)      OUTPUT="$2";       shift 2 ;;
         --skip-boltz2)    SKIP_BOLTZ2=1;     shift ;;
-        --skip-protenix)  SKIP_PROTENIX=1;   shift ;;
-        --protenix-env)   PROTENIX_ENV="$2"; shift 2 ;;
         --skip-af3)       SKIP_AF3=1;        shift ;;
         --af3-env)        AF3_ENV="$2";      shift 2 ;;
         --skip-esmfold2)  SKIP_ESMFOLD2=1;   shift ;;
@@ -119,8 +113,8 @@ while [[ $# -gt 0 ]]; do
         --primary-engine)
             PRIMARY_ENGINE="$2"
             case "$PRIMARY_ENGINE" in
-                boltz|protenix|af3|esmfold2) ;;
-                *) echo "Error: --primary-engine must be one of: boltz, protenix, af3, esmfold2 (got '$PRIMARY_ENGINE')" >&2; exit 1 ;;
+                boltz|af3|esmfold2) ;;
+                *) echo "Error: --primary-engine must be one of: boltz, af3, esmfold2 (got '$PRIMARY_ENGINE')" >&2; exit 1 ;;
             esac
             shift 2 ;;
         --epitope-residues) EPITOPE_RESIDUES="$2"; shift 2 ;;
@@ -149,16 +143,6 @@ echo "=== BindMaster Evaluator ==="
 echo "Sequences : $SEQUENCES"
 echo "Output    : $OUTPUT"
 echo ""
-
-# Auto-detect Protenix availability unless user skipped it
-if [[ $SKIP_PROTENIX -eq 0 ]]; then
-    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${PROTENIX_ENV}"; then
-        echo "[note] conda env '${PROTENIX_ENV}' not found — Protenix refolding will be skipped."
-        echo "        (install with: bindmaster install --tool pxdesign)"
-        echo ""
-        SKIP_PROTENIX=1
-    fi
-fi
 
 # Auto-detect AF3 availability unless user skipped it
 if [[ $SKIP_AF3 -eq 0 ]]; then
@@ -200,7 +184,6 @@ SEQUENCES="$FASTA"
 
 # --- Step 1: Boltz-2 refolding ---------------------------------------------
 BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
-PROTENIX_CSV="$OUTPUT/protenix_results.csv"
 AF3_CSV="$OUTPUT/af3_results.csv"
 ESMFOLD2_CSV="$OUTPUT/esmfold2_results.csv"
 SOLUPROT_CSV="$OUTPUT/soluprot_results.csv"
@@ -208,7 +191,6 @@ SOLUPROT_CSV="$OUTPUT/soluprot_results.csv"
 # Step counter: 1 (report) + 1 per engine not skipped + 1 if SoluProt ran
 N_STEPS=1  # report
 [[ $SKIP_BOLTZ2 -eq 0 ]]   && (( N_STEPS++ ))
-[[ $SKIP_PROTENIX -eq 0 ]] && (( N_STEPS++ ))
 [[ $SKIP_AF3 -eq 0 ]]      && (( N_STEPS++ ))
 [[ $SKIP_ESMFOLD2 -eq 0 ]] && (( N_STEPS++ ))
 [[ $SKIP_SOLUPROT -eq 0 ]] && (( N_STEPS++ ))
@@ -289,21 +271,7 @@ else
 fi
 (( STEP++ ))
 
-# --- Step 2: Protenix refolding (optional) ---------------------------------
-if [[ $SKIP_PROTENIX -eq 0 ]]; then
-    echo "[step ${STEP}/${N_STEPS}] Protenix refolding  (conda env: ${PROTENIX_ENV})..."
-    PROTENIX_RESUME_FLAG=""
-    [[ $RESUME -eq 1 ]] && PROTENIX_RESUME_FLAG="--resume"
-    conda run -n "${PROTENIX_ENV}" binder-compare refold-protenix \
-        --sequences  "$SEQUENCES" \
-        --target-seq "$TARGET_SEQ" \
-        -o           "$PROTENIX_CSV" \
-        --output-dir "$OUTPUT/refold_protenix" \
-        $PROTENIX_RESUME_FLAG
-    (( STEP++ ))
-fi
-
-# --- Step 3: AF3 refolding (optional) --------------------------------------
+# --- Step 2: AF3 refolding (optional) --------------------------------------
 if [[ $SKIP_AF3 -eq 0 ]]; then
     echo "[step ${STEP}/${N_STEPS}] AF3 refolding       (conda env: ${AF3_ENV})..."
     AF3_RESUME_FLAG=""
@@ -317,7 +285,7 @@ if [[ $SKIP_AF3 -eq 0 ]]; then
     (( STEP++ ))
 fi
 
-# --- Step 4: ESMFold2 refolding (optional) ---------------------------------
+# --- Step 3: ESMFold2 refolding (optional) ---------------------------------
 if [[ $SKIP_ESMFOLD2 -eq 0 ]]; then
     echo "[step ${STEP}/${N_STEPS}] ESMFold2 refolding  (conda env: ${ESMFOLD2_ENV})..."
     ESMFOLD2_RESUME_FLAG=""
@@ -339,9 +307,6 @@ REPORT_ARGS=(
     --sequences      "$SEQUENCES"
     -o               "$OUTPUT/report"
 )
-if [[ $SKIP_PROTENIX -eq 0 && -f "$PROTENIX_CSV" ]]; then
-    REPORT_ARGS+=(--protenix-results "$PROTENIX_CSV")
-fi
 if [[ $SKIP_AF3 -eq 0 && -f "$AF3_CSV" ]]; then
     REPORT_ARGS+=(--af3-results "$AF3_CSV")
 fi

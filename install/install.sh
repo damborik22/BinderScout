@@ -5,7 +5,7 @@
 # (--tool af3 / --tool esmfold2).
 #
 # Usage:
-#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|af3|esmfold2|all] [--cuda VERSION] [--skip-examples] [--yes]
+#   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|af3|esmfold2|all] [--cuda VERSION] [--skip-examples] [--yes] [--force]
 #   bindmaster install [same options]
 #
 # With no --tool flag, an interactive menu lets you choose which tools to install.
@@ -67,8 +67,11 @@ RESET='\033[0m'
 CUDA_VERSION="12.4"
 SKIP_EXAMPLES=false
 AUTO_YES=false
+SKIP_PREFLIGHT=false
+FORCE=false      # --force: allow --yes to accept DESTRUCTIVE prompts (reclone / env re-create)
 UNINSTALL_MODE=false
-TOOL_SPECIFIED=false   # set to true when --tool is passed on CLI
+TOOL_SPECIFIED=false
+TOOL_ALL=false         # --tool all was given; uninstall widens this to every optional add-on   # set to true when --tool is passed on CLI
 STANDALONE="auto"      # auto | true | false — controls local Miniforge install
 
 # Per-tool install flags (set by arg parsing or interactive menu)
@@ -82,7 +85,7 @@ DO_PROTEIN_HUNTER=false
 DO_RFD3=false
 DO_AF3=false            # opt-in via --tool af3 (>=100 GB GPU memory required; weights not bundled)
 DO_ESMFOLD2=false       # default refold engine (included in --tool all; lightweight, no gated weights)
-DO_SOLUPROT=false       # opt-in via --tool soluprot (sequence-only E. coli solubility screen; x86 only — USEARCH dep)
+DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen; needs a C/C++ toolchain for the USEARCH v12 source build)
 
 # Note: legacy RFAA support was removed entirely (see CHANGELOG).
 # Use RFD3 (--tool rfd3) for all-atom diffusion-based binder design.
@@ -94,7 +97,15 @@ while [[ $# -gt 0 ]]; do
             TOOL_SPECIFIED=true
             case "${2,,}" in
                 all)
-                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true; DO_PROTEINA_COMPLEXA=true; DO_PROTEIN_HUNTER=true; DO_RFD3=true; DO_ESMFOLD2=true ;;
+                    TOOL_ALL=true
+                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true
+                    DO_PROTEINA_COMPLEXA=true; DO_PROTEIN_HUNTER=true; DO_RFD3=true; DO_ESMFOLD2=true
+                    # SoluProt is a first-class part of the pipeline: it screens the
+                    # pool BEFORE any GPU refolding, so leaving it out of `all` means
+                    # the documented full install cannot run the documented workflow.
+                    # Costs a Python 3.7 env and a USEARCH source build (needs a
+                    # C/C++ toolchain) -- see the preflight footprint table.
+                    DO_SOLUPROT=true ;;
                 bindcraft)
                     DO_BINDCRAFT=true ;;
                 boltzgen)
@@ -136,6 +147,14 @@ while [[ $# -gt 0 ]]; do
             AUTO_YES=true
             shift
             ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
+        --skip-preflight)
+            SKIP_PREFLIGHT=true
+            shift
+            ;;
         --standalone)
             STANDALONE=true
             shift
@@ -150,7 +169,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes]
+Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes] [--force]
        $0 --uninstall --tool <tool|all> [--yes]
 
   --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
@@ -174,7 +193,15 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes]
   --cuda        CUDA version for conda package resolution (default: 12.4).
   --skip-examples
                 Do not prompt to run bundled examples after install.
-  --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
+  --yes, -y     Auto-confirm SAFE prompts (proceed?, run the example?) — for
+                non-interactive / CI runs. Destructive prompts (re-clone a tool
+                repo, re-create a conda env, remove the local Miniforge3) are
+                auto-answered NO, so a repeat install keeps existing files and
+                downloaded weights. Pair with --force to replace them.
+  --skip-preflight  Skip the disk/GPU/network checks run before downloading.
+  --force       Let --yes accept the destructive prompts too. Re-clones tool
+                repos and re-creates conda envs, DELETING what is there —
+                including BindCraft/params/*.npz (~4 GB of AF2 weights).
   --standalone  Force local Miniforge3 install into BindMaster/conda/ (server-friendly).
                 All envs and shortcuts stay inside the project directory.
   --system-conda
@@ -275,14 +302,10 @@ run_logged() {
     return ${rc}
 }
 
-# confirm <prompt>
-# Returns 0 (yes) or 1 (no).
-confirm() {
+# _confirm_interactive <prompt>
+# The shared read loop. Default (bare Enter) is NO for every prompt in this script.
+_confirm_interactive() {
     local prompt="${1:-Are you sure?}"
-    if [[ "${AUTO_YES}" == true ]]; then
-        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}y (auto-yes)"
-        return 0
-    fi
     while true; do
         read -rp "$(echo -e "${YELLOW}${prompt} [y/N]: ${RESET}")" answer
         case "${answer,,}" in
@@ -291,6 +314,38 @@ confirm() {
             *) echo "Please answer y or n." ;;
         esac
     done
+}
+
+# confirm <prompt>
+# For SAFE prompts (proceed?, run the example?). --yes auto-accepts.
+# Returns 0 (yes) or 1 (no).
+confirm() {
+    local prompt="${1:-Are you sure?}"
+    if [[ "${AUTO_YES}" == true ]]; then
+        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}y (auto-yes)"
+        return 0
+    fi
+    _confirm_interactive "$prompt"
+}
+
+# confirm_destructive <prompt>
+# For prompts that DELETE existing work (re-clone a tool repo, re-create a conda env,
+# remove the local Miniforge3). --yes must NOT accept these: `--tool all --yes` is both
+# the documented non-interactive install AND the documented repair step, so auto-yes
+# turned a repeat run into `rm -rf BindCraft/` — including params/*.npz, ~4 GB of AF2
+# weights that Proteina-Complexa symlinks against. It also inverted the prompt's own
+# displayed default of [y/N]. --force opts in explicitly.
+confirm_destructive() {
+    local prompt="${1:-Are you sure?}"
+    if [[ "${FORCE}" == true ]]; then
+        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}y (--force)"
+        return 0
+    fi
+    if [[ "${AUTO_YES}" == true ]]; then
+        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}n (auto-yes keeps existing files; use --force to replace)"
+        return 1
+    fi
+    _confirm_interactive "$prompt"
 }
 
 # smoke_test <label> <command...>
@@ -569,7 +624,7 @@ select_tools_interactive() {
         "Binder design via AlphaFold2 (conda, Python 3.10)"
         "Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)"
         "JAX-based protein design with Marimo notebooks (uv venv)"
-        "Evaluate binders: refold with Boltz-2 (+ Protenix, AF3 if installed), ranked report (requires Mosaic)"
+        "Evaluate binders: refold with Boltz-2 (+ AF3, ESMFold2 if installed), ranked report (requires Mosaic)"
         "RFD3 / foundry — all-atom diffusion for protein + ligand + NA binders (conda)"
         "Protenix-based de novo binder design (conda)"
         "NVIDIA flow matching + test-time compute binder design (uv venv)"
@@ -703,7 +758,7 @@ install_bindcraft() {
     print_step "Cloning BindCraft repository"
     if [[ -d "${BINDCRAFT_DIR}" ]]; then
         print_warn "Directory ${BINDCRAFT_DIR} already exists."
-        if confirm "Remove and reclone?"; then
+        if confirm_destructive "Remove and reclone?"; then
             rm -rf "${BINDCRAFT_DIR}" || { print_fail "Failed to remove ${BINDCRAFT_DIR}"; return 1; }
         else
             print_warn "Skipping reclone; using existing directory."
@@ -723,7 +778,7 @@ install_bindcraft() {
     # Remove existing conda env if present
     if env_exists BindCraft; then
         print_warn "Conda environment 'BindCraft' already exists."
-        if confirm "Remove and recreate the BindCraft conda environment?"; then
+        if confirm_destructive "Remove and recreate the BindCraft conda environment?"; then
             run_logged "Removing existing BindCraft conda env" \
                 "${CONDA_CMD}" env remove -n BindCraft -y \
                 || return 1
@@ -854,7 +909,7 @@ install_boltzgen() {
     print_step "Cloning BoltzGen repository"
     if [[ -d "${BOLTZGEN_DIR}" ]]; then
         print_warn "Directory ${BOLTZGEN_DIR} already exists."
-        if confirm "Remove and reclone?"; then
+        if confirm_destructive "Remove and reclone?"; then
             rm -rf "${BOLTZGEN_DIR}" || { print_fail "Failed to remove ${BOLTZGEN_DIR}"; return 1; }
         else
             print_warn "Skipping reclone; using existing directory."
@@ -875,7 +930,7 @@ install_boltzgen() {
     print_step "Creating BoltzGen conda environment (Python 3.12)"
     if env_exists BoltzGen; then
         print_warn "Conda environment 'BoltzGen' already exists."
-        if confirm "Remove and recreate the BoltzGen conda environment?"; then
+        if confirm_destructive "Remove and recreate the BoltzGen conda environment?"; then
             run_logged "Removing existing BoltzGen conda env" \
                 "${CONDA_CMD}" env remove -n BoltzGen -y \
                 || return 1
@@ -982,7 +1037,7 @@ install_mosaic() {
     print_step "Cloning Mosaic repository"
     if [[ -d "${MOSAIC_DIR}" ]]; then
         print_warn "Directory ${MOSAIC_DIR} already exists."
-        if confirm "Remove and reclone?"; then
+        if confirm_destructive "Remove and reclone?"; then
             rm -rf "${MOSAIC_DIR}" || { print_fail "Failed to remove ${MOSAIC_DIR}"; return 1; }
         else
             print_warn "Skipping reclone; using existing directory."
@@ -1178,10 +1233,9 @@ install_evaluator() {
         "${CONDA_CMD}" run -n binder-eval pip install -q -e "${EVALUATOR_DIR}[report]" \
         || { print_fail "Failed to install binder-compare into binder-eval"; return 1; }
 
-    # (AF2 refolding was removed in the AF3/Protenix refactor; the
-    #  binder-eval-af2 env is no longer created. Protenix refolding will
-    #  reuse the existing bindmaster_pxdesign env; AF3 refolding lands on
-    #  aarch64 only via install_aarch.sh.)
+    # (AF2 and Protenix refolding have both been removed; the binder-eval-af2
+    #  env is no longer created. The 2nd/3rd engines are AF3 (--tool af3) and
+    #  ESMFold2 (--tool esmfold2), each in its own env.)
 
     # Smoke test
     smoke_test "binder-compare --help" \
@@ -1231,12 +1285,31 @@ install_pxdesign() {
     fi
 
     # Create conda env (gcc for Triton JIT, cuda-nvcc for deepspeed CUDA_HOME)
+    #
+    # env_exists guard: everything after this point is network-bound (Protenix,
+    # PXDesignBench, ColabDesign, deepspeed, CUTLASS clone, weight downloads), so a
+    # dropped connection mid-install is the common failure. Without the guard the
+    # operator's natural `--tool pxdesign` re-run aborted here instead of resuming,
+    # making this ~25-step function the only non-resumable installer path. Same
+    # pattern the binder-eval-esmfold2 env already uses. Use --force to rebuild.
     print_step "Creating bindmaster_pxdesign conda environment"
-    run_logged "Creating bindmaster_pxdesign env" \
-        "${CONDA_CMD}" create -n bindmaster_pxdesign -y python=3.11 \
-            "pytorch>=2.2" "pytorch-cuda=12.4" "gcc_linux-64<14" "gxx_linux-64<14" "cuda-nvcc=12.4" "cuda-cudart-dev=12.4" \
-            -c pytorch -c nvidia -c conda-forge \
-        || { print_fail "Failed to create bindmaster_pxdesign env"; return 1; }
+    if env_exists bindmaster_pxdesign; then
+        if [[ "${FORCE}" == true ]]; then
+            run_logged "Removing existing bindmaster_pxdesign env (--force)" \
+                "${CONDA_CMD}" env remove -n bindmaster_pxdesign -y \
+                || { print_fail "Failed to remove bindmaster_pxdesign env"; return 1; }
+        else
+            print_warn "Conda environment 'bindmaster_pxdesign' already exists — reusing it."
+            print_warn "  The remaining steps are idempotent; pass --force to rebuild from scratch."
+        fi
+    fi
+    if ! env_exists bindmaster_pxdesign; then
+        run_logged "Creating bindmaster_pxdesign env" \
+            "${CONDA_CMD}" create -n bindmaster_pxdesign -y python=3.11 \
+                "pytorch>=2.2" "pytorch-cuda=12.4" "gcc_linux-64<14" "gxx_linux-64<14" "cuda-nvcc=12.4" "cuda-cudart-dev=12.4" \
+                -c pytorch -c nvidia -c conda-forge \
+            || { print_fail "Failed to create bindmaster_pxdesign env"; return 1; }
+    fi
 
     # Install PXDesign
     run_logged "Installing PXDesign (pip)" \
@@ -1452,14 +1525,6 @@ LNEOF
     smoke_test "PXDesign import check" \
         "${CONDA_CMD}" run -n bindmaster_pxdesign python -c "import torch; print('PXDesign env OK')" \
         || return 1
-
-    # Install binder-compare into the PXDesign env so Protenix refolding
-    # (Part J) can run via `conda run -n bindmaster_pxdesign binder-compare refold-protenix`.
-    if [[ -d "${EVALUATOR_DIR}" ]]; then
-        run_logged "Installing binder-compare into bindmaster_pxdesign (for Protenix refold)" \
-            "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -e "${EVALUATOR_DIR}[report]" \
-            || print_warn "binder-compare install into bindmaster_pxdesign failed — Protenix refolding will be unavailable"
-    fi
 
     # ── Conda env activate.d hook for CUDA-header CPATH + CUTLASS_PATH ──────
     #
@@ -1742,7 +1807,7 @@ install_proteina_complexa() {
     print_step "Cloning Proteina-Complexa repository"
     if [[ -d "${PROTEINA_COMPLEXA_DIR}" ]]; then
         print_warn "Directory ${PROTEINA_COMPLEXA_DIR} already exists."
-        if confirm "Remove and reclone?"; then
+        if confirm_destructive "Remove and reclone?"; then
             rm -rf "${PROTEINA_COMPLEXA_DIR}" || { print_fail "Failed to remove ${PROTEINA_COMPLEXA_DIR}"; return 1; }
         else
             print_warn "Skipping reclone; using existing directory."
@@ -2314,6 +2379,97 @@ ESMFOLD2EOF
 # Python runner's default _resolve_scripts_path() finds it without env vars.
 SOLUPROT_DIR="${EVALUATOR_DIR}/tools/soluprot"
 SOLUPROT_ZIP_URL="https://loschmidt.chemi.muni.cz/soluprot/?page=download&f=soluprot.zip"
+USEARCH12_REPO="https://github.com/rcedgar/usearch12"
+
+# Resolve the USEARCH binary the same way soluprot_runner._resolve_usearch does
+# ($SOLUPROT_USEARCH, then <dir>/usearch.<arch>, then <dir>/usearch, then PATH),
+# so what the installer validates is what the runner will actually execute.
+# Echoes the path and returns 0, or returns 1 if none is usable.
+_resolve_usearch() {
+    local cand
+    for cand in "${SOLUPROT_USEARCH:-}" \
+                "${SOLUPROT_DIR}/usearch.$(uname -m)" \
+                "${SOLUPROT_DIR}/usearch"; do
+        if [[ -n "${cand}" && -x "${cand}" ]]; then
+            echo "${cand}"
+            return 0
+        fi
+    done
+    if command -v usearch >/dev/null 2>&1; then
+        command -v usearch
+        return 0
+    fi
+    return 1
+}
+
+# Verify the resolved binary can actually START. `-x` only checks the mode bit,
+# which passes for a wrong-architecture or missing-libstdc++ binary -- and the
+# bioconda usearch 12.0_beta build is known to crash at startup on aarch64. We
+# do not assume any particular CLI, so ANY ordinary exit status counts as
+# success; only a failure to exec (126/127) or a fatal signal (>=128) fails.
+_check_usearch_runs() {
+    local bin="$1" rc=0
+    print_step "Checking USEARCH runs: ${bin}"
+    "${bin}" --version >/dev/null 2>&1 || rc=$?
+    if (( rc == 126 || rc == 127 || rc >= 128 )); then
+        print_fail "USEARCH at ${bin} could not be executed (exit ${rc})."
+        print_warn "  Usually a wrong-architecture binary or a missing shared library."
+        print_warn "  Check with: file '${bin}' && ldd '${bin}'"
+        print_warn "  Then delete it and re-run --tool soluprot to rebuild from source."
+        return 1
+    fi
+    print_ok "USEARCH executes"
+    return 0
+}
+
+# Compile open-source USEARCH v12 for SoluProt's E. coli identity feature.
+# Built here rather than committed: USEARCH v12 is GPLv3, and shipping the
+# binary in this MIT-licensed repository put a copyleft redistribution
+# obligation on every clone. x86_64 is usearch12's native platform, so this is
+# the same source build install_aarch.sh has always used, minus the aarch64
+# workarounds. The old proprietary drive5 32-bit build is NOT a substitute --
+# it is academic-use-only, which is stricter than what it would replace.
+_build_usearch_v12() {
+    print_step "Building open-source USEARCH v12 for the identity feature"
+    local t
+    for t in git make g++ gcc; do
+        if ! command -v "${t}" >/dev/null 2>&1; then
+            print_warn "USEARCH build needs git + make + gcc/g++ (missing: ${t})."
+            print_warn "  Install a toolchain and re-run, or place a 'usearch.x86_64' binary at"
+            print_warn "  ${SOLUPROT_DIR}/usearch.x86_64 (or 'usearch' on PATH)."
+            return 1
+        fi
+    done
+    local src_dir="${SOLUPROT_DIR}/usearch12-src"
+    rm -rf "${src_dir}"
+    run_logged "Cloning ${USEARCH12_REPO}" \
+        git clone --depth 1 "${USEARCH12_REPO}" "${src_dir}" \
+        || { print_warn "git clone of ${USEARCH12_REPO} failed"; return 1; }
+    # The generated Makefile hardcodes 'ccache g++'; override CC/CXX. Static
+    # link is preferred so the binary does not depend on this host's libstdc++;
+    # fall back to dynamic where static libs are unavailable.
+    if ! run_logged "Compiling usearch12 (static)" \
+        make -C "${src_dir}/src" -j"$(nproc)" CC=gcc CXX=g++; then
+        print_warn "Static build failed; retrying without -static"
+        # NB: the Makefile appends '-static' to LDFLAGS, and a command-line
+        # LDFLAGS= override does NOT win against that '+=' -- so strip it from
+        # the Makefile directly, then re-link (objects are already built).
+        sed -i 's/[[:space:]]*-static//g' "${src_dir}/src/Makefile"
+        run_logged "Compiling usearch12 (dynamic)" \
+            make -C "${src_dir}/src" -j"$(nproc)" CC=gcc CXX=g++ \
+            || { print_warn "USEARCH v12 build failed"; return 1; }
+    fi
+    if [[ -x "${src_dir}/bin/usearch12" ]]; then
+        cp "${src_dir}/bin/usearch12" "${SOLUPROT_DIR}/usearch.x86_64"
+        chmod +x "${SOLUPROT_DIR}/usearch.x86_64"
+        rm -rf "${src_dir}"
+        print_ok "USEARCH v12 built -> ${SOLUPROT_DIR}/usearch.x86_64"
+        return 0
+    fi
+    print_warn "USEARCH v12 binary not found after build (${src_dir}/bin/usearch12)"
+    return 1
+}
+
 
 install_soluprot() {
     print_step "Installing SoluProt 1.0 solubility screen (binder-eval-soluprot env)"
@@ -2402,17 +2558,26 @@ install_soluprot() {
         echo ""
     fi
 
-    # 4. Check USEARCH (x86_64). The committed usearch.x86_64 is open-source v12;
-    #    for bit-exact public-server scores use the drive5 32-bit academic build.
-    if [[ ! -x "${SOLUPROT_DIR}/usearch.x86_64" ]] && [[ ! -x "${SOLUPROT_DIR}/usearch" ]] \
-        && ! command -v usearch >/dev/null 2>&1; then
-        echo ""
-        print_warn "USEARCH is not installed. SoluProt needs it for the E. coli identity feature."
-        print_warn "  Download (32-bit, free for academic):  https://drive5.com/usearch/"
-        print_warn "  Place at:                              ${SOLUPROT_DIR}/usearch.x86_64  (chmod +x)"
-        print_warn "  Or add 'usearch' to PATH; the runner finds it as a fallback."
-        echo ""
+    # 4. Build USEARCH v12 for the identity feature. SoluProt cannot score
+    #    without it, and it fails SILENTLY: soluprot.py catches UsearchInvalidPath,
+    #    prints to stderr and returns, so the process exits 0 having written no
+    #    output CSV. A missing binary is therefore a hard install failure -- the
+    #    --help smoke test below would NOT catch it (argparse exits before the
+    #    USEARCH path runs).
+    if _resolve_usearch >/dev/null; then
+        print_ok "USEARCH binary present ($(_resolve_usearch))"
+    else
+        _build_usearch_v12 || true
+        if ! _resolve_usearch >/dev/null; then
+            print_fail "USEARCH is required for SoluProt's identity feature and could not be built."
+            print_warn "  Install a C/C++ toolchain (git make g++) and re-run, or place a 'usearch.x86_64'"
+            print_warn "  binary at ${SOLUPROT_DIR}/usearch.x86_64 (or on PATH), then re-run --tool soluprot."
+            print_warn "  Source: ${USEARCH12_REPO} (GPLv3). Do NOT substitute the drive5 32-bit build --"
+            print_warn "  it is academic-use-only and is not the version SoluProt is patched for."
+            return 1
+        fi
     fi
+    _check_usearch_runs "$(_resolve_usearch)" || return 1
 
     # 5. binder-compare runs in the 'binder-eval' env (Python 3.10+), NOT here.
     # binder-comparison is requires-python>=3.10 (numpy>=1.24 / pandas>=2.0), so
@@ -2532,6 +2697,9 @@ uninstall_tool() {
                 "${CONDA_CMD}" env remove -n bindmaster_pxdesign -y
             rm -f "${SHORTCUTS_DIR}/pxdesign"
             [[ -d "${PXDESIGN_DIR}" ]] && { rm -rf "${PXDESIGN_DIR}"; print_ok "Removed ${PXDESIGN_DIR}"; }
+            # CUTLASS v3.5.1 headers (~150 MB) cloned by install_pxdesign for the
+            # DS4Sci EvoformerAttention JIT — nothing else uses them.
+            [[ -d "${HOME}/cutlass" ]] && { rm -rf "${HOME}/cutlass"; print_ok "Removed ${HOME}/cutlass"; }
             print_ok "PXDesign uninstalled"
             ;;
         proteina-complexa|proteina_complexa|complexa)
@@ -2598,6 +2766,61 @@ uninstall_tool() {
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
+# preflight
+# Cheap sanity checks BEFORE the installer starts downloading tens of GB. Without
+# this, a host with too little free space failed an hour in with an opaque tar/pip
+# error deep inside install.log, leaving half-built envs behind. Advisory by
+# default for GPU/network (an install can legitimately precede the driver, or run
+# behind a proxy); only disk space aborts, and --skip-preflight bypasses all of it.
+preflight() {
+    [[ "${SKIP_PREFLIGHT}" == true ]] && return 0
+    print_step "Preflight checks"
+
+    # Rough per-tool download+install footprints, GB. Deliberate over-estimates.
+    local need=0
+    [[ "${DO_BINDCRAFT}" == true ]]         && need=$(( need + 8 ))   # AF2 params ~4 GB + env
+    [[ "${DO_BOLTZGEN}"  == true ]]         && need=$(( need + 10 ))  # Boltz-1 weights ~6 GB + env
+    [[ "${DO_MOSAIC}"    == true ]]         && need=$(( need + 8 ))   # JAX/CUDA venv + Boltz-2 cache
+    [[ "${DO_EVALUATOR}" == true ]]         && need=$(( need + 2 ))
+    [[ "${DO_PXDESIGN}"  == true ]]         && need=$(( need + 12 ))  # torch + CUTLASS + weights
+    [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && need=$(( need + 8 ))
+    [[ "${DO_PROTEIN_HUNTER}" == true ]]    && need=$(( need + 8 ))   # vendored Boltz-2 + Chai-1
+    [[ "${DO_RFD3}"      == true ]]         && need=$(( need + 6 ))   # rfd3_latest.ckpt ~2.5 GB
+    [[ "${DO_AF3}"       == true ]]         && need=$(( need + 6 ))
+    [[ "${DO_ESMFOLD2}"  == true ]]         && need=$(( need + 6 ))
+    [[ "${DO_SOLUPROT}"  == true ]]         && need=$(( need + 2 ))
+    [[ "${CONDA_BASE}" == "${LOCAL_CONDA_DIR}" ]] && need=$(( need + 1 ))
+
+    local avail
+    avail="$(df -BG --output=avail "${BINDMASTER_DIR}" 2>/dev/null | tail -1 | tr -dc '0-9')"
+    if [[ -z "${avail}" ]]; then
+        print_warn "Could not determine free space on ${BINDMASTER_DIR} — skipping the disk check."
+    elif (( avail < need )); then
+        print_fail "Not enough free space: ${avail} GB available, ~${need} GB needed for the selected tools."
+        print_warn "  Free some space, install fewer tools, or re-run with --skip-preflight to override."
+        return 1
+    else
+        print_ok "Disk: ${avail} GB free, ~${need} GB needed"
+    fi
+
+    if command -v nvidia-smi &>/dev/null; then
+        local _gpu
+        _gpu="$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1)"
+        [[ -n "${_gpu}" ]] && print_ok "GPU: ${_gpu}" || print_warn "nvidia-smi present but reported no GPU."
+    else
+        print_warn "nvidia-smi not found — install will proceed, but the tools need an NVIDIA GPU to run."
+    fi
+
+    if command -v curl &>/dev/null; then
+        if curl -fsS --max-time 10 -o /dev/null https://pypi.org/simple/ 2>/dev/null; then
+            print_ok "Network: pypi.org reachable"
+        else
+            print_warn "Could not reach pypi.org in 10 s — downloads may fail (proxy? offline?)."
+        fi
+    fi
+    return 0
+}
+
 main() {
     echo ""
     echo -e "${BOLD}=== BindMaster Installer — $(date) ===${RESET}"
@@ -2631,6 +2854,12 @@ main() {
         select_tools_interactive
     fi
 
+    # Preflight runs after tool selection (so the disk estimate matches the choice)
+    # and before any download. Uninstall skips it — it frees space, not consumes it.
+    if [[ "${UNINSTALL_MODE}" != true ]]; then
+        preflight || exit 1
+    fi
+
     # ── Uninstall mode ───────────────────────────────────────────────────────
     if [[ "${UNINSTALL_MODE}" == true ]]; then
         echo ""
@@ -2638,6 +2867,17 @@ main() {
         echo -e "This removes conda envs, venvs, and shortcuts."
         echo -e "User data (runs/, configs, logs) is ${GREEN}preserved${RESET}."
         confirm "Proceed with uninstall?" || { echo "Aborted."; exit 0; }
+
+        # `--tool all` means "everything installed" when uninstalling. The install-side
+        # `all` still omits AF3 (gated weights), so without this its env — plus
+        # alphafold3/ — survived an "uninstall everything" and the script still said
+        # it was complete. SoluProt and ESMFold2 are in install-`all` now; they are
+        # re-asserted here so an uninstall stays correct either way.
+        if [[ "${TOOL_ALL}" == true ]]; then
+            DO_AF3=true
+            DO_ESMFOLD2=true
+            DO_SOLUPROT=true
+        fi
 
         local failed_uninstalls=()
         [[ "${DO_BINDCRAFT}" == true ]] && { uninstall_tool bindcraft  || failed_uninstalls+=("BindCraft"); }
@@ -2656,7 +2896,7 @@ main() {
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
               "${DO_MOSAIC}" == true && "${DO_EVALUATOR}" == true ]]; then
             if [[ -d "${LOCAL_CONDA_DIR}" ]]; then
-                if confirm "Also remove local Miniforge3 installation (${LOCAL_CONDA_DIR})?"; then
+                if confirm_destructive "Also remove local Miniforge3 installation (${LOCAL_CONDA_DIR})?"; then
                     rm -rf "${LOCAL_CONDA_DIR}"
                     print_ok "Removed local Miniforge3"
                 fi
@@ -2669,6 +2909,20 @@ main() {
         else
             print_fail "Failed to uninstall: ${failed_uninstalls[*]}"
         fi
+
+        # Be explicit about what is still on disk. "Uninstall complete." used to be
+        # printed while multi-GB artefacts remained, so a user reclaiming space had no
+        # idea where it went. These are NOT removed automatically: runs/ is the user's
+        # data, and editing ~/.bashrc on their behalf is not ours to do.
+        echo ""
+        print_warn "Left in place (remove by hand if you want the space back):"
+        [[ -d "${BINDMASTER_DIR}/runs" ]] && print_warn "  ${BINDMASTER_DIR}/runs/        — your run directories and results"
+        [[ -f "${LOG_FILE}" ]] && print_warn "  ${LOG_FILE}"
+        [[ -d "${HOME}/.boltz" ]] && print_warn "  ${HOME}/.boltz/                — Boltz-2 weight cache (~4.5 GB)"
+        [[ -d "${HOME}/.cache/bindmaster" ]] && print_warn "  ${HOME}/.cache/bindmaster/     — shared target-MSA cache"
+        [[ -d "${HOME}/.cache/huggingface" ]] && print_warn "  ${HOME}/.cache/huggingface/    — ESMFold2 weights (shared with other tools)"
+        grep -q "${SHORTCUTS_DIR}" "${HOME}/.bashrc" 2>/dev/null && \
+            print_warn "  the PATH line for ${SHORTCUTS_DIR} in ~/.bashrc"
         [[ ${#failed_uninstalls[@]} -gt 0 ]] && exit 1 || exit 0
     fi
 

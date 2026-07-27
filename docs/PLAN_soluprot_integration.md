@@ -139,8 +139,8 @@ Schema extension in `core/schema.py:NativeMetrics`:
 
 ```python
 # ---- SoluProt (sequence-only solubility predictor) ----
-soluprot_score: float | None = None        # 0–1 probability of soluble expression
-soluprot_passes: bool | None = None        # score >= threshold
+soluprot_score: float | None = None  # 0–1 probability of soluble expression
+soluprot_passes: bool | None = None  # score >= threshold
 ```
 
 These land as `native_soluprot_score` and `native_soluprot_passes` in

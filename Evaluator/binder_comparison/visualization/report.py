@@ -17,6 +17,14 @@ from pathlib import Path
 import pandas as pd
 
 from ..comparison.candidates import _NATIVE_SEQ_COLS, collapse_native_df, order_tools
+from ..comparison.scoring import (
+    _ENGINE_IPSAE_COLS,
+    DEFAULT_ENGINE_THRESHOLDS,
+    IPSAE_HIGH_THRESHOLD,
+    IPSAE_MIN_THRESHOLD,
+    IPSAE_PASS_THRESHOLD,
+    MIN_ENGINES_DEFAULT,
+)
 from .plots import (
     METRIC_META,
     fig_to_base64,
@@ -31,6 +39,55 @@ from .plots import (
     plot_radar_per_engine_uniform_selection,
 )
 from .top30_slim import SLIM_REPORT_CSS, slim_table_html
+
+# ── Threshold labels ─────────────────────────────────────────────────────────
+# Every number the report *prints* about a threshold is derived here, from the
+# same constants the scoring code decides with. They used to be retyped as
+# literal "0.80" / "0.61" / "0.40" in 18 places, so editing a constant — or
+# passing `--threshold-af3 0.75` — changed what was computed while every label
+# kept quoting the old value. A report that misstates its own cutoffs is worse
+# than one that omits them, because the reader has no way to notice.
+_TIER_HIGH = f"{IPSAE_HIGH_THRESHOLD:.2f}"
+_TIER_MED = f"{IPSAE_PASS_THRESHOLD:.2f}"
+_TIER_LOW = f"{IPSAE_MIN_THRESHOLD:.2f}"
+
+# Human-readable engine names, in the order the report lists them.
+_ENGINE_DISPLAY = {"boltz": "Boltz-2", "af3": "AF3", "esmfold2": "ESMFold2"}
+
+
+def _active_engines(df: pd.DataFrame) -> list[str]:
+    """Engines whose ipSAE column is actually present — i.e. that actually ran.
+
+    The legends hardcoded "the 3 engines (Boltz-2 / AF3 / ESMFold2)" and "0–3",
+    which is wrong on any install where an engine was skipped: `agreement_count`
+    then has a smaller ceiling than the text claims, making a perfectly good
+    2-of-2 design look like it failed one of three.
+    """
+    return [engine for engine, col in _ENGINE_IPSAE_COLS.items() if col in df.columns]
+
+
+def _resolve_thresholds(engine_thresholds: dict[str, float] | None) -> dict[str, float]:
+    """Merge caller overrides over the defaults, exactly as `scoring` does."""
+    return {**DEFAULT_ENGINE_THRESHOLDS, **(engine_thresholds or {})}
+
+
+def _agreement_phrase(df: pd.DataFrame, thresholds: dict[str, float]) -> str:
+    """Describe `agreement_count`: which engines it counts, and against what cutoff."""
+    engines = _active_engines(df)
+    if not engines:
+        return "How many refolding engines score ipSAE_min above their pass threshold"
+    names = " / ".join(_ENGINE_DISPLAY.get(e, e) for e in engines)
+    cutoffs = {thresholds.get(e, IPSAE_PASS_THRESHOLD) for e in engines}
+    if len(cutoffs) == 1:
+        cutoff = f"&gt; {next(iter(cutoffs)):.2f}"
+    else:
+        cutoff = (
+            "above its own cutoff ("
+            + ", ".join(f"{_ENGINE_DISPLAY.get(e, e)} {thresholds.get(e, IPSAE_PASS_THRESHOLD):.2f}" for e in engines)
+            + ")"
+        )
+    return f"How many of the {len(engines)} engines ({names}) score ipSAE_min {cutoff} — so 0–{len(engines)}"
+
 
 # Display names for tools (source_tool values are lowercase internally)
 _TOOL_DISPLAY = {
@@ -382,6 +439,7 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path, target_seq: st
     )
 
     default_rank = entries[0]["rank"]
+    ngl_script_tag = _ngl_script_tag()
 
     html = f"""
 <div style="margin:1em 0;">
@@ -397,7 +455,7 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path, target_seq: st
   </div>
 </div>
 
-<script src="https://unpkg.com/ngl@2.3.1/dist/ngl.js"></script>
+{ngl_script_tag}
 <script>
 (function() {{
   const designs = {{
@@ -504,7 +562,6 @@ def _build_per_tool_refold_viewer(
     # Engine-specific PDB column preference (mirrors cli/report.py _ENGINE_PDB_PRIORITY)
     _PRI: dict[str, list[str]] = {
         "af3": ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"],
-        "protenix": ["protenix_pdb", "protenix_cif", "boltz_pdb", "pdb"],
         "boltz": ["boltz_pdb", "pdb"],
     }
     pdb_cols = [c for c in _PRI.get(primary_engine, ["boltz_pdb", "pdb"]) if c in tool_df.columns]
@@ -576,7 +633,7 @@ def _build_per_tool_refold_viewer(
         for e in entries
     )
     default_rank = entries[0]["rank"]
-    _engine_label = {"af3": "AlphaFold 3", "protenix": "Protenix", "boltz": "Boltz-2"}.get(
+    _engine_label = {"af3": "AlphaFold 3", "esmfold2": "ESMFold2", "boltz": "Boltz-2"}.get(
         primary_engine, primary_engine.upper()
     )
     html = f"""
@@ -1293,6 +1350,81 @@ _TOOL_PDB_HINTS = {
 }
 
 
+# Vendored NGL (relative to the Evaluator package root). Inlined so report.html is
+# self-contained: the 3D viewer used to <script src> unpkg.com, which renders a blank
+# black box on the air-gapped compute nodes this pipeline otherwise engineers around.
+# cli/epitope_map.py already did this; report.py was never brought along.
+_VENDORED_NGL = "tools/ngl/ngl-2.3.1.min.js"
+_NGL_CDN_TAG = '<script src="https://unpkg.com/ngl@2.3.1/dist/ngl.js"></script>'
+
+
+def _ngl_script_tag() -> str:
+    """Return an inline <script> with the vendored NGL, or the CDN tag if it is absent."""
+    ngl_path = Path(__file__).resolve().parents[2] / _VENDORED_NGL
+    if ngl_path.is_file():
+        return f"<script>{ngl_path.read_text()}</script>"
+    print(
+        f"[report] note: vendored NGL not found at {ngl_path}; falling back to the unpkg CDN "
+        f"(the 3D viewer will not render offline)."
+    )
+    return _NGL_CDN_TAG
+
+
+def _two_stage_methodology_html(screen_metric: str, min_engines: int, ipsae_link: str) -> str:
+    """Methodology paragraph for --rank-by two_stage, derived from the ACTIVE settings.
+
+    MUST NOT be a fixed string. The screen default flipped mean -> max in 5769064,
+    which updated CHANGELOG.md, CLAUDE.md, cli/report.py, comparison/scoring.py and
+    test_scoring.py — but not this file. Every report generated afterwards ran a max
+    screen while telling the reader it had run a mean screen, called mean "the
+    default" and called max "legacy". Rendering from the arguments makes that class
+    of drift impossible.
+    """
+    if screen_metric == "mean":
+        stage1 = (
+            "<b>Stage 1 — screen:</b> <code>consensus_iptm_mean</code> = the mean of the per-engine "
+            "PAE-recomputed iPTMs; the top 50% (<code>passes_max_screen</code>) form the binder-likely "
+            "pool. This is the stricter screen — the average must be high (Adaptyv macro AUC "
+            "<b>0.710 vs 0.689</b> for max; ~20 more true binders recalled at the 50% cut). "
+            "<code>--screen-metric max</code> switches to the lenient recall screen."
+        )
+        stage2 = (
+            "<b>Stage 2 — rank:</b> survivors are ordered by <code>consensus_iptm_mean</code> — the same "
+            "metric, so with a mean screen the two stages collapse to a single mean-iPTM gate-then-rank."
+        )
+    else:
+        stage1 = (
+            "<b>Stage 1 — screen:</b> <code>consensus_iptm</code> = the <b>max</b> of the per-engine "
+            "PAE-recomputed iPTMs; the top 50% (<code>passes_max_screen</code>) form the binder-likely "
+            "pool. This is the lenient recall step — keep a design if <em>any</em> engine rates it highly, "
+            "so a true binder is not dropped because one engine's per-target blind spot drags its mean "
+            "down (ProteinBase macro AUC <b>~0.755</b>). <code>--screen-metric mean</code> switches to the "
+            "stricter mean screen (Adaptyv macro AUC <b>0.710 vs 0.689</b>)."
+        )
+        stage2 = (
+            "<b>Stage 2 — rank:</b> survivors are ordered by <code>consensus_iptm_mean</code> — the "
+            "precision step, where you want the designs <em>all</em> engines agree on. This lifts "
+            "<b>precision@top-10% to 0.92 vs 0.79</b> for max alone."
+        )
+    return (
+        f"Ranking is <b>two-stage cross-engine iPTM</b> ({screen_metric}-screen → mean-rank), validated on "
+        f"two <em>internal</em> 4-target benchmarks (Adaptyv: Nipah / EGFR / IL7R / PD-L1, Kd-screened, "
+        f"n = 662; ProteinBase: the same 4 targets, n = 175). "
+        f"<b>Stage 0 — cross-engine gate:</b> a design must have been refolded by at least "
+        f"<b>{min_engines}</b> independent engines to be eligible. <code>consensus_iptm_mean</code> skips "
+        f"missing engines, so without this a single-engine design's mean <em>is</em> that one engine's "
+        f"score, competing against multi-engine means on an incomparable scale — and for a Mosaic or "
+        f"Protein-Hunter design that engine is the one that designed it. {stage1} {stage2} "
+        f"All designs are ranked — the screen is a flag, nothing is dropped. "
+        f"<b>ipSAE_min</b> ({ipsae_link}) and <b>agreement_count</b> are computed and shown per design as "
+        f"cross-validation — and surfaced in the Top-30 as the <span style='color:#c62828;"
+        f"font-weight:bold;'>⚠</span> engine-disagreement flag — but are <em>not</em> the ranking key. "
+        f"<b>Caveat:</b> both benchmarks comprise compact globular targets; transferability to serpins "
+        f"(e.g. 2VDY), small peptide receptors (CALCA), or flexible/membrane targets is currently "
+        f"<em>unvalidated</em>. Treat the rank as a strong shortlist signal, not a guarantee."
+    )
+
+
 def generate_report(
     df: pd.DataFrame,
     summary: dict,
@@ -1303,6 +1435,9 @@ def generate_report(
     primary_engine: str = "boltz",
     top_per_tool: int = 10,
     rank_method: str = "adaptyv",
+    screen_metric: str = "max",
+    min_engines: int = MIN_ENGINES_DEFAULT,
+    engine_thresholds: dict[str, float] | None = None,
     full_df: pd.DataFrame | None = None,
     tool_overrides: dict[str, dict] | None = None,
     provenance: dict | None = None,
@@ -1351,7 +1486,7 @@ def generate_report(
     # Tier summary
     tier_summary = _tier_summary_to_html(sort_df)
     # Engine threshold legend + cross-engine agreement summary
-    engine_threshold_legend = _engine_threshold_legend_html(sort_df)
+    engine_threshold_legend = _engine_threshold_legend_html(sort_df, engine_thresholds)
     agreement_summary = _agreement_summary_html(sort_df)
 
     # Top 30 table (primary + collapsible secondary). flag_disagreement adds a
@@ -1399,7 +1534,7 @@ def generate_report(
         "Click to expand — full metric set for the Top 30</summary>\n"
         + _full_top30
         + "\n"
-        + _top_table_legend_html(rank_method, top30_primary)
+        + _top_table_legend_html(rank_method, top30_primary, engine_thresholds)
         + "\n</details>"
     )
 
@@ -1617,7 +1752,6 @@ def generate_report(
                                         if viewer_block:
                                             _eng = {
                                                 "af3": "AlphaFold 3",
-                                                "protenix": "Protenix",
                                                 "boltz": "Boltz-2",
                                             }.get(primary_engine, primary_engine.upper())
                                             viewer_block = (
@@ -1726,7 +1860,7 @@ def generate_report(
     else:
         ngl_viewer_block = "<p style='color:#888;'><em>No refolded structures available.</em></p>"
 
-    engine_label_map = {"af3": "AlphaFold 3", "protenix": "Protenix", "boltz": "Boltz-2"}
+    engine_label_map = {"af3": "AlphaFold 3", "esmfold2": "ESMFold2", "boltz": "Boltz-2"}
     primary_engine_label = engine_label_map.get(primary_engine, primary_engine.upper())
 
     _pri_engine_label = engine_label_map.get(primary_engine, primary_engine.upper())
@@ -1823,9 +1957,10 @@ def generate_report(
             f"The primary ranking metric is <b>ipSAE_min</b> — the minimum of binder→target and "
             f"target→binder {_ipsae_link}. This metric showed 1.4× better average precision than ipAE "
             f'across 3,766 experimentally tested designs in the <a href="https://doi.org/10.1101/2025.08.14.670059" '
-            f'target="_blank">Adaptyv/Overath et al. 2025</a> benchmark. Quality tiers and the 0.61 pass '
+            f'target="_blank">Adaptyv/Overath et al. 2025</a> benchmark. Quality tiers and the {_TIER_MED} pass '
             f"threshold follow their screening methodology. <b>agreement_count</b> reports how many refolding "
-            f"engines score ipSAE_min above 0.61. Ranking sorts by quality tier, then agreement count, then ipSAE_min."
+            f"engines score ipSAE_min above their pass threshold (see the per-engine cutoffs below). "
+            f"Ranking sorts by quality tier, then agreement count, then ipSAE_min."
         ),
         "consensus_iptm": (
             f"Ranking is by <b>consensus_iptm</b> = max(boltz2, af3, esmfold2 iPTM) — the benchmark-validated "
@@ -1833,26 +1968,7 @@ def generate_report(
             f"confident engine wins; macro-AUC ≈ 0.76). <b>ipSAE_min</b> ({_ipsae_link}) and "
             f"<b>agreement_count</b> are still computed and shown per design as secondary cross-validation."
         ),
-        "two_stage": (
-            f"Ranking is <b>two-stage mean iPTM</b>, validated on two <em>internal</em> 4-target benchmarks "
-            f"(Adaptyv: 4 targets — Nipah / EGFR / IL7R / PD-L1 — Kd-screened, n = 662; ProteinBase: the "
-            f"same 4 targets, n = 175). <b>Stage 1 — screen:</b> <code>consensus_iptm_mean</code> = "
-            f"mean(boltz2, af3, esmfold2 iPTM); the top 50% (<code>passes_max_screen</code>) form the "
-            f"binder-likely pool. Mean was selected as default over max because it is more robust to "
-            f"per-target engine blind spots (Adaptyv macro AUC <b>0.710 vs 0.689</b> for max; ~20 more "
-            f"true binders recalled at the 50% cut). The legacy max-screen (<code>--screen-metric max</code>) "
-            f"is the precision-leaning alternative (ProteinBase macro AUC <b>~0.755</b>). "
-            f"<b>Stage 2 — rank:</b> survivors are ordered by <code>consensus_iptm_mean</code> (the same "
-            f"metric — so Stage 1 + Stage 2 collapse to a single mean-iPTM gate-then-rank). Demanding "
-            f"multi-engine consensus at the sharp end lifts <b>precision@top-10% to 0.92 vs 0.79</b> for "
-            f"max alone. All designs are ranked — the screen is a flag, nothing is dropped. "
-            f"<b>ipSAE_min</b> ({_ipsae_link}) and <b>agreement_count</b> are computed and shown per "
-            f"design as cross-validation — and are surfaced in the Top-30 as the <span style='color:#c62828;"
-            f"font-weight:bold;'>⚠</span> engine-disagreement flag — but are <em>not</em> the ranking key. "
-            f"<b>Caveat:</b> both benchmarks comprise compact globular targets; transferability to serpins "
-            f"(e.g. 2VDY), small peptide receptors (CALCA), or flexible/membrane targets is currently "
-            f"<em>unvalidated</em>. Treat the rank as a strong shortlist signal, not a guarantee."
-        ),
+        "two_stage": _two_stage_methodology_html(screen_metric, min_engines, _ipsae_link),
     }
     methodology_ranking_html = _rank_desc.get(rank_method, _rank_desc["adaptyv"])
 
@@ -1861,7 +1977,6 @@ def generate_report(
         ("<b>Boltz-2</b>", ("boltz_pae_iptm", "boltz_iptm")),
         ("<b>AlphaFold 3</b>", ("af3_iptm",)),
         ("<b>ESMFold2</b>", ("esmfold2_iptm",)),
-        ("<b>Protenix</b>", ("protenix_iptm",)),
     ]
     _engines = [
         lbl
@@ -1882,7 +1997,7 @@ def generate_report(
     benchmark_provenance_block = _benchmark_provenance_html() if rank_method == "two_stage" else ""
     qc_rules_block = _qc_rules_html() if "qc_pass" in sort_df.columns else ""
     screening_summary_intro = _screening_summary_intro_html(rank_method)
-    top_table_legend = _slim_legend_html(sort_df)
+    top_table_legend = _slim_legend_html(sort_df, engine_thresholds)
     tool_classification_banner = _tool_classification_banner_html(sort_df, tool_overrides=tool_overrides)
 
     # "Designed in total" banner (top of the report) from --tool-meta TOOL='total:N'.
@@ -1959,12 +2074,13 @@ def generate_report(
 # ────────────────────────────────────────────────────────────────────────────
 
 
-def _slim_legend_html(df: pd.DataFrame) -> str:
+def _slim_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float] | None = None) -> str:
     """Per-column description table for the slim decision-metrics Top-30 table.
 
     Matches the slim column set (Mean ipTM · Agreement · ipSAE_min · Epitope ·
     Solubility · Tm · Notes); optional columns are shown only when present.
     """
+    agreement_desc = _agreement_phrase(df, _resolve_thresholds(engine_thresholds))
     checks = [
         (
             "Rank",
@@ -1979,20 +2095,19 @@ def _slim_legend_html(df: pd.DataFrame) -> str:
         (
             "Mean ipTM ↑",
             "consensus_iptm_mean",
-            "<b>Primary ranking metric</b> — mean of the 3 engines' PAE-recomputed iPTM. Higher = stronger "
-            "multi-engine consensus, which resists single-engine gaming.",
+            f"<b>Primary ranking metric</b> — mean of the {len(_active_engines(df)) or 3} engines' "
+            "PAE-recomputed iPTM. Higher = stronger multi-engine consensus, which resists single-engine gaming.",
         ),
         (
             "Agreement ↑",
             "agreement_count",
-            "How many of the 3 engines (Boltz-2 / AF3 / ESMFold2) score ipSAE_min &gt; 0.61 — so 0–3. "
-            "Low = fragile, single-engine signal.",
+            f"{agreement_desc}. Low = fragile, single-engine signal.",
         ),
         (
             "ipSAE_min ↑",
             "ipsae_min",
-            "Interface quality (cross-validation). Tier-banded: High &gt; 0.80, Medium &gt; 0.61, "
-            "Low &gt; 0.40, Reject ≤ 0.40.",
+            f"Interface quality (cross-validation). Tier-banded: High &gt; {_TIER_HIGH}, "
+            f"Medium &gt; {_TIER_MED}, Low &gt; {_TIER_LOW}, Reject ≤ {_TIER_LOW}.",
         ),
         (
             "Epitope ↑",
@@ -2031,13 +2146,16 @@ def _slim_legend_html(df: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
-def _top_table_legend_html(rank_method: str, df: pd.DataFrame) -> str:
+def _top_table_legend_html(
+    rank_method: str, df: pd.DataFrame, engine_thresholds: dict[str, float] | None = None
+) -> str:
     """Per-column description table that sits under the Top-30 table.
 
     Rendered text matches the column set produced by :func:`_select_display_cols`
     for the active rank_method, so a reader can never get a description that
     references a column that isn't in the table above.
     """
+    agreement_desc = _agreement_phrase(df, _resolve_thresholds(engine_thresholds))
     if rank_method == "two_stage":
         rows = [
             ("two_stage_rank", "Overall rank — Stage-1 screen survival, then mean engine iPTM (primary ranking key)."),
@@ -2060,8 +2178,8 @@ def _top_table_legend_html(rank_method: str, df: pd.DataFrame) -> str:
             ),
             (
                 "agreement_count ↑",
-                "How many of the 3 engines (Boltz-2 / AF3 / ESMFold2) score ipSAE_min &gt; 0.61 — so 0–3. "
-                "Fewer than 2 of 3 earns the <span style='color:#c62828;font-weight:bold;'>⚠</span> warning.",
+                f"{agreement_desc}. Fewer than 2 earns the "
+                "<span style='color:#c62828;font-weight:bold;'>⚠</span> warning.",
             ),
             (
                 "boltz_pae_iptm / af3_iptm / esmfold2_iptm ↑",
@@ -2069,7 +2187,8 @@ def _top_table_legend_html(rank_method: str, df: pd.DataFrame) -> str:
             ),
             (
                 "ipsae_min ↑",
-                "Cross-validation — Boltz-2 ipSAE_min. Tier-banded (High &gt; 0.80, Medium &gt; 0.61). Not used for ranking.",
+                f"Cross-validation — Boltz-2 ipSAE_min. Tier-banded (High &gt; {_TIER_HIGH}, "
+                f"Medium &gt; {_TIER_MED}). Not used for ranking.",
             ),
             ("consensus_ipsae_min_mean ↑", "Mean of per-engine ipSAE_min — diagnostic cross-validation column."),
             ("plddt_binder_mean ↑", "Mean binder pLDDT from Boltz-2 (also see plddt_binder_min in secondary)."),
@@ -2084,8 +2203,8 @@ def _top_table_legend_html(rank_method: str, df: pd.DataFrame) -> str:
             ("consensus_iptm_spread ↓", "Engine disagreement (max − min). &gt; 0.3 flagged on the rank."),
             (
                 "agreement_count ↑",
-                "How many of the 3 engines score ipSAE_min &gt; 0.61 (0–3). Fewer than 2 of 3 flagged "
-                "with <span style='color:#c62828;font-weight:bold;'>⚠</span> on the rank.",
+                f"{agreement_desc}. Fewer than 2 flagged with "
+                "<span style='color:#c62828;font-weight:bold;'>⚠</span> on the rank.",
             ),
             ("boltz_pae_iptm / af3_iptm / esmfold2_iptm ↑", "Per-engine PAE-recomputed iPTM."),
             ("ipsae_min ↑", "Cross-validation — Boltz-2 ipSAE_min. Tier-banded. Not the ranking key."),
@@ -2095,8 +2214,12 @@ def _top_table_legend_html(rank_method: str, df: pd.DataFrame) -> str:
         rows = [
             ("adaptyv_rank", "Overall rank — quality tier → agreement_count → ipSAE_min → ipTM → pLDDT."),
             ("binder_length", "Designed binder length in amino acids."),
-            ("quality_tier", "High (&gt;0.80), Medium (&gt;0.61), Low (&gt;0.40), Reject (≤0.40) based on ipSAE_min."),
-            ("agreement_count ↑", "Engines with ipSAE_min &gt; 0.61."),
+            (
+                "quality_tier",
+                f"High (&gt;{_TIER_HIGH}), Medium (&gt;{_TIER_MED}), Low (&gt;{_TIER_LOW}), "
+                f"Reject (≤{_TIER_LOW}) based on ipSAE_min.",
+            ),
+            ("agreement_count ↑", f"{agreement_desc}."),
             (
                 "ipsae_min ↑",
                 "<b>Primary ranking metric</b> — min(binder→target, target→binder) iPSAE from Boltz-2 PAE.",
@@ -2354,10 +2477,10 @@ def _screening_summary_intro_html(rank_method: str) -> str:
     into one side-by-side table with a shared tier label.
     """
     ipsae_band = (
-        " &nbsp;<span style='color:#2e7d32'>■ High</span> &gt;0.80 &nbsp;"
-        "<span style='color:#f57f17'>■ Medium</span> &gt;0.61 &nbsp;"
-        "<span style='color:#e65100'>■ Low</span> &gt;0.40 &nbsp;"
-        "<span style='color:#c62828'>■ Reject</span> ≤0.40"
+        f" &nbsp;<span style='color:#2e7d32'>■ High</span> &gt;{_TIER_HIGH} &nbsp;"
+        f"<span style='color:#f57f17'>■ Medium</span> &gt;{_TIER_MED} &nbsp;"
+        f"<span style='color:#e65100'>■ Low</span> &gt;{_TIER_LOW} &nbsp;"
+        f"<span style='color:#c62828'>■ Reject</span> ≤{_TIER_LOW}"
     )
     if rank_method in ("two_stage", "consensus_iptm"):
         active = "consensus_iptm_mean" if rank_method == "two_stage" else "consensus_iptm"
@@ -2635,9 +2758,9 @@ def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tupl
         "quality_tier",
         "agreement_count",
         "ipsae_min",
-        "boltz_pae_ipsae_min",
-        "protenix_pae_ipsae_min",
-        "af3_pae_ipsae_min",
+        _ENGINE_IPSAE_COLS["boltz"],
+        _ENGINE_IPSAE_COLS["af3"],
+        _ENGINE_IPSAE_COLS["esmfold2"],
         "iptm",
         "plddt_binder_mean",
     ]
@@ -2662,17 +2785,22 @@ def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tupl
     )
 
 
-def _engine_threshold_legend_html(df: pd.DataFrame) -> str:
-    """One-line legend showing per-engine thresholds in effect for this report."""
+def _engine_threshold_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float] | None = None) -> str:
+    """One-line legend showing per-engine thresholds in effect for this report.
+
+    The cutoffs are read from the resolved thresholds rather than retyped: this
+    legend is the one place a reader can check what `--threshold-boltz` /
+    `--threshold-af3` / `--threshold-esmfold2` were set to, and it used to print
+    a flat "≥ 0.61" for all three no matter what was passed.
+    """
+    thresholds = _resolve_thresholds(engine_thresholds)
     rows = []
-    for _engine, col, label in (
-        ("boltz", "boltz_pae_ipsae_min", "Boltz-2 ≥ 0.61"),
-        ("protenix", "protenix_pae_ipsae_min", "Protenix ≥ 0.61"),
-        ("af3", "af3_pae_ipsae_min", "AF3 ≥ 0.61"),
-        ("af2", "af2_pae_ipsae_min", "AF2 ≥ 0.30 <i>(informational; mis-calibrated on short targets)</i>"),
-    ):
-        if col in df.columns:
-            rows.append(label)
+    # Columns come from the canonical map: boltz uses boltz_pae_*, the rest use
+    # <engine>_ipsae_min. The old hardcoded af3_pae_ipsae_min was never written by
+    # anything, so the AF3 row never rendered. AF2 is gone (Part I).
+    for engine in _active_engines(df):
+        cutoff = thresholds.get(engine, IPSAE_PASS_THRESHOLD)
+        rows.append(f"{_ENGINE_DISPLAY.get(engine, engine)} ≥ {cutoff:.2f}")
     if not rows:
         return ""
     return (
@@ -2705,10 +2833,10 @@ def _tier_summary_to_html(df: pd.DataFrame) -> str:
 
     tier_order = ["high", "medium", "low", "reject"]
     tier_labels = {
-        "high": '<span style="color:#2e7d32">■ High (&gt;0.80)</span>',
-        "medium": '<span style="color:#f57f17">■ Medium (&gt;0.61)</span>',
-        "low": '<span style="color:#e65100">■ Low (&gt;0.40)</span>',
-        "reject": '<span style="color:#c62828">■ Reject (≤0.40)</span>',
+        "high": f'<span style="color:#2e7d32">■ High (&gt;{_TIER_HIGH})</span>',
+        "medium": f'<span style="color:#f57f17">■ Medium (&gt;{_TIER_MED})</span>',
+        "low": f'<span style="color:#e65100">■ Low (&gt;{_TIER_LOW})</span>',
+        "reject": f'<span style="color:#c62828">■ Reject (≤{_TIER_LOW})</span>',
     }
     n_total = len(df)
 
@@ -2823,7 +2951,8 @@ def _df_to_html(
                 and pd.notna(agreement.get(idx))
                 and agreement.get(idx) <= DISAGREEMENT_AGREEMENT_MAX
             ):
-                reasons.append(f"only {int(agreement.get(idx))}/3 engines pass ipSAE 0.61")
+                n_engines = len(_active_engines(df)) or 3
+                reasons.append(f"only {int(agreement.get(idx))}/{n_engines} engines pass ipSAE {_TIER_MED}")
             if spread is not None and pd.notna(spread.get(idx)) and spread.get(idx) >= DISAGREEMENT_SPREAD_MIN:
                 reasons.append(f"per-engine iPTM spread {spread.get(idx):.2f}")
             if reasons:
@@ -2901,7 +3030,8 @@ _METRIC_DESCRIPTION = {
     "ipsae_min": (
         "Interface Predicted Structural Alignment Error — TM-score-like metric computed from PAE matrix. "
         "Measures how confidently the model predicts the binder–target interface. "
-        "This is the primary ranking metric. Higher = more likely to bind. Want >0.61 (medium), >0.80 (high)."
+        f"This is the primary ranking metric. Higher = more likely to bind. "
+        f"Want >{_TIER_MED} (medium), >{_TIER_HIGH} (high)."
     ),
     "bt_ipsae_aux": (
         "ipSAE in the binder→target direction, reported by the design tool during generation (not independent). "
@@ -2925,7 +3055,7 @@ _METRIC_DESCRIPTION = {
     ),
     "boltz_pae_ipsae_min": (
         "Primary ranking metric — ipSAE_min from independent Boltz-2 refolding (DunbrackLab formula, 10 Å cutoff). "
-        "The sequence is refolded from scratch, so this is an unbiased assessment. Want >0.61."
+        f"The sequence is refolded from scratch, so this is an unbiased assessment. Want >{_TIER_MED}."
     ),
     "iptm": (
         "Interface predicted TM-score from Boltz-2 — measures overall interface quality. "
@@ -2968,9 +3098,9 @@ _METRIC_DESCRIPTION = {
         "Reflects internal fold confidence. Lower = well-folded binder."
     ),
     "agreement_count": (
-        "Number of independent prediction engines that score ipSAE_min above the 0.61 pass threshold. "
-        "Currently Boltz-2 only (0 or 1); Protenix (x86) and AlphaFold 3 (aarch64 / DGX Spark) "
-        "will be added as the refactor progresses. Higher = more engines agree = stronger candidate."
+        f"Number of independent prediction engines that score ipSAE_min above the {_TIER_MED} pass threshold "
+        "(Boltz-2 / AF3 / ESMFold2, whichever ran — see the per-engine cutoffs legend). "
+        "Higher = more engines agree = stronger candidate."
     ),
     "intra_contact": (
         "Binder internal contact score — measures how tightly the binder folds. "
