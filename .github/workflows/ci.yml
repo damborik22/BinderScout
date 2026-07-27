@@ -22,6 +22,10 @@ jobs:
             Evaluator/install.sh \
             Evaluator/run.sh \
             tools/fleet.sh \
+            tools/fleet-check/check_launch.sh \
+            tools/fleet-check/check_poll_fetch.sh \
+            tools/fleet-check/check_probe.sh \
+            tools/fleet-check/check_status.sh \
             docker-entrypoint.sh \
             test_env.sh
 

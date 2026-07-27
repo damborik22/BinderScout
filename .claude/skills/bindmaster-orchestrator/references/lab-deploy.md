@@ -113,15 +113,27 @@ column next to it, by contrast, genuinely is free space (`df -h`). Below the
 table it also reports Clara tunnel state
 (`ip link show ppp0`) and whether the Clara key is loaded
 (`ssh-add -l | grep clara`), so one command gives you the whole fleet
-(LAN + Clara) at a glance. Warns explicitly when the tunnel is down or the key
-is locked, with the exact unlock command.
+(LAN + Clara) at a glance. Warns explicitly when the tunnel is down (naming
+the `vpn-ciirc` command to bring it up manually) or the key is locked (naming
+the exact `ssh-add` unlock command).
 
 ### 3.3 Launch — start a job under tmux
 
 ```bash
-tools/fleet.sh launch bm2 2VDY_rfd3 ~/runs/2VDY-bm2-rfd3 run_rfd3.sh
-#                     ^machine ^job/session name ^remote run dir  ^local script to ship
+tools/fleet.sh launch bm2 2VDY_rfd3 <BM2_HOME>/runs/2VDY-bm2-rfd3 run_rfd3.sh
+#                     ^machine ^job/session name ^remote run dir           ^local script to ship
 ```
+
+**Remote paths must be absolute — `~` does not expand.** `launch`'s
+`<remote-dir>` and `fetch`'s `<remote-path>` (§3.5) are embedded in
+single-quoted remote-shell arguments (`sq()`) or handed to `rsync`'s own
+`host:path` parsing; neither goes through a shell on BM5 that would expand a
+leading `~`, so quoting it turns `~` into a literal directory name instead of
+the target user's home. Worse, if the argument is left unquoted at the BM5
+shell (as in a copy-pasted example), BM5's *own* shell expands `~` to
+*BM5's* home before `fleet.sh` ever sees it — which is the wrong user
+entirely (`<BM2_USER>`'s home on bm2 is `<BM2_HOME>`, not BM5's
+`<BM5_HOME>`). Always spell out the target user's absolute home path.
 
 Before touching anything remote, `launch` runs **two independent admission
 checks**, and only proceeds if both pass:
@@ -179,11 +191,14 @@ machine:
 
 - **Sessions listed** → prints `<machine> <session1> <created> <session2> ...`
 - **No sessions, but reachable** → prints **`no tracked job`**, deliberately
-  *not* `idle`. This only means `fleet.sh` sees no tmux session it started —
-  it says nothing about GPU load. All three machines can (and do) run real GPU
-  work started outside `fleet.sh`; printing "idle" here would read as "safe to
-  launch," which `poll` cannot promise. Use `status` (§3.2) to check actual
-  GPU occupancy before launching.
+  *not* `idle`. This only means `tmux ls` returned zero sessions on that
+  machine, period — `fleet.sh` doesn't filter to sessions it launched itself;
+  if any session existed (from `fleet.sh` or a human), the "sessions listed"
+  case above would show it regardless of who started it. It says nothing
+  about GPU load. All three machines can (and do) run real GPU work started
+  outside `fleet.sh`; printing "idle" here would read as "safe to launch,"
+  which `poll` cannot promise. Use `status` (§3.2) to check actual GPU
+  occupancy before launching.
 - **Unreachable / indeterminate** → warns and skips that machine, distinguishing
   ssh-connection-failure (exit 255, "job state unknown") from any other
   unexpected exit ("could not determine job state").
@@ -195,10 +210,15 @@ exit 255 means "we don't actually know."
 ### 3.5 Fetch — pull results back and verify
 
 ```bash
-tools/fleet.sh fetch bm2 ~/runs/2VDY-bm2-rfd3/2VDY_rfd3_bm2.tar.gz ~/eval_workdir/2VDY/
+tools/fleet.sh fetch bm2 <BM2_HOME>/runs/2VDY-bm2-rfd3/2VDY_rfd3_bm2.tar.gz ~/eval_workdir/2VDY/
 ```
 
-`rsync -s -a --partial --append-verify --info=progress2 bm2:<remote> <dest>/`.
+The remote path (2nd arg) must be absolute for the same reason as `launch`'s
+`<remote-dir>` above — see the callout in §3.3. The local dest (3rd arg) is
+fine as `~/...`: that path is expanded by BM5's own shell before `fleet.sh`
+runs, on BM5 itself, which is exactly where it's meant to land.
+
+`rsync -s -a --partial --info=progress2 bm2:<remote> <dest>/`.
 The `-s` (`--protect-args`) flag — not the `sq()` helper used everywhere
 else — is what makes this safe: rsync parses `host:path` itself before any
 remote shell sees it, so manually quoting the path (as `sq()` does for
@@ -251,7 +271,7 @@ After the transfer, `fetch` **verifies the result before declaring success**:
 | Boltz-2 complex > ~820 tokens, launched on BM5 itself | Out of `fleet.sh`'s scope (BM5 is the orchestrator, not a fleet target) — refuse to launch locally per the standing Spark unified-memory-hang note; this hangs the whole box and needs a force-restart. |
 | VPN down (Clara only) | `status` detects `ip link show ppp0` and reports `tunnel=DOWN` with a fix hint. LAN machines need no VPN — this row doesn't apply to bm1/bm2/bm4. |
 | Clara key not in agent | `status` detects via `ssh-add -l`; reports `key=locked` and the exact unlock command. Not applicable to the LAN key (left passphrase-less by design — see `docs/PLAN_fleet_orchestration.md` D8). |
-| rsync partial transfer | `--partial --append-verify` resumes cleanly; `fetch` verifies `.tar.gz` integrity with `tar -tzf` before declaring success — don't remove anything remote until that check passes. |
+| rsync partial transfer | `--partial` resumes cleanly (`--append-verify` is deliberately NOT used — it skips a destination file whose size is already >= the source's, which would keep a stale result on re-fetch after a re-run); `fetch` verifies `.tar.gz` integrity with `tar -tzf` before declaring success — don't remove anything remote until that check passes. |
 | Job-name collision | `launch` refuses outright (no `FLEET_FORCE` override) — pick a different job name. |
 | Could-not-determine GPU state at launch | Refuses by default, distinct message from confirmed-busy; `FLEET_FORCE=1` overrides. |
 

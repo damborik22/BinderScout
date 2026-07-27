@@ -100,7 +100,7 @@ cmd_status() {
     if ip link show ppp0 >/dev/null 2>&1; then tunnel=up; else tunnel=DOWN; fi
     if ssh-add -l 2>/dev/null | grep -q clara; then key=unlocked; else key=locked; fi
     printf '\n%-5s %s  tunnel=%s  key=%s\n' clara <CLARA_LOGIN_HOST> "$tunnel" "$key"
-    [ "$tunnel" = up ]     || warn "Clara unreachable: start FortiClient manually."
+    [ "$tunnel" = up ]     || warn "Clara unreachable: run vpn-ciirc manually in a dedicated terminal."
     [ "$key" = unlocked ]  || warn "Clara key not in agent: ssh-add -t 8h ~/.ssh/id_ed25519_clara"
     printf 'inventory generated: %s\n' "$(jq -r .generated "$INVENTORY")"
 }
@@ -169,7 +169,7 @@ REMOTE
         warn "$m: GPU busy but FLEET_FORCE=1 — launching anyway"
     fi
 
-    ssh "$m" "mkdir -p '$qdir'"
+    ssh -o BatchMode=yes -o ConnectTimeout=8 "$m" "mkdir -p '$qdir'"
     # Transfer via ssh+cat rather than scp, so the destination path goes
     # through the same single-quoted-remote-shell convention (and the same
     # escaped $qdir) as every other command here. scp's own path handling
@@ -178,8 +178,8 @@ REMOTE
     # bypasses a remote shell entirely, but that's a version-dependent
     # assumption this script shouldn't carry. Piping through ssh keeps one
     # quoting model everywhere, independent of scp's protocol choice.
-    ssh "$m" "cat > '$qdir/run.sh'" < "$script"
-    ssh "$m" "cd '$qdir' && tmux new-session -d -s '$qjob' \
+    ssh -o BatchMode=yes -o ConnectTimeout=8 "$m" "cat > '$qdir/run.sh'" < "$script"
+    ssh -o BatchMode=yes -o ConnectTimeout=8 "$m" "cd '$qdir' && tmux new-session -d -s '$qjob' \
         'export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True; \
          bash run.sh > run.log 2>&1'"
     ok "$m: launched '$job' in $rundir (tmux attach -t $job to watch)"
@@ -215,12 +215,16 @@ cmd_poll() {
             *) warn "$m: could not determine job state (ssh exit $ssh_rc)"; continue ;;
         esac
         if [ -z "$sessions" ]; then
-            # "no tracked job", not "idle": this only means fleet.sh sees no
-            # tmux session it started — it says nothing about GPU load. All
-            # three machines can (and often do) run real GPU jobs started
-            # outside fleet.sh; printing "idle" here would invite exactly
-            # the false-safe misread the ssh_rc handling above guards
-            # against. `status` is the place to check GPU occupancy.
+            # "no tracked job", not "idle": tmux ls returned zero sessions on
+            # this machine, period — fleet.sh doesn't filter to sessions it
+            # launched itself, so if any session existed (from fleet.sh or a
+            # human) it would show up in the else branch below regardless of
+            # who started it. This branch only means "no tmux session at
+            # all" — it says nothing about GPU load. All three machines can
+            # (and often do) run real GPU jobs started outside fleet.sh;
+            # printing "idle" here would invite exactly the false-safe
+            # misread the ssh_rc handling above guards against. `status` is
+            # the place to check GPU occupancy.
             printf '%-4s no tracked job\n' "$m"
         else
             printf '%-4s %s\n' "$m" "$(printf '%s' "$sessions" | tr '\n' ' ')"
@@ -248,14 +252,20 @@ cmd_fetch() {
     # — -s fetches the former as one literal name and refuses the latter
     # (ENOENT on the literal path) without ever invoking a remote shell.
     mkdir -p "$dest"
-    rsync -s -a --partial --append-verify --info=progress2 "$m:$remote" "$dest/"
+    # --append-verify is NOT used here: rsync skips a destination file whose
+    # size is already >= the source's, so re-running a job and re-fetching
+    # into the same directory would silently keep the OLD archive instead of
+    # the new one — tar -tzf on that stale file still passes and reports
+    # "verified", so a stale result would flow straight into evaluation.
+    # --partial alone still resumes an interrupted transfer safely.
+    rsync -s -a --partial --info=progress2 "$m:$remote" "$dest/"
 
     local fetched
     fetched="$dest/$(basename "$remote")"
     if [ -f "$fetched" ] && [[ "$fetched" == *.tar.gz ]]; then
         tar -tzf "$fetched" >/dev/null 2>&1 || die "corrupt archive: $fetched"
         ok "verified $fetched ($(du -h "$fetched" | cut -f1))"
-    elif [ -f "$fetched" ]; then
+    elif [ -e "$fetched" ]; then
         ok "fetched $fetched"
     else
         die "fetch reported success but $fetched is missing"

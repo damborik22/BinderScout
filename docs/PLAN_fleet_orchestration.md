@@ -143,7 +143,9 @@ beats queueing silently.
 ### 5.5 Result transport
 
 Worker packages the tarball locally per the existing `packaging.md` convention.
-BM5 pulls with `rsync --partial --append-verify`, verifies integrity, refolds
+BM5 pulls with `rsync --partial` (not `--append-verify` — it skips a
+destination file whose size is already >= the source's, which would keep a
+stale archive on re-fetch after a re-run), verifies integrity, refolds
 locally, then pushes one archive copy to muni-disk out of band.
 
 ### 5.6 Clara access
@@ -226,14 +228,15 @@ accidental.
 | Boltz-2 complex > ~820 tokens on BM5 | Refuse to launch locally — this hangs the whole box and needs a force-restart. |
 | VPN down | Clara operations fail fast with an explicit message, not a DNS hang. |
 | Clara key not in agent | Detected via `ssh-add -l`; prompt the human to unlock rather than retrying. |
-| rsync partial | `--partial --append-verify`; verify tarball integrity before removing anything remote. |
+| rsync partial | `--partial` (not `--append-verify` — see §5.5); verify tarball integrity before removing anything remote. |
 
 ---
 
 ## 9. Verification
 
-1. `fleet.sh probe` returns a complete inventory for all four machines — the
-   smoke test.
+1. `fleet.sh probe` returns a complete inventory for all three LAN machines
+   (BM1/BM2/BM4) — the smoke test. BM5 is the orchestrator and is never a
+   probe target.
 2. A `sleep 60` canary job per machine exercises launch → poll → detect-exit →
    cleanup without consuming GPU time.
 3. Admission check verified by attempting a launch against a machine with a
