@@ -185,6 +185,75 @@ REMOTE
     ok "$m: launched '$job' in $rundir (tmux attach -t $job to watch)"
 }
 
+cmd_poll() {
+    local targets=("${FLEET_MACHINES[@]}")
+    if [ $# -gt 0 ]; then
+        case " ${FLEET_MACHINES[*]} " in *" $1 "*) ;; *) die "unknown machine: $1" ;; esac
+        targets=("$1")
+    fi
+    local m sessions ssh_rc
+    for m in "${targets[@]}"; do
+        ssh_rc=0
+        sessions=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$m" \
+                        "tmux ls -F '#{session_name} #{session_created}' 2>/dev/null") || ssh_rc=$?
+        # ssh passes the REMOTE command's own exit code straight through
+        # when the connection itself succeeded — and tmux ls exits 1 when
+        # the server has no sessions (the common idle case), not 0. So
+        # ssh_rc==1 here is a real, successfully-obtained answer ("none
+        # running"), not a failure; folding it into "unreachable" (as an
+        # earlier version of this function did) misreports a live, idle
+        # machine as unreachable, verified live against bm1. ssh reserves
+        # exit 255 specifically for its OWN connection failures (`man
+        # ssh`) — that's the one case that must not be read as idle: an
+        # unreachable machine could easily be running a job we simply
+        # couldn't see, and reporting it idle would look exactly like
+        # "safe to launch" to a human reading this output. Anything else
+        # is an unrecognized outcome — fail closed, don't guess.
+        case "$ssh_rc" in
+            0 | 1) ;;
+            255) warn "$m: unreachable (ssh connection failed) — job state unknown"; continue ;;
+            *) warn "$m: could not determine job state (ssh exit $ssh_rc)"; continue ;;
+        esac
+        if [ -z "$sessions" ]; then
+            printf '%-4s idle\n' "$m"
+        else
+            printf '%-4s %s\n' "$m" "$(printf '%s' "$sessions" | tr '\n' ' ')"
+        fi
+    done
+}
+
+cmd_fetch() {
+    [ $# -eq 3 ] || die "usage: fleet.sh fetch <machine> <remote-path> <local-dir>"
+    local m=$1 remote=$2 dest=$3
+    case " ${FLEET_MACHINES[*]} " in *" $m "*) ;; *) die "unknown machine: $m" ;; esac
+
+    # remote is a caller-supplied path, embedded in a "host:path" argument
+    # rsync parses itself before any remote shell sees it — this is NOT the
+    # ssh/scp -T convention sq() was built for. Manually sq()-quoting here
+    # was tried and actively breaks rsync: rsync does its own '/'-based
+    # split of host:path (for its cd-then-fetch optimization), so a literal
+    # leading quote character becomes part of the path rsync tries to cd
+    # into ("change_dir \"'/tmp/...\" failed"). The correct guard is
+    # rsync's own --protect-args (-s): it disables remote wildcard/shell
+    # expansion of the path entirely, so metacharacters (quotes, spaces,
+    # semicolons) pass through as literal path bytes with no manual
+    # escaping needed. Verified against a remote filename containing both
+    # a single quote and an embedded "; touch ...; " shell-injection shape
+    # — -s fetches the former as one literal name and refuses the latter
+    # (ENOENT on the literal path) without ever invoking a remote shell.
+    mkdir -p "$dest"
+    rsync -s -a --partial --append-verify --info=progress2 "$m:$remote" "$dest/"
+
+    local fetched
+    fetched="$dest/$(basename "$remote")"
+    if [ -f "$fetched" ] && [[ "$fetched" == *.tar.gz ]]; then
+        tar -tzf "$fetched" >/dev/null 2>&1 || die "corrupt archive: $fetched"
+        ok "verified $fetched ($(du -h "$fetched" | cut -f1))"
+    else
+        ok "fetched $fetched"
+    fi
+}
+
 usage() {
     cat <<'USAGE'
 usage: fleet.sh <command> [args]
@@ -192,6 +261,8 @@ usage: fleet.sh <command> [args]
   probe                                   refresh ~/.claude/fleet/inventory.json
   status                                  fleet + Clara state (uses cached inventory)
   launch <machine> <job> <remote-dir> <script>   tmux-launch a run script
+  poll [machine]                          list running tmux jobs
+  fetch <machine> <remote-path> <local-dir>   rsync a result back and verify it
 USAGE
     exit 1
 }
@@ -200,5 +271,7 @@ case "${1:-}" in
     probe)  shift; cmd_probe "$@" ;;
     status) shift; cmd_status "$@" ;;
     launch) shift; cmd_launch "$@" ;;
+    poll)   shift; cmd_poll  "$@" ;;
+    fetch)  shift; cmd_fetch "$@" ;;
     *)      usage ;;
 esac
