@@ -82,6 +82,7 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "native_soluprot_score": ("Solubility (SoluProt)", "[0–1]", "↑"),
     "wetlab_recommended": ("Wet-lab ready", "", ""),
     "wetlab_reason": ("Why flagged (wet-lab)", "", ""),
+    # ── Part X advisory panels ──────────────────────────────────────────────
     "esmfold2_chain_iptm_interface": ("ESMFold2 chain-ipTM (interface)", "[0–1]", "↑"),
     "beta_intercalates": ("β-intercalates", "", "↓"),
     "n_xbridge": ("β cross-bridges", "", "↓"),
@@ -89,6 +90,44 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "passes_affinity_gate": ("Affinity gate", "", ""),
     "fold_robust": ("Fold robust", "", ""),
     "monomer_rmsd": ("Monomer RMSD", "Å", "↓"),
+    # ── Ranking / screen ────────────────────────────────────────────────────
+    "two_stage_rank": ("Rank", "", ""),
+    "consensus_rank": ("Rank", "", ""),
+    "passes_max_screen": ("Passes Stage-1 screen", "", ""),
+    "consensus_iptm": ("Max ipTM", "[0–1]", "↑"),
+    "consensus_iptm_min": ("Min ipTM", "[0–1]", "↑"),
+    "consensus_iptm_spread": ("ipTM spread", "[0–1]", "↓"),
+    # ── Per-engine. boltz_pae_* is labelled above; af3/esmfold2 were missing,
+    #    so the report printed their raw column names in the same table as
+    #    Boltz's pretty label. ────────────────────────────────────────────────
+    "af3_ipsae_min": ("AF3 ipSAE_min", "[0–1]", "↑"),
+    "esmfold2_ipsae_min": ("ESMFold2 ipSAE_min", "[0–1]", "↑"),
+    "af3_iptm": ("AF3 ipTM", "[0–1]", "↑"),
+    "esmfold2_iptm": ("ESMFold2 ipTM", "[0–1]", "↑"),
+    # ── Epitope (cli/epitope.py) ────────────────────────────────────────────
+    "epitope_match_fraction": ("Epitope match", "[0–1]", "↑"),
+    "epitope_match_n": ("Hotspots hit", "", "↑"),
+    "epitope_n_interface": ("Interface residues (epitope)", "", ""),
+    "epitope_matched_residues": ("Hotspots matched", "", ""),
+    "epitope_off_target_residues": ("Off-target contacts", "", ""),
+    "epitope_status": ("Epitope status", "", ""),
+    # ── Diversity (comparison/diversity.py) ─────────────────────────────────
+    "family_size": ("Family size", "", ""),
+    "family_rank": ("Rank in family", "", ""),
+    # ── Interface QC (scripts/interface_qc.py). Directions are taken from the
+    #    BindCraft filters in cli/qc_annotate.py DEFAULT_QC rather than guessed
+    #    (dG<=0, sc>=0.55, hbonds>=3, unsat<=4, nres>=7). The two with no
+    #    threshold there get no arrow instead of an invented one. ────────────
+    "interface_dG": ("Interface ΔG", "kcal/mol", "↓"),
+    "interface_sc": ("Shape complementarity", "", "↑"),
+    "interface_interface_hbonds": ("Interface H-bonds", "", "↑"),
+    "interface_delta_unsat_hbonds": ("Buried unsat. H-bonds", "", "↓"),
+    "interface_nres": ("Interface residues (Rosetta)", "", "↑"),
+    "interface_dG_SASA_ratio": ("ΔG / dSASA", "kcal/Å²", ""),
+    "interface_hydrophobicity": ("Interface hydrophobicity", "", ""),
+    # ── Misc ────────────────────────────────────────────────────────────────
+    "native_soluprot_passes": ("Solubility pass", "", ""),
+    "qc_fail_reasons": ("QC fail reasons", "", ""),
 }
 
 
