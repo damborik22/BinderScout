@@ -26,13 +26,11 @@ from binder_comparison.visualization.report import _ADVISORY_SECONDARY, _select_
 
 _RANK_METHODS = ("two_stage", "consensus_iptm", "adaptyv")
 
-# The refold engines that can actually populate an ipSAE column. `_ENGINE_IPSAE_COLS`
-# also carries an "af2" entry left over from before Part I removed AF2 refolding:
-# no runner, merger or schema field writes `af2_ipsae_min` any more (the surviving
-# af2 fields are PXDesign's and Proteina-Complexa's own native metrics), so it can
-# never reach a table and needs no label. Kept out of this parametrisation rather
-# than labelled, so a label is not invented for a column that cannot appear.
-_LIVE_ENGINES = ("boltz", "af3", "esmfold2")
+# The refold engines that can populate an ipSAE column. Derived from the canonical
+# map rather than retyped, so a new engine is covered the moment it is registered.
+# (`_ENGINE_IPSAE_COLS` used to carry a dead "af2" entry left from before Part I
+# removed AF2 refolding; that entry is gone, so the map is now exactly the live set.)
+_LIVE_ENGINES = tuple(_ENGINE_IPSAE_COLS)
 
 # Columns a report can carry. Anything a display set may select must be here so
 # the selector actually returns it (it filters on `c in df.columns`).

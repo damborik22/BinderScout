@@ -390,22 +390,22 @@ def add_iptm_from_pae_files(
 
 
 # Per-engine iPSAE thresholds — calibrated for the DunbrackLab 2025 formula at 10 Å cutoff.
-# AF2 caps low on short targets (per docs/INVESTIGATION_RANKING_DISCREPANCY.md §6); kept informational.
 DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {
     "boltz": IPSAE_PASS_THRESHOLD,  # 0.61
     "af3": IPSAE_PASS_THRESHOLD,  # 0.61 — DunbrackLab cutoff was tuned for AF3
     "esmfold2": IPSAE_PASS_THRESHOLD,  # 0.61 — same cutoff until empirical calibration suggests otherwise
-    "af2": 0.30,  # informational only; AF2 distribution caps low
 }
 
 # Map engine key → DunbrackLab PAE-derived ipsae_min column.
 # NOTE: Boltz uses the prefixed `boltz_pae_*` columns (special add_boltz_ipsae_from_files
 # pipeline), while AF3/ESMFold2 use plain `<engine>_ipsae_min` (from add_ipsae_from_pae_files).
+# AF2 is deliberately absent: Part I removed AF2 refolding, so nothing writes
+# `af2_ipsae_min` any more. Its entry survived that removal and kept a dead
+# `--threshold-af2` flag and a `passes_af2_filter_informational` column alive.
 _ENGINE_IPSAE_COLS: dict[str, str] = {
     "boltz": "boltz_pae_ipsae_min",
     "af3": "af3_ipsae_min",
     "esmfold2": "esmfold2_ipsae_min",
-    "af2": "af2_ipsae_min",
 }
 
 
@@ -418,7 +418,6 @@ def apply_screening_thresholds(
 
     Per-engine flags added (when the corresponding PAE-derived ipsae column is present):
         passes_boltz_filter, passes_af3_filter, passes_esmfold2_filter
-        passes_af2_filter_informational  (AF2 uses a relaxed 0.30 cutoff; informational only)
 
     Aggregate flags (derived from `primary_engine` so existing reports still work):
         passes_ipsae_filter   : primary engine's ipsae_min > its threshold
@@ -442,8 +441,7 @@ def apply_screening_thresholds(
             continue
         thr = thresholds.get(engine, IPSAE_PASS_THRESHOLD)
         vals = pd.to_numeric(result[col], errors="coerce")
-        flag = "passes_af2_filter_informational" if engine == "af2" else f"passes_{engine}_filter"
-        result[flag] = vals > thr
+        result[f"passes_{engine}_filter"] = vals > thr
 
     # Primary-engine column for tier / aggregate flags
     primary_col = _ENGINE_IPSAE_COLS.get(primary_engine, _ENGINE_IPSAE_COLS["boltz"])
