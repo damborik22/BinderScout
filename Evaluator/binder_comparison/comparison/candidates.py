@@ -36,6 +36,7 @@ backbone's native rank.
 from __future__ import annotations
 
 import math
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -112,15 +113,24 @@ def collapse_native_df(
     """
     try:
         native = pd.read_csv(csv_path)
-    except Exception:
+    except Exception as exc:
+        warnings.warn(f"[candidates] {csv_path}: unreadable ({exc}) — this tool's native block is dropped.")
         return pd.DataFrame()
     col = _native_seq_col(native)
     if col is None or native.empty:
+        why = "no rows" if native.empty else f"no sequence column (tried {list(_NATIVE_SEQ_COLS)})"
+        warnings.warn(f"[candidates] {csv_path}: {why} — this tool's native block is dropped.")
         return native.iloc[0:0].copy()
     key = native[col].astype(str).str.strip().str.upper()
     grp = key.map(seq_to_group)
     native = native.assign(_seq_key=key.to_numpy(), _design_group=grp.to_numpy())
+    n_read = len(native)
     native = native[native["_design_group"].notna()]  # in-pool filter
+    if native.empty:
+        warnings.warn(
+            f"[candidates] {csv_path}: none of its {n_read} native designs are in the refold pool — "
+            "this tool's native block is dropped. Stale native CSV (tool re-run since it was written)?"
+        )
     native = native[~native["_design_group"].duplicated(keep="first")]  # backbone collapse
     native = native.reset_index(drop=True)
     if top_n is not None:

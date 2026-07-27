@@ -78,6 +78,18 @@ def test_collapse_prefers_full_chain_and_filters_in_pool(tmp_path):
     assert list(out["_seq_key"]) == ["AAAA"]  # full-chain match; ZZZZ dropped (not refolded)
 
 
+def test_collapse_warns_when_stale_csv_matches_nothing_in_pool(tmp_path):
+    # A stale native CSV (tool re-run since it was written) matches no pool
+    # sequence, so the in-pool filter empties it and the tool's whole native
+    # block disappears. That must be loud — silently dropping a tool the caller
+    # explicitly asked for is how a shortlist ships missing a design tool.
+    native = pd.DataFrame({"sequence": ["OLD1", "OLD2"]})
+    path = _write(tmp_path, "stale.csv", native)
+    with pytest.warns(UserWarning, match="refold pool"):
+        out = collapse_native_df(path, {"AAAA": "bc_t1"})
+    assert out.empty
+
+
 def test_build_candidates_full(tmp_path):
     full = _full_df()
     disp = _df_display(full)

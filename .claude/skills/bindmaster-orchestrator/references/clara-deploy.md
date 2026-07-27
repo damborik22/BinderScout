@@ -51,6 +51,24 @@ execute it yourself instead of waiting for a worker.
   Mosaic, PC, PH, BoltzGen) and `l40s` (NVIDIA L40S, 48 GB — AF2-based:
   BindCraft). One GPU per job (`--gres=gpu:H200:1` / `:L40S:1`); never
   `--exclusive`. 3–6 concurrent jobs is polite (~6–13 % of the cluster).
+- **⚠ ALWAYS request CPU + memory *per GPU*. Omitting `--mem` silently reserves the
+  WHOLE node.** Slurm's default when no memory is requested is the node's entire
+  `RealMemory` (h200 = 2,321,905 MB), so a **1-GPU job blocks all 8 GPUs on that
+  node** and everyone else queues behind you. Nothing in `squeue` shows this — it
+  looks like a normal 1-GPU job. Every GPU sbatch must carry:
+
+  ```bash
+  # H200 nodes                        # L40S nodes
+  #SBATCH --cpus-per-gpu=32           #SBATCH --cpus-per-gpu=32
+  #SBATCH --mem-per-gpu=250G          #SBATCH --mem-per-gpu=120G
+  #SBATCH --gpu-bind=closest          #SBATCH --gpu-bind=closest
+  ```
+
+  Do **not** also pass `-c/--cpus-per-task` — `--cpus-per-gpu` replaces it.
+  **Verify right after submitting** (§3.3): `scontrol show job <id>` must report
+  `TRES=cpu=32,mem=250G,…,gres/gpu=1` — if `mem` equals the node's RealMemory you
+  are hogging nodes; fix and resubmit immediately. Correctly sized, array tasks
+  pack up to 8 per node instead of one each.
 - **No sudo, no admin.** Everything in `$HOME` (`<CLARA_HOME>`, Lustre, PB-scale).
 - **No email.** `#SBATCH --mail-*` silently fails (no mail binary). Poll `squeue`, or use an `ntfy.sh` curl at the end of the sbatch.
 - **Login node has no GPU** — submit/monitor there, never compute.
@@ -111,6 +129,11 @@ Mosaic constants, BindCraft `target_settings.json`) — Slurm manual §1.2/§5.
 ```bash
 ssh clara "cd ~/runs/<TARGET>-clara-<tool> && sbatch run_<tool>.sbatch"
 # → Submitted batch job <jobid>   — capture the jobid
+
+# MANDATORY: confirm you are not reserving the whole node (§2)
+ssh clara "scontrol show job <jobid> | grep -o 'TRES=[^ ]*'"
+# want: TRES=cpu=32,mem=250G,node=1,billing=32,gres/gpu=1
+# BAD:  mem=2321905M (= node RealMemory) → 1 GPU is blocking all 8; fix + resubmit
 ```
 
 Immediately record a START row/entry in PROGRESS.md (jobid, partition, expected
@@ -201,6 +224,7 @@ knows there was no separate worker.
 | Heredoc-uploaded script has wrong values | Local shell expanded `$VAR`/backticks before send | Quote the heredoc delimiter (`<<'EOF'`), or author locally and `scp` instead |
 | Job submitted but you can't find its `.out` | Wrong run dir, or `%x-%j` pattern vs your assumption | `ssh clara "ls -lt ~/runs/<name>/ | head"`; the `.out` name is `<job-name>-<jobid>.out` |
 | Monitoring shows RUNNING but output count flat | Real stall (node `down*`, MSA rate-limit, disk full) — Slurm manual §2.3 | `sinfo -p <p>`, check inner log, `df -h`; the `.out` tail + source-of-truth count together disambiguate |
+| Colleague reports you are "blocking a whole node with a 1-GPU job" | `--mem`/`--cpus-per-gpu` omitted → Slurm reserved the node's full RealMemory (§2) | Add `--cpus-per-gpu` / `--mem-per-gpu` / `--gpu-bind=closest`; `scancel` + resubmit (most refolders take `--resume`, so little work is lost) |
 | Session ended, worried the run died | It didn't — Slurm is independent of your SSH session | Re-attach next session via `squeue`/`sacct`; SSH is only the control channel |
 
 ---
