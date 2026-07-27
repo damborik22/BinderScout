@@ -443,7 +443,7 @@ bindmaster install --tool proteina-complexa # install Proteina-Complexa
 bindmaster install --tool protein-hunter    # install Protein-Hunter (Part L)
 bindmaster install --tool rfd3              # install RFD3 / foundry (Part M)
 bindmaster install --tool esmfold2          # install ESMFold2 refolder individually (default engine; also in --tool all)
-bindmaster install --tool soluprot          # install SoluProt screen (opt-in eval filter; x86 + aarch64)
+bindmaster install --tool soluprot          # install SoluProt screen alone (also in --tool all; x86 + aarch64)
 bindmaster install --uninstall --tool all   # remove envs + shortcuts (preserves runs/)
 bindmaster install --standalone --tool all    # force local Miniforge install
 bindmaster install --system-conda --tool all  # use existing system conda

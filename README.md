@@ -15,7 +15,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 | Component | What it does | Runs in |
 |---|---|---|
-| `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the default refold engine ESMFold2; AF3 / SoluProt are separate `--tool` adds | bash |
+| `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the default refold engine ESMFold2 and the SoluProt solubility screen; AF3 is a separate `--tool` add (gated weights) | bash |
 | `bindmaster configure` | Interactive wizard: target → configs → run scripts | system Python |
 | `bindmaster evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by two-stage cross-engine iPTM, generate HTML report | conda env `binder-eval` |
 
@@ -42,7 +42,7 @@ The evaluator (`bindmaster evaluate` / `binder-compare`) runs on top of the desi
 | **Boltz-2** | Primary refold engine; ranking reference | `Mosaic/.venv` (rides Mosaic install) | x86_64 + aarch64 | default (with Mosaic) |
 | **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.10) | x86_64 + aarch64 | default (in `--tool all`) |
 | **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion on big-VRAM hosts | conda env `binder-eval-af3` (Python 3.10, gated weights) | x86_64 + aarch64; needs ≥100 GB GPU memory | `--tool af3` (gated weights) |
-| **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model — see [docs/PLAN_soluprot_integration.md](docs/PLAN_soluprot_integration.md) | `--tool soluprot` |
+| **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model — see [docs/PLAN_soluprot_integration.md](docs/PLAN_soluprot_integration.md) | in `--tool all` |
 
 ### Architecture
 
@@ -63,7 +63,7 @@ flowchart LR
 
     Extract["Extractors\n(one per tool →\nunified FASTA +\nnative_metrics.csv sidecar)"]
 
-    SoluProt["SoluProt 1.0\n(sequence-only solubility screen,\nbinder-eval-soluprot env;\nx86 + aarch64, opt-in)"]
+    SoluProt["SoluProt 1.0\n(sequence-only solubility screen,\nbinder-eval-soluprot env;\nx86 + aarch64, in --tool all)"]
 
     Drop[("Drop\nbelow threshold\n(--soluprot-filter)")]
 
@@ -88,7 +88,7 @@ flowchart LR
     ESMFold2 --> Report
 ```
 
-AF3 and ESMFold2 are explicit `--tool` installs; all three engines are then auto-detected by `evaluate.sh` from their conda envs. SoluProt is fully opt-in and acts as a filter, never as a re-ranker — its `soluprot_score` and `soluprot_passes` columns show up in `metrics.csv` alongside the refold scores so users can sort on them if they want.
+ESMFold2 and SoluProt are in `--tool all`; AF3 is an explicit `--tool af3` install (gated weights). All three refold engines are then auto-detected by `evaluate.sh` from their conda envs. SoluProt acts as a filter, never as a re-ranker — it only drops designs with `--soluprot-filter` — its `soluprot_score` and `soluprot_passes` columns show up in `metrics.csv` alongside the refold scores so users can sort on them if they want.
 
 ### Components at a glance
 
@@ -134,7 +134,7 @@ flowchart TB
     EvaluateSh -->|conda run -n …| EvalEnvs
 ```
 
-Solid blue boxes are the seven design tools' isolated environments; green / yellow boxes are the four evaluator environments (the three yellow ones are opt-in via `--tool af3 / esmfold2 / soluprot`). The grey panel shows the per-run output layout the configurator generates and `evaluate.sh` fills in.
+Solid blue boxes are the seven design tools' isolated environments; green / yellow boxes are the four evaluator environments (ESMFold2 and SoluProt ship in `--tool all`; AF3 is opt-in via `--tool af3`). The grey panel shows the per-run output layout the configurator generates and `evaluate.sh` fills in.
 
 ---
 
