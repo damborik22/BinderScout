@@ -70,18 +70,18 @@ cmd_probe() {
 
 cmd_status() {
     [ -f "$INVENTORY" ] || die "no inventory — run: fleet.sh probe"
-    printf '%s%-5s %-14s %-22s %-6s %-6s %-8s %s%s\n' "$BOLD" \
+    printf '%s%-5s %-14s %-24.24s %-6s %-6s %-8s %s%s\n' "$BOLD" \
         MACHINE HOST GPU BUSY RAM DISK BRANCH "$RESET"
     local m
     for m in "${FLEET_MACHINES[@]}"; do
         jq -r --arg m "$m" '
             .machines[$m] as $x
             | if $x.reachable
-              then [$m, $x.host, ($x.gpu // "-"), ($x.gpu_procs|tostring),
+              then [$m, $x.host, ($x.gpu // "-" | split(",")[0]), ($x.gpu_procs|tostring),
                     (($x.ram_gb|tostring) + "G"), $x.disk_free, $x.git_branch]
               else [$m, "UNREACHABLE", "-", "-", "-", "-", "-"] end
             | @tsv' "$INVENTORY" \
-        | awk -F'\t' '{printf "%-5s %-14s %-22s %-6s %-6s %-8s %s\n",$1,$2,$3,$4,$5,$6,$7}'
+        | awk -F'\t' '{printf "%-5s %-14s %-24.24s %-6s %-6s %-8s %s\n",$1,$2,$3,$4,$5,$6,$7}'
     done
 
     local tunnel key
