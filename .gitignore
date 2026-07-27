@@ -57,3 +57,6 @@ notebooks/_artifacts/
 # are tracked; a bare arch-ambiguous 'usearch' here must never be committed again
 # (an aarch64 one once clobbered the x86 build across a branch merge).
 Evaluator/tools/soluprot/usearch
+
+# superpowers SDD scratch workspace
+.superpowers/
