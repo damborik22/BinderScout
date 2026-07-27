@@ -487,23 +487,31 @@ def refold_batch(
             seq = jnp.array([TOKENS.index(c) for c in seq_str])
             pssm = jax.nn.one_hot(seq, 20)
 
-            boltz_features, boltz_writer = folder.target_only_features(
-                chains=[
-                    TargetChain(sequence=seq_str, use_msa=False),  # binder: de novo, no MSA
-                    TargetChain(
-                        # Prefer a cached a3m (msa_path) — folds the target WITH its
-                        # MSA offline. Falls back to use_msa: co-fold (no template)
-                        # fetches online; template mode goes single-sequence (the
-                        # template already fixes the backbone) when no MSA is cached.
-                        sequence=target_sequence,
-                        # use_msa=False here honours an explicit --no-msa: without it
-                        # Boltz would still co-fold an online MSA behind the operator.
-                        use_msa=use_msa and target_template_chain is None,
-                        template_chain=target_template_chain,
-                        msa_path=target_msa_path,
-                    ),
-                ],
-            )
+            # Build the complex features. A malformed binder can make Boltz emit an
+            # empty dataloader (IndexError in load_features_and_structure_writer);
+            # skip that one design rather than aborting the whole batch.
+            try:
+                boltz_features, boltz_writer = folder.target_only_features(
+                    chains=[
+                        TargetChain(sequence=seq_str, use_msa=False),  # binder: de novo, no MSA
+                        TargetChain(
+                            # Prefer a cached a3m (msa_path) — folds the target WITH its
+                            # MSA offline. Falls back to use_msa: co-fold (no template)
+                            # fetches online; template mode goes single-sequence (the
+                            # template already fixes the backbone) when no MSA is cached.
+                            sequence=target_sequence,
+                            # use_msa=False here honours an explicit --no-msa: without it
+                            # Boltz would still co-fold an online MSA behind the operator.
+                            use_msa=use_msa and target_template_chain is None,
+                            template_chain=target_template_chain,
+                            msa_path=target_msa_path,
+                        ),
+                    ],
+                )
+            except Exception as e:
+                print(f"[SKIP] Binder #{idx} feature-build failed ({e!r}) — skipping")
+                jax.clear_caches()
+                continue
 
             # ---- Comprehensive aux metrics — all 13 loss terms ----
             metrics_loss = folder.build_multisample_loss(
