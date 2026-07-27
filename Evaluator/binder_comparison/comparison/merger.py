@@ -2,7 +2,6 @@
 
 Column naming convention after merge:
   - Boltz-2 columns are prefixed with ``boltz_``
-  - Protenix columns are prefixed with ``protenix_``
   - AF3 columns (Part K, aarch64) are prefixed with ``af3_``
   - ESMFold2 columns (biohub) are prefixed with ``esmfold2_``
   - ``sequence`` is the join key, present in every engine's CSV
@@ -28,7 +27,6 @@ def merge_refold_results(
     boltz2_csv: str | Path | None,
     sequences_fasta: str | Path | None = None,
     *,
-    protenix_csv: str | Path | None = None,
     af3_csv: str | Path | None = None,
     esmfold2_csv: str | Path | None = None,
 ) -> pd.DataFrame:
@@ -39,7 +37,6 @@ def merge_refold_results(
                           anchor — report needs at least one engine).
         sequences_fasta:  Optional FASTA from 'extract'; attaches binder_id and
                           source_tool columns.
-        protenix_csv:     Optional Protenix results (refold-protenix output).
         af3_csv:          Optional AF3 results (refold-af3 output).
         esmfold2_csv:     Optional ESMFold2 results (refold-esmfold2 output).
 
@@ -49,8 +46,6 @@ def merge_refold_results(
     engine_dfs: dict[str, pd.DataFrame] = {}
     if boltz2_csv:
         engine_dfs["boltz"] = _load_engine(boltz2_csv, "boltz")
-    if protenix_csv:
-        engine_dfs["protenix"] = _load_engine(protenix_csv, "protenix")
     if af3_csv:
         engine_dfs["af3"] = _load_engine(af3_csv, "af3")
     if esmfold2_csv:
@@ -124,4 +119,21 @@ def _attach_fasta_metadata(df: pd.DataFrame, fasta_path: str | Path) -> pd.DataF
         return df
 
     meta_df = pd.DataFrame(meta_rows)
-    return pd.merge(df, meta_df, on="sequence", how="left")
+
+    # One metadata row per sequence. With `extract --keep-duplicates` the FASTA can
+    # carry the same sequence under several binder_ids; a left join against a
+    # duplicated right key multiplies the metrics rows, so one design would occupy
+    # several Top-30 slots and inflate the two-stage screen's eligible count.
+    # cli/autosize.py:160 already guards its equivalent merge the same way.
+    n_before = len(meta_df)
+    meta_df = meta_df.drop_duplicates("sequence", keep="first")
+    n_dupes = n_before - len(meta_df)
+    if n_dupes:
+        warnings.warn(
+            f"[merger] {n_dupes} duplicate sequence(s) in {fasta_path} — keeping the first "
+            f"binder_id for each. Re-run 'extract' without --keep-duplicates to avoid this.",
+            stacklevel=2,
+        )
+    # validate="m:1" turns any future regression here into an error instead of silent
+    # row inflation.
+    return pd.merge(df, meta_df, on="sequence", how="left", validate="m:1")

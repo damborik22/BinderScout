@@ -235,7 +235,7 @@ pip install torch==2.3.1+cu121 --index-url https://download.pytorch.org/whl/cu12
 
 **Cause:** the BindMaster `install/install.sh` applies patches to `protenix` (CUDA arch for Blackwell sm_120), `pxdbench` (`NumpyEncoder` JSON serialization), and `configs_infer.py` (num_workers). These are reapplied on each install but lost if you `pip install --upgrade` manually.
 
-**Fix:** rerun `install/install.sh --pxdesign` to reapply the patches.
+**Fix:** rerun `bindmaster install --tool pxdesign` to reapply the patches. There is no `--pxdesign` flag; the installer selects tools with `--tool <name>`. The re-run resumes into the existing `bindmaster_pxdesign` env rather than aborting, so only the patch steps redo any work.
 
 ### 5.7 Protein-Hunter: `pyrosetta-installer` rename
 

@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import datetime as _dt
 import json
 import os
 import re
@@ -148,6 +149,32 @@ MOSAIC_VENV = MOSAIC_DIR / ".venv"
 MOSAIC_HALLUCINATE_SRC = MOSAIC_DIR / "examples" / "bindmaster_examples" / "hallucinate_bindmaster.py"
 NANOBODY_SCAFFOLDS_SRC = BOLTZGEN_DIR / "example" / "nanobody_scaffolds"
 NANOBODY_SCAFFOLD_NAMES = ["7eow", "7xl0", "8coh", "8z8v"]
+
+# ── Design tools, in execution order — the single source of truth ────────────
+# (tools_enabled key, run-script filename, display label, output subdir)
+#
+# Every UI surface iterates this: the Step 7 preview tree, the "To run later"
+# list, run_pipeline() and write_run_all(). They were four independently
+# maintained if-chains, and three of them fell behind: the preview tree knew 4
+# of the 7 tools, the next-steps list and run_pipeline knew 5. A user could
+# enable RFD3 or Protein-Hunter, watch the wizard generate run_rfd3.sh, and then
+# never be told the script existed — while "Run the pipeline now?" silently
+# skipped it. Adding a tool must not require editing four places.
+TOOL_SEQUENCE: list[tuple[str, str, str, str]] = [
+    ("mosaic", "run_mosaic.sh", "Mosaic", "mosaic"),
+    ("boltzgen", "run_boltzgen.sh", "BoltzGen", "boltzgen"),
+    ("bindcraft", "run_bindcraft.sh", "BindCraft", "bindcraft"),
+    ("pxdesign_local", "run_pxdesign.sh", "PXDesign", "pxdesign"),
+    ("proteina_complexa", "run_proteina_complexa.sh", "Proteina-Complexa", "proteina_complexa"),
+    ("rfd3", "run_rfd3.sh", "RFD3", "rfd3"),
+    ("protein_hunter", "run_protein_hunter.sh", "Protein-Hunter", "protein_hunter"),
+]
+
+
+def enabled_tools(tools_enabled: dict) -> list[tuple[str, str, str, str]]:
+    """TOOL_SEQUENCE entries whose tools_enabled key is truthy, in execution order."""
+    return [entry for entry in TOOL_SEQUENCE if tools_enabled.get(entry[0])]
+
 
 # ─── Amino-acid 3→1 mapping ──────────────────────────────────────────────────
 
@@ -548,12 +575,10 @@ def extract_sequence_from_cif(cif_path: str, chain_id: str) -> str | None:
     except OSError:
         return None
 
-    # Try canonical _entity_poly first (chain-agnostic, longest entity)
-    seq = _cif_entity_poly_seq(text)
-    if seq:
-        return seq
-
-    # Fallback: _atom_site CA records for requested chain
+    # _atom_site CA records for the requested chain FIRST: this is the only branch that can
+    # honour chain_id. _entity_poly is chain-agnostic (it returns the longest entity), so trying
+    # it first silently discarded the user's chain answer for every mmCIF that has one — i.e.
+    # essentially every structure downloaded from the PDB.
     tokens = _cif_tokenize(text)
     i = 0
     while i < len(tokens):
@@ -596,6 +621,18 @@ def extract_sequence_from_cif(cif_path: str, chain_id: str) -> str | None:
             i += n_cols
         if seen:
             return "".join(seen[k] for k in sorted(seen))
+
+    # No CA records for that chain (or no _atom_site at all — e.g. a sequence-only mmCIF).
+    # _entity_poly is the last resort, but it cannot honour chain_id, so say so rather than
+    # returning a different chain's sequence as if it were the requested one.
+    seq = _cif_entity_poly_seq(text)
+    if seq:
+        print_warn(
+            f"Chain {chain_id} has no CA records in {Path(cif_path).name} — falling back to the "
+            f"longest _entity_poly entity ({len(seq)} aa), which may be a different chain. "
+            f"Check the length before continuing."
+        )
+        return seq
     return None
 
 
@@ -774,15 +811,7 @@ def print_tree(run_dir: Path, tools_enabled: dict, cfg: dict | None = None):
     if tools_enabled.get("evaluator"):
         print(f"  ├── {CYAN}evaluate/{RESET}")
         print("  │   └── evaluate_report/")
-    scripts = []
-    if tools_enabled.get("mosaic"):
-        scripts.append("run_mosaic.sh")
-    if tools_enabled.get("boltzgen"):
-        scripts.append("run_boltzgen.sh")
-    if tools_enabled.get("bindcraft"):
-        scripts.append("run_bindcraft.sh")
-    if tools_enabled.get("pxdesign_local"):
-        scripts.append("run_pxdesign.sh")
+    scripts = [script for _key, script, _label, _subdir in enabled_tools(tools_enabled)]
     if tools_enabled.get("evaluator"):
         scripts.append("run_evaluate.sh")
     scripts.append("run_all.sh")
@@ -910,7 +939,10 @@ def hotspots_to_epitope_idx(cfg: dict) -> list[int] | None:
         return None
     target_seq = cfg.get("target_sequence", "") or ""
     target_pdb = str(cfg.get("target_pdb", "") or "")
-    chain = cfg.get("target_chain") or cfg.get("chain") or "A"
+    # The wizard stores the chain selection in cfg["chains"] (Step 3). Neither "target_chain"
+    # nor "chain" is ever assigned, so those lookups always fell through to "A" and hotspot
+    # residue numbers were resolved against chain A no matter what the user picked.
+    chain = (cfg.get("chains") or "A").split(",")[0].strip() or "A"
     resnums = pdb_chain_residue_numbers(target_pdb, chain) if target_pdb else []
     if resnums:
         pdb_seq = extract_sequence_from_pdb(target_pdb, chain) or ""
@@ -1154,8 +1186,14 @@ def _settings_json_block(
 # of grepping run.log.
 GIT_SHA=$(git -C "{BINDMASTER_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(git -C "{BINDMASTER_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i {gpu_id_var} 2>/dev/null | head -1)
-GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i {gpu_id_var} 2>/dev/null | head -1)
+# `|| echo` is load-bearing: every generated script runs under `set -euo pipefail`, and
+# with pipefail a failing nvidia-smi in a command substitution kills the script (exit 127)
+# BEFORE the design step. GIT_SHA/GIT_BRANCH/PY_VER above are already guarded this way;
+# these two were not, so any host without nvidia-smi on PATH — a CPU login node, a
+# container without the NVIDIA runtime, or a wrong --gpu-id — died in the provenance
+# block that exists to improve reproducibility.
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i {gpu_id_var} 2>/dev/null | head -1 || echo "unknown")
+GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i {gpu_id_var} 2>/dev/null | head -1 || echo 0)
 PY_VER=$(python -c 'import sys;print(".".join(map(str,sys.version_info[:3])))' 2>/dev/null || echo "unknown"){extra_env_inner}
 cat > "${settings_dir_var}/settings.json" <<SETTINGS_JSON_EOF
 {{
@@ -1558,12 +1596,17 @@ def write_run_all(path: Path, cfg: dict, tools_enabled: dict):
             "# Mosaic is interactive — run it separately before the pipeline:",
             '#   bash "$RUN_DIR/run_mosaic.sh"',
             "# Then re-run this script. It will skip Mosaic if designs.csv already exists.",
+            "# Missing Mosaic output is a WARNING, not a failure: this block used to `exit 1`,",
+            "# and because it is emitted first that aborted the whole run before BoltzGen,",
+            "# BindCraft, PXDesign, Proteina-Complexa, RFD3 or Protein-Hunter had started —",
+            "# even though `bash runs/<name>/run_all.sh` is the documented one-command path.",
             'echo "=== Step: Mosaic ==="',
             'if [[ -f "$RUN_DIR/mosaic/designs.csv" ]]; then',
             '    echo "  Mosaic designs.csv found — skipping interactive run."',
             "else",
-            '    echo "  Mosaic requires interactive input. Run run_mosaic.sh first, then re-run run_all.sh." >&2',
-            "    exit 1",
+            '    echo "  WARNING: Mosaic needs interactive input and is being SKIPPED." >&2',
+            "    echo \"           Run 'bash $RUN_DIR/run_mosaic.sh' separately, then re-run this\" >&2",
+            '    echo "           script to include its designs. Continuing with the other tools." >&2',
             "fi",
             "",
         ]
@@ -2456,7 +2499,11 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     if tools_enabled.get("protein_hunter"):
         design_dirs.append(("--protein-hunter", str(run_dir / "protein_hunter")))
     if tools_enabled.get("rfd3"):
-        design_dirs.append(("--rfd3", str(run_dir / "rfd3" / "outputs")))
+        # run_rfd3.sh writes RFD3_DIR="$RUN_DIR/rfd3" (sequences.csv + sequences.fasta), and
+        # write_run_all already checks "$RUN_DIR/rfd3/sequences.csv". Pointing the extractor at
+        # rfd3/outputs/ handed it an empty directory, so a completed RFD3 run (23 h GPU on the
+        # documented 2VDY campaign) contributed zero designs to the report, silently.
+        design_dirs.append(("--rfd3", str(run_dir / "rfd3")))
 
     # Build the evaluate.sh invocation
     eval_sh = EVALUATOR_DIR / "evaluate.sh"
@@ -2526,8 +2573,6 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     # Engine selection flags (skip flags omit engines NOT selected)
     if not cfg.get("use_boltz", True):
         lines.append("    --skip-boltz2 \\")
-    if not cfg.get("use_protenix", False):
-        lines.append("    --skip-protenix \\")
     if not cfg.get("use_af3", False):
         lines.append("    --skip-af3 \\")
     if not cfg.get("use_esmfold2", False):
@@ -2556,6 +2601,118 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
 
 
 # ─── Generation ───────────────────────────────────────────────────────────────
+
+
+# ─── Run config persistence (headless replay) ─────────────────────────────────
+
+CONFIG_FILENAME = "config.json"
+
+
+def _jsonable(value):
+    """Path -> str; everything else passes through."""
+    return str(value) if isinstance(value, Path) else value
+
+
+def write_run_config(path: Path, cfg: dict, tools_enabled: dict) -> None:
+    """Persist the exact answers that produced this run directory.
+
+    The wizard's ~80 answers were previously discarded the moment the scripts were
+    written, so reproducing a campaign meant re-typing every one of them and there was
+    no machine-readable record of what a run was configured with. `cfg` already IS the
+    complete description — it just was never saved.
+
+    Together with `--config`, this closes CLAUDE.md's deferred item F2 ("--headless
+    mode for configurator") and gives any future front-end (GUI, cron, another script)
+    something to read and write instead of re-implementing the interview.
+    """
+    payload = {
+        "_comment": (
+            "Written by `bindmaster configure`. Replay with: "
+            "`python configurator/configurator.py --config <this file>`. "
+            "Edit freely — every key maps to one wizard answer."
+        ),
+        "config_version": 1,
+        "generated_at": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "tools_enabled": dict(sorted(tools_enabled.items())),
+        "cfg": {k: _jsonable(v) for k, v in sorted(cfg.items())},
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+
+
+def load_run_config(path: Path) -> tuple[dict, dict]:
+    """Read a config.json back into (cfg, tools_enabled).
+
+    Path-typed keys are restored, and `run_dir` is re-resolved so a config can be
+    copied to another machine (or edited to point at a new run directory) and replayed.
+    """
+    try:
+        payload = json.loads(Path(path).expanduser().read_text())
+    except (OSError, ValueError) as exc:
+        print_fail(f"Could not read config {path}: {exc}")
+        sys.exit(1)
+
+    if not isinstance(payload, dict) or "cfg" not in payload or "tools_enabled" not in payload:
+        print_fail(f"{path} is not a BindMaster run config (expected 'cfg' and 'tools_enabled' keys).")
+        sys.exit(1)
+
+    version = payload.get("config_version")
+    if version != 1:
+        print_warn(f"config_version {version!r} is not 1 — attempting to load anyway.")
+
+    cfg = dict(payload["cfg"])
+    tools_enabled = dict(payload["tools_enabled"])
+
+    for key in ("run_dir", "target_pdb", "target_pdb_src"):
+        if cfg.get(key):
+            cfg[key] = Path(str(cfg[key])).expanduser()
+
+    missing = [k for k in ("name", "run_dir", "target_pdb_src") if not cfg.get(k)]
+    if missing:
+        print_fail(f"{path} is missing required keys: {', '.join(missing)}")
+        sys.exit(1)
+
+    if not Path(cfg["target_pdb_src"]).exists():
+        print_fail(f"Target structure not found: {cfg['target_pdb_src']}")
+        print_warn("  Edit target_pdb_src in the config, or copy the structure to that path.")
+        sys.exit(1)
+
+    return cfg, tools_enabled
+
+
+def cmd_from_config(config_path: str, run_now: bool) -> None:
+    """Non-interactive path: generate a run directory straight from a saved config."""
+    cfg, tools_enabled = load_run_config(Path(config_path))
+    run_dir = Path(cfg["run_dir"])
+
+    print_step(f"Generating run folder from {config_path}")
+    print(f"  Run folder: {run_dir}")
+    enabled = [label for _k, _s, label, _d in enabled_tools(tools_enabled)]
+    print(f"  Tools:      {', '.join(enabled) if enabled else '(none)'}")
+    if tools_enabled.get("evaluator"):
+        print("  Evaluator:  enabled")
+
+    if not enabled and not tools_enabled.get("evaluator"):
+        print_fail("No tools enabled in this config — nothing to generate.")
+        sys.exit(1)
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    generate(cfg, tools_enabled)
+    print_ok(f"Run folder ready: {run_dir}")
+
+    if run_now:
+        run_pipeline(cfg, tools_enabled)
+    else:
+        print()
+        print_warn("To run:")
+        step = 1
+        for _key, script, _label, _subdir in enabled_tools(tools_enabled):
+            print(f"  {step}. bash {run_dir}/{script}")
+            step += 1
+        if tools_enabled.get("evaluator"):
+            print(f"  {step}. bash {run_dir}/run_evaluate.sh")
+        if len(enabled) > 1:
+            print(f"  Or the whole pipeline:  bash {run_dir}/run_all.sh")
+        print()
 
 
 def generate(cfg: dict, tools_enabled: dict):
@@ -2620,7 +2777,9 @@ def generate(cfg: dict, tools_enabled: dict):
         write_run_proteina_complexa(run_dir / "run_proteina_complexa.sh", cfg)
 
     if tools_enabled.get("rfd3"):
-        (run_dir / "rfd3" / "outputs").mkdir(parents=True, exist_ok=True)
+        # Matches every other tool: create the output dir the run script writes into
+        # (rfd3/sequences.csv), which is also the dir run_evaluate.sh hands the extractor.
+        (run_dir / "rfd3").mkdir(parents=True, exist_ok=True)
         write_run_rfd3(run_dir / "run_rfd3.sh", cfg)
 
     if tools_enabled.get("protein_hunter"):
@@ -2632,6 +2791,10 @@ def generate(cfg: dict, tools_enabled: dict):
 
     write_run_all(run_dir / "run_all.sh", cfg, tools_enabled)
 
+    # Save the answers that produced this directory, so the run is replayable with
+    # `configurator.py --config` and machine-readable without re-running the wizard.
+    write_run_config(run_dir / CONFIG_FILENAME, cfg, tools_enabled)
+
 
 # ─── Pipeline runner ──────────────────────────────────────────────────────────
 
@@ -2641,50 +2804,18 @@ def run_pipeline(cfg: dict, tools_enabled: dict):
     run_dir = cfg["run_dir"]
     failed = []
 
-    if tools_enabled.get("mosaic"):
-        print_step("Running Mosaic  (interactive — you will be prompted below)")
-        rc = subprocess.run(["bash", str(run_dir / "run_mosaic.sh")]).returncode
+    # Driven by TOOL_SEQUENCE, so a newly added tool is dispatched automatically.
+    # The previous hand-written if-chain covered 5 of the 7 tools: answering "y" to
+    # "Run the pipeline now?" silently ran nothing for RFD3 or Protein-Hunter, and
+    # the Evaluator then reported on an empty pool.
+    for _key, script, label, _subdir in enabled_tools(tools_enabled):
+        print_step(f"Running {label}" + ("  (interactive — you will be prompted below)" if _key == "mosaic" else ""))
+        rc = subprocess.run(["bash", str(run_dir / script)]).returncode
         if rc == 0:
-            print_ok("Mosaic completed")
+            print_ok(f"{label} completed")
         else:
-            print_fail(f"Mosaic failed (exit code {rc})")
-            failed.append("Mosaic")
-
-    if tools_enabled.get("boltzgen"):
-        print_step("Running BoltzGen")
-        rc = subprocess.run(["bash", str(run_dir / "run_boltzgen.sh")]).returncode
-        if rc == 0:
-            print_ok("BoltzGen completed")
-        else:
-            print_fail(f"BoltzGen failed (exit code {rc})")
-            failed.append("BoltzGen")
-
-    if tools_enabled.get("bindcraft"):
-        print_step("Running BindCraft")
-        rc = subprocess.run(["bash", str(run_dir / "run_bindcraft.sh")]).returncode
-        if rc == 0:
-            print_ok("BindCraft completed")
-        else:
-            print_fail(f"BindCraft failed (exit code {rc})")
-            failed.append("BindCraft")
-
-    if tools_enabled.get("pxdesign_local"):
-        print_step("Running PXDesign")
-        rc = subprocess.run(["bash", str(run_dir / "run_pxdesign.sh")]).returncode
-        if rc == 0:
-            print_ok("PXDesign completed")
-        else:
-            print_fail(f"PXDesign failed (exit code {rc})")
-            failed.append("PXDesign")
-
-    if tools_enabled.get("proteina_complexa"):
-        print_step("Running Proteina-Complexa")
-        rc = subprocess.run(["bash", str(run_dir / "run_proteina_complexa.sh")]).returncode
-        if rc == 0:
-            print_ok("Proteina-Complexa completed")
-        else:
-            print_fail(f"Proteina-Complexa failed (exit code {rc})")
-            failed.append("Proteina-Complexa")
+            print_fail(f"{label} failed (exit code {rc})")
+            failed.append(label)
 
     if tools_enabled.get("evaluator"):
         print_step("Running Evaluator  (Boltz-2 refolding + ranked report — this may take a while)")
@@ -2905,7 +3036,7 @@ def wizard():
     use_evaluator = ask_yn("  Enable cross-evaluation (refolding + ranked report)?", default=False)
 
     # ── Refolding engine selection ──
-    use_boltz = use_protenix = use_af3 = use_esmfold2 = False
+    use_boltz = use_af3 = use_esmfold2 = False
     primary_engine = "boltz"
     if use_evaluator:
         print(f"  {BOLD}Refolding engines for evaluation{RESET}")
@@ -2914,10 +3045,6 @@ def wizard():
             engines_available.append(("boltz", "Boltz-2 (Mosaic venv)", True))
         else:
             print(f"    Boltz-2: {RED}requires Mosaic install{RESET} — skipped")
-        if installed.get("pxdesign_local"):
-            engines_available.append(("protenix", "Protenix v0.5.0 (PXDesign env)", False))
-        else:
-            print(f"    Protenix: {RED}requires PXDesign install{RESET} — skipped")
         if installed.get("af3"):
             engines_available.append(("af3", "AlphaFold 3 v3.0.2 (binder-eval-af3 env)", False))
         else:
@@ -2930,14 +3057,12 @@ def wizard():
             ans = ask_yn(f"    Use {label}?", default=default_on)
             if key == "boltz":
                 use_boltz = ans
-            elif key == "protenix":
-                use_protenix = ans
             elif key == "af3":
                 use_af3 = ans
             elif key == "esmfold2":
                 use_esmfold2 = ans
         # Require at least one engine
-        if not (use_boltz or use_protenix or use_af3 or use_esmfold2):
+        if not (use_boltz or use_af3 or use_esmfold2):
             print_warn("No refolding engine selected — Evaluator disabled.")
             use_evaluator = False
         else:
@@ -2946,7 +3071,6 @@ def wizard():
                 k
                 for k, on in (
                     ("boltz", use_boltz),
-                    ("protenix", use_protenix),
                     ("af3", use_af3),
                     ("esmfold2", use_esmfold2),
                 )
@@ -2995,7 +3119,6 @@ def wizard():
         "rfd3": use_rfd3,
         "evaluator": use_evaluator,
         "use_boltz": use_boltz,
-        "use_protenix": use_protenix,
         "use_af3": use_af3,
         "use_esmfold2": use_esmfold2,
         "primary_engine": primary_engine,
@@ -3008,7 +3131,6 @@ def wizard():
     _meta_keys = {
         "evaluator",
         "use_boltz",
-        "use_protenix",
         "use_af3",
         "use_esmfold2",
         "primary_engine",
@@ -3038,7 +3160,6 @@ def wizard():
         "boltzgen_mode": "protein",
         "boltzgen_intermediate": 10000,
         "use_boltz": use_boltz,
-        "use_protenix": use_protenix,
         "use_af3": use_af3,
         "use_esmfold2": use_esmfold2,
         "primary_engine": primary_engine,
@@ -3217,7 +3338,7 @@ def wizard():
         )
 
     if use_proteina_complexa:
-        print_step("Step 6f — Proteina-Complexa settings")
+        print_step("Step 6e — Proteina-Complexa settings")
         _, pc_algo = ask_choice(
             "  Search algorithm",
             [
@@ -3262,7 +3383,7 @@ def wizard():
         )
 
     if use_rfd3:
-        print_step("Step 6g — RFD3 settings")
+        print_step("Step 6f — RFD3 settings")
         cfg["rfd3_batch_size"] = int(
             ask(
                 "  Diffusion batch size (10 fits 24 GB; drop to 4 for longer binders)",
@@ -3289,7 +3410,7 @@ def wizard():
         )
 
     if use_protein_hunter:
-        print_step("Step 6h — Protein-Hunter settings")
+        print_step("Step 6g — Protein-Hunter settings")
         cfg["protein_hunter_num_cycles"] = int(
             ask(
                 "  Boltz-2 hallucination cycles per design (7 = CALCA-validated)",
@@ -3388,10 +3509,10 @@ def wizard():
         engines = []
         if cfg.get("use_boltz"):
             engines.append("Boltz-2")
-        if cfg.get("use_protenix"):
-            engines.append("Protenix")
         if cfg.get("use_af3"):
             engines.append("AF3")
+        if cfg.get("use_esmfold2"):
+            engines.append("ESMFold2")
         engines_str = " + ".join(engines) if engines else "Boltz-2"
         primary = cfg.get("primary_engine", "boltz")
         print(f"  {CYAN}Evaluator{RESET}:     {engines_str}  |  primary={primary}  → ranked report")
@@ -3421,21 +3542,12 @@ def wizard():
     else:
         print()
         print_warn("To run later:")
+        # Driven by TOOL_SEQUENCE so every generated script is listed. The old
+        # hand-written chain omitted RFD3 and Protein-Hunter, so a user who enabled
+        # them was never told their run scripts existed.
         step = 1
-        if use_mosaic:
-            print(f"  {step}. bash {run_dir}/run_mosaic.sh")
-            step += 1
-        if use_boltzgen:
-            print(f"  {step}. bash {run_dir}/run_boltzgen.sh")
-            step += 1
-        if use_bindcraft:
-            print(f"  {step}. bash {run_dir}/run_bindcraft.sh")
-            step += 1
-        if use_pxdesign_local:
-            print(f"  {step}. bash {run_dir}/run_pxdesign.sh")
-            step += 1
-        if use_proteina_complexa:
-            print(f"  {step}. bash {run_dir}/run_proteina_complexa.sh")
+        for _key, script, _label, _subdir in enabled_tools(tools_enabled):
+            print(f"  {step}. bash {run_dir}/{script}")
             step += 1
         if use_evaluator:
             print(f"  {step}. bash {run_dir}/run_evaluate.sh")
@@ -3575,12 +3687,28 @@ def main():
         action="store_true",
         help="Show all runs and their completion state",
     )
+    parser.add_argument(
+        "--config",
+        metavar="JSON",
+        help=(
+            "Generate a run folder non-interactively from a saved config, skipping all "
+            f"prompts. Every wizard run writes one to runs/<name>/{CONFIG_FILENAME} — copy "
+            "it, edit it, and replay. Closes the headless gap for cron / scripts / a GUI."
+        ),
+    )
+    parser.add_argument(
+        "--run",
+        action="store_true",
+        help="With --config: run the pipeline immediately after generating the scripts.",
+    )
     args = parser.parse_args()
 
     if args.archive:
         cmd_archive(args.archive)
     elif args.status:
         cmd_status()
+    elif args.config:
+        cmd_from_config(args.config, run_now=args.run)
     else:
         wizard()
 
