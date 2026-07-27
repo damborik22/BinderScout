@@ -80,8 +80,8 @@ sudo exists on any machine, and none is requested by this plan.
 | D3 | Tooling | **One `fleet.sh`** | `probe\|status\|launch\|poll\|fetch`, ~150 lines. Repeatable and testable; ad-hoc SSH incantations drift. |
 | D4 | Archive model | **BM5 pulls, then archives** | Worker packages locally, BM5 rsyncs over LAN, verifies, refolds, then pushes one copy to muni-disk. Keeps CIFS off the hot path and satisfies the standing rule that refold inputs are staged Spark-local. |
 | D5 | Clara VPN | **Manual, by the human** | No stored password, no systemd unit, no sudoers grant. Reverted from an earlier always-on proposal. |
-| D6 | Clara key | **Passphrase + `ssh-agent`, `-t 8h`** | The passphrase never enters the agent's context; the unlock window lapses overnight and over weekends on its own. |
-| D7 | Clara `authorized_keys` | **`from=` + `restrict` + `expiry-time`** | Key usable only from BM5's static IP, cannot forward ports or act as a pivot into CIIRC, and expires on a date. Full shell retained for debugging failed jobs. |
+| D6 | Clara key | **Passphrase-less; the VPN is the gate** | *Revised 2026-07-27 (superseded an earlier passphrase + `ssh-add -t 8h` decision).* With no passphrase there is no `ssh-add` step and no key-side window: Clara is reachable exactly while the manually-started, gateway-timed tunnel is up. Access control is the tunnel, opened by hand every time. |
+| D7 | Clara `authorized_keys` | **`restrict,pty,expiry-time` — no `from=`** | *Applied 2026-07-27.* `from=` was dropped after verification: BM5 reaches Clara through the VPN, so the source address Clara sees is a per-session pool address (<CIIRC_VPN_POOL>) shared with other CIIRC users — pinning it is fragile and weak. `restrict` blocks port forwarding both ways (verified: `-R` refused, `-L` carries no traffic), `pty` keeps interactive shells usable. Since the key is unprotected, these options are the real protection, not hardening. |
 | D8 | LAN key | **Left passphrase-less** | BM1/2/4 are the same trust domain with no VPN adjacency. Requiring an unlock would make routine monitoring need a human present. Asymmetry is deliberate: Clara is the credential worth protecting. |
 
 ---
@@ -150,20 +150,21 @@ locally, then pushes one archive copy to muni-disk out of band.
 
 ### 5.6 Clara access
 
-The human starts FortiClient manually and unlocks the Clara key once:
+The human starts the CIIRC VPN manually, every time:
 
 ```bash
-ssh-keygen -p -f ~/.ssh/id_ed25519_clara    # one-time: set a passphrase
-ssh-add -t 8h ~/.ssh/id_ed25519_clara       # per session: bounded unlock
+vpn-ciirc        # = sudo openfortivpn -c /etc/openfortivpn/ciirc.conf
 ```
 
-BM5's agent socket is `/run/user/1000/keyring/ssh`, already a stable path in the
-user session, so no new plumbing is needed. The agent forgets the key after 8 h.
+That is the whole access step. The key is passphrase-less, so there is nothing
+to unlock — once the tunnel is up, `ssh clara` works. The tunnel is
+gateway-timed and drops on its own after roughly a working day, which is also
+what ends the access window.
 
 Clara-side `authorized_keys` entry for this key:
 
 ```
-from="<BM5_IP>",restrict,expiry-time="20270101" ssh-ed25519 AAAA... <CLARA_USER>@<BM5_HOSTNAME>-clara
+restrict,pty,expiry-time="20270727" ssh-ed25519 AAAA... <CLARA_USER>@<BM5_HOSTNAME>-clara
 ```
 
 `fleet.sh` detects tunnel state with `ip link show ppp0` and a short-timeout
@@ -190,19 +191,20 @@ target dossier → orchestrator picks tool + machine (inventory lookup)
 
 ## 7. Security model
 
-**What BM5 holds:** a passphrase-less LAN key for BM1/2/4, and a
-passphrase-protected Clara key unlocked into the agent for bounded windows.
+**What BM5 holds:** passphrase-less keys for both the LAN machines and Clara.
+Clara access is gated by the manually-started VPN tunnel, not by the key.
 
 **What BM5 does not hold:** any VPN password, any sudo capability locally or on
 the cluster.
 
-**Acknowledged residual exposure.** The agent socket is `0600 <BM5_USER>`, so
-while the Clara key is loaded it is usable by anything running as that user —
-not only the agent session. That includes the pip dependency trees of the seven
-design environments, which execute third-party code as `<BM5_USER>`. The
-mitigations are the 8-hour lifetime (bounds the window) and the Clara-side
-`from=` and `restrict` options (bound what a stolen key can do). This is
-inherent to the unlock-once model and was accepted knowingly.
+**Acknowledged residual exposure.** The Clara key file is `0600 <BM5_USER>`
+and unencrypted, so it is readable by anything running as that user — including
+the pip dependency trees of the seven design environments, which execute
+third-party code as `<BM5_USER>`. A copy of that key is a working credential.
+Two things bound the damage: it is useless while the tunnel is down, which is
+most of the time, and the Clara-side `restrict` blocks using it to forward
+ports into the CIIRC network (verified). Accepted knowingly — the alternative
+was a passphrase, which was considered and deliberately rejected in D6.
 
 **Known weak point, not fixable locally.** `<CLARA_USER>` is a shared CIIRC account,
 so key restrictions do not narrow the *account*. A genuinely scoped identity
@@ -227,7 +229,7 @@ accidental.
 | RFD3 OOM | Prevented at launch by exporting `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`. |
 | Boltz-2 complex > ~820 tokens on BM5 | Refuse to launch locally — this hangs the whole box and needs a force-restart. |
 | VPN down | Clara operations fail fast with an explicit message, not a DNS hang. |
-| Clara key not in agent | Detected via `ssh-add -l`; prompt the human to unlock rather than retrying. |
+| Clara unreachable | Almost always the tunnel. `status` reports `tunnel=DOWN`; prompt the human to re-run `vpn-ciirc`. The `key=` field is informational only with a passphrase-less key. |
 | rsync partial | `--partial` (not `--append-verify` — see §5.5); verify tarball integrity before removing anything remote. |
 
 ---
@@ -261,8 +263,9 @@ accidental.
   §7, not addressed here.
 - **Consolidating refold onto BM5** — BM4 currently runs refold work; migrate
   after its live job finishes.
-- **Clara key passphrase is not yet set** — §5.6 is the one-time human step that
-  makes D6 real rather than nominal.
+- **BM4's Clara key was removed** from `authorized_keys` on 2026-07-27 (BM5 is
+  the only machine that drives Clara now). David's laptop key is untouched and
+  unrestricted, and is the way back in if BM5's entry is ever misconfigured.
 
 ---
 
