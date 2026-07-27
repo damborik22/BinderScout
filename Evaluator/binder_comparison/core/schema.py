@@ -52,7 +52,7 @@ class NativeMetrics:
     # ---- BoltzGen (Boltz-1 internal eval) ----
     # `bg_design_ipsae_min` is BG's own ipSAE; ρ vs Boltz-2 refold ipSAE = +0.84.
     # `bg_final_rank` is a composite (diversity+pTM+hbond+RMSD); ρ vs refold ipSAE = -0.15.
-    # See INVESTIGATION_RANKING_DISCREPANCY.md §5.
+    # See docs/INVESTIGATION_RANKING_DISCREPANCY.md §5.
     bg_design_ipsae_min: float | None = None
     bg_final_rank: int | None = None
 
@@ -65,9 +65,9 @@ class NativeMetrics:
     mosaic_plddt_aux: float | None = None  # Design-time pLDDT (avg)
 
     # ---- PXDesign (AF2-IG + Protenix internal eval) ----
-    # `pxdesign_protenix_iptm` overlaps with the evaluator's Part-J Protenix refold,
-    # since PXDesign uses the same Protenix v0.5.0 internally. Both columns are kept
-    # because PXDesign's run is biased toward its own designs.
+    # `pxdesign_protenix_iptm` is PXDesign's OWN Protenix score, produced during design.
+    # It is a native metric, never a refold result: PXDesign's run is biased toward its own
+    # designs, so this is carried for reference and never used for ranking.
     pxdesign_composite_score: float | None = None  # PXDesign's internal ranking
     pxdesign_af2_iptm: float | None = None
     pxdesign_af2_ipae: float | None = None  # PAE (lower better)
@@ -156,22 +156,6 @@ class StandardisedMetrics:
     target_contact: float | None = None  # Binder-target contacts
     pTMEnergy: float | None = None  # Boltz2 energy proxy (lower better)
 
-    # ---- Protenix v0.5.0 values (universal 2nd engine; rides bindmaster_pxdesign env) ----
-    # pLDDT is rescaled 0-100 → 0-1 on ingest so it's directly comparable to Boltz-2.
-    protenix_iptm: float | None = None
-    protenix_ptm: float | None = None
-    protenix_ranking_score: float | None = None  # 0.8*iptm + 0.2*ptm + 0.5*disorder - 100*has_clash
-    protenix_plddt_binder_mean: float | None = None
-    protenix_plddt_binder_min: float | None = None
-    protenix_plddt_target_mean: float | None = None
-    protenix_pae_bt: float | None = None
-    protenix_pae_tb: float | None = None
-    protenix_pae_bb: float | None = None
-    # DunbrackLab PAE-based ipSAE (added by report.py post-merge)
-    protenix_bt_ipsae: float | None = None
-    protenix_tb_ipsae: float | None = None
-    protenix_ipsae_min: float | None = None
-
     # ---- AlphaFold 3 v3.0.2 values (aarch64 / DGX Spark only; wired in Part K) ----
     af3_iptm: float | None = None
     af3_ptm: float | None = None
@@ -200,7 +184,6 @@ class PerResidueData:
     binder_length: int | None = None
     boltz_plddt: np.ndarray | None = None
     boltz_pae: np.ndarray | None = None
-    protenix_pae: np.ndarray | None = None
     af3_pae: np.ndarray | None = None
 
 
@@ -264,9 +247,6 @@ LOWER_IS_BETTER = frozenset(
         "boltz_pae_bt",
         "boltz_pae_tb",
         "boltz_pae_bb",
-        "protenix_pae_bt",
-        "protenix_pae_tb",
-        "protenix_pae_bb",
         "af3_pae_bt",
         "af3_pae_tb",
         "af3_pae_bb",
@@ -319,16 +299,7 @@ ZSCORE_METRICS = list(BOLTZ2_METRIC_MAP.keys()) + [
     "boltz_pae_bt_ipsae",
     "boltz_pae_tb_ipsae",
     "boltz_pae_ipsae_min",
-    # Protenix DunbrackLab ipSAE + summary metrics
-    "protenix_iptm",
-    "protenix_ptm",
-    "protenix_ranking_score",
-    "protenix_plddt_binder_mean",
-    "protenix_bt_ipsae",
-    "protenix_tb_ipsae",
-    "protenix_ipsae_min",
-    "protenix_pae_iptm",
-    # AF3 DunbrackLab ipSAE + summary metrics (aarch64 / DGX Spark only)
+    # AF3 DunbrackLab ipSAE + summary metrics (needs >100 GB unified/device memory)
     "af3_iptm",
     "af3_ptm",
     "af3_ranking_score",
@@ -337,6 +308,18 @@ ZSCORE_METRICS = list(BOLTZ2_METRIC_MAP.keys()) + [
     "af3_tb_ipsae",
     "af3_ipsae_min",
     "af3_pae_iptm",
+    # ESMFold2 — the third engine, and the one feeding chain_iptm_interface (the
+    # autosize gate). Omitting it meant metrics_zscore.csv had no esmfold2_*_z columns
+    # and summary.json no ESMFold2 entries, so the engine driving consensus_iptm was
+    # absent from the very tables a reader uses to judge cross-engine agreement.
+    "esmfold2_iptm",
+    "esmfold2_ptm",
+    "esmfold2_plddt_binder_mean",
+    "esmfold2_bt_ipsae",
+    "esmfold2_tb_ipsae",
+    "esmfold2_ipsae_min",
+    "esmfold2_pae_iptm",
+    "esmfold2_chain_iptm_interface",
     # ipTM computed independently from PAE matrices
     "boltz_pae_iptm",
 ]

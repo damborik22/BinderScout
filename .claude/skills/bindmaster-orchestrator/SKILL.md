@@ -81,7 +81,7 @@ binder-eval-af3/                               ← AlphaFold 3 refold env (Part 
 The three CLI verbs that matter campaign-side:
 
 - `bindmaster install --tool <tool>` — provisions or verifies a tool's env (worker pre-flight; orchestrator uses it to stand Spark up after a fresh clone). Standalone Miniforge auto-detect handles servers without writable system conda.
-- `bindmaster configure` — interactive 5-step wizard. Workers use it to translate an assignment into a run dir; orchestrator rarely needs it directly. `bindmaster configure --status` lists runs and completion state, `--archive <run>` tars a run dir.
+- `bindmaster configure` — interactive wizard, steps 1–7 (step 6 expands into per-tool sub-steps 6a–6g), ~80 prompts. `--config <file>` replays a saved `runs/<name>/config.json` with no prompts. Workers use it to translate an assignment into a run dir; orchestrator rarely needs it directly. `bindmaster configure --status` lists runs and completion state, `--archive <run>` tars a run dir.
 - `bindmaster evaluate <run-dir>` — runs the full Evaluator pipeline (extract → refold-boltz2 → refold-af3 → report). This is the canonical entry point for Phase 3' below. Under the hood it calls `Evaluator/evaluate.sh`; advanced flags (specific refold engines, SoluProt pre-filter, top-N per tool) are documented there.
 
 On each worker machine (BM2, BM4, Clara, others):

@@ -15,7 +15,7 @@ Three refolders run as **library code, not jobs**, all locally on Spark:
 | Refolder | Env | Status | Notes |
 |---|---|---|---|
 | Boltz-2 | `Mosaic/.venv` | stable, default | Native [binder\|target] ordering, pLDDT [0,1] |
-| Protenix | `bindmaster_pxdesign` | Part J, live; optional 24 GB-friendly fallback | Target-first PAE → transposed; pLDDT [0,1] |
+| ESMFold2 | `binder-eval-esmfold2` | live; lightweight, no gated weights | Target-first PAE → transposed; pLDDT [0,1]. Also feeds `chain_iptm_interface` (the autosize gate) |
 | AlphaFold 3 (v3.0.2) | `binder-eval-af3` | Part K, live; canonical 2nd engine | Cross-platform (x86_64 + aarch64) but needs >100 GB unified or device memory — Spark / H200 / GH200 fit; consumer 24 GB GPUs do not. Target-first PAE → transposed; pLDDT [0,100] → rescaled to [0,1] |
 
 Each refolder takes a (binder sequence + target structure + chain assignment) tuple and produces a (`.cif` structure + PAE matrix `.npz`). The evaluator then computes iPSAE on each PAE matrix and merges results.
@@ -24,20 +24,20 @@ Because all three envs co-exist on Spark, the evaluation pipeline is a single Py
 
 ```
 for design in pool:
-    boltz_out  = refold_boltz2(design)        # Mosaic venv
-    protenix_out = refold_protenix(design)    # bindmaster_pxdesign venv (Part J)
-    af3_out    = refold_af3(design)            # binder-eval-af3 venv (Part K, any host with >100 GB unified/device memory)
+    boltz_out    = refold_boltz2(design)      # Mosaic venv
+    af3_out      = refold_af3(design)         # binder-eval-af3 (needs >100 GB unified/device memory)
+    esmfold2_out = refold_esmfold2(design)    # binder-eval-esmfold2
 
-    boltz_ipsae   = compute_ipsae(boltz_out.pae, cutoff=10.0, d0='d0_res')
-    protenix_ipsae = compute_ipsae(protenix_out.pae_transposed, cutoff=10.0, d0='d0_res')
-    af3_ipsae     = compute_ipsae(af3_out.pae_transposed, cutoff=10.0, d0='d0_res')
+    boltz_ipsae    = compute_ipsae(boltz_out.pae, cutoff=10.0, d0='d0_res')
+    af3_ipsae      = compute_ipsae(af3_out.pae_transposed, cutoff=10.0, d0='d0_res')
+    esmfold2_ipsae = compute_ipsae(esmfold2_out.pae_transposed, cutoff=10.0, d0='d0_res')
 
     merged[design] = {
         'boltz_*': boltz_ipsae | boltz_out.confidence,
-        'protenix_*': protenix_ipsae | protenix_out.confidence,
         'af3_*': af3_ipsae | af3_out.confidence,
-        'agreement_count': sum(e.ipsae_min > 0.61 for e in [boltz, protenix, af3] if e),
-        'ipsae_min_avg': mean(e.ipsae_min for e in [boltz, protenix, af3] if e),
+        'esmfold2_*': esmfold2_ipsae | esmfold2_out.confidence,
+        'agreement_count': sum(e.ipsae_min > 0.61 for e in [boltz, af3, esmfold2] if e),
+        'ipsae_min_avg': mean(e.ipsae_min for e in [boltz, af3, esmfold2] if e),
     }
 ```
 
@@ -62,18 +62,15 @@ Before running, verify:
    ```python
    from boltz.main import download_boltz2
    from pathlib import Path
-   download_boltz2(cache=Path.home()/'.boltz')  # positional Path arg, not str
+
+   download_boltz2(cache=Path.home() / ".boltz")  # positional Path arg, not str
    ```
 4. **GPU memory available** for the refold pass. Cross-engine refold can stack peak memory if not pipelined carefully. The evaluator's default sequential mode is safe on a single H200 / GH200.
 5. **`expandable_segments:True`** if running on Ampere-class card with mixed batch sizes:
    ```bash
    export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
    ```
-6. **Protenix CCD cache** location set if not default:
-   ```bash
-   export PROTENIX_DATA_ROOT_DIR=/path/to/ccd_cache
-   ```
-7. **AF3 env vars** for `binder-eval-af3` if aarch64 is available (database paths, model paths). See `Evaluator/docs/pipeline_reference.md`.
+6. **AF3 env vars** for `binder-eval-af3` if aarch64 is available (database paths, model paths). See `Evaluator/docs/pipeline_reference.md`.
 
 If AF3 isn't available (x86 environments), proceed with 2-engine evaluation — `agreement_count` denominator becomes 2 instead of 3. The orchestrator must note this in the final ranking (a design with `agreement_count = 2` out of 2 engines is *not* the same signal as `2 out of 3`).
 
@@ -92,12 +89,12 @@ iPSAE is the inter-chain Predicted Aligned Error score per DunbrackLab 2025 (`d0
 **Critical: native vs. transposed PAE ordering.**
 
 - Boltz-2 emits PAE in `[binder | target]` chain ordering natively. Used as-is.
-- Protenix and AF3 emit PAE in `[target | binder]` ordering (target chain first). The evaluator **transposes** these into `[binder | target]` before computing iPSAE. Manual readers of raw Protenix/AF3 output must apply this transpose themselves.
+- AF3 and ESMFold2 emit PAE in `[target | binder]` ordering (target chain first). The evaluator **transposes** these into `[binder | target]` before computing iPSAE. Manual readers of raw AF3/ESMFold2 output must apply this transpose themselves.
 
 **pLDDT scale unification:**
 
 - Boltz-2 native: `[0, 1]`
-- Protenix native: `[0, 1]`
+- ESMFold2 native: `[0, 1]`
 - AF3 native: `[0, 100]` — evaluator **divides by 100** to match.
 
 After unification, all three engines' confidence numbers are on the same scale and can be compared cell-by-cell across columns.
@@ -109,14 +106,11 @@ After unification, all three engines' confidence numbers are on the same scale a
 Per design, after all available refolders run:
 
 ```python
-ipsae_threshold = 0.61   # the agreement threshold
-agreement_count = sum(
-    1 for engine in available_engines
-    if engine.ipsae_min > ipsae_threshold
-)
+ipsae_threshold = 0.61  # the agreement threshold
+agreement_count = sum(1 for engine in available_engines if engine.ipsae_min > ipsae_threshold)
 ```
 
-**Quality tiers** (applied to the best of {boltz_ipsae_min, protenix_ipsae_min, af3_ipsae_min}, *or* a campaign-defined function — typically `mean` or `min`; orchestrator decides):
+**Quality tiers** (applied to the best of {boltz_pae_ipsae_min, af3_ipsae_min, esmfold2_ipsae_min}, *or* a campaign-defined function — typically `mean` or `min`; orchestrator decides):
 
 | Tier | `ipsae_min` |
 |---|---|
@@ -153,14 +147,14 @@ proteina_reward_af2, proteina_reward_rf3, ...
 
 # Evaluator outputs (cross-method comparator)
 boltz_bt_ipsae, boltz_tb_ipsae, boltz_ipsae_min, boltz_iptm_refold, boltz_plddt_complex, ...
-protenix_bt_ipsae, protenix_tb_ipsae, protenix_ipsae_min, protenix_iptm_refold, ...
+esmfold2_bt_ipsae, esmfold2_tb_ipsae, esmfold2_ipsae_min, esmfold2_pae_iptm, ...
 af3_bt_ipsae, af3_tb_ipsae, af3_ipsae_min, af3_iptm_refold, ...   # if aarch64
 
 # Cross-method rollup
 agreement_count, ipsae_min_mean, ipsae_min_min, tier   # tier ∈ {High, Medium, Low, Reject}
 ```
 
-**Column prefixing is load-bearing.** `boltz_*`, `protenix_*`, `af3_*` distinguish refolder-source. `mosaic_*`, `bindcraft_*`, `rfd3_*`, etc. distinguish design-tool-source. Don't collapse these — the orchestrator needs the source labels to interpret signal correctly (e.g., `boltz_ipsae_min` on a Mosaic-designed sequence has Boltz-2 self-judging bias; same column on a BindCraft-designed sequence is clean).
+**Column prefixing is load-bearing.** `boltz_*`, `af3_*`, `esmfold2_*` distinguish refolder-source. `mosaic_*`, `bindcraft_*`, `rfd3_*`, etc. distinguish design-tool-source. Don't collapse these — the orchestrator needs the source labels to interpret signal correctly (e.g., `boltz_ipsae_min` on a Mosaic-designed sequence has Boltz-2 self-judging bias; same column on a BindCraft-designed sequence is clean).
 
 See `tools/README.md` cross-method bias matrix for which combinations are correlated.
 
@@ -185,20 +179,19 @@ source ~/dev/BindMaster/Mosaic/.venv/bin/activate
 python -m bindmaster.evaluator \
     --target-cif /path/to/<TARGET>/PDB/target.cif \
     --inputs ~/eval_workdir/<TARGET>/ \
-    --engines boltz2,protenix,af3 \
+    --engines boltz2,af3,esmfold2 \
     --pae-cutoff 10.0 \
     --d0-variant d0_res \
     --output ~/eval_workdir/<TARGET>/summary.csv
 
 # If aarch64 isn't available, drop af3:
-#   --engines boltz2,protenix
+#   --engines boltz2,af3
 ```
 
-The evaluator handles env switching (it shells out to the Protenix and AF3 envs as subprocesses), PAE transposition, pLDDT rescaling, iPSAE computation, and the merge. Output is the canonical `summary.csv`.
+The evaluator handles env switching (it shells out to the AF3 and ESMFold2 envs as subprocesses), PAE transposition, pLDDT rescaling, iPSAE computation, and the merge. Output is the canonical `summary.csv`.
 
 Wall time on Spark (rough budget):
 - Boltz-2 refold: ~30-60 s per design
-- Protenix refold: ~45-90 s per design (base v1; v2 slower; mini variants faster)
 - AF3 refold: ~3-5 min per design (slowest; the inference-time scaling is significant)
 
 For a 500-design pool, full 3-engine evaluation is ~30 GPU-hours. For a 5000-design pool, plan a multi-day run with kill checkpoints.
@@ -211,13 +204,13 @@ For a 500-design pool, full 3-engine evaluation is ~30 GPU-hours. For a 5000-des
 Symptom: `ValueError: CCD component ALA not found!` at startup.
 Fix: bootstrap `~/.boltz/` per §2; verify `mols/ALA.pkl` exists.
 
-**Protenix CUDA arch patches reverted.**
-Symptom: PTX compilation errors on Blackwell sm_120.
-Fix: rerun `install/install.sh --pxdesign` to reapply post-install patches (Protenix CUDA arch, `pxdbench` NumpyEncoder, `configs_infer.py` num_workers).
+**PXDesign's Protenix CUDA arch patches reverted.**
+Symptom: PTX compilation errors on Blackwell sm_120 when running PXDesign (a *design* tool — Protenix is not a refold engine).
+Fix: rerun `bash install/install.sh --tool pxdesign` to reapply the post-install patches (protenix CUDA arch, `pxdbench` NumpyEncoder, `configs_infer.py` num_workers).
 
-**PAE matrix shape mismatch on Protenix output.**
+**PAE matrix shape mismatch on AF3 / ESMFold2 output.**
 Symptom: `IndexError` or wrong-direction iPSAE values that don't make sense.
-Cause: forgot to transpose target-first → `[binder|target]`. Should be handled by the evaluator automatically — if reading raw Protenix output, transpose first.
+Cause: forgot to transpose target-first → `[binder|target]`. Should be handled by the evaluator automatically — if reading raw AF3/ESMFold2 output, transpose first.
 
 **pLDDT values >1 on AF3 outputs in the merged CSV.**
 Symptom: tier classification looks wrong, pLDDT cells in the 70-99 range instead of 0.7-0.99.
@@ -250,7 +243,7 @@ The merged file is the input to the campaign's final selection. Typical orchestr
 
 1. **Top-tier sanity check.** Pull the top 30 by ranking. Inspect by hand — do they look diverse (binder length range, secondary-structure mix, hotspot coverage)? Are any obviously pathological (all-helix, all-ALA, RMSD outliers)?
 2. **Tool diversity audit.** What fraction of the top 30 come from each design tool? If all 30 are BindCraft, the pool is under-explored — note this and consider expanding before wet-lab handoff.
-3. **Bias check via the matrix.** For each top design, look at which refolders it agrees with. A BoltzGen design with only `boltz_ipsae_min > 0.61` and Protenix/AF3 disagreeing is a same-model self-judging artifact; tier-down or drop.
+3. **Bias check via the matrix.** For each top design, look at which refolders it agrees with. A BoltzGen design with only `boltz_pae_ipsae_min > 0.61` and AF3/ESMFold2 disagreeing is a same-model self-judging artifact; tier-down or drop.
 4. **Length bias correction.** Per CLAUDE.md `Critical domain facts`, `ipsae_min` correlates negatively with binder length (r ≈ -0.78). If the top-30 is dominated by short binders, the orchestrator may want to rank within length bands rather than globally.
 5. **Final selection for wet-lab.** Hand-pick the top 20-30 with the user, balancing rank, diversity, and any campaign-specific priorities (e.g., specific hotspot coverage, preferred fold class).
 6. **Archive the ranking.** `summary.csv` + the selection list go to RESULTS/ alongside the source tarballs.
@@ -261,7 +254,7 @@ The orchestrator does not silently apply a threshold and ship — selection is a
 
 ## 9. References
 
-- `tools/` — engine-level reference per refold engine (`boltz2.md`, `protenix.md`, `alphafold3.md`) and per design tool
+- `tools/` — engine-level reference per refold engine (`boltz2.md`, `alphafold3.md`; `protenix.md` is retired background) and per design tool
 - `tools/README.md` — cross-method bias matrix (which design tools have correlated bias with which refolders)
 - `learnings.md` §5 — "Scoring engines are not comparable" and the cross-engine refold rationale
 - `Evaluator/docs/pipeline_reference.md` (BindMaster repo) — implementation reference for the evaluator package

@@ -6,6 +6,7 @@ stdlib only. Launched by ``bindmaster`` (no args).
 
 from __future__ import annotations
 
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +23,16 @@ RESET = "\033[0m"
 
 
 # ── Tool / run detection ─────────────────────────────────────────────────────
+
+
+def _installer_for_host(repo: Path) -> Path:
+    """The installer for THIS architecture.
+
+    Both menu paths used to hardcode install.sh, so the TUI ran the x86_64 installer
+    on a DGX Spark. Mirrors bindmaster.py's dispatch.
+    """
+    name = "install_aarch.sh" if platform.machine() == "aarch64" else "install.sh"
+    return repo / "install" / name
 
 
 def _detect_tools(repo: Path) -> dict[str, bool]:
@@ -256,7 +267,7 @@ def _curses_main(stdscr, repo: Path) -> None:  # type: ignore[type-arg]
             if action == "Quit":
                 break
             elif action == "Install tools":
-                _curses_run_subprocess(stdscr, ["bash", str(repo / "install" / "install.sh")], "Install tools")
+                _curses_run_subprocess(stdscr, ["bash", str(_installer_for_host(repo))], "Install tools")
             elif action == "Configure run":
                 _curses_run_subprocess(
                     stdscr, [sys.executable, str(repo / "configurator" / "configurator.py")], "Configure run"
@@ -415,7 +426,7 @@ def _simple_menu_main(repo: Path) -> None:
         if action == "quit":
             break
         elif action == "install":
-            _run_subprocess(["bash", str(repo / "install" / "install.sh")], "Install tools")
+            _run_subprocess(["bash", str(_installer_for_host(repo))], "Install tools")
         elif action == "configure":
             _run_subprocess([sys.executable, str(repo / "configurator" / "configurator.py")], "Configure run")
         elif action == "run":

@@ -12,7 +12,6 @@ the current engine set (ESMFold2 default, two-stage ranking, + affinity/monomer)
 | refold Boltz-2 | `binder-compare refold-boltz2 --sequences … --target-seq SEQ -o boltz2.csv` | **Mosaic venv** (`Mosaic/.venv`) | default; native `[binder\|target]` PAE, pLDDT [0,1] |
 | refold AF3 | `binder-compare refold-af3 …` | `binder-eval-af3` | canonical 2nd engine; >100 GB memory; pLDDT 0–100 → rescaled; PAE transposed |
 | refold ESMFold2 | `binder-compare refold-esmfold2 … --model full` | `binder-eval-esmfold2` | **default**, lightweight; the `chain_iptm_interface` gate |
-| refold Protenix | `binder-compare refold-protenix …` | `bindmaster_pxdesign` | **only optional** engine; 24 GB-friendly |
 | report | `binder-compare report --boltz2-results … --af3-results … --esmfold2-results … --rank-by two_stage -o report/` | `binder-eval` | two-stage ranking; HTML + `metrics.csv` |
 | affinity | `binder-compare affinity --metrics report/metrics.csv --structures-dir … --run-rosetta -o affinity.csv` | `BindCraft` (PyRosetta) | Part N — see `affinity.md` |
 | monomer | `binder-compare monomer --complex-dir … --monomer-dir … -o monomer.csv` | refold env | fold-robustness QC — see `qc.md` |
@@ -40,4 +39,4 @@ crash; check for duplicate `run_id`s. Re-run `report` any time from the existing
 2-engine evaluation is fine, but **`agreement_count` denominator shrinks** — a `2/2` is not a
 `2/3`. Note it in the ranking. ESMFold2 is default and cheap, so prefer keeping it in.
 
-`TODO:` env var details (PROTENIX_DATA_ROOT_DIR, AF3 db/model paths) — see `Evaluator/docs/pipeline_reference.md`.
+`TODO:` env var details (AF3 db/model paths) — see `Evaluator/docs/pipeline_reference.md`.

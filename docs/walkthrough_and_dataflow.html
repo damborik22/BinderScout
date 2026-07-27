@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BinderScout — click-through walkthrough &amp; data flow</title>
+<style>
+  :root{
+    --bg:#fbfbfa; --fg:#1c1c1a; --muted:#6b6b66; --line:#e2e0da; --card:#fff;
+    --accent:#2f5d8a; --ok:#2c6e49; --warn:#8a6d0b; --bad:#a01b1b;
+    --code-bg:#f3f2ee;
+    --t-bg:#1b1d21; --t-fg:#d8d6d1; --t-dim:#8b8a85;
+    --t-cyan:#5fb3c9; --t-green:#7fc47f; --t-yellow:#d7b45a; --t-red:#e07b73; --t-bold:#fff;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#16171a; --fg:#e6e5e1; --muted:#9a9a94; --line:#2d2f34; --card:#1d1f23;
+      --accent:#7fb0e0; --ok:#6fcf97; --warn:#d9c163; --bad:#ff7b72;
+      --code-bg:#22252a;
+      --t-bg:#101216;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#16171a; --fg:#e6e5e1; --muted:#9a9a94; --line:#2d2f34; --card:#1d1f23;
+    --accent:#7fb0e0; --ok:#6fcf97; --warn:#d9c163; --bad:#ff7b72;
+    --code-bg:#22252a; --t-bg:#101216;
+  }
+  :root[data-theme="light"]{
+    --bg:#fbfbfa; --fg:#1c1c1a; --muted:#6b6b66; --line:#e2e0da; --card:#fff;
+    --accent:#2f5d8a; --ok:#2c6e49; --warn:#8a6d0b; --bad:#a01b1b;
+    --code-bg:#f3f2ee; --t-bg:#1b1d21;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; background:var(--bg); color:var(--fg);
+    font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-text-size-adjust:100%}
+  .wrap{max-width:1120px; margin:0 auto; padding:2.5rem 1.25rem 5rem}
+  h1{font-size:1.75rem; line-height:1.25; margin:0 0 .35rem; letter-spacing:-.01em}
+  h2{font-size:1.25rem; margin:3rem 0 .8rem; padding-bottom:.35rem; border-bottom:2px solid var(--line)}
+  h3{font-size:1.05rem; margin:2rem 0 .5rem}
+  h4{font-size:.94rem; margin:1.5rem 0 .35rem; color:var(--accent)}
+  p{margin:.6rem 0}
+  .sub{color:var(--muted); font-size:.9rem; margin:0 0 1.6rem}
+  code,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em;
+    background:var(--code-bg); padding:.1em .35em; border-radius:3px; word-break:break-word}
+  kbd{border:1px solid var(--line); box-shadow:0 1px 0 var(--line); font-weight:600}
+  pre{background:var(--code-bg); padding:.85rem 1rem; border-radius:6px; overflow-x:auto; margin:.7rem 0}
+  pre code{background:none; padding:0}
+
+  /* terminal mockups */
+  .term{background:var(--t-bg); color:var(--t-fg); border-radius:8px; margin:.9rem 0;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.8rem; line-height:1.6;
+    overflow:hidden; border:1px solid #000}
+  .term .bar{background:rgba(255,255,255,.06); padding:.35rem .8rem; font-size:.72rem; color:var(--t-dim);
+    border-bottom:1px solid rgba(255,255,255,.08); display:flex; gap:.5rem; align-items:center}
+  .term .bar b{color:var(--t-fg); font-weight:600}
+  .term pre{background:none; margin:0; padding:.85rem 1rem; color:inherit; overflow-x:auto}
+  .c{color:var(--t-cyan)} .g{color:var(--t-green)} .y{color:var(--t-yellow)} .r{color:var(--t-red)}
+  .b{color:var(--t-bold); font-weight:600} .d{color:var(--t-dim)}
+  .u{color:var(--t-bold); background:rgba(255,255,255,.13); border-radius:2px; padding:0 .15em}
+  .sel{background:rgba(95,179,201,.20); border-radius:2px}
+
+  .tw{overflow-x:auto; margin:.9rem 0; border:1px solid var(--line); border-radius:6px}
+  table{border-collapse:collapse; width:100%; font-size:.85rem; background:var(--card)}
+  th,td{text-align:left; padding:.5rem .65rem; border-bottom:1px solid var(--line); vertical-align:top}
+  th{font-weight:600; font-size:.74rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); background:var(--bg)}
+  tr:last-child td{border-bottom:none}
+  td.n{white-space:nowrap}
+  .yes{color:var(--ok); font-weight:600} .no{color:var(--bad); font-weight:600}
+  .note{background:var(--card); border:1px solid var(--line); border-left:4px solid var(--accent);
+    border-radius:6px; padding:.8rem 1rem; margin:1rem 0; font-size:.92rem}
+  .gap{border-left-color:var(--bad)}
+  .flow{background:var(--code-bg); padding:1rem; border-radius:6px; overflow-x:auto; font-size:.78rem;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; line-height:1.55; white-space:pre; margin:.9rem 0}
+  ul,ol{margin:.5rem 0 .5rem 1.2rem; padding:0}
+  li{margin:.3rem 0}
+  .fine{font-size:.84rem; color:var(--muted)}
+  hr{border:none; border-top:1px solid var(--line); margin:2.5rem 0}
+  .step{display:inline-block; min-width:1.6rem; height:1.6rem; line-height:1.6rem; text-align:center;
+    border-radius:50%; background:var(--accent); color:var(--bg); font-weight:700; font-size:.8rem; margin-right:.4rem}
+  .tag{display:inline-block; font-size:.68rem; padding:.08rem .38rem; border:1px solid var(--line);
+    border-radius:3px; color:var(--muted); white-space:nowrap}
+  .toc{background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.9rem 1.2rem; margin:1.4rem 0}
+  .toc ol{margin:.3rem 0 .3rem 1.3rem} .toc a{color:var(--accent); text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>BinderScout — click-through walkthrough &amp; data flow</h1>
+<p class="sub">
+  Companion to <a href="repo_analysis_2026-07-26.html">the repository analysis</a> · working tree at
+  <code>a600090</code><br>
+  <strong>Part 1</strong> reproduces every interactive screen you actually see — no flags, just menus and
+  prompts. <strong>Part 2</strong> traces what each tool writes, what the pipeline takes from it, and what it
+  does with it. All screen text is verbatim from source, with file:line.
+</p>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#entry">The one command, and where it takes you</a></li>
+    <li><a href="#install">Walkthrough — install (checkbox menu)</a></li>
+    <li><a href="#configure">Walkthrough — configure (7-step wizard)</a></li>
+    <li><a href="#run">Walkthrough — run designs</a></li>
+    <li><a href="#evaluate">Walkthrough — evaluate (and two dead ends)</a></li>
+    <li><a href="#flow">Data flow — generated → taken → used</a></li>
+    <li><a href="#gaps">Where the click path and the flag path diverge</a></li>
+  </ol>
+</div>
+
+<h2 id="entry">1 · The one command, and where it takes you</h2>
+
+<p>
+Run <code>bindmaster</code> with no arguments and you get a curses menu
+(<code>bindmaster.py:146–149</code> → <code>tui/app.py</code>). Every other interactive surface hangs off it.
+Arrow keys move, <kbd>Enter</kbd> selects.
+</p>
+
+<div class="term">
+  <div class="bar"><b>$ bindmaster</b><span class="d">— tui/app.py:179–185</span></div>
+<pre><span class="c b">BindMaster</span>
+
+  <span class="d">mosaic</span> <span class="g">✓</span>  <span class="d">boltzgen</span> <span class="g">✓</span>  <span class="d">bindcraft</span> <span class="r">✗</span>  <span class="d">pxdesign</span> <span class="g">✓</span>   <span class="d">← tool status bar</span>
+
+  <span class="sel">▸ Install tools    </span>
+    Configure run
+    Run designs
+    Evaluate results
+    Run status
+    Quit
+</pre>
+</div>
+
+<div class="tw"><table>
+  <thead><tr><th>Menu item</th><th>Runs exactly</th><th>Source</th></tr></thead>
+  <tbody>
+    <tr><td>Install tools</td><td><code>bash &lt;repo&gt;/install/install.sh</code> — no flags, so the checkbox menu appears</td><td class="n">tui/app.py:259, 418</td></tr>
+    <tr><td>Configure run</td><td><code>&lt;python&gt; &lt;repo&gt;/configurator/configurator.py</code> — no flags, so the wizard runs</td><td class="n">tui/app.py:262, 420</td></tr>
+    <tr><td>Run designs</td><td>lists <code>runs/*</code>, then <code>bash &lt;run&gt;/run_all.sh</code></td><td class="n">tui/app.py:285, 451</td></tr>
+    <tr><td>Evaluate results</td><td><code>&lt;python&gt; bindmaster.py evaluate</code> — with no sub-command <span class="no">this errors out</span>, see §5</td><td class="n">tui/app.py:290–294</td></tr>
+    <tr><td>Run status</td><td>read-only table of <code>runs/</code></td><td class="n">tui/app.py:300–330</td></tr>
+  </tbody>
+</table></div>
+
+<p class="fine">
+  Each item runs its child as a subprocess with a banner and, on return,
+  <code>"\nPress Enter to return to menu..."</code> (<code>tui/app.py:86</code>). If curses cannot start, a
+  plain numbered menu with the same five items is used instead (<code>tui/app.py:368–372</code>).
+</p>
+
+<h2 id="install">2 · Walkthrough — install</h2>
+
+<p>
+<code>install/install.sh</code> with no <code>--tool</code> shows a <strong>toggle checkbox menu</strong>. Type
+a digit to flip a tool, <kbd>a</kbd> for all, <kbd>n</kbd> for none, bare <kbd>Enter</kbd> to confirm
+(<code>install.sh:555–638</code>).
+</p>
+
+<h4><span class="step">1</span>Banner, conda detection, status</h4>
+
+<div class="term">
+  <div class="bar"><b>install.sh</b><span class="d">— :2602–2623</span></div>
+<pre>=== BindMaster Installer — Sun Jul 26 06:00:00 UTC 2026 ===
+CUDA: 12.4 | Arch: x86_64 | Standalone: false | Skip examples: false
+
+<span class="g">✓</span> mamba 1.5.8 at: /home/user/miniforge3
+<span class="y">⚠ System conda at /opt/conda — envs directory not writable</span>   <span class="d">← standalone mode triggers here</span>
+
+=== Installed Tools ===
+  <span class="g">✓</span>  BindCraft             installed
+  <span class="r">✗</span>  BoltzGen              not installed
+  <span class="d">…one row per tool…</span>
+</pre>
+</div>
+<p class="fine">
+  On aarch64 a five-line warning block is printed here instead of silence
+  (<code>install.sh:2615–2621</code>): BindCraft "may fail — jaxlib CUDA conda packages not available for
+  aarch64", Mosaic "may fail — torchtext has no Linux aarch64 wheel", and so on.
+</p>
+
+<h4><span class="step">2</span>The checkbox menu — the main screen</h4>
+
+<div class="term">
+  <div class="bar"><b>select_tools_interactive()</b><span class="d">— install.sh:592–611</span></div>
+<pre>  <span class="c b">Select tools to install</span>
+  Type a number to toggle selection, then press Enter when done.
+
+    1)  <span class="g">[x]</span>  <span class="b">BindCraft           </span>  <span class="g">installed</span>      Binder design via AlphaFold2 (conda, Python 3.10)
+    2)  <span class="g">[x]</span>  <span class="b">BoltzGen            </span>  <span class="y">not installed</span>  Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)
+    3)  <span class="g">[x]</span>  <span class="b">Mosaic              </span>  <span class="y">not installed</span>  JAX-based protein design with Marimo notebooks (uv venv)
+    4)  <span class="g">[x]</span>  <span class="b">Evaluator           </span>  <span class="y">not installed</span>  Evaluate binders: refold with Boltz-2 (+ Protenix, AF3 if installed), ranked report (requires Mosaic)
+    5)  <span class="g">[x]</span>  <span class="b">RFD3                </span>  <span class="y">not installed</span>  RFD3 / foundry — all-atom diffusion for protein + ligand + NA binders (conda)
+    6)  <span class="r">[ ]</span>  <span class="b">PXDesign            </span>  <span class="y">not installed</span>  Protenix-based de novo binder design (conda)
+    7)  <span class="r">[ ]</span>  <span class="b">Proteina-Complexa   </span>  <span class="y">not installed</span>  NVIDIA flow matching + test-time compute binder design (uv venv)
+    8)  <span class="r">[ ]</span>  <span class="b">Protein-Hunter      </span>  <span class="y">not installed</span>  Protein-Hunter — Boltz/Chai hallucination: protein/cyclic/ligand/DNA/RNA binders (conda)
+
+  <span class="y">a</span>) Select all   <span class="y">n</span>) Select none   <span class="y">Enter</span> to confirm
+
+  &gt; <span class="u">6</span>          <span class="d">← toggles PXDesign on; the whole menu reprints</span>
+</pre>
+</div>
+
+<p>
+Five tools are <strong>pre-checked</strong>: BindCraft, BoltzGen, Mosaic, Evaluator, RFD3
+(<code>install.sh:558–565</code>). PXDesign, Proteina-Complexa and Protein-Hunter start off. Confirming with
+nothing selected prints <code>No tools selected. Select at least one.</code> and reprints.
+</p>
+
+<div class="note gap">
+  <strong>Gap in the click path.</strong> The menu offers 8 items. Three installable targets are
+  <em>missing from it entirely</em> and reachable only via <code>--tool</code>:
+  <strong>ESMFold2</strong> (the documented default refold engine), <strong>AF3</strong>, and
+  <strong>SoluProt</strong>. So a mouse-and-menu user cannot install the default refold engine at all —
+  they must fall back to <code>bash install/install.sh --tool esmfold2</code>.
+</div>
+
+<h4><span class="step">3</span>Confirmation, then per-tool questions</h4>
+
+<div class="term">
+  <div class="bar"><b>install.sh</b><span class="d">— :649–664, then per-tool installers</span></div>
+<pre>  <span class="b">Installing:</span>
+    <span class="g">✓</span> BindCraft
+    <span class="g">✓</span> BoltzGen
+    <span class="g">✓</span> Mosaic
+    <span class="g">✓</span> Evaluator
+    <span class="g">✓</span> RFD3
+
+<span class="y">Proceed with installation? [y/N]: </span><span class="u">y</span>
+
+Log file: /home/user/BinderScout/install.log
+
+<span class="b">[1/5] BindCraft</span>
+<span class="y">⚠ Directory /home/user/BinderScout/BindCraft already exists.</span>
+<span class="y">Remove and reclone? [y/N]: </span><span class="u">n</span>
+<span class="y">⚠ Skipping reclone; using existing directory.</span>
+<span class="y">⚠ Conda environment 'BindCraft' already exists.</span>
+<span class="y">Remove and recreate the BindCraft conda environment? [y/N]: </span><span class="u">n</span>
+<span class="y">Run the BindCraft PDL1 example? [y/N]: </span><span class="u">n</span>
+    <span class="d">This will take 45-90 min — full output in install.log</span>
+</pre>
+</div>
+
+<p>
+Every one of those mid-install questions defaults to <strong>no</strong> — the safe answer, and what makes a
+repeat install non-destructive. <code>confirm()</code> only accepts <code>y</code>/<code>yes</code> as yes;
+<code>n</code>, <code>no</code> and bare <kbd>Enter</kbd> all mean no, and there is no
+<code>[Y/n]</code>-style prompt anywhere in the installer.
+</p>
+
+<p class="fine">
+  Only <strong>BindCraft, BoltzGen and Mosaic</strong> ask anything mid-install. Evaluator
+  (<code>install.sh:1115–1197</code>) and RFD3 (<code>:1893–1945</code>) — both pre-checked — run start to
+  finish unattended, as do PXDesign, Protein-Hunter, AF3, ESMFold2 and SoluProt. Long steps show only a
+  spinner and print the last 30 log lines on failure (<code>install.sh:244–272</code>); everything is tee'd
+  to <code>install.log</code>.
+</p>
+
+<p class="fine">
+  Three things people expect here and will not find, having been checked against the source: there is
+  <strong>no CUDA-version question</strong> (<code>CUDA_VERSION</code> defaults to <code>12.4</code> and is
+  settable only with <code>--cuda</code>), <strong>no disk-space or GPU preflight</strong> before ~60 GB of
+  downloads, <strong>no AF2-weights-path prompt</strong> (weights are auto-symlinked from
+  <code>bindcraft-tools/af2_params</code>), and <strong>no standalone-vs-system-conda question</strong> —
+  that is auto-detected silently, and the only thing you see is the warning line above.
+</p>
+
+<div class="note gap">
+  <strong>This is the screen <code>--yes</code> overrides.</strong> <code>confirm()</code> returns true
+  unconditionally under <code>--yes</code> (<code>install.sh:282</code>), so
+  <code>--tool all --yes</code> answers <em>yes</em> to "Remove and reclone?" — deleting
+  <code>BindCraft/params/*.npz</code>, ~4 GB of AF2 weights. The click path is the <em>safe</em> one here;
+  the documented flag path is the destructive one. (Finding F11.)
+</div>
+
+<h4><span class="step">4</span>Summary</h4>
+
+<div class="term">
+  <div class="bar"><b>install.sh</b><span class="d">— :2708–2749</span></div>
+<pre>=== Installation Summary ===
+<span class="g">✓ All selected tools installed successfully.</span>
+
+Shortcuts available in /home/user/BinderScout/bin:
+  bindcraft  — open BindCraft shell
+  boltzgen   — open BoltzGen shell
+  <span class="d">…one line per installed tool…</span>
+
+<span class="g">✓ Added /home/user/BinderScout/bin to PATH in ~/.bashrc</span>
+Full log: /home/user/BinderScout/install.log
+</pre>
+</div>
+
+<p class="fine">
+  Uninstall has <strong>no</strong> interactive picker: <code>--uninstall</code> without <code>--tool</code>
+  prints <code>✗ --uninstall requires --tool &lt;tool|all&gt;</code> and exits 1
+  (<code>install.sh:2627–2630</code>). Once given a tool it does ask
+  <code>Proceed with uninstall? [y/N]</code> and
+  <code>Also remove local Miniforge3 installation (…)? [y/N]</code>.
+</p>
+
+<h2 id="configure">3 · Walkthrough — configure</h2>
+
+<p>
+The wizard prints seven numbered steps (Step 6 splits into 6a–6h, one per enabled tool), then generates, then
+offers to run. Three prompt shapes are used throughout
+(<code>configurator.py:237</code>, <code>:258</code>, <code>:272</code>):
+</p>
+
+<div class="term">
+  <div class="bar"><b>prompt shapes</b><span class="d">— ask() / ask_yn() / ask_choice()</span></div>
+<pre><span class="c">  Minimum binder length</span> <span class="y">[65]</span>: <span class="u">80</span>            <span class="d">ask()       — Enter accepts the default</span>
+<span class="c">  Enable BindCraft?</span> [<span class="g">Y</span>/n]: <span class="u"></span>                  <span class="d">ask_yn()    — capital letter is the default</span>
+
+<span class="b">  PXDesign mode</span>                                <span class="d">ask_choice() — numbered list</span>
+  <span class="g">[1]</span> Skip <span class="y">(default)</span>
+  <span class="c">[2]</span> Run locally (requires install)
+  <span class="c">[3]</span> Import external results
+  <span class="y">Choice [1-3]</span> (default 1): <span class="u">2</span>
+</pre>
+</div>
+
+<h4>Steps 1–4 — target and global defaults</h4>
+
+<div class="term">
+  <div class="bar"><b>configurator.py</b><span class="d">— :2819–2872</span></div>
+<pre><span class="c b">▶ Step 1 — Project name</span>
+  Used as binder name. Run folder path can be customised below.
+<span class="c">  Target name</span>: <span class="u">CALCA_helix</span>                      <span class="d">validate_name: [A-Za-z0-9_-]+ only</span>
+<span class="c">  Run folder</span> <span class="y">[/home/user/BinderScout/runs/CALCA_helix]</span>: <span class="u"></span>
+       <span class="d">…if it exists:  ⚠ Run folder already exists   →   Overwrite? [y/N]</span>
+
+<span class="c b">▶ Step 2 — Target structure</span>
+<span class="b">How will you provide the target structure?</span>
+  <span class="g">[1]</span> PDB or mmCIF file path <span class="y">(default)</span>
+  <span class="c">[2]</span> Amino acid sequence (predict structure with Boltz-2 or AF3)
+  <span class="y">Choice [1-2]</span> (default 1): <span class="u"></span>
+<span class="c">  Path to target structure file (.pdb / .cif)</span>: <span class="u">~/targets/calca.pdb</span>
+
+<span class="c b">▶ Step 3 — Target details</span>
+<span class="c">  Chain(s) to target (e.g. A or A,B)</span> <span class="y">[A]</span>: <span class="u"></span>
+<span class="c">  Hotspot residues (e.g. 56 or 1-10,20, blank=auto)</span>: <span class="u">32,36,39</span>
+<span class="g">✓ Auto-extracted sequence for chain A: ACDTATCVTHRLAGLLSRSGGVVKNNFVPTNVGSKAF... (37 aa)</span>
+
+<span class="c b">▶ Step 4 — Binder settings (global defaults)</span>
+  These apply to all tools — you can override per-tool in Step 6.
+<span class="c">  Minimum binder length</span> <span class="y">[65]</span>: <span class="u"></span>            <span class="d">validate_int(10..500)</span>
+<span class="c">  Maximum binder length</span> <span class="y">[150]</span>: <span class="u"></span>
+<span class="c">  Number of top/final designs</span> <span class="y">[10]</span>: <span class="u">50</span>
+</pre>
+</div>
+
+<p class="fine">
+  Choosing <strong>[2] Amino acid sequence</strong> in Step 2 opens a sub-flow
+  (<code>:2732–2808</code>): it asks <code>How would you like to predict the structure?</code> with
+  <em>[1] Predict locally with Boltz-2 (GPU recommended, ~2-5 min)</em> or <em>[2] Use AlphaFold 3 Server</em>,
+  takes the sequence, and either folds it or walks you through the AF3 web server and asks for the downloaded
+  file. If Mosaic is absent, local prediction is disabled and the AF3 path is forced.
+</p>
+
+<div class="note gap">
+  <strong>Step 3 is where finding F1 bites.</strong> The chain you type here is honoured for
+  <code>.pdb</code> but <em>discarded</em> for <code>.cif</code>/<code>.mmcif</code>:
+  <code>extract_sequence_from_cif</code> (<code>:551</code>) reads <code>_entity_poly</code> first, which its
+  own comment describes as "chain-agnostic, longest entity". The green
+  <code>✓ Auto-extracted sequence for chain A</code> line will still say "chain A" while showing a different
+  chain's sequence. <strong>Read the residue count on that line</strong> — it is the only signal you get.
+</div>
+
+<h4>Step 5 — tool selection, engines, and the solubility screen</h4>
+
+<div class="term">
+  <div class="bar"><b>configurator.py</b><span class="d">— :2875–2984</span></div>
+<pre><span class="c b">▶ Step 5 — Tool selection</span>
+  <span class="b">Mosaic</span>    [<span class="g">installed</span>]
+<span class="c">  Enable Mosaic?</span> [y/<span class="g">N</span>]: <span class="u">y</span>
+  <span class="b">BoltzGen</span>  [<span class="r">NOT installed — run: bindmaster install</span>]
+<span class="c">  Enable BoltzGen?</span> [y/<span class="g">N</span>]: <span class="u"></span>
+  <span class="b">BindCraft</span> [<span class="g">installed</span>]
+<span class="c">  Enable BindCraft?</span> [<span class="g">Y</span>/n]: <span class="u"></span>             <span class="d">← the ONLY tool on by default</span>
+  <span class="b">PXDesign</span>  [<span class="g">installed</span>] / [external import]
+<span class="b">  PXDesign mode</span>   <span class="g">[1]</span> Skip <span class="y">(default)</span>  <span class="c">[2]</span> Run locally  <span class="c">[3]</span> Import external results
+  <span class="b">Proteina-Complexa</span> [<span class="r">NOT installed…</span>]
+<span class="c">  Enable Proteina-Complexa (NVIDIA flow matching)?</span> [y/<span class="g">N</span>]: <span class="u"></span>
+  <span class="b">Protein-Hunter</span> [<span class="g">installed</span>]
+<span class="c">  Enable Protein-Hunter (Boltz-2 / Chai-1 hallucination)?</span> [y/<span class="g">N</span>]: <span class="u"></span>
+  <span class="b">RFD3</span> [<span class="g">installed</span>]
+<span class="c">  Enable RFD3 (RosettaCommons foundry diffusion + ProteinMPNN)?</span> [y/<span class="g">N</span>]: <span class="u">y</span>
+  <span class="b">Evaluator</span> [<span class="g">installed</span>]
+<span class="c">  Enable cross-evaluation (refolding + ranked report)?</span> [y/<span class="g">N</span>]: <span class="u">y</span>
+
+  <span class="b">Refolding engines for evaluation</span>                <span class="d">only when Evaluator = yes</span>
+<span class="c">    Use Boltz-2 (Mosaic venv)?</span> [<span class="g">Y</span>/n]: <span class="u"></span>            <span class="d">← the only engine defaulting ON</span>
+    <span class="r">Protenix: requires PXDesign install — skipped</span>
+<span class="c">    Use AlphaFold 3 v3.0.2 (binder-eval-af3 env)?</span> [y/<span class="g">N</span>]: <span class="u">y</span>
+<span class="c">    Use ESMFold2 (binder-eval-esmfold2 env)?</span> [y/<span class="g">N</span>]: <span class="u">y</span>
+<span class="b">    Primary engine for ranking</span>   <span class="g">[1]</span> boltz <span class="y">(default)</span>  <span class="c">[2]</span> af3  <span class="c">[3]</span> esmfold2
+
+  <span class="b">SoluProt solubility screen</span> (sequence-only filter, no GPU)   <span class="d">only if env present</span>
+<span class="c">    Use SoluProt to score solubility?</span> [<span class="g">Y</span>/n]: <span class="u"></span>
+<span class="c">    Pass threshold (paper default 0.5; lower for short binders)</span> <span class="y">[0.5]</span>: <span class="u"></span>
+<span class="c">    Drop sub-threshold designs BEFORE refolding (saves GPU)?</span> [<span class="g">Y</span>/n]: <span class="u"></span>
+</pre>
+</div>
+
+<p>
+Unavailable tools are shown but still offered — the label just turns red. Answering no to everything prints
+<code>⚠ No tools enabled — nothing to generate. Exiting.</code> (<code>:3022</code>).
+</p>
+
+<div class="note">
+  <strong>What pressing Enter through the whole wizard actually gives you:</strong> BindCraft only, no
+  Evaluator, no refolding, 65–150 aa, 10 designs. Every other tool and the entire evaluation pipeline default
+  to <em>off</em>. Worth knowing before demoing it. Note also that ESMFold2 — described elsewhere as the
+  default refold engine — defaults to <strong>off</strong> here (<code>:2926</code>, <code>default_on=False</code>).
+</div>
+
+<h4>Steps 6a–6h — per-tool settings</h4>
+
+<p>
+One sub-step per enabled tool, gated on its <code>tools_enabled</code> key. The headers are printed exactly as
+below — note <strong><code>Step 6d</code> appears twice and there is no <code>6e</code></strong>:
+</p>
+
+<div class="tw"><table>
+  <thead><tr><th class="n">Header (verbatim)</th><th class="n">Line</th><th>Shown when</th></tr></thead>
+  <tbody>
+    <tr><td class="n">▶ Step 6a — BindCraft settings</td><td class="n">:3051</td><td><code>use_bindcraft</code></td></tr>
+    <tr><td class="n">▶ Step 6b — BoltzGen settings</td><td class="n">:3082</td><td><code>use_boltzgen</code></td></tr>
+    <tr><td class="n">▶ Step 6c — Mosaic settings</td><td class="n">:3111</td><td><code>use_mosaic</code></td></tr>
+    <tr><td class="n">▶ Step 6d — PXDesign settings (local run)</td><td class="n">:3148</td><td><code>use_pxdesign_local</code></td></tr>
+    <tr><td class="n">▶ Step 6d — PXDesign settings (import)</td><td class="n">:3331</td><td><code>use_pxdesign_import</code> — shares 6d with the local branch, but the two are <code>if</code>/<code>elif</code>, so only one ever prints</td></tr>
+    <tr><td class="n">▶ Step 6e — Proteina-Complexa settings</td><td class="n">:3341</td><td><code>use_proteina_complexa</code> — <span class="yes">was 6f; the 6e gap is closed</span></td></tr>
+    <tr><td class="n">▶ Step 6f — RFD3 settings</td><td class="n">:3386</td><td><code>use_rfd3</code></td></tr>
+    <tr><td class="n">▶ Step 6g — Protein-Hunter settings</td><td class="n">:3413</td><td><code>use_protein_hunter</code></td></tr>
+  </tbody>
+</table></div>
+
+<p class="fine">
+  Each sub-step re-asks length range and design count with the Step-4 values as defaults, plus tool-specific
+  knobs — e.g. RFD3 asks batch size, diffusion steps, step scale, MPNN samples and MPNN temperature;
+  Protein-Hunter asks cycle count and MSA mode. Across all steps the wizard asks
+  <strong>80 questions</strong> (51 <code>ask</code>, 17 <code>ask_yn</code>, 12 <code>ask_choice</code>).
+</p>
+
+<h4>Step 7 — preview, generate, run</h4>
+
+<div class="term">
+  <div class="bar"><b>configurator.py</b><span class="d">— print_tree() :743, then :3401–3441</span></div>
+<pre><span class="c b">▶ Step 7 — Preview</span>
+  <span class="c">Mosaic</span>:        length=65–150  designs=50
+  <span class="c">RFD3</span>:          length=65–150  designs=50  batch=10
+  <span class="c">Evaluator</span>:     Boltz-2 + AF3  |  primary=boltz  → ranked report
+
+  <span class="b">CALCA_helix/</span>
+  ├── <span class="c">target/</span>
+  │   └── &lt;target&gt;.pdb
+  ├── <span class="c">mosaic/</span>
+  │   └── hallucinate.py
+  ├── <span class="c">evaluate/</span>
+  │   └── evaluate_report/
+  ├── <span class="g">run_mosaic.sh</span>
+  ├── <span class="g">run_evaluate.sh</span>
+  └── <span class="g">run_all.sh</span>
+
+<span class="c">Generate configs and scripts now?</span> [<span class="g">Y</span>/n]: <span class="u"></span>
+<span class="c b">▶ Generating run folder</span>
+<span class="g">✓ Run folder ready: /home/user/BinderScout/runs/CALCA_helix</span>
+
+<span class="y">⚠ Mosaic requires interactive input and will run first.</span>
+<span class="y">⚠ Evaluator runs Boltz-2 refolding (GPU recommended, ~30 min per design).</span>
+<span class="c">Run the pipeline now?</span> [<span class="g">Y</span>/n]: <span class="u">n</span>
+
+<span class="y">⚠ To run later:</span>
+  1. bash /home/user/BinderScout/runs/CALCA_helix/run_mosaic.sh
+  2. bash /home/user/BinderScout/runs/CALCA_helix/run_evaluate.sh
+  Or run the full pipeline:  bash /home/user/BinderScout/runs/CALCA_helix/run_all.sh
+</pre>
+</div>
+
+<div class="note gap">
+  <strong>RFD3 vanishes from the UI here.</strong> The run was configured with RFD3 enabled, and
+  <code>generate()</code> does write <code>run_rfd3.sh</code> — but RFD3 appears in neither the preview tree
+  (<code>print_tree</code>, <code>:743</code>) nor the "To run later" list (<code>:3423</code>), and
+  <code>run_pipeline()</code> (<code>:2662</code>) has no branch for it. The same is true of Protein-Hunter;
+  Proteina-Complexa is missing from the tree only. Full matrix in §7. (Finding F9.)
+</div>
+
+<h2 id="run">4 · Walkthrough — run designs</h2>
+
+<p>
+The TUI lists run directories and executes <code>run_all.sh</code> for the one you pick
+(<code>tui/app.py:282–285</code>). The status screen alongside it reads the run directory on disk:
+</p>
+
+<div class="term">
+  <div class="bar"><b>TUI → Run status</b><span class="d">— tui/app.py:300–330</span></div>
+<pre><span class="c b">Run status</span>
+
+  <span class="g">*</span> CALCA_helix        mosaic, bindcraft, evaluated
+    ApoE4_r2           boltzgen
+    2VDY_nano                                <span class="d">← ran RFD3 + Protein-Hunter; shows nothing</span>
+</pre>
+</div>
+
+<div class="note gap">
+  <strong>The status screen only knows four tools.</strong>
+  <code>for tool in ("mosaic", "boltzgen", "bindcraft", "pxdesign")</code> is hardcoded at
+  <code>tui/app.py:72</code>, <code>:325</code> and <code>:473</code>. A run whose designs came from RFD3,
+  Protein-Hunter or Proteina-Complexa displays as empty. <code>configurator.py cmd_status()</code>
+  (<code>:3473</code>) checks all seven, so the two status views disagree. (Finding F27.)
+</div>
+
+<h2 id="evaluate">5 · Walkthrough — evaluate</h2>
+
+<p>There are three interactive doors into the evaluator. Two of them are shut.</p>
+
+<h4>Door 1 — TUI → "Evaluate results" <span class="no">(errors)</span></h4>
+
+<p>
+The menu item runs <code>bindmaster.py evaluate</code> with no further arguments
+(<code>tui/app.py:290–294</code>), which becomes
+<code>conda run -n binder-eval binder-compare</code> — <code>binder-compare</code> with no sub-command. But
+<code>main.py</code> sets <code>subparsers.required = True</code>, so:
+</p>
+
+<div class="term">
+  <div class="bar"><b>TUI → Evaluate results</b><span class="d">— reproduced locally</span></div>
+<pre>usage: binder-compare [-h] &lt;command&gt; ...
+<span class="r">binder-compare: error: the following arguments are required: &lt;command&gt;</span>
+                                                          <span class="d">exit code 2</span>
+
+Press Enter to return to menu...
+</pre>
+</div>
+
+<h4>Door 2 — the <code>evaluate</code> shortcut <span class="no">(errors, after asking everything)</span></h4>
+
+<p>
+<code>bin/evaluate</code> runs <code>Evaluator/run.sh</code>, a genuine three-question wizard:
+</p>
+
+<div class="term">
+  <div class="bar"><b>$ evaluate</b><span class="d">— Evaluator/run.sh:37–94</span></div>
+<pre>==============================
+  BindMaster Evaluator
+==============================
+
+Binder sequences — paste directly or enter a file path.
+Accepted: FASTA, one per line, comma-separated, semicolon-separated,
+          or a CSV/TSV file with a 'sequence' column.
+When pasting, press Enter then Ctrl-D when done.
+
+&gt; <span class="u">MAEVKLSYVLNQ…</span>
+<span class="u">^D</span>
+
+Path to target structure (.pdb or .cif): <span class="u">~/targets/calca.pdb</span>
+
+Extracting target sequence from PDB...
+Target: 37 aa — ACDTATCVTHRLAGLLSRSGGVVKNNFVPTNVGSKAF
+
+Output directory [./results]: <span class="u"></span>
+
+--- Starting evaluation ---
+
+<span class="r">Unknown argument: --target-pdb</span>
+<span class="r">ERROR: evaluation failed (exit code 1).</span>
+Scroll up to see the error message.
+Press Enter to close...
+</pre>
+</div>
+
+<p class="fine">
+  <code>run.sh:91</code> passes <code>--target-pdb "$TARGET_PDB"</code>; <code>evaluate.sh</code> has no such
+  case and falls through to <code>*) echo "Unknown argument: $1"; exit 1</code> (<code>:116</code>). It has
+  never worked. (Finding F10.)
+</p>
+
+<h4>Door 3 — <code>run_evaluate.sh</code> <span class="yes">(works)</span></h4>
+
+<p>
+The wrapper the configurator generates is the one that runs. It is not interactive — it just calls
+<code>extract</code> with the right per-tool directories and then <code>evaluate.sh</code>:
+</p>
+
+<div class="term">
+  <div class="bar"><b>$ bash runs/CALCA_helix/run_evaluate.sh</b><span class="d">— generated by configurator.py:2434</span></div>
+<pre>[extract] Mosaic: runs/CALCA_helix/mosaic
+  <span class="y">Mosaic: filtered to is_top=1: 41/812 designs</span>
+  → 41 sequences
+[extract] BindCraft: runs/CALCA_helix/bindcraft
+  → 18 sequences
+[extract] Removed 2 duplicate sequence(s).
+[extract] Total: 57 unique binders
+[extract] Native metrics → runs/CALCA_helix/evaluate/sequences_native_metrics.csv
+
+=== BindMaster Evaluator ===
+Sequences : runs/CALCA_helix/evaluate/sequences.fasta
+Output    : runs/CALCA_helix/evaluate
+
+<span class="d">[note] conda env 'bindmaster_pxdesign' not found — Protenix refolding will be skipped.</span>
+[step 1/4] SoluProt solubility screen (binder-eval-soluprot)...
+[step 2/4] Boltz-2 refolding (Mosaic venv)...
+[step 3/4] AF3 refolding       (conda env: binder-eval-af3)...
+[step 4/4] Generating report   (binder-eval)...
+
+Report : runs/CALCA_helix/evaluate/report/report.html
+Metrics: runs/CALCA_helix/evaluate/report/metrics.csv
+</pre>
+</div>
+
+<p class="fine">
+  Engines are auto-detected: each is skipped with a printed <code>[note]</code> when its conda env is absent
+  (<code>evaluate.sh:135–170</code>), and the step counter adjusts. <code>--resume</code> exists. This is the
+  best-behaved interactive-adjacent surface in the repo.
+</p>
+
+<h2 id="flow">6 · Data flow — what is generated, what we take, what we do with it</h2>
+
+<div class="flow">  <span style="opacity:.6">STAGE</span>   1 DESIGN                    2 EXTRACT              3 REFOLD                   4 MERGE + SCORE        5 REPORT
+
+  target.pdb ─▶ 7 tools ─┐
+                          │  each writes its own CSV
+                          ▼
+            runs/&lt;n&gt;/&lt;tool&gt;/…  ──▶  sequences.fasta  ──▶  boltz2_results.csv  ──┐
+                                     + _native_metrics.csv    af3_results.csv    ├──▶ merged df ──▶ report/
+                                                              esmfold2_results.csv│    join on `sequence`     report.html
+                                     ▲                        (protenix_results)  │                          metrics.csv
+                                     │                                            │                          top30_candidates.csv
+                            dedup by sequence                soluprot_results.csv ┘                          metrics_zscore.csv
+                            <span style="opacity:.6">← the join key is born here</span>                                                summary.json
+
+                                          shared target MSA:  ~/.cache/bindmaster/target_msa/target_&lt;sha256[:16]&gt;.a3m
+                                          written by AF3/ESMFold2 on miss · read by all engines · Boltz-2 read-only</div>
+
+<h3>6.1 Stage 1 → 2 · What each tool writes, and what the pipeline takes from it</h3>
+
+<p>
+This is the crux. Each tool writes its own format; one extractor per tool reads a specific file and a specific
+column. If the filename or the column is not what the extractor expects, that tool contributes
+<strong>nothing</strong>, silently.
+</p>
+
+<div class="tw"><table>
+  <thead><tr>
+    <th>Tool</th><th>Environment</th><th>File(s) read, in search order</th><th>Sequence column taken</th>
+    <th>Rows dropped</th><th><code>binder_id</code> format</th>
+  </tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>BindCraft</strong></td><td class="n"><code>BindCraft</code><br><span class="fine">conda, py3.10</span></td>
+      <td class="n"><code>final_design_stats.csv</code><br><code>mpnn_design_stats.csv</code><br><code>trajectory_stats.csv</code></td>
+      <td class="n"><code>Sequence</code></td>
+      <td>best MPNN sequence per trajectory only —<br><code>drop_duplicates("_traj")</code> by <code>Average_i_pTM</code><br><span class="fine">off with <code>collapse_variants=False</code></span></td>
+      <td class="n"><code>bindcraft_&lt;Design&gt;</code><br><span class="fine">else <code>bindcraft_&lt;stem&gt;_&lt;idx&gt;</code></span></td>
+    </tr>
+    <tr>
+      <td><strong>BoltzGen</strong></td><td class="n"><code>BoltzGen</code><br><span class="fine">conda, py3.12</span></td>
+      <td class="n"><code>final_designs_metrics_*.csv</code><br><code>aggregate_metrics_*.csv</code></td>
+      <td class="n"><code>designed_chain_sequence</code><br><code>designed_sequence</code><br><code>sequence</code><br><span class="fine">order matters — see note</span></td>
+      <td>invalid sequences only</td>
+      <td class="n"><code>boltzgen_&lt;id&gt;</code><br><span class="fine">else <code>boltzgen_&lt;stem&gt;_&lt;idx&gt;</code></span></td>
+    </tr>
+    <tr>
+      <td><strong>Mosaic</strong></td><td class="n"><code>Mosaic/.venv</code><br><span class="fine">uv, py3.12</span></td>
+      <td class="n"><code>designs.csv</code><br><code>refold_designs.csv</code></td>
+      <td class="n"><code>sequence</code></td>
+      <td><strong><code>is_top == 1</code> only</strong> — typically<br>~40 of ~800 designs<br><span class="fine">all with <code>--all-mosaic-designs</code></span></td>
+      <td class="n"><code>mosaic_&lt;worker_id&gt;_&lt;rank&gt;</code></td>
+    </tr>
+    <tr>
+      <td><strong>PXDesign</strong></td><td class="n"><code>bindmaster_pxdesign</code><br><span class="fine">conda, py3.11</span></td>
+      <td class="n"><code>summary.csv</code><br><code>sequences.csv</code></td>
+      <td class="n"><code>sequence</code></td>
+      <td>invalid sequences only</td>
+      <td class="n"><code>pxdesign_&lt;task_name&gt;_&lt;rank&gt;</code><br><span class="fine">falls back to positional <code>pxdesign_&lt;idx&gt;</code>;<br><code>design_id</code> is never used</span></td>
+    </tr>
+    <tr>
+      <td><strong>Proteina-Complexa</strong></td><td class="n"><code>Proteina-Complexa/.venv</code><br><span class="fine">uv, py3.12</span></td>
+      <td class="n"><code>sequences.csv</code><br><span class="fine">+ native metrics from <code>top_samples_*.csv</code></span></td>
+      <td class="n"><code>sequence</code>, or <code>aatype</code> ints<br>decoded via <code>"ARNDCQEGHILKMFPSTWYV"</code></td>
+      <td>invalid sequences only</td>
+      <td class="n"><code>complexa_&lt;design_id|name&gt;</code></td>
+    </tr>
+    <tr>
+      <td><strong>Protein-Hunter</strong></td><td class="n"><code>bindmaster_protein_hunter</code><br><span class="fine">conda, py3.10</span></td>
+      <td class="n"><code>summary_high_iptm.csv</code> <span class="fine">(default)</span><br><code>summary_all_runs.csv</code> <span class="fine">(<code>--all-protein-hunter-designs</code>)</span></td>
+      <td class="n"><code>sequence</code></td>
+      <td>one row per run —<br><code>drop_duplicates("run_id")</code><br><span class="fine">cycles are snapshots of one trajectory</span></td>
+      <td class="n"><code>protein_hunter_&lt;run_id&gt;_c&lt;cycle&gt;</code></td>
+    </tr>
+    <tr>
+      <td><strong>RFD3</strong></td><td class="n"><code>bindmaster_rfd3</code><br><span class="fine">conda, py3.12</span></td>
+      <td class="n"><code>sequences.csv</code>, <code>results.csv</code>,<br><code>designs.csv</code>, <code>rfd3_designs.csv</code>,<br><code>summary.csv</code><br><span class="fine">then a FASTA fallback over <code>mpnn/*.fa</code></span></td>
+      <td class="n"><code>sequence</code>, <code>Sequence</code>,<br><code>designed_sequence</code>, <code>binder_sequence</code></td>
+      <td>invalid sequences only</td>
+      <td class="n"><code>rfd3_&lt;design_id|name|run_id|…&gt;</code></td>
+    </tr>
+  </tbody>
+</table></div>
+
+<div class="note">
+  <strong>Why the BoltzGen column order matters.</strong> <code>designed_sequence</code> holds only the
+  <em>designed residues</em>. For nanobody CDR-redesign that is just the CDR — 24–42 aa on the 2VDY campaign,
+  versus 112–133 aa for the full VHH in <code>designed_chain_sequence</code>. Reading the wrong one refolds a
+  truncated binder. The extractor prefers the chain column
+  (<code>extractors/boltzgen.py:38</code>) and the reasoning is written into the code.
+</div>
+
+<h4>Native metrics — what each tool's own scores contribute</h4>
+
+<p>
+Alongside the sequence, each extractor harvests the tool's <em>own</em> quality numbers. These are carried
+through as <code>native_*</code> columns and shown in the report, but they are
+<strong>never used for ranking</strong> — that is deliberate, because a tool's self-assessment is biased
+toward its own designs.
+</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Tool</th><th>Schema field ← source column</th></tr></thead>
+  <tbody>
+    <tr><td class="n"><strong>BindCraft</strong></td><td class="n"><code>dG</code>←<code>Average_dG</code> · <code>dSASA</code>←<code>Average_dSASA</code> · <code>shape_complementarity</code>←<code>Average_ShapeComplementarity</code> · <code>packstat</code>←<code>Average_PackStat</code> · <code>hbonds_interface</code>←<code>Average_n_InterfaceHbonds</code> · <code>hbonds_pct</code>←<code>Average_InterfaceHbondsPercentage</code> · <code>mpnn_recovery</code>←<code>MPNN_seq_recovery</code></td></tr>
+    <tr><td class="n"><strong>BoltzGen</strong></td><td class="n"><code>bg_design_ipsae_min</code>← first of <code>design_ipsae_min</code>, <code>ipsae_min</code>, <code>design_ipsae</code>, <code>ipsae_min_top10</code> · <code>bg_final_rank</code>←<code>final_rank</code></td></tr>
+    <tr><td class="n"><strong>Mosaic</strong></td><td class="n"><code>mosaic_ranking_loss</code>←<code>ranking_loss</code> · <code>mosaic_iptm_design</code>←<code>iptm_aux</code> · <code>mosaic_ipsae_min_design</code>←<code>ipsae_min</code> · <code>mosaic_bt_iptm</code>←<code>bt_iptm</code> · <code>mosaic_binder_ptm</code>←<code>binder_ptm</code> · <code>mosaic_plddt_aux</code>←<code>plddt_aux</code></td></tr>
+    <tr><td class="n"><strong>PXDesign</strong></td><td class="n"><code>pxdesign_composite_score</code>←<code>composite_score</code> · <code>pxdesign_af2_iptm</code>←<code>af2_iptm</code> · <code>pxdesign_af2_ipae</code>←<code>af2_ipae</code>|<code>af2_ipAE</code> · <code>pxdesign_protenix_iptm</code>←<code>ptx_iptm</code> · <code>pxdesign_sequence_recovery</code>←<code>sequence_recovery</code></td></tr>
+    <tr><td class="n"><strong>Protein-Hunter</strong></td><td class="n"><code>protein_hunter_iptm_cycle</code>←<code>iptm</code> · <code>protein_hunter_iptm_best</code>←<code>best_iptm</code> · <code>protein_hunter_plddt</code>←<code>plddt</code> · <code>protein_hunter_plddt_best</code>←<code>best_plddt</code><br><span class="fine">the two <code>best_*</code> are merged in from <code>summary_all_runs.csv</code> by <code>run_id</code>; <code>sequence_recovery</code> is declared but Protein-Hunter never emits it</span></td></tr>
+    <tr><td class="n"><strong>RFD3</strong></td><td class="n"><code>rfd3_n_chainbreaks</code>←<code>n_chainbreaks</code> · <code>rfd3_n_clashing</code>←<code>n_clashing</code> · <code>rfd3_helix_fraction</code>←<code>helix_fraction</code> · <code>rfd3_sequence_recovery</code>←<code>sequence_recovery</code>|<code>mpnn_sequence_recovery</code><br><span class="fine">plus per-design JSON sidecars under <code>&lt;csv_dir&gt;/diffusion/</code>, reading <code>data["metrics"]["n_clashing.interresidue_clashes_w_sidechain"]</code> and <code>…_w_backbone</code></span></td></tr>
+  </tbody>
+</table></div>
+
+<h3>6.2 The handoff — <code>sequences.fasta</code></h3>
+
+<p>
+Extraction collapses seven formats into one file. From here on <strong>the amino-acid string is the identity
+of a design</strong> — every later stage joins on it.
+</p>
+
+<div class="term">
+  <div class="bar"><b>sequences.fasta</b><span class="d">— io/write.py:45–48, cli/extract.py:114</span></div>
+<pre><span class="c">&gt;mosaic_w3_7  source=mosaic  length=72</span>
+MAEVKLSYVLNQIREKAEELLQKAKEDGNEELVKLAKELIEKAKELLEKGDLEKAIELLEKALELLKKAQKL
+<span class="c">&gt;bindcraft_CALCA_l72_s341_mpnn3  source=bindcraft  length=72</span>
+SPEELLQKAIELAKELLEKGNPEKAEELLKKALELLKRAQELAKQGKPEEAEELLKKAAELLEKAKKLLEQG
+<span class="c">&gt;rfd3_calca_0014  source=rfd3  length=88</span>
+…</pre>
+</div>
+
+<p class="fine">
+  Header = <code>&gt;{binder_id}</code> + two spaces + <code>key=value</code> tags joined by two spaces.
+  A sidecar <code>sequences_native_metrics.csv</code> is written next to it
+  (<code>cli/extract.py:151</code>) carrying the per-tool native metrics above — the FASTA itself only
+  transports id, sequence, source and length.
+</p>
+
+<div class="note">
+  <strong>Duplicates are removed here by default</strong> (<code>cli/extract.py:87–98</code>,
+  first occurrence wins, prints <code>Removed N duplicate sequence(s)</code>). That matters downstream:
+  <code>merger.py</code> joins on <code>sequence</code> with no dedup of its own, so
+  <code>--keep-duplicates</code> lets one design fan out into several report rows. (Finding F6.)
+</div>
+
+<h3>6.3 Stage 3 · Refolding — what each engine writes</h3>
+
+<p>
+Each engine independently folds <em>target + binder</em> as a complex and writes a flat CSV. They never see
+each other's output. Three of the four share an almost identical schema:
+</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Engine</th><th>Environment</th><th>Output CSV</th><th>Columns written</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Boltz-2</strong><br><span class="fine">primary</span></td>
+      <td class="n"><code>Mosaic/.venv</code></td>
+      <td class="n"><code>boltz2_results.csv</code><br><span class="fine">the script itself writes<br><code>refold_designs.csv</code> into its<br>output dir; the runner copies it</span></td>
+      <td class="n"><code>run_id</code> <code>idx</code> <code>sequence</code> <code>target_sequence</code> <code>binder_length</code><br>
+        <code>iptm_aux</code> <code>bt_ipsae</code> <code>tb_ipsae</code> <code>ipsae_min</code> <code>ipsae_valid</code> <code>bt_iptm</code> <code>binder_ptm</code> <code>plddt_aux</code><br>
+        <code>bb_pae</code> <code>bt_pae_aux</code> <code>tb_pae</code> <code>intra_contact</code> <code>target_contact</code> <code>pTMEnergy</code><br>
+        <code>iptm</code> <code>plddt_binder_{mean,min,max,std}</code> <code>plddt_target_{mean,min}</code><br>
+        <code>pae_{bb,bt,tb}_mean</code> <code>ipae</code> <code>pae_tt_mean</code> <code>pae_overall_mean</code> <code>pae_max</code><br>
+        <code>pdb</code> <code>pae_file</code> <code>plddt_file</code>
+        <br><span class="fine">33 columns — the richest; PAE is native <code>[binder|target]</code></span></td>
+    </tr>
+    <tr>
+      <td><strong>AF3 v3.0.2</strong><br><span class="fine">canonical 2nd opinion</span></td>
+      <td class="n"><code>binder-eval-af3</code><br><span class="fine">needs ≥100 GB GPU mem</span></td>
+      <td class="n"><code>af3_results.csv</code></td>
+      <td class="n"><code>run_id</code> <code>idx</code> <code>sequence</code> <code>target_sequence</code> <code>binder_length</code><br>
+        <code>iptm</code> <code>ptm</code> <code>ranking_score</code><br>
+        <code>plddt_binder_{mean,min}</code> <code>plddt_target_mean</code><br>
+        <code>pae_{bt,tb,bb}_mean</code> <code>pae_overall_mean</code> <code>pae_max</code><br>
+        <code>cif</code> <code>pdb</code> <code>pae_file</code>
+        <br><span class="fine">pLDDT rescaled 0–100 → 0–1 on ingest; PAE is token-order <code>[target|binder]</code> and is transposed</span></td>
+    </tr>
+    <tr>
+      <td><strong>ESMFold2</strong><br><span class="fine">documented default</span></td>
+      <td class="n"><code>binder-eval-esmfold2</code></td>
+      <td class="n"><code>esmfold2_results.csv</code></td>
+      <td class="n">same as AF3, minus <code>ranking_score</code>, plus<br>
+        <code>iptm_pair</code> <code>iptm_pair_min</code>
+        <br><span class="fine"><code>iptm_pair</code> feeds <code>chain_iptm_interface</code> — the autosize gate</span></td>
+    </tr>
+    <tr>
+      <td><strong>Protenix v0.5.0</strong><br><span class="fine">optional; fits 24 GB</span></td>
+      <td class="n"><code>bindmaster_pxdesign</code></td>
+      <td class="n"><code>protenix_results.csv</code></td>
+      <td class="n">identical to AF3<br><span class="fine">PAE also <code>[target|binder]</code></span></td>
+    </tr>
+    <tr>
+      <td><strong>SoluProt 1.0</strong><br><span class="fine">screen, not an engine</span></td>
+      <td class="n"><code>binder-eval-soluprot</code><br><span class="fine">py3.7, scikit-learn 0.20.x</span></td>
+      <td class="n"><code>soluprot_results.csv</code></td>
+      <td class="n"><code>soluprot_score</code> and pass/fail against the threshold<br>
+        <span class="fine">sequence-only, no GPU, runs <em>before</em> refolding; with
+        <code>--soluprot-filter</code> it writes <code>sequences.soluble.fasta</code> and the refolds use that
+        instead</span></td>
+    </tr>
+  </tbody>
+</table></div>
+
+<div class="note">
+  <strong><code>run_id</code> is per-engine, not global.</strong> Boltz-2 emits its own ids while AF3 writes
+  <code>af3_0001</code> and ESMFold2 <code>esmfold2_0001</code>. There is no shared design id across engine
+  CSVs — which is exactly why the merge has to join on <code>sequence</code>.
+</div>
+
+<h4>The shared target MSA</h4>
+
+<div class="flow">first engine to need it ─▶ POST api.colabfold.com/ticket/msa ─▶ poll ─▶ download tar.gz ─▶ extract uniref.a3m
+                                                                                         │
+                          cache key = sha256(target_seq).hexdigest()[:16]                ▼
+                          ~/.cache/bindmaster/target_msa/target_&lt;key&gt;.a3m   ($BINDMASTER_MSA_CACHE overrides)
+                                       │
+        ┌──────────────────────────────┼──────────────────────────────┐
+        ▼                              ▼                              ▼
+   AF3   get_target_msa()      ESMFold2  get_target_msa()      Boltz-2  target_msa_cache_path()
+   fetches on miss             fetches on miss                 NEVER fetches — read-only
+                                                               cold cache ⇒ single-sequence target</div>
+
+<p class="fine">
+  One fetch per target, shared by every engine and every session — this is what stops the ColabFold
+  rate-limit from killing repeat runs. The asymmetry on the right is deliberate (offline compute nodes must
+  not block) but nothing records which mode was used, so a cold-cache Boltz-2 number and a warm-cache AF3
+  number are averaged together as if comparable. (Finding F21.)
+</p>
+
+<h3>6.4 Stage 4 · Merge and score — what we <em>do</em> with it</h3>
+
+<div class="flow">boltz2_results.csv ──┐
+af3_results.csv ─────┤  pd.merge(…, on="sequence", how="outer")      merger.py:68
+esmfold2_results.csv ┤  every non-passthrough column prefixed:
+protenix_results.csv ┘    boltz_* · af3_* · esmfold2_* · protenix_*
+                        passthrough (unprefixed): sequence · target_sequence · binder_length · run_id
+                                 │
+sequences.fasta ─────────────────┤  left-join on `sequence`  →  adds binder_id · source_tool   merger.py:127
+                                 ▼
+                          one row per design, all engines side by side</div>
+
+<div class="tw"><table>
+  <thead><tr><th>Function</th><th>Adds</th><th>What it means</th></tr></thead>
+  <tbody>
+    <tr><td class="n"><code>compute_ipsae_from_pae</code></td>
+      <td class="n"><code>{engine}_bt_ipsae</code> <code>{engine}_tb_ipsae</code><br><code>{engine}_ipsae_min</code> <code>{engine}_ipsae_max</code></td>
+      <td>DunbrackLab 2025 d0res formula from the raw PAE matrix, per direction. <code>ipsae_min</code> = the pessimistic direction. Higher is better.</td></tr>
+    <tr><td class="n"><code>compute_iptm_from_pae</code></td>
+      <td class="n"><code>{engine}_pae_iptm</code></td>
+      <td>iPTM recomputed from PAE rather than trusting the engine's own reported <code>iptm</code>. <strong>These are the only inputs to the ranking.</strong></td></tr>
+    <tr><td class="n"><code>compute_consensus_iptm</code></td>
+      <td class="n"><code>consensus_iptm</code> (max)<br><code>consensus_iptm_mean</code><br><code>consensus_iptm_min</code><br><code>consensus_iptm_spread</code><br><code>consensus_iptm_n</code></td>
+      <td>Across the available <code>*_pae_iptm</code> columns. <code>spread</code> = max − min = engine disagreement. <code>n</code> = how many engines contributed (0–4).</td></tr>
+    <tr><td class="n"><code>rank_by_two_stage</code><br><span class="fine">the default</span></td>
+      <td class="n"><code>passes_max_screen</code><br><code>two_stage_rank</code></td>
+      <td><strong>Stage 1</strong>: keep the top 50% by <code>consensus_iptm</code> (max — lenient recall).<br><strong>Stage 2</strong>: order survivors by <code>consensus_iptm_mean</code> (strict consensus).</td></tr>
+    <tr><td class="n"><code>compute_agreement</code></td>
+      <td class="n"><code>agreement_count</code></td>
+      <td>How many engines put this design past <code>ipsae_min &gt; 0.61</code>. A diagnostic, not a sort key.</td></tr>
+    <tr><td class="n"><code>apply_screening_thresholds</code></td>
+      <td class="n"><code>quality_tier</code></td>
+      <td>high &gt; 0.80 · medium 0.61–0.80 · low 0.40–0.61 · reject ≤ 0.40, on <code>ipsae_min</code>.</td></tr>
+    <tr><td class="n"><code>add_design_groups</code></td>
+      <td class="n"><code>design_group</code></td>
+      <td>Collapses near-duplicate variants of one backbone: Protein-Hunter <code>_c&lt;cycle&gt;</code> and BindCraft <code>_mpnn&lt;N&gt;</code> are stripped so one trajectory counts once.</td></tr>
+    <tr><td class="n"><code>annotate_wetlab_recommended</code></td>
+      <td class="n"><code>wetlab_recommended</code><br><code>wetlab_reason</code></td>
+      <td>SoluProt pass + <code>agreement_count ≥ 2</code> + binder pLDDT ≥ 0.50. <span class="fine">Always false on a single-engine install — F34.</span></td></tr>
+    <tr><td class="n"><code>add_chain_iptm_interface</code></td>
+      <td class="n"><code>chain_iptm_interface</code></td>
+      <td>From ESMFold2's <code>iptm_pair</code>; the gate the autosize loop counts passers against.</td></tr>
+    <tr><td class="n"><code>rank_by_adaptyv_method</code><br><code>rank_by_consensus_iptm</code></td>
+      <td class="n"><code>adaptyv_rank</code><br><code>consensus_rank</code></td>
+      <td>Kept as alternative orderings/columns; no longer the default sort.</td></tr>
+  </tbody>
+</table></div>
+
+<h3>6.5 Stage 5 · The report</h3>
+
+<div class="flow">runs/&lt;name&gt;/evaluate/
+├── sequences.fasta                  ← extract      (the join key is defined here)
+├── sequences_native_metrics.csv     ← extract      (per-tool self-scores)
+├── sequences.soluble.fasta          ← soluprot     (only with --soluprot-filter)
+├── soluprot_results.csv             ← soluprot
+├── boltz2_results.csv               ← refold-boltz2
+├── af3_results.csv                  ← refold-af3
+├── esmfold2_results.csv             ← refold-esmfold2
+├── protenix_results.csv             ← refold-protenix   (when the pxdesign env exists)
+└── report/
+    ├── report.html                  ← the deliverable
+    ├── metrics.csv                  ← every design, every column
+    ├── top30_candidates.csv         ← the wet-lab shortlist
+    ├── metrics_zscore.csv           ← per-metric z-scores
+    ├── summary.json                 ← per-tool aggregates
+    └── structures/                  ← PDB/CIF for the 3D viewer</div>
+
+<p><code>report.html</code> sections, in order:</p>
+<ol>
+  <li><strong>Screening Summary</strong> — counts by tier, what passed the screen</li>
+  <li><strong>Top 30 Binders</strong> — the ranked table (plus a slim decision variant)</li>
+  <li><strong>Metric Distributions by Tool</strong> — base64-embedded plots</li>
+  <li><strong>Tool Comparison</strong> — per-tool mean ± std, and the same designs across engines</li>
+  <li><strong>3D Structure Viewer — Top 20</strong> — NGL, <span class="no">loaded from unpkg.com</span> (F20)</li>
+  <li><strong>Two-stage selection — max-screen vs mean-rank</strong> — methodology block <span class="no">(still describes the reverted mean-screen default — F32)</span></li>
+  <li><strong>Full Metrics Table</strong></li>
+</ol>
+
+<h2 id="gaps">7 · Where the click path and the flag path diverge</h2>
+
+<p>
+The generators handle all seven tools. The <em>user-interface</em> layers were written when there were four,
+and three of them were never updated. This table is the single most useful thing to know when driving the
+pipeline by menu:
+</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Surface</th><th class="n">Mosaic</th><th class="n">BoltzGen</th><th class="n">BindCraft</th><th class="n">PXDesign</th><th class="n">Proteina</th><th class="n">Prot-Hunter</th><th class="n">RFD3</th></tr></thead>
+  <tbody>
+    <tr><td>Wizard Step 5 — offered</td>
+      <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+    <tr><td>Step 7 preview tree <span class="fine">(<code>print_tree</code>)</span></td>
+      <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="no">NO</td><td class="no">NO</td><td class="no">NO</td></tr>
+    <tr><td>"To run later" list</td>
+      <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="no">NO</td><td class="no">NO</td></tr>
+    <tr><td>"Run the pipeline now?" <span class="fine">(<code>run_pipeline</code>)</span></td>
+      <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="no">NO</td><td class="no">NO</td></tr>
+    <tr><td><code>run_all.sh</code> generator</td>
+      <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+    <tr><td><code>run_evaluate.sh</code> extract flags</td>
+      <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes<span class="fine">*</span></td></tr>
+    <tr><td><code>configure --status</code></td>
+      <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+    <tr><td>TUI status / run picker</td>
+      <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="no">NO</td><td class="no">NO</td><td class="no">NO</td></tr>
+    <tr><td><code>binder-compare run</code></td>
+      <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="no">NO</td><td class="no">NO</td><td class="no">NO</td></tr>
+  </tbody>
+</table></div>
+<p class="fine">
+  <span class="fine">*</span> the flag is emitted, but it points at <code>rfd3/outputs</code> while
+  <code>run_rfd3.sh</code> writes <code>rfd3/sequences.csv</code> — so the directory handed to the extractor
+  is empty (F3).
+</p>
+
+<h3>Driving it entirely by menu — the practical recipe</h3>
+
+<ol>
+  <li><code>bindmaster</code> → <strong>Install tools</strong> → toggle what you want → <kbd>Enter</kbd> →
+      <code>y</code>. Answer <strong>no</strong> to every "Remove and reclone?" if you already have a working
+      install.<br>
+      <span class="fine">Then, unavoidably by flag, for the default refold engine:
+      <code>bash install/install.sh --tool esmfold2</code> — the menu cannot reach it.</span></li>
+  <li><code>bindmaster</code> → <strong>Configure run</strong> → walk the 7 steps. Prefer a <code>.pdb</code>
+      target over <code>.cif</code> (F1), and check the residue count on the
+      <code>✓ Auto-extracted sequence</code> line.</li>
+  <li>Answer <strong>no</strong> to "Run the pipeline now?" if you enabled RFD3 or Protein-Hunter, then run
+      <code>bash runs/&lt;name&gt;/run_all.sh</code> — it is the only launcher that covers all seven. If Mosaic
+      is enabled, run <code>run_mosaic.sh</code> first (F8).</li>
+  <li><code>bash runs/&lt;name&gt;/run_evaluate.sh</code> — <em>not</em> the TUI's "Evaluate results" and not the
+      <code>evaluate</code> shortcut, both of which error out (§5). Add
+      <code>--rfd3 runs/&lt;name&gt;/rfd3</code> to the extract call yourself if RFD3 ran.</li>
+  <li>Open <code>runs/&lt;name&gt;/evaluate/report/report.html</code>. Sort on
+      <code>consensus_iptm_mean</code> and check <code>consensus_iptm_n</code> before trusting a top row
+      (F5).</li>
+</ol>
+
+<hr>
+<p class="fine">
+  All screen text, filenames, column names and line references were read from the working tree at
+  <code>a600090</code>; nothing was inferred from documentation. Terminal transcripts are faithful
+  reconstructions — the prompt strings, defaults, option lists and ordering are verbatim from source, while
+  the values typed in and the target/run names are illustrative. No installer, wizard or GPU workload was
+  executed, and no repository source code was modified.
+</p>
+
+</div>
+</body>
+</html>

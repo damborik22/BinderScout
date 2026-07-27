@@ -18,7 +18,9 @@ Key findings implemented here:
 
 from __future__ import annotations
 
+import math
 import re
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -31,9 +33,17 @@ IPSAE_MIN_THRESHOLD = 0.40  # Below this → very unlikely binder
 SHAPE_COMP_PREFILTER = 0.62  # Pre-filter from meta-analysis
 RMSD_BINDER_PREFILTER = 3.73  # Å, pre-filter from meta-analysis
 
+# ---- Cross-engine support gate for the two-stage screen ----
+# The pipeline runs exactly three independent refold engines (Boltz-2, AF3,
+# ESMFold2), so the default demands agreement from all of them. Two is the floor:
+# a "cross-engine" consensus built from one engine is just that engine's opinion,
+# and for Mosaic/Protein-Hunter designs that engine is the one that designed them.
+MIN_ENGINES_DEFAULT = 3
+MIN_ENGINES_FLOOR = 2
+
 # PAE cutoff for Dunbrack ipSAE formula (Å).
 # Uniform 10 Å for all engines so that ipSAE scores are directly comparable
-# across Boltz-2 and other refolders (Protenix on x86, AF3 on aarch64).
+# across Boltz-2 and the other refolders (AF3, ESMFold2).
 # Overath et al. (2025) thresholds (0.61, 0.80) were calibrated with a 10 Å
 # cutoff on AF3 data.
 IPSAE_PAE_CUTOFF = 10.0
@@ -243,7 +253,7 @@ def add_boltz_ipsae_from_files(
 
 
 # ---------------------------------------------------------------------------
-# Generic PAE → DunbrackLab ipSAE loader (for Protenix, AF3, and future engines)
+# Generic PAE → DunbrackLab ipSAE loader (for AF3, ESMFold2, and future engines)
 # ---------------------------------------------------------------------------
 
 
@@ -261,7 +271,7 @@ def add_ipsae_from_pae_files(
 
     Engine-agnostic version of ``add_boltz_ipsae_from_files``. Adds columns
     ``{prefix}_bt_ipsae``, ``{prefix}_tb_ipsae``, ``{prefix}_ipsae_min``,
-    ``{prefix}_ipsae_max`` where ``prefix`` is e.g. "protenix" or "af3".
+    ``{prefix}_ipsae_max`` where ``prefix`` is e.g. "af3" or "esmfold2".
 
     Args:
         df:              DataFrame with engine refolding results.
@@ -269,9 +279,9 @@ def add_ipsae_from_pae_files(
         binder_length_col: Column with binder sequence length.
         pae_cutoff:      PAE cutoff in Å (default 10 Å, uniform across engines).
         base_dir:        Base directory for resolving relative PAE file paths.
-        prefix:          Output column prefix (e.g. 'protenix', 'af3').
+        prefix:          Output column prefix (e.g. 'af3', 'esmfold2').
         ordering:        'binder_target' or 'target_binder' — how the PAE matrix
-                         is laid out. Protenix and AF3 both default to
+                         is laid out. AF3 and ESMFold2 both default to
                          'target_binder' because we always put target first in
                          the input JSON.
     """
@@ -340,7 +350,7 @@ def add_iptm_from_pae_files(
         pae_file_col:    Column containing paths to PAE .npy files.
         binder_length_col: Column with binder sequence length.
         ordering:        PAE matrix ordering ('binder_target' or 'target_binder').
-        prefix:          Column name prefix ('boltz', 'protenix', or 'af3').
+        prefix:          Column name prefix ('boltz', 'af3', or 'esmfold2').
         base_dir:        Base directory for resolving relative PAE file paths.
     """
     result = df.copy()
@@ -380,10 +390,9 @@ def add_iptm_from_pae_files(
 
 
 # Per-engine iPSAE thresholds — calibrated for the DunbrackLab 2025 formula at 10 Å cutoff.
-# AF2 caps low on short targets (per INVESTIGATION_RANKING_DISCREPANCY.md §6); kept informational.
+# AF2 caps low on short targets (per docs/INVESTIGATION_RANKING_DISCREPANCY.md §6); kept informational.
 DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {
     "boltz": IPSAE_PASS_THRESHOLD,  # 0.61
-    "protenix": IPSAE_PASS_THRESHOLD,  # 0.61
     "af3": IPSAE_PASS_THRESHOLD,  # 0.61 — DunbrackLab cutoff was tuned for AF3
     "esmfold2": IPSAE_PASS_THRESHOLD,  # 0.61 — same cutoff until empirical calibration suggests otherwise
     "af2": 0.30,  # informational only; AF2 distribution caps low
@@ -391,10 +400,9 @@ DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {
 
 # Map engine key → DunbrackLab PAE-derived ipsae_min column.
 # NOTE: Boltz uses the prefixed `boltz_pae_*` columns (special add_boltz_ipsae_from_files
-# pipeline), while Protenix/AF3/AF2 use plain `<engine>_ipsae_min` (from add_ipsae_from_pae_files).
+# pipeline), while AF3/ESMFold2 use plain `<engine>_ipsae_min` (from add_ipsae_from_pae_files).
 _ENGINE_IPSAE_COLS: dict[str, str] = {
     "boltz": "boltz_pae_ipsae_min",
-    "protenix": "protenix_ipsae_min",
     "af3": "af3_ipsae_min",
     "esmfold2": "esmfold2_ipsae_min",
     "af2": "af2_ipsae_min",
@@ -409,7 +417,7 @@ def apply_screening_thresholds(
     """Add Boolean screening flags and quality tier column.
 
     Per-engine flags added (when the corresponding PAE-derived ipsae column is present):
-        passes_boltz_filter, passes_protenix_filter, passes_af3_filter
+        passes_boltz_filter, passes_af3_filter, passes_esmfold2_filter
         passes_af2_filter_informational  (AF2 uses a relaxed 0.30 cutoff; informational only)
 
     Aggregate flags (derived from `primary_engine` so existing reports still work):
@@ -575,8 +583,13 @@ def compute_iptm_from_pae(
             ]
         )
 
-    # Global d0 (uses total chain lengths, no minimum of 27)
-    d0 = max(1.0, 1.24 * (L_b + L_t - 15) ** (1.0 / 3.0) - 1.8)
+    # Global d0 (uses total chain lengths, no minimum of 27 — unlike _d0 for ipSAE).
+    # np.cbrt, not ** (1/3): for a total under 15 residues the base is negative and
+    # Python's ** returns a COMPLEX number, so max(1.0, complex) raised TypeError.
+    # np.cbrt takes the real cube root, giving the negative value the formula intends,
+    # which the max() then floors to 1.0. Unreachable via the configurator (binders are
+    # >= 10 aa and targets larger) but reachable from sequence-only mode.
+    d0 = max(1.0, 1.24 * float(np.cbrt(L_b + L_t - 15)) - 1.8)
 
     pae_bt = pae[:L_b, L_b:]  # shape [L_b, L_t]
     pae_tb = pae[L_b:, :L_b]  # shape [L_t, L_b]
@@ -607,15 +620,14 @@ def compute_agreement(
     Uses per-engine thresholds (defaulting to *threshold* for backward compat
     when `engine_thresholds` not supplied). AF2 is **excluded** from the count
     because its DunbrackLab distribution is mis-calibrated on short targets
-    (see INVESTIGATION_RANKING_DISCREPANCY.md §6).
+    (see docs/INVESTIGATION_RANKING_DISCREPANCY.md §6).
 
-    Adds column 'agreement_count' (0–4: Boltz-2, Protenix, AF3, ESMFold2 over their thresholds).
+    Adds column 'agreement_count' (0–3: Boltz-2, AF3, ESMFold2 over their thresholds).
     """
     result = df.copy()
     thresholds = {**DEFAULT_ENGINE_THRESHOLDS, **(engine_thresholds or {})}
     engine_cols = {
         "boltz": "boltz_pae_ipsae_min",
-        "protenix": "protenix_ipsae_min",
         "af3": "af3_ipsae_min",
         "esmfold2": "esmfold2_ipsae_min",
     }
@@ -641,7 +653,6 @@ _ENGINE_IPTM_COLS: list[str] = [
     "boltz_pae_iptm",
     "af3_pae_iptm",
     "esmfold2_pae_iptm",
-    "protenix_pae_iptm",
 ]
 
 
@@ -683,7 +694,7 @@ def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     confident" lands on the right one each time.
 
     NOTE: this scores *binder vs non-binder*; the same benchmark showed it does **not**
-    rank affinity among binders (see docs/plans.md Part N — that needs interface ΔG).
+    rank affinity among binders (see docs/completed_plans.md Part N — that needs interface ΔG).
 
     Adds:
         consensus_iptm        — max over available {engine}_pae_iptm columns (NaN if none).
@@ -703,7 +714,7 @@ def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
         return result
     numeric = result[present].apply(pd.to_numeric, errors="coerce")
     # max = binder screen (recall); mean/min = consensus re-rank (precision). See
-    # rank_by_two_stage and docs/plans.md Part N (exhaustive two-stage analysis).
+    # rank_by_two_stage and docs/completed_plans.md Part N (exhaustive two-stage analysis).
     result["consensus_iptm"] = numeric.max(axis=1)
     result["consensus_iptm_mean"] = numeric.mean(axis=1)
     result["consensus_iptm_min"] = numeric.min(axis=1)
@@ -722,7 +733,6 @@ _ENGINE_IPSAE_MIN_COLS: list[str] = [
     "boltz_pae_ipsae_min",
     "af3_ipsae_min",
     "esmfold2_ipsae_min",
-    "protenix_ipsae_min",
 ]
 
 
@@ -731,7 +741,7 @@ def compute_consensus_ipsae(df: pd.DataFrame) -> pd.DataFrame:
     DunbrackLab ipSAE_min.
 
     Parallels :func:`compute_consensus_iptm`: averages the independent engines'
-    interface ipSAE_min (boltz / af3 / esmfold2 [/ protenix]). The metric being
+    interface ipSAE_min (boltz / af3 / esmfold2). The metric being
     averaged is each engine's ``ipsae_min`` (hence ``_min_mean``). Diagnostic /
     reporting column — the primary ranker stays the two-stage iptm.
 
@@ -787,11 +797,27 @@ def rank_by_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     return result.reset_index(drop=True)
 
 
-def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5, screen_metric: str = "max") -> pd.DataFrame:
+def rank_by_two_stage(
+    df: pd.DataFrame,
+    screen_frac: float = 0.5,
+    screen_metric: str = "max",
+    min_engines: int = MIN_ENGINES_DEFAULT,
+) -> pd.DataFrame:
     """Two-stage ranking — the EVALUATOR benchmark recommendation for wet-lab selection.
 
+    Stage 0 — cross-engine support gate. A design scored by a single engine has
+    ``consensus_iptm_mean`` equal to that one engine's value (``DataFrame.mean``
+    skips NaN), so it would compete against 3-engine means on an incomparable
+    scale. Worse, the single engine is often the one biased in the design's favour
+    — Mosaic *is* Boltz-2 gradient hallucination, so a Mosaic design that only
+    Boltz-2 refolded could top the list on the strength of its own designer. Only
+    designs with ``consensus_iptm_n >= min_engines`` are eligible for the screen.
+    Default ``MIN_ENGINES_DEFAULT`` (all three of Boltz-2 / AF3 / ESMFold2);
+    ``MIN_ENGINES_FLOOR`` is the lowest meaningful value, since "cross-engine"
+    requires at least two.
+
     Stage 1 — screen by the ``screen_metric`` consensus iptm: keep the top
-    ``screen_frac`` as the binder-likely pool (the recall step).
+    ``screen_frac`` of the eligible pool (the recall step).
     ``screen_metric="max"`` (default) screens by ``consensus_iptm`` (max over
     engines) — the lenient recall step: keep a design if *any* engine rates it
     highly, so a genuine binder is not dropped just because one engine's per-target
@@ -810,31 +836,56 @@ def rank_by_two_stage(df: pd.DataFrame, screen_frac: float = 0.5, screen_metric:
     Ranks ALL rows (the screen is a flag + ordering, nothing is dropped):
     ``passes_max_screen`` is the primary sort key, so all screen survivors sort
     above all non-survivors regardless of their mean; within each group rows are
-    ordered by ``consensus_iptm_mean``. The head of the list is therefore the
-    genuine two-stage result. Adds:
-        passes_max_screen — bool, in the top ``screen_frac`` by the screen metric
+    ordered by ``consensus_iptm_mean``, then by ``consensus_iptm_n`` so a design
+    backed by more engines outranks an equal mean backed by fewer. The head of the
+    list is therefore the genuine two-stage result. Adds:
+        passes_max_screen — bool, eligible AND in the top ``screen_frac``
         two_stage_rank    — 1 = best
+
+    Raises:
+        ValueError: if ``min_engines`` is below ``MIN_ENGINES_FLOOR``.
 
     NOTE: this ranks binder-vs-non-binder *confidence*, NOT affinity among binders
     (every confidence metric inverts against Kd — strongest binders score lowest).
     Affinity ranking needs the interface-ΔG term (see comparison.affinity, Part N).
 
-    See docs/plans.md Part N for the exhaustive two-stage analysis.
+    See docs/completed_plans.md Part N for the exhaustive two-stage analysis.
     """
     result = df.copy()
     if "consensus_iptm" not in result.columns or "consensus_iptm_mean" not in result.columns:
         result = compute_consensus_iptm(result)
 
+    if min_engines < MIN_ENGINES_FLOOR:
+        raise ValueError(
+            f"min_engines={min_engines} is below the floor of {MIN_ENGINES_FLOOR}: "
+            f"a cross-engine consensus needs at least {MIN_ENGINES_FLOOR} engines."
+        )
+
     screen_col = "consensus_iptm_mean" if screen_metric == "mean" else "consensus_iptm"
     cons = pd.to_numeric(result[screen_col], errors="coerce")
-    eligible = cons.notna()
+    n_eng = pd.to_numeric(result.get("consensus_iptm_n", 0), errors="coerce").fillna(0)
+    eligible = cons.notna() & (n_eng >= min_engines)
     n_eligible = int(eligible.sum())
-    n_keep = round(n_eligible * screen_frac)
+
+    # Tell the operator when the gate — not the data — emptied the screen, and how
+    # to proceed. Silently returning an all-False passes_max_screen looks like
+    # "no good designs" when it actually means "not enough engines were run".
+    n_available = int(n_eng.max()) if len(n_eng) else 0
+    if n_eligible == 0 and cons.notna().any():
+        warnings.warn(
+            f"[two-stage] no design was refolded by {min_engines}+ engines "
+            f"(best coverage in this pool: {n_available}), so nothing passes the Stage-1 screen. "
+            f"Run the missing engine(s), or lower the gate with --min-engines "
+            f"{max(MIN_ENGINES_FLOOR, n_available)}.",
+            stacklevel=2,
+        )
+
+    n_keep = math.ceil(n_eligible * screen_frac)
     thr = cons[eligible].nlargest(n_keep).min() if n_keep else float("inf")
     result["passes_max_screen"] = eligible & (cons >= thr)
 
-    sort_keys = ["passes_max_screen", "consensus_iptm_mean", "consensus_iptm"]
-    ascending = [False, False, False]
+    sort_keys = ["passes_max_screen", "consensus_iptm_mean", "consensus_iptm_n", "consensus_iptm"]
+    ascending = [False, False, False, False]
     for col in ("plddt_binder_mean", "boltz_plddt_binder_mean"):
         if col in result.columns:
             sort_keys.append(col)
@@ -995,9 +1046,28 @@ def annotate_wetlab_recommended(
 
     if "agreement_count" in out.columns:
         agreement = pd.to_numeric(out["agreement_count"], errors="coerce")
-        for i, val in enumerate(agreement):
-            if pd.notna(val) and val < agreement_min:
-                reasons[i].append(f"agreement {int(val)} < {agreement_min}")
+        # agreement_count cannot exceed the number of engines that actually ran, and a
+        # single-engine run is a supported, auto-detected configuration (evaluate.sh
+        # skips engines whose conda env is absent). Applying the >= 2 rule there failed
+        # EVERY design for a reason the operator cannot act on by improving a design,
+        # which makes the whole column uninformative. Treat it as unknown instead.
+        # Treated as "unknown", consistent with this function's NaN policy: unknowns do
+        # not block. Warn once so the operator knows the criterion was not applied.
+        n_engines = 0
+        if "consensus_iptm_n" in out.columns:
+            counts = pd.to_numeric(out["consensus_iptm_n"], errors="coerce")
+            n_engines = int(counts.max()) if counts.notna().any() else 0
+        if n_engines and n_engines < agreement_min:
+            warnings.warn(
+                f"[wetlab] only {n_engines} refold engine(s) in this pool, so cross-engine "
+                f"agreement (>= {agreement_min}) could not be assessed and was NOT applied to "
+                f"wetlab_recommended. Run a second engine before trusting this column.",
+                stacklevel=2,
+            )
+        else:
+            for i, val in enumerate(agreement):
+                if pd.notna(val) and val < agreement_min:
+                    reasons[i].append(f"agreement {int(val)} < {agreement_min}")
 
     if "plddt_binder_min" in out.columns:
         plddt_min = pd.to_numeric(out["plddt_binder_min"], errors="coerce")

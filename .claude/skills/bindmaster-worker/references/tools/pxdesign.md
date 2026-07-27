@@ -18,7 +18,7 @@
 - **Tool weights downloaded:** `download_tool_weights.sh` must have run once. Auto-downloads on first launch otherwise — accept the one-time delay.
 - **`PROTENIX_DATA_ROOT_DIR`** set if CCD cache is not in default location (`${project_root}/release_data/ccd_cache`).
 - **PyTorch with CUDA** (not the CPU-only torch from `requirements.txt`). If you ran `pip install -r requirements.txt` manually without the installer's followup, you have CPU torch. See `troubleshooting.md` §5.5.
-- **Post-install patches applied:** the BindMaster `install/install.sh` patches `protenix` (CUDA arch for Blackwell sm_120), `pxdbench` (`NumpyEncoder` JSON serialization), and `configs_infer.py` (num_workers). These are reapplied on each install but lost on manual `pip install --upgrade`. Verify with `install.sh --pxdesign --check` (if available) or rerun the installer.
+- **Post-install patches applied:** the BindMaster `install/install.sh` patches `protenix` (CUDA arch for Blackwell sm_120), `pxdbench` (`NumpyEncoder` JSON serialization), and `configs_infer.py` (num_workers). These are reapplied on each install but lost on manual `pip install --upgrade`. There is no `--check` mode — rerun `bindmaster install --tool pxdesign`, which resumes into the existing env and reapplies them.
 - **MSA path** in YAML pre-computed and exists. PXDesign supports per-target MSA in `target.chains.<id>.msa`; pre-compute saves significant per-design time.
 
 ## OOM / hardware limits

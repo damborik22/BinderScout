@@ -22,6 +22,7 @@ BINDCRAFT_DIR="${BINDMASTER_DIR}/BindCraft"
 BOLTZGEN_DIR="${BINDMASTER_DIR}/BoltzGen"
 MOSAIC_DIR="${BINDMASTER_DIR}/Mosaic"
 EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
+FOUNDRY_WEIGHTS_DIR="${BINDMASTER_DIR}/weights/foundry"
 # AlphaFold 3 (DeepMind, Evaluator refolding). NOT a real PyPI package — the
 # "alphafold3" PyPI name is an unrelated stub. Installed from the official repo
 # (pinned); refold_af3.py resolves run_alphafold.py at ${AF3_DIR}. alphafold3/ gitignored.
@@ -40,6 +41,7 @@ PXDESIGN_DIR="${BINDMASTER_DIR}/PXDesign"
 
 ARCH="$(uname -m)"     # expected: aarch64
 CUDA_VERSION="13.0"    # DGX Spark GB10 (Blackwell, sm_121)
+FOUNDRY_VERSION="0.1.9"   # rc-foundry release pinned for RFD3 (matches install.sh)
 
 # Pre-cached resources: two levels up → Documents/OLD/BindMaster/bindcraft-tools
 _default_tools="$(cd "${BINDMASTER_DIR}" && cd ../../Documents/OLD/BindMaster/bindcraft-tools 2>/dev/null && pwd || true)"
@@ -58,8 +60,11 @@ RESET='\033[0m'
 # ─── Defaults ─────────────────────────────────────────────────────────────────
 SKIP_EXAMPLES=false
 AUTO_YES=false
+SKIP_PREFLIGHT=false
+FORCE=false      # --force: allow --yes to accept DESTRUCTIVE prompts (reclone / env re-create)
 UNINSTALL_MODE=false
-TOOL_SPECIFIED=false   # set to true when --tool is passed on CLI
+TOOL_SPECIFIED=false
+TOOL_ALL=false         # --tool all was given; uninstall widens this to every optional add-on   # set to true when --tool is passed on CLI
 STANDALONE="auto"      # auto | true | false — controls local Miniforge install
 
 # Per-tool install flags (set by arg parsing or interactive menu)
@@ -69,8 +74,10 @@ DO_MOSAIC=false
 DO_EVALUATOR=false
 DO_PXDESIGN=false
 DO_AF3=false            # opt-in via --tool af3 (gated weights; not in --tool all)
-DO_ESMFOLD2=false       # opt-in via --tool esmfold2 (lightweight 4th refold engine; no gated weights)
-DO_SOLUPROT=false       # opt-in via --tool soluprot (sequence-only E. coli solubility screen; aarch64-enabled via source-built USEARCH v12 + --no_tmhmm model)
+DO_RFD3=false           # opt-in via --tool rfd3. Should work (pip-only, no DGL) but is
+                        # UNVALIDATED on aarch64 hardware, so it is kept out of --tool all.
+DO_ESMFOLD2=false       # in --tool all (default refold engine) (lightweight 4th refold engine; no gated weights)
+DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen; source-builds scikit-learn 0.20.4 + USEARCH v12, uses the --no_tmhmm model)
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -79,7 +86,17 @@ while [[ $# -gt 0 ]]; do
             TOOL_SPECIFIED=true
             case "${2,,}" in
                 all)
-                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true ;;
+                    TOOL_ALL=true
+                    # ESMFold2 is the DEFAULT refold engine, so `all` must include it —
+                    # otherwise evaluate.sh skips it and consensus_iptm is built from
+                    # fewer engines than the two-stage ranking assumes.
+                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true
+                    DO_ESMFOLD2=true      # RFD3 is opt-in here: --tool rfd3 (see the note on DO_RFD3)
+                    # SoluProt screens the pool BEFORE any GPU refolding, so a full
+                    # install without it cannot run the documented workflow. On this
+                    # platform it also source-builds scikit-learn 0.20.4 and USEARCH
+                    # v12, so `all` now requires a C/C++ toolchain.
+                    DO_SOLUPROT=true ;;
                 bindcraft)
                     DO_BINDCRAFT=true ;;
                 boltzgen)
@@ -90,6 +107,15 @@ while [[ $# -gt 0 ]]; do
                     DO_EVALUATOR=true ;;
                 pxdesign)
                     DO_PXDESIGN=true ;;
+                rfd3|foundry)
+                    DO_RFD3=true ;;
+                protein-hunter|protein_hunter|phunter)
+                    echo -e "${RED}Protein-Hunter is not supported on aarch64: PyRosetta publishes no aarch64 wheels.${RESET}"
+                    exit 1 ;;
+                proteina-complexa|proteina_complexa|complexa)
+                    echo -e "${RED}Proteina-Complexa is not yet wired into the aarch64 installer.${RESET}"
+                    echo -e "${YELLOW}  PyTorch Geometric and torchtext may lack aarch64 wheels — see README aarch64 notes.${RESET}"
+                    exit 1 ;;
                 af3|alphafold3|alphafold)
                     DO_AF3=true ;;
                 esmfold2|esm|esmfold)
@@ -97,7 +123,7 @@ while [[ $# -gt 0 ]]; do
                 soluprot|solu|solubility)
                     DO_SOLUPROT=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, pxdesign, af3, esmfold2, soluprot${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, pxdesign, rfd3, af3, esmfold2, soluprot${RESET}"
                     exit 1
                     ;;
             esac
@@ -119,6 +145,14 @@ while [[ $# -gt 0 ]]; do
             AUTO_YES=true
             shift
             ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
+        --skip-preflight)
+            SKIP_PREFLIGHT=true
+            shift
+            ;;
         --standalone)
             STANDALONE=true
             shift
@@ -133,15 +167,19 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--tool TOOL] [--tools-dir PATH] [--cuda VERSION] [--skip-examples] [--yes]
+Usage: $0 [--tool TOOL] [--tools-dir PATH] [--cuda VERSION] [--skip-examples] [--yes] [--force]
        $0 --uninstall --tool <tool|all> [--yes]
 
 DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstream on first install.
 
   --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
-                  all                  bindcraft, boltzgen, mosaic, evaluator, pxdesign
+                  all                  bindcraft, boltzgen, mosaic, evaluator, pxdesign,
+                                       esmfold2 (the default refold engine)
                   bindcraft|boltzgen|mosaic|evaluator|pxdesign
                                        install one tool
+                  rfd3                 RFD3 / foundry — opt-in on aarch64. Pure pip (no DGL),
+                                       so it should work, but it is UNVALIDATED on aarch64
+                                       hardware and is therefore not in --tool all.
                   af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
                                        gated AF3 weights you obtain from
                                        https://github.com/google-deepmind/alphafold3
@@ -157,7 +195,15 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
   --cuda        CUDA version (default: 13.0). Only 13.0 has been tested on DGX Spark (GB10).
   --skip-examples
                 Do not prompt to run bundled examples after install.
-  --yes, -y     Auto-confirm all prompts (useful for non-interactive/CI runs).
+  --yes, -y     Auto-confirm SAFE prompts (proceed?, run the example?) — for
+                non-interactive / CI runs. Destructive prompts (re-clone a tool
+                repo, re-create a conda env, remove the local Miniforge3) are
+                auto-answered NO, so a repeat install keeps existing files and
+                downloaded weights. Pair with --force to replace them.
+  --skip-preflight  Skip the disk/GPU/network checks run before downloading.
+  --force       Let --yes accept the destructive prompts too. Re-clones tool
+                repos and re-creates conda envs, DELETING what is there —
+                including BindCraft/params/*.npz (~4 GB of AF2 weights).
   --standalone  Force local Miniforge3 install into BindMaster/conda/ (server-friendly).
                 All envs and shortcuts stay inside the project directory.
   --system-conda
@@ -264,14 +310,10 @@ run_logged() {
     return ${rc}
 }
 
-# confirm <prompt>
-# Returns 0 (yes) or 1 (no).
-confirm() {
+# _confirm_interactive <prompt>
+# The shared read loop. Default (bare Enter) is NO for every prompt in this script.
+_confirm_interactive() {
     local prompt="${1:-Are you sure?}"
-    if [[ "${AUTO_YES}" == true ]]; then
-        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}y (auto-yes)"
-        return 0
-    fi
     while true; do
         read -rp "$(echo -e "${YELLOW}${prompt} [y/N]: ${RESET}")" answer
         case "${answer,,}" in
@@ -280,6 +322,38 @@ confirm() {
             *) echo "Please answer y or n." ;;
         esac
     done
+}
+
+# confirm <prompt>
+# For SAFE prompts (proceed?, run the example?). --yes auto-accepts.
+# Returns 0 (yes) or 1 (no).
+confirm() {
+    local prompt="${1:-Are you sure?}"
+    if [[ "${AUTO_YES}" == true ]]; then
+        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}y (auto-yes)"
+        return 0
+    fi
+    _confirm_interactive "$prompt"
+}
+
+# confirm_destructive <prompt>
+# For prompts that DELETE existing work (re-clone a tool repo, re-create a conda env,
+# remove the local Miniforge3). --yes must NOT accept these: `--tool all --yes` is both
+# the documented non-interactive install AND the documented repair step, so auto-yes
+# turned a repeat run into `rm -rf BindCraft/` — including params/*.npz, ~4 GB of AF2
+# weights that Proteina-Complexa symlinks against. It also inverted the prompt's own
+# displayed default of [y/N]. --force opts in explicitly.
+confirm_destructive() {
+    local prompt="${1:-Are you sure?}"
+    if [[ "${FORCE}" == true ]]; then
+        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}y (--force)"
+        return 0
+    fi
+    if [[ "${AUTO_YES}" == true ]]; then
+        echo -e "${YELLOW}${prompt} [y/N]: ${RESET}n (auto-yes keeps existing files; use --force to replace)"
+        return 1
+    fi
+    _confirm_interactive "$prompt"
 }
 
 # smoke_test <label> <command...>
@@ -562,7 +636,7 @@ select_tools_interactive() {
         "Binder design via AlphaFold2 (conda, Python 3.10)"
         "Structure generation with Boltz-1 (conda, Python 3.12)"
         "JAX-based protein design with Marimo notebooks (uv venv)"
-        "Evaluate binders: refold with Boltz-2 (+ Protenix, AF3 on DGX Spark), ranked report (requires Mosaic)"
+        "Evaluate binders: refold with Boltz-2 (+ AF3, ESMFold2 if installed), ranked report (requires Mosaic)"
         "Protenix-based de novo binder design (conda)"
     )
 
@@ -634,7 +708,8 @@ select_tools_interactive() {
     [[ "$DO_EVALUATOR" == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
     [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
     [[ "$DO_AF3"       == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; weights required)${RESET}"
-    [[ "$DO_ESMFOLD2"  == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (opt-in refolder)"
+    [[ "$DO_RFD3"      == true ]] && echo -e "    ${GREEN}✓${RESET} RFD3 (opt-in; unvalidated on aarch64)"
+    [[ "$DO_ESMFOLD2"  == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (default refolder)"
     [[ "$DO_SOLUPROT"  == true ]] && echo -e "    ${GREEN}✓${RESET} SoluProt (opt-in solubility screen; aarch64 via source build)"
     echo ""
 
@@ -802,7 +877,7 @@ install_bindcraft() {
     print_step "Cloning BindCraft repository"
     if [[ -d "${BINDCRAFT_DIR}" ]]; then
         print_warn "Directory ${BINDCRAFT_DIR} already exists."
-        if confirm "Remove and reclone?"; then
+        if confirm_destructive "Remove and reclone?"; then
             rm -rf "${BINDCRAFT_DIR}" || { print_fail "Failed to remove ${BINDCRAFT_DIR}"; return 1; }
         else
             print_warn "Skipping reclone; using existing directory."
@@ -845,7 +920,7 @@ install_bindcraft() {
 
     if env_exists BindCraft; then
         print_warn "Conda environment 'BindCraft' already exists."
-        if confirm "Remove and recreate the BindCraft conda environment?"; then
+        if confirm_destructive "Remove and recreate the BindCraft conda environment?"; then
             run_logged "Removing BindCraft conda env" \
                 "${CONDA_CMD}" env remove -n BindCraft -y || return 1
         else
@@ -1032,7 +1107,7 @@ install_boltzgen() {
     print_step "Cloning BoltzGen repository"
     if [[ -d "${BOLTZGEN_DIR}" ]]; then
         print_warn "Directory ${BOLTZGEN_DIR} already exists."
-        if confirm "Remove and reclone?"; then
+        if confirm_destructive "Remove and reclone?"; then
             rm -rf "${BOLTZGEN_DIR}" || { print_fail "Failed to remove ${BOLTZGEN_DIR}"; return 1; }
         else
             print_warn "Skipping reclone; using existing directory."
@@ -1051,7 +1126,7 @@ install_boltzgen() {
 
     if env_exists BoltzGen; then
         print_warn "Conda environment 'BoltzGen' already exists."
-        if confirm "Remove and recreate the BoltzGen conda environment?"; then
+        if confirm_destructive "Remove and recreate the BoltzGen conda environment?"; then
             run_logged "Removing BoltzGen conda env" \
                 "${CONDA_CMD}" env remove -n BoltzGen -y || return 1
         else
@@ -1197,7 +1272,7 @@ install_mosaic() {
     print_step "Cloning Mosaic repository"
     if [[ -d "${MOSAIC_DIR}" ]]; then
         print_warn "Directory ${MOSAIC_DIR} already exists."
-        if confirm "Remove and reclone?"; then
+        if confirm_destructive "Remove and reclone?"; then
             rm -rf "${MOSAIC_DIR}" || { print_fail "Failed to remove ${MOSAIC_DIR}"; return 1; }
         else
             print_warn "Skipping reclone; using existing directory."
@@ -1370,9 +1445,9 @@ install_evaluator() {
         "${CONDA_CMD}" run -n binder-eval pip install -q -e "${EVALUATOR_DIR}[report]" \
         || { print_fail "Failed to install binder-compare into binder-eval"; return 1; }
 
-    # (AF2 refolding was removed in the AF3/Protenix refactor; the
-    #  binder-eval-af2 env is no longer created. AF3 refolding on DGX
-    #  Spark / aarch64 is installed separately via `install_af3`.)
+    # (AF2 and Protenix refolding have both been removed; the binder-eval-af2
+    #  env is no longer created. AF3 is installed separately via `install_af3`,
+    #  ESMFold2 via `install_esmfold2`.)
 
     # Smoke test
     smoke_test "binder-compare --help" \
@@ -1422,11 +1497,27 @@ install_pxdesign() {
     fi
 
     # Create conda env (gcc needed for Triton JIT compilation used by deepspeed)
+    #
+    # env_exists guard so a re-run after a mid-install network failure resumes rather
+    # than aborting here — every remaining step in this function is network-bound.
+    # Mirrors install.sh. Use --force to rebuild from scratch.
     print_step "Creating bindmaster_pxdesign conda environment"
-    run_logged "Creating bindmaster_pxdesign env" \
-        "${CONDA_CMD}" create -n bindmaster_pxdesign -y python=3.11 \
-            gcc_linux-aarch64 gxx_linux-aarch64 -c conda-forge \
-        || { print_fail "Failed to create bindmaster_pxdesign env"; return 1; }
+    if env_exists bindmaster_pxdesign; then
+        if [[ "${FORCE}" == true ]]; then
+            run_logged "Removing existing bindmaster_pxdesign env (--force)" \
+                "${CONDA_CMD}" env remove -n bindmaster_pxdesign -y \
+                || { print_fail "Failed to remove bindmaster_pxdesign env"; return 1; }
+        else
+            print_warn "Conda environment 'bindmaster_pxdesign' already exists — reusing it."
+            print_warn "  The remaining steps are idempotent; pass --force to rebuild from scratch."
+        fi
+    fi
+    if ! env_exists bindmaster_pxdesign; then
+        run_logged "Creating bindmaster_pxdesign env" \
+            "${CONDA_CMD}" create -n bindmaster_pxdesign -y python=3.11 \
+                gcc_linux-aarch64 gxx_linux-aarch64 -c conda-forge \
+            || { print_fail "Failed to create bindmaster_pxdesign env"; return 1; }
+    fi
 
     # aarch64: install PyTorch from PyPI with cu130 index (no conda pytorch-cuda for aarch64)
     run_logged "Installing PyTorch (aarch64, CUDA 13.0)" \
@@ -1575,14 +1666,6 @@ PATCHEOF
         "${CONDA_CMD}" run -n bindmaster_pxdesign python -c "import torch; print('PXDesign env OK')" \
         || return 1
 
-    # Install binder-compare into the PXDesign env so Protenix refolding
-    # (Part J) can run via `conda run -n bindmaster_pxdesign binder-compare refold-protenix`.
-    if [[ -d "${EVALUATOR_DIR}" ]]; then
-        run_logged "Installing binder-compare into bindmaster_pxdesign (for Protenix refold)" \
-            "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -e "${EVALUATOR_DIR}[report]" \
-            || print_warn "binder-compare install into bindmaster_pxdesign failed — Protenix refolding will be unavailable"
-    fi
-
     # Shortcut
     mkdir -p "${SHORTCUTS_DIR}"
     cat > "${SHORTCUTS_DIR}/pxdesign" << PXDEOF
@@ -1713,6 +1796,98 @@ AF3EOF
 
 # ─── ESMFold2 (refolder, opt-in) ────────────────────────────────────────────
 
+install_rfd3() {
+    print_step "Installing RFD3 (foundry) — aarch64"
+    ensure_conda_in_path
+
+    # NOTE: UNVALIDATED on aarch64 hardware. RFD3 should port cleanly (pure pip, no
+    # DGL / SE3-Transformer), which is why the docs claim aarch64 support — but the
+    # aarch64 installer had no --tool rfd3 case at all, so that claim was untestable.
+    # Kept out of `--tool all` until someone confirms it on a Spark / GH200.
+    # Mirrors install.sh's install_rfd3(); the only difference is the CUDA wheel index.
+    if env_exists bindmaster_rfd3; then
+        print_warn "Conda environment 'bindmaster_rfd3' already exists — skipping creation."
+    else
+        run_logged "Creating bindmaster_rfd3 env" \
+            "${CONDA_CMD}" create -n bindmaster_rfd3 -y python=3.12 pip \
+            -c conda-forge \
+            || { print_fail "Failed to create bindmaster_rfd3 env"; return 1; }
+    fi
+
+    # cu130 wheels for Blackwell/GB10 (the x86 installer pins cu121).
+    run_logged "Installing PyTorch (cu130, aarch64)" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 \
+        pip install -q torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130 \
+        || { print_fail "Failed to install PyTorch"; return 1; }
+
+    run_logged "Installing rc-foundry[rfd3]==${FOUNDRY_VERSION}" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 \
+        pip install -q "rc-foundry[rfd3]==${FOUNDRY_VERSION}" \
+        || { print_fail "Failed to install rc-foundry"; return 1; }
+
+    run_logged "Installing rc-foundry[mpnn]==${FOUNDRY_VERSION}" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 \
+        pip install -q "rc-foundry[mpnn]==${FOUNDRY_VERSION}" \
+        || print_warn "rc-foundry[mpnn] install failed — MPNN redesign step may not work"
+
+    mkdir -p "${FOUNDRY_WEIGHTS_DIR}"
+    if [[ -n "$(ls -A "${FOUNDRY_WEIGHTS_DIR}" 2>/dev/null)" ]]; then
+        print_ok "Foundry weights dir already populated at ${FOUNDRY_WEIGHTS_DIR}"
+    else
+        run_logged "Downloading RFD3 weights (~2.5 GB)" \
+            "${CONDA_CMD}" run -n bindmaster_rfd3 \
+            foundry install rfd3 --checkpoint-dir "${FOUNDRY_WEIGHTS_DIR}" \
+            || print_warn "RFD3 weight download failed — retry: conda run -n bindmaster_rfd3 foundry install rfd3 --checkpoint-dir ${FOUNDRY_WEIGHTS_DIR}"
+    fi
+
+    # ProteinMPNN weights are NOT bundled with rfd3 (foundry install rfd3 fetches only
+    # rfd3_latest.ckpt) — the MPNN sequence-design stage needs this ~7 MB file.
+    run_logged "Downloading ProteinMPNN weights (~7 MB)" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 \
+        foundry install proteinmpnn --checkpoint-dir "${FOUNDRY_WEIGHTS_DIR}" \
+        || print_warn "ProteinMPNN weight download failed — 'mpnn' will not run until it is fetched"
+
+    smoke_test "RFD3 CLI check" \
+        "${CONDA_CMD}" run -n bindmaster_rfd3 rfd3 --help \
+        || print_warn "rfd3 CLI smoke test failed — env may need foundry weights first"
+
+    _write_rfd3_shortcut
+
+    print_ok "RFD3 installation complete (aarch64 — please report whether it works)"
+    print_ok "  Usage: rfd3 design out_dir=./run inputs=config.yaml"
+}
+
+
+_write_rfd3_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# RFD3 shortcut — runs 'rfd3 design ...' in the bindmaster_rfd3 env."
+        echo "# With no args: opens an interactive env shell."
+        echo ""
+        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "FOUNDRY_WEIGHTS_DIR=\"${FOUNDRY_WEIGHTS_DIR}\""
+    } > "${SHORTCUTS_DIR}/rfd3"
+    cat >> "${SHORTCUTS_DIR}/rfd3" << 'EOF'
+
+# Surface the weights dir for the foundry checkpoint registry.
+# (The registry reads FOUNDRY_CHECKPOINT_DIRS / FOUNDRY_CHECKPOINTS_DIR; the
+# singular form FOUNDRY_CHECKPOINT_DIR is silently ignored.)
+export FOUNDRY_CHECKPOINT_DIRS="${FOUNDRY_WEIGHTS_DIR}"
+
+if [[ $# -eq 0 ]]; then
+    echo "RFD3 environment (bindmaster_rfd3). Weights: ${FOUNDRY_WEIGHTS_DIR}"
+    echo "Examples:"
+    echo "  rfd3 design out_dir=./run inputs=examples/ppi.yaml"
+    echo "  foundry list-installed"
+    exec "${CONDA_CMD}" run --live-stream -n bindmaster_rfd3 bash
+fi
+
+exec "${CONDA_CMD}" run --live-stream -n bindmaster_rfd3 rfd3 "$@"
+EOF
+    chmod +x "${SHORTCUTS_DIR}/rfd3"
+}
+
 install_esmfold2() {
     print_step "Installing ESMFold2 refolder (binder-eval-esmfold2 env)"
     ensure_conda_in_path
@@ -1735,10 +1910,25 @@ install_esmfold2() {
             || { print_fail "Failed to create binder-eval-esmfold2 conda env"; return 1; }
     fi
 
-    # esmfold + gemmi (producer side). ESMFold2 has linux aarch64 wheels.
-    run_logged "Installing esmfold + gemmi into binder-eval-esmfold2" \
-        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q esmfold gemmi \
-        || { print_fail "Failed to install esmfold + gemmi (check PyPI access and aarch64 wheel availability)"; return 1; }
+    # NOTE: there is NO `esmfold` PyPI package — this used to pip install one, which
+    # either hard-failed or produced an env with no torch, no transformers and no
+    # biohub `esm`, so `binder-compare refold-esmfold2` died at import while the
+    # --help-only smoke test below still passed. The runtime is transformers'
+    # ESMFold2Model + biohub's `esm` SDK (ESMFold2InputBuilder + the ProteinInput /
+    # StructurePredictionInput dataclasses) + gemmi for CIF->PDB. refold_esmfold2.py
+    # imports exactly these. Kept in sync with install.sh's install_esmfold2().
+    run_logged "Installing torch (cu130) into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 \
+        pip install -q --index-url https://download.pytorch.org/whl/cu130 torch \
+        || { print_fail "Failed to install torch into binder-eval-esmfold2"; return 1; }
+    run_logged "Installing transformers + gemmi + safetensors into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'transformers>=4.50' gemmi safetensors \
+        || { print_fail "Failed to install transformers/gemmi/safetensors into binder-eval-esmfold2"; return 1; }
+    # biohub/esm: pinned commit per the HuggingFace model card (no PyPI release yet).
+    run_logged "Installing biohub esm SDK into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 \
+        pip install -q 'esm @ git+https://github.com/Biohub/esm.git@c94ed8d' \
+        || { print_fail "Failed to install biohub esm SDK (check network / git access)"; return 1; }
 
     run_logged "Installing binder-compare into binder-eval-esmfold2" \
         "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q -e "${EVALUATOR_DIR}[report]" \
@@ -1843,7 +2033,18 @@ uninstall_tool() {
                 "${CONDA_CMD}" env remove -n bindmaster_pxdesign -y
             rm -f "${SHORTCUTS_DIR}/pxdesign"
             [[ -d "${PXDESIGN_DIR}" ]] && { rm -rf "${PXDESIGN_DIR}"; print_ok "Removed ${PXDESIGN_DIR}"; }
+            # CUTLASS v3.5.1 headers (~150 MB) cloned by install_pxdesign for the
+            # DS4Sci EvoformerAttention JIT — nothing else uses them.
+            [[ -d "${HOME}/cutlass" ]] && { rm -rf "${HOME}/cutlass"; print_ok "Removed ${HOME}/cutlass"; }
             print_ok "PXDesign uninstalled"
+            ;;
+        rfd3|foundry)
+            print_step "Uninstalling RFD3 (foundry)"
+            env_exists bindmaster_rfd3 && run_logged "Removing bindmaster_rfd3 conda env" \
+                "${CONDA_CMD}" env remove -n bindmaster_rfd3 -y
+            rm -f "${SHORTCUTS_DIR}/rfd3"
+            [[ -d "${FOUNDRY_WEIGHTS_DIR}" ]] && { rm -rf "${FOUNDRY_WEIGHTS_DIR}"; print_ok "Removed ${FOUNDRY_WEIGHTS_DIR}"; }
+            print_ok "RFD3 uninstalled"
             ;;
         af3|alphafold3|alphafold)
             print_step "Uninstalling AlphaFold 3 refolder"
@@ -1929,6 +2130,47 @@ PYEOF
     local rc=$?
     rm -f "${patch_py}"
     return $rc
+}
+
+# Resolve the USEARCH binary the same way soluprot_runner._resolve_usearch does
+# ($SOLUPROT_USEARCH, then <dir>/usearch.<arch>, then <dir>/usearch, then PATH),
+# so what the installer validates is what the runner will actually execute.
+# Echoes the path and returns 0, or returns 1 if none is usable.
+_resolve_usearch() {
+    local cand
+    for cand in "${SOLUPROT_USEARCH:-}" \
+                "${SOLUPROT_DIR}/usearch.$(uname -m)" \
+                "${SOLUPROT_DIR}/usearch"; do
+        if [[ -n "${cand}" && -x "${cand}" ]]; then
+            echo "${cand}"
+            return 0
+        fi
+    done
+    if command -v usearch >/dev/null 2>&1; then
+        command -v usearch
+        return 0
+    fi
+    return 1
+}
+
+# Verify the resolved binary can actually START. `-x` only checks the mode bit,
+# which passes for a wrong-architecture or missing-libstdc++ binary -- and the
+# bioconda usearch 12.0_beta build is known to crash at startup on aarch64. We
+# do not assume any particular CLI, so ANY ordinary exit status counts as
+# success; only a failure to exec (126/127) or a fatal signal (>=128) fails.
+_check_usearch_runs() {
+    local bin="$1" rc=0
+    print_step "Checking USEARCH runs: ${bin}"
+    "${bin}" --version >/dev/null 2>&1 || rc=$?
+    if (( rc == 126 || rc == 127 || rc >= 128 )); then
+        print_fail "USEARCH at ${bin} could not be executed (exit ${rc})."
+        print_warn "  Usually a wrong-architecture binary or a missing shared library."
+        print_warn "  Check with: file '${bin}' && ldd '${bin}'"
+        print_warn "  Then delete it and re-run --tool soluprot to rebuild from source."
+        return 1
+    fi
+    print_ok "USEARCH executes"
+    return 0
 }
 
 # Compile open-source USEARCH v12 for the identity feature. The bioconda
@@ -2058,17 +2300,19 @@ install_soluprot() {
     #    without it (it aborts on a USEARCH failure), so a missing binary is a
     #    hard install failure — the --help smoke test below would NOT catch it
     #    (argparse exits before the USEARCH path runs).
-    if [[ -x "${SOLUPROT_DIR}/usearch.aarch64" ]] || command -v usearch >/dev/null 2>&1; then
-        print_ok "USEARCH binary present (${SOLUPROT_DIR}/usearch.aarch64 or on PATH)"
+    if _resolve_usearch >/dev/null; then
+        print_ok "USEARCH binary present ($(_resolve_usearch))"
     else
         _build_usearch_v12 || true
-        if [[ ! -x "${SOLUPROT_DIR}/usearch.aarch64" ]] && ! command -v usearch >/dev/null 2>&1; then
+        if ! _resolve_usearch >/dev/null; then
             print_fail "USEARCH is required for SoluProt's identity feature and could not be built."
             print_warn "  Install a C/C++ toolchain (git make g++) and re-run, or place a 'usearch.aarch64'"
             print_warn "  binary at ${SOLUPROT_DIR}/usearch.aarch64 (or on PATH), then re-run --tool soluprot."
+            print_warn "  Source: ${USEARCH12_REPO} (GPLv3)."
             return 1
         fi
     fi
+    _check_usearch_runs "$(_resolve_usearch)" || return 1
 
     # 5. binder-compare runs in the 'binder-eval' env (Python 3.10+), NOT here.
     # binder-comparison is requires-python>=3.10 (numpy>=1.24 / pandas>=2.0), so
@@ -2126,6 +2370,61 @@ SOLUPROTEOF
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
+# preflight
+# Cheap sanity checks BEFORE the installer starts downloading tens of GB. Without
+# this, a host with too little free space failed an hour in with an opaque tar/pip
+# error deep inside install.log, leaving half-built envs behind. Advisory by
+# default for GPU/network (an install can legitimately precede the driver, or run
+# behind a proxy); only disk space aborts, and --skip-preflight bypasses all of it.
+preflight() {
+    [[ "${SKIP_PREFLIGHT}" == true ]] && return 0
+    print_step "Preflight checks"
+
+    # Rough per-tool download+install footprints, GB. Deliberate over-estimates.
+    local need=0
+    [[ "${DO_BINDCRAFT}" == true ]]         && need=$(( need + 8 ))   # AF2 params ~4 GB + env
+    [[ "${DO_BOLTZGEN}"  == true ]]         && need=$(( need + 10 ))  # Boltz-1 weights ~6 GB + env
+    [[ "${DO_MOSAIC}"    == true ]]         && need=$(( need + 8 ))   # JAX/CUDA venv + Boltz-2 cache
+    [[ "${DO_EVALUATOR}" == true ]]         && need=$(( need + 2 ))
+    [[ "${DO_PXDESIGN}"  == true ]]         && need=$(( need + 12 ))  # torch + CUTLASS + weights
+    [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && need=$(( need + 8 ))
+    [[ "${DO_PROTEIN_HUNTER}" == true ]]    && need=$(( need + 8 ))   # vendored Boltz-2 + Chai-1
+    [[ "${DO_RFD3}"      == true ]]         && need=$(( need + 6 ))   # rfd3_latest.ckpt ~2.5 GB
+    [[ "${DO_AF3}"       == true ]]         && need=$(( need + 6 ))
+    [[ "${DO_ESMFOLD2}"  == true ]]         && need=$(( need + 6 ))
+    [[ "${DO_SOLUPROT}"  == true ]]         && need=$(( need + 2 ))
+    [[ "${CONDA_BASE}" == "${LOCAL_CONDA_DIR}" ]] && need=$(( need + 1 ))
+
+    local avail
+    avail="$(df -BG --output=avail "${BINDMASTER_DIR}" 2>/dev/null | tail -1 | tr -dc '0-9')"
+    if [[ -z "${avail}" ]]; then
+        print_warn "Could not determine free space on ${BINDMASTER_DIR} — skipping the disk check."
+    elif (( avail < need )); then
+        print_fail "Not enough free space: ${avail} GB available, ~${need} GB needed for the selected tools."
+        print_warn "  Free some space, install fewer tools, or re-run with --skip-preflight to override."
+        return 1
+    else
+        print_ok "Disk: ${avail} GB free, ~${need} GB needed"
+    fi
+
+    if command -v nvidia-smi &>/dev/null; then
+        local _gpu
+        _gpu="$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1)"
+        [[ -n "${_gpu}" ]] && print_ok "GPU: ${_gpu}" || print_warn "nvidia-smi present but reported no GPU."
+    else
+        print_warn "nvidia-smi not found — install will proceed, but the tools need an NVIDIA GPU to run."
+    fi
+
+    if command -v curl &>/dev/null; then
+        if curl -fsS --max-time 10 -o /dev/null https://pypi.org/simple/ 2>/dev/null; then
+            print_ok "Network: pypi.org reachable"
+        else
+            print_warn "Could not reach pypi.org in 10 s — downloads may fail (proxy? offline?)."
+        fi
+    fi
+    return 0
+}
+
 main() {
     echo ""
     echo -e "${BOLD}=== BindMaster Installer — DGX Spark (aarch64) — $(date) ===${RESET}"
@@ -2151,6 +2450,12 @@ main() {
         select_tools_interactive
     fi
 
+    # Preflight runs after tool selection (so the disk estimate matches the choice)
+    # and before any download. Uninstall skips it — it frees space, not consumes it.
+    if [[ "${UNINSTALL_MODE}" != true ]]; then
+        preflight || exit 1
+    fi
+
     # ── Uninstall mode ───────────────────────────────────────────────────────
     if [[ "${UNINSTALL_MODE}" == true ]]; then
         echo ""
@@ -2158,6 +2463,16 @@ main() {
         echo -e "This removes conda envs, venvs, and shortcuts."
         echo -e "User data (runs/, configs, logs) is ${GREEN}preserved${RESET}."
         confirm "Proceed with uninstall?" || { echo "Aborted."; exit 0; }
+
+        # `--tool all` means "everything installed" when uninstalling. The install-side
+        # `all` deliberately omits AF3 (gated weights) and SoluProt (opt-in screen), so
+        # without this their envs — plus alphafold3/ and Evaluator/tools/soluprot —
+        # survived an "uninstall everything" and the script still said it was complete.
+        if [[ "${TOOL_ALL}" == true ]]; then
+            DO_AF3=true
+            DO_ESMFOLD2=true
+            DO_SOLUPROT=true
+        fi
 
         local failed_uninstalls=()
         [[ "${DO_BINDCRAFT}" == true ]] && { uninstall_tool bindcraft  || failed_uninstalls+=("BindCraft"); }
@@ -2173,7 +2488,7 @@ main() {
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
               "${DO_MOSAIC}" == true && "${DO_EVALUATOR}" == true ]]; then
             if [[ -d "${LOCAL_CONDA_DIR}" ]]; then
-                if confirm "Also remove local Miniforge3 installation (${LOCAL_CONDA_DIR})?"; then
+                if confirm_destructive "Also remove local Miniforge3 installation (${LOCAL_CONDA_DIR})?"; then
                     rm -rf "${LOCAL_CONDA_DIR}"
                     print_ok "Removed local Miniforge3"
                 fi
@@ -2186,6 +2501,20 @@ main() {
         else
             print_fail "Failed to uninstall: ${failed_uninstalls[*]}"
         fi
+
+        # Be explicit about what is still on disk. "Uninstall complete." used to be
+        # printed while multi-GB artefacts remained, so a user reclaiming space had no
+        # idea where it went. These are NOT removed automatically: runs/ is the user's
+        # data, and editing ~/.bashrc on their behalf is not ours to do.
+        echo ""
+        print_warn "Left in place (remove by hand if you want the space back):"
+        [[ -d "${BINDMASTER_DIR}/runs" ]] && print_warn "  ${BINDMASTER_DIR}/runs/        — your run directories and results"
+        [[ -f "${LOG_FILE}" ]] && print_warn "  ${LOG_FILE}"
+        [[ -d "${HOME}/.boltz" ]] && print_warn "  ${HOME}/.boltz/                — Boltz-2 weight cache (~4.5 GB)"
+        [[ -d "${HOME}/.cache/bindmaster" ]] && print_warn "  ${HOME}/.cache/bindmaster/     — shared target-MSA cache"
+        [[ -d "${HOME}/.cache/huggingface" ]] && print_warn "  ${HOME}/.cache/huggingface/    — ESMFold2 weights (shared with other tools)"
+        grep -q "${SHORTCUTS_DIR}" "${HOME}/.bashrc" 2>/dev/null && \
+            print_warn "  the PATH line for ${SHORTCUTS_DIR} in ~/.bashrc"
         [[ ${#failed_uninstalls[@]} -gt 0 ]] && exit 1 || exit 0
     fi
 
@@ -2200,6 +2529,7 @@ main() {
     [[ "${DO_MOSAIC}"    == true ]] && (( total++ ))
     [[ "${DO_EVALUATOR}" == true ]] && (( total++ ))
     [[ "${DO_PXDESIGN}"  == true ]] && (( total++ ))
+    [[ "${DO_RFD3}"      == true ]] && (( total++ ))
     [[ "${DO_AF3}"       == true ]] && (( total++ ))
     [[ "${DO_ESMFOLD2}"  == true ]] && (( total++ ))
     [[ "${DO_SOLUPROT}"  == true ]] && (( total++ ))
@@ -2212,6 +2542,7 @@ main() {
     [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
     [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
+    [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}"; install_rfd3 || failed_tools+=("RFD3"); }
     [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
     [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
     [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; install_soluprot || failed_tools+=("SoluProt"); }

@@ -13,7 +13,7 @@
 ### Clone
 
 ```bash
-git clone https://github.com/damborik22/BindMaster.git
+git clone https://github.com/damborik22/BinderScout.git
 cd BindMaster
 ```
 

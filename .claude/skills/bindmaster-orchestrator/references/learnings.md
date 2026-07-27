@@ -148,12 +148,12 @@ Every CLI-drift bug this campaign hit (PC `pipeline=` shorthand + wrong Hydra pa
 ## 11. Generation is cheap; the cross-engine refold is the funnel — draw more, filter hard
 **[Likely portable]** — orchestration strategy
 
-When the goal is "best possible designs" (expensive wet-lab validation downstream), the binding constraint is **not** design-tool compute — it's the cross-engine refold (Boltz-2 + AF3 + Protenix on the big-VRAM/Spark node). Cheap generators (esp. **RFD3** — ApoE4 did 100 backbones in 1h59m on H200) can flood a large pool, but tools that emit *unscored* designs (RFD3 has no native interface metric) load the refold 1:1.
+When the goal is "best possible designs" (expensive wet-lab validation downstream), the binding constraint is **not** design-tool compute — it's the cross-engine refold (Boltz-2 + AF3 + ESMFold2 on the big-VRAM/Spark node). Cheap generators (esp. **RFD3** — ApoE4 did 100 backbones in 1h59m on H200) can flood a large pool, but tools that emit *unscored* designs (RFD3 has no native interface metric) load the refold 1:1.
 
 **Pattern — decouple the cheap engine from the Spark-locked one:**
 1. Scale up the cheap generator (RFD3 backbones, MPNN best-of-N) + filter cheaply first: geometry (drop chainbreaks/clashes), then a cheap fold.
 2. **ESMFold2-Fast** (`binder-eval-esmfold2`) folds the *complex* and emits `iptm` directly — it is NOT Spark-locked, runs on any idle 24 GB card. Use it as a pre-filter: gate on `iptm` up front (cheap, conventional), keep the top slice (~40%).
-3. Promote only survivors to the expensive Boltz-2 + AF3 + Protenix merge, where `ipsae_min` does the real ranking (`scoring.py` computes `esmfold2_ipsae_min` too; ESMFold2 is reported-not-counted in `agreement_count`).
+3. Promote only survivors to the expensive Boltz-2 + AF3 + ESMFold2 merge, where `ipsae_min` does the real ranking (`scoring.py` computes `esmfold2_ipsae_min` too; ESMFold2 is reported-not-counted in `agreement_count`).
 
 This keeps the Spark refold load flat as the generated pool grows. (ApoE4 2026-05-29: RFD3 v2 = 500 backbones → geometry → MPNN best-of-30 → ESMFold2 iPTM top-40% → cross-engine merge.)
 

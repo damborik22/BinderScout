@@ -53,7 +53,7 @@ BindCraft's per-design CSV with the full AF2 + Rosetta metric battery:
 - **Secondary structure:** `Interface_Helix%`, `Interface_BetaSheet%`, `Interface_Loop%`, `Binder_Helix%`, `Binder_BetaSheet%`, `Binder_Loop%`, `InterfaceAAs`
 - **RMSD / cross-val:** `HotspotRMSD`, `Target_RMSD`, `Binder_pLDDT`, `Binder_pTM`, `Binder_pAE`, `Binder_RMSD`
 
-**Normalization note:** BindCraft normalizes AF2 metrics differently — pAE is divided by `n/31`. The evaluator must un-normalize before comparing with raw PAE from Boltz-2 / Protenix / AF3.
+**Normalization note:** BindCraft normalizes AF2 metrics differently — pAE is divided by `n/31`. The evaluator must un-normalize before comparing with raw PAE from Boltz-2 / AF3 / ESMFold2.
 
 **After evaluator re-fold:** `.cif` + PAE `.npz` → `bt_ipsae`, `tb_ipsae`, `ipsae_min`. Both BindCraft's native ranking (by iPTM, with the full Rosetta + AF2 metric battery) and the evaluator's cross-method `ipsae_min` are preserved in `summary.csv`. The evaluator provides a method-agnostic comparator over the merged design pool — it sits alongside BindCraft's internal metrics, not above them.
 

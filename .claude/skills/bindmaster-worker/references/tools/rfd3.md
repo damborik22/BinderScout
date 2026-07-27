@@ -109,4 +109,4 @@ Wall: <h> on <GPU>. Compute: <GPU-h>.
 Packaged: <TARGET>_RFD3_<machine>.tar.gz (<size>).
 ```
 
-**Note about cross-validation:** RFD3 + MPNN are independent of Boltz-2, Protenix, and AF3 — RFD3 outputs are among the cleanest signals in the BindMaster pool for cross-engine refold consensus. See `bindmaster-orchestrator/references/tools/README.md`.
+**Note about cross-validation:** RFD3 + MPNN are independent of Boltz-2, AF3, and ESMFold2 — RFD3 outputs are among the cleanest signals in the BindMaster pool for cross-engine refold consensus. See `bindmaster-orchestrator/references/tools/README.md`.

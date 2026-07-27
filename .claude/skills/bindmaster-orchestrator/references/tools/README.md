@@ -26,20 +26,20 @@ Threshold 0.61 is the agreement threshold (the per-engine "pass" cutoff used in 
 
 | File | One-line summary | Engine | Same-model bias to flag |
 |---|---|---|---|
-| `bindcraft.md` | AF2 backprop hallucination + MPNN + PyRosetta filtering. Turnkey reference, internal AF2 cross-val. | AF2-multimer / AF2-ptm | Independent of Boltz-2, Protenix, AF3 |
+| `bindcraft.md` | AF2 backprop hallucination + MPNN + PyRosetta filtering. Turnkey reference, internal AF2 cross-val. | AF2-multimer / AF2-ptm | Independent of Boltz-2, AF3, ESMFold2 |
 | `boltzgen.md` | Diffusion → inverse-folding → Boltz-2 refold pipeline. Two-checkpoint ensemble, diversity-aware filter. | Boltz-2 internally | **Boltz-2 refold is correlated** |
-| `mosaic.md` | JAX gradient hallucination over 8 structure predictors. Composable losses, framework not turnkey. | Boltz-2, Protenix, AF2 (composable) | **Boltz-2 refold is correlated** |
+| `mosaic.md` | JAX gradient hallucination over 8 structure predictors. Composable losses, framework not turnkey. | Boltz-2, AF3, AF2 (composable) | **Boltz-2 refold is correlated** |
 | `protein-hunter.md` | Iterative structure-hallucination-within-diffusion. Multi-modal, all-X initial sequence. | Boltz-2 (or Chai-1) | **Boltz-2 refold is correlated** |
-| `proteina-complexa.md` | NVIDIA flow matching + inference-time search. Atom + sidechain + sequence in one pass. | Flow matching (AF2/RF3 rewards) | Independent of Boltz-2, Protenix, AF3 |
-| `pxdesign.md` | ByteDance diffusion + Protenix + AF2-IG. 17–82% nanomolar hits across 6/7 therapeutic targets. | Protenix internally | **Protenix refold is correlated** |
-| `rfd3.md` | All-atom diffusion (RFdiffusion3). Atom-level conditioning, side-chain aware, batch generation. | RFD3 (Baker lab) | Independent of Boltz-2, Protenix, AF3 |
+| `proteina-complexa.md` | NVIDIA flow matching + inference-time search. Atom + sidechain + sequence in one pass. | Flow matching (AF2/RF3 rewards) | Independent of Boltz-2, AF3, ESMFold2 |
+| `pxdesign.md` | ByteDance diffusion + Protenix + AF2-IG. 17–82% nanomolar hits across 6/7 therapeutic targets. | Protenix internally | Independent of all three refolders |
+| `rfd3.md` | All-atom diffusion (RFdiffusion3). Atom-level conditioning, side-chain aware, batch generation. | RFD3 (Baker lab) | Independent of Boltz-2, AF3, ESMFold2 |
 
 ### Evaluation / refolding tools
 
 | File | One-line summary | Status | Independence from design pool |
 |---|---|---|---|
 | `boltz2.md` | Primary refolder. AF3-class diffusion + affinity head. Native `[binder\|target]` ordering, pLDDT `[0,1]`. | Stable, default | Correlated with Mosaic / BoltzGen / Protein-Hunter |
-| `protenix.md` | Second refolder (Part J in progress). ByteDance AF3 reimplementation, 4 checkpoint tiers, Apache 2.0. | In progress | Correlated with PXDesign |
+| `protenix.md` | **Retired as a refolder** (Part J reverted 2026-07-26). Background only — PXDesign's internal engine. | Not a refolder | n/a |
 | `alphafold3.md` | Third refolder (Part K in progress). DeepMind native AF3 v3.0.2, aarch64 / DGX Spark only. | In progress, aarch64 only | **Fully independent of every design tool** |
 
 ## Entry template
@@ -85,7 +85,7 @@ Every tool file follows the same structure:
 
 Same-model bias to watch for when interpreting `agreement_count`:
 
-|  | Boltz-2 refold | Protenix refold | AF3 refold |
+|  | Boltz-2 refold | AF3 refold | ESMFold2 refold |
 |---|---|---|---|
 | BindCraft outputs | clean | clean | clean |
 | BoltzGen outputs | **correlated** | clean | clean |

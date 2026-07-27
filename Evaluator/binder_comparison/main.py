@@ -4,7 +4,6 @@ Subcommands:
     extract          — pull sequences from tool outputs
     parse-seqs       — convert sequences from any format to FASTA
     refold-boltz2    — refold with Boltz-2 (run in Mosaic venv)
-    refold-protenix  — refold with Protenix v0.5.0 (run in bindmaster_pxdesign env)
     refold-af3       — refold with AlphaFold 3 v3.0.2 (run in binder-eval-af3 env; needs >=100 GB GPU memory)
     refold-esmfold2  — refold with ESMFold2 (biohub; run in binder-eval-esmfold2 env)
     filter-soluprot  — score sequence solubility with SoluProt 1.0 (run in binder-eval-soluprot env; no GPU)
@@ -35,7 +34,6 @@ from .cli import (
     refold_af3,
     refold_boltz2,
     refold_esmfold2,
-    refold_protenix,
     report,
     run,
     validate,
@@ -58,7 +56,6 @@ def main(argv=None) -> None:
     extract.add_parser(subparsers)
     parse_seqs.add_parser(subparsers)
     refold_boltz2.add_parser(subparsers)
-    refold_protenix.add_parser(subparsers)
     refold_af3.add_parser(subparsers)
     refold_esmfold2.add_parser(subparsers)
     filter_soluprot.add_parser(subparsers)

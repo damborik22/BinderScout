@@ -95,4 +95,4 @@ Wall: <h> on <GPU>. Compute: <GPU-h>.
 Packaged: <TARGET>_BoltzGen_<machine>.tar.gz (<size>), _final (<size>).
 ```
 
-**Note about cross-validation:** the orchestrator knows BoltzGen's internal refolding is via Boltz-2 — same model as the evaluator's default refold. The `agreement_count` signal for BoltzGen outputs is most decisive when Protenix and AF3 also agree (engines independent of BoltzGen's design lineage). See `bindmaster-orchestrator/references/tools/README.md` cross-method bias matrix.
+**Note about cross-validation:** the orchestrator knows BoltzGen's internal refolding is via Boltz-2 — same model as the evaluator's default refold. The `agreement_count` signal for BoltzGen outputs is most decisive when AF3 and ESMFold2 also agree (engines independent of BoltzGen's design lineage). See `bindmaster-orchestrator/references/tools/README.md` cross-method bias matrix.

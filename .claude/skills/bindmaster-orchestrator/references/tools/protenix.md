@@ -1,9 +1,9 @@
 # Protenix
 
 **Engine:** AF3-class diffusion-based all-atom structure predictor from ByteDance AI4S. Open-source AlphaFold3 reimplementation with multiple checkpoint variants (Protenix-v2 ~464 M params, Protenix-v1 base ~368 M, Protenix-Mini ~lightweight, Protenix-Mini-Tmpl with template support). Outperformed AF3 on diverse benchmarks at matched training cutoff per the v1 paper; v2 adds antibody-antigen and ligand-plausibility improvements.
-**Role:** refolding (BindMaster Part J, in progress); also used internally at design time by **PXDesign** (which is built on Protenix)
-**Status:** in progress (Part J integration); checkpoint variants stable upstream
-**Environment:** `bindmaster_pxdesign` (shared with PXDesign — single conda env services both design and refolding roles)
+**Role:** background only. Protenix is **not** a BindMaster refold engine — used internally at design time by **PXDesign**, which is built on it.
+**Status:** retired as a refolder (2026-07-26). Part J was reverted: AF3 fills the independent-cross-check role, so `refold-protenix` and every `protenix_*` column are gone. Kept here because PXDesign's `ptx_iptm` / `pxdesign_protenix_iptm` come from this engine — a *native* metric, biased toward PXDesign's own designs and never used for ranking.
+**Environment:** `bindmaster_pxdesign` (PXDesign's env; the `protenix` package and its sm_120 / LayerNorm patches are still installed there for design)
 
 ## Principle
 
