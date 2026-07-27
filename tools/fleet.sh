@@ -215,7 +215,13 @@ cmd_poll() {
             *) warn "$m: could not determine job state (ssh exit $ssh_rc)"; continue ;;
         esac
         if [ -z "$sessions" ]; then
-            printf '%-4s idle\n' "$m"
+            # "no tracked job", not "idle": this only means fleet.sh sees no
+            # tmux session it started — it says nothing about GPU load. All
+            # three machines can (and often do) run real GPU jobs started
+            # outside fleet.sh; printing "idle" here would invite exactly
+            # the false-safe misread the ssh_rc handling above guards
+            # against. `status` is the place to check GPU occupancy.
+            printf '%-4s no tracked job\n' "$m"
         else
             printf '%-4s %s\n' "$m" "$(printf '%s' "$sessions" | tr '\n' ' ')"
         fi
@@ -249,8 +255,10 @@ cmd_fetch() {
     if [ -f "$fetched" ] && [[ "$fetched" == *.tar.gz ]]; then
         tar -tzf "$fetched" >/dev/null 2>&1 || die "corrupt archive: $fetched"
         ok "verified $fetched ($(du -h "$fetched" | cut -f1))"
-    else
+    elif [ -f "$fetched" ]; then
         ok "fetched $fetched"
+    else
+        die "fetch reported success but $fetched is missing"
     fi
 }
 
