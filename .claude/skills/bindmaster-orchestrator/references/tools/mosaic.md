@@ -9,7 +9,7 @@
 
 Mosaic relaxes the discrete binder sequence into a soft PSSM and optimizes it by gradient descent through one or more differentiable structure predictors. Lineage: ColabDesign → RSO → BindCraft, but rather than hallucinating against a single AF2-Multimer pass, Mosaic lets you compose differentiable losses across multiple models — binder–target contacts from Boltz-2, monomer foldability from a second Boltz-2 call, ProteinMPNN sequence recovery, ESM likelihood, stability priors, custom terms — into one loss. Because every model is reimplemented in the same JAX backend (via `joltz` for Boltz-1/2), gradients flow cleanly across the stack without container plumbing. The optimizer (default `simplex_APGM`) walks the PSSM for `n_steps`; sequences are sampled from the converged distribution.
 
-Because hallucination uses the predictor *itself* as the design oracle, design-time confidence overstates real binding likelihood. Cross-validation must come from the BindMaster evaluator (Boltz-2 refold + Protenix + AF3), not from Mosaic itself.
+Because hallucination uses the predictor *itself* as the design oracle, design-time confidence overstates real binding likelihood. Cross-validation must come from the BindMaster evaluator (Boltz-2 + AF3 + ESMFold2 refold), not from Mosaic itself.
 
 ## Strengths
 
@@ -55,7 +55,7 @@ Mosaic's native `ranking_loss` is preserved in `summary.csv`; `bt_ipsae` / `ipsa
 **Parser quirks:**
 - `designs.csv` can mix old 11-column and new 13-column formats when multiple workers run concurrently. Parser may misalign — documented in `Evaluator/docs/pipeline_reference.md`.
 - `target_sequence` column may contain `"REPLACE_ME"` (template placeholder when the run script wasn't fully configured). Evaluator's CSV fallback skips these rows.
-- PAE matrix is native `[binder|target]` ordering (Boltz-2 convention) — column prefix `boltz_pae_*` to distinguish from `protenix_*` / `af3_*`.
+- PAE matrix is native `[binder|target]` ordering (Boltz-2 convention) — column prefix `boltz_pae_*` to distinguish from `af3_*` / `esmfold2_*` (`protenix_*` was retired — Part J reverted).
 - pLDDT scale is [0,1] (Boltz-2 native, not the [0,100] AF3 convention).
 - `refold_boltz2.py` appends to CSV — check for duplicate `run_id` if rerun after partial failure.
 
