@@ -37,6 +37,33 @@ _MODEL_IDS: dict[str, str] = {
     "full": "biohub/ESMFold2",
 }
 
+# --- shared target MSA: pre-warm + enforce (F21) -----------------------------
+# The target MSA is fetched ONCE per target into the shared on-disk cache, so
+# every engine folds the target with the same evolutionary context.  An engine
+# that quietly ran single-sequence is systematically penalised (the MSA drives
+# target fold confidence and iPTM is an interface metric over both chains), so
+# it drags consensus_iptm_mean down and can demote a good design invisibly.
+# Default: abort.  Explicit opt-out: --allow-no-msa / BINDMASTER_ALLOW_NO_MSA=1.
+try:
+    from binder_comparison.refolding.target_msa import MissingTargetMSA, prepare_target_msa
+except Exception as _exc:  # binder_comparison unavailable in this env
+    _MSA_IMPORT_ERROR = _exc
+
+    class MissingTargetMSA(RuntimeError):
+        pass
+
+    def prepare_target_msa(target_seq, *, engine, cache_dir=None, out_dir=None, use_msa=True, allow_no_msa=False):
+        if use_msa and not (allow_no_msa or os.environ.get("BINDMASTER_ALLOW_NO_MSA", "").lower() in ("1", "true")):
+            raise MissingTargetMSA(
+                f"[{engine}] ABORTING: cannot reach the shared target-MSA cache — "
+                f"binder_comparison is not importable here ({_MSA_IMPORT_ERROR}). "
+                f"Install it in this environment (pip install -e Evaluator --no-deps), or re-run with "
+                f"--allow-no-msa (BINDMASTER_ALLOW_NO_MSA=1) to fold single-sequence with scores that are "
+                f"NOT comparable to engines that used an MSA."
+            )
+        print(f"[{engine}] WARNING: no target MSA — scores not comparable to MSA-using engines", flush=True)
+        return "", "single_sequence"
+
 
 def refold_batch(
     binder_sequences: list[str],
@@ -52,6 +79,7 @@ def refold_batch(
     skip_indices: set[int] | None = None,
     use_msa: bool = True,
     msa_cache_dir: str | os.PathLike | None = None,
+    allow_no_msa: bool = False,
 ) -> None:
     """Refold each binder against *target_sequence* using ESMFold2.
 
@@ -86,20 +114,35 @@ def refold_batch(
         f"diffusion_samples={num_diffusion_samples}, seed={seed})"
     )
 
-    # Fetch / load target MSA once for the whole batch (None = single-sequence mode)
+    # Pre-warm / load the shared target MSA once for the whole batch.  Raises
+    # MissingTargetMSA (abort) if it cannot be obtained and no opt-out was given.
+    a3m_str, _msa_mode = prepare_target_msa(
+        target_sequence,
+        engine="esmfold2",
+        cache_dir=msa_cache_dir,
+        out_dir=out_dir,
+        use_msa=use_msa,
+        allow_no_msa=allow_no_msa,
+    )
     target_msa_obj = None
-    if use_msa:
+    if a3m_str:
         try:
             import io as _io
 
-            from binder_comparison.refolding.target_msa import get_target_msa
             from esm.utils.msa.msa import MSA as _MSA
 
-            a3m_str = get_target_msa(target_sequence, cache_dir=msa_cache_dir)
             target_msa_obj = _MSA.from_a3m(_io.StringIO(a3m_str))
             print(f"[esmfold2] Target MSA loaded: {a3m_str.count('>')} sequences", flush=True)
         except Exception as exc:
-            print(f"[esmfold2] WARNING: could not fetch target MSA ({exc}); single-sequence mode", flush=True)
+            # Same gate as a failed fetch: never fold single-sequence by accident.
+            if not (allow_no_msa or os.environ.get("BINDMASTER_ALLOW_NO_MSA", "").lower() in ("1", "true")):
+                raise MissingTargetMSA(
+                    f"[esmfold2] ABORTING: the shared target MSA was obtained but ESMFold2 could not "
+                    f"parse it ({exc}). Fix the cached a3m, or re-run with --allow-no-msa "
+                    f"(BINDMASTER_ALLOW_NO_MSA=1) to fold single-sequence — those scores are NOT "
+                    f"comparable to engines that used an MSA."
+                ) from exc
+            print(f"[esmfold2] WARNING: could not parse target MSA ({exc}); single-sequence mode", flush=True)
             target_msa_obj = None
 
     model, build_fn = _load_model_and_builder(repo_id, target_msa=target_msa_obj)
@@ -516,6 +559,12 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--resume", action="store_true", help="Skip binders already in output CSV")
     parser.add_argument("--no-msa", action="store_true", help="Disable target MSA (single-sequence mode)")
+    parser.add_argument(
+        "--allow-no-msa",
+        action="store_true",
+        help="Proceed single-sequence if the shared target MSA cannot be obtained (air-gapped nodes). "
+        "Default is to abort — scores from an MSA-less engine are not comparable to the others.",
+    )
     parser.add_argument("--msa-cache-dir", default=None, help="Override MSA cache directory")
     args = parser.parse_args()
 
@@ -543,17 +592,22 @@ if __name__ == "__main__":
         if skip:
             print(f"[esmfold2] Resuming — skipping {len(skip)} already-completed binders")
 
-    refold_batch(
-        binder_sequences=seqs,
-        target_sequence=args.target_seq,
-        output_dir=args.output_dir,
-        output_csv=args.output,
-        model_name=args.model,
-        num_loops=args.num_loops,
-        num_sampling_steps=args.num_sampling_steps,
-        num_diffusion_samples=args.num_diffusion_samples,
-        seed=args.seed,
-        skip_indices=skip,
-        use_msa=not args.no_msa,
-        msa_cache_dir=args.msa_cache_dir,
-    )
+    try:
+        refold_batch(
+            binder_sequences=seqs,
+            target_sequence=args.target_seq,
+            output_dir=args.output_dir,
+            output_csv=args.output,
+            model_name=args.model,
+            num_loops=args.num_loops,
+            num_sampling_steps=args.num_sampling_steps,
+            num_diffusion_samples=args.num_diffusion_samples,
+            seed=args.seed,
+            skip_indices=skip,
+            use_msa=not args.no_msa,
+            msa_cache_dir=args.msa_cache_dir,
+            allow_no_msa=args.allow_no_msa,
+        )
+    except MissingTargetMSA as exc:
+        print(f"\n{exc}", file=sys.stderr)
+        sys.exit(2)

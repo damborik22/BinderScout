@@ -128,6 +128,8 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     # ── Misc ────────────────────────────────────────────────────────────────
     "native_soluprot_passes": ("Solubility pass", "", ""),
     "qc_fail_reasons": ("QC fail reasons", "", ""),
+    "qc_covered": ("QC panel covered", "", ""),
+    "qc_missing_metrics": ("QC metrics missing", "", ""),
 }
 
 
