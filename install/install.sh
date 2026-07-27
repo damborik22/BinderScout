@@ -85,7 +85,7 @@ DO_PROTEIN_HUNTER=false
 DO_RFD3=false
 DO_AF3=false            # opt-in via --tool af3 (>=100 GB GPU memory required; weights not bundled)
 DO_ESMFOLD2=false       # default refold engine (included in --tool all; lightweight, no gated weights)
-DO_SOLUPROT=false       # opt-in via --tool soluprot (sequence-only E. coli solubility screen; x86 only — USEARCH dep)
+DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen; needs a C/C++ toolchain for the USEARCH v12 source build)
 
 # Note: legacy RFAA support was removed entirely (see CHANGELOG).
 # Use RFD3 (--tool rfd3) for all-atom diffusion-based binder design.
@@ -98,7 +98,14 @@ while [[ $# -gt 0 ]]; do
             case "${2,,}" in
                 all)
                     TOOL_ALL=true
-                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true; DO_PROTEINA_COMPLEXA=true; DO_PROTEIN_HUNTER=true; DO_RFD3=true; DO_ESMFOLD2=true ;;
+                    DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true
+                    DO_PROTEINA_COMPLEXA=true; DO_PROTEIN_HUNTER=true; DO_RFD3=true; DO_ESMFOLD2=true
+                    # SoluProt is a first-class part of the pipeline: it screens the
+                    # pool BEFORE any GPU refolding, so leaving it out of `all` means
+                    # the documented full install cannot run the documented workflow.
+                    # Costs a Python 3.7 env and a USEARCH source build (needs a
+                    # C/C++ toolchain) -- see the preflight footprint table.
+                    DO_SOLUPROT=true ;;
                 bindcraft)
                     DO_BINDCRAFT=true ;;
                 boltzgen)
@@ -2862,9 +2869,10 @@ main() {
         confirm "Proceed with uninstall?" || { echo "Aborted."; exit 0; }
 
         # `--tool all` means "everything installed" when uninstalling. The install-side
-        # `all` deliberately omits AF3 (gated weights) and SoluProt (opt-in screen), so
-        # without this their envs — plus alphafold3/ and Evaluator/tools/soluprot —
-        # survived an "uninstall everything" and the script still said it was complete.
+        # `all` still omits AF3 (gated weights), so without this its env — plus
+        # alphafold3/ — survived an "uninstall everything" and the script still said
+        # it was complete. SoluProt and ESMFold2 are in install-`all` now; they are
+        # re-asserted here so an uninstall stays correct either way.
         if [[ "${TOOL_ALL}" == true ]]; then
             DO_AF3=true
             DO_ESMFOLD2=true

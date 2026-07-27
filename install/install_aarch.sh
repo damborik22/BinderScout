@@ -77,7 +77,7 @@ DO_AF3=false            # opt-in via --tool af3 (gated weights; not in --tool al
 DO_RFD3=false           # opt-in via --tool rfd3. Should work (pip-only, no DGL) but is
                         # UNVALIDATED on aarch64 hardware, so it is kept out of --tool all.
 DO_ESMFOLD2=false       # in --tool all (default refold engine) (lightweight 4th refold engine; no gated weights)
-DO_SOLUPROT=false       # opt-in via --tool soluprot (sequence-only E. coli solubility screen; aarch64-enabled via source-built USEARCH v12 + --no_tmhmm model)
+DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen; source-builds scikit-learn 0.20.4 + USEARCH v12, uses the --no_tmhmm model)
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -91,7 +91,12 @@ while [[ $# -gt 0 ]]; do
                     # otherwise evaluate.sh skips it and consensus_iptm is built from
                     # fewer engines than the two-stage ranking assumes.
                     DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true
-                    DO_ESMFOLD2=true ;;   # RFD3 is opt-in here: --tool rfd3 (see the note on DO_RFD3)
+                    DO_ESMFOLD2=true      # RFD3 is opt-in here: --tool rfd3 (see the note on DO_RFD3)
+                    # SoluProt screens the pool BEFORE any GPU refolding, so a full
+                    # install without it cannot run the documented workflow. On this
+                    # platform it also source-builds scikit-learn 0.20.4 and USEARCH
+                    # v12, so `all` now requires a C/C++ toolchain.
+                    DO_SOLUPROT=true ;;
                 bindcraft)
                     DO_BINDCRAFT=true ;;
                 boltzgen)
