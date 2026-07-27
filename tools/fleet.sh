@@ -70,8 +70,13 @@ cmd_probe() {
 
 cmd_status() {
     [ -f "$INVENTORY" ] || die "no inventory — run: fleet.sh probe"
-    printf '%s%-5s %-14s %-24.24s %-6s %-6s %-8s %s%s\n' "$BOLD" \
-        MACHINE HOST GPU BUSY RAM DISK BRANCH "$RESET"
+    # Single source of truth for column widths — header and data rows both
+    # render through this format, so they can never drift out of sync again.
+    # MACHINE is 7 chars wide because the literal label "MACHINE" is 7 chars;
+    # %s is a minimum width and would silently NOT truncate a shorter spec.
+    local row_fmt='%-7s %-14s %-24.24s %-6s %-6s %-8s %s'
+    # shellcheck disable=SC2059  # row_fmt is our own fixed literal, not user input
+    printf '%s%s%s\n' "$BOLD" "$(printf "$row_fmt" MACHINE HOST GPU BUSY RAM DISK BRANCH)" "$RESET"
     local m
     for m in "${FLEET_MACHINES[@]}"; do
         jq -r --arg m "$m" '
@@ -81,7 +86,7 @@ cmd_status() {
                     (($x.ram_gb|tostring) + "G"), $x.disk_free, $x.git_branch]
               else [$m, "UNREACHABLE", "-", "-", "-", "-", "-"] end
             | @tsv' "$INVENTORY" \
-        | awk -F'\t' '{printf "%-5s %-14s %-24.24s %-6s %-6s %-8s %s\n",$1,$2,$3,$4,$5,$6,$7}'
+        | awk -F'\t' -v fmt="$row_fmt" '{printf fmt"\n", $1,$2,$3,$4,$5,$6,$7}'
     done
 
     local tunnel key
