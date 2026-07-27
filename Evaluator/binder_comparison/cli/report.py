@@ -319,13 +319,12 @@ def run(args: argparse.Namespace) -> None:
     summary = stats["summary"]
 
     # Step 3b: Adaptyv scoring pipeline (Overath et al. 2025 methodology)
-    # Per-engine thresholds — falls back to defaults (0.61 across active engines, 0.30 AF2 info).
+    # Per-engine thresholds — falls back to defaults (0.61 across the active engines).
     engine_thresholds: dict[str, float] = {}
     for engine, attr in (
         ("boltz", "threshold_boltz"),
         ("af3", "threshold_af3"),
         ("esmfold2", "threshold_esmfold2"),
-        ("af2", "threshold_af2"),
     ):
         val = getattr(args, attr, None)
         if val is not None:
@@ -1330,12 +1329,6 @@ def add_parser(subparsers) -> None:
         type=float,
         default=None,
         help="ESMFold2 ipsae_min pass threshold (default 0.61, using the shared DunbrackLab cutoff)",
-    )
-    p.add_argument(
-        "--threshold-af2",
-        type=float,
-        default=None,
-        help="AF2 informational threshold (default 0.30; AF2 mis-calibrated for short targets — not counted in agreement)",
     )
     p.add_argument(
         "--top-per-tool",
