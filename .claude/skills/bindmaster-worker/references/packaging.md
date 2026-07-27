@@ -1,6 +1,6 @@
 # Packaging + Transfer to RESULTS/
 
-Once a run finishes (success or failure), you package the outputs and transfer to muni-disk so the orchestrator can pick them up. This file is the canonical convention.
+Once a run finishes (success or failure), you package the outputs. **Assignment mode** (Clara, non-LAN machines): transfer the tarball to muni-disk yourself, as before. **Driven mode** (BM1/BM2/BM4, launched via `tools/fleet.sh` from BM5): package locally and leave it in the run dir — BM5 pulls it with `fleet.sh fetch` and archives a copy to muni-disk itself; you don't push. This file's naming convention and per-tool recipes are unchanged either way — only the transfer leg differs (see "Transfer" below).
 
 ## Naming convention
 
@@ -44,6 +44,8 @@ Each tool has a different "real evidence" set. See per-tool guidance below. Gene
 When unsure, err toward inclusion. Disk is cheap; lost evidence is expensive.
 
 ## Per-tool packaging recipes
+
+The commands below write straight to `/path/to/RESULTS/` — that's the **assignment-mode** convention (muni-disk mounted or VPN-reachable). **In driven mode** (BM1/BM2/BM4), tar to a local path instead — anywhere under the run dir works, e.g. `~/runs/<TARGET>-<machine>-<tool>/<TARGET>_<tool>_<machine>.tar.gz` — and leave it there for BM5 to pull with `fleet.sh fetch` (see "Transfer", below). Everything else about these recipes — what's included, the naming convention — is identical either way.
 
 ### BindCraft
 
@@ -178,9 +180,23 @@ tar czf /path/to/RESULTS/<TARGET>_RFD3_<machine>.tar.gz \
 
 The `mpnn_out/` directory contains the `.fa` files with N sequences per backbone. Post-processing (pick best-of-N, strip target prefix) can happen here OR in the orchestrator's evaluator — by convention, leave the raw `.fa` and let the evaluator do post-processing for consistency across runs.
 
-## Transfer to muni-disk
+## Transfer
 
-### If muni-disk is mounted directly
+### Driven mode (BM1/BM2/BM4, launched via `tools/fleet.sh`)
+
+Leave the tarball where you packaged it, in the run dir on the worker machine — you don't push to muni-disk yourself. BM5 (playing the orchestrator role here) pulls it:
+
+```bash
+tools/fleet.sh fetch <machine> <remote-dir>/<TARGET>_<tool>_<machine>.tar.gz ~/eval_workdir/<TARGET>/
+```
+
+This runs `rsync -s -a --partial` and, for a `.tar.gz`, verifies the archive with `tar -tzf` before declaring success — a corrupt or partial transfer dies loudly (`fetch` refuses to report success) rather than silently landing a bad file. BM5 then archives one copy to muni-disk RESULTS/ itself; that copy — not your worker-side tarball — is what closes the campaign record. See `bindmaster-orchestrator/references/lab-deploy.md` §3.5.
+
+You still append the completion-entry to PROGRESS.md (below) — driven mode doesn't change who owns that record, only who does the muni-disk write.
+
+### Assignment mode (Clara, non-LAN machines)
+
+#### If muni-disk is mounted directly
 
 ```bash
 cp <TARGET>_<tool>_<machine>.tar.gz /path/to/muni-disk/<TARGET>/RESULTS/
@@ -193,7 +209,7 @@ ls -la /path/to/muni-disk/<TARGET>/RESULTS/<TARGET>_<tool>_<machine>.tar.gz
 # Check the file size matches
 ```
 
-### If muni-disk needs VPN switching (Clara → MUNI)
+#### If muni-disk needs VPN switching (Clara → MUNI)
 
 **Announce the VPN switch in PROGRESS.md Worker updates first:**
 
@@ -219,6 +235,8 @@ ssh user@muni-disk-host "ls -la /path/to/<TARGET>/RESULTS/<TARGET>_<tool>_<machi
 
 ### Verifying transfer integrity
 
+Driven mode: `fleet.sh fetch` already verifies `.tar.gz` integrity automatically with `tar -tzf` (see above) — no manual step needed. The checksum flow below is for assignment-mode scp/rsync transfers.
+
 For large tarballs, checksum-verify:
 
 ```bash
@@ -235,19 +253,25 @@ Not always necessary, but cheap insurance for >10 GB archives.
 
 ## Don't delete the worker-side copy yet
 
-Until the orchestrator or user confirms the muni-disk archive is readable and complete. The worker-side run dir is your local backup until the campaign closes.
+Until the muni-disk archive is confirmed readable and complete. The worker-side run dir is your local backup until the campaign closes — this holds in both modes, just who does the confirming differs.
 
-Pattern that works:
+Pattern that works (assignment mode):
 1. Transfer tarball to muni-disk.
 2. Append completion-entry to PROGRESS.md Worker updates.
 3. Wait for the orchestrator to merge and confirm.
+4. Only after that confirmation, optionally delete the worker-side run dir (with user OK).
+
+Pattern that works (driven mode):
+1. Package locally; leave the tarball in the run dir.
+2. Append completion-entry to PROGRESS.md Worker updates, noting it's ready for `fleet.sh fetch`.
+3. Wait for BM5 to fetch (`tar -tzf`-verified) and archive to muni-disk.
 4. Only after that confirmation, optionally delete the worker-side run dir (with user OK).
 
 If disk space pressure is real, *move* the tarball locally to a "delete-pending" subdirectory rather than deleting outright — gives a recovery window if the muni-disk copy is bad.
 
 ## Append the completion-entry to PROGRESS.md
 
-After successful transfer:
+After successful transfer (or, in driven mode, after packaging — see pattern above):
 
 ```markdown
 ### 2026-MM-DD HH:MM — <machine> — <Tool> <variant>
@@ -258,6 +282,8 @@ Packaged: <TARGET>_<tool>_<machine>.tar.gz (<size>) at RESULTS/.
 [Optional] New error: <error + reproduction>.
 [Optional] New lesson: <one sentence candidate for learnings.md>.
 ```
+
+**Driven mode:** replace `SLURM <id>` with the tmux job name, and replace "Packaged: ... at RESULTS/" with "Packaged: ... in `<remote-dir>`, ready for `fleet.sh fetch`" — the RESULTS/ path is only accurate once BM5 has archived its own fetched copy there.
 
 For failures (❌) or planned kills:
 
