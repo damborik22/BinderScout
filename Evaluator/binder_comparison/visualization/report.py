@@ -2619,6 +2619,15 @@ _ADVISORY_SECONDARY = [
     "epitope_matched_residues",
     "family_size",
     "family_rank",
+    # beta-check (Part X): binder→target β-sheet intercalation flag (anti-gaming).
+    "beta_intercalates",
+    "n_xbridge",
+    # affinity (Part N / Part X): interface-energy affinity ranking among binders.
+    "affinity_energy_density",
+    "passes_affinity_gate",
+    # monomer (Part X): context-dependent-fold flag (binder-alone vs in-complex RMSD).
+    "fold_robust",
+    "monomer_rmsd",
 ]
 
 
@@ -2663,6 +2672,26 @@ def _advisory_legend_html(df: pd.DataFrame) -> str:
             "<code>delta_unsat_hbonds</code> buried unsatisfied polar atoms · "
             "<code>nres</code> # interface residues."
         )
+    if "beta_intercalates" in df.columns:
+        bits.append(
+            "<b>beta_intercalates</b> = binder strand threaded into the target β-sheet (β-augmentation via DSSP "
+            "cross-chain bridges; from <code>binder-compare beta-check</code>). A design flagged <code>true</code> "
+            "games iPTM with a non-physical interface — treat with caution (advisory; drop only with "
+            "<code>--exclude-intercalators</code>)."
+        )
+    if "affinity_energy_density" in df.columns:
+        bits.append(
+            "<b>affinity_energy_density</b> = |dG/dSASA| interface energy per buried Å² (Rosetta; from "
+            "<code>binder-compare affinity</code>). Ranks affinity <em>among</em> gate-passing binders "
+            "(<code>passes_affinity_gate</code> = ipsae_min ≥ gate). Caveat: on predicted structures this screens "
+            "binder-vs-non-binder but does not reliably rank Kd — a diagnostic, not the primary sort."
+        )
+    if "fold_robust" in df.columns:
+        bits.append(
+            "<b>fold_robust / monomer_rmsd</b> = Cα RMSD of the binder refolded alone vs in-complex (from "
+            "<code>binder-compare monomer</code>). <code>fold_robust=false</code> (RMSD &gt; 3 Å) = a "
+            "target-stabilized, context-dependent fold — an expression/behaviour risk (advisory)."
+        )
     if not bits:
         return ""
     return (
@@ -2705,6 +2734,7 @@ def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tupl
             "boltz_pae_ipsae_min",
             "af3_ipsae_min",
             "esmfold2_ipsae_min",
+            "esmfold2_chain_iptm_interface",
             "consensus_ipsae_min_spread",
             "binder_ptm",
             "plddt_binder_min",

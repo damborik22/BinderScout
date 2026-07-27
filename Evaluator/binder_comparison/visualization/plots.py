@@ -82,6 +82,14 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "native_soluprot_score": ("Solubility (SoluProt)", "[0–1]", "↑"),
     "wetlab_recommended": ("Wet-lab ready", "", ""),
     "wetlab_reason": ("Why flagged (wet-lab)", "", ""),
+    # ── Part X advisory panels ──────────────────────────────────────────────
+    "esmfold2_chain_iptm_interface": ("ESMFold2 chain-ipTM (interface)", "[0–1]", "↑"),
+    "beta_intercalates": ("β-intercalates", "", "↓"),
+    "n_xbridge": ("β cross-bridges", "", "↓"),
+    "affinity_energy_density": ("|dG/dSASA|", "kcal/Å²", "↑"),
+    "passes_affinity_gate": ("Affinity gate", "", ""),
+    "fold_robust": ("Fold robust", "", ""),
+    "monomer_rmsd": ("Monomer RMSD", "Å", "↓"),
     # ── Ranking / screen ────────────────────────────────────────────────────
     "two_stage_rank": ("Rank", "", ""),
     "consensus_rank": ("Rank", "", ""),
@@ -282,8 +290,15 @@ _ENGINE_RADAR_METRICS: dict[str, list[tuple[str, str, str]]] = {
         ("af3_ipsae_min", "ipSAE_min", "↑"),
         ("af3_iptm", "ipTM", "↑"),
         ("af3_plddt_binder_mean", "pLDDT binder", "↑"),
-        ("af3_pae_bt", "PAE b→t", "↓"),
-        ("af3_pae_tb", "PAE t→b", "↓"),
+        ("af3_pae_bt_mean", "PAE b→t", "↓"),
+        ("af3_pae_tb_mean", "PAE t→b", "↓"),
+    ],
+    "esmfold2": [
+        ("esmfold2_ipsae_min", "ipSAE_min", "↑"),
+        ("esmfold2_pae_iptm", "ipTM", "↑"),
+        ("esmfold2_plddt_binder_mean", "pLDDT binder", "↑"),
+        ("esmfold2_pae_bt_mean", "PAE b→t", "↓"),
+        ("esmfold2_pae_tb_mean", "PAE t→b", "↓"),
     ],
 }
 
@@ -293,6 +308,7 @@ _ENGINE_RADAR_METRICS: dict[str, list[tuple[str, str, str]]] = {
 _ENGINE_RANK_COLS: dict[str, str] = {
     "boltz": "boltz_pae_ipsae_min",
     "af3": "af3_ipsae_min",
+    "esmfold2": "esmfold2_ipsae_min",
 }
 
 _ENGINE_DISPLAY = {"boltz": "Boltz-2", "af3": "AF3", "esmfold2": "ESMFold2"}

@@ -6,7 +6,11 @@ Both are ADVISORY: surfaced as columns, never used to reorder or drop designs.
 import pytest
 
 pd = pytest.importorskip("pandas")
-from binder_comparison.cli.report import _attach_qc_results  # noqa: E402
+from binder_comparison.cli.report import (  # noqa: E402
+    _attach_affinity_results,
+    _attach_monomer_results,
+    _attach_qc_results,
+)
 from binder_comparison.visualization.report import (  # noqa: E402
     _advisory_legend_html,
     _benchmark_provenance_html,
@@ -223,6 +227,170 @@ def test_select_display_cols_two_stage_promotes_agreement_and_spread():
     primary, _secondary = _select_display_cols(df, rank_method="two_stage")
     assert "agreement_count" in primary
     assert "consensus_iptm_spread" in primary
+
+
+# --- Part X: newly-wired advisory panels (affinity, monomer, beta) ------------
+
+
+def test_attach_affinity_results_joins_by_binder_id(tmp_path):
+    """affinity CSV surfaces affinity_energy_density + passes_affinity_gate; advisory (no drop/reorder)."""
+    aff = pd.DataFrame(
+        {
+            "binder_id": ["d1", "d3"],
+            "affinity_energy_density": [0.42, 0.11],
+            "passes_affinity_gate": [True, False],
+        }
+    )
+    p = tmp_path / "affinity.csv"
+    aff.to_csv(p, index=False)
+    out = _attach_affinity_results(_metrics_df(), str(p))
+    assert out["binder_id"].tolist() == ["d1", "d2", "d3"]  # no reorder/drop
+    assert out.loc[out.binder_id == "d1", "affinity_energy_density"].iloc[0] == 0.42
+    assert out.loc[out.binder_id == "d2", "affinity_energy_density"].isna().iloc[0]
+
+
+def test_attach_affinity_results_missing_file_is_noop():
+    out = _attach_affinity_results(_metrics_df(), "/nonexistent/affinity.csv")
+    assert "affinity_energy_density" not in out.columns
+
+
+def test_attach_monomer_results_joins_design_id_to_binder_id(tmp_path):
+    """monomer CSV keys by design_id; must join onto binder_id and add monomer_rmsd + fold_robust."""
+    mono = pd.DataFrame(
+        {
+            "design_id": ["d1", "d2"],
+            "monomer_rmsd": [1.2, 5.6],
+            "fold_robust": [True, False],
+        }
+    )
+    p = tmp_path / "monomer.csv"
+    mono.to_csv(p, index=False)
+    out = _attach_monomer_results(_metrics_df(), str(p))
+    assert out["binder_id"].tolist() == ["d1", "d2", "d3"]
+    assert bool(out.loc[out.binder_id == "d1", "fold_robust"].iloc[0]) is True
+    assert out.loc[out.binder_id == "d2", "monomer_rmsd"].iloc[0] == 5.6
+    assert out.loc[out.binder_id == "d3", "fold_robust"].isna().iloc[0]  # unannotated stays blank
+
+
+def test_new_advisory_cols_in_secondary_when_present():
+    """affinity / monomer / beta columns must reach the Top-30 detailed (secondary) display set."""
+    df = _metrics_df()
+    df["passes_max_screen"] = True
+    df["affinity_energy_density"] = [0.4, 0.3, 0.2]
+    df["fold_robust"] = [True, True, False]
+    df["monomer_rmsd"] = [1.0, 2.0, 4.0]
+    df["beta_intercalates"] = ["false", "false", "true"]
+    df["esmfold2_chain_iptm_interface"] = [0.7, 0.6, 0.5]
+    _primary, secondary = _select_display_cols(df, rank_method="two_stage")
+    for col in (
+        "affinity_energy_density",
+        "fold_robust",
+        "monomer_rmsd",
+        "beta_intercalates",
+        "esmfold2_chain_iptm_interface",
+    ):
+        assert col in secondary, f"{col} missing from two-stage secondary display set"
+
+
+def test_advisory_legend_covers_beta_affinity_monomer():
+    df = _metrics_df()
+    df["beta_intercalates"] = "false"
+    df["affinity_energy_density"] = 0.3
+    df["fold_robust"] = True
+    legend = _advisory_legend_html(df)
+    assert "beta_intercalates" in legend
+    assert "affinity_energy_density" in legend
+    assert "fold_robust" in legend
+
+
+def _pdb_atom(serial, chain, resnum, x, y, z):
+    """One fixed-width Cα ATOM record the epitope parser can read."""
+    return (
+        "ATOM  "
+        + f"{serial:>5}"
+        + "  CA  "
+        + "ALA "
+        + chain
+        + f"{resnum:>4}"
+        + "    "
+        + f"{x:>8.3f}"
+        + f"{y:>8.3f}"
+        + f"{z:>8.3f}"
+        + "  1.00  0.00           C"
+    )
+
+
+def test_primary_structure_col_picks_engine_and_chain():
+    from binder_comparison.cli.report import _primary_structure_col
+
+    df = pd.DataFrame({"esmfold2_pdb": ["/x.pdb"], "boltz_pdb": ["/y.pdb"]})
+    assert _primary_structure_col(df, "esmfold2") == ("esmfold2_pdb", "B")
+    assert _primary_structure_col(df, "boltz") == ("boltz_pdb", "A")
+    # fallback to any engine when the requested one is absent
+    df2 = pd.DataFrame({"boltz_pdb": ["/y.pdb"]})
+    assert _primary_structure_col(df2, "af3") == ("boltz_pdb", "A")
+
+
+def test_compute_epitope_inline_scores_from_structure(tmp_path):
+    """Inline epitope reads the refolded structure and scores hotspot recall (advisory)."""
+    from binder_comparison.cli.report import _compute_epitope_inline
+
+    pdb = "\n".join(
+        [
+            _pdb_atom(1, "A", 1, 0, 0, 0),  # binder
+            _pdb_atom(2, "A", 2, 3, 0, 0),  # binder
+            _pdb_atom(3, "B", 10, 1, 1, 1),  # target, ~1.7 Å from binder → interface
+            _pdb_atom(4, "B", 99, 50, 50, 50),  # target, far → not interface
+        ]
+    )
+    p = tmp_path / "d1.pdb"
+    p.write_text(pdb)
+    df = pd.DataFrame({"binder_id": ["d1"], "sequence": ["AA"], "boltz_pdb": [str(p)]})
+    out = _compute_epitope_inline(
+        df,
+        hotspots_spec="10,99",
+        structure_col="boltz_pdb",
+        binder_chain="A",
+        cutoff=8.0,
+        flag_threshold=0.30,
+        base_dir=None,
+    )
+    assert out.loc[0, "epitope_n_interface"] == 1  # only B10 contacts the binder
+    assert out.loc[0, "epitope_match_fraction"] == 0.5  # 1 of 2 hotspots (10) landed; numeric, not str
+    assert out.loc[0, "epitope_status"] == "OK"  # 0.5 >= 0.30 flag threshold
+
+
+def test_compute_epitope_inline_missing_structure_marks_no_structure(tmp_path):
+    from binder_comparison.cli.report import _compute_epitope_inline
+
+    df = pd.DataFrame({"binder_id": ["d1"], "boltz_pdb": ["/does/not/exist.pdb"]})
+    out = _compute_epitope_inline(
+        df,
+        hotspots_spec="10",
+        structure_col="boltz_pdb",
+        binder_chain="A",
+        cutoff=8.0,
+        flag_threshold=0.30,
+        base_dir=None,
+    )
+    assert out.loc[0, "epitope_status"] == "NO_STRUCTURE"
+    assert pd.isna(out.loc[0, "epitope_match_fraction"])
+
+
+def test_engine_radar_uses_real_pae_mean_columns():
+    """Regression: the AF3 radar referenced non-existent af3_pae_bt/tb (the real
+    merged columns are *_pae_bt_mean). ESMFold2 (default engine) must now have a radar panel.
+
+    Protenix was in this list until its refolding was removed (see CHANGELOG,
+    "Protenix refolding removed; AF3 is the 2nd engine") — it has no radar to check."""
+    from binder_comparison.visualization.plots import _ENGINE_RADAR_METRICS, _ENGINE_RANK_COLS
+
+    for engine in ("af3", "esmfold2"):
+        cols = {c for c, _lbl, _dir in _ENGINE_RADAR_METRICS[engine]}
+        assert f"{engine}_pae_bt_mean" in cols, f"{engine} radar must use {engine}_pae_bt_mean"
+        assert f"{engine}_pae_tb_mean" in cols
+        assert f"{engine}_pae_bt" not in cols  # the bare (non-existent) column must be gone
+    assert _ENGINE_RANK_COLS["esmfold2"] == "esmfold2_ipsae_min"
 
 
 # --- Methodology text must describe the ranking that actually ran (F32) --------
