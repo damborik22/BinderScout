@@ -22,6 +22,13 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..comparison.scoring import (
+    _ENGINE_IPSAE_COLS,
+    IPSAE_HIGH_THRESHOLD,
+    IPSAE_MIN_THRESHOLD,
+    IPSAE_PASS_THRESHOLD,
+)
+
 # display label -> (source column, sort kind). Optional columns drop when absent.
 _SLIM = [
     ("Rank", "two_stage_rank", "n"),
@@ -64,9 +71,24 @@ _FULL_LEAD = [
 
 
 def _tier(v) -> str:
+    """Tier band for the slim table's ipSAE_min colouring.
+
+    Reads the same constants `scoring.apply_screening_thresholds` bands
+    `quality_tier` with — retyped literals here meant the slim table could
+    colour a row differently from the tier the full report assigned it.
+    """
     if pd.isna(v):
         return "na"
-    return "high" if v > 0.80 else "med" if v > 0.61 else "low" if v > 0.40 else "rej"
+    if v > IPSAE_HIGH_THRESHOLD:
+        return "high"
+    if v > IPSAE_PASS_THRESHOLD:
+        return "med"
+    return "low" if v > IPSAE_MIN_THRESHOLD else "rej"
+
+
+def _n_engines(df: pd.DataFrame) -> int:
+    """How many refolding engines contributed — the real ceiling of agreement_count."""
+    return sum(1 for col in _ENGINE_IPSAE_COLS.values() if col in df.columns) or 3
 
 
 def _slim_cols(df: pd.DataFrame):
@@ -221,6 +243,11 @@ def write_top30_slim(df: pd.DataFrame, output_dir: Path, top_per_tool: int = 10,
             "\n".join(f'<div class="scroll">{s}</div>' if s.startswith("<table") else s for s in sections),
         )
         .replace("__ROLLS__", "\n".join(rolls))
+        # Rendered from the scoring constants and from the engines that actually
+        # ran, so the legend cannot claim a band or an engine count the tables
+        # below were not built with. (CSS braces rule out an f-string template.)
+        .replace("__TIER_HIGH__", f"{IPSAE_HIGH_THRESHOLD:.2f}".lstrip("0"))
+        .replace("__N_ENGINES__", str(_n_engines(d)))
     )
     (output_dir / "top30_slim.html").write_text(page)
 
@@ -274,8 +301,8 @@ details .full th,details .full td{font-size:11px;padding:5px 8px}
 </style></head><body><div class="wrap">
 <h1>Decision tables · Top 30 + per tool</h1>
 <p class="sub">__SUB__</p>
-<p class="legend"><b>Mean ipTM</b> (binds, cross-engine ↑) · <b>Agreement</b> (engines concurring 0–3 ↑) ·
-<b>ipSAE_min</b> (interface: <span style="color:var(--high)">High&gt;.80</span>/<span style="color:var(--med)">Med</span>/<span style="color:var(--low)">Low</span> ↑) ·
+<p class="legend"><b>Mean ipTM</b> (binds, cross-engine ↑) · <b>Agreement</b> (engines concurring 0–__N_ENGINES__ ↑) ·
+<b>ipSAE_min</b> (interface: <span style="color:var(--high)">High&gt;__TIER_HIGH__</span>/<span style="color:var(--med)">Med</span>/<span style="color:var(--low)">Low</span> ↑) ·
 <b>Epitope</b> (contacts on the pocket ↑) · <b>Solubility</b> (SoluProt ↑) · <b>Tm</b> (TmProt °C ↑) · <b>Notes</b> (wet-lab advisory).</p>
 __SECTIONS__
 <div class="rollhdr">All metrics — roll-ups (click to expand)</div>

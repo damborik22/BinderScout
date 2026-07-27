@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "binder-comparison"
 version = "0.1.0"
-description = "Evaluate protein binder sequences by independent refolding with Boltz-2 (plus Protenix on x86 and AlphaFold 3 on aarch64 / DGX Spark when configured) — sequences in, ranked interface metrics out."
+description = "Evaluate protein binder sequences by independent refolding with Boltz-2, AlphaFold 3 and ESMFold2 — sequences in, ranked interface metrics out."
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24",
