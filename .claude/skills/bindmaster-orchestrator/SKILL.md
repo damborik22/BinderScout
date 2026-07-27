@@ -7,6 +7,8 @@ description: Use this skill when planning, dispatching, and evaluating a BindMas
 
 **Audience:** an AI agent acting as the *orchestrator* of a BindMaster binder-design campaign — typically running on Spark. The orchestrator coordinates work across multiple compute nodes (BM2, BM4, Clara, others as available); each worker is either a Claude Code instance reading the assignment locally, a remote session driven by the orchestrator over VPN/SSH, or a human. This skill is meta — for per-tool engine principles see `references/tools/`, for empirical campaign lessons see `references/learnings.md`, for the local cross-engine refold + iPSAE merge recipe see `references/evaluation.md`, and for the worker-side operational playbook see the sibling skill `bindmaster-worker`.
 
+When this machine has direct LAN SSH to BM1/BM2/BM4 (no VPN, same subnet — as BM5 does), the orchestrator can drive those machines itself via `tools/fleet.sh` (`probe|status|launch|poll|fetch`), the same direct-deploy collapse of orchestrator/worker roles described below for Clara. See `references/lab-deploy.md`.
+
 **When you read this:** at the start of any campaign session, after `MEMORY.md`, before touching the run dirs. It encodes patterns that took a full campaign (2VDY / human CBG, May 2026) to learn.
 
 **What this skill is NOT:**

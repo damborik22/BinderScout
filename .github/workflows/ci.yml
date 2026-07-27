@@ -21,6 +21,7 @@ jobs:
             Evaluator/evaluate.sh \
             Evaluator/install.sh \
             Evaluator/run.sh \
+            tools/fleet.sh \
             docker-entrypoint.sh \
             test_env.sh
 
