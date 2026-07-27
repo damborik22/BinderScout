@@ -117,22 +117,68 @@ cmd_launch() {
     qjob=$(sq "$job")
     qdir=$(sq "$rundir")
 
-    # Admission check 1 — job-name collision (deterministic).
-    if ssh "$m" "tmux has-session -t '$qjob'" 2>/dev/null; then
-        die "$m: tmux session '$job' already exists — refusing"
-    fi
+    # Admission check 1 — job-name collision (deterministic). tmux has-session
+    # exits 1 for "no such session" (the expected, common case) and 0 if one
+    # exists; ssh itself exits 255 on a connection failure. That must not be
+    # misread as "no such session" — an unreachable host means we don't know
+    # whether a session is running there, so refuse rather than proceed.
+    local sess_rc=0
+    ssh -o ConnectTimeout=8 "$m" "tmux has-session -t '$qjob'" 2>/dev/null && sess_rc=0 || sess_rc=$?
+    case "$sess_rc" in
+        0)   die "$m: tmux session '$job' already exists — refusing" ;;
+        1)   ;;  # no such session — expected, proceed
+        255) die "$m: ssh connection failed — cannot check for a running session — refusing" ;;
+        *)   die "$m: could not determine whether session '$job' exists (ssh exit $sess_rc) — refusing" ;;
+    esac
 
-    # Admission check 2 — GPU occupancy, ignoring sub-threshold desktop processes.
-    local busy
-    busy=$(ssh "$m" "nvidia-smi --query-compute-apps=pid,used_memory \
-        --format=csv,noheader,nounits 2>/dev/null | awk -F', *' '\$2+0 > $GPU_BUSY_MIB'")
-    if [ -n "$busy" ] && [ "${FLEET_FORCE:-0}" != 1 ]; then
+    # Admission check 2 — GPU occupancy, ignoring sub-threshold desktop
+    # processes. Three distinguishable outcomes: confirmed-idle (launch),
+    # confirmed-busy (refuse, name the PID), could-not-determine (refuse —
+    # nvidia-smi failed, or ssh itself failed). An empty $busy must never be
+    # read as "idle" when it could mean "couldn't check": nvidia-smi's own
+    # exit status is captured remotely (not discarded) and surfaced as a
+    # distinct sentinel (exit 97) instead of folding into empty stdout.
+    local busy ssh_rc=0
+    busy=$(ssh -o ConnectTimeout=8 "$m" "GPU_BUSY_MIB=$GPU_BUSY_MIB bash -s" <<'REMOTE'
+set -u
+if ! out=$(nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>&1); then
+    echo "nvidia-smi failed: $out" >&2
+    exit 97
+fi
+printf '%s\n' "$out" | awk -F', *' -v floor="$GPU_BUSY_MIB" '$2+0 > floor'
+REMOTE
+    ) || ssh_rc=$?
+
+    local reason=""
+    case "$ssh_rc" in
+        0)   ;;
+        255) reason="ssh connection failed" ;;
+        97)  reason="nvidia-smi failed" ;;
+        *)   reason="ssh command exited $ssh_rc" ;;
+    esac
+
+    if [ -n "$reason" ]; then
+        if [ "${FLEET_FORCE:-0}" = 1 ]; then
+            warn "$m: could not determine GPU state ($reason) but FLEET_FORCE=1 — launching anyway"
+        else
+            die "$m: could not determine GPU state ($reason) — refusing. FLEET_FORCE=1 overrides."
+        fi
+    elif [ -n "$busy" ] && [ "${FLEET_FORCE:-0}" != 1 ]; then
         die "$m: GPU busy (pid, MiB): $busy — refusing. FLEET_FORCE=1 overrides."
+    elif [ -n "$busy" ]; then
+        warn "$m: GPU busy but FLEET_FORCE=1 — launching anyway"
     fi
-    [ -z "$busy" ] || warn "$m: GPU busy but FLEET_FORCE=1 — launching anyway"
 
     ssh "$m" "mkdir -p '$qdir'"
-    scp -q "$script" "$m:$rundir/run.sh"
+    # Transfer via ssh+cat rather than scp, so the destination path goes
+    # through the same single-quoted-remote-shell convention (and the same
+    # escaped $qdir) as every other command here. scp's own path handling
+    # depends on which wire protocol the local scp binary defaults to (SFTP
+    # vs legacy -T/exec) — modern OpenSSH defaults to SFTP, where the path
+    # bypasses a remote shell entirely, but that's a version-dependent
+    # assumption this script shouldn't carry. Piping through ssh keeps one
+    # quoting model everywhere, independent of scp's protocol choice.
+    ssh "$m" "cat > '$qdir/run.sh'" < "$script"
     ssh "$m" "cd '$qdir' && tmux new-session -d -s '$qjob' \
         'export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True; \
          bash run.sh > run.log 2>&1'"
