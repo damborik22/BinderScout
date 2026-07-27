@@ -117,7 +117,7 @@ the spec — confirm it rather than assuming it.
 - [ ] **Step 1: Write the failing verification**
 
 ```bash
-# tests/fleet/check_probe.sh
+# tools/fleet-check/check_probe.sh
 set -euo pipefail
 bash tools/fleet.sh probe
 jq -e '.machines | keys == ["bm1","bm2","bm4"]' ~/.claude/fleet/inventory.json
@@ -129,7 +129,7 @@ echo "PROBE OK"
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `bash tests/fleet/check_probe.sh`
+Run: `bash tools/fleet-check/check_probe.sh`
 Expected: FAIL — `tools/fleet.sh: No such file or directory`.
 
 - [ ] **Step 3: Write `tools/fleet.sh` with the `probe` subcommand**
@@ -209,7 +209,7 @@ esac
 
 ```bash
 chmod +x tools/fleet.sh
-bash tests/fleet/check_probe.sh
+bash tools/fleet-check/check_probe.sh
 ```
 Expected: `PROBE OK`. If `ram_gb == 31` fails, re-read the value — BM1 genuinely has 31 GB and that asymmetry is load-bearing (see spec §2).
 
@@ -221,7 +221,7 @@ Expected: no output.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tools/fleet.sh tests/fleet/check_probe.sh
+git add tools/fleet.sh tools/fleet-check/check_probe.sh
 git commit -m "feat(fleet): probe BM1/BM2/BM4 into a cached inventory"
 ```
 
@@ -231,7 +231,7 @@ git commit -m "feat(fleet): probe BM1/BM2/BM4 into a cached inventory"
 
 **Files:**
 - Modify: `tools/fleet.sh`
-- Create: `tests/fleet/check_status.sh`
+- Create: `tools/fleet-check/check_status.sh`
 
 **Interfaces:**
 - Consumes: `INVENTORY`, `die`, `ok` from Task 2.
@@ -240,7 +240,7 @@ git commit -m "feat(fleet): probe BM1/BM2/BM4 into a cached inventory"
 - [ ] **Step 1: Write the failing verification**
 
 ```bash
-# tests/fleet/check_status.sh
+# tools/fleet-check/check_status.sh
 set -euo pipefail
 out=$(bash tools/fleet.sh status)
 printf '%s\n' "$out"
@@ -253,7 +253,7 @@ echo "STATUS OK"
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `bash tests/fleet/check_status.sh`
+Run: `bash tools/fleet-check/check_status.sh`
 Expected: FAIL — `usage: fleet.sh <command>`, exit 1.
 
 - [ ] **Step 3: Add `cmd_status` above `usage()`**
@@ -294,14 +294,14 @@ In the `case` block add `status) shift; cmd_status "$@" ;;` and add to `usage()`
 
 - [ ] **Step 5: Run the verification**
 
-Run: `bash tests/fleet/check_status.sh`
+Run: `bash tools/fleet-check/check_status.sh`
 Expected: `STATUS OK`, with `tunnel=DOWN key=locked` and both warnings printed — the tunnel is manual and currently down, which is the correct state, not a failure.
 
 - [ ] **Step 6: Confirm shellcheck, then commit**
 
 ```bash
 shellcheck --shell=bash --severity=warning tools/fleet.sh
-git add tools/fleet.sh tests/fleet/check_status.sh
+git add tools/fleet.sh tools/fleet-check/check_status.sh
 git commit -m "feat(fleet): status view incl. Clara tunnel and agent-key state"
 ```
 
@@ -311,7 +311,7 @@ git commit -m "feat(fleet): status view incl. Clara tunnel and agent-key state"
 
 **Files:**
 - Modify: `tools/fleet.sh`
-- Create: `tests/fleet/check_launch.sh`
+- Create: `tools/fleet-check/check_launch.sh`
 
 **Interfaces:**
 - Consumes: `die`, `warn`, `ok`, `GPU_BUSY_MIB` from Task 2.
@@ -320,7 +320,7 @@ git commit -m "feat(fleet): status view incl. Clara tunnel and agent-key state"
 - [ ] **Step 1: Write the failing verification (canary + both refusal paths)**
 
 ```bash
-# tests/fleet/check_launch.sh
+# tools/fleet-check/check_launch.sh
 set -euo pipefail
 JOB=canary_$$
 DIR=/tmp/fleet_canary_$$
@@ -343,7 +343,7 @@ echo "LAUNCH OK"
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `bash tests/fleet/check_launch.sh`
+Run: `bash tools/fleet-check/check_launch.sh`
 Expected: FAIL — `usage: fleet.sh <command>`, exit 1.
 
 - [ ] **Step 3: Add `cmd_launch`**
@@ -387,7 +387,7 @@ Add `launch) shift; cmd_launch "$@" ;;` to the `case` block and to `usage()`:
 
 - [ ] **Step 5: Run the verification**
 
-Run: `bash tests/fleet/check_launch.sh`
+Run: `bash tools/fleet-check/check_launch.sh`
 Expected: `LAUNCH OK`.
 
 - [ ] **Step 6: Verify the GPU-busy refusal against a genuinely busy machine**
@@ -406,7 +406,7 @@ rely on the collision check from Step 5 for coverage.
 
 ```bash
 shellcheck --shell=bash --severity=warning tools/fleet.sh
-git add tools/fleet.sh tests/fleet/check_launch.sh
+git add tools/fleet.sh tools/fleet-check/check_launch.sh
 git commit -m "feat(fleet): tmux launch with GPU and session admission checks"
 ```
 
@@ -416,7 +416,7 @@ git commit -m "feat(fleet): tmux launch with GPU and session admission checks"
 
 **Files:**
 - Modify: `tools/fleet.sh`
-- Create: `tests/fleet/check_poll_fetch.sh`
+- Create: `tools/fleet-check/check_poll_fetch.sh`
 
 **Interfaces:**
 - Consumes: everything from Tasks 2 and 4.
@@ -425,7 +425,7 @@ git commit -m "feat(fleet): tmux launch with GPU and session admission checks"
 - [ ] **Step 1: Write the failing verification**
 
 ```bash
-# tests/fleet/check_poll_fetch.sh
+# tools/fleet-check/check_poll_fetch.sh
 set -euo pipefail
 JOB=pf_$$
 DIR=/tmp/fleet_pf_$$
@@ -446,7 +446,7 @@ echo "POLL/FETCH OK"
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `bash tests/fleet/check_poll_fetch.sh`
+Run: `bash tools/fleet-check/check_poll_fetch.sh`
 Expected: FAIL at the `poll` step — unknown command, exit 1.
 
 - [ ] **Step 3: Add `cmd_poll` and `cmd_fetch`**
@@ -499,14 +499,14 @@ And to `usage()`:
 
 - [ ] **Step 5: Run the verification**
 
-Run: `bash tests/fleet/check_poll_fetch.sh`
+Run: `bash tools/fleet-check/check_poll_fetch.sh`
 Expected: `POLL/FETCH OK`.
 
 - [ ] **Step 6: Confirm shellcheck, then commit**
 
 ```bash
 shellcheck --shell=bash --severity=warning tools/fleet.sh
-git add tools/fleet.sh tests/fleet/check_poll_fetch.sh
+git add tools/fleet.sh tools/fleet-check/check_poll_fetch.sh
 git commit -m "feat(fleet): poll running jobs and fetch verified results"
 ```
 
