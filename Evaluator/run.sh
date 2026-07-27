@@ -85,10 +85,13 @@ echo ""
 echo "--- Starting evaluation ---"
 echo ""
 
+# The target PDB is only the source of $TARGET_SEQ above — evaluate.sh consumes the
+# sequence, not the structure. Do not pass --target-pdb: Boltz-2's template mode is
+# opt-in and AF3/ESMFold2 have no equivalent, so constraining one engine's target
+# backbone would make the per-engine iPTMs non-comparable.
 bash "$EVALUATOR_DIR/evaluate.sh" \
     --sequences  "$SEQUENCES_FILE" \
     --target-seq "$TARGET_SEQ" \
-    --target-pdb "$TARGET_PDB" \
     --output     "$OUTPUT"
 
 echo ""
