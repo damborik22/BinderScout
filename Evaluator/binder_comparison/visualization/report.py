@@ -2602,6 +2602,7 @@ _ADVISORY_PRIMARY = [
 _ADVISORY_SECONDARY = [
     "native_soluprot_passes",
     "qc_fail_reasons",
+    "qc_missing_metrics",
     # Interface energy decomposition (Item 13) — surfaces existing
     # interface_qc.py columns. Already in `_attach_qc_results`, just now
     # visible in the report.

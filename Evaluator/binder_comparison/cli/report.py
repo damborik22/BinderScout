@@ -1106,6 +1106,11 @@ def _attach_monomer_results(df: pd.DataFrame, monomer_csv: str) -> pd.DataFrame:
 _QC_PANEL_COLS = (
     "qc_pass",
     "qc_fail_reasons",
+    # Coverage is distinct from failure: qc_pass is NA when the Rosetta panel did
+    # not produce every metric, and these two say which metrics were missing. Without
+    # them a reader cannot tell "measured and failed" from "never measured".
+    "qc_covered",
+    "qc_missing_metrics",
     "interface_sc",
     "interface_packstat",
     "interface_dG",
