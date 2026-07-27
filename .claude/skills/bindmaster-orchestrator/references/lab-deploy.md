@@ -47,11 +47,11 @@ it lets a different operator reproduce or take over.
 | Alias (`~/.ssh/config`) | — (orchestrator) | `bm1` | `bm2` | `bm4` |
 | Arch | aarch64 | x86_64 | x86_64 | x86_64 |
 | GPU | GB10 (unified) | RTX 3090 24 GB | RTX 3090 24 GB | RTX 3090 24 GB |
-| RAM | 121 GB | **31 GB** | 62 GB | 62 GB |
+| RAM (total) | 121 GB | **31 GB** | 62 GB | 62 GB |
 | Role | orchestrator + refold | design worker | design worker | design worker |
 
 Full field set (also captured per-probe in `~/.claude/fleet/inventory.json`):
-arch, GPU name, GPU busy-process count, free RAM, free disk, conda envs
+arch, GPU name, GPU busy-process count, total RAM, free disk, conda envs
 present, BindMaster git SHA/branch, tmux version, reachability, timestamp.
 
 **Capability constraints that follow from the hardware — these are not
@@ -89,7 +89,8 @@ tools/fleet.sh probe
 ```
 
 SSHes to bm1/bm2/bm4 in turn (`BatchMode=yes`, 8 s connect timeout), pulls
-GPU name/VRAM, busy-process count (>512 MiB), free RAM, free disk, conda envs,
+GPU name/VRAM, busy-process count (>512 MiB), total RAM (`free -g` column 2,
+not free — see §3.2), free disk, conda envs,
 BindMaster git SHA/branch, tmux version, and writes
 `~/.claude/fleet/inventory.json`. An unreachable machine gets a full-shape
 placeholder row (`reachable:false`, typed nulls) rather than being dropped
@@ -104,7 +105,12 @@ tools/fleet.sh status
 
 Renders one row per LAN machine (MACHINE, HOST, GPU, BUSY, RAM, DISK, BRANCH)
 from the last `probe`, **not** a fresh probe — call `probe` first if the
-picture might be stale. Below the table it also reports Clara tunnel state
+picture might be stale. **The RAM column is the machine's total installed
+RAM, not free/available memory** — `probe_one()` reads it with `free -g |
+awk '/^Mem:/{print $2}'`, and column 2 of `free -g` is `total` (column 4 is
+`free`). BM1's `31` is its fixed capacity, not current headroom — the DISK
+column next to it, by contrast, genuinely is free space (`df -h`). Below the
+table it also reports Clara tunnel state
 (`ip link show ppp0`) and whether the Clara key is loaded
 (`ssh-add -l | grep clara`), so one command gives you the whole fleet
 (LAN + Clara) at a glance. Warns explicitly when the tunnel is down or the key
