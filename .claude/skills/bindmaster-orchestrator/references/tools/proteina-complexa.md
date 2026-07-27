@@ -75,7 +75,7 @@ Three model variants on NGC, each with its own (model + autoencoder) checkpoint 
 
 **Evaluator step (BindMaster):**
 
-Proteina-Complexa outputs go through the BindMaster evaluator the same as other tools — Boltz-2 refold (uniform 10 Å iPSAE), and (via Parts J/K) Protenix + AF3 refold for cross-method `agreement_count`. Both Proteina-Complexa's native reward scores and diversity metrics, and the evaluator's `ipsae_min`, are preserved in `summary.csv` — Proteina-Complexa's internal ranking is its native view; the evaluator adds method-agnostic comparison across the full BindMaster pool.
+Proteina-Complexa outputs go through the BindMaster evaluator the same as other tools — Boltz-2 refold (uniform 10 Å iPSAE), and (via Part K) AF3 + ESMFold2 refold for cross-method `agreement_count` (Protenix refolding was retired — Part J reverted; AF3 covers the independent cross-check role). Both Proteina-Complexa's native reward scores and diversity metrics, and the evaluator's `ipsae_min`, are preserved in `summary.csv` — Proteina-Complexa's internal ranking is its native view; the evaluator adds method-agnostic comparison across the full BindMaster pool.
 
 ## Key knobs
 
