@@ -899,3 +899,201 @@ Target: ApoE4 isoform (P02649, 6NCO chain A, N-terminal 4-helix bundle 24–164)
 - **Start the T–X roadmap with Part X** (report gap audit) — investigate which of `affinity/diversity/monomer/wetlab/epitope/…` analyses actually surface in the HTML report; report + fix plan, no code until approved.
 - Merge order for the pushed branches: CI-fix → screen-metric (auto-retargets to master) → docs (independent).
 - When the multi-state Mosaic + scale-up pools land, re-run the funnel and update the 44 count; verify whether the design-for-selectivity arm beats the counter-screen arm.
+
+---
+
+## 2026-07-23 → 07-25 — Part X report-gap audit shipped; **Part T (Promera) rejected as a negative result**; per-engine advantage map + a length crossover
+
+Two roadmap parts closed. Part X turned the report honest; Part T spent H200 hours to prove a
+candidate engine *isn't* worth adopting — and produced a more valuable side finding than the
+engine itself would have been.
+
+**What changed:**
+
+1. **Part X — report gap audit + surgical fix (commit `be6134e`).** Audited all 16 modules in
+   `Evaluator/binder_comparison/comparison/` through every layer (module → CLI → injected column →
+   rendered HTML), each verdict independently re-verified. Finding: both default orchestrators
+   (`cli/run.py`, `evaluate.sh`) run only *extract → refold → report*; every advisory analysis
+   (`diversity`, `epitope`, `affinity`, `monomer`, `beta-check`, `qc-annotate`) surfaced **only** if
+   its sidecar CSV was hand-threaded via a flag. `monomer` and `affinity` had no wire into the
+   report at all; `beta_intercalates` was injected but in no display set. Fixes: diversity + epitope
+   now run **inline by default** (`--epitope-residues`, `--no-diversity`, `--diversity-threshold`),
+   new `--affinity-results` / `--monomer-results` attach paths, `esmfold2_chain_iptm_interface` (the
+   autosize gate) surfaced, and a real radar bug fixed — AF3/Protenix referenced non-existent
+   `*_pae_bt`/`*_pae_tb` (actual columns are `*_pae_bt_mean`), silently dropping two axes; ESMFold2
+   (the default engine) had **no radar panel at all**. +11 tests, 196 pass, ruff + shellcheck clean.
+2. **Part T — Promera benchmarked end-to-end and rejected.** T1 desk study (MIT licence, 1.89 GB
+   ungated weights, Boltz-class GPU) → T2 folds: nipah pilot 87/90 on Spark, **Adaptyv labelled
+   2515/2517 on a Clara H200 6-way sbatch array** (~1 h per 420-design chunk) → T3 scoring. Full
+   write-up: `docs/INVESTIGATION_partT_promera.md`; data + scripts in `runs/adaptyv_promera_bench/`.
+3. **Promera stood up on both platforms.** Vanilla `pip install` on Clara x86/Hopper. On Spark
+   aarch64/GB10 (sm_121) it needed **three stacked fixes**, encapsulated in
+   `Evaluator/scripts/promera_env.sh`: torch reinstalled from the **cu130** index (the pinned 2.9.0
+   installs CPU-only; cu128 dies with `nvrtc: invalid --gpu-architecture` since CUDA-12.8 NVRTC
+   doesn't know sm_121) · `LD_LIBRARY_PATH` exposing the cu12 NVIDIA libs so cuequivariance's
+   kernels coexist with torch's cu13 runtime (Promera hard-calls cueq triangle-multiply, no
+   pure-torch fallback) · `TRITON_PTXAS_PATH` → the system CUDA-13 `ptxas` (Triton bundles a
+   cu12.8 one capped at sm_120).
+4. **Found: Boltz-2 refolding was silently broken on Spark.** The master pull brought the
+   offline-MSA feature into `refold_boltz2.py` (passes `TargetChain(msa_path=…)`), but its companion
+   `install/patches/mosaic-offline-msa.patch` had **never been applied to Spark's Mosaic install** →
+   every Boltz-2 refold died with `TypeError: unexpected keyword argument 'msa_path'`. Patch applied.
+
+**Why it mattered:**
+
+- Part X: wet-lab picks are made from `report.html`. Signal computed but never rendered is signal
+  that doesn't exist. Selectivity (ApoE4) and dedup now surface by default instead of on request.
+- Part T: the roadmap's premise was that Promera's **iCS** might be the affinity/selectivity ranker
+  `ipsae_min` isn't. Testing it properly — rather than adopting it on the strength of a published
+  enrichment number — is the whole point of an investigate-first roadmap with a hard gate.
+
+**Outcome:**
+
+- **Promera loses on every target with real binder counts** (same designs, 1963 with all 4 engines):
+  egfr 0.52 vs incumbent 0.76 · il7r 0.50 vs 0.68 · pd-l1 0.61 vs 0.78. **Target wins: ESMFold2 ×2,
+  Boltz-2 ×1, AF3 ×1, Promera ×0.** nipah pilot agreed (Promera ipSAE 0.641 vs Boltz-2 ipSAE_min 0.686).
+- **The decisive test — Promera is not distinguishable from a random voter.** Binder-catch rate in
+  the top-25% is **0.293 vs 0.25 chance** (incumbents 0.586–0.671). Adding it as a 4th consensus
+  voter gains +4 binders of union recall; a **random** 4th voter gains **+9.2** on average and
+  matches-or-beats Promera in **100 % of 200 simulations**. The naive "it catches 4 binders the
+  others miss" complementarity argument fails its null test. → **Not wired into `evaluate.sh`.**
+- **A metric that looked like a win and wasn't:** pooled `promera_plddt` scores 0.826 — a
+  Simpson's-paradox artifact of pooling targets with wildly different binder rates (nipah 1/927 vs
+  egfr 130/826); within-target it collapses to ~0.60. Second such trap this month — always run the
+  within-target check before believing a pooled AUC.
+- **Affinity ranking unchanged and unsolved** — Spearman vs −log₁₀Kd among binders ≈ 0 or negative
+  for every metric including all of Promera's. Consistent with Part N / SKEMPI / OpenBind / Adaptyv.
+- **The real payoff — a per-engine advantage map.** No engine dominates (ProtDBench's
+  "verifier-dependent bias" reproduced on our own stack); dropping any one loses uniquely-caught
+  binders (AF3 −7, Boltz-2 −4, ESMFold2 −3). And **Boltz-2 and AF3 are near-perfectly
+  anti-correlated by binder length**: short (10–82 aa) Boltz-2 **0.80** / AF3 **0.44**; long
+  (128–259 aa) Boltz-2 **0.51** / AF3 **0.78**. Within egfr alone (826 designs, widest length range)
+  it is starker — short 0.85 vs **0.33**, long 0.63 vs 0.67. AF3 is *anti-predictive* on short
+  binders exactly where Boltz-2 is strongest, and our uniform consensus averages the two together.
+- **2 designs are unfoldable** (`scarlet-raven-snow`, `radiant-shark-iron`, fgf-r1): a `:` in the
+  sequence raises `KeyError: ':'` inside tinyprot's DataLoader and **kills the whole worker**,
+  silently truncating its chunk (cost 222 designs on the first pass; recovered by a targeted refold).
+  Validate sequences for non-standard characters before any batch fold.
+
+**Propositions / TODOs:**
+
+- ~~In flight: independent validation of the length crossover~~ → **DONE, and REFUTED** — see the
+  addendum below. Length-conditioned weighting is **not** implemented.
+- Keep the `binder-eval-promera` env + weights on both machines (cheap); Promera's MIT **nanobody
+  designer** may still be worth evaluating for **Part V** (would remove the aarch64 PyRosetta blocker).
+- Part U (ProtDBench calibration harness) remains the way to make future metric decisions provable;
+  its Cao ground truth is binary binder/non-binder, so it will settle screens, not affinity.
+
+---
+
+## 2026-07-25 (addendum) — Length-crossover **REFUTED** on independent data; uniform consensus stands
+
+Follow-up to the Part T entry above. The per-engine advantage map had suggested a *length-dependent*
+Boltz-2/AF3 crossover — on Adaptyv/egfr, AF3 was **anti-predictive on short binders (0.33)** exactly
+where Boltz-2 peaked (0.85), implying our uniform consensus was averaging a strong signal with a
+harmful one. That would have been a free accuracy win: length-conditioned engine weighting, no new
+engine, no extra GPU. It was the most actionable thing to come out of the Promera benchmark, so it
+was validated before implementing.
+
+**What changed:**
+- Refolded the **BindCraft Nature-2025** de-novo set through all three engines
+  (`runs/denovo_lengthtest/`): 110 designs / 7 targets / **45 binders**, independent of Adaptyv,
+  balanced **15/15/15** across length terciles, 69–178 aa (straddles the ~100 aa crossover).
+  All three engines scored **the same 110 designs**.
+- Found and fixed en route: Boltz-2 refolding was **silently broken on Spark** — master's
+  `refold_boltz2.py` passes `TargetChain(msa_path=…)` but `install/patches/mosaic-offline-msa.patch`
+  had never been applied to Spark's Mosaic. Also fixed the analysis join: refold CSVs key on
+  `run_id`/`idx` + `sequence`, **not** the FASTA design name, so the join must be on sequence.
+
+**Outcome — the crossover does not replicate:**
+
+| tercile | binders | Boltz-2 | AF3 | ESMFold2 |
+|---|---|---|---|---|
+| short (69–92 aa) | 15 | 0.58 | **0.74** | 0.73 |
+| mid (93–111 aa) | 15 | 0.67 | 0.71 | 0.74 |
+| long (113–178 aa) | 15 | 0.42 | 0.50 | 0.50 |
+
+- Discovery predicted short → Boltz-2 **0.85** ≫ AF3 **0.33**; independent set gives
+  short → Boltz-2 **0.58 < AF3 0.74** — **opposite direction**.
+- Within-target on PD1 (53 designs / 13 binders, the only powered independent target):
+  short Boltz-2 0.82 vs **AF3 0.83**; long 0.79 vs 0.73. **AF3 is healthy on short binders.**
+  Its egfr 0.33 was **target-specific**, not an engine property. Opposite-signed point estimates =
+  evidence against, not an underpowered null.
+- **→ Length-conditioned weighting NOT implemented. Uniform consensus stands.**
+
+**What does replicate:**
+- **All engines degrade on long binders** (0.58–0.74 short → 0.42–0.50 long) — a *shared*, not
+  differential, effect. Long binders are harder for everyone; no per-engine action implied.
+- **No engine dominates** (PD1 ESMFold2 0.88 · IFNAR2 Boltz-2 0.72 · DerF7 AF3 0.79 · PD-L1
+  ESMFold2 0.64) — the cross-engine consensus design reconfirmed on a second independent dataset.
+- **ESMFold2 most consistent** here (pooled 0.643, best on 3/5 powered targets), echoing the
+  2026-06-23 BindCraft screen replication (0.91).
+
+**Why it mattered:**
+- Shipping the egfr crossover unvalidated would have baked a **target-specific artifact into the
+  ranking layer** of every future campaign — and it looked compelling (a 0.52 AUC gap).
+- **Third Simpson's-paradox-family trap in one investigation**: pooled `promera_plddt`
+  (0.826 → ~0.60 within-target), Promera's "unique catches" (beaten by a random voter), and now
+  this. Standing rule going forward: **a per-stratum effect found on one target must reproduce on
+  an independent target set before it changes the ranking layer**, and two engines must be compared
+  on the *same designs* — mid-run, Boltz-2 and AF3 had scored nearly disjoint sets and the
+  preliminary table pointed the wrong way.
+
+**Net:** two roadmap negatives banked (Promera not adopted; length-weighting not adopted). Both are
+deliverables — we now know two things not to build. The affinity-ranking gap remains open, untouched.
+
+---
+
+## 2026-07-26 — Cao 2022 staged as the large-scale metric benchmark (654k designs / 12 targets); Clara node-hogging incident found and fixed
+
+**What changed:**
+
+1. **Part U — Cao et al. 2022 benchmark staged and running** (`docs/INVESTIGATION_partU_cao_benchmark.md`).
+   Every metric comparison so far was **noise-limited**: on our two labelled sets only 4–6 targets
+   are scorable, ~45 candidate metrics all land in **0.71–0.74 macro-AUC**, and the metric
+   *ranking* correlates **ρ = −0.107** between datasets — i.e. which metric "wins" has been
+   essentially random. That is how the (later refuted) length crossover arose. Fixing it needs
+   many targets **and** many binders per target.
+   Assembled the Cao yeast-display data — **654,716 designs / 12 targets**, 40–67 aa minibinders —
+   by joining `ngs_analysis/affinities/<T>.sc` with `sorting_ngs_data/<T>/sequences.list` (index-aligned).
+   Refolding a **4,442-design / 2,042-binder / 12-target** subsample through Boltz-2 + AF3 (Clara
+   H200 arrays) and ESMFold2 (Spark). Target constructs taken from chain B of the 13
+   `*_mb.pdb` complexes (chain A = minibinder), i.e. the paper's exact constructs.
+2. **Clara node-hogging incident.** A colleague (Anička) emailed that our AF3 jobs were "blocking a
+   whole node with a 1-GPU job". Correct: the sbatch had `--gres=gpu:H200:1` and `-c 8` but **no
+   `--mem`**, and Slurm then reserves the node's entire `RealMemory` (h200 = 2,321,905 MB). Four
+   running array tasks held **four whole nodes — 32 GPUs of capacity to use 4**. Cancelled, added
+   `--cpus-per-gpu=32 / --mem-per-gpu=250G / --gpu-bind=closest`, resubmitted with `--resume`.
+   Rule written into `references/clara-deploy.md` §2 / §3.3 / §5 (commit `9b9614b`).
+
+**Why it mattered:**
+
+- The metric question cannot be settled at 5 targets; Cao is the only labelled set big enough
+  (12 targets, ~2,000 binders in the subsample) to resolve differences that were noise.
+- The Slurm default is silent and invisible in `squeue` — it looked like a normal 1-GPU job.
+  Only `scontrol show job <id> | grep TRES` reveals it. Worth a permanent rule, not a one-off fix.
+
+**Outcome:**
+
+- **Two findings that bound the scope, recorded up front:**
+  - *Label:* the naive "finite Kd" label marks 55,886 binders but their **median Kd is 8 µM** —
+    not binding, and it inflates FGFR2 to a 56 % hit rate. Use **`kd_lb < 1000 nM`** → 11,629
+    binders (1.79 %). The resulting 275× per-target spread (FGFR2 11.1 % → Tie2 0.04 %) is
+    **expected**, not an artifact — Cao's own protocol guide grades target tractability.
+  - *Affinity:* **this dataset cannot settle affinity ranking.** Only **495 of 11,629** binders have
+    trustworthy Kd bounds, and they cluster against the assay's ~1 µM dynamic-range limit
+    (PDGFR IQR **0.11 logs**). Only **FGFR2** has a real gradient (225 binders, 2.2 logs). Scope is
+    therefore a well-powered **screen** benchmark + a single-target affinity probe. The subsample
+    deliberately retains all 495 clean-Kd binders.
+- **Provenance:** all Cao designs come from **one Rosetta pipeline** (RIF docking + motif grafting),
+  not different design tools; what varies is scaffold topology — and β-containing folds
+  (HEEH 4.39 %, EHEE 4.38 %) hit ~5× more often than all-helical HHH (0.92 %). So Cao (1 method ×
+  12 targets) and Adaptyv (many methods × few targets) are **complementary**, testing different things.
+- **Refold status:** Boltz-2 **4,442/4,442** ✅, ESMFold2 **4,442/4,442** ✅ (zero errors), AF3 running.
+  After the resource fix the same array packs 8 tasks per node and runs ~3× more concurrently.
+- **Data note:** only `experimental_data_and_analysis.tar.gz` (234 MB) is needed; the
+  `design_models_pdb`/`silent` tarballs (**109 GB**) are Cao's own predicted structures and are
+  irrelevant — we refold from sequence.
+- **Archived to MUNI** (`EVALUATOR/promera_partT_2026-07/`, `EVALUATOR/denovo_lengthtest_2026-07/`):
+  the completed Part T Promera benchmark and the 3-engine de-novo length test (refold CSVs +
+  analyses; structures left local). Cao waits until AF3 finishes.
