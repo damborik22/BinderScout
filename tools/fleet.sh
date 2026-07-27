@@ -9,7 +9,6 @@ INVENTORY="$FLEET_DIR/inventory.json"
 GPU_BUSY_MIB=512   # ignore snapd-desktop-integration (~6 MiB) on BM4
 
 RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'
-# shellcheck disable=SC2034  # used by status/launch subcommands added in later tasks
 BOLD=$'\033[1m'; RESET=$'\033[0m'
 
 die()  { printf '%s%s%s\n' "$RED"    "$*" "$RESET" >&2; exit 1; }
@@ -69,16 +68,43 @@ cmd_probe() {
     ok "wrote $INVENTORY"
 }
 
+cmd_status() {
+    [ -f "$INVENTORY" ] || die "no inventory — run: fleet.sh probe"
+    printf '%s%-5s %-14s %-22s %-6s %-6s %-8s %s%s\n' "$BOLD" \
+        MACHINE HOST GPU BUSY RAM DISK BRANCH "$RESET"
+    local m
+    for m in "${FLEET_MACHINES[@]}"; do
+        jq -r --arg m "$m" '
+            .machines[$m] as $x
+            | if $x.reachable
+              then [$m, $x.host, ($x.gpu // "-"), ($x.gpu_procs|tostring),
+                    (($x.ram_gb|tostring) + "G"), $x.disk_free, $x.git_branch]
+              else [$m, "UNREACHABLE", "-", "-", "-", "-", "-"] end
+            | @tsv' "$INVENTORY" \
+        | awk -F'\t' '{printf "%-5s %-14s %-22s %-6s %-6s %-8s %s\n",$1,$2,$3,$4,$5,$6,$7}'
+    done
+
+    local tunnel key
+    if ip link show ppp0 >/dev/null 2>&1; then tunnel=up; else tunnel=DOWN; fi
+    if ssh-add -l 2>/dev/null | grep -q clara; then key=unlocked; else key=locked; fi
+    printf '\n%-5s %s  tunnel=%s  key=%s\n' clara <CLARA_LOGIN_HOST> "$tunnel" "$key"
+    [ "$tunnel" = up ]     || warn "Clara unreachable: start FortiClient manually."
+    [ "$key" = unlocked ]  || warn "Clara key not in agent: ssh-add -t 8h ~/.ssh/id_ed25519_clara"
+    printf 'inventory generated: %s\n' "$(jq -r .generated "$INVENTORY")"
+}
+
 usage() {
     cat <<'USAGE'
 usage: fleet.sh <command> [args]
 
   probe                                   refresh ~/.claude/fleet/inventory.json
+  status                                  fleet + Clara state (uses cached inventory)
 USAGE
     exit 1
 }
 
 case "${1:-}" in
-    probe) shift; cmd_probe "$@" ;;
-    *)     usage ;;
+    probe)  shift; cmd_probe "$@" ;;
+    status) shift; cmd_status "$@" ;;
+    *)      usage ;;
 esac
