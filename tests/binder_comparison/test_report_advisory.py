@@ -408,20 +408,34 @@ class TestTwoStageMethodologyText:
 
         return _two_stage_methodology_html(screen_metric, min_engines, "ipsae-link")
 
-    def test_max_screen_is_described_as_max(self):
+    def test_max_screen_names_the_column_it_diagnoses(self):
         html = self._render("max")
-        assert "<b>max</b> of the per-engine" in html
-        assert "lenient recall" in html
+        assert "<code>consensus_iptm</code>" in html
+        assert "no longer affects the ranking" in html
 
     def test_max_screen_does_not_claim_mean_is_the_default(self):
         html = self._render("max")
         assert "Mean was selected as default" not in html
         assert "legacy max-screen" not in html
 
-    def test_mean_screen_is_described_as_mean(self):
+    def test_mean_screen_names_the_column_it_diagnoses(self):
         html = self._render("mean")
-        assert "the mean of the per-engine" in html
-        assert "stricter screen" in html
+        assert "<code>consensus_iptm_mean</code>) as a" in html
+        assert "no longer affects the ranking" in html
+
+    def test_blurb_does_not_claim_the_screen_still_ranks(self):
+        """Part U retired Stage 1. The blurb must not tell a reader that a screen
+        selects a 'binder-likely pool' or that Stage 2 ranks only 'survivors'."""
+        for metric in ("max", "mean"):
+            html = self._render(metric)
+            assert "binder-likely" not in html
+            assert "survivors are ordered" not in html
+
+    def test_blurb_states_the_calibrated_enrichment(self):
+        """A reader must not take the top-N as a verdict — Part U measured ~1.5-2x."""
+        html = self._render("max")
+        assert "triage filter" in html
+        assert "6 of 12 targets" in html
 
     def test_the_two_screens_render_differently(self):
         assert self._render("max") != self._render("mean")

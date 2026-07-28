@@ -814,30 +814,36 @@ def rank_by_two_stage(
     ``MIN_ENGINES_FLOOR`` is the lowest meaningful value, since "cross-engine"
     requires at least two.
 
-    Stage 1 — screen by the ``screen_metric`` consensus iptm: keep the top
-    ``screen_frac`` of the eligible pool (the recall step).
-    ``screen_metric="max"`` (default) screens by ``consensus_iptm`` (max over
-    engines) — the lenient recall step: keep a design if *any* engine rates it
-    highly, so a genuine binder is not dropped just because one engine's per-target
-    blind spot drags its mean down. Best on the ProteinBase 4-target benchmark
-    (macro AUC ~0.755, "trust whichever engine is most confident").
-    ``screen_metric="mean"`` screens by ``consensus_iptm_mean`` instead (stricter —
-    the average must be high; Adaptyv macro AUC 0.710 vs 0.689). See docs/plans.md
-    Part N.
+    Stage 1 — RETIRED (Part U, 2026-07-28). ``passes_max_screen`` is still computed
+    and reported as a diagnostic (it marks where the top-``screen_frac`` cut falls,
+    and the report draws its threshold line from it) but it no longer steers the
+    ranking. It was measured to be inert on the Cao 2022 benchmark (4442 designs,
+    12 targets, all three engines): **0 designs were removed from the top-5, top-10,
+    top-20, top-50 or top-10% on 12/12 targets**, and the earliest rank the screen
+    moved at all was 21.0% down the pool (EGFRc, rank 84/400). Full-list Spearman
+    between screened and unscreened orderings was 0.983–0.999.
 
-    Stage 2 — rank survivors by ``consensus_iptm_mean`` (mean engine iptm): the
-    precision step — at the sharp end of the list you want designs *all* engines
-    agree on. On the benchmark this lifts precision@top-10% to 0.92 vs 0.79 for
-    max alone. The default max-screen → mean-rank pairs a lenient recall screen
-    with a strict consensus rank (the intended two-stage design).
+    This is an empirical property of correlated engines, NOT a theorem. Elementwise
+    ``mean <= max`` does *not* imply the max-screen preserves the head of the mean
+    ordering: A=(0.5,0.5,0.5) has mean 0.5/max 0.5 and B=(0.9,0.1,0.1) has mean
+    0.367/max 0.9, so a cut at 0.6 drops A and keeps B despite A's higher mean. It
+    holds here because max and mean co-rank at Spearman 0.89–0.98 within target.
 
-    Ranks ALL rows (the screen is a flag + ordering, nothing is dropped):
-    ``passes_max_screen`` is the primary sort key, so all screen survivors sort
-    above all non-survivors regardless of their mean; within each group rows are
-    ordered by ``consensus_iptm_mean``, then by ``consensus_iptm_n`` so a design
-    backed by more engines outranks an equal mean backed by fewer. The head of the
-    list is therefore the genuine two-stage result. Adds:
+    ``screen_metric`` is accepted for backwards compatibility and still selects
+    which column ``passes_max_screen`` is computed from, but it can no longer change
+    the ranking. Part U also found the documented rationale for the ``max`` default
+    to be backwards: at the 50% cut ``mean`` had the *better* recall (1114 vs 1093
+    true binders retained, +0.0123 macro, CI [+0.0027,+0.0226], p=0.0094, 8/12
+    targets) — which is moot now that neither steers the rank.
+
+    Stage 2 — rank by ``consensus_iptm_mean`` (mean engine iptm): at the sharp end
+    of the list you want designs *all* engines agree on. Ties break on
+    ``consensus_iptm_n`` so a design backed by more engines outranks an equal mean
+    backed by fewer, then on ``consensus_iptm``.
+
+    Ranks ALL rows; nothing is dropped. Adds:
         passes_max_screen — bool, eligible AND in the top ``screen_frac``
+                            (DIAGNOSTIC ONLY — does not affect two_stage_rank)
         two_stage_rank    — 1 = best
 
     Raises:
@@ -882,8 +888,10 @@ def rank_by_two_stage(
     thr = cons[eligible].nlargest(n_keep).min() if n_keep else float("inf")
     result["passes_max_screen"] = eligible & (cons >= thr)
 
-    sort_keys = ["passes_max_screen", "consensus_iptm_mean", "consensus_iptm_n", "consensus_iptm"]
-    ascending = [False, False, False, False]
+    # NOTE: passes_max_screen is deliberately NOT a sort key (Part U). Ranking is
+    # gate → consensus_iptm_mean; the screen flag is informational only.
+    sort_keys = ["consensus_iptm_mean", "consensus_iptm_n", "consensus_iptm"]
+    ascending = [False, False, False]
     for col in ("plddt_binder_mean", "boltz_plddt_binder_mean"):
         if col in result.columns:
             sort_keys.append(col)

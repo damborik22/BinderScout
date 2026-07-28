@@ -70,14 +70,26 @@ def _two_engine_df():
     # mean: A 0.90, B 0.425, C 0.60, D 0.50
 
 
-def test_two_stage_survivors_rank_above_nonsurvivors_despite_lower_mean():
-    """The load-bearing property: passes_max_screen is the PRIMARY sort key, so a
-    max-screen survivor (B, mean 0.425) outranks a non-survivor (C, mean 0.60)."""
+def test_two_stage_ranks_purely_by_mean_not_by_screen():
+    """Part U: passes_max_screen is NOT a sort key. C (mean 0.60) must outrank the
+    max-screen survivor B (mean 0.425) — the screen no longer steers the ranking."""
     out = rank_by_two_stage(_two_engine_df(), screen_frac=0.5, screen_metric="max", min_engines=2)
     order = out.sort_values("two_stage_rank")["id"].tolist()
-    assert order == ["A", "B", "C", "D"]
+    assert order == ["A", "C", "D", "B"]  # pure consensus_iptm_mean descending
     rank = dict(zip(out["id"], out["two_stage_rank"]))
-    assert rank["B"] < rank["C"]  # survivor beats higher-mean non-survivor
+    assert rank["C"] < rank["B"]  # higher mean wins regardless of screen membership
+
+
+def test_two_stage_rank_is_invariant_to_screen_metric():
+    """The screen flag differs between max and mean, but the RANKING must not."""
+    by_max = rank_by_two_stage(_two_engine_df(), screen_frac=0.5, screen_metric="max", min_engines=2)
+    by_mean = rank_by_two_stage(_two_engine_df(), screen_frac=0.5, screen_metric="mean", min_engines=2)
+    order_max = by_max.sort_values("two_stage_rank")["id"].tolist()
+    order_mean = by_mean.sort_values("two_stage_rank")["id"].tolist()
+    assert order_max == order_mean
+    # ...while the diagnostic flag itself still reflects the chosen metric.
+    assert set(by_max.loc[by_max["passes_max_screen"], "id"]) == {"A", "B"}
+    assert set(by_mean.loc[by_mean["passes_max_screen"], "id"]) == {"A", "C"}
 
 
 def test_two_stage_screen_keeps_top_frac_by_max():
@@ -95,9 +107,8 @@ def test_two_stage_screen_metric_mean_differs_from_default_max():
 
 
 def test_two_stage_default_screen_metric_is_max():
-    """Omitting screen_metric uses the default max-screen (lenient recall): top-2 by
-    max = {A 0.90, B 0.85}, so B (high max, low mean) is kept over C; Stage 2 then
-    ranks the survivors by mean."""
+    """Omitting screen_metric still computes the diagnostic flag from the max column:
+    top-2 by max = {A 0.90, B 0.85}. The ranking is unaffected either way (Part U)."""
     default = rank_by_two_stage(_two_engine_df(), screen_frac=0.5, min_engines=2)
     explicit = rank_by_two_stage(_two_engine_df(), screen_frac=0.5, screen_metric="max", min_engines=2)
     assert default["two_stage_rank"].tolist() == explicit["two_stage_rank"].tolist()
