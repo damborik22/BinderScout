@@ -67,14 +67,14 @@ def test_display_cols_include_advisory_when_present():
     df["native_soluprot_score"] = [0.7, 0.6, 0.5]
     df["qc_pass"] = [True, False, True]
     df["interface_dG"] = [-25.0, 3.0, -10.0]
-    primary, secondary = _select_display_cols(df, rank_method="two_stage")
+    primary, secondary = _select_display_cols(df)
     assert "native_soluprot_score" in primary
     assert "qc_pass" in primary
     assert "interface_dG" in secondary
 
 
 def test_display_cols_omit_advisory_when_absent():
-    primary, _secondary = _select_display_cols(_metrics_df(), rank_method="two_stage")
+    primary, _secondary = _select_display_cols(_metrics_df())
     assert "native_soluprot_score" not in primary
     assert "qc_pass" not in primary
 
@@ -94,27 +94,27 @@ def test_advisory_legend_present_only_with_columns():
 def test_top_table_legend_two_stage_calls_iptm_primary():
     """The Top-30 legend under two-stage ranking must NOT label ipSAE_min as primary."""
     df = _metrics_df()
-    df["passes_max_screen"] = [True, True, False]
+    df["passes_engine_gate"] = [True, True, False]
     df["consensus_iptm_mean"] = df["consensus_iptm_mean"]  # already in fixture
-    html = _top_table_legend_html("two_stage", df)
-    assert "Primary ranking metric" in html
-    # The "Primary ranking metric" label must be attached to consensus_iptm_mean,
+    html = _top_table_legend_html(df)
+    assert "The ranking metric" in html
+    # The "The ranking metric" label must be attached to consensus_iptm_mean,
     # not ipsae_min — this is the bug the maintainer flagged.
-    primary_idx = html.index("Primary ranking metric")
+    primary_idx = html.index("The ranking metric")
     iptm_mean_idx = html.index("consensus_iptm_mean")
     assert iptm_mean_idx < primary_idx + 200  # within the same row
 
 
-def test_top_table_legend_adaptyv_still_calls_ipsae_primary():
-    """The adaptyv ranking path keeps ipSAE_min as primary — the rewrite is rank-aware."""
+def test_top_table_legend_never_calls_ipsae_the_ranking_metric():
+    """Part U removed the adaptyv (ipSAE-led) ranking. ipSAE_min is a diagnostic;
+    the legend must not present it as the ranking key."""
     df = _metrics_df()
     df["ipsae_min"] = [0.85, 0.82, 0.45]
-    html = _top_table_legend_html("adaptyv", df)
-    assert "Primary ranking metric" in html
-    # Under adaptyv, the primary label sits next to ipsae_min, not consensus_iptm_mean.
+    html = _top_table_legend_html(df)
+    assert "Not used for ranking" in html
     ipsae_idx = html.index("ipsae_min")
-    primary_idx = html.index("Primary ranking metric")
-    assert ipsae_idx < primary_idx + 200
+    primary_idx = html.index("The ranking metric")
+    assert not (ipsae_idx < primary_idx < ipsae_idx + 120)  # label is not on the ipsae row
 
 
 def test_screening_summary_intro_two_stage_single_ipsae_tier():
@@ -124,7 +124,7 @@ def test_screening_summary_intro_two_stage_single_ipsae_tier():
     iPTM tier-count table, so rendering a parallel iPTM tier legend just reads as a
     confusing second tier system. iPTM is named in prose; only ipSAE_min is banded.
     """
-    html = _screening_summary_intro_html("two_stage")
+    html = _screening_summary_intro_html()
     # The active ranking metric is named so the reader knows the ranking key.
     assert "consensus_iptm_mean" in html
     # No second, parallel iPTM tier band/table.
@@ -144,12 +144,13 @@ def test_binding_map_link_renders_only_when_provided():
     assert 'target="_blank"' in html or "target='_blank'" in html
 
 
-def test_screening_summary_intro_adaptyv_only_ipsae_legend():
-    """Under adaptyv, ipSAE IS the ranking metric — show just the single ipSAE band."""
-    html = _screening_summary_intro_html("adaptyv")
-    assert "ipSAE_min tiers" in html
-    # No iPTM band table in adaptyv mode (iPTM isn't the ranking key here).
+def test_screening_summary_intro_has_exactly_one_tier_system():
+    """Part U: one ranking, one tier system. ipSAE_min is banded; iPTM is named in
+    prose because it is continuous and has no tier-count table."""
+    html = _screening_summary_intro_html()
+    assert "consensus_iptm_mean" in html
     assert "iPTM band" not in html
+    assert html.count("High") == 1
 
 
 def test_qc_rules_html_lists_all_five_default_thresholds():
@@ -218,13 +219,13 @@ def test_df_to_html_disagreement_flag_off_by_default():
     assert "⚠" not in html
 
 
-def test_select_display_cols_two_stage_promotes_agreement_and_spread():
+def test_select_display_cols_promotes_agreement_and_spread():
     """Item 4 part 2: agreement_count + consensus_iptm_spread must be in PRIMARY now."""
     df = _metrics_df()
-    df["passes_max_screen"] = True
+    df["passes_engine_gate"] = True
     df["agreement_count"] = [3, 2, 1]
     df["consensus_iptm_spread"] = [0.05, 0.15, 0.40]
-    primary, _secondary = _select_display_cols(df, rank_method="two_stage")
+    primary, _secondary = _select_display_cols(df)
     assert "agreement_count" in primary
     assert "consensus_iptm_spread" in primary
 
@@ -275,13 +276,13 @@ def test_attach_monomer_results_joins_design_id_to_binder_id(tmp_path):
 def test_new_advisory_cols_in_secondary_when_present():
     """affinity / monomer / beta columns must reach the Top-30 detailed (secondary) display set."""
     df = _metrics_df()
-    df["passes_max_screen"] = True
+    df["passes_engine_gate"] = True
     df["affinity_energy_density"] = [0.4, 0.3, 0.2]
     df["fold_robust"] = [True, True, False]
     df["monomer_rmsd"] = [1.0, 2.0, 4.0]
     df["beta_intercalates"] = ["false", "false", "true"]
     df["esmfold2_chain_iptm_interface"] = [0.7, 0.6, 0.5]
-    _primary, secondary = _select_display_cols(df, rank_method="two_stage")
+    _primary, secondary = _select_display_cols(df)
     for col in (
         "affinity_energy_density",
         "fold_robust",
@@ -396,39 +397,47 @@ def test_engine_radar_uses_real_pae_mean_columns():
 # --- Methodology text must describe the ranking that actually ran (F32) --------
 
 
-class TestTwoStageMethodologyText:
+class TestRankingMethodologyText:
     """Regression: the blurb was a fixed string. Commit 5769064 flipped the screen
     default mean -> max and updated CHANGELOG, CLAUDE.md, cli/report.py, scoring.py
     and test_scoring.py — but not visualization/report.py. Every report afterwards
-    ran a max screen while telling the reader it had run a mean screen, called mean
-    "the default" and called max "legacy"."""
+    ran a max screen while telling the reader it had run a mean screen. min_engines
+    is the only knob left and must still be rendered from the argument."""
 
-    def _render(self, screen_metric, min_engines=3):
-        from binder_comparison.visualization.report import _two_stage_methodology_html
+    def _render(self, min_engines=3):
+        from binder_comparison.visualization.report import _ranking_methodology_html
 
-        return _two_stage_methodology_html(screen_metric, min_engines, "ipsae-link")
+        return _ranking_methodology_html(min_engines, "ipsae-link")
 
-    def test_max_screen_is_described_as_max(self):
-        html = self._render("max")
-        assert "<b>max</b> of the per-engine" in html
-        assert "lenient recall" in html
+    def test_blurb_names_the_one_ranking_metric(self):
+        html = self._render()
+        assert "<code>consensus_iptm_mean</code>" in html
 
-    def test_max_screen_does_not_claim_mean_is_the_default(self):
-        html = self._render("max")
+    def test_blurb_does_not_claim_mean_is_the_default_screen(self):
+        html = self._render()
         assert "Mean was selected as default" not in html
         assert "legacy max-screen" not in html
 
-    def test_mean_screen_is_described_as_mean(self):
-        html = self._render("mean")
-        assert "the mean of the per-engine" in html
-        assert "stricter screen" in html
+    def test_blurb_says_there_is_no_screen_and_no_metric_choice(self):
+        """Part U retired Stage 1 AND the two alternative orderings. The blurb must
+        not describe a 'binder-likely pool' or rank only 'survivors'."""
+        html = self._render()
+        assert "no screening stage, and no choice of ranking metric" in html
+        assert "binder-likely" not in html
+        assert "survivors are ordered" not in html
+
+    def test_blurb_states_the_calibrated_enrichment(self):
+        """A reader must not take the top-N as a verdict — Part U measured ~1.5-2x."""
+        html = self._render("max")
+        assert "triage filter" in html
+        assert "6 of 12 targets" in html
 
     def test_the_two_screens_render_differently(self):
         assert self._render("max") != self._render("mean")
 
     def test_engine_gate_is_stated_from_the_argument(self):
-        assert "at least <b>3</b>" in self._render("max", min_engines=3)
-        assert "at least <b>2</b>" in self._render("max", min_engines=2)
+        assert "at least <b>3</b>" in self._render(min_engines=3)
+        assert "at least <b>2</b>" in self._render(min_engines=2)
 
 
 class TestVendoredNglIsInlined:

@@ -98,7 +98,7 @@ Target structure (.pdb / .mmcif)
        2. Refold with Boltz-2 (Mosaic venv)                                    [live, all platforms]
        3. Refold with AlphaFold 3 v3.0.2 (binder-eval-af3 env)                 [live, canonical 2nd engine — Spark / H200 / >100 GB VRAM]
        4. Refold with ESMFold2 (binder-eval-esmfold2 env)                      [live, DEFAULT engine — installed by --tool all; auto-detected by evaluate.sh; feeds consensus_iptm + autosize gate]
-       5. Rank by two-stage cross-engine iPTM (≥3-engine gate → max-screen → mean iptm; `--min-engines 2` to relax, `--screen-metric mean` for the stricter screen); generate HTML + CSV report
+       5. Rank by cross-engine iPTM (≥3-engine gate → `consensus_iptm_mean`; `--min-engines 2` to relax); generate HTML + CSV report
 ```
 
 ### Directory layout
@@ -290,7 +290,7 @@ the parameter sweep.
 | **ipTM** | Interface predicted TM-score (0–1, higher = better). Measures binding interface quality |
 | **iPSAE** | Interface Predicted Structural Alignment Error (DunbrackLab 2025 formula). TM-score analogue; **higher is better** |
 | **ipsae_min** | min(binder→target iPSAE, target→binder iPSAE). Secondary metric / tiebreaker (primary is the two-stage cross-engine iPTM ranking — see ranking note) |
-| **consensus_iptm** | max ipTM across independent refolding engines. **The default Stage-1 screen** — lenient recall (keep a design any engine rates highly). `consensus_iptm_mean` (mean) available via `--screen-metric mean` |
+| **consensus_iptm** | max ipTM across independent refolding engines. A diagnostic column only — **it does not rank** (max-ranking loses to mean; Part U). The ranking metric is `consensus_iptm_mean` |
 | **PAE** | Predicted Aligned Error (Angstroms, **lower = better**). Raw error between residue pairs |
 | **pLDDT** | Predicted Local Distance Difference Test (0–1, higher = better). Per-residue confidence |
 | **MPNN** | ProteinMPNN — sequence design neural network |
@@ -311,7 +311,25 @@ the parameter sweep.
 
 ### Evaluation metrics and ranking
 
-**Primary ranking: two-stage cross-engine iPTM** — `binder-compare report --rank-by two_stage` (the default). **Stage 0 (cross-engine gate):** a design must have been refolded by at least `--min-engines` independent engines (**default 3** = all of Boltz-2 / AF3 / ESMFold2; floor 2) to be eligible. `consensus_iptm_mean` skips missing engines, so without this a single-engine design's mean *is* that one engine's score and it competes against 3-engine means on an incomparable scale — and for Mosaic / Protein-Hunter that engine is the one that designed it. `consensus_iptm_n` records the count and is also a tiebreaker in Stage 2. If nothing in the pool clears the gate, the run warns and names the shortfall rather than silently reporting that no design was good enough. **Stage 1 (screen):** `consensus_iptm` = **max** of the per-engine PAE-recomputed iPTMs (`boltz_pae_iptm`, `af3_pae_iptm`, `esmfold2_pae_iptm`); keep the top 50% of the *eligible* pool (`ceil(n/2)`, so a single eligible design still passes) flagged as `passes_max_screen` — the lenient recall step: keep a design if *any* engine rates it highly, so a true binder isn't dropped because one engine's per-target blind spot drags its mean down (ProteinBase macro AUC ≈ 0.755). The stricter `mean` screen (`consensus_iptm_mean`; Adaptyv macro AUC 0.710 vs 0.689) is available via `--screen-metric mean`. **Stage 2 (rank):** `consensus_iptm_mean` orders the survivors (precision@top-10% 0.92 vs 0.79 for max alone). `adaptyv_rank` (agreement_count → ipsae_min) and `consensus_rank` (max only) remain as columns but are no longer the default sort.
+**There is ONE ranking, and no way to choose another** (Part U, 2026-07-28): a cross-engine gate, then `consensus_iptm_mean`. It produces a single `rank` column.
+
+**Stage 0 — cross-engine gate.** A design must have been refolded by at least `--min-engines` independent engines (**default 3** = all of Boltz-2 / AF3 / ESMFold2; floor 2). `consensus_iptm_mean` skips missing engines, so without this a single-engine design's mean *is* that one engine's score and it competes against 3-engine means on an incomparable scale — and for Mosaic / Protein-Hunter that engine is the one that designed it. Designs failing the gate are ranked **last, not dropped** (`passes_engine_gate` records it). If nothing clears the gate the run warns and names the shortfall rather than silently reporting that no design was good enough.
+
+**Rank — `consensus_iptm_mean`,** ties broken by `consensus_iptm_n` (more engines backing an equal mean wins), then `consensus_iptm`, then binder pLDDT.
+
+**What was removed, and why — do not re-add any of it:**
+
+| removed | evidence |
+|---|---|
+| Stage-1 top-50% max screen (`passes_max_screen`) | Removed **0 designs from the top-5/10/20/50 and top-10% on 12/12 Cao targets**; earliest rank it moved was 21.0% down the pool; full-list Spearman 0.983–0.999 |
+| `--screen-metric` | The `max` default was documented as "the lenient recall step" — **backwards**: at the same cut `mean` retained *more* true binders (1,114 vs 1,093; +0.0123, CI [+0.0027,+0.0226], p=0.0094, 8/12) |
+| `adaptyv_rank` (quality_tier → agreement_count → ipsae_min) | `agreement_count` is a flat null as a screen: macro-AUC **0.532** with **87.2%** of designs tied at zero |
+| `consensus_rank` (max-iptm) | Max-ranking loses to mean-ranking: precision@top-10% **0.79 vs 0.92** |
+| `--rank-by`, `active_rank` | Searching for a better metric on labelled data makes it **worse** — honest nested selection over 72 metrics scores **0.5170** vs **0.5552** for `consensus_iptm_mean` (p=0.0014, 8/12 targets) |
+
+> **Caveat on the Stage-1 inertness.** It is an empirical property of correlated engines (max and mean co-rank at Spearman 0.89–0.98 within target), **not** a theorem. Elementwise `mean ≤ max` does *not* imply rank preservation: A=(0.5,0.5,0.5) has mean 0.5/max 0.5, B=(0.9,0.1,0.1) has mean 0.367/max 0.9, so a cut at 0.6 drops A and keeps B despite A's higher mean.
+
+> **Clean break on the CSV schema.** `two_stage_rank`, `adaptyv_rank`, `consensus_rank`, `active_rank` and `passes_max_screen` are gone from `metrics.csv` — replaced by `rank` and `passes_engine_gate`. There is no compatibility shim: older `metrics.csv` files were written by an older version and are left as-is. Re-report from the per-engine refold CSVs if you need the new schema for an archived run.
 
 `ipsae_min` (min of binder→target and target→binder iPSAE; DunbrackLab 2025 `max_i[mean_j(1/(1+(PAE_ij/d0)²))]`, d0_res variant, uniform 10 Å PAE cutoff) is retained as a diagnostic and for the quality tiers below — not the primary sort. **Caveat:** no structure-confidence metric ranks *affinity* among binders, only binder-vs-non-binder — and **Part N established that nothing else we tested does either** (landed 2026-06-16 with a negative result; archived in `docs/completed_plans.md`). Interface ΔG, `|dG/dSASA|`, PRODIGY and the BindCraft 14-metric panel all fail to rank affinity *among* binders (best pooled |ρ| ≈ 0.34, holding on only 2/4 targets), corroborated externally on OpenBind (molecular weight is the best predictor, ρ 0.48) and SKEMPI (PRODIGY 0.20, Rosetta ΔG 0.12). `binder-compare affinity` ships the surviving gate-then-density form — gate on `passes_affinity_gate` (`ipsae_min ≥ 0.61`), then rank survivors by `interface_energy_density` (`|dG/dSASA|`) — as an **advisory** ranker, not a validated one.
 
@@ -331,8 +349,9 @@ the parameter sweep.
 ### Critical domain facts
 
 - **iptm is gameable by the designing engine** — BindCraft games AF2 ipTM; Mosaic games `boltz_iptm` by construction (it *is* Boltz-2 gradient hallucination). Never rank on a single engine's ipTM. The two-stage `consensus_iptm_mean` (mean across independent engines) resists this — a design one engine loves but another rejects is demoted by the mean.
-- **Engine disagreement is signal, not noise** — For short binders (~60aa), refolding engines often disagree on interface quality. The two-stage mean iPTM captures this continuously (disagreement lowers the mean); the `agreement_count` column (engines past the 0.61 ipSAE threshold) is retained as a diagnostic.
-- **Binder length is a main driver** — Longer binders tend to score lower on `ipsae_min` (r ≈ -0.78).
+- **Engine disagreement lowers the mean — but is NOT a useful stratifier.** For short binders (~60aa), refolding engines often disagree on interface quality, and `consensus_iptm_mean` captures that continuously (disagreement drags the mean down). That much holds. What does *not* hold is using disagreement to slice the pool: on Cao, splitting at the median engine spread changed AUC by −0.006/+0.005 against a random-split null of ±0.018 (p=0.71/0.81), and `agreement_count` scores macro-AUC 0.532 with 87.2% of designs tied at zero. Keep `agreement_count` as a diagnostic column; do not gate or stratify on it (Part U).
+- **The ranking is a triage filter, not a decision procedure.** Calibrate expectations before presenting a top-N as "the best". On the Cao 2022 near-miss pool (4,442 Rosetta minibinders, 12 targets — the closest analogue to a real campaign pool: hundreds of same-tool, same-length designs against one target) the whole 72-metric field spans macro-AUC **0.471–0.560**, and taking the top decile by the best metric is worth ~**1.5–2× enrichment** (FGFR2 8.98 → 2.13 designs-per-hit) — but it beats a random ranking on only **6/12 targets**, and on TrkA and Tie2 it is *worse than not ranking at all*. Ranking looks much stronger on easier pools (Adaptyv 0.68–0.72, de novo BindCraft 0.72–0.78 macro) and on label-clean positives (Cao rises to 0.73 once one-sided-Kd "binders" are excluded — 73.4% of Cao's binder labels are one-sided and are experimentally indistinguishable from non-binders on Cao's own independent binary assay). Part U.
+- **Binder length is a main driver** — Longer binders tend to score lower on `ipsae_min` (r ≈ -0.78). (Not testable on Cao: 75.1% of that set is exactly 65 aa.)
 - **Mosaic designs.csv format** — Can mix column formats between workers (old 11-col / new 13-col). The parser must handle this carefully or columns misalign. The `is_top` column marks the ~40 refolded designs out of ~800 total; extractors filter to `is_top=1` by default.
 - **Mosaic `target_sequence` placeholder** — The Mosaic template (`hallucinate_bindmaster.py`) writes `"REPLACE_ME"` as `target_sequence` when not configured. The legacy evaluator guards against using this as a real target sequence.
 - **pLDDT scale** — Boltz-2 returns [0,1]; AF3 native is [0,100] and is rescaled to [0,1] on ingest by the refold runner so report columns are directly comparable.

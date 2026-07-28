@@ -372,7 +372,7 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path, target_seq: st
     # Collect PDBs/CIFs and metadata for each top design
     entries = []
     for _, row in top_df.head(20).iterrows():
-        rank = int(row.get("active_rank", row.get("adaptyv_rank", 0)))
+        rank = int(row.get("rank", 0))
         binder_id = row.get("binder_id", f"rank{rank}")
         tool = row.get("source_tool", "unknown")
         ipsae = row.get("ipsae_min", "")
@@ -1028,7 +1028,7 @@ def _build_per_tool_pdb_viewer(
         tool_csv_path: CSV sorted by the tool's native ranking
         tool_pdb_dir: Directory containing original design PDBs/CIFs
         pdb_pattern: Pattern to find PDB for each design (with {name} placeholder)
-        seq_to_ids: sequence → {binder_id, adaptyv_rank} mapping
+        seq_to_ids: sequence → {binder_id, rank} mapping
         n: Number of top designs to show
         target_seq: target sequence for per-design binder/target chain detection
     """
@@ -1077,7 +1077,7 @@ def _build_per_tool_pdb_viewer(
                         "rank": i + 1,
                         "name": name or direct_pdb.stem,
                         "binder_id": eval_info.get("binder_id", ""),
-                        "eval_rank": eval_info.get("adaptyv_rank", ""),
+                        "eval_rank": eval_info.get("rank", ""),
                         "length": len(seq),
                         "ext": ext,
                         "binder_chain": bch,
@@ -1106,7 +1106,7 @@ def _build_per_tool_pdb_viewer(
                             "rank": i + 1,
                             "name": name or hit.stem,
                             "binder_id": eval_info.get("binder_id", ""),
-                            "eval_rank": eval_info.get("adaptyv_rank", ""),
+                            "eval_rank": eval_info.get("rank", ""),
                             "length": len(seq),
                             "ext": "pdb",
                             "binder_chain": bch,
@@ -1131,7 +1131,7 @@ def _build_per_tool_pdb_viewer(
                         "rank": i + 1,
                         "name": name or ghit.stem,
                         "binder_id": eval_info.get("binder_id", ""),
-                        "eval_rank": eval_info.get("adaptyv_rank", ""),
+                        "eval_rank": eval_info.get("rank", ""),
                         "length": len(seq),
                         "ext": gext,
                         "binder_chain": bch,
@@ -1189,7 +1189,7 @@ def _build_per_tool_pdb_viewer(
                     "rank": i + 1,
                     "name": name or pdb_file.stem,
                     "binder_id": eval_info.get("binder_id", ""),
-                    "eval_rank": eval_info.get("adaptyv_rank", ""),
+                    "eval_rank": eval_info.get("rank", ""),
                     "length": len(seq),
                     "ext": ext,
                     "binder_chain": bch,
@@ -1370,44 +1370,32 @@ def _ngl_script_tag() -> str:
     return _NGL_CDN_TAG
 
 
-def _two_stage_methodology_html(screen_metric: str, min_engines: int, ipsae_link: str) -> str:
-    """Methodology paragraph for --rank-by two_stage, derived from the ACTIVE settings.
+def _ranking_methodology_html(min_engines: int, ipsae_link: str) -> str:
+    """Methodology paragraph for the ranking, derived from the ACTIVE settings.
 
     MUST NOT be a fixed string. The screen default flipped mean -> max in 5769064,
     which updated CHANGELOG.md, CLAUDE.md, cli/report.py, comparison/scoring.py and
     test_scoring.py — but not this file. Every report generated afterwards ran a max
-    screen while telling the reader it had run a mean screen, called mean "the
-    default" and called max "legacy". Rendering from the arguments makes that class
-    of drift impossible.
+    screen while telling the reader it had run a mean screen. Rendering from the
+    arguments makes that class of drift impossible. ``min_engines`` is the only
+    knob left, and it is read from the argument.
     """
-    if screen_metric == "mean":
-        stage1 = (
-            "<b>Stage 1 — screen:</b> <code>consensus_iptm_mean</code> = the mean of the per-engine "
-            "PAE-recomputed iPTMs; the top 50% (<code>passes_max_screen</code>) form the binder-likely "
-            "pool. This is the stricter screen — the average must be high (Adaptyv macro AUC "
-            "<b>0.710 vs 0.689</b> for max; ~20 more true binders recalled at the 50% cut). "
-            "<code>--screen-metric max</code> switches to the lenient recall screen."
-        )
-        stage2 = (
-            "<b>Stage 2 — rank:</b> survivors are ordered by <code>consensus_iptm_mean</code> — the same "
-            "metric, so with a mean screen the two stages collapse to a single mean-iPTM gate-then-rank."
-        )
-    else:
-        stage1 = (
-            "<b>Stage 1 — screen:</b> <code>consensus_iptm</code> = the <b>max</b> of the per-engine "
-            "PAE-recomputed iPTMs; the top 50% (<code>passes_max_screen</code>) form the binder-likely "
-            "pool. This is the lenient recall step — keep a design if <em>any</em> engine rates it highly, "
-            "so a true binder is not dropped because one engine's per-target blind spot drags its mean "
-            "down (ProteinBase macro AUC <b>~0.755</b>). <code>--screen-metric mean</code> switches to the "
-            "stricter mean screen (Adaptyv macro AUC <b>0.710 vs 0.689</b>)."
-        )
-        stage2 = (
-            "<b>Stage 2 — rank:</b> survivors are ordered by <code>consensus_iptm_mean</code> — the "
-            "precision step, where you want the designs <em>all</em> engines agree on. This lifts "
-            "<b>precision@top-10% to 0.92 vs 0.79</b> for max alone."
-        )
+    stage1 = (
+        "<b>There is no screening stage, and no choice of ranking metric.</b> A top-50% "
+        "<em>max</em>-iPTM screen used to sort ahead of the rank; Part U retired it after measuring that "
+        "it removed <b>0 designs from the top-10% on 12/12 targets</b> of the Cao 2022 benchmark "
+        "(4,442 designs, all three engines on every design). Two alternative orderings "
+        "(<code>adaptyv</code>, <code>consensus_iptm</code>) were removed with it: <code>agreement_count</code> "
+        "is a flat null as a screen (macro-AUC 0.532) and max-iPTM ranking loses to the mean."
+    )
+    stage2 = (
+        "<b>Rank:</b> the pool is ordered by <code>consensus_iptm_mean</code> — you want the designs "
+        "<em>all</em> engines agree on. Mean-ranking lifts <b>precision@top-10% to 0.92 vs 0.79</b> for "
+        "max-ranking, and it beats <em>searching</em> for a better metric: honest nested selection over "
+        "72 candidate metrics scores macro-AUC 0.5170 against 0.5552 for this one."
+    )
     return (
-        f"Ranking is <b>two-stage cross-engine iPTM</b> ({screen_metric}-screen → mean-rank), validated on "
+        f"Ranking is <b>cross-engine iPTM</b> (gate → <code>consensus_iptm_mean</code>), validated on "
         f"two <em>internal</em> 4-target benchmarks (Adaptyv: Nipah / EGFR / IL7R / PD-L1, Kd-screened, "
         f"n = 662; ProteinBase: the same 4 targets, n = 175). "
         f"<b>Stage 0 — cross-engine gate:</b> a design must have been refolded by at least "
@@ -1415,13 +1403,17 @@ def _two_stage_methodology_html(screen_metric: str, min_engines: int, ipsae_link
         f"missing engines, so without this a single-engine design's mean <em>is</em> that one engine's "
         f"score, competing against multi-engine means on an incomparable scale — and for a Mosaic or "
         f"Protein-Hunter design that engine is the one that designed it. {stage1} {stage2} "
-        f"All designs are ranked — the screen is a flag, nothing is dropped. "
+        f"All designs are ranked — nothing is dropped. "
         f"<b>ipSAE_min</b> ({ipsae_link}) and <b>agreement_count</b> are computed and shown per design as "
         f"cross-validation — and surfaced in the Top-30 as the <span style='color:#c62828;"
         f"font-weight:bold;'>⚠</span> engine-disagreement flag — but are <em>not</em> the ranking key. "
         f"<b>Caveat:</b> both benchmarks comprise compact globular targets; transferability to serpins "
         f"(e.g. 2VDY), small peptide receptors (CALCA), or flexible/membrane targets is currently "
-        f"<em>unvalidated</em>. Treat the rank as a strong shortlist signal, not a guarantee."
+        f"<em>unvalidated</em>. <b>Calibrate your expectations:</b> on a hard near-miss pool (many "
+        f"same-tool, same-length designs against one target — the Cao 2022 benchmark, 12 targets) the "
+        f"top decile is worth only <b>~1.5–2× enrichment</b> over the base rate, and it beat a random "
+        f"ranking on just <b>6 of 12 targets</b>. Easier pools do much better (Adaptyv macro AUC "
+        f"0.68–0.72). Treat the rank as a <em>triage filter</em> — a shortlist signal, not a verdict."
     )
 
 
@@ -1434,8 +1426,6 @@ def generate_report(
     boltz2_results_dir: str | Path | None = None,
     primary_engine: str = "boltz",
     top_per_tool: int = 10,
-    rank_method: str = "adaptyv",
-    screen_metric: str = "max",
     min_engines: int = MIN_ENGINES_DEFAULT,
     engine_thresholds: dict[str, float] | None = None,
     full_df: pd.DataFrame | None = None,
@@ -1469,11 +1459,10 @@ def generate_report(
             target_seq = vals.iloc[0]
 
     sort_df = df.copy()
-    # active_rank reflects the --rank-by choice (== adaptyv_rank for the default),
-    # so the HTML table/structures follow the selected ranking method.
-    _order_col = "active_rank" if "active_rank" in sort_df.columns else "adaptyv_rank"
-    if _order_col in sort_df.columns:
-        sort_df = sort_df.sort_values(_order_col, ascending=True)
+    # `rank` is the one ranking (cross-engine gate → consensus_iptm_mean), so the
+    # HTML table and the exported structures follow it.
+    if "rank" in sort_df.columns:
+        sort_df = sort_df.sort_values("rank", ascending=True)
 
     # Tool counts
     tool_counts_str = ""
@@ -1493,10 +1482,10 @@ def generate_report(
     # ⚠ warning icon next to the rank when agreement_count < 2 or per-engine
     # iPTM spread > 0.3 — surfaces "single-engine spike" / "one engine rejects"
     # cases that the rank alone hides.
-    primary_cols, secondary_cols = _select_display_cols(sort_df, rank_method=rank_method)
+    primary_cols, secondary_cols = _select_display_cols(sort_df)
     top30_primary = sort_df[primary_cols].head(30)
     _rank_col_for_flag = next(
-        (c for c in ("active_rank", "two_stage_rank", "consensus_rank", "adaptyv_rank") if c in primary_cols),
+        (c for c in ("rank",) if c in primary_cols),
         None,
     )
     # Prominent Top-30 = slim decision-metrics table (Mean ipTM · Agreement · ipSAE_min
@@ -1534,7 +1523,7 @@ def generate_report(
         "Click to expand — full metric set for the Top 30</summary>\n"
         + _full_top30
         + "\n"
-        + _top_table_legend_html(rank_method, top30_primary, engine_thresholds)
+        + _top_table_legend_html(top30_primary, engine_thresholds)
         + "\n</details>"
     )
 
@@ -1544,10 +1533,9 @@ def generate_report(
     # Plots
     dist_fig = plot_metric_distributions(sort_df)
     scatter_fig = None
-    if rank_method == "two_stage":
-        # Two-stage view: radar over the engine iPTMs (balance = consensus =
-        # high mean-rank; spike = passes max-screen only) + the max-vs-mean
-        # signature scatter. Replaces the ipsae-centric per-engine radars.
+    if True:
+        # Radar over the engine iPTMs (balance = consensus = high rank; spike =
+        # one engine only) + the max-vs-mean signature scatter.
         try:
             radar_fig = plot_multimetric_radar(sort_df, top_n=top_per_tool)
         except Exception:  # pragma: no cover - defensive
@@ -1591,19 +1579,24 @@ def generate_report(
         tools_present = order_tools(sort_df["source_tool"].dropna().unique())
         if tools_present:
             per_tool_top10 = (
-                "<h2>Top Designs per Tool</h2>\n"
+                "<h2>Top Designs per Tool "
+                '<span style="background:#1565C0;color:white;padding:2px 10px;'
+                "border-radius:4px;font-size:0.7em;font-weight:bold;vertical-align:middle;"
+                'margin-left:0.4em;">NATIVE TOOL RANKING</span></h2>\n'
                 '<p style="font-size:0.85em;color:#555;">'
-                "Each tool's best designs by the evaluator's cross-engine two-stage ranking, in the "
-                "same slim decision-metrics view as the main Top-30 "
-                "(Mean ipTM · Agreement · ipSAE_min · Epitope · Solubility · Tm · Notes). "
-                "Expand a tool for its table + 3D structures.</p>\n"
+                "Each tool's top designs ranked by <b>that tool's own internal scoring</b> "
+                "(not the evaluator's cross-engine ranking) — so you can see where the refold "
+                "winners sit in each tool's own order. Shows <b>refolded designs only</b>, one row "
+                "per backbone (MPNN/cycle siblings collapsed; never-refolded designs omitted). "
+                "Columns are the same slim decision metrics as the main Top-30, with "
+                "<b>Native rank</b> leading and our <b>Rank</b> alongside.</p>\n"
             )
 
             # Build sequence → binder_id + rank lookup. Use the FULL (pre-collapse)
             # frame when available: df/sort_df here is representatives-only, so
             # multi-sequence-per-backbone tools (BindCraft MPNN siblings,
             # Protein-Hunter cycles) would otherwise leave their sibling rows'
-            # eval_rank blank. active_rank is the primary (two-stage) ranking.
+            # eval_rank blank. rank is the primary (two-stage) ranking.
             def _r3(v):
                 try:
                     return round(float(v), 3)
@@ -1614,8 +1607,8 @@ def generate_report(
             # ranking the Top-30 table and candidates.csv use), keyed by backbone
             # so sibling rows resolve to their representative's rank.
             grp_to_dense = {}
-            if "design_group" in sort_df.columns and "active_rank" in sort_df.columns:
-                grp_to_dense = dict(zip(sort_df["design_group"], sort_df["active_rank"], strict=False))
+            if "design_group" in sort_df.columns and "rank" in sort_df.columns:
+                grp_to_dense = dict(zip(sort_df["design_group"], sort_df["rank"], strict=False))
 
             seq_to_ids = {}
             lookup_df = full_df if full_df is not None else sort_df
@@ -1625,14 +1618,23 @@ def generate_report(
                     if seq and seq not in seq_to_ids:
                         seq_to_ids[seq] = {
                             "binder_id": row.get("binder_id", ""),
-                            "adaptyv_rank": row.get("adaptyv_rank", ""),
-                            "active_rank": grp_to_dense.get(row.get("design_group", ""), row.get("active_rank", "")),
+                            "rank": grp_to_dense.get(row.get("design_group", ""), row.get("rank", "")),
                             "consensus_iptm_mean": _r3(row.get("consensus_iptm_mean", "")),
                             "consensus_ipsae_min_mean": _r3(row.get("consensus_ipsae_min_mean", "")),
                             "native_soluprot_score": _r3(row.get("native_soluprot_score", "")),
                             "binder_length": row.get("binder_length", ""),
                             "sequence": row.get("sequence", ""),
                             "design_group": row.get("design_group", ""),
+                            # The rest of the slim decision-metric set, so the per-tool
+                            # native tables can render the SAME columns as the main
+                            # Top-30 while keeping the tool's own row order.
+                            "source_tool": row.get("source_tool", ""),
+                            "agreement_count": row.get("agreement_count", ""),
+                            "ipsae_min": _r3(row.get("ipsae_min", "")),
+                            "epitope_match_fraction": _r3(row.get("epitope_match_fraction", "")),
+                            "binding_mode": row.get("binding_mode", ""),
+                            "native_tmprot_tm": _r3(row.get("native_tmprot_tm", "")),
+                            "wetlab_reason": row.get("wetlab_reason", ""),
                         }
 
             # Sequence → backbone (design_group) for the refold pool, so the
@@ -1674,13 +1676,23 @@ def generate_report(
                                 _keyseq = native_df[seq_col].str.strip().str.upper()
                                 # Evaluator columns alongside the tool's native ranking, matched by
                                 # sequence: refold rank, cross-engine means, solubility, length, sequence.
+                                # Names match the slim spec (top30_slim._SLIM) so the
+                                # per-tool table renders the same decision columns as the
+                                # main Top-30 — the tool's order, our look.
                                 _eval_cols = [
-                                    ("eval_rank", "active_rank"),
+                                    ("rank", "rank"),
                                     ("binder_id", "binder_id"),
-                                    ("consensus_iptm_mean", "consensus_iptm_mean"),
-                                    ("consensus_ipsae_min_mean", "consensus_ipsae_min_mean"),
-                                    ("native_soluprot_score", "native_soluprot_score"),
+                                    ("source_tool", "source_tool"),
                                     ("binder_length", "binder_length"),
+                                    ("consensus_iptm_mean", "consensus_iptm_mean"),
+                                    ("agreement_count", "agreement_count"),
+                                    ("ipsae_min", "ipsae_min"),
+                                    ("epitope_match_fraction", "epitope_match_fraction"),
+                                    ("binding_mode", "binding_mode"),
+                                    ("native_soluprot_score", "native_soluprot_score"),
+                                    ("native_tmprot_tm", "native_tmprot_tm"),
+                                    ("wetlab_reason", "wetlab_reason"),
+                                    ("consensus_ipsae_min_mean", "consensus_ipsae_min_mean"),
                                     ("sequence", "sequence"),
                                 ]
                                 _pos = 1
@@ -1694,9 +1706,14 @@ def generate_report(
                                     )
                                     _pos += 1
                             n = len(native_df)
+                            # The tool's OWN ordering, in the slim decision-metrics view.
+                            # preserve_order is essential: without it slim_table_html
+                            # re-sorts by our rank, which is what turned this table into a
+                            # filtered copy of the main Top-30 and made it disagree with the
+                            # 3D viewer below (which always showed the native order).
                             tool_table = (
                                 '<div class="slimreport">'
-                                + slim_table_html(sort_df[sort_df["source_tool"] == tool], top_per_tool, f"tpt_{tool}")
+                                + slim_table_html(native_df, top_per_tool, f"tpt_{tool}", preserve_order=True)
                                 + "</div>"
                             )
 
@@ -1765,19 +1782,40 @@ def generate_report(
                             per_tool_top10 += (
                                 f'<details style="margin:0.3em 0;">'
                                 f'<summary style="cursor:pointer;font-weight:bold;">'
-                                f"{display_name} — top {n}{_of_total}</summary>\n"
+                                f"{display_name} — top {n} (native ranking){_of_total}</summary>\n"
                                 f"{tool_table}\n{viewer_block}\n</details>\n"
                             )
                             continue
                         except Exception:
                             pass  # Fall through to evaluator-based ranking
 
-                # Evaluator two-stage ranking within this tool (sort_df is already
-                # rank-sorted); slim decision-metrics table + refolded-structure viewer.
-                tool_df = sort_df[sort_df["source_tool"] == tool].head(top_per_tool)
+                # No --tool-csv for this tool: fall back to a native scoring column
+                # carried in the metrics frame when one exists, else to our ranking.
+                # Either way the table is the slim decision-metrics view.
+                tool_only = sort_df[sort_df["source_tool"] == tool].copy()
+                native_sort_col = _TOOL_NATIVE_SORT.get(tool)
+                native_sort_dir = _TOOL_NATIVE_SORT_DIR.get(tool, "desc")
+                used_native = False
+                if native_sort_col and native_sort_col in tool_only.columns:
+                    vals = pd.to_numeric(tool_only[native_sort_col], errors="coerce")
+                    if vals.notna().any():
+                        tool_only = (
+                            tool_only.assign(_sort=vals)
+                            .sort_values("_sort", ascending=native_sort_dir == "asc", na_position="last")
+                            .drop(columns=["_sort"])
+                        )
+                        used_native = True
+                tool_df = tool_only.head(top_per_tool)
+                if used_native:
+                    # Number the tool's own order so the slim table leads with it,
+                    # exactly as the --tool-csv path does.
+                    tool_df = tool_df.copy()
+                    tool_df.insert(0, "native_rank", range(1, len(tool_df) + 1))
                 n = len(tool_df)
                 tool_table = (
-                    '<div class="slimreport">' + slim_table_html(tool_df, top_per_tool, f"tpt_{tool}") + "</div>"
+                    '<div class="slimreport">'
+                    + slim_table_html(tool_df, top_per_tool, f"tpt_{tool}", preserve_order=used_native)
+                    + "</div>"
                 )
                 # 3D viewer using refolded Boltz-2 PDBs (works for Mosaic etc.
                 # without needing --tool-csv/--tool-pdb-dir flags)
@@ -1793,16 +1831,30 @@ def generate_report(
                     )
                 except Exception as e:  # pragma: no cover - defensive
                     refold_viewer = f"<p style='color:#888;'><em>3D viewer error: {e}</em></p>"
+                if used_native:
+                    badge = (
+                        f'<span style="background:#1565C0;color:white;padding:1px 6px;'
+                        f'border-radius:3px;font-size:0.75em;margin-left:0.4em;">NATIVE RANK</span>'
+                        f'<span style="font-size:0.8em;color:#555;margin-left:0.4em;">'
+                        f"sorted by <code>{native_sort_col}</code> ({native_sort_dir})</span>"
+                    )
+                    label = f"{display_name} — top {n}{_of_total}{badge}"
+                else:
+                    label = (
+                        f"{display_name} — top {n}{_of_total} "
+                        f'<span style="font-size:0.8em;color:#888;">(evaluator ranking; '
+                        f"no native column available)</span>"
+                    )
                 per_tool_top10 += (
                     f'<details style="margin:0.3em 0;">'
                     f'<summary style="cursor:pointer;font-weight:bold;">'
-                    f"{display_name} — top {n}{_of_total}</summary>\n"
+                    f"{label}</summary>\n"
                     f"{tool_table}\n{refold_viewer}\n</details>\n"
                 )
 
     # Full table — curated columns in ranking order
     _full_cols = [
-        "adaptyv_rank",
+        "rank",
         "binder_id",
         "source_tool",
         "binder_length",
@@ -1952,25 +2004,7 @@ def generate_report(
         '<a href="https://github.com/DunbrackLab/IPSAE" target="_blank">DunbrackLab d0<sub>res</sub> formula</a> '
         "(per-residue d0, uniform 10 Å PAE cutoff for all engines)"
     )
-    _rank_desc = {
-        "adaptyv": (
-            f"The primary ranking metric is <b>ipSAE_min</b> — the minimum of binder→target and "
-            f"target→binder {_ipsae_link}. This metric showed 1.4× better average precision than ipAE "
-            f'across 3,766 experimentally tested designs in the <a href="https://doi.org/10.1101/2025.08.14.670059" '
-            f'target="_blank">Adaptyv/Overath et al. 2025</a> benchmark. Quality tiers and the {_TIER_MED} pass '
-            f"threshold follow their screening methodology. <b>agreement_count</b> reports how many refolding "
-            f"engines score ipSAE_min above their pass threshold (see the per-engine cutoffs below). "
-            f"Ranking sorts by quality tier, then agreement count, then ipSAE_min."
-        ),
-        "consensus_iptm": (
-            f"Ranking is by <b>consensus_iptm</b> = max(boltz2, af3, esmfold2 iPTM) — the benchmark-validated "
-            f"binder-vs-non-binder screen (the most predictive engine flips per target, so trusting the most "
-            f"confident engine wins; macro-AUC ≈ 0.76). <b>ipSAE_min</b> ({_ipsae_link}) and "
-            f"<b>agreement_count</b> are still computed and shown per design as secondary cross-validation."
-        ),
-        "two_stage": _two_stage_methodology_html(screen_metric, min_engines, _ipsae_link),
-    }
-    methodology_ranking_html = _rank_desc.get(rank_method, _rank_desc["adaptyv"])
+    methodology_ranking_html = _ranking_methodology_html(min_engines, _ipsae_link)
 
     # Engine list reflects the engines actually present (populated) in this run.
     _engine_check = [
@@ -1991,12 +2025,12 @@ def generate_report(
         engines_present_html = "one or more refolding engines"
 
     # Item 7 + 15: provenance + QC rules blocks live under the methodology
-    # paragraph. Item 12: legend + screening intro adapt to rank_method.
+    # paragraph.
     # Items 3 + 5: per-tool framing banner (pre-filter / modality / convergence).
     # Item 6: run provenance footer (CLI args / git_sha / engine versions).
-    benchmark_provenance_block = _benchmark_provenance_html() if rank_method == "two_stage" else ""
+    benchmark_provenance_block = _benchmark_provenance_html()
     qc_rules_block = _qc_rules_html() if "qc_pass" in sort_df.columns else ""
-    screening_summary_intro = _screening_summary_intro_html(rank_method)
+    screening_summary_intro = _screening_summary_intro_html()
     top_table_legend = _slim_legend_html(sort_df, engine_thresholds)
     tool_classification_banner = _tool_classification_banner_html(sort_df, tool_overrides=tool_overrides)
 
@@ -2084,7 +2118,7 @@ def _slim_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float] | No
     checks = [
         (
             "Rank",
-            "two_stage_rank",
+            "rank",
             "Overall rank — Stage-1 mean-iPTM screen survival, then mean engine iPTM (the primary key).",
         ),
         (
@@ -2146,87 +2180,51 @@ def _slim_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float] | No
     return "\n".join(lines)
 
 
-def _top_table_legend_html(
-    rank_method: str, df: pd.DataFrame, engine_thresholds: dict[str, float] | None = None
-) -> str:
+def _top_table_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float] | None = None) -> str:
     """Per-column description table that sits under the Top-30 table.
 
-    Rendered text matches the column set produced by :func:`_select_display_cols`
-    for the active rank_method, so a reader can never get a description that
-    references a column that isn't in the table above.
+    Rendered text matches the column set produced by :func:`_select_display_cols`,
+    so a reader can never get a description that references a column that isn't in
+    the table above.
     """
     agreement_desc = _agreement_phrase(df, _resolve_thresholds(engine_thresholds))
-    if rank_method == "two_stage":
-        rows = [
-            ("two_stage_rank", "Overall rank — Stage-1 screen survival, then mean engine iPTM (primary ranking key)."),
-            (
-                "passes_max_screen",
-                "True ⇒ in the top 50% by the screen metric (mean iPTM by default — change with "
-                "<code>--screen-metric max</code>).",
-            ),
-            ("binder_length", "Designed binder length in amino acids."),
-            (
-                "consensus_iptm_mean ↑",
-                "<b>Primary ranking metric</b> — mean of per-engine PAE-iPTM. Higher = stronger multi-engine consensus.",
-            ),
-            ("consensus_iptm ↑", "Max engine iPTM (Stage-1 alternative screen via <code>--screen-metric max</code>)."),
-            ("consensus_iptm_min ↑", "Min engine iPTM — conservative lower bound."),
-            (
-                "consensus_iptm_spread ↓",
-                "Max − min engine iPTM. Large spread ⇒ engine disagreement; a row with spread &gt; 0.3 "
-                "earns the <span style='color:#c62828;font-weight:bold;'>⚠</span> warning next to its rank.",
-            ),
-            (
-                "agreement_count ↑",
-                f"{agreement_desc}. Fewer than 2 earns the "
-                "<span style='color:#c62828;font-weight:bold;'>⚠</span> warning.",
-            ),
-            (
-                "boltz_pae_iptm / af3_iptm / esmfold2_iptm ↑",
-                "Per-engine PAE-recomputed iPTM (the values entering the mean).",
-            ),
-            (
-                "ipsae_min ↑",
-                f"Cross-validation — Boltz-2 ipSAE_min. Tier-banded (High &gt; {_TIER_HIGH}, "
-                f"Medium &gt; {_TIER_MED}). Not used for ranking.",
-            ),
-            ("consensus_ipsae_min_mean ↑", "Mean of per-engine ipSAE_min — diagnostic cross-validation column."),
-            ("plddt_binder_mean ↑", "Mean binder pLDDT from Boltz-2 (also see plddt_binder_min in secondary)."),
-        ]
-    elif rank_method == "consensus_iptm":
-        rows = [
-            ("consensus_rank", "Overall rank — max(boltz, af3, esmfold2) iPTM, then ipSAE_min for tiebreak."),
-            ("binder_length", "Designed binder length in amino acids."),
-            ("consensus_iptm ↑", "<b>Primary ranking metric</b> — max engine iPTM (binder-vs-non-binder screen)."),
-            ("consensus_iptm_mean ↑", "Mean engine iPTM — precision-leaning consensus metric."),
-            ("consensus_iptm_min ↑", "Min engine iPTM — conservative lower bound."),
-            ("consensus_iptm_spread ↓", "Engine disagreement (max − min). &gt; 0.3 flagged on the rank."),
-            (
-                "agreement_count ↑",
-                f"{agreement_desc}. Fewer than 2 flagged with "
-                "<span style='color:#c62828;font-weight:bold;'>⚠</span> on the rank.",
-            ),
-            ("boltz_pae_iptm / af3_iptm / esmfold2_iptm ↑", "Per-engine PAE-recomputed iPTM."),
-            ("ipsae_min ↑", "Cross-validation — Boltz-2 ipSAE_min. Tier-banded. Not the ranking key."),
-            ("plddt_binder_mean ↑", "Mean binder pLDDT from Boltz-2."),
-        ]
-    else:  # adaptyv
-        rows = [
-            ("adaptyv_rank", "Overall rank — quality tier → agreement_count → ipSAE_min → ipTM → pLDDT."),
-            ("binder_length", "Designed binder length in amino acids."),
-            (
-                "quality_tier",
-                f"High (&gt;{_TIER_HIGH}), Medium (&gt;{_TIER_MED}), Low (&gt;{_TIER_LOW}), "
-                f"Reject (≤{_TIER_LOW}) based on ipSAE_min.",
-            ),
-            ("agreement_count ↑", f"{agreement_desc}."),
-            (
-                "ipsae_min ↑",
-                "<b>Primary ranking metric</b> — min(binder→target, target→binder) iPSAE from Boltz-2 PAE.",
-            ),
-            ("iptm ↑", "Interface predicted TM-score from Boltz-2 (cross-validation column under adaptyv)."),
-            ("plddt_binder_mean ↑", "Mean binder pLDDT from Boltz-2."),
-        ]
+    rows = [
+        ("rank", "Overall rank — cross-engine gate, then mean engine iPTM (the ranking key)."),
+        (
+            "passes_engine_gate",
+            "True ⇒ refolded by enough independent engines to be comparable "
+            "(<code>--min-engines</code>). Designs that fail the gate rank last.",
+        ),
+        ("binder_length", "Designed binder length in amino acids."),
+        (
+            "consensus_iptm_mean ↑",
+            "<b>The ranking metric</b> — mean of per-engine PAE-iPTM. Higher = stronger multi-engine consensus.",
+        ),
+        ("consensus_iptm ↑", "Max engine iPTM — diagnostic; ranking uses the mean (max-ranking is worse)."),
+        ("consensus_iptm_min ↑", "Min engine iPTM — conservative lower bound."),
+        (
+            "consensus_iptm_spread ↓",
+            "Max − min engine iPTM. Large spread ⇒ engine disagreement; a row with spread &gt; 0.3 "
+            "earns the <span style='color:#c62828;font-weight:bold;'>⚠</span> warning next to its rank.",
+        ),
+        (
+            "agreement_count ↑",
+            f"{agreement_desc}. Fewer than 2 earns the "
+            "<span style='color:#c62828;font-weight:bold;'>⚠</span> warning. Diagnostic only — it is a "
+            "flat null as a screen (macro-AUC 0.532 on the Cao benchmark), so do not gate on it.",
+        ),
+        (
+            "boltz_pae_iptm / af3_iptm / esmfold2_iptm ↑",
+            "Per-engine PAE-recomputed iPTM (the values entering the mean).",
+        ),
+        (
+            "ipsae_min ↑",
+            f"Cross-validation — Boltz-2 ipSAE_min. Tier-banded (High &gt; {_TIER_HIGH}, "
+            f"Medium &gt; {_TIER_MED}). Not used for ranking.",
+        ),
+        ("consensus_ipsae_min_mean ↑", "Mean of per-engine ipSAE_min — diagnostic cross-validation column."),
+        ("plddt_binder_mean ↑", "Mean binder pLDDT from Boltz-2 (also see plddt_binder_min in secondary)."),
+    ]
     # Show only rows whose column is actually present (or whose label aggregates
     # multiple per-engine columns).
     visible = [(c, d) for c, d in rows if _col_in_df_legend(c, df)]
@@ -2467,14 +2465,13 @@ def _binding_map_link_html(binding_map: str | None) -> str:
     )
 
 
-def _screening_summary_intro_html(rank_method: str) -> str:
+def _screening_summary_intro_html() -> str:
     """Single combined tier legend block above the screening tables.
 
-    iPTM is the active ranking metric (under two_stage / consensus_iptm);
-    ipSAE_min drives the ``quality_tier`` column and the tier-count table.
-    Previously rendered as two near-identical paragraphs — readers had to
-    cross-reference which threshold belonged to which metric. Now folded
-    into one side-by-side table with a shared tier label.
+    ``consensus_iptm_mean`` is the ranking metric; ``ipSAE_min`` drives the
+    ``quality_tier`` column and the tier-count table. Previously rendered as two
+    near-identical paragraphs — readers had to cross-reference which threshold
+    belonged to which metric.
     """
     ipsae_band = (
         f" &nbsp;<span style='color:#2e7d32'>■ High</span> &gt;{_TIER_HIGH} &nbsp;"
@@ -2482,23 +2479,15 @@ def _screening_summary_intro_html(rank_method: str) -> str:
         f"<span style='color:#e65100'>■ Low</span> &gt;{_TIER_LOW} &nbsp;"
         f"<span style='color:#c62828'>■ Reject</span> ≤{_TIER_LOW}"
     )
-    if rank_method in ("two_stage", "consensus_iptm"):
-        active = "consensus_iptm_mean" if rank_method == "two_stage" else "consensus_iptm"
-        # One tier system only: the ipSAE_min tiers shown here are exactly the bands
-        # the tier-count table below reports. iPTM is the ranking metric but is NOT
-        # tier-banded (no second tier table exists for it), so it is named in prose
-        # rather than rendered as a parallel — and easily-confused — tier legend.
-        return (
-            "<p style='font-size:0.85em;color:#555;margin:0.3em 0;'>"
-            "<b>Ranking metric:</b> <code>" + active + "</code> (iPTM-based; continuous, not tier-banded). "
-            "The single tier system below — used by the <code>quality_tier</code> column and the "
-            "tier-count table — is <b>ipSAE_min</b>:" + ipsae_band + "</p>"
-        )
-    # adaptyv: ipSAE_min IS the ranking metric, single band.
+    # One tier system only: the ipSAE_min tiers shown here are exactly the bands
+    # the tier-count table below reports. iPTM is the ranking metric but is NOT
+    # tier-banded (no second tier table exists for it), so it is named in prose
+    # rather than rendered as a parallel — and easily-confused — tier legend.
     return (
         "<p style='font-size:0.85em;color:#555;margin:0.3em 0;'>"
-        "<b>ipSAE_min tiers</b> (the ranking metric under <code>adaptyv</code> — "
-        "and the basis for <code>quality_tier</code>):" + ipsae_band + "</p>"
+        "<b>Ranking metric:</b> <code>consensus_iptm_mean</code> (iPTM-based; continuous, not "
+        "tier-banded). The single tier system below — used by the <code>quality_tier</code> column "
+        "and the tier-count table — is <b>ipSAE_min</b>:" + ipsae_band + "</p>"
     )
 
 
@@ -2701,80 +2690,46 @@ def _advisory_legend_html(df: pd.DataFrame) -> str:
     )
 
 
-def _select_display_cols(df: pd.DataFrame, rank_method: str = "adaptyv") -> tuple[list[str], list[str]]:
+def _select_display_cols(df: pd.DataFrame) -> tuple[list[str], list[str]]:
     """Pick columns for the top-20 table: (primary, secondary).
 
     Primary columns are always visible; secondary are in a collapsible section.
-    For the iptm-based rankings (two_stage / consensus_iptm) the iptm/consensus
-    columns lead and ipSAE is demoted to secondary (still shown). adaptyv keeps
-    the ipSAE-led layout.
+    The iPTM/consensus columns lead because ``consensus_iptm_mean`` is the ranking
+    metric; ipSAE is a diagnostic and sits in secondary.
     """
-    if rank_method in ("two_stage", "consensus_iptm"):
-        rank_col = "two_stage_rank" if rank_method == "two_stage" else "consensus_rank"
-        # Lead with the iPTM ranking columns; surface agreement_count + spread
-        # right at the top so engine-disagreement is visible in the Top-30 table
-        # (per maintainer feedback: rank-3 with agreement=1 must not hide).
-        primary = [rank_col, "binder_id", "source_tool", "binder_length"]
-        if rank_method == "two_stage":
-            primary.append("passes_max_screen")
-        primary += [
-            "consensus_iptm_mean",
-            "consensus_iptm",
-            "consensus_iptm_min",
-            "consensus_iptm_spread",
-            "agreement_count",
-            "boltz_pae_iptm",
-            "af3_iptm",
-            "esmfold2_iptm",
-            "ipsae_min",
-            "consensus_ipsae_min_mean",
-            "plddt_binder_mean",
-        ]
-        secondary = [
-            "quality_tier",
-            "boltz_pae_ipsae_min",
-            "af3_ipsae_min",
-            "esmfold2_ipsae_min",
-            "esmfold2_chain_iptm_interface",
-            "consensus_ipsae_min_spread",
-            "binder_ptm",
-            "plddt_binder_min",
-            "pae_bt",
-            "pae_tb",
-            "native_bg_design_ipsae_min",
-            "native_dG",
-            "native_dSASA",
-            "native_shape_complementarity",
-            "sequence",
-        ]
-        return (
-            [c for c in primary + _ADVISORY_PRIMARY if c in df.columns],
-            [c for c in _ADVISORY_SECONDARY + secondary if c in df.columns],
-        )
+    # Lead with the iPTM ranking columns; surface agreement_count + spread right
+    # at the top so engine-disagreement is visible in the Top-30 table (per
+    # maintainer feedback: rank-3 with agreement=1 must not hide).
     primary = [
-        "adaptyv_rank",
+        "rank",
         "binder_id",
         "source_tool",
         "binder_length",
-        "quality_tier",
+        "passes_engine_gate",
+        "consensus_iptm_mean",
+        "consensus_iptm",
+        "consensus_iptm_min",
+        "consensus_iptm_spread",
         "agreement_count",
+        "boltz_pae_iptm",
+        "af3_iptm",
+        "esmfold2_iptm",
         "ipsae_min",
-        _ENGINE_IPSAE_COLS["boltz"],
-        _ENGINE_IPSAE_COLS["af3"],
-        _ENGINE_IPSAE_COLS["esmfold2"],
-        "iptm",
+        "consensus_ipsae_min_mean",
         "plddt_binder_mean",
     ]
     secondary = [
-        "boltz_pae_iptm",
+        "quality_tier",
+        "boltz_pae_ipsae_min",
+        "af3_ipsae_min",
+        "esmfold2_ipsae_min",
+        "esmfold2_chain_iptm_interface",
+        "consensus_ipsae_min_spread",
         "binder_ptm",
         "plddt_binder_min",
-        "ipae",
         "pae_bt",
         "pae_tb",
-        "ipsae_dg_composite",
-        "ipsae_shape_composite",
-        "native_bg_design_ipsae_min",  # BoltzGen's own ipSAE (per-tool native rank)
+        "native_bg_design_ipsae_min",
         "native_dG",
         "native_dSASA",
         "native_shape_complementarity",
@@ -2935,7 +2890,7 @@ def _df_to_html(
         # Pick the rank column to attach the flag to (caller-supplied wins).
         rank_warn_col = rank_col
         if rank_warn_col is None:
-            for candidate in ("active_rank", "two_stage_rank", "consensus_rank", "adaptyv_rank"):
+            for candidate in ("rank",):
                 if candidate in df.columns:
                     rank_warn_col = candidate
                     break

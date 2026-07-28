@@ -117,17 +117,16 @@ class TestAgreementDescribesTheEnginesThatRan:
     @pytest.mark.parametrize("legend", [_slim_legend_html, None])
     def test_legends_do_not_claim_three_engines_when_two_ran(self, legend):
         df = _df(engines=("boltz", "af3"))
-        html = _slim_legend_html(df) if legend else _top_table_legend_html("two_stage", df)
+        html = _slim_legend_html(df) if legend else _top_table_legend_html(df)
         assert "0–3" not in html
         assert "of the 3 engines" not in html
 
 
 _RENDERERS = [
     lambda df: _tier_summary_to_html(df),
-    lambda df: _screening_summary_intro_html("two_stage"),
+    lambda df: _screening_summary_intro_html(),
     lambda df: _slim_legend_html(df),
-    lambda df: _top_table_legend_html("two_stage", df),
-    lambda df: _top_table_legend_html("adaptyv", df),
+    lambda df: _top_table_legend_html(df),
 ]
 
 
