@@ -11,6 +11,11 @@ dependencies = [
     "numpy>=1.24",
     "pandas>=2.0",
     "matplotlib>=3.7",
+    # refolding/target_msa.py imports requests at MODULE level (not lazily), and
+    # every engine now calls prepare_target_msa() up front, so it is a hard runtime
+    # dependency. biopython and gemmi are deliberately NOT here: both are imported
+    # inside functions, behind guards that keep their modules importable without them.
+    "requests>=2.28",
 ]
 
 [project.optional-dependencies]
