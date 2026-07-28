@@ -1579,12 +1579,17 @@ def generate_report(
         tools_present = order_tools(sort_df["source_tool"].dropna().unique())
         if tools_present:
             per_tool_top10 = (
-                "<h2>Top Designs per Tool</h2>\n"
+                "<h2>Top Designs per Tool "
+                '<span style="background:#1565C0;color:white;padding:2px 10px;'
+                "border-radius:4px;font-size:0.7em;font-weight:bold;vertical-align:middle;"
+                'margin-left:0.4em;">NATIVE TOOL RANKING</span></h2>\n'
                 '<p style="font-size:0.85em;color:#555;">'
-                "Each tool's best designs by the evaluator's cross-engine two-stage ranking, in the "
-                "same slim decision-metrics view as the main Top-30 "
-                "(Mean ipTM · Agreement · ipSAE_min · Epitope · Solubility · Tm · Notes). "
-                "Expand a tool for its table + 3D structures.</p>\n"
+                "Each tool's top designs ranked by <b>that tool's own internal scoring</b> "
+                "(not the evaluator's cross-engine ranking) — so you can see where the refold "
+                "winners sit in each tool's own order. Shows <b>refolded designs only</b>, one row "
+                "per backbone (MPNN/cycle siblings collapsed; never-refolded designs omitted). "
+                "Columns are the same slim decision metrics as the main Top-30, with "
+                "<b>Native rank</b> leading and our <b>Rank</b> alongside.</p>\n"
             )
 
             # Build sequence → binder_id + rank lookup. Use the FULL (pre-collapse)
@@ -1620,6 +1625,16 @@ def generate_report(
                             "binder_length": row.get("binder_length", ""),
                             "sequence": row.get("sequence", ""),
                             "design_group": row.get("design_group", ""),
+                            # The rest of the slim decision-metric set, so the per-tool
+                            # native tables can render the SAME columns as the main
+                            # Top-30 while keeping the tool's own row order.
+                            "source_tool": row.get("source_tool", ""),
+                            "agreement_count": row.get("agreement_count", ""),
+                            "ipsae_min": _r3(row.get("ipsae_min", "")),
+                            "epitope_match_fraction": _r3(row.get("epitope_match_fraction", "")),
+                            "binding_mode": row.get("binding_mode", ""),
+                            "native_tmprot_tm": _r3(row.get("native_tmprot_tm", "")),
+                            "wetlab_reason": row.get("wetlab_reason", ""),
                         }
 
             # Sequence → backbone (design_group) for the refold pool, so the
@@ -1661,13 +1676,23 @@ def generate_report(
                                 _keyseq = native_df[seq_col].str.strip().str.upper()
                                 # Evaluator columns alongside the tool's native ranking, matched by
                                 # sequence: refold rank, cross-engine means, solubility, length, sequence.
+                                # Names match the slim spec (top30_slim._SLIM) so the
+                                # per-tool table renders the same decision columns as the
+                                # main Top-30 — the tool's order, our look.
                                 _eval_cols = [
-                                    ("eval_rank", "rank"),
+                                    ("rank", "rank"),
                                     ("binder_id", "binder_id"),
-                                    ("consensus_iptm_mean", "consensus_iptm_mean"),
-                                    ("consensus_ipsae_min_mean", "consensus_ipsae_min_mean"),
-                                    ("native_soluprot_score", "native_soluprot_score"),
+                                    ("source_tool", "source_tool"),
                                     ("binder_length", "binder_length"),
+                                    ("consensus_iptm_mean", "consensus_iptm_mean"),
+                                    ("agreement_count", "agreement_count"),
+                                    ("ipsae_min", "ipsae_min"),
+                                    ("epitope_match_fraction", "epitope_match_fraction"),
+                                    ("binding_mode", "binding_mode"),
+                                    ("native_soluprot_score", "native_soluprot_score"),
+                                    ("native_tmprot_tm", "native_tmprot_tm"),
+                                    ("wetlab_reason", "wetlab_reason"),
+                                    ("consensus_ipsae_min_mean", "consensus_ipsae_min_mean"),
                                     ("sequence", "sequence"),
                                 ]
                                 _pos = 1
@@ -1681,9 +1706,14 @@ def generate_report(
                                     )
                                     _pos += 1
                             n = len(native_df)
+                            # The tool's OWN ordering, in the slim decision-metrics view.
+                            # preserve_order is essential: without it slim_table_html
+                            # re-sorts by our rank, which is what turned this table into a
+                            # filtered copy of the main Top-30 and made it disagree with the
+                            # 3D viewer below (which always showed the native order).
                             tool_table = (
                                 '<div class="slimreport">'
-                                + slim_table_html(sort_df[sort_df["source_tool"] == tool], top_per_tool, f"tpt_{tool}")
+                                + slim_table_html(native_df, top_per_tool, f"tpt_{tool}", preserve_order=True)
                                 + "</div>"
                             )
 
@@ -1752,19 +1782,40 @@ def generate_report(
                             per_tool_top10 += (
                                 f'<details style="margin:0.3em 0;">'
                                 f'<summary style="cursor:pointer;font-weight:bold;">'
-                                f"{display_name} — top {n}{_of_total}</summary>\n"
+                                f"{display_name} — top {n} (native ranking){_of_total}</summary>\n"
                                 f"{tool_table}\n{viewer_block}\n</details>\n"
                             )
                             continue
                         except Exception:
                             pass  # Fall through to evaluator-based ranking
 
-                # Evaluator two-stage ranking within this tool (sort_df is already
-                # rank-sorted); slim decision-metrics table + refolded-structure viewer.
-                tool_df = sort_df[sort_df["source_tool"] == tool].head(top_per_tool)
+                # No --tool-csv for this tool: fall back to a native scoring column
+                # carried in the metrics frame when one exists, else to our ranking.
+                # Either way the table is the slim decision-metrics view.
+                tool_only = sort_df[sort_df["source_tool"] == tool].copy()
+                native_sort_col = _TOOL_NATIVE_SORT.get(tool)
+                native_sort_dir = _TOOL_NATIVE_SORT_DIR.get(tool, "desc")
+                used_native = False
+                if native_sort_col and native_sort_col in tool_only.columns:
+                    vals = pd.to_numeric(tool_only[native_sort_col], errors="coerce")
+                    if vals.notna().any():
+                        tool_only = (
+                            tool_only.assign(_sort=vals)
+                            .sort_values("_sort", ascending=native_sort_dir == "asc", na_position="last")
+                            .drop(columns=["_sort"])
+                        )
+                        used_native = True
+                tool_df = tool_only.head(top_per_tool)
+                if used_native:
+                    # Number the tool's own order so the slim table leads with it,
+                    # exactly as the --tool-csv path does.
+                    tool_df = tool_df.copy()
+                    tool_df.insert(0, "native_rank", range(1, len(tool_df) + 1))
                 n = len(tool_df)
                 tool_table = (
-                    '<div class="slimreport">' + slim_table_html(tool_df, top_per_tool, f"tpt_{tool}") + "</div>"
+                    '<div class="slimreport">'
+                    + slim_table_html(tool_df, top_per_tool, f"tpt_{tool}", preserve_order=used_native)
+                    + "</div>"
                 )
                 # 3D viewer using refolded Boltz-2 PDBs (works for Mosaic etc.
                 # without needing --tool-csv/--tool-pdb-dir flags)
@@ -1780,10 +1831,24 @@ def generate_report(
                     )
                 except Exception as e:  # pragma: no cover - defensive
                     refold_viewer = f"<p style='color:#888;'><em>3D viewer error: {e}</em></p>"
+                if used_native:
+                    badge = (
+                        f'<span style="background:#1565C0;color:white;padding:1px 6px;'
+                        f'border-radius:3px;font-size:0.75em;margin-left:0.4em;">NATIVE RANK</span>'
+                        f'<span style="font-size:0.8em;color:#555;margin-left:0.4em;">'
+                        f"sorted by <code>{native_sort_col}</code> ({native_sort_dir})</span>"
+                    )
+                    label = f"{display_name} — top {n}{_of_total}{badge}"
+                else:
+                    label = (
+                        f"{display_name} — top {n}{_of_total} "
+                        f'<span style="font-size:0.8em;color:#888;">(evaluator ranking; '
+                        f"no native column available)</span>"
+                    )
                 per_tool_top10 += (
                     f'<details style="margin:0.3em 0;">'
                     f'<summary style="cursor:pointer;font-weight:bold;">'
-                    f"{display_name} — top {n}{_of_total}</summary>\n"
+                    f"{label}</summary>\n"
                     f"{tool_table}\n{refold_viewer}\n</details>\n"
                 )
 

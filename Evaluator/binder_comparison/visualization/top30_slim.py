@@ -30,7 +30,10 @@ from ..comparison.scoring import (
 )
 
 # display label -> (source column, sort kind). Optional columns drop when absent.
+# `native_rank` leads when present — it only is in the per-tool native tables, where
+# the tool's own ordering is the point and our `rank` rides alongside for comparison.
 _SLIM = [
+    ("Native rank", "native_rank", "n"),
     ("Rank", "rank", "n"),
     ("Binder ID", "binder_id", "s"),
     ("Tool", "source_tool", "s"),
@@ -168,10 +171,21 @@ def _full_table(df: pd.DataFrame, table_id: str) -> str:
     return f'<table class="sortable full" id="{table_id}"><thead><tr>{heads}</tr></thead><tbody>\n{chr(10).join(rows)}\n</tbody></table>'
 
 
-def slim_table_html(df: pd.DataFrame, top_n: int = 30, table_id: str = "t") -> str:
-    """Return just the slim ``<table>`` HTML for the top-``top_n`` rows (for embedding)."""
-    sort_col = "rank" if "rank" in df.columns else "consensus_iptm_mean"
-    d = df.sort_values(sort_col, ascending=(sort_col == "rank")).head(top_n)
+def slim_table_html(df: pd.DataFrame, top_n: int = 30, table_id: str = "t", preserve_order: bool = False) -> str:
+    """Return just the slim ``<table>`` HTML for the top-``top_n`` rows (for embedding).
+
+    Args:
+        preserve_order: render *df* in the order given instead of re-sorting by our
+            ``rank``. Required by the per-tool native tables, whose whole point is the
+            **tool's own** ordering — re-sorting them by our ranking is what made those
+            tables duplicate the main Top-30 (and disagree with the 3D viewer beneath
+            them, which always showed the native order).
+    """
+    if preserve_order:
+        d = df.head(top_n)
+    else:
+        sort_col = "rank" if "rank" in df.columns else "consensus_iptm_mean"
+        d = df.sort_values(sort_col, ascending=(sort_col == "rank")).head(top_n)
     return _slim_table(d, _slim_cols(d), table_id)
 
 
