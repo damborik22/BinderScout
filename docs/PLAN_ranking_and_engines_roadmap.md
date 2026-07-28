@@ -43,7 +43,7 @@ whether the metric that selects its output is even the right one.
 |---|---|---|---|---|---|
 | **X** | Report gap audit | Highest ROI — unblocks honest reads of every report | ~1 day | Direct (we pick wet-lab designs from these reports) | ✅ **DONE** 2026-07-25 (`be6134e`) |
 | **T** | Promera 5th refold engine + **iCS** metric | Could be the affinity/selectivity ranker `ipsae_min` isn't | ~1 wk | Direct (core ranking weakness) | ❌ **CLOSED — NEGATIVE** 2026-07-25 |
-| **U** | ProtDBench calibration harness | Objective, data-driven metric comparison (enables T's decision) | ~few days | Direct (makes metric choices provable) | Next (settles screens, not affinity) |
+| **U** | Large-scale calibration benchmark (**Cao 2022**, not ProtDBench) | Objective, data-driven metric comparison | ~3 days | Direct (makes metric choices provable) | ✅ **DONE** 2026-07-28 (`f63e18b`) — see `INVESTIGATION_partU_cao_benchmark.md`. Verdict: **metric choice is closed**. Nothing beats shipped `consensus_iptm_mean`; *selecting* a metric from labels scores worse (0.5170 vs 0.5552). Stage-1 screen retired. Ranking transfers across datasets only at the engine level, not the metric level → **stop running combination searches** |
 | **O** | Chai-1 refold engine | 4th independent engine hardens anti-gaming consensus | ~days (vendored) | Indirect (consensus robustness) | Spare slot |
 | **V** | OpenGerminal (Ab/Nb designer) | New capability; removes aarch64 PyRosetta blocker | ~1 wk | Future (no current Ab campaign) | On demand |
 | **W** | RFD2-MI (small-mol/PTM designer) | Enables ligand/PTM targets (pairs with Boltz-2 affinity head) | ~1 wk | Future (no current ligand target) | On demand |

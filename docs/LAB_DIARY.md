@@ -1201,3 +1201,90 @@ which now reaches BM1/BM2/BM4 directly over the LAN (`tools/fleet.sh`) and Clara
 - Sync BM1/BM2/BM4 onto `fix/boltz2-skip-bad-design` once their arms finish, then re-shard E2.
 - Merge `fix/boltz2-skip-bad-design` into master — it is a genuine bug fix that has been in production
   on BM4 for a day and is validated by a 5-design smoke test on BM5.
+---
+
+## 2026-07-28 — **Part U closes the metric question**: the Cao 0.56 ceiling is label censoring, the Stage-1 screen was doing nothing, and the de novo "0.91" was a Simpson artifact
+
+**What changed:**
+- `f63e18b` — Stage-1 max screen retired from `rank_by_two_stage`. Ranking is now
+  `>= --min-engines gate → consensus_iptm_mean`. `--screen-metric` deprecated.
+  `docs/INVESTIGATION_partU_cao_benchmark.md` rewritten with the verdict (§5–§10).
+- Memory `reference_denovo_bindcraft_replication.md` corrected — the "AUC 0.91" it recorded
+  is not a dataset-level result.
+
+**The run.** All 4,442 Cao designs × 3 engines completed: Boltz-2 and AF3 on Clara H200
+(array `153471`, all 12 tasks `COMPLETED 0:0` under the corrected `--cpus-per-gpu=32
+--mem-per-gpu=250G` after the node-hogging incident), ESMFold2 on Spark. **100 % coverage,
+zero NaN** — the first perfectly-matched engine comparison we have ever had. Metrics were
+recomputed from the PAE matrices with the *shipped* scoring code on whichever host held the
+`.npy` files, so the columns are what `binder-compare report` would produce.
+
+**The scare, and what it actually was.** The first leaderboard read like a disaster: ceiling
+**0.5603** macro-AUC across all 72 metrics, everything inside 0.471–0.560, against Adaptyv's
+~0.69. Target pairing and labels checked out, and the signal had *structure* (AF3 metrics
+clustered top, Boltz-2 bottom, signs consistent across 12 targets) — so not shuffled labels.
+
+The cause was the label. **73.41 % of Cao "binders" have a one-sided Kd** (`kd_ub = inf`) —
+the titration saturated. Restricting to two-sided positives on the 6 adequately-powered
+targets: `af3_pae_iptm` **0.6175 → 0.7343**; one-sided-only gives **0.5350**, i.e. chance.
+That is not circular from the same Kd fit — Cao's own fixed-concentration binary assay agrees
+across the full 654,716-design library: two-sided-Kd designs pass `binder_400_nm` at
+**35.90 %**, one-sided at **0.073 %**, labelled non-binders at 0.0023 %. **The one-sided
+"binders" are experimentally indistinguishable from non-binders.** Our metrics scoring 0.535
+on them is correct behaviour.
+
+**A number we had been quoting was wrong.** Chasing the comparison exposed that the de novo
+BindCraft "screen AUC 0.91" is a **2-target pooled figure**: PD1 0.9096 (13 binders/40 non)
+pooled with PD-L1 0.6364 (11 binders / **2** non). Macro over the two = **0.7730**; pooling
+inflated it **+0.1328** — the exact Simpson trap this project's own rule forbids, committed by
+us. Corrected ladder: **Cao 0.56 raw / 0.73 label-clean / Adaptyv 0.68–0.72 / de novo
+0.72–0.78 macro.**
+
+**Stage 1 was a no-op.** The top-50 % max screen removed **0 designs from the top-5/10/20/50
+and top-10 % on 12/12 targets**; the earliest rank it touched was 21.0 % down the pool
+(EGFRc, 84/400), full-list Spearman 0.983–0.999. Retired. **Important caveat recorded in the
+docstring:** the workflow claimed this was a theorem from `mean ≤ max` — it is not.
+A=(0.5,0.5,0.5) and B=(0.9,0.1,0.1) with a cut at 0.6 drops the higher-mean design. It holds
+here only because max and mean co-rank at Spearman 0.89–0.98. Also: the documented rationale
+for the `max` default ("the lenient recall step") is **backwards** — mean retained *more* true
+binders at the same cut (1,114 vs 1,093, p = 0.0094, 8/12). Recorded so it is not flipped back
+a third time.
+
+**Metric selection is closed.** Honest nested selection over the 72 metrics scores **0.5170** —
+*worse* than the `consensus_iptm_mean` we already ship (0.5552, +0.0382, p = 0.0014, 8/12
+targets). Best of 2,489 searched combinations: 0.5591, inside the permutation null. Metric
+rankings transfer across datasets only at the **engine** level (partialling out engine means
+drops Cao↔de novo ρ from +0.630 to +0.230; Cao↔Adaptyv is −0.026), and each dataset's #1 lands
+at the 31st–75th percentile elsewhere. **Stop running combination searches.**
+
+**Three things deliberately NOT changed,** each with the evidence: `min_engines` stays 3 (the
+case for 2 was a random-dropout simulation that flipped sign under reseeding); all three
+engines stay — do not drop Boltz-2 despite it being weakest here, because `af3+esm` loses to
+the 3-engine mean on Adaptyv (p < 0.001, 0/4 targets) and single-engine commitment has the
+worst regret of any option (0.106–0.116 vs 0.042); `consensus_iptm_mean` stays the metric.
+
+**Part N survives** with one narrow correction: FGFR2 does show a real affinity correlation
+(`esmfold2_pae_overall_mean` ρ = +0.3024, n = 225, FWER p = 0.0002) but it does not transfer
+(PDGFR −0.014 on a matched Kd window), the shipped ranker gains nothing from it, and **net
+charge of the raw sequence alone gives ρ = +0.2385** — 79 % of it, with no structure
+prediction at all.
+
+**Method note — 11 of 15 agents' claims were struck.** The workflow's own adversarial
+verifiers refuted 11 original claims (an algebraic identity mistaken for a discovery, a
+variance argument that merely restated the AUC gap, an MCAR-only dropout simulation, a
+split-half that split targets and so conflated noise with heterogeneity). The investigation
+doc marks every finding **[V]** (re-run by hand), **[A]** (survived a verifier) or **[✗]**
+(struck). Treating agent output as established would have shipped several wrong changes,
+including dropping Boltz-2.
+
+**What this means for reports.** Macro fold-enrichment from the top decile is **1.88×**
+(FGFR2 8.98 → 2.13 designs-per-hit) but it beats a random ranking on only **6 of 12 targets**,
+and on TrkA and Tie2 it is *worse than not ranking*. The report blurb and CLAUDE.md now say
+this outright: it is a **triage filter, not a decision procedure**.
+
+**Next:**
+- Report-generator edit to remove `two_stage_rank` now that the two-stage name is a misnomer.
+- Open: why Boltz-2 is last on Cao (mechanism unknown; it is our cheapest engine); whether
+  the label-cleaning effect generalises — Adaptyv was never checked for the analogous
+  assay-quality confound, and its ESMFold2 ipTM predicts *expression* at macro 0.680,
+  essentially equal to its binder AUC.
