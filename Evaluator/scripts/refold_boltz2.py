@@ -458,6 +458,12 @@ def refold_batch(
         indexed_seqs.sort(key=lambda x: len(x[1]))
         n_todo = sum(1 for idx, _ in indexed_seqs if idx not in skip_indices)
         n_done = 0
+        # Track per-design feature-build skips. Skipping a bad design is right;
+        # skipping EVERY design means the environment is broken (e.g. a Mosaic
+        # checkout without the msa_path patch), and reporting that as a clean
+        # run lets a batch claim success with zero results. See the guard below.
+        n_skipped = 0
+        first_skip_exc = None
         prev_length = -1
 
         for idx, seq_str in indexed_seqs:
@@ -487,23 +493,33 @@ def refold_batch(
             seq = jnp.array([TOKENS.index(c) for c in seq_str])
             pssm = jax.nn.one_hot(seq, 20)
 
-            boltz_features, boltz_writer = folder.target_only_features(
-                chains=[
-                    TargetChain(sequence=seq_str, use_msa=False),  # binder: de novo, no MSA
-                    TargetChain(
-                        # Prefer a cached a3m (msa_path) — folds the target WITH its
-                        # MSA offline. Falls back to use_msa: co-fold (no template)
-                        # fetches online; template mode goes single-sequence (the
-                        # template already fixes the backbone) when no MSA is cached.
-                        sequence=target_sequence,
-                        # use_msa=False here honours an explicit --no-msa: without it
-                        # Boltz would still co-fold an online MSA behind the operator.
-                        use_msa=use_msa and target_template_chain is None,
-                        template_chain=target_template_chain,
-                        msa_path=target_msa_path,
-                    ),
-                ],
-            )
+            # Build the complex features. A malformed binder can make Boltz emit an
+            # empty dataloader (IndexError in load_features_and_structure_writer);
+            # skip that one design rather than aborting the whole batch.
+            try:
+                boltz_features, boltz_writer = folder.target_only_features(
+                    chains=[
+                        TargetChain(sequence=seq_str, use_msa=False),  # binder: de novo, no MSA
+                        TargetChain(
+                            # Prefer a cached a3m (msa_path) — folds the target WITH its
+                            # MSA offline. Falls back to use_msa: co-fold (no template)
+                            # fetches online; template mode goes single-sequence (the
+                            # template already fixes the backbone) when no MSA is cached.
+                            sequence=target_sequence,
+                            # use_msa=False here honours an explicit --no-msa: without it
+                            # Boltz would still co-fold an online MSA behind the operator.
+                            use_msa=use_msa and target_template_chain is None,
+                            template_chain=target_template_chain,
+                            msa_path=target_msa_path,
+                        ),
+                    ],
+                )
+            except Exception as e:
+                print(f"[SKIP] Binder #{idx} feature-build failed ({e!r}) — skipping")
+                n_skipped += 1
+                first_skip_exc = first_skip_exc or repr(e)
+                jax.clear_caches()
+                continue
 
             # ---- Comprehensive aux metrics — all 13 loss terms ----
             metrics_loss = folder.build_multisample_loss(
@@ -708,11 +724,27 @@ def refold_batch(
     print(f"\n{'=' * 55}")
     print("=== Run Complete ===")
     print(f"Processed {len(results_ref)} binder(s).")
+    if n_skipped:
+        print(f"Skipped  {n_skipped} binder(s) on feature-build failure.")
     print(f"Results  → {txt_path}, {csv_path}")
     print(f"PDB      → {output_dir}/refold*_{run_id}.pdb")
     print(f"PAE      → {output_dir}/refold*_{run_id}_pae.npy")
     print(f"pLDDT    → {output_dir}/refold*_{run_id}_plddt.csv")
     print(f"Run ID: {run_id} (for tracking this session)")
+
+    # Skipping a malformed design is expected; skipping *every* design is an
+    # environment fault, not a data property. Without this the batch exits 0
+    # having folded nothing, so a retry wrapper logs "COMPLETE" and the operator
+    # sees a finished run with an empty CSV. Observed 2026-07-28: a Mosaic
+    # checkout lacking the msa_path patch skipped all 512 designs of a shard on
+    # two machines and reported success.
+    if n_todo > 0 and n_skipped == n_todo:
+        raise RuntimeError(
+            f"All {n_todo} binder(s) failed the feature build — nothing was folded. "
+            f"This is an environment fault, not bad input. First error: {first_skip_exc}. "
+            "Common cause: this machine's Mosaic checkout predates the msa_path "
+            "parameter — apply install/patches/mosaic-offline-msa.patch in Mosaic/."
+        )
 
 
 # ============================

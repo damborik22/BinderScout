@@ -259,10 +259,80 @@ After the transfer, `fetch` **verifies the result before declaring success**:
 
 ---
 
+## 4bis. Two traps when you script against these machines by hand
+
+`fleet.sh` avoids both. Anything you write yourself must too — each one produces
+a **confidently wrong answer**, not an error, which is what makes them expensive.
+
+### 4bis.1 `pgrep`/`pkill -f` over ssh matches the ssh command itself
+
+The remote shell's own `/proc/*/cmdline` contains the pattern you just sent, so
+the pattern matches it:
+
+```bash
+ssh bm1 "pgrep -f refold-boltz2 >/dev/null && echo running || echo IDLE"   # ALWAYS "running"
+ssh bm4 "pkill -f cs_chain_e2.sh"     # kills the shell running this line;
+                                      # everything after it silently never runs
+```
+
+Bracket the first character so the pattern cannot match its own literal text —
+and note it matches locally too, if a *local* `ssh …` command line happens to
+contain the string you are grepping for:
+
+```bash
+ssh bm1 "ps -eo cmd | grep -c '[r]efold-boltz2'"        # true count
+ssh bm4 "pids=\$(pgrep -f '[c]s_chain_e2.sh'); kill \$pids"
+```
+
+**Cost when missed (2026-07-28):** a completion monitor keyed on
+`pgrep -f refold-boltz2` never fired because it always read "running"; BM1 and
+BM2 sat idle ~3 h after finishing their counter-screen arms.
+
+**Better still: monitor a row count, not a process.** Progress files can't
+self-match. Key completion on `wc -l` of the output CSV and add a stall
+detector (no new rows in N minutes ⇒ report), which also catches silent deaths
+that a process check would miss.
+
+### 4bis.2 `ssh host "cmd &"` hangs unless the child's FDs are detached
+
+A backgrounded remote process inherits the ssh channel's stdout/stderr, so ssh
+waits on it forever even with `nohup`/`setsid`. In a multi-step deploy script
+this means every step after the first launch silently never executes.
+
+```bash
+ssh bm1 "setsid nohup ./job.sh &"                          # HANGS
+ssh -n bm1 "setsid nohup ./job.sh >/dev/null 2>&1 </dev/null &"   # returns
+```
+
+**Cost when missed (2026-07-28):** a 4-machine shard deploy hung on its first
+remote launch; the 4th machine was never started, and the operator's own hung
+`ssh` command line then self-matched a local `pgrep` (§4bis.1) and read as
+"running".
+
+### 4bis.3 Corollary — after syncing a machine's BindMaster repo, patch Mosaic
+
+Newer `Evaluator/scripts/refold_boltz2.py` passes `msa_path=` to
+`TargetChain`, which only exists in a **patched** Mosaic checkout. Pulling
+BindMaster without applying the patch makes every design fail its feature
+build:
+
+```bash
+ssh <m> "cd ~/dev/BindMaster/Mosaic && git apply ~/dev/BindMaster/install/patches/mosaic-offline-msa.patch"
+ssh <m> "grep -c msa_path ~/dev/BindMaster/Mosaic/src/mosaic/structure_prediction.py"   # must be >= 1
+```
+
+Verify with that grep as part of any sync — do not assume the checkout is
+current just because the repo is.
+
+---
+
 ## 5. Failure modes
 
 | Condition | Behaviour |
 |---|---|
+| `pgrep`/`pkill -f` over ssh reports everything as running / kills its own shell | Pattern self-match — bracket the first char (§4bis.1). Prefer row-count monitoring over process checks. |
+| Multi-step ssh deploy stops partway with no error | Backgrounded remote child holds the ssh channel open (§4bis.2) — redirect its FDs and use `ssh -n`. |
+| Boltz-2 refold exits 0 having folded nothing | Every design hit the per-design skip — an environment fault, usually an unpatched Mosaic (§4bis.3). `refold_boltz2.py` now raises instead of reporting a clean run; older checkouts do not, so check `Processed N binder(s)` is non-zero. |
 | Machine unreachable | Marked down in the inventory (`reachable:false`, typed nulls) and surfaced by `status`/`probe`. Never a silent skip. |
 | tmux session gone, no output | Treated as a crash; pull `run.log` via `fetch` (or `ssh <m> tail run.log`) for diagnosis. |
 | GPU busy at launch | Refuse, report which PID(s) hold it. No silent queueing. |
