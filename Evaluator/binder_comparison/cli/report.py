@@ -18,6 +18,7 @@ import datetime as _dt
 import json
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -344,6 +345,14 @@ def run(args: argparse.Namespace) -> None:
     df = rank_by_adaptyv_method(df)
     df = rank_by_consensus_iptm(df)
     screen_metric = getattr(args, "screen_metric", "max") or "max"
+    if screen_metric != "max":
+        warnings.warn(
+            "--screen-metric is deprecated (Part U) and no longer affects the ranking: the Stage-1 "
+            "screen was retired after it was measured to remove 0 designs from the top-10% on 12/12 "
+            "Cao benchmark targets. It now only selects the column behind the informational "
+            "passes_max_screen diagnostic. Ranking is the cross-engine gate then consensus_iptm_mean.",
+            stacklevel=2,
+        )
     min_engines = getattr(args, "min_engines", None) or MIN_ENGINES_DEFAULT
     df = rank_by_two_stage(df, screen_metric=screen_metric, min_engines=min_engines)
 
@@ -356,16 +365,13 @@ def run(args: argparse.Namespace) -> None:
     # two_stage_rank); --rank-by selects which orders the report. `active_rank`
     # is the chosen ordering (1..N) — used for display + structure-file naming so
     # the HTML shows the selected method's rank. The default is two_stage
-    # (max-screen → mean-rank), the benchmark-recommended ordering for wet-lab selection.
+    # (>=min_engines gate → consensus_iptm_mean rank).
     rank_by = getattr(args, "rank_by", "two_stage") or "two_stage"
     if rank_by == "consensus_iptm":
         print("[report] Ranking by consensus_iptm (max engine iptm — benchmark-validated binder filter)")
         df = df.sort_values(["consensus_rank"], ascending=[True]).reset_index(drop=True)
     elif rank_by == "two_stage":
-        print(
-            f"[report] Ranking by two_stage ({screen_metric}-screen top 50% → mean-rank, "
-            f"min {min_engines} engines — benchmark-validated for selection)"
-        )
+        print(f"[report] Ranking by two_stage (min {min_engines} engines → consensus_iptm_mean rank)")
         df = df.sort_values(["two_stage_rank"], ascending=[True]).reset_index(drop=True)
     else:
         df = df.sort_values(["adaptyv_rank"], ascending=[True]).reset_index(drop=True)
@@ -1286,18 +1292,19 @@ def add_parser(subparsers) -> None:
         default="two_stage",
         help="Ranking method for the report. 'adaptyv' = quality_tier → agreement_count → "
         "ipsae_min. 'consensus_iptm' = max engine iptm (benchmark-validated binder-vs-non-binder filter). "
-        "'two_stage' (default) = screen (top 50%%) then mean-rank survivors (benchmark-validated for wet-lab "
-        "selection: precision@top-10%% 0.92 vs 0.79 for max alone; see docs/completed_plans.md Part N). All ranks "
-        "are always written as columns (adaptyv_rank, consensus_rank, two_stage_rank).",
+        "'two_stage' (default) = cross-engine gate (>= --min-engines) then rank by consensus_iptm_mean "
+        "(mean-ranking beats max-ranking on precision@top-10%%, 0.92 vs 0.79; see docs/completed_plans.md "
+        "Part N). All ranks are always written as columns (adaptyv_rank, consensus_rank, two_stage_rank).",
     )
     p.add_argument(
         "--screen-metric",
         choices=["max", "mean"],
         default="max",
-        help="Stage-1 screen metric for --rank-by two_stage. 'max' (default) = consensus_iptm (max over "
-        "engines) — the lenient recall screen (keep a design any engine rates highly; best on ProteinBase, "
-        "~0.755). Stage 2 then ranks survivors by consensus_iptm_mean. 'mean' = consensus_iptm_mean screen "
-        "(stricter; Adaptyv macro AUC 0.710 vs 0.689).",
+        help="DEPRECATED (Part U) — no longer affects the ranking. Selects which column the "
+        "informational 'passes_max_screen' diagnostic is computed from ('max' = consensus_iptm, "
+        "'mean' = consensus_iptm_mean). The Stage-1 screen was retired after it was measured to remove "
+        "0 designs from the top-10%% on 12/12 Cao benchmark targets; ranking is now the cross-engine "
+        "gate followed by consensus_iptm_mean.",
     )
     p.add_argument(
         "--min-engines",
