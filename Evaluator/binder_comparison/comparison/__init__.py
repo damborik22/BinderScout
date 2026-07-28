@@ -9,7 +9,7 @@ from .scoring import (
     compute_composite_scores,
     compute_ipsae_from_pae,
     compute_iptm_from_pae,
-    rank_by_adaptyv_method,
+    rank_designs,
 )
 from .statistics import compute_statistics
 
@@ -25,5 +25,5 @@ __all__ = [
     "compute_iptm_from_pae",
     "compute_statistics",
     "merge_refold_results",
-    "rank_by_adaptyv_method",
+    "rank_designs",
 ]

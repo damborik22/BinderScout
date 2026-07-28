@@ -18,7 +18,6 @@ import datetime as _dt
 import json
 import subprocess
 import sys
-import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -43,9 +42,7 @@ from ..comparison.scoring import (
     compute_composite_scores,
     compute_consensus_ipsae,
     compute_consensus_iptm,
-    rank_by_adaptyv_method,
-    rank_by_consensus_iptm,
-    rank_by_two_stage,
+    rank_designs,
 )
 from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
@@ -337,45 +334,18 @@ def run(args: argparse.Namespace) -> None:
     df = compute_composite_scores(df)
     df = compute_agreement(df, engine_thresholds=engine_thresholds)
 
-    # Consensus iPTM = max of per-engine PAE-recomputed iptms. Benchmark-validated
-    # (ProteinBase 4-target, exhaustive 297-combo search) as the best deployable
-    # binder-vs-non-binder score. Always computed; selectable as the ranking metric.
+    # consensus_iptm (max) and consensus_iptm_mean are both computed; the ranking
+    # uses the mean. See rank_designs() for why nothing else is offered (Part U).
     df = compute_consensus_iptm(df)
     df = compute_consensus_ipsae(df)
-    df = rank_by_adaptyv_method(df)
-    df = rank_by_consensus_iptm(df)
-    screen_metric = getattr(args, "screen_metric", "max") or "max"
-    if screen_metric != "max":
-        warnings.warn(
-            "--screen-metric is deprecated (Part U) and no longer affects the ranking: the Stage-1 "
-            "screen was retired after it was measured to remove 0 designs from the top-10% on 12/12 "
-            "Cao benchmark targets. It now only selects the column behind the informational "
-            "passes_max_screen diagnostic. Ranking is the cross-engine gate then consensus_iptm_mean.",
-            stacklevel=2,
-        )
     min_engines = getattr(args, "min_engines", None) or MIN_ENGINES_DEFAULT
-    df = rank_by_two_stage(df, screen_metric=screen_metric, min_engines=min_engines)
+    df = rank_designs(df, min_engines=min_engines)
+    print(f"[report] Ranking by consensus_iptm_mean (cross-engine gate: min {min_engines} engines)")
 
     # Item 9: wet-lab-ready badge (SoluProt-passes + agreement_count >= 2 +
     # min binder pLDDT >= 0.50 + no FAILED RUN). Advisory only — the rank is
     # unchanged; the report renders failing rows with CSS strike-through.
     df = annotate_wetlab_recommended(df)
-
-    # All three rankings coexist as columns (adaptyv_rank, consensus_rank,
-    # two_stage_rank); --rank-by selects which orders the report. `active_rank`
-    # is the chosen ordering (1..N) — used for display + structure-file naming so
-    # the HTML shows the selected method's rank. The default is two_stage
-    # (>=min_engines gate → consensus_iptm_mean rank).
-    rank_by = getattr(args, "rank_by", "two_stage") or "two_stage"
-    if rank_by == "consensus_iptm":
-        print("[report] Ranking by consensus_iptm (max engine iptm — benchmark-validated binder filter)")
-        df = df.sort_values(["consensus_rank"], ascending=[True]).reset_index(drop=True)
-    elif rank_by == "two_stage":
-        print(f"[report] Ranking by two_stage (min {min_engines} engines → consensus_iptm_mean rank)")
-        df = df.sort_values(["two_stage_rank"], ascending=[True]).reset_index(drop=True)
-    else:
-        df = df.sort_values(["adaptyv_rank"], ascending=[True]).reset_index(drop=True)
-    df["active_rank"] = range(1, len(df) + 1)
 
     # "Best design, not multiple sequences per design": collapse near-duplicate
     # variants of one trajectory (Protein-Hunter cycles, BindCraft MPNN re-designs)
@@ -391,7 +361,7 @@ def run(args: argparse.Namespace) -> None:
             f"{n_groups} distinct designs (best per trajectory; --no-collapse-duplicates to disable)"
         )
         df_display = df[df["is_representative"]].reset_index(drop=True)
-        df_display["active_rank"] = range(1, len(df_display) + 1)
+        df_display["rank"] = range(1, len(df_display) + 1)
     else:
         df_display = df
 
@@ -458,7 +428,7 @@ def run(args: argparse.Namespace) -> None:
         "consensus_iptm_mean",
         "consensus_iptm_min",
         "consensus_iptm_n",
-        "passes_max_screen",
+        "passes_engine_gate",
         "ipsae_min",
         # Per-engine ipSAE. Boltz uses the boltz_pae_* convention (add_boltz_ipsae_from_files);
         # every other engine uses <engine>_ipsae_min (add_ipsae_from_pae_files). Taken from the
@@ -485,10 +455,7 @@ def run(args: argparse.Namespace) -> None:
         "passes_af3_filter",
         "passes_esmfold2_filter",
         "native_bg_design_ipsae_min",
-        "adaptyv_rank",
-        "consensus_rank",
-        "two_stage_rank",
-        "active_rank",
+        "rank",
     ]
     _available = [c for c in _top_cols if c in df.columns]
     top30 = df_display.head(30)[_available]
@@ -531,7 +498,7 @@ def run(args: argparse.Namespace) -> None:
     structures_dir.mkdir(parents=True, exist_ok=True)
     n_copied = 0
     for _, row in df_display.head(20).iterrows():
-        rank = int(row.get("active_rank", row.get("adaptyv_rank", 0)))
+        rank = int(row.get("rank", 0))
         binder_id = row.get("binder_id", f"rank{rank}")
         for col in pdb_cols:
             src = row.get(col)
@@ -578,10 +545,8 @@ def run(args: argparse.Namespace) -> None:
         boltz2_results_dir=Path(args.boltz2_results).resolve().parent if args.boltz2_results else None,
         primary_engine=primary_engine,
         top_per_tool=args.top_per_tool,
-        rank_method=rank_by,
         # Passed through so the report's methodology paragraph describes the ranking
         # that actually ran. A hardcoded copy silently survived the mean->max revert.
-        screen_metric=screen_metric,
         min_engines=min_engines,
         # Same dict the scoring used, so the printed cutoffs are the applied ones.
         # The legends previously retyped "0.61" regardless of --threshold-*.
@@ -667,7 +632,7 @@ def _write_pymol_script(top_df: pd.DataFrame, structures_dir: Path) -> None:
     # Colour each binder by source tool
     pml_lines.append("# Binder chain (A) coloured by source tool")
     for _, row in top_df.iterrows():
-        rank = int(row.get("active_rank", row.get("adaptyv_rank", 0)))
+        rank = int(row.get("rank", 0))
         binder_id = row.get("binder_id", f"rank{rank}")
         tool = row.get("source_tool", "unknown")
         colour = _TOOL_COLOURS_PYMOL.get(tool, "white")
@@ -1286,32 +1251,17 @@ def add_parser(subparsers) -> None:
         help="Which engine's DunbrackLab PAE-based ipsae_min to use as the primary ranking metric "
         "(default: boltz). Falls back to boltz if the chosen engine's PAE files are missing.",
     )
-    p.add_argument(
-        "--rank-by",
-        choices=["adaptyv", "consensus_iptm", "two_stage"],
-        default="two_stage",
-        help="Ranking method for the report. 'adaptyv' = quality_tier → agreement_count → "
-        "ipsae_min. 'consensus_iptm' = max engine iptm (benchmark-validated binder-vs-non-binder filter). "
-        "'two_stage' (default) = cross-engine gate (>= --min-engines) then rank by consensus_iptm_mean "
-        "(mean-ranking beats max-ranking on precision@top-10%%, 0.92 vs 0.79; see docs/completed_plans.md "
-        "Part N). All ranks are always written as columns (adaptyv_rank, consensus_rank, two_stage_rank).",
-    )
-    p.add_argument(
-        "--screen-metric",
-        choices=["max", "mean"],
-        default="max",
-        help="DEPRECATED (Part U) — no longer affects the ranking. Selects which column the "
-        "informational 'passes_max_screen' diagnostic is computed from ('max' = consensus_iptm, "
-        "'mean' = consensus_iptm_mean). The Stage-1 screen was retired after it was measured to remove "
-        "0 designs from the top-10%% on 12/12 Cao benchmark targets; ranking is now the cross-engine "
-        "gate followed by consensus_iptm_mean.",
-    )
+    # NOTE (Part U): --rank-by and --screen-metric were REMOVED, not deprecated.
+    # There is one ranking — cross-engine gate then consensus_iptm_mean — because
+    # searching for a better one on labelled data makes it worse (nested selection
+    # over 72 metrics scored 0.5170 vs 0.5552 for the shipped metric). The former
+    # 'adaptyv' and 'consensus_iptm' orderings were removed with them.
     p.add_argument(
         "--min-engines",
         type=int,
         default=MIN_ENGINES_DEFAULT,
         metavar="N",
-        help=f"Minimum independent refold engines a design needs to be eligible for the Stage-1 screen "
+        help=f"Minimum independent refold engines a design needs to clear the cross-engine gate "
         f"(default: {MIN_ENGINES_DEFAULT} — all of Boltz-2/AF3/ESMFold2; floor: {MIN_ENGINES_FLOOR}). "
         f"consensus_iptm_mean skips missing engines, so a single-engine design would otherwise compete "
         f"against 3-engine means on an incomparable scale — and for Mosaic/Protein-Hunter that single "

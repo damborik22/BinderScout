@@ -25,7 +25,7 @@ Two correctness rules are baked in here so the file is right straight out of
      backbones.
 
 Both "Ranking refolded" columns use the SAME ranking — the collapsed two-stage
-order (``df_display`` dense ``active_rank``), looked up by ``design_group`` — so
+order (``df_display`` dense ``rank``), looked up by ``design_group`` — so
 a native design and the refold-block appearance of its backbone carry the same
 refold rank. Likewise the refold block's "Ranking native" is looked up by
 ``design_group`` (not exact sequence) so a refold representative that is a
@@ -187,7 +187,7 @@ def build_candidates_table(
         full_df:    Every refolded design (the ``metrics.csv`` frame) carrying
                     ``design_group`` and the consensus columns.
         df_display: The collapsed, two-stage-ranked representatives (the
-                    ``top30_candidates.csv`` frame, dense ``active_rank``) used
+                    ``top30_candidates.csv`` frame, dense ``rank``) used
                     for the refold block and for every design's refold rank.
         tool_csvs:  Mapping tool name → that tool's RAW native CSV.
     """
@@ -195,7 +195,7 @@ def build_candidates_table(
     seq_to_group = {k: v["design_group"] for k, v in meta.items() if v.get("design_group") not in (None, "")}
     # backbone → collapsed two-stage refold rank (the single, dense ranking used
     # by both the refold block and the native block's "Ranking refolded").
-    grp_to_refold_rank = dict(zip(df_display.get("design_group", []), df_display.get("active_rank", []), strict=False))
+    grp_to_refold_rank = dict(zip(df_display.get("design_group", []), df_display.get("rank", []), strict=False))
 
     rows: list[dict] = []
 
