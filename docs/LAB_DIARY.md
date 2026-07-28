@@ -1097,3 +1097,107 @@ deliverables — we now know two things not to build. The affinity-ranking gap r
 - **Archived to MUNI** (`EVALUATOR/promera_partT_2026-07/`, `EVALUATOR/denovo_lengthtest_2026-07/`):
   the completed Part T Promera benchmark and the 3-engine de-novo length test (refold CSVs +
   analyses; structures left local). Cao waits until AF3 finishes.
+
+---
+
+## 2026-07-27 → 07-28 — ApoE4-isoform 6-tool funnel: orchestration moves to BM5; four silent-corruption bugs caught in the extract/gate layer
+
+Campaign: ApoE4 **isoform-selectivity** (P02649, 6NCO chain A NTD 24–164, 141 aa). Goal is to bind
+ApoE4 (**Arg112**) and reject ApoE3 (Cys112) and ApoE2 (Cys112+Cys158); residue 112 is buried, so the
+method is epitope-forced design plus an E4−E3/E2 counter-screen. Source of truth:
+`muni:/ApoE4-isoform/PROGRESS.md`. Orchestration handed from BM4 to **BM5** (`HANDOFF_BM5.md`),
+which now reaches BM1/BM2/BM4 directly over the LAN (`tools/fleet.sh`) and Clara over the CIIRC VPN.
+
+**What changed:**
+
+1. **Stage-1 gate completed for all six pools — 4931 survivors.** Boltz-2 E4 co-fold gate, keep
+   `iptm ≥ 0.7`: PH **946**/1035 · RFD3 **1524**/5000 · BindCraft **463**/601 · Mosaic (multi-state)
+   **276**/401 · PXDesign **76**/150 · **BoltzGen 1646**/5000 (finished 07-28). The first five (3285)
+   are in `survivors.fasta` and in the counter-screen; BoltzGen's 1646 are queued behind it.
+
+2. **The gate definition was nowhere in writing — recovered by reconstruction.** The threshold is
+   `iptm ≥ 0.7` on the **`iptm`** column. Verified by reproducing the known survivor counts exactly
+   (RFD3 → 1524, PXDesign → 76); `bt_iptm` would give 841/61 and `iptm_aux` 1015/65. Now recorded in
+   PROGRESS.md, because re-gating a pool on the wrong column silently yields a different pool.
+
+3. **PC-v3 landed (7th pool) and its extraction exposed three separate bugs.** Clara SLURM 150070,
+   50/50 MCTS replicates, all `rc=0`, 5000 PDBs. Extracting it surfaced:
+   - **`aatype` decodes the whole complex, not the binder.** Sequences came out at mean length
+     **238.7** against a 141-aa target; all 4804 are `E4_target(141) + binder` with the target an
+     *exact* prefix in 4804/4804 cases. Unstripped, the gate would have folded target+binder fusions
+     against the target. Same class as RFD3 `.fa` (concatenated) and BoltzGen `designed_sequence`
+     (CDR-only) — now confirmed for Proteina-Complexa's native `top_samples_*.csv` path.
+   - **`_find_csv` returns `matches[0]`.** Pointing `binder-compare extract` at the parent
+     `inference/` dir silently extracts ONE replicate (99 designs) instead of 4804, no warning.
+   - **`metadata_tag` is not unique** — collides across replicates (no seed in the tag) *and within
+     one* (12 cases); the extractor's IDs gave 4238 unique for 4804 designs.
+
+   Result after fixing all three: **4804** binders → **4346 unique** (458 exact duplicates collapsed,
+   one sequence repeated 40× — MCTS revisiting modes), lengths 78–100. **Open:** 196 designs (3.9%)
+   have PDBs but no `top_samples` row.
+
+4. **Boltz-2 per-design crash fix rebased onto master.** A malformed binder makes Boltz emit an empty
+   dataloader (`IndexError` in `load_features_and_structure_writer`), which aborted a whole 5000-design
+   batch at ~design 900. BM4's `4f892d8` wraps the feature build in try/except and skips. Cherry-picked
+   onto current master as **`24daff3`** (branch `fix/boltz2-skip-bad-design`, pushed); the conflict was
+   real — master has since added an explicit `--no-msa` flag
+   (`use_msa=use_msa and target_template_chain is None`) that BM4's branch predates, so the resolution
+   keeps master's `use_msa` semantics *inside* BM4's try/except.
+
+5. **BM1/BM2 were 124 and 211 commits behind, and it was costing throughput.** Their
+   `refold_boltz2.py` has no target-MSA cache path (`use_msa=True`, no `msa_path`), so they call
+   `api.colabfold.com` **once per design** — 2808 calls logged on BM1. BM4/BM5 on newer code fetch once
+   and reuse the cached a3m: same MSA content, **~2× the throughput** (380/h vs 200/h on identical
+   3090s) and no rate-limit exposure. Corollary: the a3m files pre-warmed into
+   `~/.cache/bindmaster/target_msa/` on BM1/BM2 were **inert** — that code never reads them.
+   Repos must not be hot-swapped under a running arm, since `cs_retry.sh` would relaunch onto the new
+   code mid-run and change the MSA regime partway through; sync after each arm finishes.
+
+6. **Two handoff claims corrected.** `HANDOFF_BM5.md` §4 states "Template mode → target single-seq, no
+   MSA needed (robust offline)" — not what runs; every arm folds the target *with* an MSA (BM1's log:
+   `n_msa 545`). §5.5's "MSA cache pre-warmed onto BM1/BM2" is true but had no effect, per (5).
+
+7. **PROGRESS.md brought current** (157 → 218 lines): live funnel state, per-pool gate table,
+   an "Errors observed" table, and a **resolved methodology contradiction** — the doc simultaneously
+   said "Protenix = DROPPED" and prescribed "CONFIRM = Protenix + target MSA", so two operators could
+   have produced different `consensus_iptm`. Struck through and cross-referenced to Part J.
+
+8. **Repos synced across the fleet, nothing clobbered.** Three machines held commits that existed
+   nowhere else; all pushed to origin before any checkout — `fix/boltz2-skip-bad-design`,
+   `snapshot/bm1-nodes-gpu-check` (BM1's unpushed `bindmaster nodes` commit from May 18, functionally
+   superseded by `tools/fleet.sh` but the only copy), `snapshot/bm4-binderscout-improvements`.
+   `master` left untouched.
+
+**Why it mattered:**
+
+- **Four of the findings are silent-corruption bugs, not crashes.** The PC target-prefix, the
+  `matches[0]` truncation, the ID collisions, and the wrong-iptm-column risk all produce a plausible
+  FASTA or a plausible survivor count with no error. The pattern is now explicit: for any tool whose
+  output is a complex, verify sequence length against the target before gating; for any extractor
+  pointed at a parent directory, verify the design count against the known pool size.
+- **Ordering was chosen on conversion, not pool size.** BoltzGen's 1646 is the largest survivor pool
+  and the *least* promising — its 29 Boltz-2-selectives went 0/29 on AF3, since it optimises the same
+  Boltz-2 objective the gate uses. PC has 11 AF3-selectives banked and is genuinely independent. So:
+  finish the 3285 counter-screen → gate PC-v3 → counter-screen PC survivors → BoltzGen last, letting
+  AF3 start on the earlier pools.
+
+**Outcome / status:**
+
+- Counter-screen ~90 % on E4 (BM1) and E3 (BM2); E2 started on BM4 at ~380/h.
+- PC-v3 E4 gate running on BM5 over the 4346 unique sequences, against the **byte-identical** E4 a3m
+  the other five pools were gated with (`6f2d8e87…`, 515 seqs) — copied across deliberately, since a
+  freshly fetched MSA would have made PC's iptm values non-comparable at the 0.7 threshold.
+- **7.2 GB of funnel raw data archived to MUNI** (`/ApoE4-isoform/RESULTS/`) — six per-pool gates,
+  BM4's `eval_workdir` (the banked-44 evidence), the input FASTAs and isoform seqs, and the PC-v3
+  extraction. Until now every byte of it existed on exactly one workstation with no copy anywhere.
+  The three live `counterscreen/` dirs are excluded until their arms finish.
+
+**Propositions / TODOs:**
+
+- **Fix `extractors/proteina_complexa.py` upstream**: strip the target prefix when decoding `aatype`,
+  and make `_find_csv` either aggregate all matches or fail loudly when it finds more than one.
+- Recover the 196 PC-v3 designs that have PDBs but no `top_samples` row (sequences are readable from
+  the PDB residues).
+- Sync BM1/BM2/BM4 onto `fix/boltz2-skip-bad-design` once their arms finish, then re-shard E2.
+- Merge `fix/boltz2-skip-bad-design` into master — it is a genuine bug fix that has been in production
+  on BM4 for a day and is validated by a 5-design smoke test on BM5.
