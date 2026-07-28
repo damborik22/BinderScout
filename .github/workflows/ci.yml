@@ -51,10 +51,14 @@ jobs:
         with:
           python-version: "3.10"
       - name: Install test deps
+        # This list must mirror Evaluator/pyproject.toml [project.dependencies] —
+        # CI installs the deps directly rather than the package, so a new runtime
+        # import that is not added here fails collection, not just one test.
         # matplotlib is required because tests indirectly import
         # binder_comparison.cli.__init__ → cli.report → visualization.report
-        # → visualization.plots → matplotlib. (Declared in Evaluator/pyproject.toml.)
-        run: pip install pytest pyyaml pandas numpy matplotlib
+        # → visualization.plots → matplotlib.
+        # requests likewise: refolding/target_msa.py imports it at module level.
+        run: pip install pytest pyyaml pandas numpy matplotlib requests
       - name: Run unit tests
         run: python -m pytest -q
 
