@@ -18,7 +18,6 @@ Key findings implemented here:
 
 from __future__ import annotations
 
-import math
 import re
 import warnings
 from pathlib import Path
@@ -765,89 +764,53 @@ def compute_consensus_ipsae(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def rank_by_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
-    """Rank by ``consensus_iptm`` (max-iptm) descending; benchmark-validated binder filter.
+def rank_designs(df: pd.DataFrame, min_engines: int = MIN_ENGINES_DEFAULT) -> pd.DataFrame:
+    """THE ranking. Cross-engine gate, then ``consensus_iptm_mean`` descending.
 
-    Sort order (better first):
-        1. consensus_iptm    — max engine iptm (higher = more likely a binder)
-        2. agreement_count   — engines agreeing ipsae_min > threshold (tiebreak)
-        3. plddt_binder_mean — fold confidence (tiebreak)
+    Adds a single ``rank`` column (1 = best). Ranks ALL rows; nothing is dropped.
 
-    Adds a column ``consensus_rank`` (1 = best). Does not modify ``adaptyv_rank``;
-    the two rankings coexist so the report can offer either.
-    """
-    result = df.copy()
-    if "consensus_iptm" not in result.columns:
-        result = compute_consensus_iptm(result)
-
-    sort_keys, ascending = ["consensus_iptm"], [False]
-    if "agreement_count" in result.columns:
-        sort_keys.append("agreement_count")
-        ascending.append(False)
-    for col in ("plddt_binder_mean", "boltz_plddt_binder_mean"):
-        if col in result.columns:
-            sort_keys.append(col)
-            ascending.append(False)
-            break
-
-    result = result.sort_values(sort_keys, ascending=ascending, na_position="last")
-    result["consensus_rank"] = range(1, len(result) + 1)
-    return result.reset_index(drop=True)
-
-
-def rank_by_two_stage(
-    df: pd.DataFrame,
-    screen_frac: float = 0.5,
-    screen_metric: str = "max",
-    min_engines: int = MIN_ENGINES_DEFAULT,
-) -> pd.DataFrame:
-    """Two-stage ranking — the EVALUATOR benchmark recommendation for wet-lab selection.
-
-    Stage 0 — cross-engine support gate. A design scored by a single engine has
+    **Stage 0 — cross-engine gate.** A design scored by a single engine has
     ``consensus_iptm_mean`` equal to that one engine's value (``DataFrame.mean``
     skips NaN), so it would compete against 3-engine means on an incomparable
     scale. Worse, the single engine is often the one biased in the design's favour
     — Mosaic *is* Boltz-2 gradient hallucination, so a Mosaic design that only
     Boltz-2 refolded could top the list on the strength of its own designer. Only
-    designs with ``consensus_iptm_n >= min_engines`` are eligible for the screen.
-    Default ``MIN_ENGINES_DEFAULT`` (all three of Boltz-2 / AF3 / ESMFold2);
-    ``MIN_ENGINES_FLOOR`` is the lowest meaningful value, since "cross-engine"
-    requires at least two.
+    designs with ``consensus_iptm_n >= min_engines`` are eligible; ineligible rows
+    are ranked last rather than dropped, so nothing disappears silently.
+    Default ``MIN_ENGINES_DEFAULT``; ``MIN_ENGINES_FLOOR`` is the lowest meaningful
+    value, since "cross-engine" requires at least two.
 
-    Stage 1 — screen by the ``screen_metric`` consensus iptm: keep the top
-    ``screen_frac`` of the eligible pool (the recall step).
-    ``screen_metric="max"`` (default) screens by ``consensus_iptm`` (max over
-    engines) — the lenient recall step: keep a design if *any* engine rates it
-    highly, so a genuine binder is not dropped just because one engine's per-target
-    blind spot drags its mean down. Best on the ProteinBase 4-target benchmark
-    (macro AUC ~0.755, "trust whichever engine is most confident").
-    ``screen_metric="mean"`` screens by ``consensus_iptm_mean`` instead (stricter —
-    the average must be high; Adaptyv macro AUC 0.710 vs 0.689). See docs/plans.md
-    Part N.
+    **Rank.** ``consensus_iptm_mean`` — the mean across independent engines. Ties
+    break on ``consensus_iptm_n`` (more engines backing an equal mean wins), then
+    ``consensus_iptm``, then binder pLDDT.
 
-    Stage 2 — rank survivors by ``consensus_iptm_mean`` (mean engine iptm): the
-    precision step — at the sharp end of the list you want designs *all* engines
-    agree on. On the benchmark this lifts precision@top-10% to 0.92 vs 0.79 for
-    max alone. The default max-screen → mean-rank pairs a lenient recall screen
-    with a strict consensus rank (the intended two-stage design).
+    Why this and nothing else (Part U, Cao 2022: 4,442 designs / 12 targets / all
+    three engines on every design):
 
-    Ranks ALL rows (the screen is a flag + ordering, nothing is dropped):
-    ``passes_max_screen`` is the primary sort key, so all screen survivors sort
-    above all non-survivors regardless of their mean; within each group rows are
-    ordered by ``consensus_iptm_mean``, then by ``consensus_iptm_n`` so a design
-    backed by more engines outranks an equal mean backed by fewer. The head of the
-    list is therefore the genuine two-stage result. Adds:
-        passes_max_screen — bool, eligible AND in the top ``screen_frac``
-        two_stage_rank    — 1 = best
+    * **Mean-ranking beats max-ranking** — precision@top-10% 0.92 vs 0.79.
+    * **It beats picking a metric from data.** Honest nested selection over 72
+      candidate metrics scores macro-AUC 0.5170; ``consensus_iptm_mean`` scores
+      0.5552 (+0.0382, CI [+0.0142, +0.0633], p=0.0014, 8/12 targets). Searching
+      for a better metric on a labelled benchmark makes the ranking *worse*.
+    * **Combination search is closed** — best of 2,489 nested-CV combinations was
+      0.5591, inside the label-permutation null.
+    * **Keep all three engines.** Every 2-engine subset wins on one dataset and
+      loses on another; the 3-engine mean is never worst. Single-engine commitment
+      carries the largest worst-case regret (0.106–0.116 vs 0.042).
+
+    The former ``adaptyv_rank`` (quality_tier → agreement_count → ipsae_min) and
+    ``consensus_rank`` (max-iptm) were removed in Part U: ``agreement_count`` is a
+    flat null on Cao (macro-AUC 0.532, 87.2% of designs tied at zero) and max-iptm
+    ranking loses to mean. A retired top-50% ``passes_max_screen`` stage went with
+    them — it removed 0 designs from the top-10% on 12/12 targets.
+
+    NOTE: this ranks binder-vs-non-binder *confidence*, NOT affinity among binders.
+    Affinity ranking from structure confidence is closed as negative across four
+    datasets (Part N, Part U, OpenBind, SKEMPI) — see comparison.affinity for the
+    advisory gate-then-density ranker.
 
     Raises:
-        ValueError: if ``min_engines`` is below ``MIN_ENGINES_FLOOR``.
-
-    NOTE: this ranks binder-vs-non-binder *confidence*, NOT affinity among binders
-    (every confidence metric inverts against Kd — strongest binders score lowest).
-    Affinity ranking needs the interface-ΔG term (see comparison.affinity, Part N).
-
-    See docs/completed_plans.md Part N for the exhaustive two-stage analysis.
+        ValueError: if *min_engines* is below ``MIN_ENGINES_FLOOR``.
     """
     result = df.copy()
     if "consensus_iptm" not in result.columns or "consensus_iptm_mean" not in result.columns:
@@ -859,30 +822,27 @@ def rank_by_two_stage(
             f"a cross-engine consensus needs at least {MIN_ENGINES_FLOOR} engines."
         )
 
-    screen_col = "consensus_iptm_mean" if screen_metric == "mean" else "consensus_iptm"
-    cons = pd.to_numeric(result[screen_col], errors="coerce")
+    cons = pd.to_numeric(result["consensus_iptm_mean"], errors="coerce")
     n_eng = pd.to_numeric(result.get("consensus_iptm_n", 0), errors="coerce").fillna(0)
     eligible = cons.notna() & (n_eng >= min_engines)
-    n_eligible = int(eligible.sum())
 
-    # Tell the operator when the gate — not the data — emptied the screen, and how
-    # to proceed. Silently returning an all-False passes_max_screen looks like
-    # "no good designs" when it actually means "not enough engines were run".
+    # Tell the operator when the gate — not the data — emptied the top of the list.
+    # Silently ranking everything as ineligible looks like "no good designs" when it
+    # actually means "not enough engines were run".
     n_available = int(n_eng.max()) if len(n_eng) else 0
-    if n_eligible == 0 and cons.notna().any():
+    if not eligible.any() and cons.notna().any():
         warnings.warn(
-            f"[two-stage] no design was refolded by {min_engines}+ engines "
-            f"(best coverage in this pool: {n_available}), so nothing passes the Stage-1 screen. "
+            f"[rank] no design was refolded by {min_engines}+ engines "
+            f"(best coverage in this pool: {n_available}); the ranking is ordered by "
+            f"consensus_iptm_mean but NO design cleared the cross-engine gate. "
             f"Run the missing engine(s), or lower the gate with --min-engines "
             f"{max(MIN_ENGINES_FLOOR, n_available)}.",
             stacklevel=2,
         )
 
-    n_keep = math.ceil(n_eligible * screen_frac)
-    thr = cons[eligible].nlargest(n_keep).min() if n_keep else float("inf")
-    result["passes_max_screen"] = eligible & (cons >= thr)
+    result["passes_engine_gate"] = eligible
 
-    sort_keys = ["passes_max_screen", "consensus_iptm_mean", "consensus_iptm_n", "consensus_iptm"]
+    sort_keys = ["passes_engine_gate", "consensus_iptm_mean", "consensus_iptm_n", "consensus_iptm"]
     ascending = [False, False, False, False]
     for col in ("plddt_binder_mean", "boltz_plddt_binder_mean"):
         if col in result.columns:
@@ -890,7 +850,7 @@ def rank_by_two_stage(
             ascending.append(False)
             break
     result = result.sort_values(sort_keys, ascending=ascending, na_position="last")
-    result["two_stage_rank"] = range(1, len(result) + 1)
+    result["rank"] = range(1, len(result) + 1)
     return result.reset_index(drop=True)
 
 
@@ -931,75 +891,6 @@ def add_design_groups(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Adaptyv-method ranking (with agreement)
 # ---------------------------------------------------------------------------
-
-
-def rank_by_adaptyv_method(df: pd.DataFrame) -> pd.DataFrame:
-    """Rank binders using the Adaptyv/meta-analysis hierarchy.
-
-    Sort order (all ascending sort key = better first):
-        1. quality_tier      — high > medium > low > reject
-        2. agreement_count   — how many engines agree ipsae_min > 0.61
-        3. ipsae_min         — primary metric (higher = better)
-        4. iptm              — secondary (higher = better)
-        5. plddt_binder_mean — tertiary (higher = better)
-
-    Adds a column 'adaptyv_rank' (1 = best).
-    Rows with ipsae_valid == 1 are shown before those without.
-    """
-    result = df.copy()
-    ipsae_col = _best_ipsae_col(result)
-
-    sort_keys = []
-    ascending = []
-
-    # Valid interface first
-    if "ipsae_valid" in result.columns:
-        result["_ipsae_valid_sort"] = (~result["ipsae_valid"].eq(1)).astype(int)
-        sort_keys.append("_ipsae_valid_sort")
-        ascending.append(True)
-
-    # Primary: quality tier (high before medium before low before reject)
-    if "quality_tier" in result.columns:
-        _tier_order = {"high": 0, "medium": 1, "low": 2, "reject": 3, "unknown": 4}
-        result["_tier_sort"] = result["quality_tier"].map(_tier_order).fillna(4)
-        sort_keys.append("_tier_sort")
-        ascending.append(True)
-
-    # Secondary: agreement count (more engines agreeing = better)
-    if "agreement_count" in result.columns:
-        sort_keys.append("agreement_count")
-        ascending.append(False)
-
-    # Tertiary: ipSAE_min
-    if ipsae_col is not None:
-        sort_keys.append(ipsae_col)
-        ascending.append(False)
-
-    # Tertiary: iptm
-    for col in ["iptm", "boltz_iptm"]:
-        if col in result.columns:
-            sort_keys.append(col)
-            ascending.append(False)
-            break
-
-    # Quaternary: pLDDT
-    for col in ["plddt_binder_mean", "boltz_plddt_binder_mean"]:
-        if col in result.columns:
-            sort_keys.append(col)
-            ascending.append(False)
-            break
-
-    if sort_keys:
-        result = result.sort_values(sort_keys, ascending=ascending, na_position="last")
-
-    result["adaptyv_rank"] = range(1, len(result) + 1)
-
-    # Clean up temporary columns
-    for tmp_col in ["_ipsae_valid_sort", "_tier_sort"]:
-        if tmp_col in result.columns:
-            result = result.drop(columns=[tmp_col])
-
-    return result.reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------

@@ -129,7 +129,7 @@ def cluster_sequences_df(
     sizes = out["family_id"].value_counts().to_dict()
     out["family_size"] = out["family_id"].map(sizes).astype(int)
     # Within-family rank: order by position in the input (caller can sort
-    # beforehand if they want a different ordering, e.g. by two_stage_rank).
+    # beforehand if they want a different ordering, e.g. by rank).
     out["family_rank"] = out.groupby("family_id").cumcount() + 1
     return out
 
@@ -223,7 +223,7 @@ def top_per_family(
 ) -> pd.DataFrame:
     """Return up to ``n_per_family`` representatives per family.
 
-    Sorts within each family by ``sort_col`` (e.g. ``two_stage_rank``,
+    Sorts within each family by ``sort_col`` (e.g. ``rank``,
     ascending=True for lowest rank = best) before picking the top N.
     Designs without a ``family_id`` are returned as singletons.
     """

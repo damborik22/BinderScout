@@ -305,7 +305,7 @@ cross-ranks all designs by a configurable metric, and writes a summary.
 | **Boltz-2** | `binder-compare refold-boltz2` | Mosaic `.venv` | Anywhere with a 24 GB GPU |
 | **AF3 v3.0.2** | `binder-compare refold-af3` | `binder-eval-af3` conda | Any host with ≥100 GB GPU memory — DGX Spark (aarch64), H200 (x86_64), GH200, etc. Full AF3 inference doesn't fit on consumer 24 GB GPUs. |
 
-Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). The **default ranking is two-stage**: stage 1 screens by `consensus_iptm` (max engine iPTM) keeping the top 50%, stage 2 ranks survivors by the mean engine iPTM (`binder-compare report --rank-by two_stage`). `ipsae_min` (DunbrackLab 2025 formula) and `agreement_count` remain as secondary/diagnostic columns. AF3 and ESMFold2 produce token-order PAE which the evaluator transposes to match Boltz-2's `[binder|target]` order.
+Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). There is **one ranking and no way to select another**: a cross-engine gate (`--min-engines`, default 3) then `consensus_iptm_mean`, emitted as a single `rank` column. `ipsae_min` (DunbrackLab 2025 formula) and `agreement_count` are diagnostic columns — `agreement_count` in particular is a flat null as a screen (macro-AUC 0.532), so do not gate on it. Part U removed the `--rank-by` / `--screen-metric` flags and the `two_stage_rank` / `adaptyv_rank` / `consensus_rank` / `active_rank` columns; see `docs/INVESTIGATION_partU_cao_benchmark.md`. AF3 and ESMFold2 produce token-order PAE which the evaluator transposes to match Boltz-2's `[binder|target]` order.
 
 > Evaluation = Boltz-2 + AF3 + ESMFold2, exactly three independent engines. Each is auto-detected from its conda env and can be skipped with `--skip-<engine>`.
 
@@ -558,12 +558,6 @@ Finding IDs refer to that document.
 - **The report's 3D viewer needs internet (F20).** `report.html` loads NGL from
   `unpkg.com`, so the structure viewer is blank on an air-gapped node even though
   `Evaluator/tools/ngl/` is vendored.
-- **`report.html` describes the wrong ranking method (F32).** Its methodology block still
-  says Stage 1 screens on `consensus_iptm_mean` and that mean "was selected as default
-  over max". Commit `5769064` reverted the default to **max** but did not update
-  `visualization/report.py`. The ranking the code performs is max-screen → mean-rank, as
-  documented in this README and `CLAUDE.md`; ignore the report's own methodology text
-  until it is regenerated from `--screen-metric`.
 - **AF3's per-engine ipSAE is missing from `top30_candidates.csv` (F33).** The shortlist
   reads `af3_pae_ipsae_min`, but the writer emits `af3_ipsae_min`, so that column is
   silently absent. Read it

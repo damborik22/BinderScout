@@ -34,7 +34,7 @@ def test_order_tools_canonical_then_variants_then_unknown():
 
 def _full_df():
     # Two backbones for bindcraft (each with an MPNN sibling) + one mosaic design.
-    # active_rank is the full-pool ordering (siblings included); is_representative
+    # rank is the full-pool ordering (siblings included); is_representative
     # marks the best-ranked row per design_group.
     return pd.DataFrame(
         {
@@ -46,15 +46,15 @@ def _full_df():
             "consensus_iptm_mean": [0.90, 0.88, 0.70, 0.95],
             "consensus_ipsae_min_mean": [0.80, 0.78, 0.60, 0.85],
             "native_soluprot_score": [0.5, 0.5, 0.6, 0.7],
-            "active_rank": [2, 3, 4, 1],
+            "rank": [2, 3, 4, 1],
             "is_representative": [True, False, True, True],
         }
     )
 
 
 def _df_display(full):
-    disp = full[full["is_representative"]].sort_values("active_rank").reset_index(drop=True).copy()
-    disp["active_rank"] = range(1, len(disp) + 1)  # dense, like cli/report.py
+    disp = full[full["is_representative"]].sort_values("rank").reset_index(drop=True).copy()
+    disp["rank"] = range(1, len(disp) + 1)  # dense, like cli/report.py
     return disp
 
 
