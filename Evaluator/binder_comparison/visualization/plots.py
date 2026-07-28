@@ -68,7 +68,7 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "pae_tb": ("PAE (T→B)", "Å", "↓"),
     "pae_bb": ("PAE (intra-B)", "Å", "↓"),
     "agreement_count": ("Agreement", "", "↑"),
-    "adaptyv_rank": ("Rank", "", ""),
+    "rank": ("Rank", "", ""),
     "binder_id": ("Binder ID", "", ""),
     "source_tool": ("Tool", "", ""),
     "quality_tier": ("Tier", "", ""),
@@ -91,9 +91,7 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "fold_robust": ("Fold robust", "", ""),
     "monomer_rmsd": ("Monomer RMSD", "Å", "↓"),
     # ── Ranking / screen ────────────────────────────────────────────────────
-    "two_stage_rank": ("Rank", "", ""),
-    "consensus_rank": ("Rank", "", ""),
-    "passes_max_screen": ("Passes Stage-1 screen", "", ""),
+    "passes_engine_gate": ("Clears cross-engine gate", "", ""),
     "consensus_iptm": ("Max ipTM", "[0–1]", "↑"),
     "consensus_iptm_min": ("Min ipTM", "[0–1]", "↑"),
     "consensus_iptm_spread": ("ipTM spread", "[0–1]", "↓"),
@@ -426,7 +424,7 @@ def plot_radar_per_engine_uniform_selection(
 ) -> Figure:
     """Per-engine radar where every panel shows the SAME per-tool top-N selection,
     chosen by the evaluator's **primary refold rank** (``<primary_engine>_pae_ipsae_min``
-    or fallback to ``adaptyv_rank``). Useful to see engine *agreement* on the same
+    or fallback to ``rank``). Useful to see engine *agreement* on the same
     designs the evaluator promoted, rather than each engine's own "favorites".
     """
     if "source_tool" not in df.columns:
@@ -436,7 +434,7 @@ def plot_radar_per_engine_uniform_selection(
 
     # Pick the per-tool top-N ONCE, using the primary engine's column
     pri_col = _ENGINE_RANK_COLS.get(primary_engine, "boltz_pae_ipsae_min")
-    fallback_col = "adaptyv_rank"
+    fallback_col = "rank"
     per_tool_top: dict[str, pd.DataFrame] = {}
     for tool, gdf in df.groupby("source_tool"):
         if pri_col in gdf.columns and pd.to_numeric(gdf[pri_col], errors="coerce").notna().any():
@@ -685,7 +683,7 @@ def plot_radar_iptm(df: pd.DataFrame, top_n: int = 10) -> Figure:
 def plot_max_vs_mean_iptm(df: pd.DataFrame, label_n: int = 20) -> Figure:
     """Two-stage signature scatter: max engine iPTM (screen) vs mean engine iPTM (rank).
 
-    x = ``consensus_iptm`` (max, the Stage-1 screen), y = ``consensus_iptm_mean``
+    x = ``consensus_iptm`` (max across engines), y = ``consensus_iptm_mean`` (the ranking key)
     (the Stage-2 re-rank). The dashed y=x line is the upper bound (max ≥ mean) —
     vertical distance below it = engine disagreement. The dotted vertical line is
     the max-screen threshold (top 50%). Colour by tool; top designs are labelled
@@ -714,20 +712,15 @@ def plot_max_vs_mean_iptm(df: pd.DataFrame, label_n: int = 20) -> Figure:
             label=_tool_display(str(tool)),
             edgecolors="none",
         )
-    if "passes_max_screen" in d.columns and d["passes_max_screen"].any():
-        thr = pd.to_numeric(d.loc[d["passes_max_screen"], "consensus_iptm"], errors="coerce").min()
-        ax.axvline(thr, ls=":", color="#c62828", lw=1.5)
-        ax.text(thr, 0.02, f" max-screen ≥ {thr:.3f} (top 50%)", color="#c62828", fontsize=8, rotation=90, va="bottom")
-
-    if "active_rank" in d.columns:
-        topd = d.dropna(subset=["active_rank"]).nsmallest(label_n, "active_rank")
+    if "rank" in d.columns:
+        topd = d.dropna(subset=["rank"]).nsmallest(label_n, "rank")
     else:
         topd = d.nlargest(label_n, "_x")
     for _, r in topd.iterrows():
-        lab = str(int(r["active_rank"])) if "active_rank" in r and pd.notna(r.get("active_rank")) else ""
+        lab = str(int(r["rank"])) if "rank" in r and pd.notna(r.get("rank")) else ""
         ax.annotate(lab, (r["_x"], r["_y"]), fontsize=7, xytext=(3, 3), textcoords="offset points")
 
-    ax.set_xlabel("max engine iPTM = consensus_iptm   (Stage-1 screen →)")
+    ax.set_xlabel("max engine iPTM = consensus_iptm")
     ax.set_ylabel("mean engine iPTM = consensus_iptm_mean   (Stage-2 rank ↑)")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
@@ -1031,8 +1024,8 @@ def plot_per_tool_engine_iptm(df: pd.DataFrame, top_n: int | None = None) -> Fig
     rows: dict[str, list[float]] = {}
     for t in tools:
         sub = df[df["source_tool"] == t]
-        if top_n and "two_stage_rank" in sub.columns:
-            sub = sub.sort_values("two_stage_rank").head(top_n)
+        if top_n and "rank" in sub.columns:
+            sub = sub.sort_values("rank").head(top_n)
         elif top_n:
             sub = sub.head(top_n)
         rows[t] = [pd.to_numeric(sub[c], errors="coerce").mean() for c, _, _ in engines]
@@ -1085,8 +1078,8 @@ def plot_multimetric_radar(df: pd.DataFrame, top_n: int | None = None) -> Figure
     means = {}
     for t in df["source_tool"].dropna().unique():
         sub = df[df["source_tool"] == t]
-        if top_n and "two_stage_rank" in sub.columns:
-            sub = sub.sort_values("two_stage_rank").head(top_n)
+        if top_n and "rank" in sub.columns:
+            sub = sub.sort_values("rank").head(top_n)
         elif top_n:
             sub = sub.head(top_n)
         vals = []

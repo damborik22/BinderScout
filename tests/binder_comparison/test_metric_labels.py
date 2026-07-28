@@ -24,8 +24,6 @@ from binder_comparison.comparison.scoring import _ENGINE_IPSAE_COLS
 from binder_comparison.visualization.plots import METRIC_META
 from binder_comparison.visualization.report import _ADVISORY_SECONDARY, _select_display_cols
 
-_RANK_METHODS = ("two_stage", "consensus_iptm", "adaptyv")
-
 # The refold engines that can populate an ipSAE column. Derived from the canonical
 # map rather than retyped, so a new engine is covered the moment it is registered.
 # (`_ENGINE_IPSAE_COLS` used to carry a dead "af2" entry left from before Part I
@@ -41,16 +39,14 @@ _CANDIDATE_COLS = [
     "binder_length",
     "quality_tier",
     "agreement_count",
-    "passes_max_screen",
+    "passes_engine_gate",
     "consensus_iptm",
     "consensus_iptm_mean",
     "consensus_iptm_min",
     "consensus_iptm_spread",
     "consensus_iptm_n",
     "consensus_ipsae_min_mean",
-    "two_stage_rank",
-    "consensus_rank",
-    "adaptyv_rank",
+    "rank",
     "ipsae_min",
     "plddt_binder_mean",
     "plddt_binder_min",
@@ -68,13 +64,13 @@ _CANDIDATE_COLS = [
 
 
 def _displayable_columns() -> set[str]:
-    """Union of every column the three rank methods can put in a table."""
+    """Every column the display selector can put in a table.
+
+    Part U collapsed three rank methods into one, so this no longer loops.
+    """
     df = pd.DataFrame({c: [0] for c in dict.fromkeys(_CANDIDATE_COLS)})
-    cols: set[str] = set()
-    for method in _RANK_METHODS:
-        primary, secondary = _select_display_cols(df, rank_method=method)
-        cols |= set(primary) | set(secondary)
-    return cols
+    primary, secondary = _select_display_cols(df)
+    return set(primary) | set(secondary)
 
 
 class TestEveryDisplayedColumnHasALabel:
