@@ -29,7 +29,7 @@ import pandas as pd
 
 from ..comparison.tool_classification import ExtractorMetadata
 from ..core.schema import ExtractedBinder, NativeMetrics
-from .base import SequenceExtractor
+from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
 
 _HIGH_IPTM_CSV = "summary_high_iptm.csv"
 _ALL_RUNS_CSV = "summary_all_runs.csv"
@@ -101,8 +101,14 @@ class ProteinHunterExtractor(SequenceExtractor):
     def extract(self, input_dir: str | Path) -> list[ExtractedBinder]:
         input_dir = Path(input_dir)
         if self.all_runs:
-            return self._extract_all_runs(input_dir)
-        return self._extract_high_iptm(input_dir)
+            results = self._extract_all_runs(input_dir)
+        else:
+            results = self._extract_high_iptm(input_dir)
+        # run_id restarts at 1 in every replicate, so a merged summary collides:
+        # measured 1654 rows → 1487 ids, all 164 collisions covering DIFFERENT
+        # sequences.
+        disambiguate_ids(results, tool="Protein-Hunter")
+        return results
 
     def _extract_high_iptm(self, input_dir: Path) -> list[ExtractedBinder]:
         csv_path = self._find_csv(input_dir, _HIGH_IPTM_CSV)
@@ -206,8 +212,10 @@ class ProteinHunterExtractor(SequenceExtractor):
         direct = input_dir / name
         if direct.exists():
             return direct
-        matches = list(input_dir.rglob(name))
-        return matches[0] if matches else None
+        matches = sorted(input_dir.rglob(name))
+        if not matches:
+            return None
+        return resolve_single_match(matches, tool="Protein-Hunter", what=name, input_dir=input_dir)
 
     def _make_id(self, row: pd.Series, fallback_idx: int) -> str:
         run_id = row.get("run_id")

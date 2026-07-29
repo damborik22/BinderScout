@@ -321,6 +321,250 @@ class TestProteinaComplexa:
         assert got[0].native.complexa_self_iptm == pytest.approx(0.9)
 
 
+_RESTYPES = "ARNDCQEGHILKMFPSTWYV"
+
+
+def _aatype(seq: str) -> str:
+    """Encode a one-letter sequence the way NVIDIA's top_samples_*.csv does."""
+    return ",".join(str(_RESTYPES.index(c)) for c in seq)
+
+
+class TestProteinaComplexaBinderIsolation:
+    """F44(a): the NVIDIA-native ``aatype`` column encodes the WHOLE COMPLEX.
+
+    Measured on three production runs: 2VDY (1000 designs, 500-509 aa against a
+    389-aa target), ApoE4/Clara (100 designs, 298-305 aa against 185 aa) and
+    ApoE4-iso PC-v3 (4804/4804 rows carrying the 141-aa target as an exact
+    prefix). The decoded string is ``target + binder + poly-alanine padding``;
+    unstripped it is refolded against the very target it already contains, and
+    every iPTM computed for it is meaningless. The binder END is recoverable
+    exactly from ``_n_<N>_`` in the job-directory name (verified 1100/1100);
+    stripping the trailing alanine run instead is lossy — a clean pool on disk
+    has a genuine 7-alanine C-terminus.
+    """
+
+    def test_strips_the_declared_target_prefix(self, tmp_path):
+        _csv(
+            tmp_path / "top_samples_x.csv",
+            [{"aatype": _aatype(_SEQ_A + _SEQ_B), "metadata_tag": "mcts_orig1"}],
+        )
+        got = ProteinaComplexaExtractor(target_sequence=_SEQ_A).extract(tmp_path)
+        assert [b.sequence for b in got] == [_SEQ_B]
+
+    def test_strips_the_poly_alanine_pad_using_the_job_name_length(self, tmp_path):
+        n = len(_SEQ_A) + len(_SEQ_B)
+        _csv(
+            tmp_path / "top_samples_x.csv",
+            [
+                {
+                    "aatype": _aatype(_SEQ_A + _SEQ_B + "A" * 30),
+                    "pdb_path": f"job_0_n_{n}_id_3_bon_orig10_r1/sample.pdb",
+                    "metadata_tag": "mcts_orig1",
+                }
+            ],
+        )
+        got = ProteinaComplexaExtractor(target_sequence=_SEQ_A).extract(tmp_path)
+        assert [b.sequence for b in got] == [_SEQ_B]
+
+    def test_infers_the_target_prefix_when_none_is_declared(self, tmp_path):
+        """Every row of a run shares one byte-identical target prefix, so the pool
+        itself reveals it. Warn — an inferred boundary is not a declared one."""
+        _csv(
+            tmp_path / "top_samples_x.csv",
+            [
+                {"aatype": _aatype(_SEQ_A + _SEQ_B), "metadata_tag": "t1"},
+                {"aatype": _aatype(_SEQ_A + _SEQ_B[::-1]), "metadata_tag": "t2"},
+            ],
+        )
+        with pytest.warns(UserWarning, match="inferred"):
+            got = ProteinaComplexaExtractor().extract(tmp_path)
+        assert [b.sequence for b in got] == [_SEQ_B, _SEQ_B[::-1]]
+
+    def test_refuses_to_strip_a_target_that_is_not_a_prefix(self, tmp_path):
+        """PC's ``target_input`` can select a sub-range of the configured chain, so
+        a declared target need not match what is embedded. Corrupting the binder is
+        worse than emitting it unstripped — warn and leave it alone."""
+        _csv(tmp_path / "top_samples_x.csv", [{"aatype": _aatype(_SEQ_B), "metadata_tag": "t1"}])
+        with pytest.warns(UserWarning, match="not a prefix"):
+            got = ProteinaComplexaExtractor(target_sequence=_SEQ_A).extract(tmp_path)
+        assert [b.sequence for b in got] == [_SEQ_B]
+
+    def test_strips_the_pad_by_its_alanine_run_when_the_job_name_has_no_length(self, tmp_path):
+        """PC-v3's pdb_path is a bare filename with no ``_n_<N>_`` field, and the CSV
+        carries no length column — the alanine run is the only boundary left. 4543 of
+        4804 rows in that pool carry one, up to 42 residues long."""
+        _csv(
+            tmp_path / "top_samples_x.csv",
+            [
+                {
+                    "aatype": _aatype(_SEQ_A + _SEQ_B + "A" * 25),
+                    "pdb_path": "orig15-s0to100br1.pdb",
+                    "metadata_tag": "t1",
+                }
+            ],
+        )
+        got = ProteinaComplexaExtractor(target_sequence=_SEQ_A).extract(tmp_path)
+        assert [b.sequence for b in got] == [_SEQ_B]
+
+    def test_keeps_a_short_genuine_alanine_tail(self, tmp_path):
+        """A clean pool on disk ends a real design in 7 alanines, so the pad
+        heuristic must not eat a plausible C-terminus."""
+        binder = _SEQ_B + "AAA"
+        _csv(
+            tmp_path / "top_samples_x.csv",
+            [{"aatype": _aatype(_SEQ_A + binder), "pdb_path": "orig15.pdb", "metadata_tag": "t1"}],
+        )
+        got = ProteinaComplexaExtractor(target_sequence=_SEQ_A).extract(tmp_path)
+        assert [b.sequence for b in got] == [binder]
+
+    def test_prefers_pcs_own_binder_sequence_column(self, tmp_path):
+        """PC's evaluation CSVs carry the binder verbatim — no decode, no arithmetic."""
+        _csv(
+            tmp_path / "sequences.csv",
+            [{"binder_sequence": _SEQ_B, "target_sequence": _SEQ_A, "design_id": "c1"}],
+        )
+        got = ProteinaComplexaExtractor().extract(tmp_path)
+        assert [b.sequence for b in got] == [_SEQ_B]
+
+    def test_unresolvable_target_passes_through_and_names_the_remedy(self, tmp_path):
+        _csv(tmp_path / "top_samples_x.csv", [{"aatype": _aatype(_SEQ_A), "metadata_tag": "t1"}])
+        with pytest.warns(UserWarning, match="--target-seq"):
+            got = ProteinaComplexaExtractor().extract(tmp_path)
+        assert [b.sequence for b in got] == [_SEQ_A]
+
+
+class TestExtractorFileDiscovery:
+    """F44(b): every extractor resolved a multi-match glob with ``matches[0]``.
+
+    Measured: pointing extract at PC-v3's parent kept 96 of 4804 rows (one
+    filesystem-order replicate) and at a Clara run 100 of 500; on a normal
+    multi-variant run dir BindCraft's ``final_design_stats.csv`` has 4 matches and
+    BoltzGen's ``sorted()[-1]`` silently discarded a 700-design pool. A
+    wrong-but-nonzero pool passes every downstream guard, so ambiguity must stop
+    the run rather than pick.
+    """
+
+    def test_ambiguous_native_csvs_fail_loudly(self, tmp_path):
+        _csv(tmp_path / "seed_2000" / "top_samples_x.csv", [{"aatype": _aatype(_SEQ_A), "metadata_tag": "t1"}])
+        _csv(tmp_path / "seed_2001" / "top_samples_x.csv", [{"aatype": _aatype(_SEQ_B), "metadata_tag": "t2"}])
+        with pytest.raises(ValueError, match="seed_2001"):
+            ProteinaComplexaExtractor().extract(tmp_path)
+
+    def test_aggregate_replicates_keeps_every_replicate(self, tmp_path):
+        _csv(tmp_path / "seed_2000" / "top_samples_x.csv", [{"aatype": _aatype(_SEQ_A), "metadata_tag": "t1"}])
+        _csv(tmp_path / "seed_2001" / "top_samples_x.csv", [{"aatype": _aatype(_SEQ_B), "metadata_tag": "t2"}])
+        got = ProteinaComplexaExtractor(aggregate_replicates=True).extract(tmp_path)
+        assert sorted(b.sequence for b in got) == sorted([_SEQ_A, _SEQ_B])
+
+    def test_top_level_sequences_csv_still_short_circuits(self, tmp_path):
+        """The aggregated collector output is the primary layout — a nested stray
+        CSV must not turn it into an ambiguity error."""
+        _csv(tmp_path / "sequences.csv", [{"sequence": _SEQ_A, "design_id": "c1"}])
+        _csv(tmp_path / "nested" / "sequences.csv", [{"sequence": _SEQ_B, "design_id": "c2"}])
+        got = ProteinaComplexaExtractor().extract(tmp_path)
+        assert [b.sequence for b in got] == [_SEQ_A]
+
+    def test_bindcraft_ambiguous_stats_csv_fails_loudly(self, tmp_path):
+        rows = [{"Sequence": _SEQ_A, "Design": "d1", "Average_i_pTM": 0.8}]
+        _csv(tmp_path / "bindcraft_default" / "final_design_stats.csv", rows)
+        _csv(tmp_path / "bindcraft_variant_a" / "final_design_stats.csv", rows)
+        with pytest.raises(ValueError, match=r"final_design_stats\.csv"):
+            BindCraftExtractor().extract(tmp_path)
+
+    def test_boltzgen_ambiguous_metrics_csv_fails_loudly(self, tmp_path):
+        rows = [{"designed_chain_sequence": _SEQ_A, "id": "b1"}]
+        _csv(tmp_path / "boltzgen" / "final_designs_metrics_50.csv", rows)
+        _csv(tmp_path / "boltzgen_nanobody" / "final_designs_metrics_700.csv", rows)
+        with pytest.raises(ValueError, match="final_designs_metrics"):
+            BoltzGenExtractor().extract(tmp_path)
+
+
+class TestRFD3FastaFallback:
+    """F44(a2): the FASTA fallback's 500-aa ceiling rejects 0% of real fusions.
+
+    ``mpnn`` writes the full chain — target prefix + designed binder — and the
+    threshold is calibrated on the configurator's binder-length ceiling, not on
+    target+binder length, so it only fires when the TARGET alone exceeds ~360 aa.
+    Measured on the shipped CALCA run: 1600 .fa files, 8000 sequences, 92-172 aa,
+    ZERO rejected, and 8000/8000 carrying the same 32-aa target prefix. The
+    correct guard is a shared-prefix check.
+    """
+
+    def test_refuses_sequences_that_share_a_target_prefix(self, tmp_path):
+        target = "EDEARLLLAALVQDYVQMKASELEQEQEREGS"  # 32 aa, the CALCA helix
+        (tmp_path / "mpnn").mkdir()
+        for i, binder in enumerate([_SEQ_A, _SEQ_B]):
+            (tmp_path / "mpnn" / f"d{i}.fa").write_text(f">d{i}, sequence_recovery=0.45\n{target}{binder}\n")
+        with pytest.warns(UserWarning, match="sequences.csv"):
+            got = RFD3Extractor().extract(tmp_path)
+        assert got == [], "a target+binder fusion must never be emitted as a binder"
+
+    def test_keeps_clean_binder_only_fastas(self, tmp_path):
+        (tmp_path / "a.fa").write_text(f">d0\n{_SEQ_A}\n")
+        (tmp_path / "b.fa").write_text(f">d1\n{_SEQ_B}\n")
+        got = RFD3Extractor().extract(tmp_path)
+        assert sorted(b.sequence for b in got) == sorted([_SEQ_A, _SEQ_B])
+
+    def test_mpnns_trailing_comma_is_not_part_of_the_id(self, tmp_path):
+        (tmp_path / "d.fa").write_text(f">calca_b0_d0, sequence_recovery=0.4533\n{_SEQ_A}\n")
+        assert RFD3Extractor().extract(tmp_path)[0].binder_id == "rfd3_calca_b0_d0"
+
+
+class TestBinderIdUniqueness:
+    """F44(c): a duplicate binder_id is a SILENT DROP, not a crash.
+
+    ``add_design_groups`` keys design_group on binder_id and the report keeps only
+    the first row per group, so the colliding design vanishes from the report,
+    Top-N, candidates and diversity while surviving in metrics.csv — announced by
+    a line indistinguishable from the intended variant collapse. Measured: PC on
+    2VDY collapses 1000 designs into 253 ids (75%), and a merged Protein-Hunter
+    CSV gives 1654 rows → 1487 ids with all 164 collisions covering *different*
+    sequences.
+    """
+
+    def test_complexa_colliding_metadata_tags_stay_distinct(self, tmp_path):
+        _csv(
+            tmp_path / "top_samples_x.csv",
+            [
+                {"aatype": _aatype(_SEQ_A), "metadata_tag": "mcts_orig1-br0"},
+                {"aatype": _aatype(_SEQ_B), "metadata_tag": "mcts_orig1-br0"},
+            ],
+        )
+        with pytest.warns(UserWarning, match="not unique"):
+            got = ProteinaComplexaExtractor().extract(tmp_path)
+        assert len({b.binder_id for b in got}) == 2
+
+    def test_complexa_ids_carry_the_replicate_seed(self, tmp_path):
+        """``metadata_tag`` has no seed in it, so it collides ACROSS replicates —
+        the replicate directory name is the only thing that separates them."""
+        _csv(
+            tmp_path / "run_mcts_seed_2000" / "top_samples_x.csv",
+            [{"aatype": _aatype(_SEQ_A), "metadata_tag": "mcts_orig1-br0"}],
+        )
+        _csv(
+            tmp_path / "run_mcts_seed_2001" / "top_samples_x.csv",
+            [{"aatype": _aatype(_SEQ_B), "metadata_tag": "mcts_orig1-br0"}],
+        )
+        got = ProteinaComplexaExtractor(aggregate_replicates=True).extract(tmp_path)
+        assert sorted(b.binder_id for b in got) == [
+            "complexa_s2000_mcts_orig1-br0",
+            "complexa_s2001_mcts_orig1-br0",
+        ]
+
+    def test_protein_hunter_colliding_run_ids_stay_distinct(self, tmp_path):
+        """run_id restarts at 1 in every replicate, so a merged summary collides."""
+        _csv(
+            tmp_path / "summary_high_iptm.csv",
+            [
+                {"sequence": _SEQ_A, "run_id": 1, "cycle": 5, "iptm": 0.80},
+                {"sequence": _SEQ_B, "run_id": 1, "cycle": 5, "iptm": 0.81},
+            ],
+        )
+        with pytest.warns(UserWarning, match="not unique"):
+            got = ProteinHunterExtractor(collapse_variants=False).extract(tmp_path)
+        assert len({b.binder_id for b in got}) == 2
+
+
 class TestProteinHunter:
     def test_reads_high_iptm_summary_and_collapses_cycles(self, tmp_path):
         """Cycles are snapshots of one hallucination trajectory, so one row per run."""

@@ -816,7 +816,7 @@ def _attach_diversity_results(df: pd.DataFrame, diversity_csv: str) -> pd.DataFr
     df["binder_id"] = df["binder_id"].astype(str)
     n_fam = int(sub["family_id"].nunique()) if "family_id" in sub.columns else 0
     print(f"[report] Attaching diversity clusters from {div_path.name} ({n_fam} families)")
-    return pd.merge(df, sub, on="binder_id", how="left")
+    return pd.merge(df, sub, on="binder_id", how="left", validate="m:1")
 
 
 _EPITOPE_COLS = (
@@ -851,7 +851,7 @@ def _attach_epitope_results(df: pd.DataFrame, epitope_csv: str) -> pd.DataFrame:
     df["binder_id"] = df["binder_id"].astype(str)
     n = int(ep_sub["epitope_match_fraction"].notna().sum()) if "epitope_match_fraction" in ep_sub.columns else 0
     print(f"[report] Attaching epitope-match panel from {epitope_path.name} ({n} annotated designs)")
-    return pd.merge(df, ep_sub, on="binder_id", how="left")
+    return pd.merge(df, ep_sub, on="binder_id", how="left", validate="m:1")
 
 
 def _attach_binding_mode(df: pd.DataFrame) -> pd.DataFrame:
@@ -1000,7 +1000,7 @@ def _attach_beta_results(df: pd.DataFrame, beta_csv: str, exclude: bool = False)
     b_sub["binder_id"] = b_sub["binder_id"].astype(str)
     df = df.copy()
     df["binder_id"] = df["binder_id"].astype(str)
-    df = pd.merge(df, b_sub, on="binder_id", how="left")
+    df = pd.merge(df, b_sub, on="binder_id", how="left", validate="m:1")
     flagged = df["beta_intercalates"].astype(str).str.lower() == "true" if "beta_intercalates" in df.columns else None
     if exclude and flagged is not None:
         before = len(df)
@@ -1040,7 +1040,7 @@ def _attach_affinity_results(df: pd.DataFrame, affinity_csv: str) -> pd.DataFram
     df["binder_id"] = df["binder_id"].astype(str)
     n = int(a_sub["affinity_energy_density"].notna().sum()) if "affinity_energy_density" in a_sub.columns else 0
     print(f"[report] Attaching affinity ranking from {path.name} ({n} scored designs)")
-    return pd.merge(df, a_sub, on="binder_id", how="left")
+    return pd.merge(df, a_sub, on="binder_id", how="left", validate="m:1")
 
 
 _MONOMER_COLS = ("monomer_rmsd", "fold_robust")
@@ -1071,7 +1071,7 @@ def _attach_monomer_results(df: pd.DataFrame, monomer_csv: str) -> pd.DataFrame:
     df["binder_id"] = df["binder_id"].astype(str)
     n = int(m_sub["fold_robust"].notna().sum()) if "fold_robust" in m_sub.columns else 0
     print(f"[report] Attaching monomer fold-robustness from {path.name} ({n} validated designs)")
-    return pd.merge(df, m_sub, on="binder_id", how="left")
+    return pd.merge(df, m_sub, on="binder_id", how="left", validate="m:1")
 
 
 _QC_PANEL_COLS = (
@@ -1118,7 +1118,7 @@ def _attach_qc_results(df: pd.DataFrame, qc_csv: str) -> pd.DataFrame:
     df["binder_id"] = df["binder_id"].astype(str)
     n = int(qc_sub["qc_pass"].notna().sum()) if "qc_pass" in qc_sub.columns else len(qc_sub)
     print(f"[report] Attaching qc-annotate panel from {qc_path.name} ({n} annotated designs)")
-    return pd.merge(df, qc_sub, on="binder_id", how="left")
+    return pd.merge(df, qc_sub, on="binder_id", how="left", validate="m:1")
 
 
 def add_parser(subparsers) -> None:
