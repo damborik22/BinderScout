@@ -28,13 +28,14 @@ versions sometimes start emitting fields directly in the CSV.
 from __future__ import annotations
 
 import json
+import os
 import warnings
 from pathlib import Path
 
 import pandas as pd
 
 from ..core.schema import ExtractedBinder, NativeMetrics
-from .base import SequenceExtractor
+from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
 
 _CSV_CANDIDATES = ["sequences.csv", "results.csv", "designs.csv", "rfd3_designs.csv", "summary.csv"]
 _SEQUENCE_COLS = ("sequence", "Sequence", "designed_sequence", "binder_sequence")
@@ -52,6 +53,9 @@ _NATIVE_COL_MAP = {
 # the configurator's own binder-length ceiling is 500 aa (validate_int max_val), and
 # real designs in this pipeline run 60-150 aa.
 _MAX_PLAUSIBLE_BINDER_LEN = 500
+
+# A prefix this long shared by every FASTA sequence is the target, not a motif.
+_MIN_SHARED_TARGET_PREFIX = 20
 
 _SIDECAR_SUBDIR = "diffusion"
 # Within each sidecar JSON, the structural QC metrics live under data["metrics"].
@@ -86,9 +90,11 @@ class RFD3Extractor(SequenceExtractor):
         input_dir = Path(input_dir)
         csv_results = self._extract_from_csv(input_dir)
         if csv_results:
+            disambiguate_ids(csv_results, tool="RFD3")
             return csv_results
         fasta_results = self._extract_from_fasta(input_dir)
         if fasta_results:
+            disambiguate_ids(fasta_results, tool="RFD3")
             return fasta_results
         warnings.warn(f"RFD3: no CSV (tried {_CSV_CANDIDATES}) or *.fasta with sequences found under {input_dir}.")
         return []
@@ -195,6 +201,14 @@ class RFD3Extractor(SequenceExtractor):
         Refusing implausible lengths is the honest option: the aggregated
         `sequences.csv` that `run_rfd3.sh` produces already carries stripped binders,
         so anyone hitting this path can generate it instead.
+
+        The length ceiling alone does not detect this. It is calibrated on the
+        configurator's binder-length cap, not on target+binder length, so it only
+        fires when the TARGET alone exceeds ~360 aa: on the shipped CALCA run it
+        rejected 0 of 8000 sequences that all carried the same 32-aa target prefix.
+        What does detect it is the prefix itself — every mpnn sequence for one
+        target starts with the same residues — so a long shared prefix across
+        designs refuses the whole pool.
         """
         from ..io.read import read_fasta
 
@@ -202,13 +216,29 @@ class RFD3Extractor(SequenceExtractor):
         if not fastas:
             return []
 
-        results: list[ExtractedBinder] = []
-        n_rejected = 0
+        entries_by_file = []
         for fp in fastas:
             try:
-                entries = read_fasta(fp)
+                entries_by_file.append((fp, read_fasta(fp)))
             except Exception:
                 continue
+
+        seqs = [s.strip().upper() for _, entries in entries_by_file for _, s in entries]
+        seqs = [s for s in seqs if self._validate_sequence(s)]
+        shared = os.path.commonprefix(seqs) if len(seqs) >= 2 else ""
+        if _MIN_SHARED_TARGET_PREFIX <= len(shared) < min((len(s) for s in seqs), default=0):
+            warnings.warn(
+                f"RFD3: all {len(seqs)} FASTA sequences under {input_dir} share a "
+                f"{len(shared)}-residue prefix — this is mpnn's full chain (target prefix + "
+                f"binder), not a binder, and refolding it would produce meaningless iPTM. "
+                f"Extracting nothing. Generate the aggregated sequences.csv (run_rfd3.sh does "
+                f"this) so the target prefix is stripped properly."
+            )
+            return []
+
+        results: list[ExtractedBinder] = []
+        n_rejected = 0
+        for fp, entries in entries_by_file:
             for idx, (header, seq) in enumerate(entries):
                 seq = seq.strip().upper()
                 if not self._validate_sequence(seq):
@@ -216,7 +246,9 @@ class RFD3Extractor(SequenceExtractor):
                 if len(seq) > _MAX_PLAUSIBLE_BINDER_LEN:
                     n_rejected += 1
                     continue
-                binder_id = header.split()[0] if header else f"rfd3_{fp.stem}_{idx}"
+                # mpnn writes ">name, sequence_recovery=0.45" — the comma sticks to
+                # the name token and would otherwise ride into every binder_id join.
+                binder_id = header.split()[0].rstrip(",") if header else f"rfd3_{fp.stem}_{idx}"
                 results.append(
                     ExtractedBinder(
                         binder_id=f"rfd3_{binder_id}",
@@ -241,9 +273,9 @@ class RFD3Extractor(SequenceExtractor):
             if direct.exists():
                 return direct
         for name in _CSV_CANDIDATES:
-            hits = list(input_dir.rglob(name))
+            hits = sorted(input_dir.rglob(name))
             if hits:
-                return hits[0]
+                return resolve_single_match(hits, tool="RFD3", what=name, input_dir=input_dir)
         return None
 
     def _make_id(self, row: pd.Series, fallback_idx: int) -> str:

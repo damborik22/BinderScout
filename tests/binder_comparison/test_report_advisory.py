@@ -55,6 +55,28 @@ def test_attach_qc_results_joins_by_binder_id(tmp_path):
     assert out.loc[out.binder_id == "d3", "interface_dG"].iloc[0] == 3.0
 
 
+def test_attach_qc_results_refuses_a_sidecar_with_duplicate_ids(tmp_path):
+    """F44(c): merger.py guards its sequence join with validate="m:1" precisely
+    because a duplicated right key multiplies the metrics rows — one design would
+    occupy several Top-30 slots and inflate the eligible count. The six binder_id
+    joins in the report had no such guard, and a sidecar built from a pool with
+    colliding ids (measured: 164 in one shipped Protein-Hunter CSV) is exactly
+    that duplicated key. Advisory panels must not silently reorder or inflate."""
+    qc = pd.DataFrame(
+        {
+            "binder_id": ["d1", "d1"],
+            "qc_pass": [True, False],
+            "qc_fail_reasons": ["", "dG>0.0"],
+            "interface_dG": [-25.0, 3.0],
+            "interface_sc": [0.71, 0.40],
+        }
+    )
+    p = tmp_path / "qc.csv"
+    qc.to_csv(p, index=False)
+    with pytest.raises(pd.errors.MergeError):
+        _attach_qc_results(_metrics_df(), str(p))
+
+
 def test_attach_qc_results_missing_file_is_noop():
     df = _metrics_df()
     out = _attach_qc_results(df, "/nonexistent/qc.csv")

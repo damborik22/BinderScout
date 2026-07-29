@@ -125,6 +125,78 @@ class TestZeroYieldIsAnError:
         assert "--allow-empty" in res.stderr
 
 
+class TestTargetSeqReachesExtract:
+    """F44: `aatype` encodes the whole complex, so the extractor needs the target
+    to know where the binder starts — but `extract` had no --target-seq, even
+    though `run` declares one as required and the configurator holds it three
+    lines above the extract call it generates."""
+
+    _RESTYPES = "ARNDCQEGHILKMFPSTWYV"
+    _TARGET = "ACDEFGHIKLMNPQRSTVWY" * 2  # 40 aa
+    _BINDER = "MKTAYIAKQRQISFVKSHFS" * 3  # 60 aa
+
+    def _native_csv(self, tmp_path):
+        import pandas as pd
+
+        aatype = ",".join(str(self._RESTYPES.index(c)) for c in self._TARGET + self._BINDER)
+        pd.DataFrame([{"aatype": aatype, "metadata_tag": "t1"}]).to_csv(tmp_path / "top_samples_x.csv", index=False)
+        return tmp_path
+
+    def test_extract_accepts_target_seq(self):
+        import importlib
+
+        mod = importlib.import_module("binder_comparison.cli.extract")
+        sub = argparse.ArgumentParser().add_subparsers()
+        mod.add_parser(sub)
+        assert "target_seq" in {a.dest for a in sub.choices["extract"]._actions}
+
+    def test_extract_strips_the_target_it_was_given(self, tmp_path):
+        import subprocess
+
+        pc_dir = self._native_csv(tmp_path)
+        out = tmp_path / "seqs.fasta"
+        res = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "binder_comparison",
+                "extract",
+                "--proteina-complexa",
+                str(pc_dir),
+                "--target-seq",
+                self._TARGET,
+                "--output",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+            env={"PYTHONPATH": str(Path(__file__).resolve().parents[2] / "Evaluator"), "PATH": "/usr/bin:/bin"},
+        )
+        assert res.returncode == 0, res.stderr
+        assert self._BINDER in out.read_text()
+        assert self._TARGET + self._BINDER not in out.read_text()
+
+    def test_run_forwards_target_seq_to_extract(self, monkeypatch, tmp_path):
+        """`run` declares --target-seq required and then dropped it on the floor."""
+        import importlib
+
+        run_mod = importlib.import_module("binder_comparison.cli.run")
+        captured = {}
+
+        def _capture(cmd, label):
+            captured[label] = cmd
+            raise SystemExit(0)
+
+        monkeypatch.setattr(run_mod, "_run_step", _capture)
+        ns = dict.fromkeys(TOOL_DESTS)
+        ns.update(proteina_complexa="/pc", target_seq="MKT", output=str(tmp_path), all_mosaic_designs=False)
+        args = argparse.Namespace(**ns)
+        with pytest.raises(SystemExit):
+            run_mod.run(args)
+        assert "--target-seq" in captured["extract"]
+        assert "MKT" in captured["extract"]
+
+
 class TestRfd3FastaFallbackGuard:
     """Regression (F39): mpnn writes the FULL chain (target prefix + binder). With no
     target to strip, an unguarded fallback handed the refold engines a target+binder

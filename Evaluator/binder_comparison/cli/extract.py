@@ -71,7 +71,10 @@ def run(args: argparse.Namespace) -> None:
 
     if args.proteina_complexa:
         print(f"[extract] Proteina-Complexa: {args.proteina_complexa}")
-        extracted = ProteinaComplexaExtractor().extract(args.proteina_complexa)
+        extracted = ProteinaComplexaExtractor(
+            target_sequence=getattr(args, "target_seq", None),
+            aggregate_replicates=getattr(args, "aggregate_replicates", False),
+        ).extract(args.proteina_complexa)
         _take("proteina_complexa", extracted)
 
     if args.protein_hunter:
@@ -199,6 +202,20 @@ def add_parser(subparsers) -> None:
         action="store_true",
         help="Continue when a requested --<tool> directory yields 0 sequences (default: error out, "
         "so a mistyped path cannot silently shrink the pool before hours of GPU refolding)",
+    )
+    p.add_argument(
+        "--target-seq",
+        metavar="SEQ",
+        help="Target chain the designs were made against. Proteina-Complexa's native "
+        "'aatype' column encodes the WHOLE COMPLEX (target + binder + poly-alanine pad), "
+        "so without this the extractor has to infer where the binder starts.",
+    )
+    p.add_argument(
+        "--aggregate-replicates",
+        action="store_true",
+        help="Treat every matching Proteina-Complexa top_samples_*.csv under the given "
+        "directory as one pool (MCTS writes one per replicate seed). Default: refuse to "
+        "guess which of several matches is the design pool.",
     )
     p.add_argument(
         "--all-mosaic-designs",

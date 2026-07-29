@@ -346,6 +346,16 @@ class TestRunEvaluateRfd3Path:
         assert f"--rfd3 {run_dir}/rfd3 " in content or f'--rfd3 "{run_dir}/rfd3"' in content or "/rfd3 \\" in content
         assert "rfd3/outputs" not in content
 
+    def test_extract_is_given_the_target_sequence(self, base_cfg, tmp_path):
+        """F44: the generated script holds the target three lines below, hands it to
+        evaluate.sh, and used to pass nothing to extract — where Proteina-Complexa
+        needs it to cut the binder out of the encoded complex."""
+        script = tmp_path / "run_evaluate.sh"
+        conf.write_run_evaluate(script, base_cfg, _ALL_SEVEN)
+        content = script.read_text()
+        extract_block = content[content.index("binder-compare extract") : content.index("# Step 2")]
+        assert "--target-seq" in extract_block
+
 
 class TestSettingsJsonSurvivesMissingNvidiaSmi:
     def test_gpu_probes_are_guarded(self, base_cfg, tmp_path):

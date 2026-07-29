@@ -21,7 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..core.schema import ExtractedBinder, NativeMetrics
-from .base import SequenceExtractor
+from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
 
 # In order of preference
 _CSV_CANDIDATES = [
@@ -105,14 +105,17 @@ class BoltzGenExtractor(SequenceExtractor):
                 )
             )
 
+        disambiguate_ids(results, tool="BoltzGen")
         return results
 
     def _find_csv(self, input_dir: Path) -> Path | None:
-        # final_designs_metrics takes priority
+        # final_designs_metrics takes priority. "Take the latest if multiple
+        # budgets" was a guess that silently discarded a whole 700-design pool on
+        # a run dir holding both a nanobody and a non-nanobody BoltzGen output.
         for pattern in _CSV_CANDIDATES:
             matches = sorted(input_dir.rglob(pattern))
             if matches:
-                return matches[-1]  # take latest if multiple budgets
+                return resolve_single_match(matches, tool="BoltzGen", what=pattern, input_dir=input_dir)
         return None
 
     def _detect_sequence_col(self, df: pd.DataFrame) -> str | None:
