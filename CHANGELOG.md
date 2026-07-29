@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed (2026-07-29 — the docs and the agent instructions catch up with Part U)
+
+Part U removed `--rank-by` and `--screen-metric` from the code but not from the things that *tell people and agents to use them*.
+
+- **`binder-compare validate --target-pdb` returned an error string as the target sequence.** `cli/validate.py` imported `extract_sequence_from_pdb` from `io.read`, which defines no such function — the real helper is `parse_pdb_sequence`. The import sat inside a bare `except Exception: return f"ERROR: {e}"`, so the command reported the ImportError *as the sequence*, compared every design length against it, and exited 0.
+- **Every report shipped a pre-Part-U benchmark blurb.** `_benchmark_provenance_html()` is rendered unconditionally and still presented the retired Stage-1 max screen as live, tabulated "Mean-screen AUC / Max-screen AUC", and instructed the reader to "Pass `--screen-metric max` to revert to max-first" — a flag that now exits 2. Rewritten around the Cao 2022 result: the three-benchmark AUC ladder, why Cao's 0.556 is label censoring rather than metric failure, that metric selection is closed, and the honest headline — **~1.9× enrichment from the top decile, beating a random ordering on only 6 of 12 targets**. It is a triage filter, not a decision procedure.
+- **The `bindmaster-evaluator` skill prescribed a removed flag.** `SKILL.md` and `references/pipeline.md` both handed out `binder-compare report … --rank-by two_stage`; `references/ranking.md` was entirely pre-Part-U (Stage-1 `passes_max_screen`, `two_stage_rank` "is the column", "`adaptyv_rank` and `consensus_rank` coexist for comparison"). These are agent instructions — they get executed. Rewritten to the shipped ranking, with `agreement_count` demoted to diagnostic-only and the inflated `chain_iptm_interface` ≈ 0.745 figure corrected to ≈ 0.69.
+- **New guard: `tests/test_skill_commands_are_real.py`** parses every `binder-compare <cmd> --flag` in `.claude/skills/**` against the real argparse subparsers, so a skill can no longer outlive the flag it documents. It reproduces both known defects before the fix.
+- **Bookkeeping:** `docs/plans.md` still listed F2 (headless configurator) as deferred three days after it shipped, and budgeted a `binder-eval-af2` env that Part I deleted. `PLAN_ranking_and_engines_roadmap.md`'s Part U *section* still described the unbuilt ProtDBench harness its own summary row marked done — rewritten to record what was actually run (Cao 2022) and what stays open.
+
 ### Fixed (2026-07-28 — F44: extractor ingestion integrity — three silent-corruption classes)
 
 Every one of these produced a **plausible, non-zero pool** with no error, so nothing downstream — including `--allow-empty` — could catch it. Measured on shipped run data, not hypothesised.
