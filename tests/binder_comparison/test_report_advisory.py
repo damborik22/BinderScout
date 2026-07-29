@@ -189,14 +189,34 @@ def test_qc_rules_html_lists_all_five_default_thresholds():
     assert "Advisory only" in html  # the never-auto-drop disclaimer
 
 
-def test_benchmark_provenance_html_cites_both_benchmarks_and_caveat():
-    """Item 7: provenance block must cite Adaptyv + ProteinBase AUCs and the serpin caveat."""
+def test_benchmark_provenance_html_cites_the_benchmarks_and_caveat():
+    """Item 7: provenance block must cite the benchmarks and the serpin caveat."""
     html = _benchmark_provenance_html()
     assert "Adaptyv" in html
-    assert "ProteinBase" in html
-    assert "0.710" in html and "0.689" in html
+    assert "Cao" in html
     assert "Transferability caveat" in html
     assert "serpins" in html
+
+
+def test_benchmark_provenance_html_is_not_pre_part_u():
+    """Part U retired the Stage-1 max screen and REMOVED --rank-by / --screen-metric
+    (4fc3690). This block is rendered into every report unconditionally, so a stale
+    copy tells the reader to pass a flag that now exits 2, and presents a screen that
+    no longer runs as if it were live."""
+    html = _benchmark_provenance_html()
+    assert "--screen-metric" not in html
+    assert "--rank-by" not in html
+    assert "Max-screen" not in html and "max-screen" not in html
+
+
+def test_benchmark_provenance_html_states_the_triage_ceiling():
+    """The honest headline from Cao: on a near-miss pool the ranking is worth ~1.9x
+    enrichment and beats a random ordering on only 6 of 12 targets. A report that
+    presents its top-10 as 'the best' without that framing over-sells by a wide
+    margin."""
+    html = _benchmark_provenance_html()
+    assert "triage" in html.lower()
+    assert "6 of 12" in html or "6/12" in html
 
 
 def test_df_to_html_disagreement_flag_fires_when_agreement_low():
