@@ -57,6 +57,10 @@ def run(args: argparse.Namespace) -> None:
         if value:
             extract_cmd += [flag, value]
     extract_cmd += ["--output", str(sequences_fasta)]
+    # `run` already requires the target for refolding, and Proteina-Complexa's
+    # extractor needs the same string to cut the binder out of the encoded complex.
+    if getattr(args, "target_seq", None):
+        extract_cmd += ["--target-seq", args.target_seq]
     if getattr(args, "all_mosaic_designs", False):
         extract_cmd += ["--all-mosaic-designs"]
 

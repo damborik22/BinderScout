@@ -2678,6 +2678,9 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         for flag, dir_path in design_dirs:
             lines.append(f'        {flag} "{dir_path}" \\')
         lines += [
+            # Proteina-Complexa's native aatype column encodes target + binder +
+            # padding, so the extractor needs the same target evaluate.sh gets below.
+            f'        --target-seq "{target_seq}" \\',
             '        --output "$SEQUENCES"',
             "fi",
             "",
