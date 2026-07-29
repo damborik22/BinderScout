@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Deprecated (2026-07-29 — Proteina-Complexa on aarch64 / DGX Spark: not viable)
+
+**Run upstream Proteina-Complexa on x86 (Clara / BM1–BM4). It is deprecated on Spark — a throughput verdict, not an install failure.**
+
+The install works and was under-described before: upstream `complexa` (`916eaae`) runs on Spark (uv venv, torch 2.13.0+cu130, GB10/sm_121) and has **produced real designs there**, reproducible byte-identically 16 days later. It is also **not a different algorithm** — both platforms run one reward model, `af2folding` with `i_pae = -1.0` and every other weight zero. Three previously-recorded blockers were stale: tmol's CUDA kernels **do** build at sm_121, `rf3` **is** installed and working, and the `torch_scatter` shim is **never entered** (`fold_emb` is absent from the shipped checkpoint). The old "PyG / torchtext lack aarch64 wheels" rationale in `CLAUDE.md` and the installer was simply wrong — PC imports neither.
+
+The real blocker is that **no CUDA `jaxlib` exists for aarch64**, so the AF2 reward — the only member of the composite — runs on CPU:
+
+| | H200 (Clara) | GB10 (Spark) |
+|---|---|---|
+| per AF2 call | ≤ 2.46 s | **~320 s** |
+| 100-design MCTS replicate (generate) | 2.25 h | **12.2 days** |
+| ApoE4 campaign, 5 replicates | 16 h 12 m | ~61 days |
+| PC-v3, 50 replicates | ~2 weeks | **~1.7 years** |
+
+The production recipe is `search.algorithm=mcts, n_simulations=8`, whose budget is fixed by construction at `nsamples × (1 + 8×4)` = 3300 AF2 calls per 100-design replicate. Threading cannot rescue it — AF2-on-CPU asymptotes at ~4 of 20 cores — and `evaluate` adds a second CPU wall because `binder_folding_method: colabdesign` is also JAX.
+
+Two traps recorded so they are not rediscovered:
+
+- **Do not switch to `best-of-n` to make it affordable.** It costs ~1 AF2 call per sample only because `best_of_n_search.py` / `single_pass_generation.py` never call `compute_reward_from_samples` — the reward is post-hoc ranking. MCTS was adopted on 2VDY because it beat best-of-n **10× at iPTM ≥ 0.85 in a third of the wall clock**. Under MCTS the reward is backpropagated into node statistics, so CPU-vs-GPU floats change the search *trajectory*, not just the ordering.
+- **Do not expect identical designs from any two machines.** `generate.py:596` deliberately enables TF32, there is no `use_deterministic_algorithms` / `cudnn.deterministic` / `CUBLAS_WORKSPACE_CONFIG` anywhere, and a 400-step SDE amplifies the drift. Bit-identity holds only for same box + same stack + same config — and even there `dataloader.batch_size` alone changes the designs at a fixed seed, so `seed=X` is not a sufficient provenance record.
+
+Reopens only if a CUDA jaxlib for aarch64/sm_121 appears, or if a GPU-native reward replaces AF2 (`rf3` is installed on Spark and PC's rf3 folding reward is commented out at `binder_generate.yaml:194-213` — a different objective, so a new experiment, not parity). `install/install_aarch.sh` now refuses with the real reason and the numbers; the full verdict is in `docs/plans.md`.
+
 ### Fixed (2026-07-29 — the docs and the agent instructions catch up with Part U)
 
 Part U removed `--rank-by` and `--screen-metric` from the code but not from the things that *tell people and agents to use them*.
