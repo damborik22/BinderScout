@@ -113,8 +113,17 @@ while [[ $# -gt 0 ]]; do
                     echo -e "${RED}Protein-Hunter is not supported on aarch64: PyRosetta publishes no aarch64 wheels.${RESET}"
                     exit 1 ;;
                 proteina-complexa|proteina_complexa|complexa)
-                    echo -e "${RED}Proteina-Complexa is not yet wired into the aarch64 installer.${RESET}"
-                    echo -e "${YELLOW}  PyTorch Geometric and torchtext may lack aarch64 wheels — see README aarch64 notes.${RESET}"
+                    # DEPRECATED 2026-07-29 — a throughput verdict, not an install failure.
+                    # Upstream complexa DOES install and generate on Spark. But there is no CUDA
+                    # jaxlib for aarch64, so the AF2 reward — the only reward in the composite —
+                    # runs on CPU at ~320 s/call vs <=2.46 s on an H200. The production MCTS recipe
+                    # costs 3300 AF2 calls per 100-design replicate, i.e. 12.2 days here vs 2.25 h.
+                    # See docs/plans.md "Proteina-Complexa on aarch64 (DGX Spark) — NOT VIABLE".
+                    echo -e "${RED}Proteina-Complexa is deprecated on aarch64 (DGX Spark): not viable, not broken.${RESET}"
+                    echo -e "${YELLOW}  No CUDA jaxlib for aarch64 → the AF2 reward runs on CPU (~320 s/call vs 2.5 s on H200).${RESET}"
+                    echo -e "${YELLOW}  The production MCTS recipe needs 3300 AF2 calls per 100-design replicate:${RESET}"
+                    echo -e "${YELLOW}    12.2 days here vs 2.25 h on one H200. Run Proteina-Complexa on x86 (Clara / BM1-BM4).${RESET}"
+                    echo -e "${YELLOW}  Details + what would reopen it: docs/plans.md.${RESET}"
                     exit 1 ;;
                 af3|alphafold3|alphafold)
                     DO_AF3=true ;;
