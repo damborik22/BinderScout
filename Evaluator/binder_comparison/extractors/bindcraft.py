@@ -19,7 +19,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..core.schema import ExtractedBinder, NativeMetrics
-from .base import SequenceExtractor
+from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
 
 # Column names as defined in BindCraft's generate_dataframe_labels()
 _SEQUENCE_COL = "Sequence"
@@ -109,6 +109,7 @@ class BindCraftExtractor(SequenceExtractor):
                 )
             )
 
+        disambiguate_ids(results, tool="BindCraft")
         return results
 
     def _find_csv(self, input_dir: Path) -> Path | None:
@@ -118,9 +119,9 @@ class BindCraftExtractor(SequenceExtractor):
                 return candidate
         # Also search one level deep (e.g. if input_dir is the design_path parent)
         for name in _CSV_CANDIDATES:
-            matches = list(input_dir.rglob(name))
+            matches = sorted(input_dir.rglob(name))
             if matches:
-                return matches[0]
+                return resolve_single_match(matches, tool="BindCraft", what=name, input_dir=input_dir)
         return None
 
     def _extract_native(self, row: pd.Series) -> NativeMetrics:

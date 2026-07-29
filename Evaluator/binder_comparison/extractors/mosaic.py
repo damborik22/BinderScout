@@ -20,7 +20,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..core.schema import ExtractedBinder, NativeMetrics
-from .base import SequenceExtractor
+from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
 
 _CSV_CANDIDATES = [
     "designs.csv",
@@ -123,6 +123,7 @@ class MosaicExtractor(SequenceExtractor):
                 )
             )
 
+        disambiguate_ids(results, tool="Mosaic")
         return results
 
     def _find_csv(self, input_dir: Path) -> Path | None:
@@ -131,9 +132,9 @@ class MosaicExtractor(SequenceExtractor):
             if candidate.exists():
                 return candidate
         for name in _CSV_CANDIDATES:
-            matches = list(input_dir.rglob(name))
+            matches = sorted(input_dir.rglob(name))
             if matches:
-                return matches[0]
+                return resolve_single_match(matches, tool="Mosaic", what=name, input_dir=input_dir)
         return None
 
     def _make_id(self, row: pd.Series, fallback_idx: int) -> str:

@@ -41,13 +41,15 @@ working.
 
 from __future__ import annotations
 
+import os
+import re
 import warnings
 from pathlib import Path
 
 import pandas as pd
 
 from ..core.schema import ExtractedBinder, NativeMetrics
-from .base import SequenceExtractor
+from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
 
 # Try the configurator-aggregated form first, then the NVIDIA native output.
 _CSV_CANDIDATES = [
@@ -55,8 +57,32 @@ _CSV_CANDIDATES = [
 ]
 _NATIVE_CSV_GLOB = "top_samples_*.csv"
 
-_SEQUENCE_COL = "sequence"
+# Binder-only sequence columns, in preference order. "sequence" is what the
+# configurator's collector writes; "binder_sequence" (RAW_protein_binder_results_*)
+# and "self_sequence" (binder_results_*) are PC's OWN evaluation columns, which
+# carry the binder verbatim — no decode, no arithmetic, no target to strip.
+_SEQUENCE_COL_CANDIDATES = ("sequence", "binder_sequence", "self_sequence")
 _AATYPE_COL = "aatype"
+_PDB_PATH_COL = "pdb_path"
+
+# NVIDIA names each job directory ``job_<i>_n_<N>_id_<j>_...`` where N is
+# len(target) + len(binder) — the exact end of the binder, before the padding.
+# Verified against PC's own evaluation CSVs on 1100/1100 designs across two runs.
+_JOB_LEN_RE = re.compile(r"_n_(\d+)_")
+
+# ``metadata_tag`` has no seed in it, so it collides across replicates. The
+# replicate directory name is the only thing that separates them.
+_SEED_RE = re.compile(r"seed[_-](\d+)")
+
+# A shared prefix shorter than this is not evidence of a target — real binders
+# from one MCTS run can share a short motif.
+_MIN_INFERRED_TARGET_LEN = 20
+
+# Fallback boundary when the job name carries no ``_n_<N>_`` (PC-v3's pdb_path is
+# a bare filename): strip a trailing poly-alanine run this long or longer. The
+# longest genuine C-terminal alanine run in a clean pool on disk is 7, and the
+# pads measured on PC-v3 reach 42, so the threshold sits between them.
+_PAD_MIN_RUN = 10
 
 # Canonical AF2 / Proteina residue order. Index = aatype int, value = one-letter.
 _RESTYPES = "ARNDCQEGHILKMFPSTWYV"
@@ -112,7 +138,22 @@ def _decode_aatype(aatype_str: str) -> str | None:
 
 
 class ProteinaComplexaExtractor(SequenceExtractor):
-    """Extract binder sequences from Proteina-Complexa outputs."""
+    """Extract binder sequences from Proteina-Complexa outputs.
+
+    Args:
+        target_sequence: The target chain the designs were made against. Only the
+            ``aatype`` path needs it — that column encodes the whole complex, so
+            without the target there is no principled place to cut. Passed through
+            from ``binder-compare extract --target-seq``.
+        aggregate_replicates: Treat every matching ``top_samples_*.csv`` under
+            *input_dir* as one pool. PC's MCTS runs write one per replicate seed,
+            and 50 of them are a single campaign — but a mis-pointed parent
+            directory is not, so this is opt-in and the default refuses to guess.
+    """
+
+    def __init__(self, target_sequence: str | None = None, aggregate_replicates: bool = False):
+        self.target_sequence = target_sequence.strip().upper() if target_sequence else None
+        self.aggregate_replicates = aggregate_replicates
 
     @property
     def tool_name(self) -> str:
@@ -120,60 +161,138 @@ class ProteinaComplexaExtractor(SequenceExtractor):
 
     def extract(self, input_dir: str | Path) -> list[ExtractedBinder]:
         input_dir = Path(input_dir)
-        csv_path = self._find_csv(input_dir)
-        if csv_path is None:
+        csv_paths = self._find_csvs(input_dir)
+        if not csv_paths:
             warnings.warn(
                 f"Proteina-Complexa: no CSV found in {input_dir}. Looked for {_CSV_CANDIDATES} and {_NATIVE_CSV_GLOB}."
             )
             return []
 
-        df = pd.read_csv(csv_path)
-        if df.empty:
+        frames = []
+        for path in csv_paths:
+            frame = pd.read_csv(path)
+            if frame.empty:
+                continue
+            frame["__source_csv"] = str(path)
+            frames.append(frame)
+        if not frames:
             return []
+        df = pd.concat(frames, ignore_index=True)
+        if len(csv_paths) > 1:
+            print(f"[extract] Proteina-Complexa: aggregated {len(csv_paths)} replicate CSVs → {len(df)} rows")
 
-        # Decide which sequence source this CSV uses.
-        if _SEQUENCE_COL in df.columns:
-            seq_source = "sequence_col"
+        # Decide which sequence source this CSV uses. Dispatch on the COLUMNS, not
+        # on which _find_csvs branch matched — a file named sequences.csv can carry
+        # aatype, and an evaluation CSV carries binder_sequence.
+        seq_col = next((c for c in _SEQUENCE_COL_CANDIDATES if c in df.columns), None)
+        if seq_col is not None:
+            sequences: list[str | None] = [str(v).strip().upper() for v in df[seq_col]]
         elif _AATYPE_COL in df.columns:
-            seq_source = "aatype"
+            sequences = self._binders_from_aatype(df)
         else:
             raise ValueError(
-                f"Proteina-Complexa CSV {csv_path} has neither '{_SEQUENCE_COL}' "
-                f"nor '{_AATYPE_COL}' column. Available: {list(df.columns[:10])}"
+                f"Proteina-Complexa CSV {csv_paths[0]} has none of {_SEQUENCE_COL_CANDIDATES} "
+                f"nor '{_AATYPE_COL}'. Available: {list(df.columns[:10])}"
             )
 
         results: list[ExtractedBinder] = []
         n_decode_fail = 0
 
-        for idx, row in df.iterrows():
-            if seq_source == "sequence_col":
-                seq = str(row[_SEQUENCE_COL]).strip().upper()
-            else:
-                decoded = _decode_aatype(row.get(_AATYPE_COL))
-                if decoded is None:
-                    n_decode_fail += 1
-                    continue
-                seq = decoded
+        for (idx, row), seq in zip(df.iterrows(), sequences, strict=True):
+            if seq is None:
+                n_decode_fail += 1
+                continue
 
             if not self._validate_sequence(seq):
                 warnings.warn(f"Proteina-Complexa row {idx}: invalid sequence — skipping")
                 continue
 
-            binder_id = self._make_id(row, idx)
-            native = self._extract_native(row)
-
             results.append(
                 ExtractedBinder(
-                    binder_id=binder_id,
+                    binder_id=self._make_id(row, idx),
                     sequence=seq,
                     source_tool="proteina_complexa",
-                    native=native,
+                    native=self._extract_native(row),
                 )
             )
 
         if n_decode_fail:
             warnings.warn(f"Proteina-Complexa: failed to decode aatype for {n_decode_fail} row(s)")
+        disambiguate_ids(results, tool="Proteina-Complexa")
         return results
+
+    def _binders_from_aatype(self, df: pd.DataFrame) -> list[str | None]:
+        """Decode ``aatype`` and cut the binder out of the complex.
+
+        ``aatype`` is the WHOLE COMPLEX: ``target + binder + poly-alanine pad``.
+        Measured on three production runs — 2VDY (1000 designs, 500-509 aa against
+        a 389-aa target), ApoE4/Clara (100 designs, 298-305 aa against 185 aa) and
+        ApoE4-iso PC-v3 (4804/4804 rows carrying the 141-aa target as an exact
+        prefix). Refolding that unstripped feeds the engines a target+binder fusion
+        against the same target, and every iPTM computed from it is meaningless.
+        """
+        decoded = [_decode_aatype(v) for v in df[_AATYPE_COL]]
+        ok = [d for d in decoded if d]
+        prefix_len = 0
+
+        if self.target_sequence:
+            if ok and all(d.startswith(self.target_sequence) for d in ok):
+                prefix_len = len(self.target_sequence)
+            else:
+                warnings.warn(
+                    f"Proteina-Complexa: the declared target ({len(self.target_sequence)} aa) is "
+                    f"not a prefix of the decoded complex — PC's target_input can select a "
+                    f"sub-range of the configured chain. Emitting sequences unstripped rather "
+                    f"than cutting at the wrong residue."
+                )
+        elif len(ok) >= 2:
+            # Every row of a run embeds the same target, so the pool reveals it.
+            lcp = os.path.commonprefix(ok)
+            if _MIN_INFERRED_TARGET_LEN <= len(lcp) < min(len(d) for d in ok):
+                prefix_len = len(lcp)
+                warnings.warn(
+                    f"Proteina-Complexa: no --target-seq given; inferred a {len(lcp)}-residue "
+                    f"target prefix shared by all {len(ok)} designs and stripped it. Pass "
+                    f"--target-seq to make the boundary declared rather than inferred."
+                )
+
+        if not prefix_len:
+            warnings.warn(
+                "Proteina-Complexa: could not resolve the target prefix in the decoded "
+                "'aatype' complex — pass --target-seq. Sequences are emitted as decoded, so "
+                "they may be target+binder fusions."
+            )
+
+        ends = self._binder_ends(df, decoded)
+        return [None if d is None else d[prefix_len:end] for d, end in zip(decoded, ends, strict=True)]
+
+    @staticmethod
+    def _binder_ends(df: pd.DataFrame, decoded: list[str | None]) -> list[int]:
+        """Where the binder stops, before NVIDIA's poly-alanine padding.
+
+        The job-directory name carries ``_n_<N>_`` = len(target) + len(binder),
+        exact on 1100/1100 designs checked against PC's own evaluation CSVs. The
+        ``aatype`` column itself is padded and the job name is not, so they agree
+        on only 26/1000 — the name is the authority.
+
+        Where the name has no length field (PC-v3 writes a bare filename), fall
+        back to the trailing alanine run, which is a heuristic and is why the
+        declared boundary is preferred wherever it exists.
+        """
+        paths = df[_PDB_PATH_COL] if _PDB_PATH_COL in df.columns else [None] * len(df)
+        ends = []
+        for d, p in zip(decoded, paths, strict=True):
+            end = len(d) if d else 0
+            match = _JOB_LEN_RE.search(str(p)) if p is not None and not pd.isna(p) else None
+            if match and 0 < int(match.group(1)) <= end:
+                ends.append(int(match.group(1)))
+                continue
+            if d:
+                pad = len(d) - len(d.rstrip("A"))
+                if pad >= _PAD_MIN_RUN:
+                    end -= pad
+            ends.append(end)
+        return ends
 
     def _extract_native(self, row: pd.Series) -> NativeMetrics:
         def _get(candidates: tuple[str, ...]) -> float | None:
@@ -192,32 +311,39 @@ class ProteinaComplexaExtractor(SequenceExtractor):
             complexa_rf3_reward=_get(_NATIVE_COL_MAP["complexa_rf3_reward"]),
         )
 
-    def _find_csv(self, input_dir: Path) -> Path | None:
-        # 1. Configurator-aggregated sequences.csv (top-level then recursive)
+    def _find_csvs(self, input_dir: Path) -> list[Path]:
+        # 1. Configurator-aggregated sequences.csv (top-level then recursive). The
+        #    top-level hit short-circuits: it is the primary layout, and a stray
+        #    nested CSV must not turn a correct run dir into an ambiguity error.
         for name in _CSV_CANDIDATES:
             candidate = input_dir / name
             if candidate.exists():
-                return candidate
+                return [candidate]
         for name in _CSV_CANDIDATES:
-            matches = list(input_dir.rglob(name))
+            matches = sorted(input_dir.rglob(name))
             if matches:
-                return matches[0]
+                return self._resolve(matches, name, input_dir)
 
         # 2. NVIDIA native top_samples_*.csv (top-level then recursive)
-        native_top = list(input_dir.glob(_NATIVE_CSV_GLOB))
+        native_top = sorted(input_dir.glob(_NATIVE_CSV_GLOB))
         if native_top:
-            return native_top[0]
-        native_recursive = list(input_dir.rglob(_NATIVE_CSV_GLOB))
+            return self._resolve(native_top, _NATIVE_CSV_GLOB, input_dir)
+        native_recursive = sorted(input_dir.rglob(_NATIVE_CSV_GLOB))
         if native_recursive:
-            return native_recursive[0]
+            return self._resolve(native_recursive, _NATIVE_CSV_GLOB, input_dir)
 
         # 3. Last resort: any CSV under evaluation_results/
         eval_dir = input_dir / "evaluation_results"
         if eval_dir.exists():
-            csvs = list(eval_dir.rglob("*.csv"))
+            csvs = sorted(eval_dir.rglob("*.csv"))
             if csvs:
-                return csvs[0]
-        return None
+                return self._resolve(csvs, "evaluation_results/**/*.csv", input_dir)
+        return []
+
+    def _resolve(self, matches: list[Path], what: str, input_dir: Path) -> list[Path]:
+        if self.aggregate_replicates:
+            return matches
+        return [resolve_single_match(matches, tool="Proteina-Complexa", what=what, input_dir=input_dir)]
 
     def _make_id(self, row: pd.Series, fallback_idx: int) -> str:
         # Configurator-aggregated CSV: prefer explicit ID columns.
@@ -226,10 +352,12 @@ class ProteinaComplexaExtractor(SequenceExtractor):
             return did if did.startswith("complexa_") else f"complexa_{did}"
         if "name" in row.index and pd.notna(row["name"]):
             return f"complexa_{row['name']}"
-        # NVIDIA native: derive from metadata_tag or pdb_path.
+        # NVIDIA native: metadata_tag is unique only WITHIN a replicate — it carries
+        # no seed — so key it on the replicate directory the row came from.
+        seed = _SEED_RE.search(str(row.get("__source_csv", "")))
+        prefix = f"complexa_s{seed.group(1)}_" if seed else "complexa_"
         if "metadata_tag" in row.index and pd.notna(row["metadata_tag"]):
-            return f"complexa_{row['metadata_tag']}"
+            return f"{prefix}{row['metadata_tag']}"
         if "pdb_path" in row.index and pd.notna(row["pdb_path"]):
-            stem = Path(str(row["pdb_path"])).stem
-            return f"complexa_{stem}"
-        return f"complexa_{fallback_idx}"
+            return f"{prefix}{Path(str(row['pdb_path'])).stem}"
+        return f"{prefix}{fallback_idx}"

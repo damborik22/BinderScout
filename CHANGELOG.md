@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed (2026-07-28 — F44: extractor ingestion integrity — three silent-corruption classes)
+
+Every one of these produced a **plausible, non-zero pool** with no error, so nothing downstream — including `--allow-empty` — could catch it. Measured on shipped run data, not hypothesised.
+
+**(a) Proteina-Complexa emitted the whole complex as the binder.** The NVIDIA-native `aatype` column encodes `target + binder + poly-alanine pad`. Verified on three production runs: 2VDY (1000 designs at 500–509 aa against a 389-aa target), ApoE4/Clara (100 at 298–305 vs 185 aa) and ApoE4-iso PC-v3 (4804/4804 rows carrying the 141-aa target as an exact prefix). Refolded unstripped, each design was scored against a target it already contained.
+
+- `ProteinaComplexaExtractor(target_sequence=...)`, fed by a new `binder-compare extract --target-seq`. `binder-compare run` and the configurator's generated `run_evaluate.sh` both already held the target and now forward it — one line each.
+- The binder END comes from `_n_<N>_` in the job-directory name (= `len(target) + len(binder)`, exact on 1100/1100 designs checked against PC's own evaluation CSVs). Where the job name has no length field, a trailing alanine run of ≥ 10 is treated as padding — above the longest genuine C-terminal alanine run on disk (7) and below the pads measured on PC-v3 (up to 42).
+- With no `--target-seq`, the prefix shared by every row of a run is inferred and **the inference is announced**. A declared target that is *not* a prefix is refused rather than cut at the wrong residue (PC's `target_input` can select a sub-range).
+- PC's own binder-only columns (`binder_sequence`, `self_sequence`) are now recognised and preferred — no decode, no arithmetic.
+- **Result on the live PC-v3 pool: 4804 designs at 60–100 aa (was 96 at 219–241), max residual alanine tail 5.**
+
+**(a2) RFD3's FASTA-fallback guard rejected 0 % of real concatenations.** `_MAX_PLAUSIBLE_BINDER_LEN = 500` is calibrated on binder length, not target+binder length, so it only fires when the target alone exceeds ~360 aa: on the shipped CALCA run it passed all 8000 mpnn sequences, every one carrying the same 32-aa target prefix. Replaced by a shared-prefix check — a prefix ≥ 20 aa common to every FASTA sequence refuses the pool and names `sequences.csv` as the remedy. mpnn's trailing comma (`>name, sequence_recovery=…`) no longer rides into `binder_id`.
+
+**(b) All seven extractors resolved a multi-match glob with `matches[0]`** — raw filesystem order, no warning. Pointed at a parent of N replicates that kept ONE: 96 of 4804 rows on PC-v3, 100 of 500 on a Clara run. On an ordinary multi-variant run dir it picked `bindcraft_variant_a` out of four, and BoltzGen's `sorted()[-1]` discarded a whole 700-design pool. New `resolve_single_match()` in `extractors/base.py` **stops the run and lists every candidate**. Where several files genuinely are one pool, `extract --aggregate-replicates` opts in and reports the count. The top-level `sequences.csv` short-circuit is preserved, so a stray nested CSV cannot turn a correct run dir into an error.
+
+**(c) A duplicate `binder_id` was a silent DROP.** `add_design_groups` keys `design_group` on it and the report keeps only the first row per group, so the colliding design vanished from the report, Top-N, candidates and diversity while surviving in `metrics.csv` — announced by a "Collapsing N near-duplicate variant(s)" line indistinguishable from the intended Protein-Hunter/BindCraft collapse. **PC on 2VDY collapsed 1000 designs into 253 ids (75 %); a merged Protein-Hunter summary gave 1654 rows → 1487 ids with all 164 collisions covering *different* sequences.**
+
+- `_disambiguate_ids` moved from PXDesign (its only user) to `extractors/base.py` and applied in all seven.
+- Proteina-Complexa ids are re-keyed on the replicate directory (`complexa_s<seed>_<tag>`) — `metadata_tag` carries no seed, so it collides across replicates by construction.
+- The six advisory `binder_id` joins in `cli/report.py` gained the `validate="m:1"` that `merger.py` already used on its sequence join, so a sidecar built from a colliding pool can no longer multiply metrics rows.
+
+24 new tests; the clean layouts are unchanged (CALCA `sequences.csv` still 778 designs at 21–140 aa with identical ids; the RFD3 CSV path still 704).
+
 ### Removed (2026-07-28 — Part U: one ranking, no way to choose another)
 
 **Breaking change to `metrics.csv` / `top30_candidates.csv`.** Three ranking methods collapse into one. `rank_by_two_stage`, `rank_by_consensus_iptm` and `rank_by_adaptyv_method` are replaced by a single `rank_designs(df, min_engines=3)`: cross-engine gate, then `consensus_iptm_mean`, ties on `consensus_iptm_n` → `consensus_iptm` → binder pLDDT.

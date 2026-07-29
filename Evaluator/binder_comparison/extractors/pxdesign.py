@@ -21,15 +21,13 @@ toward PXDesign-optimised sequences. We re-fold everything standardly.
 
 from __future__ import annotations
 
-import hashlib
 import warnings
-from collections import Counter
 from pathlib import Path
 
 import pandas as pd
 
 from ..core.schema import ExtractedBinder, NativeMetrics
-from .base import SequenceExtractor
+from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
 
 _CSV_CANDIDATES = [
     "summary.csv",
@@ -63,31 +61,6 @@ def _safe_float(val) -> float | None:
         return float(val)
     except (TypeError, ValueError):
         return None
-
-
-def _disambiguate_ids(binders: list[ExtractedBinder]) -> None:
-    """Make binder_ids unique, in place.
-
-    Length-scan runs aggregate one ``filtered_summary.csv`` per length bucket into
-    a single sequences.csv, and the collector falls back to the CSV's *file stem*
-    when a row carries no name — so distinct designs can legitimately arrive with
-    the same ``design_id``. binder_id is what ``add_design_groups`` keys on, and
-    duplicates there collapse distinct designs into one group (only the
-    best-ranked survivor is kept), so a silent drop. Break ties with a short hash
-    of the sequence: deterministic and order-independent, so the id stays stable
-    across a re-sorted CSV.
-    """
-    dupes = {bid for bid, n in Counter(b.binder_id for b in binders).items() if n > 1}
-    if not dupes:
-        return
-    for b in binders:
-        if b.binder_id in dupes:
-            b.binder_id = f"{b.binder_id}_{hashlib.sha1(b.sequence.encode()).hexdigest()[:6]}"
-    warnings.warn(
-        f"PXDesign: {len(dupes)} binder_id(s) were not unique across the extracted pool "
-        f"(e.g. {sorted(dupes)[0]!r}); disambiguated with a sequence hash suffix.",
-        stacklevel=2,
-    )
 
 
 class PXDesignExtractor(SequenceExtractor):
@@ -142,7 +115,7 @@ class PXDesignExtractor(SequenceExtractor):
                 f"run is repeated, and cannot be grepped back to the source CSV.",
                 stacklevel=2,
             )
-        _disambiguate_ids(results)
+        disambiguate_ids(results, tool="PXDesign")
         return results
 
     def _extract_native(self, row: pd.Series) -> NativeMetrics:
@@ -167,9 +140,9 @@ class PXDesignExtractor(SequenceExtractor):
                 return candidate
         # Search subdirectories (e.g. design_outputs/run_name/summary.csv)
         for name in _CSV_CANDIDATES:
-            matches = list(input_dir.rglob(name))
+            matches = sorted(input_dir.rglob(name))
             if matches:
-                return matches[0]
+                return resolve_single_match(matches, tool="PXDesign", what=name, input_dir=input_dir)
         return None
 
     def _make_id(self, row: pd.Series, fallback_idx: int) -> str:
