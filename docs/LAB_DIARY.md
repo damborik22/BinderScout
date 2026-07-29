@@ -1288,3 +1288,84 @@ this outright: it is a **triage filter, not a decision procedure**.
   the label-cleaning effect generalises — Adaptyv was never checked for the analogous
   assay-quality confound, and its ESMFold2 ipTM predicts *expression* at macro 0.680,
   essentially equal to its binder AUC.
+
+---
+
+## 2026-07-29 — **Proteina-Complexa deprecated on Spark**: it runs, it is the same algorithm, and it is ~130× too slow because the AF2 reward has no GPU on aarch64
+
+**Decision:** run upstream Proteina-Complexa on x86 (Clara / BM1–BM4) only. `install_aarch.sh` now
+refuses `--tool proteina-complexa` with the real reason and the numbers; `docs/plans.md`,
+`CLAUDE.md` and the CHANGELOG carry the verdict.
+
+**What we got wrong before, in both directions.** The standing note said upstream `complexa` on
+Spark was "validated only as CLI imports + runs, rc=0" and that PyG/torchtext were the blocker.
+Both are false. It has **produced real two-chain designs on this box** (2026-07-13), and re-running
+that config today reproduced them **byte-identically, 16 days and three processes apart**. tmol's
+CUDA kernels **do** compile at sm_121 (22.9 s for apsp, 64.1 s for the hbond + fa_elec pair PC
+actually uses). `rf3` **is** installed and working (rc-foundry 0.2.0, 1.9 GB checkpoint). The
+`torch_scatter` shim is **never entered** — `fold_emb` is absent from `ckpts/complexa.ckpt`, so
+`FoldEmbeddingSeqFeat` is never constructed. PC imports no PyG package at all. Only foldseek/mmseqs
+are genuinely missing, and they only feed analyze-stage diversity/novelty reporting.
+
+**It is also not a different algorithm.** Both platforms run one reward model — `af2folding`, with
+`i_pae = -1.0` and every other weight 0.0 — so `total_reward == -af2folding_i_pae` on both sides.
+No reward term is missing on Spark. By the only bar that is achievable here (same generative
+distribution) the port is legitimately equivalent.
+
+**The blocker is jaxlib.** There is no CUDA jaxlib wheel for aarch64, so `jax.devices()` returns
+`[CpuDevice(id=0)]` — structural, not a `JAX_PLATFORMS` pin — and the AF2 reward runs on CPU.
+Measured live: **401.8 s to generate 1 sample with the reward active vs 63.7 s for 2 samples with
+it stripped**, isolating **~320 s per AF2 call** at 389 % CPU (≈4 of 20 cores; the workload is
+latency-bound on many small ops, so threading does not help). On H200 the same call is **≤2.46 s**
+(8113.5 s generate ÷ 3300 calls, an upper bound that also absorbs the diffusion, so the true ratio
+is ≥130×).
+
+**The MCTS budget is fixed by construction**, which is what makes this fatal rather than annoying:
+`nsamples × (1 + n_simulations × n_segments)` = `100 × (1 + 8×4)` = **3300 AF2 calls per 100-design
+replicate** (counted exactly in the 2VDY generate log).
+
+| | H200 (Clara) | GB10 (Spark) |
+|---|---|---|
+| 100-design replicate, generate | 2.25 h | **12.2 days** |
+| ApoE4 v1, 5 replicates | 16 h 12 m | ~61 days |
+| PC-v3, 50 replicates | ~2 weeks | **~1.7 years** |
+
+`evaluate` adds a second CPU wall (`binder_folding_method: colabdesign` is also JAX, ~9 h/replicate
+here vs 51 min on H200).
+
+**Two traps, recorded so nobody re-derives them.**
+
+1. **`best-of-n` is not a workaround.** It costs ~1 AF2 call per sample (~18 h per 100 designs,
+   genuinely viable) *precisely because* `best_of_n_search.py` and `single_pass_generation.py` never
+   call `compute_reward_from_samples` — the reward is post-hoc ranking in `filter.py`. MCTS was
+   adopted on 2VDY because it beat best-of-n **10× at iPTM ≥ 0.85 in ⅓ the wall clock**. Running
+   best-of-n on Spark is not the same search made slower; it is the search we already rejected.
+   Under MCTS the reward is backpropagated into node statistics, so CPU-vs-GPU floats change the
+   **trajectory**, not merely the ordering.
+2. **No two machines produce identical designs, and that is by design.** `generate.py:596`
+   deliberately enables TF32 (SM-generation-specific kernels); there is no
+   `use_deterministic_algorithms`, no `cudnn.deterministic`, no `CUBLAS_WORKSPACE_CONFIG` anywhere;
+   and a 400-step SDE amplifies the drift. Bit-identity is **same box + same stack + same config**
+   only. Sharper: `dataloader.batch_size` alone changes the designs at a fixed seed (verified by
+   running it — lengths unchanged, both structures different), and `gen_njobs`,
+   `search.max_batch_size`, `nres.low/high`, `best_of_n.replicas` and `filter.filter_samples_limit`
+   do the same. **`seed=X` was never a sufficient provenance record.**
+
+**Also found, not fixed:** the `torch_scatter` shim is untracked — it lives only inside the venv,
+is invisible to `git status`, and dies on any `uv sync`; `search/sequence_hallucination.py:154`
+still hard-codes `jax.devices("gpu")[device_id]` with no fallback (inert while
+`refinement.algorithm: null`, but it will hard-fail the moment refinement is enabled); and every
+`ipsae` column in the Spark reward CSVs is identically 0.0, which reads as not-computed rather than
+genuinely zero — confirm before ranking on them.
+
+**What would reopen it:** a CUDA jaxlib for aarch64/sm_121, or a GPU-native reward replacing AF2.
+`rf3` is already installed on Spark and PC's rf3 folding reward is commented out at
+`binder_generate.yaml:194-213` — but that is a different objective, so it would be a new
+experiment, not parity with Clara.
+
+**Method note.** Verifying this meant running, not reading: ~6 short `complexa generate` jobs plus
+a live AF2-CPU measurement, into gitignored `Proteina-Complexa/inference/` dirs
+(`repro{A,B,C_seed6,D_bs1}`, `verifyAF2cpu`) and ~31 MB of tmol kernels in
+`~/.cache/torch_extensions`. Two adversarial verifiers struck several claims from the first pass,
+including a wrong subcommand count, a stale run inventory, and a binder-chain length quoted as
+fixed when `nres` draws it per sample.

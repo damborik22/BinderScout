@@ -80,27 +80,90 @@ bindmaster pack --output FILE              cd BindMaster
 
 ---
 
-## Proteina-Complexa on aarch64
+## Proteina-Complexa on aarch64 (DGX Spark) — NOT VIABLE
 
-> **Status:** Planned. x86_64 integration is complete. Porting to the `aarch64` branch
-> follows the Mosaic pattern: try building, identify packages without aarch64 wheels,
-> patch them out with `platform_machine != 'aarch64'` markers.
+> **Status: DEPRECATED 2026-07-29. Do not run production Proteina-Complexa on Spark.**
+> This is a throughput verdict, not an install failure — the port works. It reopens only if
+> a CUDA-enabled `jaxlib` for aarch64 / sm_121 becomes available (see "What would reopen it").
 
-### Key facts
+### What is actually true
 
-- Core deps (PyTorch 2.7, JAX 0.4.29) have aarch64 CUDA wheels
-- Likely blockers: `torchtext`, `torch-geometric` (PyG), `esmj`, `atomworks`
-- Approach: clone → attempt build → note failures → write patch function → add to `install_aarch.sh`
+Upstream `complexa` (`NVIDIA-Digital-Bio/proteina-complexa` @ `916eaae`) **is installed and
+working** on BM5 — uv venv, Python 3.12.12, torch 2.13.0+cu130, GB10 visible at sm_121. It has
+produced real two-chain designs on that box (2026-07-13), and re-running the same config
+reproduces them byte-identically. The port is **not a different algorithm**: both Spark and the
+x86 fleet run one reward model (`af2folding`, `i_pae = -1.0`, every other weight 0.0), and none
+of the platform workarounds touches the generation path —
 
-### Steps
+- the hand-written `torch_scatter` shim is never entered (`fold_emb` is absent from
+  `ckpts/complexa.ckpt`, so `FoldEmbeddingSeqFeat` is never constructed);
+- `tmol` is never constructed under the binder configs — and its CUDA kernels **do** build at
+  sm_121 (verified, 22.9 s / 64.1 s);
+- `rf3` is installed and working (rc-foundry 0.2.0, 1.9 GB checkpoint) — the older "rf3 deferred"
+  note is stale;
+- `foldseek` / `mmseqs` really are missing, but they only feed analyze-stage diversity/novelty
+  reporting, all try/except-wrapped. Nothing is gated on them.
 
-1. Rebase `aarch64` branch from `master`
-2. Clone Proteina-Complexa and attempt naive build
-3. Identify failing packages from build log
-4. Write `_patch_complexa_pyproject()` to exclude unsupported packages
-5. Handle PyTorch CUDA (force-reinstall for sm_121 if needed)
-6. Add `install_proteina_complexa()` to `install/install_aarch.sh`
-7. Verify end-to-end: install → configure → run → evaluate
+### Why it is deprecated anyway — the AF2 reward has no GPU on aarch64
+
+There is no CUDA `jaxlib` wheel for aarch64, so `jax.devices()` returns `[CpuDevice(id=0)]` and
+the AF2 reward — the *only* reward in the composite — runs on CPU. That is structural, not a
+`JAX_PLATFORMS` pin.
+
+The production recipe on Clara is `search.algorithm=mcts, n_simulations=8`, whose reward budget
+is fixed by construction: `nsamples x (1 + 8x4)` = **3300 AF2 calls per 100-design replicate**.
+
+| | H200 (Clara) | GB10 (Spark) |
+|---|---|---|
+| per AF2 call | <= 2.46 s | **~320 s** |
+| 100-design replicate (generate) | 2.25 h | **12.2 days** |
+| ApoE4 campaign, 5 replicates | 16 h 12 m | ~61 days |
+| PC-v3, 50 replicates | ~2 weeks | **~1.7 years** |
+
+Threading does not rescue it: AF2-on-CPU asymptotes at ~4 of 20 cores (latency-bound on many
+small ops), and even an impossible perfect 20-core scale-out leaves 122 days for PC-v3. The
+`evaluate` stage adds a second CPU wall, since `binder_folding_method: colabdesign` is also JAX.
+
+### Two traps
+
+**Do not "solve" it with `best-of-n`.** best-of-n and single-pass cost ~1 AF2 call per sample
+(~18 h per 100 designs, genuinely viable) *precisely because they never consult the reward during
+generation* — `best_of_n_search.py` and `single_pass_generation.py` never call
+`compute_reward_from_samples`. MCTS was adopted on 2VDY because it beat best-of-n **10x at
+iPTM >= 0.85 in a third of the wall clock**. Running best-of-n on Spark is not the same search
+made slower; it is the search we already rejected.
+
+**Do not expect identical designs from any two machines, ever.** `generate.py:596` deliberately
+enables TF32 (SM-generation-specific kernels), there is no `use_deterministic_algorithms`, no
+`cudnn.deterministic` and no `CUBLAS_WORKSPACE_CONFIG` anywhere in the tree, and a 400-step SDE
+amplifies the drift. Bit-identity holds only for **same box + same stack + same config**. Even
+there, `dataloader.batch_size` alone changes the designs at a fixed seed (verified), so `seed=X`
+is not a sufficient provenance record — `gen_njobs`, `search.max_batch_size`, `nres.low/high`,
+`best_of_n.replicas` and `filter.filter_samples_limit` all move the output too. The achievable
+bar is *same generative distribution*, and by that bar the Spark port is legitimately equivalent.
+Under MCTS specifically, CPU-vs-GPU AF2 floats are backpropagated into the node statistics, so
+they change the search **trajectory**, not merely the ranking.
+
+### What would reopen it
+
+1. A CUDA-enabled `jaxlib` for aarch64 / sm_121. This is the whole blocker.
+2. Or a **GPU-native reward** instead of AF2. `rf3` is already installed on Spark and PC supports
+   an rf3 folding reward (commented out at `binder_generate.yaml:194-213`). That is a different
+   objective, so designs would differ from Clara's by construction — a new experiment, not parity.
+
+### If someone still packages the install (worth doing on its own merits)
+
+The install is three tracked edits — `pyproject.toml` cu126 -> cu130, the JAX GPU->CPU fallback in
+`rewards/alphafold2_reward.py:125-129`, and a target block — plus **one untracked `torch_scatter`
+shim living only inside the venv**, invisible to git and destroyed by any `uv sync`. That shim is
+the most fragile part of the setup. Also unpatched: `search/sequence_hallucination.py:154` still
+hard-codes `jax.devices("gpu")[device_id]` with no fallback — inert today
+(`refinement.algorithm: null`) but it will hard-fail on aarch64 the moment refinement is enabled.
+
+**Not to be confused with `jproteina-complexa`** — the escalante-bio JAX reimplementation that
+ships inside the Mosaic venv. That one genuinely works on aarch64 and produced the 150-design CBG
+run, but it is a different implementation with different weights
+(`~/.cache/jproteina_complexa/weights_v2`), not upstream `complexa`.
 
 ---
 
