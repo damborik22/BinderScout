@@ -19,18 +19,32 @@ Two correctness rules are baked in here so the file is right straight out of
      native-block row is therefore a refolded design (no blank-metric rows,
      barring a design whose engines all failed to score).
   2. Backbone collapse — a tool's native CSV may list many sequences for one
-     backbone (BindCraft MPNN siblings, Protein-Hunter cycles); we keep the
-     best-native-ranked sequence per ``design_group`` so every row is a
-     distinct design. Native rank is dense over the surviving distinct
-     backbones.
+     backbone (BindCraft MPNN siblings, Protein-Hunter cycles); we keep one row
+     per ``design_group`` so every row is a distinct design. Native rank is
+     dense over the surviving distinct backbones.
 
-Both "Ranking refolded" columns use the SAME ranking — the collapsed two-stage
-order (``df_display`` dense ``rank``), looked up by ``design_group`` — so
-a native design and the refold-block appearance of its backbone carry the same
-refold rank. Likewise the refold block's "Ranking native" is looked up by
-``design_group`` (not exact sequence) so a refold representative that is a
-*different* MPNN sibling than the native-best one still resolves to its
-backbone's native rank.
+  3. One row = one real design, and **the native block is the TOOL's view** — our
+     refold never picks which sibling it shows, nor reorders it. A backbone's
+     best-NATIVE sibling and our refold REPRESENTATIVE are often different
+     sequences; the native block shows the tool's pick and quotes *that
+     sequence's own* refold rank. Both halves of the row therefore describe the
+     same molecule.
+
+     Getting this wrong in either direction has already shipped. Printing the
+     native sibling's ipTM beside the representative's rank made rows describing
+     no actual design (10 of 140 on the CALCA top-50 pool: bindcraft native #4
+     showed mpnn3's ipTM 0.917, true rank 26, next to mpnn4's rank 22, ipTM
+     0.921). Rendering the row *from* the representative instead fixed the
+     arithmetic but let our ranking overwrite the tool's own #1 — BindCraft ranks
+     ``…_l186_s671234_mpnn5`` first, and the table said ``_mpnn2``.
+
+This works only because ``rank`` is never renumbered after collapsing (see
+``cli/report.py``), so every refolded sequence keeps a rank and a collapsed
+sibling can still be quoted. The refold block quotes each row's own ``rank``
+too; it therefore skips numbers where a sibling was collapsed, and a missing
+number means exactly that. The refold block's "Ranking native" is looked up by
+``design_group`` so a representative that is a *different* sibling than the
+native-best one still resolves to its backbone's native rank.
 """
 
 from __future__ import annotations
@@ -41,9 +55,9 @@ from pathlib import Path
 
 import pandas as pd
 
-# Section sizes — fixed by request: per-method 20 native designs + 30 refolded.
+# Section sizes — fixed by request: per-method 20 native designs + 50 refolded.
 N_NATIVE_PER_TOOL = 20
-N_REFOLD = 30
+N_REFOLD = 50
 
 # Native blocks are emitted in this order; the refold block always comes last.
 CANONICAL_TOOL_ORDER = [
@@ -193,9 +207,15 @@ def build_candidates_table(
     """
     meta = _seq_meta(full_df)
     seq_to_group = {k: v["design_group"] for k, v in meta.items() if v.get("design_group") not in (None, "")}
-    # backbone → collapsed two-stage refold rank (the single, dense ranking used
-    # by both the refold block and the native block's "Ranking refolded").
-    grp_to_refold_rank = dict(zip(df_display.get("design_group", []), df_display.get("rank", []), strict=False))
+    # UPPER(sequence) → that sequence's OWN refold rank. Every refolded design
+    # has one (report.py does not renumber after collapsing), so a native row can
+    # quote the rank of the exact design it names — including a sibling the
+    # shortlist collapsed away.
+    seq_to_rank = {
+        str(r.get("sequence", "")).strip().upper(): r.get("rank", "")
+        for r in full_df.to_dict("records")
+        if str(r.get("sequence", "")).strip()
+    }
 
     rows: list[dict] = []
 
@@ -217,7 +237,8 @@ def build_candidates_table(
                     "Set": set_label,
                     "Method": tool,
                     "Ranking native": native_rank,
-                    "Ranking refolded": grp_to_refold_rank.get(m.get("design_group", ""), ""),
+                    # THIS design's own refold rank — never a sibling's.
+                    "Ranking refolded": seq_to_rank.get(key, ""),
                     "Mean_ipTM": m.get("Mean_ipTM", ""),
                     "Mean_ipSAE_min": m.get("Mean_ipSAE_min", ""),
                     "Solubility SoluProt": m.get("Solubility SoluProt", ""),
@@ -226,17 +247,22 @@ def build_candidates_table(
                 }
             )
 
-    # --- refold block (cross-engine two-stage ranking), LAST ---
+    # --- refold block (cross-engine ranking), LAST ---
     set_label = f"Refold top-{n_refold}"
+    unresolved: dict[str, int] = {}
     for refold_rank, row in enumerate(df_display.head(n_refold).to_dict("records"), start=1):
         tool = row.get("source_tool", "")
         native_rank = grp_native_rank.get(tool, {}).get(row.get("design_group", ""), "")
+        if native_rank == "" and tool in grp_native_rank:
+            unresolved[tool] = unresolved.get(tool, 0) + 1
         rows.append(
             {
                 "Set": set_label,
                 "Method": tool,
                 "Ranking native": native_rank,
-                "Ranking refolded": refold_rank,
+                # the frame's own rank, not the row position, so both blocks
+                # quote the same number for the same design
+                "Ranking refolded": row.get("rank", refold_rank),
                 "Mean_ipTM": _num3(row.get("consensus_iptm_mean", "")),
                 "Mean_ipSAE_min": _num3(row.get("consensus_ipsae_min_mean", "")),
                 "Solubility SoluProt": _num3(row.get("native_soluprot_score", "")),
@@ -245,4 +271,12 @@ def build_candidates_table(
             }
         )
 
+    if unresolved:
+        detail = ", ".join(f"{t}: {n}" for t, n in sorted(unresolved.items()))
+        warnings.warn(
+            f"[candidates] no native rank for {sum(unresolved.values())} of the top-{n_refold} "
+            f"refold designs ({detail}) — those designs are in the refold pool but absent from "
+            "their tool's native CSV, so the cell is left blank. The snapshot predates the pool "
+            "(tool re-run, or the pool was assembled from a different selection)."
+        )
     return pd.DataFrame(rows, columns=CANDIDATES_COLUMNS)

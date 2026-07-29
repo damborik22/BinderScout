@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..comparison.candidates import build_candidates_table
+from ..comparison.candidates import N_NATIVE_PER_TOOL, N_REFOLD, build_candidates_table
 from ..comparison.diversity import cluster_sequences_df
 from ..comparison.ensemble import compute_ensemble_metrics
 from ..comparison.epitope import epitope_match, extract_interface_residues, parse_hotspots
@@ -360,8 +360,15 @@ def run(args: argparse.Namespace) -> None:
             f"[report] Collapsing {len(df) - n_groups} near-duplicate variant(s) → "
             f"{n_groups} distinct designs (best per trajectory; --no-collapse-duplicates to disable)"
         )
+        # ONE numbering space: `rank` is the position of a SEQUENCE in the full
+        # refold ordering, and it is NOT renumbered here. Collapsing only decides
+        # which designs the shortlist *shows*, never what they are called — so a
+        # collapsed sibling keeps its own rank and the candidates table can quote
+        # it in the tool's native block. The shortlist therefore skips numbers
+        # where a sibling was collapsed; a missing number means exactly that.
+        # (Renumbering densely made metrics.csv and every shortlist disagree, and
+        # left 11 of BindCraft's native top-20 with no rank to show at all.)
         df_display = df[df["is_representative"]].reset_index(drop=True)
-        df_display["rank"] = range(1, len(df_display) + 1)
     else:
         df_display = df
 
@@ -481,7 +488,7 @@ def run(args: argparse.Namespace) -> None:
     # applied internally (no pre-processing needed).
     candidates = build_candidates_table(df, df_display, tool_csvs or None)
     write_csv(candidates, output_dir / "candidates.csv")
-    print("  candidates.csv — per-tool native top-20 + refold top-30 with sequences")
+    print(f"  candidates.csv — per-tool native top-{N_NATIVE_PER_TOOL} + refold top-{N_REFOLD} with sequences")
 
     # Step 4c: Copy top-20 refolded PDB structures for visual inspection.
     # Prefer the *primary engine's* PDB so the viewer shows the structure
