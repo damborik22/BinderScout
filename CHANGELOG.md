@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed (2026-07-29 — candidates.csv: every cell now describes the sequence in its own row)
+
+Follow-on to the shortlist fixes below, all found by reading the shipped CALCA top-50 file. The common defect: a cell was resolved through `design_group`, so it printed a number belonging to a **sibling** — a different MPNN sequence of the same backbone.
+
+- **"Ranking native" on the refold block came from the backbone.** Our rank-22 row holds `l127_s975277_mpnn4` and printed native rank **4**, which is `_mpnn3`'s; `_mpnn4`'s own native rank is 10. This is visible precisely because the tool and the refold disagree about which sibling is better — BindCraft scores `_mpnn3` 0.890 vs `_mpnn4` 0.880, while our engines score `_mpnn4` 0.921 vs `_mpnn3` 0.917. Native rank is now computed **per sequence** over every in-pool design the tool ranked (`collapse_native_df` gains `collapse=False`).
+- **The per-tool native block was being collapsed.** Backbone collapse exists so *our* shortlist does not spend slots on several MPNN sequences of one design; it was also rewriting each tool's own top-N, which is not ours to renumber. BindCraft's native top-20 came out as `1,2,3,4,7,8,11,14,15,16,18,19,21,23,24,26,27,29,30,33` — holes wherever a sibling of an already-listed backbone was dropped. Native blocks now reproduce the tool's list untouched: **every tool on both live pools reads 1..20 with no holes.** The refold block still collapses and therefore still skips a number where a sibling was dropped — that skip is the point of the collapse, and it is the only place collapse belongs.
+- **A sequence listed twice in a native CSV took the *last* copy's rank**, because the lookup was a dict comprehension. First occurrence (the better rank) now wins. No native CSV in either live pool has an in-pool duplicate, so nothing shipped was affected.
+
+Both rankings count sequences, and every cell is looked up by sequence, never by `design_group`. Verified on both pools: **0** native rows and **0** refold rows quote a rank belonging to a different sequence.
+
+Not a code change, but worth recording: these tools' headline metrics are coarse enough that native rank was largely arbitrary. BindCraft reports `Average_i_pTM` to 2 decimals — 314 of 350 values tied, and the value at native #4 was shared by five designs occupying ranks 2–6. The campaign-side snapshot builders now sort on a chain (`Average_i_pTM` → `Average_i_pAE` → `Average_pLDDT` → `MPNN_score`, directions checked against the data: ρ = −0.73 / +0.59 / −0.16), taking distinct values from 36 to 346 of 350 and unseparated sibling groups from 38 to 2 of 153.
+
 ### Deprecated (2026-07-29 — Proteina-Complexa on aarch64 / DGX Spark: not viable)
 
 **Run upstream Proteina-Complexa on x86 (Clara / BM1–BM4). It is deprecated on Spark — a throughput verdict, not an install failure.**

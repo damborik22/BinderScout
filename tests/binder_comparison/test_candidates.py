@@ -16,6 +16,7 @@ pd = pytest.importorskip("pandas")
 from binder_comparison.comparison.candidates import (  # noqa: E402
     build_candidates_table,
     collapse_native_df,
+    display_tool_name,
     order_tools,
 )
 
@@ -53,8 +54,12 @@ def _full_df():
 
 
 def _df_display(full):
-    # Like cli/report.py: collapse to representatives but do NOT renumber, so
-    # every sequence keeps its own rank and the shortlist skips the collapsed one.
+    """Like cli/report.py: collapse to representatives, never renumber.
+
+    `rank` stays each SEQUENCE's own, so the shortlist skips a number where a
+    sibling was collapsed and every row can quote the rank of the exact sequence
+    it names.
+    """
     return full[full["is_representative"]].sort_values("rank").reset_index(drop=True).copy()
 
 
@@ -93,10 +98,11 @@ def test_collapse_warns_when_stale_csv_matches_nothing_in_pool(tmp_path):
 def test_build_candidates_full(tmp_path):
     full = _full_df()
     disp = _df_display(full)
-    # bindcraft native CSV in native-rank order; the best-native row of bc_t1 is
-    # the mpnn2 sibling (AAAB), NOT the refold representative (AAAA). Includes a
-    # never-refolded design (XXXX) that must be dropped.
-    bindcraft = pd.DataFrame({"Sequence": ["AAAB", "XXXX", "CCCC"]})
+    # bindcraft native CSV in native-rank order. Both bc_t1 siblings are listed,
+    # and the tool ranks AAAB above AAAA while our refold prefers AAAA — the real
+    # BindCraft case (it rates l127_s975277_mpnn3 4th; we rate its sibling _mpnn4
+    # higher). Includes a never-refolded design (XXXX) that must be dropped.
+    bindcraft = pd.DataFrame({"Sequence": ["AAAB", "AAAA", "XXXX", "CCCC"]})
     mosaic = pd.DataFrame({"sequence": ["MMMM"]})
     tool_csvs = {
         "bindcraft": _write(tmp_path, "bc.csv", bindcraft),
@@ -111,28 +117,27 @@ def test_build_candidates_full(tmp_path):
     sets = list(dict.fromkeys(t["Set"]))
     assert sets == ["Native top-20", "Refold top-30"]  # this call passes n_refold=30 explicitly
     native_order = list(dict.fromkeys(t[t["Set"].str.startswith("Native")]["Method"]))
-    assert native_order == ["bindcraft", "mosaic"]
+    assert native_order == ["BindCraft", "Mosaic"]  # display names, not join keys
 
-    # bindcraft native block: XXXX dropped (not refolded), bc_t1 collapsed to one
-    # row, dense native rank 1..N. The row shows the TOOL's pick (AAAB, bc_t1's
-    # best-native sibling) — our refold must not swap it for the representative.
-    bc_nat = t[(t["Set"].str.startswith("Native")) & (t["Method"] == "bindcraft")]
-    assert list(bc_nat["Primary sequence"]) == ["AAAB", "CCCC"]
-    assert list(bc_nat["Ranking native"]) == [1, 2]
+    # bindcraft native block reproduces the TOOL's list: XXXX dropped (never
+    # refolded), but BOTH bc_t1 siblings kept and numbered 1,2,3 with no holes.
+    # Backbone collapse is for OUR shortlist only — it must not rewrite the
+    # tool's own top-N (doing so renumbered BindCraft's as 1,2,3,4,7,8,11,…).
+    bc_nat = t[(t["Set"].str.startswith("Native")) & (t["Method"] == "BindCraft")]
+    assert list(bc_nat["Primary sequence"]) == ["AAAB", "AAAA", "CCCC"]
+    assert list(bc_nat["Ranking native"]) == [1, 2, 3]
 
-    # The bc_t1 refold representative (AAAA) is a DIFFERENT sibling than the
-    # native-best (AAAB); its refold-block "Ranking native" still resolves to
-    # bc_t1's native rank (1) via design_group.
+    # THE POINT: the refold block's bc_t1 row holds AAAA, so it must print AAAA's
+    # OWN native rank (2) — not AAAB's 1, which is a different sequence.
     refold = t[t["Set"].str.startswith("Refold")]
-    bc_ref = refold[refold["Method"] == "bindcraft"]
+    bc_ref = refold[refold["Method"] == "BindCraft"]
     bc_t1_row = bc_ref[bc_ref["Primary sequence"] == "AAAA"]
-    assert list(bc_t1_row["Ranking native"]) == [1]
+    assert list(bc_t1_row["Ranking native"]) == [2]
 
-    # Each row quotes ITS OWN design's rank: the refold block's AAAA shows 2, and
-    # the native row for AAAB shows 3 — AAAB's own rank, not its backbone's.
+    # Every rank is its own sequence's: AAAA refolds at 2, AAAB at 3. The refold
+    # block therefore skips 3 — AAAB was collapsed as a sibling of AAAA.
     assert list(bc_t1_row["Ranking refolded"]) == [2]
     assert list(bc_nat[bc_nat["Primary sequence"] == "AAAB"]["Ranking refolded"]) == [3]
-    # The shortlist therefore skips 3 (AAAB was collapsed away).
     assert sorted(refold["Ranking refolded"]) == [1, 2, 4]
 
     # Length is a plain int, not a float.
@@ -179,18 +184,22 @@ def test_native_row_is_one_real_design(tmp_path):
 
     nat = t[t["Set"].str.startswith("Native")]
     by_seq = full.set_index("sequence")
-    # every refolded sequence keeps a rank, collapsed siblings included
-    rank_to_seq = dict(zip(full["rank"], full["sequence"], strict=False))
+    # a rank identifies a DESIGN, so it must resolve to this row's backbone
+    rank_to_group = dict(zip(full["rank"], full["design_group"], strict=False))
+    seq_to_group = dict(zip(full["sequence"], full["design_group"], strict=False))
     for _, row in nat.iterrows():
         seq = row["Primary sequence"]
         shown_rank = row["Ranking refolded"]
         # the row's own metrics
         assert row["Mean_ipTM"] == round(by_seq.loc[seq, "consensus_iptm_mean"], 3)
         assert row["Length"] == by_seq.loc[seq, "binder_length"]
-        # …and the rank it prints must be THIS sequence's rank, not a sibling's
-        assert rank_to_seq[shown_rank] == seq, (
-            f"native row names {seq} but prints rank {shown_rank}, which belongs to {rank_to_seq[shown_rank]}"
+        # …and the rank it prints must belong to THIS design, not another one
+        assert rank_to_group[shown_rank] == seq_to_group[seq], (
+            f"native row names {seq} (design {seq_to_group[seq]}) but prints rank "
+            f"{shown_rank}, which belongs to design {rank_to_group[shown_rank]}"
         )
+    # no native row may be left without a cross-reference
+    assert not (nat["Ranking refolded"].astype(str).str.strip() == "").any()
 
 
 def test_refold_only_when_no_tool_csvs():
@@ -203,3 +212,34 @@ def test_refold_only_when_no_tool_csvs():
     assert (t["Ranking native"].astype(str).str.strip() == "").all()
     other = t.drop(columns=["Ranking native"])
     assert int(other.map(lambda x: str(x).strip() == "").to_numpy().sum()) == 0
+
+
+def test_tool_names_are_human_readable():
+    """The Method column is for a reader, so it must not print raw keys.
+
+    Join keys (`source_tool`, `--tool-csv` names) stay lowercase; this is display
+    only. Variants keep their qualifier so the two BoltzGen modes stay apart, and
+    an unknown tool passes through rather than being mangled.
+    """
+    assert display_tool_name("protein_hunter") == "Protein Hunter"
+    assert display_tool_name("rfd3") == "RFDiffusion3"
+    assert display_tool_name("proteina_complexa") == "Proteina-Complexa"
+    assert display_tool_name("pxdesign") == "PXDesign"
+    assert display_tool_name("boltzgen") == "BoltzGen"
+    assert display_tool_name("bindcraft") == "BindCraft"
+    assert display_tool_name("mosaic") == "Mosaic"
+    # variants keep their qualifier
+    assert display_tool_name("boltzgen_protein") == "BoltzGen (protein)"
+    assert display_tool_name("boltzgen_nano") == "BoltzGen (nano)"
+    # unknown / empty pass through untouched
+    assert display_tool_name("some_new_tool") == "some_new_tool"
+    assert display_tool_name("") == ""
+
+
+def test_candidates_method_column_uses_display_names(tmp_path):
+    full = _full_df()
+    disp = _df_display(full)
+    tool_csvs = {"bindcraft": _write(tmp_path, "bc.csv", pd.DataFrame({"Sequence": ["AAAB", "CCCC"]}))}
+    t = build_candidates_table(full, disp, tool_csvs, n_native=20, n_refold=30)
+    assert "bindcraft" not in set(t["Method"])
+    assert "BindCraft" in set(t["Method"])

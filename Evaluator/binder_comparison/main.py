@@ -26,6 +26,7 @@ from .cli import (
     epitope_map,
     extract,
     filter_soluprot,
+    hits,
     mature,
     monomer,
     parse_seqs,
@@ -74,6 +75,7 @@ def main(argv=None) -> None:
     beta_check.add_parser(subparsers)
     epitope.add_parser(subparsers)
     diversity.add_parser(subparsers)
+    hits.add_parser(subparsers)
 
     args = parser.parse_args(argv)
     args.func(args)
