@@ -81,9 +81,9 @@ def _load_target(args: argparse.Namespace) -> str | None:
         return args.target_seq.strip().upper()
     if args.target_pdb:
         try:
-            from ..io.read import extract_sequence_from_pdb
+            from ..io.read import parse_pdb_sequence
 
-            return extract_sequence_from_pdb(args.target_pdb)
+            return parse_pdb_sequence(args.target_pdb)
         except Exception as e:
             return f"ERROR: {e}"
     return None
