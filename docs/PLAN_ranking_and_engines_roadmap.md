@@ -124,23 +124,48 @@ ProteinBase). If it doesn't beat it, document the negative result and stop.
 
 ---
 
-## Part U — ProtDBench calibration harness
+## Part U — Large-scale calibration benchmark
 
-**Goal.** Stand up a reproducible harness that scores our ranking layer against
-**ProtDBench** (arXiv 2605.04118) so every metric decision — `ipsae_min` vs `iCS` vs
-`consensus_iptm[_mean]` vs future metrics — is data-driven rather than anecdotal. This is
-the *infrastructure* that lets Part T's decision be provable.
+> ## ✅ DONE 2026-07-28 — **metric choice is closed.**
+> Full write-up: **`docs/INVESTIGATION_partU_cao_benchmark.md`** · shipped in `3fa175e`,
+> `3ee060a`, `4fc3690` (merged `ce63d12`).
+>
+> **ProtDBench was dropped as the benchmark** in favour of **Cao 2022** — 4,442 near-miss
+> Rosetta minibinders across 12 targets, refolded through all three engines with **100%
+> coverage and zero NaN**, the first perfectly-matched engine comparison we have. No
+> `binder-compare calibrate` subcommand was built and none is needed: the verdict is that
+> searching for a better metric on labelled data makes things *worse*.
+>
+> - Nothing beats the shipped `consensus_iptm_mean`. Honest nested selection over 72 metrics
+>   scores **0.5170** vs **0.5552** (p = 0.0014, 8/12 targets); the best of 2,489 searched
+>   combinations sits inside the permutation null. **Stop running combination searches.**
+> - The Stage-1 max screen was **inert** (0 designs removed from the top decile on 12/12
+>   targets) and is retired; `--rank-by` and `--screen-metric` are removed.
+> - Cao's 0.56 ceiling is **label censoring**, not metric failure: 73.4% of its binder labels
+>   are one-sided Kd and are experimentally indistinguishable from non-binders on Cao's own
+>   binary assay. Label-clean, the same metric reaches 0.73.
+> - The ranking is a **triage filter, not a decision procedure** — ~1.9× macro enrichment from
+>   the top decile, beating a random ordering on only 6 of 12 targets.
+> - Metric rankings transfer across datasets only at the **engine** level, not the metric level.
+>
+> **Still open (research, no repo change implied):** why Boltz-2 ranks last on Cao (mechanism
+> unknown, and it is our cheapest engine); whether the label-cleaning effect generalises —
+> Adaptyv was never checked for the analogous assay-quality confound, and its ESMFold2 iPTM
+> predicts *expression* at macro 0.680, essentially equal to its binder AUC.
 
-**Investigate-first checklist:**
-- [ ] U1. Read arXiv 2605.04118. Confirm the benchmark's **targets, hotspots, and crops
-      are reproducible** inside our pipeline before building anything.
-- [ ] U2. Identify the ground-truth labels (binder/non-binder, or affinity) and the exact
-      metric-of-record the paper uses, so our AUC/rank numbers are comparable.
-- [ ] U3. Sketch a `binder-compare calibrate` (or a script) that ingests our refold CSVs +
-      the benchmark labels and emits an AUC/precision table per candidate metric.
+**Goal (as originally stated).** Stand up a reproducible harness so every metric decision is
+data-driven rather than anecdotal — the infrastructure that lets Part T's decision be provable.
 
-**Validation gate:** the harness must reproduce at least one published number from the
-paper on a shared metric before we trust its verdicts on our own metrics.
+- [x] U1. Confirm the benchmark's targets and labels are reproducible inside our pipeline.
+      → ProtDBench rejected; **Cao 2022** used instead (654k-design library, 4,442 labelled).
+- [x] U2. Identify the ground-truth labels and the metric-of-record.
+      → Kd + Cao's independent `binder_400_nm` binary assay; the latter is what exposed the
+      one-sided-Kd censoring.
+- [x] U3. Score every candidate metric against the labels.
+      → 72 metrics × 12 targets, plus 2,489 nested-CV combinations. Verdict above.
+
+**Validation gate:** met — the analysis reproduced Cao's own binary-assay pass rates across the
+full library before any metric verdict was trusted.
 
 ---
 

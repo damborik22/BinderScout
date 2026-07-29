@@ -54,7 +54,7 @@ bindmaster pack --output FILE              cd BindMaster
 | BoltzGen weights | ~6 GB | ~5 GB | Exclude by default |
 | Mosaic venv | ~6 GB | ~2 GB | JAX + Boltz-2 + CUDA |
 | binder-eval env | ~2 GB | ~500 MB | Lightweight |
-| binder-eval-af2 env | ~5 GB | ~1.5 GB | ColabDesign + JAX CUDA |
+| binder-eval-af3 / -esmfold2 envs | ~5 GB | ~1.5 GB | The two non-Boltz refold engines |
 | **Total (no model weights)** | **~34 GB** | **~11 GB** | |
 | **Total (all weights)** | **~44 GB** | **~20 GB** | |
 
@@ -73,8 +73,10 @@ bindmaster pack --output FILE              cd BindMaster
 
 | Item | Description | Original part |
 |---|---|---|
-| F2 | `--headless` mode for configurator (accept JSON config, skip prompts) | Part F |
 | F6 | Multi-chain binder support in BoltzGen YAML generation | Part F |
+
+*F2 (`--headless` configurator) shipped 2026-07-26 as `configurator --config <file>` replay —
+`write_run_config` / `load_run_config` / `cmd_from_config` / `--run`, with 8 tests.*
 
 ---
 
