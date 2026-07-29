@@ -360,14 +360,14 @@ def run(args: argparse.Namespace) -> None:
             f"[report] Collapsing {len(df) - n_groups} near-duplicate variant(s) → "
             f"{n_groups} distinct designs (best per trajectory; --no-collapse-duplicates to disable)"
         )
-        # ONE numbering space: `rank` is the position of a SEQUENCE in the full
-        # refold ordering, and it is NOT renumbered here. Collapsing only decides
-        # which designs the shortlist *shows*, never what they are called — so a
-        # collapsed sibling keeps its own rank and the candidates table can quote
-        # it in the tool's native block. The shortlist therefore skips numbers
-        # where a sibling was collapsed; a missing number means exactly that.
-        # (Renumbering densely made metrics.csv and every shortlist disagree, and
-        # left 11 of BindCraft's native top-20 with no rank to show at all.)
+        # `rank` ranks SEQUENCES and is NOT renumbered here. Collapsing decides
+        # which designs the shortlist SHOWS, never what they are called, so every
+        # refolded sequence keeps one rank and no number ever means two things.
+        # The shortlist consequently skips a number where a sibling was collapsed
+        # — that is intended, and it is what lets each row quote the rank of the
+        # exact sequence it names. Renumbering over backbones instead forced two
+        # sequences to share a rank, which hid that the tool and the refold can
+        # prefer *different* siblings of one backbone.
         df_display = df[df["is_representative"]].reset_index(drop=True)
     else:
         df_display = df

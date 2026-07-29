@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..comparison.candidates import display_tool_name
 from ..comparison.scoring import (
     _ENGINE_IPSAE_COLS,
     IPSAE_HIGH_THRESHOLD,
@@ -111,8 +112,9 @@ def _slim_table(df: pd.DataFrame, cols, table_id: str) -> str:
             elif lbl == "Binder ID":
                 cells.append(f'<td class="bid" title="{_html.escape(str(v))}">{_html.escape(str(v))}</td>')
             elif lbl == "Tool":
+                # colour keyed on the RAW tool key; only the label is prettified
                 c = _TOOLCOL.get(str(v), "#64748b")
-                cells.append(f'<td><span class="chip" style="--c:{c}">{_html.escape(str(v))}</span></td>')
+                cells.append(f'<td><span class="chip" style="--c:{c}">{_html.escape(display_tool_name(v))}</span></td>')
             elif lbl == "Length":
                 cells.append(f'<td class="num">{"" if pd.isna(v) else int(v)}</td>')
             elif lbl == "Mean ipTM":
@@ -228,6 +230,8 @@ def write_top30_slim(df: pd.DataFrame, output_dir: Path, top_per_tool: int = 10,
     # overall slim CSV (unchanged contract)
     top30 = d.head(30)[[c for _, c, _ in cols]].copy()
     top30.columns = [lbl for lbl, _, _ in cols]
+    if "Tool" in top30.columns:
+        top30["Tool"] = top30["Tool"].map(display_tool_name)
     top30.to_csv(output_dir / "top30_slim.csv", index=False)
 
     tools = list(d["source_tool"].value_counts().index) if "source_tool" in d.columns else []
@@ -237,7 +241,7 @@ def write_top30_slim(df: pd.DataFrame, output_dir: Path, top_per_tool: int = 10,
         sub = d[d["source_tool"] == tool].head(top_per_tool)
         c = _TOOLCOL.get(tool, "#64748b")
         sections.append(
-            f'<h2><span class="dot" style="background:{c}"></span>{_html.escape(tool)} — Top {min(top_per_tool, len(sub))}</h2>{_slim_table(sub, cols, f"t_tool{i}")}'
+            f'<h2><span class="dot" style="background:{c}"></span>{_html.escape(display_tool_name(tool))} — Top {min(top_per_tool, len(sub))}</h2>{_slim_table(sub, cols, f"t_tool{i}")}'
         )
 
     rolls = [
@@ -246,7 +250,7 @@ def write_top30_slim(df: pd.DataFrame, output_dir: Path, top_per_tool: int = 10,
     for i, tool in enumerate(tools):
         sub = d[d["source_tool"] == tool].head(top_per_tool)
         rolls.append(
-            f'<details><summary>{_html.escape(tool)} Top-{min(top_per_tool, len(sub))} — all metrics</summary><div class="scroll">{_full_table(sub, f"f_tool{i}")}</div></details>'
+            f'<details><summary>{_html.escape(display_tool_name(tool))} Top-{min(top_per_tool, len(sub))} — all metrics</summary><div class="scroll">{_full_table(sub, f"f_tool{i}")}</div></details>'
         )
 
     subtitle = f"Ranked by two-stage cross-engine iPTM · intercalators excluded{f' · n={pool_size} pool' if pool_size else ''}. Click any header to sort."
