@@ -295,11 +295,8 @@ def _run_single(
     # fails with a CLEAN per-design JAX OOM (recorded as an empty row) instead of taking
     # down the machine. Keep PREALLOCATE=true (=false fragments and hangs). Default 0.8 (~77
     # GB, ~19 GB headroom); override via AF3_XLA_MEM_FRACTION on >100 GB hosts.
-    af3_env = {
-        **os.environ,
-        "XLA_PYTHON_CLIENT_PREALLOCATE": "true",
-        "XLA_PYTHON_CLIENT_MEM_FRACTION": os.environ.get("AF3_XLA_MEM_FRACTION", "0.8"),
-    }
+    af3_env = _build_af3_env(os.environ)
+
     print(f"  [af3] Running: {Path(cmd[1]).name} (XLA mem fraction {af3_env['XLA_PYTHON_CLIENT_MEM_FRACTION']}) ...")
     result = subprocess.run(cmd, capture_output=True, text=True, env=af3_env)
     if result.returncode != 0:
@@ -308,6 +305,47 @@ def _run_single(
 
     # Find the top-ranked output
     return _load_top_sample(output_dir, job_name)
+
+
+def _build_af3_env(parent_env) -> dict[str, str]:
+    """Build the child environment for ``run_alphafold.py`` with the XLA memory cap.
+
+    The cap MUST reach the child under exactly ONE variable name.  jaxlib accepts the
+    legacy ``XLA_PYTHON_CLIENT_MEM_FRACTION`` and the newer ``XLA_CLIENT_MEM_FRACTION``,
+    but raises ``ValueError`` when BOTH are set ("Remove the latter one, it is
+    deprecated").  We inherit the parent environment, so an operator who followed AF3's
+    own ``docs/performance.md`` — which tells unified-memory hosts to export
+    ``XLA_CLIENT_MEM_FRACTION`` — would collide with the name we set and lose every
+    design to that ValueError.  The failure is near-silent: ``_run_single`` raises, the
+    caller writes an empty row and continues, so the pool completes with all-blank
+    ``af3_*`` columns and every design then fails the >=3-engine gate for no visible reason.
+
+    We set the LEGACY name only.  It is still documented and honoured by jax 0.9.x and
+    0.10.x alike, whereas older jaxlib does not understand the newer name — and a cap that
+    silently no-ops is exactly the whole-box reboot this guard exists to prevent.  An
+    inherited ``XLA_CLIENT_MEM_FRACTION`` is forwarded (not discarded) so the operator's
+    intent survives the rename.  Precedence: ``AF3_XLA_MEM_FRACTION`` >
+    ``XLA_CLIENT_MEM_FRACTION`` > ``XLA_PYTHON_CLIENT_MEM_FRACTION`` > default 0.8.
+
+    Revisit if a jax upgrade ever drops the legacy name — see docs/PLAN_af3_v304_upgrade.md.
+    """
+    env = {**parent_env, "XLA_PYTHON_CLIENT_PREALLOCATE": "true"}
+
+    inherited_new = (parent_env.get("XLA_CLIENT_MEM_FRACTION") or "").strip()
+    inherited_legacy = (parent_env.get("XLA_PYTHON_CLIENT_MEM_FRACTION") or "").strip()
+    explicit = (parent_env.get("AF3_XLA_MEM_FRACTION") or "").strip()
+
+    mem_fraction = explicit or inherited_new or inherited_legacy or "0.8"
+    env["XLA_PYTHON_CLIENT_MEM_FRACTION"] = mem_fraction
+    # Drop the newer name so the two can never both be present in the child.
+    env.pop("XLA_CLIENT_MEM_FRACTION", None)
+
+    if inherited_new:
+        print(
+            f"  [af3] NOTE: inherited XLA_CLIENT_MEM_FRACTION={inherited_new} — forwarding as "
+            f"XLA_PYTHON_CLIENT_MEM_FRACTION={mem_fraction} (setting both names is a jaxlib ValueError)"
+        )
+    return env
 
 
 def _load_top_sample(output_dir: Path, job_name: str) -> dict | None:
