@@ -29,6 +29,15 @@
 #                          refolding — saves GPU time on designs we wouldn't pursue.
 #                          Off by default; the score still lands in the report either way.
 #   --primary-engine ENG   primary ranking engine: boltz | af3 | esmfold2 (default: boltz)
+#   --min-engines N        how many independent engines must have refolded a design for it
+#                          to be eligible for the ranking (default 3 = all of Boltz-2 / AF3 /
+#                          ESMFold2; floor 2). Designs below the gate are ranked LAST, not
+#                          dropped. On a host without AF3 — the common case, it needs >100 GB
+#                          of GPU memory — only two engines run and the default gate fails
+#                          EVERY design, so this script says so up front and names the flag.
+#                          The gate is never lowered automatically: that would make two
+#                          operators with the same designs produce different rankings
+#                          depending on what happens to be installed.
 #   --epitope-residues L   intended hotspot residues (e.g. '15,18,232,263' or 'A15,A18'). Computes
 #                          epitope_match_fraction INLINE in the report from each design's refolded
 #                          structure (selectivity signal for multi-pocket targets, e.g. ApoE4). Cheap.
@@ -65,18 +74,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# --- locate Mosaic venv (written by install.sh) ----------------------------
 MOSAIC_VENV_FILE="$SCRIPT_DIR/envs/mosaic_venv_path"
-if [[ -f "$MOSAIC_VENV_FILE" ]]; then
-    MOSAIC_VENV="$(cat "$MOSAIC_VENV_FILE")"
-else
-    echo "Error: Mosaic venv path not found. Run bash install.sh first." >&2
-    exit 1
-fi
-[[ -f "$MOSAIC_VENV/bin/binder-compare" ]] || {
-    echo "Error: binder-compare not found in $MOSAIC_VENV. Run bash install.sh again." >&2
-    exit 1
-}
 
 SEQUENCES=""
 TARGET_SEQ=""
@@ -93,6 +91,7 @@ SOLUPROT_ENV="binder-eval-soluprot"
 SOLUPROT_THRESHOLD=0.5
 SOLUPROT_FILTER=0
 PRIMARY_ENGINE="boltz"
+MIN_ENGINES=""          # empty = let binder-compare apply its own default (3)
 EPITOPE_RESIDUES=""
 WITH_AFFINITY=0
 BINDCRAFT_ENV="BindCraft"
@@ -123,6 +122,14 @@ while [[ $# -gt 0 ]]; do
                 *) echo "Error: --primary-engine must be one of: boltz, af3, esmfold2 (got '$PRIMARY_ENGINE')" >&2; exit 1 ;;
             esac
             shift 2 ;;
+        --min-engines)
+            MIN_ENGINES="$2"
+            [[ "$MIN_ENGINES" =~ ^[0-9]+$ ]] || {
+                echo "Error: --min-engines takes an integer (got '$MIN_ENGINES')" >&2; exit 1; }
+            (( MIN_ENGINES >= 2 )) || {
+                echo "Error: --min-engines floor is 2 — a cross-engine consensus needs at least two engines." >&2
+                exit 1; }
+            shift 2 ;;
         --epitope-residues) EPITOPE_RESIDUES="$2"; shift 2 ;;
         --with-affinity)    WITH_AFFINITY=1;        shift ;;
         --bindcraft-env)    BINDCRAFT_ENV="$2";     shift 2 ;;
@@ -140,6 +147,26 @@ done
 [[ -z "$TARGET_SEQ" ]] && { echo "Error: --target-seq required"; exit 1; }
 [[ -z "$OUTPUT" ]]     && { echo "Error: --output required"; exit 1; }
 [[ -f "$SEQUENCES" ]]  || { echo "Error: sequences file not found: $SEQUENCES"; exit 1; }
+
+# --- locate Mosaic venv (written by install.sh) ----------------------------
+# Resolved AFTER argument parsing, and only when Boltz-2 will actually run. It used to
+# be resolved at the top, unconditionally, so `evaluate.sh --help` could not print the
+# help without a Mosaic install, and an AF3 + ESMFold2 evaluation (`--skip-boltz2`) was
+# refused on a host that legitimately has no Mosaic.
+if [[ $SKIP_BOLTZ2 -eq 0 ]]; then
+    if [[ -f "$MOSAIC_VENV_FILE" ]]; then
+        MOSAIC_VENV="$(cat "$MOSAIC_VENV_FILE")"
+    else
+        echo "Error: Mosaic venv path not found — Boltz-2 refolding runs in the Mosaic venv." >&2
+        echo "       Run 'bindmaster install --tool mosaic', or pass --skip-boltz2." >&2
+        exit 1
+    fi
+    [[ -f "$MOSAIC_VENV/bin/binder-compare" ]] || {
+        echo "Error: binder-compare not found in $MOSAIC_VENV. Run bash install.sh again," >&2
+        echo "       or pass --skip-boltz2 to evaluate without Boltz-2." >&2
+        exit 1
+    }
+fi
 
 mkdir -p "$OUTPUT"
 SEQUENCES="$(realpath "$SEQUENCES")"
@@ -178,6 +205,36 @@ if [[ $SKIP_SOLUPROT -eq 0 ]]; then
         echo ""
         SKIP_SOLUPROT=1
     fi
+fi
+
+# --- Cross-engine gate vs. the engines that will actually run ---------------
+# The ranking gates on how many INDEPENDENT engines refolded each design (default 3).
+# AF3 needs >100 GB of GPU memory, so on most hosts only Boltz-2 + ESMFold2 run and
+# every design fails a gate of 3 — ranked last, with an empty top of the list. The
+# report warns after the fact; by then the GPU time is already spent, so say it here.
+# Deliberately NOT auto-lowered: the gate is part of what the ranking means, and
+# silently deriving it from the local install would make two operators with the same
+# designs produce different rankings.
+# Arithmetic ASSIGNMENT, not `(( n++ ))`: post-increment evaluates to the OLD value, so
+# the first increment from 0 returns 0 — false — and `set -e` kills the script here.
+_N_ENGINES=0
+[[ $SKIP_BOLTZ2   -eq 0 ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+[[ $SKIP_AF3      -eq 0 ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+[[ $SKIP_ESMFOLD2 -eq 0 ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+if [[ -z "$MIN_ENGINES" ]] && (( _N_ENGINES < 3 )); then
+    echo "[warn] ${_N_ENGINES} refold engine(s) will run, but the cross-engine gate defaults to 3."
+    echo "       Every design will fail the gate and be ranked last, leaving no ranked shortlist."
+    if (( _N_ENGINES >= 2 )); then
+        echo "       To rank on the engines you have, re-run with:  --min-engines ${_N_ENGINES}"
+    else
+        echo "       A cross-engine ranking needs at least 2 engines; install another refold"
+        echo "       engine (bindmaster install --tool esmfold2) before trusting the ranking."
+    fi
+    echo ""
+elif [[ -n "$MIN_ENGINES" ]] && (( _N_ENGINES < MIN_ENGINES )); then
+    echo "[warn] --min-engines ${MIN_ENGINES} was requested but only ${_N_ENGINES} engine(s) will run —"
+    echo "       every design will fail the gate."
+    echo ""
 fi
 
 # --- Step 0: Normalise sequences to FASTA ----------------------------------
@@ -354,6 +411,9 @@ if [[ $SKIP_SOLUPROT -eq 0 && -f "$SOLUPROT_CSV" ]]; then
     REPORT_ARGS+=(--soluprot-results "$SOLUPROT_CSV")
 fi
 REPORT_ARGS+=(--primary-engine "$PRIMARY_ENGINE")
+if [[ -n "$MIN_ENGINES" ]]; then
+    REPORT_ARGS+=(--min-engines "$MIN_ENGINES")
+fi
 # Inline epitope match (selectivity) — cheap, no extra pass or GPU.
 if [[ -n "$EPITOPE_RESIDUES" ]]; then
     REPORT_ARGS+=(--epitope-residues "$EPITOPE_RESIDUES")

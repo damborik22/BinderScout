@@ -1369,3 +1369,103 @@ a live AF2-CPU measurement, into gitignored `Proteina-Complexa/inference/` dirs
 `~/.cache/torch_extensions`. Two adversarial verifiers struck several claims from the first pass,
 including a wrong subcommand count, a stale run inventory, and a binder-chain length quoted as
 fixed when `nres` draws it per sample.
+
+---
+
+## 2026-08-14 — Terminal-path audit (PR #37): two silent failures, five usability defects, thirteen stale "known issues"
+
+**What changed:**
+
+Audited the pipeline as a plain CLI toolkit — no skills, no agent — by driving it end to
+end on synthetic data (`configure --config` → generated run scripts → `extract` →
+`report`), then fixed everything the audit turned up. Seven commits.
+
+The two that could cost something real:
+
+- **A report built without its PAE files ranked nothing, silently.** Every
+  `{engine}_pae_iptm` — the sole input to `consensus_iptm_mean`, i.e. the whole ranking
+  — is recomputed from the `.npy` PAE matrices named in the refold CSVs, *not* from the
+  CSV's own `iptm`. When those paths did not resolve, all three loaders appended NaN
+  without a word, and `rank_designs`' "nothing cleared the gate" warning was guarded by
+  `cons.notna().any()` — false precisely when *no* engine scored *anything*. Exit 0, a
+  full `metrics.csv` and `report.html`, `passes_engine_gate` False everywhere, and
+  `rank` populated 1..N from the tiebreakers alone. Indistinguishable from a pool where
+  no design was good enough. This is the shape of a results directory separated from its
+  CSVs: a `fleet.sh fetch`, an archived run, a CSV copied on its own. Now one aggregate
+  `[pae] N/M … not found` per loader call plus a decisive `[rank] NO engine ipTM was
+  available` line.
+- **One tool's failure ended the whole campaign.** `run_all.sh` ran under `set -euo
+  pipefail` with a bare per-tool invocation and `check_outputs … exit 1` after each, so a
+  BoltzGen OOM at hour 2 aborted the script — RFD3 and Protein-Hunter never started, and
+  the Evaluator never ran on the designs that *had* finished. The Mosaic block already
+  carried this exact fix and the comment explaining why; it now applies to every step.
+
+The five usability defects: `evaluate.sh` had no `--min-engines` passthrough, so the
+default gate of 3 always applied and on any host without AF3 (needs >100 GB GPU memory)
+*every* design failed it; `evaluate.sh --help` required a Mosaic install and
+`--skip-boltz2` was refused without one, because the Mosaic venv was resolved before
+argument parsing; the configurator turned an uninstalled-but-enabled tool into a
+`FileNotFoundError` over a half-written run directory; `--config` replay validated 3 keys
+while the generators read ~50, so a hand-edited config died with
+`KeyError: 'boltzgen_intermediate'`; and the TUI's "Evaluate results" entry ran
+`bindmaster evaluate` with no arguments — argparse exit 2 — while its comment promised it
+"shows available subcommands".
+
+Compounding the configurator ones: `config.json` was the **last** line of `generate()`,
+so any earlier failure cost ~80 wizard answers with nothing to replay.
+
+**Why it mattered:**
+
+Three of these are invisible-failure modes, which is the expensive kind. A void ranking
+and a truthful one are byte-indistinguishable to a reader of `report.html`; a campaign
+that lost BoltzGen at hour 2 and one that never started it look the same in the output
+tree. The audit also found that **every** finding the README listed as a live defect
+(F1, F2, F3, F5, F8, F9, F15, F20, F33, F34, F38, F40, F41 — thirteen) had already been
+fixed, so readers were being instructed to apply workarounds for problems that no longer
+existed. Doc rot in the "known issues" section is worse than no section: it costs trust
+in the parts that are still true.
+
+**Outcome:**
+
+- PR #37 opened against `master`. 493 → 543 tests (+50), ruff and shellcheck clean,
+  all seven generated run scripts syntax- and shellcheck-clean.
+- The gate is now reachable (`--min-engines`, floor 2) and `evaluate.sh` warns **before**
+  spending GPU time when fewer engines will run than the gate demands, naming the flag.
+  Deliberately **not** auto-lowered: deriving it from the local install would make two
+  operators with the same designs produce different rankings — the same contradiction
+  Part J's revert removed for Protenix.
+- The configurator refuses to start with a list of every problem at once (missing tool
+  assets with their install commands, missing config keys by name) rather than a
+  traceback partway through, and writes `config.json` first.
+- README documents all 22 `binder-compare` subcommands (15 had no human-facing
+  documentation — five lived only in `.claude/skills/`, which is agent instructions, not
+  a manual) and all 21 `evaluate.sh` flags. Both tables are now covered by tests that
+  fail in either direction: an undocumented new flag, or a documented one the parser
+  rejects.
+
+**Method note.** Running beat reading, repeatedly and in both directions.
+
+The PAE bug is only visible if you actually generate a report from CSVs whose `.npy`
+files are gone — reading `rank_designs` alone does not show it, because the guard *looks*
+correct. Conversely, three of my own errors were caught only by running: I wrote the
+engine counter as `(( n++ ))`, which evaluates to the **old** value, so the first
+increment from 0 returned false and `set -e` killed the script — `bash -n` and shellcheck
+both passed it. A test I wrote to pin "the gate is never auto-lowered" passed
+**vacuously**, because the stub conda never reached the report call; it was replaced with
+a source-level assertion. And the first mutation test of the README flag guard did not
+bite, because the flag I deleted from the table also appeared in the prose below it — the
+guard was fine, the mutation was not.
+
+Every new guard was mutation-tested rather than assumed: deleting a README table row,
+injecting a `cfg["…"]` into a generator, and auto-deriving `MIN_ENGINES` each fail the
+test intended to catch them.
+
+**Also found, not fixed:** answering "is the README updated?" after the docs commit
+surfaced three more contradictions the first pass missed — the `bindmaster evaluate`
+section's engine table omitted ESMFold2 (the *default* engine) two lines above a note
+saying "Boltz-2 + AF3 + ESMFold2, exactly three independent engines"; the same section
+opened with "cross-ranks all designs by a configurable metric", false since Part U
+removed metric selection and contradicted three paragraphs later in that same section;
+and `evaluate.sh`'s flags were undocumented anywhere despite `run_evaluate.sh` being the
+documented path. All three are fixed, but the lesson is that a targeted docs pass fixes
+what it was pointed at — a section is not verified until something checks it.
