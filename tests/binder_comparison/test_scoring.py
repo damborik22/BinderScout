@@ -14,7 +14,10 @@ import pandas as pd
 from binder_comparison.comparison.scoring import (
     MIN_ENGINES_DEFAULT,
     MIN_ENGINES_FLOOR,
+    add_boltz_ipsae_from_files,
     add_chain_iptm_interface,
+    add_ipsae_from_pae_files,
+    add_iptm_from_pae_files,
     compute_consensus_ipsae,
     compute_consensus_iptm,
     rank_designs,
@@ -229,6 +232,47 @@ def test_warns_when_the_gate_admits_nothing():
     assert not out["passes_engine_gate"].any()
 
 
+def test_warns_when_no_engine_scored_any_design():
+    """Zero coverage, not partial: every engine column is all-NaN, which is what a
+    report built from refold CSVs whose PAE .npy files cannot be resolved looks like.
+
+    The partial-coverage branch stays quiet here because it asks whether *some*
+    design has a score, so this used to produce a full metrics.csv with a populated
+    `rank` column, `passes_engine_gate` False everywhere, and no warning at all.
+    """
+    nan = float("nan")
+    df = pd.DataFrame(
+        {
+            "id": ["A", "B"],
+            "boltz_pae_iptm": [nan, nan],
+            "af3_pae_iptm": [nan, nan],
+            "esmfold2_pae_iptm": [nan, nan],
+        }
+    )
+    with pytest.warns(UserWarning, match="NO engine ipTM was available"):
+        out = rank_designs(df, min_engines=3)
+    assert not out["passes_engine_gate"].any()
+
+
+def test_warns_when_the_engine_iptm_columns_are_absent_entirely():
+    """Same silence, reached the other way: no <engine>_pae_iptm column was ever added
+    because the refold CSV carried no <engine>_pae_file column to load them from."""
+    df = pd.DataFrame({"id": ["A", "B"], "sequence": ["MK", "MA"]})
+    with pytest.warns(UserWarning, match="NO engine ipTM was available"):
+        rank_designs(df, min_engines=3)
+
+
+def test_empty_frame_does_not_warn():
+    """No designs is not the same as designs with no scores — nothing to report."""
+    import warnings as _w
+
+    df = pd.DataFrame({"id": [], "boltz_pae_iptm": []})
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        rank_designs(df, min_engines=3)
+    assert [str(x.message) for x in caught if "[rank]" in str(x.message)] == []
+
+
 # --- Report truthfulness -------------------------------------------------------
 
 
@@ -268,3 +312,56 @@ def test_wetlab_still_blocks_real_disagreement():
     assert rec["good"] is True or rec["good"]
     assert not rec["lonely"]
     assert "agreement 1 < 2" in out.loc[out["id"] == "lonely", "wetlab_reason"].iloc[0]
+
+
+# --- PAE file resolution -------------------------------------------------------
+
+
+class TestUnresolvedPaeFilesAreReported:
+    """The engine ipTM/ipSAE columns are computed from PAE .npy files named in the
+    refold CSV, not from the CSV's own `iptm`. Every loader used to append NaN and
+    move on when a path did not resolve, so a results directory moved away from its
+    CSV (a `fleet.sh fetch`, an archived run) emptied the ranking in silence.
+    """
+
+    def _frame(self, missing="/nonexistent/does_not_exist_pae.npy"):
+        return pd.DataFrame({"pae_file": [missing], "binder_length": [10]})
+
+    def test_iptm_loader_warns(self):
+        with pytest.warns(UserWarning, match=r"1/1 PAE files listed in 'pae_file' were not found"):
+            out = add_iptm_from_pae_files(self._frame(), pae_file_col="pae_file", prefix="boltz")
+        assert math.isnan(out["boltz_pae_iptm"].iloc[0])
+
+    def test_generic_ipsae_loader_warns(self):
+        with pytest.warns(UserWarning, match="PAE files listed in 'pae_file' were not found"):
+            add_ipsae_from_pae_files(self._frame(), pae_file_col="pae_file", prefix="af3")
+
+    def test_boltz_ipsae_loader_warns(self):
+        with pytest.warns(UserWarning, match="PAE files listed in 'pae_file' were not found"):
+            add_boltz_ipsae_from_files(self._frame(), pae_file_col="pae_file")
+
+    def test_warning_names_the_base_dir_that_was_tried(self, tmp_path):
+        with pytest.warns(UserWarning, match=f"also tried relative to {tmp_path}"):
+            add_iptm_from_pae_files(self._frame("rel/path.npy"), pae_file_col="pae_file", base_dir=tmp_path)
+
+    def test_one_warning_per_call_not_per_row(self):
+        """A real pool is thousands of designs; per-row warnings would bury the signal."""
+        import warnings as _w
+
+        df = pd.DataFrame({"pae_file": ["/nope/a.npy"] * 50, "binder_length": [10] * 50})
+        with _w.catch_warnings(record=True) as caught:
+            _w.simplefilter("always")
+            add_iptm_from_pae_files(df, pae_file_col="pae_file", prefix="boltz")
+        pae_warnings = [x for x in caught if "[pae]" in str(x.message)]
+        assert len(pae_warnings) == 1
+        assert "50/50" in str(pae_warnings[0].message)
+
+    def test_a_row_with_no_pae_path_at_all_is_not_counted_as_unresolved(self):
+        """A blank cell means that engine never folded this design — not a lost file."""
+        import warnings as _w
+
+        df = pd.DataFrame({"pae_file": [float("nan")], "binder_length": [10]})
+        with _w.catch_warnings(record=True) as caught:
+            _w.simplefilter("always")
+            add_iptm_from_pae_files(df, pae_file_col="pae_file", prefix="boltz")
+        assert [x for x in caught if "[pae]" in str(x.message)] == []

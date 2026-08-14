@@ -4,9 +4,9 @@
 
 BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. It wraps seven independent design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) behind a single CLI (`bindmaster`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders.
 
-**Current status:** v0.7.0 + Parts I, J, K, L, M landed on `[Unreleased]`. Latest milestones: Evaluator AF2 refolding removed (Part I), AF3 v3.0.2 stood up as the canonical 2nd refolding engine on big-VRAM hardware (Part K — Spark / H200, >100 GB unified memory), Protenix refolding removed (Part J reverted — AF3 covers the 2nd-engine role), Protein-Hunter installed and configurable (Part L), RFD3 installed and configurable (Part M). Active development on `master`; `aarch64` branch tracks DGX Spark / Grace-Hopper and is periodically rebased.
+**Current status:** v0.7.0 + Parts I, J, K, L, M, N, T and U landed on `[Unreleased]`. Engine line-up: Evaluator AF2 refolding removed (Part I), AF3 v3.0.2 as the canonical 2nd refolding engine on big-VRAM hardware (Part K — Spark / H200, >100 GB unified memory), Protenix refolding removed (Part J reverted — AF3 covers the 2nd-engine role), Protein-Hunter (Part L) and RFD3 (Part M) installed and configurable. Ranking: affinity-from-structure-confidence closed as a negative result (Part N), and three ranking methods collapsed into one — cross-engine gate then `consensus_iptm_mean` (Part U). SoluProt is part of `--tool all` and both platforms build USEARCH v12 from source. Proteina-Complexa is deprecated on aarch64 (throughput, not an install failure). Active development on `master`; `aarch64` branch tracks DGX Spark / Grace-Hopper and is periodically rebased.
 
-**Repository:** `github.com/damborik22/BindMaster` (the working-tree directory may be checked out as `BinderScout`; the CLI command and Python package are both `bindmaster`)
+**Repository:** `github.com/damborik22/BinderScout` (the working-tree directory may be checked out as `BinderScout`; the CLI command and Python package are both `bindmaster`. The old `damborik22/BindMaster` URL redirects.)
 
 ---
 
@@ -481,16 +481,32 @@ bindmaster configure --archive <run>  # tar.gz a run directory
 
 ### Evaluate
 
-```bash
-# Run-directory mode (parses tool outputs, ranks, writes report)
-bindmaster evaluate runs/<name>
-bindmaster evaluate runs/<name> --metric ipsae_min --top 20
-bindmaster evaluate runs/<name> --refold 5 --target target.pdb
-bindmaster evaluate runs/<name> --all-mosaic-designs  # include all ~800 Mosaic designs
+`bindmaster evaluate` is a **passthrough to `binder-compare`** (run in the
+`binder-eval` conda env) — every argument goes straight to that CLI. There is no
+run-directory mode and no `--metric` / `--top` / `--refold` / `--target` flag; the
+first argument must be a subcommand or argparse rejects it.
 
-# Sequence-only mode (fold bare sequences without a run directory)
-bindmaster evaluate --sequences my_seqs.txt --refold 3 --target target.pdb
-echo "MAEVKLSYVL..." | bindmaster evaluate --sequences - --refold 1
+```bash
+# Usual path: the configurator already wrote this, and it drives Evaluator/evaluate.sh
+bash runs/<name>/run_evaluate.sh
+
+# Full pipeline in one command (extract → refold-boltz2 → report)
+bindmaster evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bindcraft \
+                       --rfd3 runs/<name>/rfd3 --target-seq "<TARGET_SEQ>" \
+                       -o runs/<name>/evaluate
+
+# Individual steps
+bindmaster evaluate extract --mosaic runs/<name>/mosaic -o seqs.fasta
+bindmaster evaluate extract --mosaic runs/<name>/mosaic --all-mosaic-designs -o seqs.fasta
+bindmaster evaluate report --boltz2-results boltz2.csv --af3-results af3.csv \
+                          --esmfold2-results esmfold2.csv --sequences seqs.fasta -o ./report
+bindmaster evaluate report --min-engines 2 …   # relax the cross-engine gate (floor 2)
+
+# Fold bare sequences without a run directory
+bindmaster evaluate parse-seqs --input my_seqs.txt -o seqs.fasta
+bindmaster evaluate validate --sequences seqs.fasta --target-seq "<TARGET_SEQ>"
+
+bindmaster evaluate --help    # all 22 subcommands
 ```
 
 ### Linting and CI

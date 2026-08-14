@@ -322,11 +322,18 @@ def _curses_submenu_runs(stdscr, repo: Path) -> None:  # type: ignore[type-arg]
 
 
 def _curses_submenu_evaluate(stdscr, repo: Path) -> None:  # type: ignore[type-arg]
-    """Launch the evaluator (binder-compare passthrough — shows available subcommands)."""
+    """Show the evaluator's subcommands (binder-compare passthrough).
+
+    `--help` is the payload, not decoration: `bindmaster evaluate` with no arguments
+    reaches argparse with a required subcommand missing, which prints one usage line
+    and exits 2 — so this menu entry showed an error instead of the 22 subcommands it
+    promised. Evaluation itself is not startable from a menu (it needs sequences, a
+    target and an output dir), so listing what to run is the useful thing to do here.
+    """
     _curses_run_subprocess(
         stdscr,
-        [sys.executable, str(repo / "bindmaster.py"), "evaluate"],
-        "Evaluate results (binder-compare)",
+        [sys.executable, str(repo / "bindmaster.py"), "evaluate", "--help"],
+        "Evaluate results — binder-compare subcommands",
     )
 
 
@@ -484,10 +491,10 @@ def _simple_submenu_runs(repo: Path) -> None:
 
 
 def _simple_submenu_evaluate(repo: Path) -> None:
-    """Launch the evaluator (binder-compare passthrough — shows available subcommands)."""
+    """Show the evaluator's subcommands (binder-compare passthrough). See the curses twin."""
     _run_subprocess(
-        [sys.executable, str(repo / "bindmaster.py"), "evaluate"],
-        "Evaluate results (binder-compare)",
+        [sys.executable, str(repo / "bindmaster.py"), "evaluate", "--help"],
+        "Evaluate results — binder-compare subcommands",
     )
 
 

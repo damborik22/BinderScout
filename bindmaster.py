@@ -10,7 +10,7 @@ Dispatches sub-commands to their respective scripts:
 
 Usage:
   bindmaster                                                    Interactive menu (TUI)
-  bindmaster install   [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples]
+  bindmaster install   [--tool all|<tool>] [--cuda VERSION] [--skip-examples]   (--help for the tool list)
   bindmaster configure [options passed through to configurator.py]
   bindmaster evaluate  <binder-compare args>   (e.g. run --mosaic DIR --target-seq SEQ -o OUT)
   bindmaster --help
@@ -33,14 +33,15 @@ USAGE = f"""{BOLD}BindMaster{RESET} — GPU-accelerated protein binder design to
 
 {BOLD}Usage:{RESET}
   bindmaster                                                    Interactive menu (TUI)
-  bindmaster install   [--tool bindcraft|boltzgen|mosaic|all] [--cuda VERSION] [--skip-examples]
+  bindmaster install   [--tool all|<tool>] [--cuda VERSION] [--skip-examples]   (--help for the tool list)
   bindmaster configure [options passed through]
   bindmaster evaluate  <binder-compare args>   (e.g. run --mosaic DIR --target-seq SEQ -o OUT)
   bindmaster --help
 
 {BOLD}Commands:{RESET}
   {CYAN}(no args){RESET}  Launch interactive menu — install, configure, run, evaluate
-  {CYAN}install{RESET}    Install BindCraft, BoltzGen, and/or Mosaic
+  {CYAN}install{RESET}    Install the design tools and refold engines (seven design tools,
+             plus the evaluator, ESMFold2, SoluProt and opt-in AF3)
   {CYAN}configure{RESET}  Interactive wizard to set up a run (target, tools, parameters)
   {CYAN}evaluate{RESET}   Passthrough to the binder-compare evaluator (extract / refold / report / run)
 

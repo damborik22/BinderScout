@@ -295,14 +295,16 @@ Each per-tool run script writes a `runs/<name>/<tool>/settings.json` capturing t
 
 ### `bindmaster evaluate`
 
-Parses design outputs from any combination of tools,
-cross-ranks all designs by a configurable metric, and writes a summary.
+Parses design outputs from any combination of tools, refolds them with independent
+engines, ranks the pool, and writes a report. There is one ranking and no metric to
+choose — see [Ranking metrics](#ranking-metrics) below.
 
 **Refolding engines (canonical pipeline):**
 
 | Engine | CLI subcommand | Env | Where it runs |
 |---|---|---|---|
 | **Boltz-2** | `binder-compare refold-boltz2` | Mosaic `.venv` | Anywhere with a 24 GB GPU |
+| **ESMFold2** | `binder-compare refold-esmfold2` | `binder-eval-esmfold2` conda | Anywhere — lightweight, no gated weights. The default engine (`--tool all`), and the source of the `chain_iptm_interface` gate `autosize` uses. |
 | **AF3 v3.0.2** | `binder-compare refold-af3` | `binder-eval-af3` conda | Any host with ≥100 GB GPU memory — DGX Spark (aarch64), H200 (x86_64), GH200, etc. Full AF3 inference doesn't fit on consumer 24 GB GPUs. |
 
 Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). There is **one ranking and no way to select another**: a cross-engine gate (`--min-engines`, default 3) then `consensus_iptm_mean`, emitted as a single `rank` column. `ipsae_min` (DunbrackLab 2025 formula) and `agreement_count` are diagnostic columns — `agreement_count` in particular is a flat null as a screen (macro-AUC 0.532), so do not gate on it. Part U removed the `--rank-by` / `--screen-metric` flags and the `two_stage_rank` / `adaptyv_rank` / `consensus_rank` / `active_rank` columns; see `docs/INVESTIGATION_partU_cao_benchmark.md`. AF3 and ESMFold2 produce token-order PAE which the evaluator transposes to match Boltz-2's `[binder|target]` order.
@@ -318,9 +320,72 @@ binder-compare run --mosaic runs/PDL1/mosaic --bindcraft runs/PDL1/bindcraft \
                    --target-seq "MKTAYIAKQR…" -o runs/PDL1/evaluate
 ```
 
-Individual steps are also subcommands: `extract`, `refold-boltz2`, `refold-af3`, `refold-esmfold2`, `report`, and `autosize`. The configurator-generated `runs/<name>/run_evaluate.sh` wraps `Evaluator/evaluate.sh`, which auto-detects the installed engines and drives the whole thing.
+The configurator-generated `runs/<name>/run_evaluate.sh` wraps `Evaluator/evaluate.sh`, which auto-detects the installed engines and drives the whole thing.
 
-Report output lands in `…/evaluate/report/` — `report.html`, `metrics.csv`, and `top20_candidates.csv`, ranked two-stage.
+Report output lands in `…/evaluate/report/` — `report.html`, `metrics.csv`, and `top20_candidates.csv`.
+
+#### `Evaluator/evaluate.sh` — the orchestrator's own flags
+
+This is the script `run_evaluate.sh` calls, and the one to reach for when re-running a
+step by hand. `bash Evaluator/evaluate.sh --help` prints the same list.
+
+| Flag | Effect |
+|---|---|
+| `--sequences` / `--target-seq` / `--output` | Required: binder FASTA (or CSV / one-per-line), the full target sequence, the output directory |
+| `--min-engines N` | How many independent engines must have refolded a design for it to be eligible for the ranking. Default 3 = all of Boltz-2 / AF3 / ESMFold2; floor 2. Designs below the gate are ranked **last, not dropped**. Never lowered automatically — see the warning note below |
+| `--skip-boltz2` / `--skip-af3` / `--skip-esmfold2` | Skip an engine. Each is otherwise auto-detected from its conda env and skipped with a `[note]` if absent |
+| `--af3-env` / `--esmfold2-env` / `--soluprot-env` / `--bindcraft-env` | Override the conda env name for that step |
+| `--esmfold2-model full\|fast` | ESMFold2 checkpoint (default `full`) |
+| `--skip-soluprot` / `--soluprot-threshold N` | Control the solubility screen (default threshold 0.5, the paper value) |
+| `--soluprot-filter` | **Drop** sub-threshold designs from the FASTA before any refolding, saving GPU time. Off by default — the score lands in the report either way |
+| `--primary-engine boltz\|af3\|esmfold2` | Which engine's metrics are promoted as primary (default `boltz`) |
+| `--epitope-residues LIST` | Compute `epitope_match_fraction` inline against intended hotspots, e.g. `'15,18,232'`. Cheap, no extra pass |
+| `--with-affinity` | Opt-in: after the report, run the \|dG/dSASA\| affinity ranking (Rosetta, BindCraft env) on the top 20 and regenerate |
+| `--monomer-dir DIR` | Opt-in: binder-alone structures for the context-dependent-fold check (`fold_robust`) |
+| `--allow-no-msa` | Proceed when the shared target MSA cannot be fetched. Default is to abort: one engine folding single-sequence while the others use an MSA produces scores that are not comparable, and the ranking averages across engines |
+| `--resume` | Resume an interrupted run |
+
+> **The gate defaults to 3, and most hosts run two engines.** AF3 needs >100 GB of GPU
+> memory, so a typical box runs Boltz-2 + ESMFold2 and *every* design fails a gate of 3.
+> `evaluate.sh` counts the engines it will actually run and warns **before** any GPU
+> time, naming the flag: pass `--min-engines 2`. It is never lowered for you — deriving
+> the gate from whatever happens to be installed would make two operators with the same
+> designs produce different rankings.
+
+#### All `binder-compare` subcommands
+
+Every one takes `--help`. `bindmaster evaluate <cmd> …` runs the same thing inside the
+`binder-eval` conda env.
+
+| Subcommand | What it does |
+|---|---|
+| `extract` | Pull binder sequences out of any combination of the seven tools' outputs into one FASTA |
+| `parse-seqs` | Convert sequences from FASTA / one-per-line / CSV / comma-separated into FASTA |
+| `validate` | Sanity-check sequences (alphabet, length, duplicates, target parse) before spending GPU time |
+| `run` | The whole pipeline in one call: extract → refold-boltz2 → report |
+| `report` | Merge the per-engine refold CSVs, rank, and write `report.html` + `metrics.csv` |
+| **Refolding** | |
+| `refold-boltz2` | Refold with Boltz-2 (Mosaic venv) |
+| `refold-af3` | Refold with AlphaFold 3 v3.0.2 (`binder-eval-af3`; needs ≥100 GB GPU memory) |
+| `refold-esmfold2` | Refold with ESMFold2 (`binder-eval-esmfold2`) — the default engine |
+| **Screening before the GPU** | |
+| `filter-soluprot` | Sequence-only *E. coli* solubility score (`binder-eval-soluprot`, no GPU) |
+| `prefilter` | Rank designs by a Boltz-2 fold-back interface score, for tools with no native metric (e.g. RFD3) |
+| `autosize` | Decide whether enough independent designs cleared the ESMFold2 gate; size the next batch |
+| **Campaign planning** | |
+| `analyze-target` | Advisory target difficulty, suggested binder length, hotspots and batch size, from a PDB |
+| `diversity` | Cluster designs into families by sequence identity (greedy, CD-HIT-style) |
+| **Shortlist QC (all advisory — none of these reorder or drop)** | |
+| `monomer` | Flag context-dependent folds: binder-alone vs in-complex Cα RMSD |
+| `beta-check` | Flag binder→target β-sheet intercalation (β-augmentation) via DSSP cross-chain bridges |
+| `epitope` | Compute `epitope_match_fraction` against an intended hotspot list |
+| `epitope-map` | Interactive target structure coloured by binding frequency, with per-binding-mode toggles |
+| `qc-annotate` | Interface-quality annotation of a shortlist (BindCraft panel; relax + Rosetta) |
+| `affinity` | Rank affinity among binders via \|dG/dSASA\| gated by `ipsae_min` — **advisory, not validated** (Part N) |
+| **Wet lab** | |
+| `wetlab` | Markdown plan: synthesis, expression, assays, FASTA with biophysical properties |
+| `hits` | Build the Selected Hits workbook from `candidates.csv` (top-N per tool + top-M refolded) |
+| `mature` | Choose the next maturation round — strategy and parents — from returned binding data |
 
 #### `autosize` — adaptive sampling
 
@@ -527,43 +592,49 @@ non-LLM operability, and GUI options — is at
 **[docs/repo_analysis_2026-07-26.html](docs/repo_analysis_2026-07-26.html)**
 (31 findings with file:line and a suggested fix order).
 
-The items below are the ones you are most likely to hit while following this README.
-Finding IDs refer to that document.
+Every finding that document raised against the quick-start path (F1, F2, F3, F5, F8,
+F9, F15, F20, F33, F34, F38, F40, F41) has since been fixed, and the tables that
+listed them as live issues have been removed rather than left to mislead. Read the
+audit as a record of what was wrong, not as current behaviour.
 
-### Following the quick start
+The items below are what is still true today.
 
-| Symptom | Cause | Workaround |
-|---|---|---|
-| `run_all.sh` prints *"Mosaic requires interactive input"* and exits 1 before any tool runs | The Mosaic block is emitted first and hard-exits unless `mosaic/designs.csv` already exists (F8) | Run `bash runs/<name>/run_mosaic.sh` first, then `run_all.sh`; or disable Mosaic in the wizard |
-| Answering *y* to "Run the pipeline now?" never runs RFD3 or Protein-Hunter | `run_pipeline()` dispatches Mosaic, BoltzGen, BindCraft, PXDesign and Proteina-Complexa, but has no branch for RFD3 or Protein-Hunter. They are also absent from the Step 7 preview tree and the "To run later" list (F9) | Run `bash runs/<name>/run_rfd3.sh` / `run_protein_hunter.sh` by hand, or `run_all.sh` (which does cover all seven — with the Mosaic caveat above) |
-| A run script dies immediately with `nvidia-smi: command not found` | The `settings.json` provenance block runs `nvidia-smi` unguarded under `set -euo pipefail` (F15) | Run on a node where `nvidia-smi` is on `PATH`, and check `--gpu-id` is a real device index |
-| RFD3 finished but contributes no designs to the report | `run_evaluate.sh` points `--rfd3` at `rfd3/outputs`, while `run_rfd3.sh` writes `rfd3/sequences.csv` (F3) | Pass `--rfd3 runs/<name>/rfd3` to `binder-compare extract` yourself |
-| `binder-compare run --rfd3 …` is rejected by argparse | `run` accepts only `--bindcraft`, `--boltzgen`, `--mosaic`, `--pxdesign` — RFD3, Protein-Hunter and Proteina-Complexa are `extract`-only (F38) | Use `binder-compare extract` (which accepts all seven) followed by the refold + `report` steps, or `runs/<name>/run_evaluate.sh` |
-| A mistyped tool directory produces a report that looks complete | `extract` treats a per-tool yield of 0 as non-fatal and exits 0; only an all-empty result fails (F40) | Check the `→ N sequences` line for every tool before starting the refold |
-| `binder-compare refold-af2` → `invalid choice` | `Evaluator/README.md` and `docs/pipeline_reference.md` still document the `refold-af2` subcommand and `binder-eval-af2` env, both removed in Part I (F41) | AF2 refolding no longer exists; use Boltz-2 / AF3 / ESMFold2 |
+### Things worth knowing before you run it
+
+Not defects — behaviour that will surprise you if you have not met it.
+
+- **The cross-engine gate defaults to 3, and most hosts run two engines.** AF3 needs
+  >100 GB of GPU memory, so a typical box runs Boltz-2 + ESMFold2 and *every* design
+  fails a gate of 3 — ranked last, no shortlist. `evaluate.sh` says so before spending
+  any GPU time and names the flag; pass `--min-engines 2` to rank on the engines you
+  have. It is never lowered for you: deriving the gate from whatever happens to be
+  installed would make two operators with the same designs produce different rankings.
+- **Enable only tools that report `installed`.** The configurator refuses to generate a
+  run whose enabled tools are missing their assets, listing each one and the install
+  command, before writing anything. Nothing is half-built, but the run is not generated
+  either.
+- **Hand-written `--config` files are validated, not guessed at.** Missing keys are
+  listed by name up front. Start from a `runs/<name>/config.json` the wizard wrote and
+  edit values rather than composing one from scratch.
+- **`run_all.sh` does not stop at the first casualty.** A tool that dies is recorded and
+  the rest continue; the Evaluator reports on whatever finished; the script exits
+  non-zero at the end naming the failed steps. Check that summary line — a "complete"
+  run and a run that lost BoltzGen both produce a report.
 
 ### Correctness caveats worth knowing
 
-- **mmCIF targets ignore your chain answer (F1).** For a `.cif` / `.mmcif` input,
-  `extract_sequence_from_cif` reads `_entity_poly` first, which is chain-agnostic and
-  picks the **longest** polymer entity — so on a multi-chain structure the target
-  sequence may not be the chain you selected. Prefer `.pdb` input, or verify
-  `runs/<name>/*/settings.json` shows the target length you expect before committing GPU time.
-- **Mosaic hotspots resolve against chain A (F2).** The epitope-index helper reads
-  `cfg["target_chain"]` / `cfg["chain"]`, neither of which the wizard sets, so it always
-  falls back to `"A"`.
-- **Designs refolded by only one engine are ranked against 3-engine designs (F5).**
-  `consensus_iptm_mean` skips missing engines, and the two-stage sort does not gate on
-  `consensus_iptm_n`. Check that column before trusting a top-ranked design.
-- **The report's 3D viewer needs internet (F20).** `report.html` loads NGL from
-  `unpkg.com`, so the structure viewer is blank on an air-gapped node even though
-  `Evaluator/tools/ngl/` is vendored.
-- **AF3's per-engine ipSAE is missing from `top30_candidates.csv` (F33).** The shortlist
-  reads `af3_pae_ipsae_min`, but the writer emits `af3_ipsae_min`, so that column is
-  silently absent. Read it
-  from `metrics.csv` under the correct names.
-- **`wetlab_recommended` is always `False` on a single-engine install (F34).** The gate
-  requires `agreement_count >= 2`, which is unreachable when only Boltz-2 is present.
+- **The ranking is computed from PAE `.npy` files, not from the CSV's `iptm` column.**
+  If a results directory is separated from the refold CSVs that reference it (a
+  `fleet.sh fetch`, an archived run, a CSV copied on its own), the per-engine ipTM and
+  ipSAE columns cannot be recomputed. The report says so — `[pae] N/N PAE files … were
+  not found`, then `[rank] NO engine ipTM was available` — and the resulting `rank`
+  column carries no cross-engine signal. Move the whole `evaluate/` directory, not just
+  the CSVs.
+- **The ranking is a triage filter, not a decision procedure.** On a realistic
+  same-target, same-tool pool (Cao 2022: 4,442 designs, 12 targets) the top decile is
+  worth roughly 1.5–2× enrichment, and it beats a random ordering on only 6 of 12
+  targets. It ranks binder-vs-non-binder confidence, never affinity among binders.
+  See Part U in [CHANGELOG.md](CHANGELOG.md).
 
 ### Running without an LLM
 
@@ -574,11 +645,11 @@ packages are an operating manual, not a requirement. Two gaps affect scripted us
   `runs/<name>/config.json`, and `configurator --config <file>` regenerates a run
   directory with no prompts (`--run` also starts the pipeline). Replays are
   byte-identical.
-- **15 of the 22 `binder-compare` subcommands have no human-facing documentation.**
-  `analyze-target`, `mature`, `monomer`, `affinity` and `wetlab` are documented only
-  inside `.claude/skills/`; `prefilter`, `qc-annotate`, `epitope`, `epitope-map`,
-  `beta-check`, `diversity` and `validate` are documented nowhere. Use
-  `binder-compare <cmd> --help` in the meantime.
+- ~~**15 of the 22 `binder-compare` subcommands have no human-facing documentation.**~~
+  **Fixed:** all 22 are listed under
+  [All `binder-compare` subcommands](#all-binder-compare-subcommands), and a test
+  fails if the table and the parser disagree in either direction. `--help` on any
+  subcommand remains the detailed reference.
 
 ---
 

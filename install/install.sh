@@ -175,7 +175,8 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes] [--force]
   --tool        Which tool(s) to install (or uninstall). Omit for interactive selection.
                   all                  current-generation tools: bindcraft, boltzgen,
                                        mosaic, evaluator, pxdesign, proteina-complexa,
-                                       protein-hunter, rfd3, esmfold2 (default refold engine)
+                                       protein-hunter, rfd3, esmfold2 (default refold
+                                       engine) and soluprot (pre-refold screen)
                   bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3
                                        install one current-generation tool
                   af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
@@ -184,12 +185,13 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes] [--force]
                                        https://github.com/google-deepmind/alphafold3
                   esmfold2             ESMFold2 refolder — default (in --tool all);
                                        lightweight refold engine, no gated weights
-                  soluprot             SoluProt 1.0 solubility screen — opt-in only;
-                                       sequence-only, no GPU, no refolding. x86 only
-                                       (USEARCH dep is x86 binary). TMHMM (DTU
-                                       registration) and USEARCH (drive5.com) downloads
-                                       are required and the installer prints the URLs
-                                       if either is missing post-install.
+                  soluprot             SoluProt 1.0 solubility screen — also in
+                                       --tool all; sequence-only, no GPU, no refolding.
+                                       x86 and aarch64. Builds open-source USEARCH v12
+                                       (rcedgar/usearch12, GPLv3) and scikit-learn
+                                       0.20.4 from source, so a C/C++ toolchain is
+                                       required. Uses the shipped --no_tmhmm model, so
+                                       no TMHMM registration and no drive5.com download.
   --cuda        CUDA version for conda package resolution (default: 12.4).
   --skip-examples
                 Do not prompt to run bundled examples after install.
@@ -712,8 +714,8 @@ select_tools_interactive() {
     [[ "$DO_PROTEINA_COMPLEXA" == true ]] && echo -e "    ${GREEN}✓${RESET} Proteina-Complexa"
     [[ "$DO_PROTEIN_HUNTER" == true ]] && echo -e "    ${GREEN}✓${RESET} Protein-Hunter"
     [[ "$DO_AF3" == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; >=100 GB GPU; weights required)${RESET}"
-    [[ "$DO_ESMFOLD2" == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (opt-in refolder)"
-    [[ "$DO_SOLUPROT" == true ]] && echo -e "    ${GREEN}✓${RESET} SoluProt 1.0 (opt-in solubility screen)"
+    [[ "$DO_ESMFOLD2" == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (default refolder)"
+    [[ "$DO_SOLUPROT" == true ]] && echo -e "    ${GREEN}✓${RESET} SoluProt 1.0 (pre-refold solubility screen)"
     echo ""
 
     confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
