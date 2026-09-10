@@ -299,7 +299,7 @@ ZSCORE_METRICS = list(BOLTZ2_METRIC_MAP.keys()) + [
     "boltz_pae_bt_ipsae",
     "boltz_pae_tb_ipsae",
     "boltz_pae_ipsae_min",
-    # AF3 DunbrackLab ipSAE + summary metrics (needs >100 GB unified/device memory)
+    # AF3 DunbrackLab ipSAE + summary metrics (runs on 24 GB GPUs; ~4.4 GB peak at ~260 tokens)
     "af3_iptm",
     "af3_ptm",
     "af3_ranking_score",

@@ -16,7 +16,7 @@ Three refolders run as **library code, not jobs**, all locally on Spark:
 |---|---|---|---|
 | Boltz-2 | `Mosaic/.venv` | stable, default | Native [binder\|target] ordering, pLDDT [0,1] |
 | ESMFold2 | `binder-eval-esmfold2` | live; lightweight, no gated weights | Target-first PAE → transposed; pLDDT [0,1]. Also feeds `chain_iptm_interface` (the autosize gate) |
-| AlphaFold 3 (v3.0.2) | `binder-eval-af3` | Part K, live; canonical 2nd engine | Cross-platform (x86_64 + aarch64) but needs >100 GB unified or device memory — Spark / H200 / GH200 fit; consumer 24 GB GPUs do not. Target-first PAE → transposed; pLDDT [0,100] → rescaled to [0,1] |
+| AlphaFold 3 (v3.0.2) | `binder-eval-af3` | Part K, live; canonical 2nd engine | Cross-platform (x86_64 + aarch64) and runs on 24 GB consumer GPUs too — measured 4,430 MiB peak for a 258-token complex on an RTX 3090 (2026-08-14); the old ">100 GB" note was preallocation misread as working set. Target-first PAE → transposed; pLDDT [0,100] → rescaled to [0,1] |
 
 Each refolder takes a (binder sequence + target structure + chain assignment) tuple and produces a (`.cif` structure + PAE matrix `.npz`). The evaluator then computes iPSAE on each PAE matrix and merges results.
 
@@ -25,7 +25,7 @@ Because all three envs co-exist on Spark, the evaluation pipeline is a single Py
 ```
 for design in pool:
     boltz_out    = refold_boltz2(design)      # Mosaic venv
-    af3_out      = refold_af3(design)         # binder-eval-af3 (needs >100 GB unified/device memory)
+    af3_out      = refold_af3(design)         # binder-eval-af3 (runs on 24 GB GPUs)
     esmfold2_out = refold_esmfold2(design)    # binder-eval-esmfold2
 
     boltz_ipsae    = compute_ipsae(boltz_out.pae, cutoff=10.0, d0='d0_res')

@@ -6,6 +6,38 @@ import signal
 import sys
 import uuid
 
+# --- GPU memory policy: MUST run before equinox/jax import (equinox pulls in jax).
+# refold_boltz2.py previously set NO memory policy at all, so JAX applied its
+# default XLA_PYTHON_CLIENT_MEM_FRACTION=0.75.  On a discrete card that is 0.75 of
+# the card.  On DGX Spark's unified memory, cudaMemGetInfo total == system RAM, so
+# it reserved 93,802 MiB of the machine's own 121.7 GiB and triggered
+# `NVRM: Out of memory` on 2026-08-19.  See binder_comparison.refolding.memory_policy
+# and docs/PLAN_bm5_unified_memory.md.  Override with BOLTZ2_XLA_MEM_FRACTION.
+#
+# MEASURED 2026-08-20 on BM5 (GB10, 121.7 GiB unified), PREALLOCATE=false under an
+# MPS cap.  Demand is FLAT across our size regime -- 273 tokens and 340 tokens both peak
+# at 17.19 GiB -- so it is dominated by fixed cost, not by N^2.  24 GiB is ~1.4x that and
+# is verified to complete a 340-token refold.  (The "18.9 GB" figure in circulation was
+# roughly right by luck: it is also ~0.75 x 23.6 GiB, a preallocation artifact on a 24 GB
+# card, so it was supply that happened to sit near demand.)
+#
+# CEILING: above ~600 tokens demand jumps past 56 GiB and will NOT fit -- measured at
+# 634 / 721 / 869 tokens, all of which fail.  They now fail *cleanly*
+# (RESOURCE_EXHAUSTED, box untouched) instead of wedging the host, but they do fail.
+# For oversize complexes raise both this and the MPS cap, and run exclusively.
+_BOLTZ2_TARGET_GIB = 24.0
+try:
+    from binder_comparison.refolding.memory_policy import apply_jax_memory_policy
+
+    apply_jax_memory_policy("boltz2", _BOLTZ2_TARGET_GIB)
+except Exception as _mem_policy_exc:  # binder_comparison not importable in this env
+    print(
+        f"  [boltz2] WARNING: no GPU memory policy applied ({_mem_policy_exc}). "
+        f"On a unified-memory host JAX will reserve 75% of SYSTEM RAM. "
+        f"Run under tools/gpu_mem_guard.sh, or set BOLTZ2_XLA_MEM_FRACTION.",
+        file=sys.stderr,
+    )
+
 import equinox as eqx
 import gemmi
 import jax

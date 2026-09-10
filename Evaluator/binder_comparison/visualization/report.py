@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..comparison.candidates import _NATIVE_SEQ_COLS, collapse_native_df, order_tools
+from ..comparison.candidates import _NATIVE_SEQ_COLS, collapse_native_df, display_tool_name, order_tools
 from ..comparison.scoring import (
     _ENGINE_IPSAE_COLS,
     DEFAULT_ENGINE_THRESHOLDS,
@@ -90,18 +90,6 @@ def _agreement_phrase(df: pd.DataFrame, thresholds: dict[str, float]) -> str:
 
 
 # Display names for tools (source_tool values are lowercase internally)
-_TOOL_DISPLAY = {
-    "mosaic": "Mosaic",
-    "pxdesign": "PXDesign",
-    "boltzgen": "BoltzGen",
-    "boltzgen_nano": "BoltzGen (nano)",
-    "boltzgen_protein": "BoltzGen (protein)",
-    "bindcraft": "BindCraft",
-    "proteina_complexa": "Proteina-Complexa",
-    "rfd3": "RFD3",
-    "protein_hunter": "Protein-Hunter",
-}
-
 # Primary reference link per tool. Points at the canonical repository used by
 # the BindMaster installer (so the link matches the code the user actually
 # ran). Swap to a paper URL once each method is published.
@@ -131,7 +119,7 @@ def _tool_display(name: str, *, link: bool = False) -> str:
     repository) — used only by the top counts banner so links don't repeat
     on every tool mention in tables/section headings.
     """
-    label = _TOOL_DISPLAY.get(name, name)
+    label = display_tool_name(name)
     if not link:
         return label
     url = _TOOL_LINKS.get(name)
@@ -423,7 +411,7 @@ def _build_ngl_viewer(top_df: pd.DataFrame, structures_dir: Path, target_seq: st
             f'style="background:{e["tool_colour"]};color:white;border:none;padding:0.4em 0.7em;'
             f"margin:0.15em;border-radius:4px;cursor:pointer;font-size:0.85em;font-weight:bold;"
             f'transition:transform 0.1s,filter 0.1s,box-shadow 0.1s;" '
-            f'title="{_TOOL_DISPLAY.get(e["tool"], e["tool"])} — ipSAE={e["ipsae"]}, ipTM={e["iptm"]}, {e["length"]}aa">'
+            f'title="{display_tool_name(e["tool"])} — ipSAE={e["ipsae"]}, ipTM={e["iptm"]}, {e["length"]}aa">'
             f"#{e['rank']}</button>"
         )
     buttons = "\n".join(buttons_html)
@@ -2034,27 +2022,9 @@ def generate_report(
     top_table_legend = _slim_legend_html(sort_df, engine_thresholds)
     tool_classification_banner = _tool_classification_banner_html(sort_df, tool_overrides=tool_overrides)
 
-    # "Designed in total" banner (top of the report) from --tool-meta TOOL='total:N'.
-    _dt = (
-        {t: (tool_overrides or {}).get(t, {}).get("total") for t in sort_df["source_tool"].dropna().unique()}
-        if "source_tool" in sort_df.columns
-        else {}
-    )
-    _dt = {t: int(v) for t, v in _dt.items() if v and str(v).isdigit()}
-    designed_total_banner = ""
-    if _dt:
-        _grand = sum(_dt.values())
-        _per = " &nbsp;·&nbsp; ".join(
-            f"{_tool_display(t)} <b>{v:,}</b>" for t, v in sorted(_dt.items(), key=lambda kv: -kv[1])
-        )
-        designed_total_banner = (
-            '<p style="font-size:0.95em;color:#222;margin:0.6em 0 0.4em 0;padding:0.6em 1em;'
-            'background:#eef6ff;border:1px solid #b3d4fc;border-radius:6px;">'
-            f"&#129516; <b>Designed in total: {_grand:,}</b> across {len(_dt)} tools "
-            f"&rarr; <b>{len(sort_df):,}</b> kept in the ranked pool "
-            f"(the best per tool, by cross-engine two-stage ranking, intercalators excluded). "
-            f"&nbsp;{_per}.</p>"
-        )
+    # Generation funnel banner (top of the report) from
+    # --tool-meta TOOL='total:N;filtered:M'.
+    designed_total_banner = _designed_funnel_html(sort_df, tool_overrides, full_df=full_df)
     provenance_footer = _provenance_footer_html(provenance)
     binding_map_link = _binding_map_link_html(binding_map)
 
@@ -2383,6 +2353,103 @@ def _tool_classification_banner_html(
         "<th style='text-align:left;'>Source CSV</th>"
         "<th style='text-align:left;'>Native metric (what it measures)</th>"
         "<th style='text-align:left;'>Status</th></tr>" + "".join(rows) + "</table></div></details>"
+    )
+
+
+def _designed_funnel_html(sort_df, tool_overrides, full_df=None) -> str:
+    """Render the generation funnel: generated -> passed the tool's own filter -> refold pool.
+
+    Fed by ``--tool-meta TOOL='total:N;filtered:M'``.
+
+    The banner used to name only the first and last rung. On CALCA that reads
+    "37,863 designed -> 350 in the pool", a 1-in-108 reduction with no account
+    of what happened in between, and the two steps are not the same kind of
+    thing: each tool first drops designs that fail ITS OWN filters, and only
+    then do we take the best N per tool into the cross-engine refold.
+
+    ``filtered`` is optional per tool and genuinely absent for some: BoltzGen,
+    PXDesign, BindCraft and Protein-Hunter apply pass/fail filters, while
+    Proteina-Complexa, RFdiffusion3 and Mosaic only rank. A tool that does not
+    declare one is still listed, with the middle rung shown as absent rather
+    than as a zero (which would read as "everything was rejected") and excluded
+    from the summed middle rung.
+    """
+    if "source_tool" not in getattr(sort_df, "columns", []):
+        return ""
+    tools = sort_df["source_tool"].dropna().unique()
+    ov = tool_overrides or {}
+
+    rows = []
+    for t in tools:
+        total = str(ov.get(t, {}).get("total", "")).strip()
+        if not total.isdigit():
+            continue  # `filtered` alone has no denominator, so it cannot be shown
+        filt = str(ov.get(t, {}).get("filtered", "")).strip()
+        rows.append((t, int(total), int(filt) if filt.isdigit() else None))
+    if not rows:
+        return ""
+
+    rows.sort(key=lambda r: -r[1])
+    n_pool = len(sort_df)
+    grand = sum(r[1] for r in rows)
+    with_filter = [r for r in rows if r[2] is not None]
+    mid = sum(r[2] for r in with_filter) if with_filter else None
+
+    # `sort_df` is representatives-only (MPNN/cycle siblings collapsed to one
+    # row per backbone), so it undercounts what was actually refolded. Prefer
+    # `full_df` for the refold rung and name the collapse when they differ.
+    refold_df = full_df if full_df is not None and "source_tool" in full_df.columns else sort_df
+    n_refolded = len(refold_df)
+    pool_by_tool = refold_df["source_tool"].value_counts().to_dict()
+    body = []
+    for t, total, filt in rows:
+        kept = pool_by_tool.get(t, 0)
+        mid_cell = f"{filt:,}" if filt is not None else '<span style="color:#888;">ranked only, no filter</span>'
+        body.append(
+            f"<tr><td>{_tool_display(t)}</td>"
+            f'<td style="text-align:right;">{total:,}</td>'
+            f'<td style="text-align:right;">{mid_cell}</td>'
+            f'<td style="text-align:right;">{kept:,}</td></tr>'
+        )
+
+    collapse_note = (
+        f", shown below as {n_pool:,} rows because MPNN/cycle siblings of the same backbone are collapsed to one"
+        if n_pool != n_refolded
+        else ""
+    )
+
+    if mid is not None:
+        mid_sentence = (
+            f" Each tool then applied its own pass/fail filters, leaving "
+            f"<b>{mid:,}</b> across the {len(with_filter)} tool(s) that filter at all"
+            f" (the rest rank their output but reject nothing)."
+        )
+        mid_total_cell = f"<b>{mid:,}</b>"
+    else:
+        mid_sentence = " None of these tools applies a pass/fail filter; they only rank their output."
+        mid_total_cell = "&mdash;"
+
+    return (
+        '<div style="font-size:0.95em;color:#222;margin:0.6em 0 0.4em 0;padding:0.6em 1em;'
+        'background:#eef6ff;border:1px solid #b3d4fc;border-radius:6px;">'
+        f"&#129516; <b>{grand:,} designs generated</b> across {len(rows)} tools."
+        f"{mid_sentence}"
+        f" From those survivors we took the best per tool into the cross-engine refold: "
+        f"<b>{n_refolded:,}</b> designs refolded and ranked here{collapse_note}."
+        '<table style="margin:0.7em 0 0 0;border-collapse:collapse;font-size:0.92em;">'
+        '<tr style="text-align:left;border-bottom:1px solid #b3d4fc;">'
+        "<th>Tool</th>"
+        '<th style="text-align:right;padding-left:1.4em;">Generated</th>'
+        '<th style="text-align:right;padding-left:1.4em;">Passed the tool&rsquo;s own filter</th>'
+        '<th style="text-align:right;padding-left:1.4em;">Refolded &amp; ranked here</th></tr>'
+        + "".join(body)
+        + '<tr style="border-top:1px solid #b3d4fc;font-weight:bold;">'
+        f"<td>Total</td>"
+        f'<td style="text-align:right;">{grand:,}</td>'
+        f'<td style="text-align:right;">{mid_total_cell}</td>'
+        f'<td style="text-align:right;">{n_refolded:,}</td></tr>'
+        "</table>"
+        "</div>"
     )
 
 

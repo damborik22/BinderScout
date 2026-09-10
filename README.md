@@ -344,9 +344,15 @@ step by hand. `bash Evaluator/evaluate.sh --help` prints the same list.
 | `--monomer-dir DIR` | Opt-in: binder-alone structures for the context-dependent-fold check (`fold_robust`) |
 | `--allow-no-msa` | Proceed when the shared target MSA cannot be fetched. Default is to abort: one engine folding single-sequence while the others use an MSA produces scores that are not comparable, and the ranking averages across engines |
 | `--resume` | Resume an interrupted run |
+| `--concurrent` | Run the three refold engines staggered-concurrently instead of one after another. Worth ~1.25x (19.8 % wall-clock, measured), but it costs ~54 % of the OS memory headroom — use it only when the box is dedicated |
+| `--stagger N` | Seconds between engine starts under `--concurrent` (default 30). Staggering stops three engines compiling at once |
+| `--gpu-cap-boltz2` / `--gpu-cap-af3` / `--gpu-cap-esmfold2` | Per-engine CUDA MPS device-memory cap (defaults `24G` / `12G` / `24G`). On a unified-memory host (DGX Spark / GB10) the GPU pool **is** system RAM, so an uncapped engine reserves a fraction of the whole machine and can starve the OS. Caps are set at ~1.4-1.5x measured demand |
+| `--no-gpu-guard` | Do not start the CUDA MPS guard. Only for hosts with a discrete card, where a runaway allocation kills the process rather than the machine |
 
-> **The gate defaults to 3, and most hosts run two engines.** AF3 needs >100 GB of GPU
-> memory, so a typical box runs Boltz-2 + ESMFold2 and *every* design fails a gate of 3.
+> **The gate defaults to 3, and some hosts run two engines.** AF3 itself fits a 24 GB card
+> for our size regime (~4.4 GiB peak at 258-391 tokens; the old ">=100 GB" figure was a
+> preallocation artifact), but it needs gated weights, so a box without them runs
+> Boltz-2 + ESMFold2 and *every* design fails a gate of 3.
 > `evaluate.sh` counts the engines it will actually run and warns **before** any GPU
 > time, naming the flag: pass `--min-engines 2`. It is never lowered for you — deriving
 > the gate from whatever happens to be installed would make two operators with the same

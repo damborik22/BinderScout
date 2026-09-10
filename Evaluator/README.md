@@ -80,7 +80,8 @@ and creates two additional conda environments:
 > The refold engines are **Boltz-2 + AF3 + ESMFold2**. AF2 refolding was removed in
 > Part I and Protenix refolding on 2026-07-26 — there is no `refold-af2` or
 > `refold-protenix` subcommand and no `binder-eval-af2` env. AF3 needs gated weights
-> and >100 GB of GPU memory; ESMFold2 needs neither. `evaluate.sh` auto-detects
+> (but runs on a 24 GB GPU — ~4.4 GB peak for a 258-token complex); ESMFold2 needs
+> neither. `evaluate.sh` auto-detects
 > whichever engine envs exist and skips the rest.
 
 ---
@@ -166,8 +167,8 @@ Output: `boltz2_results.csv` (appends on re-run — check for duplicates after p
 ### `refold-af3`
 Refolds with AlphaFold 3 v3.0.2 in the `binder-eval-af3` env. Columns carry the `af3_`
 prefix; pLDDT is rescaled 0–100 → 0–1 on ingest and the PAE matrix is transposed from
-token order (`[target|binder]`) to `[binder|target]` to match Boltz-2. Needs >100 GB of
-unified or device memory.
+token order (`[target|binder]`) to `[binder|target]` to match Boltz-2. Runs on 24 GB
+consumer GPUs: a 258-token binder:target complex peaks at ~4.4 GB (RTX 3090, 2026-08-14).
 
 Output: `af3_results.csv` (append mode — check for duplicates after partial runs).
 

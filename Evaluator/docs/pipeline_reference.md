@@ -23,7 +23,7 @@ BindMaster/
 | Env | Used for | Status |
 |-----|----------|--------|
 | `binder-eval` | Sequence extraction + reporting | Created by `Evaluator/install.sh` |
-| `binder-eval-af3` | AF3 v3.0.2 refolding | `bindmaster install --tool af3` (gated weights, >100 GB GPU memory) |
+| `binder-eval-af3` | AF3 v3.0.2 refolding | `bindmaster install --tool af3` (gated weights; runs on 24 GB GPUs) |
 | `binder-eval-esmfold2` | ESMFold2 refolding | `bindmaster install --tool esmfold2` (in `--tool all`) |
 | Mosaic `.venv` | Boltz-2 refolding | Created by `bindmaster install --tool mosaic` |
 
@@ -38,7 +38,7 @@ conda run -n binder-eval binder-compare extract \
 Mosaic/.venv/bin/binder-compare refold-boltz2 \
     --sequences seqs.fasta --target-seq SEQ -o boltz2.csv
 
-# Step 3: AF3 refolding (needs >100 GB unified/device memory)
+# Step 3: AF3 refolding (runs on 24 GB GPUs; ~4.4 GB peak at ~260 tokens)
 conda run -n binder-eval-af3 binder-compare refold-af3 \
     --sequences seqs.fasta --target-seq SEQ -o af3.csv
 

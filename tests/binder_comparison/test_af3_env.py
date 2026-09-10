@@ -29,6 +29,24 @@ def build_env():
     return module._build_af3_env
 
 
+@pytest.fixture(scope="module")
+def default_fraction():
+    """The pool-aware default, computed the same way the script computes it.
+
+    Deliberately NOT a hard-coded "0.8": that constant is what rebooted BM5, and
+    _build_af3_env was changed to derive the fraction from the real pool. Asserting
+    0.8 here made these tests pass on a discrete card and fail on a unified-memory
+    host (GB10 resolves 12 GiB / 121.7 GiB = 0.099) — i.e. it asserted the bug.
+    """
+    spec = importlib.util.spec_from_file_location("_refold_af3_default_under_test", _SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except ImportError as exc:
+        pytest.skip(f"refold_af3 dependencies unavailable: {exc}")
+    return module._default_mem_fraction()
+
+
 def test_never_sets_both_mem_fraction_names(build_env):
     """The two names must never both reach the child — that is a jaxlib ValueError."""
     env = build_env({"XLA_CLIENT_MEM_FRACTION": "3.2"})
@@ -52,19 +70,24 @@ def test_explicit_override_wins(build_env):
     assert "XLA_CLIENT_MEM_FRACTION" not in env
 
 
-def test_default_cap_and_preallocate(build_env):
-    """Default 0.8 leaves headroom for the OS; PREALLOCATE stays true (false fragments/hangs)."""
+def test_default_cap_and_preallocate(build_env, default_fraction):
+    """With nothing set we fall back to the pool-aware default, and PREALLOCATE stays true.
+
+    PREALLOCATE=true is load-bearing: with "false" and no device ceiling the allocator
+    grows into the shared pool with no fail-fast, which is the slow-starve path.
+    """
     env = build_env({})
 
-    assert env["XLA_PYTHON_CLIENT_MEM_FRACTION"] == "0.8"
+    assert env["XLA_PYTHON_CLIENT_MEM_FRACTION"] == default_fraction
+    assert 0.0 < float(env["XLA_PYTHON_CLIENT_MEM_FRACTION"]) <= 0.8
     assert env["XLA_PYTHON_CLIENT_PREALLOCATE"] == "true"
 
 
-def test_blank_values_fall_through_to_default(build_env):
+def test_blank_values_fall_through_to_default(build_env, default_fraction):
     """An exported-but-empty var must not silently disarm the cap."""
     env = build_env({"AF3_XLA_MEM_FRACTION": "  ", "XLA_CLIENT_MEM_FRACTION": ""})
 
-    assert env["XLA_PYTHON_CLIENT_MEM_FRACTION"] == "0.8"
+    assert env["XLA_PYTHON_CLIENT_MEM_FRACTION"] == default_fraction
 
 
 def test_parent_environment_is_preserved(build_env):

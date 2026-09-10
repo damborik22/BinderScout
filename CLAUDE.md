@@ -4,7 +4,7 @@
 
 BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. It wraps seven independent design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) behind a single CLI (`bindmaster`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders.
 
-**Current status:** v0.7.0 + Parts I, J, K, L, M, N, T and U landed on `[Unreleased]`. Engine line-up: Evaluator AF2 refolding removed (Part I), AF3 v3.0.2 as the canonical 2nd refolding engine on big-VRAM hardware (Part K — Spark / H200, >100 GB unified memory), Protenix refolding removed (Part J reverted — AF3 covers the 2nd-engine role), Protein-Hunter (Part L) and RFD3 (Part M) installed and configurable. Ranking: affinity-from-structure-confidence closed as a negative result (Part N), and three ranking methods collapsed into one — cross-engine gate then `consensus_iptm_mean` (Part U). SoluProt is part of `--tool all` and both platforms build USEARCH v12 from source. Proteina-Complexa is deprecated on aarch64 (throughput, not an install failure). Active development on `master`; `aarch64` branch tracks DGX Spark / Grace-Hopper and is periodically rebased.
+**Current status:** v0.7.0 + Parts I, J, K, L, M, N, T and U landed on `[Unreleased]`. Engine line-up: Evaluator AF2 refolding removed (Part I), AF3 v3.0.2 as the canonical 2nd refolding engine (Part K — **runs on 24 GB consumer GPUs for our size regime**; the old ">=100 GB" figure was a preallocation artifact, see the AF3 memory note below), Protenix refolding removed (Part J reverted — AF3 covers the 2nd-engine role), Protein-Hunter (Part L) and RFD3 (Part M) installed and configurable. Ranking: affinity-from-structure-confidence closed as a negative result (Part N), and three ranking methods collapsed into one — cross-engine gate then `consensus_iptm_mean` (Part U). SoluProt is part of `--tool all` and both platforms build USEARCH v12 from source. Proteina-Complexa is deprecated on aarch64 (throughput, not an install failure). Active development on `master`; `aarch64` branch tracks DGX Spark / Grace-Hopper and is periodically rebased.
 
 **Repository:** `github.com/damborik22/BinderScout` (the working-tree directory may be checked out as `BinderScout`; the CLI command and Python package are both `bindmaster`. The old `damborik22/BindMaster` URL redirects.)
 
@@ -96,7 +96,7 @@ Target structure (.pdb / .mmcif)
        1. Extract sequences from all tool outputs (one extractor per tool)
        1.5. (optional) Screen with SoluProt 1.0 (binder-eval-soluprot env)     [live, x86 + aarch64; --soluprot-filter drops sub-threshold designs from FASTA before refold]
        2. Refold with Boltz-2 (Mosaic venv)                                    [live, all platforms]
-       3. Refold with AlphaFold 3 v3.0.2 (binder-eval-af3 env)                 [live, canonical 2nd engine — Spark / H200 / >100 GB VRAM]
+       3. Refold with AlphaFold 3 v3.0.2 (binder-eval-af3 env)                 [live, canonical 2nd engine — runs on 24 GB GPUs; ~4.4 GB peak for a 260–390-token complex]
        4. Refold with ESMFold2 (binder-eval-esmfold2 env)                      [live, DEFAULT engine — installed by --tool all; auto-detected by evaluate.sh; feeds consensus_iptm + autosize gate]
        5. Rank by cross-engine iPTM (≥3-engine gate → `consensus_iptm_mean`; `--min-engines 2` to relax); generate HTML + CSV report
 ```
@@ -164,7 +164,7 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `bindmaster_protein_hunter` | Protein-Hunter | 3.10 | conda | Boltz-2 / Chai-1 hallucination, 6 modalities |
 | `bindmaster_rfd3` | RFD3 (`rc-foundry`) | 3.12 | conda | RosettaCommons foundry diffusion + ProteinMPNN |
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
-| `binder-eval-af3` | AF3 refolder | 3.10 | conda | AlphaFold 3 v3.0.2 refolding — **canonical 2nd engine** (Part K, live on Spark / H200 / >100 GB VRAM hardware) |
+| `binder-eval-af3` | AF3 refolder | 3.10 | conda | AlphaFold 3 v3.0.2 refolding — **canonical 2nd engine** (Part K; live on Spark / H200 **and on 24 GB consumer GPUs** — BM1/BM2/BM4) |
 | `binder-eval-esmfold2` | ESMFold2 refolder | 3.10 | conda | **Default refold engine** (biohub) — installed by `--tool all`, auto-detected by `evaluate.sh`; lightweight, no gated weights; feeds `consensus_iptm` + autosize gate |
 | `binder-eval-soluprot` | SoluProt screen | 3.7 | conda | Sequence-only *E. coli* solubility filter (Hon et al. 2021); x86 + aarch64 (aarch64 builds scikit-learn 0.20.4 + USEARCH v12 from source, uses the `--no_tmhmm` model). NOT a refold engine; runs before refolding; `--soluprot-filter` drops sub-threshold designs before any GPU work |
 
@@ -195,7 +195,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 - **stdlib-only CLI:** `bindmaster.py` uses only stdlib so it works on any Python 3.10+ without pip installs.
 - **uv for Mosaic:** Mosaic uses `uv` instead of conda because it needs JAX with CUDA, and uv resolves this faster and more reliably.
 - **Pinned commits:** Tool repos are cloned at pinned commits (`BINDCRAFT_COMMIT`, `BOLTZGEN_COMMIT`, `MOSAIC_COMMIT`) for reproducible installs.
-- **Separate evaluator envs:** Boltz-2 refolding runs in the Mosaic venv (JAX). AF3 v3.0.2 (Part K, live) is the canonical 2nd engine and runs in a dedicated `binder-eval-af3` conda env on DGX Spark / H200 / any host with >100 GB unified or device memory — full AF3 inference needs that headroom. ESMFold2 (biohub) runs in its own `binder-eval-esmfold2` conda env, auto-detected by `evaluate.sh` when present. `evaluate.sh` orchestrates Boltz-2 + AF3 + ESMFold2 — exactly three engines, all auto-detected, each skippable with `--skip-<engine>`.
+- **Separate evaluator envs:** Boltz-2 refolding runs in the Mosaic venv (JAX). AF3 v3.0.2 (Part K, live) is the canonical 2nd engine and runs in a dedicated `binder-eval-af3` conda env — on DGX Spark, H200, **and on 24 GB consumer GPUs** (see the AF3 memory note below; the old ">100 GB" requirement was a preallocation artifact). ESMFold2 (biohub) runs in its own `binder-eval-esmfold2` conda env, auto-detected by `evaluate.sh` when present. `evaluate.sh` orchestrates Boltz-2 + AF3 + ESMFold2 — exactly three engines, all auto-detected, each skippable with `--skip-<engine>`.
 
 ---
 
@@ -355,6 +355,7 @@ the parameter sweep.
 - **Binder length is a main driver** — Longer binders tend to score lower on `ipsae_min` (r ≈ -0.78). (Not testable on Cao: 75.1% of that set is exactly 65 aa.)
 - **Mosaic designs.csv format** — Can mix column formats between workers (old 11-col / new 13-col). The parser must handle this carefully or columns misalign. The `is_top` column marks the ~40 refolded designs out of ~800 total; extractors filter to `is_top=1` by default.
 - **Mosaic `target_sequence` placeholder** — The Mosaic template (`hallucinate_bindmaster.py`) writes `"REPLACE_ME"` as `target_sequence` when not configured. The legacy evaluator guards against using this as a real target sequence.
+- **AF3 memory: the ">=100 GB GPU" requirement was wrong — it fits a 24 GB card.** Measured 2026-08-14 on BM2 (RTX 3090, 24 GB, current `AF3_COMMIT`): a **258-token** complex (ApoE4 NTD 141 aa + 117 aa binder) peaks at **4,430 MiB** and takes 91 s including cold compile (`iptm 0.88`); a **391-token** complex peaks at the *same* 4,430 MiB. A 20-design pool (241–286 tokens) ran **20/20 with zero empty rows**. The old figure came from measuring with `XLA_PYTHON_CLIENT_PREALLOCATE=true`, which grabs a fixed *fraction of the pool regardless of need* — reproduced on the same 3090, where the shipped default at fraction 0.9 reserves ~22 GB for a 4.4 GB working set. That is evidence about our env vars, not about AF3's working set. **AF3 therefore runs fleet-wide (BM1/BM2/BM4), and the >=3-engine gate is no longer Spark-bound.** Caveat: this is our *size regime* (~200–400 tokens), not a universal claim — AF3 documents 5,120 tokens on an 80 GB A100, and pair activations scale super-linearly, so a much larger complex will still need a much larger card.
 - **pLDDT scale** — Boltz-2 returns [0,1]; AF3 native is [0,100] and is rescaled to [0,1] on ingest by the refold runner so report columns are directly comparable.
 - **PAE ordering** — Boltz-2 is native [binder|target]. AF3 is token-order so we always put target first in the input JSON, giving [target|binder] — the evaluator transposes internally. Column prefixes distinguish engines (`boltz_pae_*`, `af3_*`, `esmfold2_*`).
 - **Append-mode CSVs** — `refold_boltz2.py` appends to CSV. If rerun after partial failure, check for duplicate `run_id` entries.
@@ -375,7 +376,7 @@ the parameter sweep.
 
 - **Parts A–H complete** (see STAGES.md); **Parts I, J, K, L, M landed on `[Unreleased]`** (see CHANGELOG). All Roadmap items are done.
 - **Part I — AF2 refolding removed from Evaluator.** Deleted `refold_af2.py`, `af2_runner.py`, `binder-eval-af2.yml`; pruned all `af2_*` schema fields and report plots. BindCraft / PXDesign / Proteina-Complexa still use AF2 internally — only the Evaluator's AF2 refolding step was removed.
-- **Part K — AF3 v3.0.2 is the canonical 2nd refolding engine.** Runs in its own `binder-eval-af3` conda env on DGX Spark, H200, or any host with >100 GB unified / device memory (full AF3 inference doesn't fit on consumer 24 GB GPUs). Schema: `af3_*` columns in `StandardisedMetrics`; pLDDT rescaled 0–100 → 0–1 on ingest; PAE transposed from token-order to `[binder|target]` to match Boltz-2.
+- **Part K — AF3 v3.0.2 is the canonical 2nd refolding engine.** Runs in its own `binder-eval-af3` conda env on DGX Spark, H200, **and on 24 GB consumer GPUs** — the original ">100 GB / OOMs on 24 GB" claim was wrong, see the memory note below. Schema: `af3_*` columns in `StandardisedMetrics`; pLDDT rescaled 0–100 → 0–1 on ingest; PAE transposed from token-order to `[binder|target]` to match Boltz-2.
 - **Part J reverted — Protenix refolding removed.** `refold-protenix`, `protenix_runner.py`, `refold_protenix.py` and every `protenix_*` schema/report column are gone; AF3 covers the independent-cross-check role. This also resolved a live contradiction: `evaluate.sh` ran Protenix opt-OUT (whenever `bindmaster_pxdesign` existed) while this file claimed it ran only when explicitly enabled, so two operators with the same designs could get different `consensus_iptm`. **PXDesign still uses Protenix internally** — that is a design tool, and `pxdesign_protenix_iptm` remains a native metric.
 - **Part L — Protein-Hunter** installable via `bindmaster install --tool protein-hunter` (x86 only; aarch64 blocked by PyRosetta). Conda env `bindmaster_protein_hunter`, vendored Boltz-2 + Chai-1 (sokrypton fork). New `ProteinHunterExtractor` reads `summary_high_iptm.csv` by default (`--all-protein-hunter-designs` for all runs). Configurator generates `run_protein_hunter.sh`.
 - **Part M — RFD3** installable via `bindmaster install --tool rfd3` (x86; aarch64 opt-in and unvalidated — see aarch64 specifics). Conda env `bindmaster_rfd3`, `rc-foundry[rfd3,mpnn]` from PyPI, weights at `weights/foundry/`. New `RFD3Extractor`. Configurator generates `run_rfd3.sh`.
@@ -556,7 +557,7 @@ conda run -n binder-eval binder-compare extract \
 Mosaic/.venv/bin/binder-compare refold-boltz2 \
     --sequences seqs.fasta --target-seq SEQ -o boltz2.csv
 
-# Refold with AF3 v3.0.2 (canonical 2nd engine — Spark / H200, >100 GB VRAM)
+# Refold with AF3 v3.0.2 (canonical 2nd engine — Spark / H200 / 24 GB consumer GPUs)
 conda run -n binder-eval-af3 binder-compare refold-af3 \
     --sequences seqs.fasta --target-seq SEQ -o af3.csv
 

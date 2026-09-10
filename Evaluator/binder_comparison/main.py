@@ -4,7 +4,7 @@ Subcommands:
     extract          — pull sequences from tool outputs
     parse-seqs       — convert sequences from any format to FASTA
     refold-boltz2    — refold with Boltz-2 (run in Mosaic venv)
-    refold-af3       — refold with AlphaFold 3 v3.0.2 (run in binder-eval-af3 env; needs >=100 GB GPU memory)
+    refold-af3       — refold with AlphaFold 3 v3.0.2 (run in binder-eval-af3 env; runs on 24 GB GPUs)
     refold-esmfold2  — refold with ESMFold2 (biohub; run in binder-eval-esmfold2 env)
     filter-soluprot  — score sequence solubility with SoluProt 1.0 (run in binder-eval-soluprot env; no GPU)
     report           — merge, normalise, generate HTML report

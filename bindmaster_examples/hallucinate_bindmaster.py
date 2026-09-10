@@ -5,6 +5,30 @@ import signal
 import json
 import sys
 
+# --- GPU memory policy: MUST run before jax is imported. ---
+# Mosaic is Boltz-2 *gradient* hallucination, so its working set is far larger than
+# the refold engines' — a 389 aa target at DESIGN_BATCH_SIZE=4 asked for a single
+# 24.61 GiB tensor and died inside an 80 GiB pool (CBG r3, 2026-09-10).
+#
+# Without a policy JAX applies its default MEM_FRACTION=0.75. On a discrete card
+# that is 0.75 of the card; on GB10 `cudaMemGetInfo` total == system RAM, so it is
+# 0.75 of the whole machine — 93.6 GiB observed here, which is the same shape as the
+# two reboots that motivated this module. Same helper AF3 and Boltz-2 already use:
+# name an absolute GiB target, let it derive the fraction from the real pool and
+# keep >= DEFAULT_MIN_OS_GIB (40) for the OS.
+_MOSAIC_TARGET_GIB = float(os.environ.get("MOSAIC_TARGET_GIB", "64"))
+try:
+    from binder_comparison.refolding.memory_policy import apply_jax_memory_policy
+
+    apply_jax_memory_policy("mosaic", _MOSAIC_TARGET_GIB)
+except Exception as _mem_policy_exc:  # binder_comparison not importable in this venv
+    print(
+        f"  [mosaic] WARNING: no GPU memory policy applied ({_mem_policy_exc}). "
+        f"On a unified-memory host JAX will reserve 75% of SYSTEM RAM. "
+        f"Run under tools/gpu_mem_guard.sh, or set MOSAIC_XLA_MEM_FRACTION.",
+        file=sys.stderr,
+    )
+
 import gemmi
 import jax
 import jax.numpy as jnp
@@ -50,7 +74,12 @@ ESM2_CLIP = (2.0, 100.0)  # ClippedLoss bounds — guards against over-optimizat
 # Seeds optimized in parallel per GPU pass (one vmap'd batched_simplex_APGM call).
 # GPU memory scales ~linearly with the batch; the ESM2 prior adds more pressure —
 # drop to 2 (or disable ESM2) if you OOM on a 24 GB card.
-DESIGN_BATCH_SIZE = 4
+#
+# It is not only small cards: memory scales with TARGET size too, and this default
+# was set against small targets. On CBG/2VDY (389 aa target, ~449-499 tokens) batch 4
+# requested a single 24.61 GiB tensor and failed inside an 80 GiB pool; batch 2 is the
+# working setting there. Rule of thumb: at >300 aa of target, start at 2.
+DESIGN_BATCH_SIZE = int(os.environ.get("MOSAIC_DESIGN_BATCH_SIZE", "4"))
 
 
 # ============================

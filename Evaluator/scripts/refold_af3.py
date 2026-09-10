@@ -96,6 +96,21 @@ def refold_batch(
         print("[af3] Nothing to do (all indices skipped).")
         return
 
+    # One fixed bucket for the whole pool, plus a persistent JAX compilation
+    # cache.  Each binder is a fresh run_alphafold.py subprocess, so without the
+    # cache every design recompiles from cold; and with AF3's default bucket
+    # ladder a ~310-token complex pads to 512 while binders of differing length
+    # straddle a boundary and trigger a *second* compile.  Sizing the bucket to
+    # the pool maximum gives every design one identical shape, which is what
+    # makes the cache hit.  Deliberately computed over ALL binder_sequences and
+    # not over `jobs`, so a --resume run keeps the same shape as the run it is
+    # resuming instead of silently re-compiling at a smaller bucket.
+    bucket = len(target_sequence) + max(len(s) for s in binder_sequences)
+    jax_cache_dir = Path(
+        os.environ.get("AF3_JAX_CACHE_DIR") or Path.home() / ".cache" / "bindmaster" / "af3_jax_compile"
+    )
+    jax_cache_dir.mkdir(parents=True, exist_ok=True)
+
     # Pre-warm / load the shared target MSA once for the whole batch.  Raises
     # MissingTargetMSA (abort) if it cannot be obtained and no opt-out was given.
     target_msa, _msa_mode = prepare_target_msa(
@@ -114,6 +129,7 @@ def refold_batch(
         f"per seed × {num_seeds} seed(s)  [model_dir={model_dir}, "
         f"target_msa={'on' if target_msa else 'off'}]"
     )
+    print(f"[af3] Bucket pinned to {bucket} tokens (pool max); JAX compile cache at {jax_cache_dir}")
 
     # Process one binder at a time so partial results are saved incrementally.
     fieldnames = _csv_fieldnames()
@@ -125,6 +141,8 @@ def refold_batch(
             writer.writeheader()
             fh.flush()
 
+        n_failed = 0
+        first_exc: Exception | None = None
         for idx, binder_seq in jobs:
             binder_len = len(binder_seq)
             target_len = len(target_sequence)
@@ -140,9 +158,13 @@ def refold_batch(
                     model_dir=model_dir,
                     num_seeds=num_seeds,
                     num_samples=num_samples,
+                    bucket=bucket,
+                    jax_cache_dir=jax_cache_dir,
                 )
             except Exception as exc:
                 print(f"[af3] ERROR on binder #{idx}: {exc}")
+                n_failed += 1
+                first_exc = first_exc or exc
                 row = _empty_row(idx, binder_seq, target_sequence)
                 writer.writerow(row)
                 fh.flush()
@@ -150,6 +172,7 @@ def refold_batch(
 
             if af3_out is None:
                 print(f"[af3] No output found for binder #{idx}")
+                n_failed += 1
                 row = _empty_row(idx, binder_seq, target_sequence)
                 writer.writerow(row)
                 fh.flush()
@@ -217,6 +240,21 @@ def refold_batch(
 
     print(f"[af3] Wrote {len(jobs)} row(s) → {csv_path}")
 
+    # Failing EVERY binder is an environment fault, not bad input, and it must not
+    # exit 0. Mirrors the same guard in refold_boltz2.py. Without this, AF3 wrote a
+    # full set of empty rows, evaluate.sh returned 0, and the report was generated
+    # with AF3 silently absent -- which also silently defeats the >=3-engine gate,
+    # because every design then looks like a 2-engine design.
+    # Observed 2026-08-20: JAX_PLATFORMS=cpu was exported by evaluate.sh on
+    # aarch64, so run_alphafold.py could not see the GPU and all 6/6 binders died.
+    if jobs and n_failed == len(jobs):
+        raise RuntimeError(
+            f"All {len(jobs)} binder(s) failed — AF3 produced no usable output. "
+            f"This is an environment fault, not bad input. First error: {first_exc}. "
+            "Common cause: JAX cannot see the GPU (check JAX_PLATFORMS is not set to "
+            "'cpu'), or the AF3 model weights / run_alphafold.py are missing."
+        )
+
 
 # ---------------------------------------------------------------------------
 # AF3 invocation
@@ -233,6 +271,8 @@ def _run_single(
     model_dir: str,
     num_seeds: int,
     num_samples: int,
+    bucket: int,
+    jax_cache_dir: Path,
 ) -> dict | None:
     """Run AF3 on a single binder-target pair and return parsed outputs.
 
@@ -286,6 +326,9 @@ def _run_single(
         "--run_data_pipeline=false",
         "--force_output_dir",
         f"--num_diffusion_samples={num_samples}",
+        # Pool-wide fixed shape + persistent compile cache (see refold_batch).
+        f"--buckets={bucket}",
+        f"--jax_compilation_cache_dir={jax_cache_dir}",
     ]
 
     # Cap AF3's JAX/XLA memory preallocation. On unified-memory hosts (DGX Spark, 96 GB
@@ -293,18 +336,97 @@ def _run_single(
     # the OS/NVRM driver → out-of-memory cascade → whole-box reboot. Preallocate a fixed
     # capped fraction so AF3 can never starve the system: a complex too big to fit then
     # fails with a CLEAN per-design JAX OOM (recorded as an empty row) instead of taking
-    # down the machine. Keep PREALLOCATE=true (=false fragments and hangs). Default 0.8 (~77
-    # GB, ~19 GB headroom); override via AF3_XLA_MEM_FRACTION on >100 GB hosts.
+    # down the machine. Keep PREALLOCATE=true (=false fragments and hangs). The fraction is
+    # of whatever pool exists, so it travels: 0.8 is ~77 GB on Spark and ~19 GB on a 24 GB
+    # card — both far above the real working set (4,430 MiB measured for a 258-token
+    # complex on an RTX 3090, 2026-08-14). Note that this preallocation, not AF3's actual
+    # demand, is what produced the retired ">=100 GB GPU" requirement. Override via
+    # AF3_XLA_MEM_FRACTION.
     af3_env = _build_af3_env(os.environ)
 
     print(f"  [af3] Running: {Path(cmd[1]).name} (XLA mem fraction {af3_env['XLA_PYTHON_CLIENT_MEM_FRACTION']}) ...")
     result = subprocess.run(cmd, capture_output=True, text=True, env=af3_env)
     if result.returncode != 0:
-        print(f"  [af3] STDERR: {result.stderr[-500:]}" if result.stderr else "  [af3] No stderr")
+        # 4000, not 500: a 500-char tail cut the head off every traceback, which is
+        # exactly where the cause lives. The JAX "Unknown backend: 'gpu'" failure was
+        # unreadable for that reason -- the log showed a severed path fragment.
+        print(f"  [af3] STDERR: {result.stderr[-4000:]}" if result.stderr else "  [af3] No stderr")
         raise RuntimeError(f"AF3 exited with code {result.returncode}")
 
     # Find the top-ranked output
     return _load_top_sample(output_dir, job_name)
+
+
+# Absolute reserve, in GiB, that the default fraction aims for.
+#
+# MEASURED 2026-08-20 on BM5 (GB10, 121.7 GiB unified): a 340-token complex
+# (PD-L1 220 aa + 120 aa binder) peaks at 7,759 MiB of GPU and 14.1 GiB of total host
+# footprint, and completes under an 8 GiB MPS cap (iptm 0.9100).  12 GiB is ~1.5x that.
+#
+# This replaces a provisional 80.0, which was chosen on 2026-08-18 to stay clear of a
+# boundary we had not yet measured.  80 GiB is ~10x the real demand and made the box
+# unshareable for no benefit; the hard ceiling is now the MPS per-client cap
+# (tools/gpu_mem_guard.sh), not this number.  Override with AF3_XLA_MEM_FRACTION.
+_AF3_TARGET_RESERVE_GIB = 12.0
+# Never leave a unified-memory host less than this.  40, not 24: the 2026-08-18 BM5
+# reboot happened with ~24 GB nominally free, so 24 is a measured FAILURE point, not a
+# safe floor.  On a 121 GB GB10 this caps the reserve at 81 GB.
+_AF3_MIN_OS_GIB = 40.0
+
+
+def _default_mem_fraction() -> str:
+    """Pick the XLA preallocation fraction from the ACTUAL pool size.
+
+    A fixed fraction is the wrong unit on unified memory.  AF3's working set is a constant
+    ~4.4 GB no matter how big the machine is, so a fraction makes a LARGER host reserve
+    MORE and therefore be MORE likely to die -- the opposite of what a safety cap should
+    do.  The previous hard-coded 0.8 was written assuming a ~96 GB pool ("~77 GB on
+    Spark"); on a 121 GB GB10 it reserves 97 GB and leaves the OS 24 GB.
+
+    Cost of getting this wrong, observed 2026-08-18 on BM5: AF3 preallocated 99,960 MiB,
+    the kernel logged `NVRM: Out of memory [NV_ERR_NO_MEMORY]` every ~65 s for nine
+    minutes, and the box hard-rebooted after 22 days of uptime, killing the run.
+
+    Discrete-GPU hosts are unaffected in practice: on a 24 GB card this returns 0.67
+    (16 GiB), close to the old 0.8, and a runaway there can only kill the GPU context.
+    """
+    try:
+        import ctypes
+
+        free = ctypes.c_size_t()
+        total = ctypes.c_size_t()
+        libs = ("libcudart.so", "libcudart.so.12", "libcudart.so.13")
+        pool_gib = 0.0
+        for lib in libs:
+            try:
+                rt = ctypes.CDLL(lib)
+            except OSError:
+                continue
+            if rt.cudaMemGetInfo(ctypes.byref(free), ctypes.byref(total)) == 0 and total.value:
+                pool_gib = total.value / (1024**3)
+                break
+        if pool_gib <= 0:  # no CUDA runtime reachable -- fall back to system RAM
+            pool_gib = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**3)
+        if pool_gib <= 0:
+            return "0.8"
+
+        # Is this pool UNIFIED (GPU memory == system RAM, e.g. GB10/Grace-Hopper)?  Only
+        # then does an over-reservation starve the OS.  On a discrete card the OS needs
+        # none of the GPU's RAM, so the old near-0.8 behaviour is correct there -- and
+        # applying the OS floor to a 24 GB card would drive the fraction to 0.02
+        # (0.5 GB), below the ~4.4 GB working set, OOM-ing every design.
+        ram_gib = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**3)
+        unified = ram_gib > 0 and abs(pool_gib - ram_gib) / ram_gib < 0.2
+
+        frac = _AF3_TARGET_RESERVE_GIB / pool_gib
+        if unified:
+            frac = min(frac, max(0.0, (pool_gib - _AF3_MIN_OS_GIB) / pool_gib))
+        else:
+            frac = max(frac, 0.5)  # discrete: keep plenty of card for big complexes
+        frac = max(0.02, min(frac, 0.8))
+        return f"{frac:.3f}"
+    except Exception:
+        return "0.8"
 
 
 def _build_af3_env(parent_env) -> dict[str, str]:
@@ -325,7 +447,8 @@ def _build_af3_env(parent_env) -> dict[str, str]:
     silently no-ops is exactly the whole-box reboot this guard exists to prevent.  An
     inherited ``XLA_CLIENT_MEM_FRACTION`` is forwarded (not discarded) so the operator's
     intent survives the rename.  Precedence: ``AF3_XLA_MEM_FRACTION`` >
-    ``XLA_CLIENT_MEM_FRACTION`` > ``XLA_PYTHON_CLIENT_MEM_FRACTION`` > default 0.8.
+    ``XLA_CLIENT_MEM_FRACTION`` > ``XLA_PYTHON_CLIENT_MEM_FRACTION`` > a pool-aware
+    default (see ``_default_mem_fraction``; was a hard-coded 0.8, which rebooted BM5).
 
     Revisit if a jax upgrade ever drops the legacy name — see docs/PLAN_af3_v304_upgrade.md.
     """
@@ -335,7 +458,7 @@ def _build_af3_env(parent_env) -> dict[str, str]:
     inherited_legacy = (parent_env.get("XLA_PYTHON_CLIENT_MEM_FRACTION") or "").strip()
     explicit = (parent_env.get("AF3_XLA_MEM_FRACTION") or "").strip()
 
-    mem_fraction = explicit or inherited_new or inherited_legacy or "0.8"
+    mem_fraction = explicit or inherited_new or inherited_legacy or _default_mem_fraction()
     env["XLA_PYTHON_CLIENT_MEM_FRACTION"] = mem_fraction
     # Drop the newer name so the two can never both be present in the child.
     env.pop("XLA_CLIENT_MEM_FRACTION", None)
