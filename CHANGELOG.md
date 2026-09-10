@@ -6,6 +6,122 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed (2026-08-14 — the rest of the terminal-path audit: the gate you cannot reach, the wizard session you lose, the menu that errors)
+
+Follow-on to the two fixes below, closing every remaining finding from the same pass.
+
+- **The cross-engine gate was unreachable from the script that runs the pipeline.**
+  `evaluate.sh` never passed `--min-engines`, so the default of 3 always applied — and
+  AF3 needs >100 GB of GPU memory, so on a typical host only Boltz-2 and ESMFold2 run
+  and *every* design failed the gate. The operator had to know to re-run the report
+  step by hand. `evaluate.sh` gained `--min-engines N` (validated: integer, floor 2)
+  and now counts the engines it will actually run, warning **before** any GPU time is
+  spent and naming the flag that fixes it. The gate is deliberately **not** derived
+  from the local install — that would make two operators with the same designs produce
+  different rankings, the same contradiction Part J's revert removed for Protenix.
+- **`evaluate.sh --help` required a Mosaic install, and `--skip-boltz2` did not skip it.**
+  The Mosaic venv was resolved at the top of the script, before argument parsing and
+  unconditionally, so the help could not be read without a full install and an
+  AF3 + ESMFold2 evaluation was refused on a host that legitimately has no Mosaic. Now
+  resolved after parsing, and only when Boltz-2 will run.
+- **The configurator turned a missing tool into a traceback and ate the session.**
+  Step 5 shows install status but never stopped you enabling a tool that is not there,
+  and the generators read that tool's files unguarded — BindCraft's filter/advanced
+  presets, Mosaic's `hallucinate_bindmaster.py`, BoltzGen's nanobody scaffolds. The
+  failure landed as a bare `FileNotFoundError` partway through, over a half-written run
+  directory. A new `preflight()` runs before anything is written and reports **every**
+  problem at once — each missing asset with the install command that supplies it —
+  then exits 1.
+- **`--config` replay is validated.** `load_run_config` checked three keys while the
+  generators read some fifty more directly, so a hand-edited config died with a bare
+  `KeyError: 'boltzgen_intermediate'` mid-generation. `REQUIRED_CFG_KEYS` names what
+  each tool needs; missing keys are listed by name, with a pointer to a wizard-written
+  config. The map is re-derived from the writer sources by a test, so a new `cfg["…"]`
+  in a generator cannot reach a user as a KeyError.
+- **`config.json` is written first, not last.** It was the final line of `generate()`,
+  so any failure before it cost the operator the entire wizard session — ~80 answers,
+  nothing to replay. Written immediately after the run directory is created, and again
+  at the end to capture the paths `generate()` derives.
+- **The TUI's "Evaluate results" entry showed an error, not the subcommands.** It ran
+  `bindmaster evaluate` with no arguments, which reaches argparse with a required
+  subcommand missing: one usage line, exit 2 — while the code comment promised it
+  "shows available subcommands". It now asks for `--help`.
+- **`run_all.sh` housekeeping.** The header comment named all seven tools regardless of
+  what was enabled, so a two-tool run advertised five it would never start; it is now
+  built from the enabled set. The output check ran `ls -A` on paths that are CSVs for
+  four of the tools, and `ls -A` on a file prints its name — so a 0-byte
+  `sequences.csv` counted as real output. Directories and files are now checked as what
+  they are. The `# shellcheck disable=SC1090` directive was present in three of the six
+  generated scripts; all six carry it, so every generated script is shellcheck-clean.
+
+### Added (2026-08-14 — README documents all 22 `binder-compare` subcommands)
+
+Fifteen had no human-facing documentation: `analyze-target`, `mature`, `monomer`,
+`affinity` and `wetlab` existed only inside `.claude/skills/` — agent instructions, not
+a manual — and `prefilter`, `qc-annotate`, `epitope`, `epitope-map`, `beta-check`,
+`diversity`, `hits` and `validate` were documented nowhere, so a terminal user could
+not discover them without reading `main.py`. They are now one grouped table, and
+`tests/test_readme_documents_the_cli.py` fails if the table and the parser disagree in
+either direction — an undocumented new subcommand, or a documented one that argparse
+would reject.
+
+### Fixed (2026-08-14 — two silent failures in the terminal path: a void ranking, and a pipeline that stopped at the first casualty)
+
+Both found by driving the non-agent path end to end (`configure --config` → generated
+run scripts → `extract` → `report`) on synthetic data. Neither is reachable from the
+unit tests as they stood, and neither announced itself at runtime.
+
+- **A report built without its PAE files produced a `rank` column that ranked nothing, silently.**
+  Every `{engine}_pae_iptm` — the sole input to `consensus_iptm` / `consensus_iptm_mean`,
+  i.e. the whole ranking — is recomputed from the `.npy` PAE matrices named in the refold
+  CSVs, *not* from the CSV's own `iptm`. When those paths did not resolve, all three
+  loaders appended NaN and moved on without a word, and `rank_designs`' "nothing cleared
+  the gate" warning was guarded by `cons.notna().any()`, which is false precisely when
+  *no* engine scored *anything*. Result: exit 0, a full `metrics.csv` and `report.html`,
+  `passes_engine_gate` False on every row, `consensus_iptm_mean` empty — and `rank`
+  populated 1..N from the tiebreakers alone. This is the shape of a results directory
+  separated from its CSVs (a `fleet.sh fetch`, an archived run, a CSV copied on its own).
+  `add_boltz_ipsae_from_files`, `add_ipsae_from_pae_files` and `add_iptm_from_pae_files`
+  now emit one aggregate `[pae] N/M PAE files … were not found` per call (not per row — a
+  real pool is thousands of designs), naming the column and the `base_dir` that was tried;
+  a blank path is still not counted, since that means the engine never folded that design.
+  `rank_designs` gained the zero-coverage branch the existing test could not reach.
+- **One tool's failure ended the whole campaign.** `run_all.sh` ran under `set -euo
+  pipefail` with a bare `"$RUN_DIR/run_<tool>.sh"` per step and a `check_outputs … exit 1`
+  after each, so a BoltzGen OOM at hour 2 aborted the script: RFD3 and Protein-Hunter
+  never started, and the Evaluator never ran on the designs that *had* finished. The
+  Mosaic block already carried this fix and the comment explaining why; it now applies to
+  every step. Each tool runs through a `run_tool` helper that records the failure and
+  returns, the Evaluator reports on whatever completed, and the script exits non-zero at
+  the end naming every failed step. Because a failed tool leaves an empty output dir and
+  `extract` treats that as fatal (deliberately — a mistyped path must not silently shrink
+  the pool), `run_all.sh` exports `BINDMASTER_ALLOW_EMPTY=1` when it knows a tool died;
+  `run_evaluate.sh` passes `--allow-empty` only then, so a hand-run evaluation stays
+  strict. An entirely empty pool still errors inside `extract`.
+
+### Fixed (2026-08-14 — docs: the Known-issues list had outlived every issue in it)
+
+`README.md` listed thirteen findings (F1, F2, F3, F5, F8, F9, F15, F20, F33, F34, F38,
+F40, F41) as live defects with workarounds. All thirteen were verified fixed in the
+current tree — `run` accepts all seven tools, `run_evaluate.sh` points `--rfd3` at the
+directory `run_rfd3.sh` writes, `extract` errors on a per-tool yield of zero, NGL is
+inlined from the vendored copy, the ranking gates on `consensus_iptm_n`, and so on — so
+a reader was being told to apply workarounds for problems that no longer exist. The
+tables are replaced by what is actually true today (the configurator's traceback-on-
+missing-tool, the unvalidated `--config` replay, `evaluate.sh` having no `--min-engines`
+passthrough, the TUI's dead-end Evaluate entry) plus the PAE caveat above.
+
+Also corrected: `CLAUDE.md`'s Evaluate section documented `bindmaster evaluate
+runs/<name>`, `--metric`, `--top`, `--refold` and `--target`, none of which have existed
+since `evaluate` became a `binder-compare` passthrough — argparse rejects all of them;
+`CLAUDE.md`'s status line stopped at Part M (master is through Part U) and pointed at
+the pre-rename repository URL; `install.sh --help` omitted `soluprot` from the `--tool
+all` list it *is* in, called it "opt-in only" and "x86 only (USEARCH dep is x86 binary)"
+with TMHMM/drive5.com download instructions, when both platforms build open-source
+USEARCH v12 from source and the shipped `--no_tmhmm` model needs neither; and
+`bindmaster --help` still advertised `--tool bindcraft|boltzgen|mosaic|all` out of
+eleven valid values.
+
 ### Fixed (2026-07-29 — candidates.csv: every cell now describes the sequence in its own row)
 
 Follow-on to the shortlist fixes below, all found by reading the shipped CALCA top-50 file. The common defect: a cell was resolved through `design_group`, so it printed a number belonging to a **sibling** — a different MPNN sequence of the same backbone.

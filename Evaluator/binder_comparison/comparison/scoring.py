@@ -181,6 +181,31 @@ def _resolve_pae_path(
     return None
 
 
+def _warn_unresolved_pae(
+    n_unresolved: int,
+    n_rows: int,
+    pae_file_col: str,
+    base_dir: str | Path | None,
+) -> None:
+    """Warn once per loader call about PAE files named in the CSV but absent on disk.
+
+    Each loader used to append NaN and move on, so a results directory that had been
+    moved (a `fleet.sh fetch`, an archived run, a CSV copied without its .npy files)
+    produced a full-looking metrics.csv in which every engine column was empty — and
+    nothing said so. One aggregate line rather than one per row: a real pool is
+    thousands of designs.
+    """
+    if not n_unresolved:
+        return
+    tried = f" (also tried relative to {base_dir})" if base_dir is not None else ""
+    warnings.warn(
+        f"[pae] {n_unresolved}/{n_rows} PAE files listed in '{pae_file_col}' were not found{tried} "
+        f"— those designs get no ipTM/ipSAE from this engine. Check that the refold output "
+        f"directory still sits next to the CSV.",
+        stacklevel=3,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Boltz-2 ipSAE from saved PAE files
 # ---------------------------------------------------------------------------
@@ -214,6 +239,7 @@ def add_boltz_ipsae_from_files(
         return result
 
     bt_ipsae_vals, tb_ipsae_vals, min_vals, max_vals = [], [], [], []
+    n_unresolved = 0
 
     for _, row in df.iterrows():
         pae_path = row.get(pae_file_col)
@@ -221,6 +247,8 @@ def add_boltz_ipsae_from_files(
 
         resolved = _resolve_pae_path(pae_path, base_dir)
         if pd.isna(pae_path) or pd.isna(L_b) or resolved is None:
+            if resolved is None and not pd.isna(pae_path):
+                n_unresolved += 1
             bt_ipsae_vals.append(np.nan)
             tb_ipsae_vals.append(np.nan)
             min_vals.append(np.nan)
@@ -242,6 +270,8 @@ def add_boltz_ipsae_from_files(
             tb_ipsae_vals.append(np.nan)
             min_vals.append(np.nan)
             max_vals.append(np.nan)
+
+    _warn_unresolved_pae(n_unresolved, len(df), pae_file_col, base_dir)
 
     result["boltz_pae_bt_ipsae"] = bt_ipsae_vals
     result["boltz_pae_tb_ipsae"] = tb_ipsae_vals
@@ -290,6 +320,7 @@ def add_ipsae_from_pae_files(
         return result
 
     bt_ipsae_vals, tb_ipsae_vals, min_vals, max_vals = [], [], [], []
+    n_unresolved = 0
 
     for _, row in df.iterrows():
         pae_path = row.get(pae_file_col)
@@ -297,6 +328,8 @@ def add_ipsae_from_pae_files(
 
         resolved = _resolve_pae_path(pae_path, base_dir)
         if pd.isna(pae_path) or pd.isna(L_b) or resolved is None:
+            if resolved is None and not pd.isna(pae_path):
+                n_unresolved += 1
             bt_ipsae_vals.append(np.nan)
             tb_ipsae_vals.append(np.nan)
             min_vals.append(np.nan)
@@ -318,6 +351,8 @@ def add_ipsae_from_pae_files(
             tb_ipsae_vals.append(np.nan)
             min_vals.append(np.nan)
             max_vals.append(np.nan)
+
+    _warn_unresolved_pae(n_unresolved, len(df), pae_file_col, base_dir)
 
     result[f"{prefix}_bt_ipsae"] = bt_ipsae_vals
     result[f"{prefix}_tb_ipsae"] = tb_ipsae_vals
@@ -358,6 +393,7 @@ def add_iptm_from_pae_files(
         return result
 
     iptm_vals = []
+    n_unresolved = 0
 
     for _, row in df.iterrows():
         pae_path = row.get(pae_file_col)
@@ -365,6 +401,8 @@ def add_iptm_from_pae_files(
 
         resolved = _resolve_pae_path(pae_path, base_dir)
         if pd.isna(pae_path) or pd.isna(L_b) or resolved is None:
+            if resolved is None and not pd.isna(pae_path):
+                n_unresolved += 1
             iptm_vals.append(np.nan)
             continue
 
@@ -377,6 +415,8 @@ def add_iptm_from_pae_files(
 
             warnings.warn(f"Failed to compute ipTM for {pae_path}: {e}")
             iptm_vals.append(np.nan)
+
+    _warn_unresolved_pae(n_unresolved, len(df), pae_file_col, base_dir)
 
     result[f"{prefix}_pae_iptm"] = iptm_vals
 
@@ -837,6 +877,21 @@ def rank_designs(df: pd.DataFrame, min_engines: int = MIN_ENGINES_DEFAULT) -> pd
             f"consensus_iptm_mean but NO design cleared the cross-engine gate. "
             f"Run the missing engine(s), or lower the gate with --min-engines "
             f"{max(MIN_ENGINES_FLOOR, n_available)}.",
+            stacklevel=2,
+        )
+    elif not cons.notna().any() and len(result):
+        # Zero engines contributed to ANY design: the per-engine ipTM columns are
+        # missing or entirely NaN. That is what a report built from refold CSVs whose
+        # PAE .npy files cannot be resolved looks like — and the branch above stays
+        # quiet for it, because it asks whether some design has a score. `rank` is
+        # then decided by the tiebreakers alone and carries no cross-engine signal,
+        # so say so instead of shipping a full-looking metrics.csv in silence.
+        warnings.warn(
+            f"[rank] NO engine ipTM was available for ANY of the {len(result)} designs "
+            f"({'/'.join(_ENGINE_IPTM_COLS)} absent or all-NaN), so consensus_iptm_mean "
+            f"is empty and the `rank` column is NOT a cross-engine ranking. The usual "
+            f"cause is unreadable PAE .npy files — check the <engine>_pae_file paths in "
+            f"the refold CSVs.",
             stacklevel=2,
         )
 

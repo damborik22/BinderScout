@@ -2413,8 +2413,7 @@ def _designed_funnel_html(sort_df, tool_overrides, full_df=None) -> str:
         )
 
     collapse_note = (
-        f", shown below as {n_pool:,} rows because MPNN/cycle siblings of the same backbone "
-        f"are collapsed to one"
+        f", shown below as {n_pool:,} rows because MPNN/cycle siblings of the same backbone are collapsed to one"
         if n_pool != n_refolded
         else ""
     )

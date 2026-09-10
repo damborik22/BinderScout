@@ -80,18 +80,14 @@ def test_non_numeric_meta_is_skipped(pool):
 
 def test_refold_count_comes_from_full_df_when_given(pool):
     full = pd.DataFrame({"source_tool": ["bindcraft"] * 6 + ["boltzgen"] * 2})
-    html = _designed_funnel_html(
-        pool, {"bindcraft": {"total": "12270"}, "boltzgen": {"total": "9873"}}, full_df=full
-    )
+    html = _designed_funnel_html(pool, {"bindcraft": {"total": "12270"}, "boltzgen": {"total": "9873"}}, full_df=full)
     assert "8</b> designs refolded" in html or "<b>8</b>" in html
     # and the collapse is named, not silently dropped
     assert "4" in html and "backbone" in html.lower()
 
 
 def test_no_collapse_note_when_counts_match(pool):
-    html = _designed_funnel_html(
-        pool, {"bindcraft": {"total": "10"}, "boltzgen": {"total": "10"}}, full_df=pool
-    )
+    html = _designed_funnel_html(pool, {"bindcraft": {"total": "10"}, "boltzgen": {"total": "10"}}, full_df=pool)
     assert "backbone" not in html.lower()
 
 
