@@ -288,6 +288,22 @@ ssh bm4 "pids=\$(pgrep -f '[c]s_chain_e2.sh'); kill \$pids"
 `pgrep -f refold-boltz2` never fired because it always read "running"; BM1 and
 BM2 sat idle ~3 h after finishing their counter-screen arms.
 
+**Bracketing is NOT sufficient on its own.** It only stops the pattern matching
+its own literal text. If any *other* part of the command line contains the real
+string, you still self-match:
+
+```bash
+# hit 2026-08-16: killed the controlling shell (exit 144), target survived
+pkill -f '[c]hain_after_screens.sh'; cat > chain_after_screens.sh <<'EOF' ...
+#                                          ^^^^^^^^^^^^^^^^^^^^^^ matches
+```
+
+Two habits that actually hold:
+- **Kill by PID, never by pattern**, when a kill is what you mean:
+  `ps -eo pid,args | grep '[t]arget'` → inspect → `kill <pid>`.
+- **Give the replacement a different filename** from the thing being replaced,
+  so the rewrite and the cleanup cannot share a token.
+
 **Better still: monitor a row count, not a process.** Progress files can't
 self-match. Key completion on `wc -l` of the output CSV and add a stall
 detector (no new rows in N minutes ⇒ report), which also catches silent deaths
@@ -324,6 +340,41 @@ ssh <m> "grep -c msa_path ~/dev/BindMaster/Mosaic/src/mosaic/structure_predictio
 Verify with that grep as part of any sync — do not assume the checkout is
 current just because the repo is.
 
+### 4bis.4 Preflight is MANDATORY before every launch — `tools/preflight.sh`
+
+Not once per session. Before **every** launch, including the second job you put
+on a box you filled yourself ten minutes earlier.
+
+```bash
+tools/preflight.sh measure <one instance of the worker>   # peak RSS, BEFORE choosing N
+tools/preflight.sh check bm5 37                           # headroom + declared floors
+tools/preflight.sh declare pxd-mpnn 25                    # publish YOUR floor while you run
+tools/preflight.sh release pxd-mpnn
+```
+
+Three things this exists to stop, all observed on BM5 2026-08-16:
+
+- **GPU footprint is not host RSS.** 16 MPNN workers were sized off 339 MiB of
+  *GPU* memory. Real host RSS was **3.1 GB each = 42.6 GB**. On Spark's unified
+  memory, host RSS is the binding constraint — always `measure` before scaling.
+- **A memory floor declared inside a script is invisible.**
+  `repro_check/run_repro_capped.sh` set `FLOOR_GB=25` as a bash variable; the
+  MPNN launch could not see it, drove the box from 115 GB to 24 GB available,
+  and its watchdog killed **3 of 4 experiment arms** (rc=137). Long jobs must
+  `declare` their floor so the next launch is refused instead of landing on it.
+- **`ALL DONE` after every arm died.** That pipeline logged
+  `REPRO2 ALL DONE` with three rc=137 arms above it. Check per-arm rc, never the
+  tail of a log — same shape as the Mosaic 512/512-skipped incident (§4bis.3).
+
+Corollary on cleanup: `pkill -f` against `xargs -P N` workers accomplishes
+nothing — xargs immediately respawns them (observed: memory went 25 GB → 55 GB
+seconds after the "kill"). Kill the process group:
+
+```bash
+ps -eo pid,pgid,args | grep '[x]args -P'      # find PGID
+kill -TERM -<PGID>; sleep 4; kill -KILL -<PGID>
+```
+
 ---
 
 ## 5. Failure modes
@@ -331,6 +382,8 @@ current just because the repo is.
 | Condition | Behaviour |
 |---|---|
 | `pgrep`/`pkill -f` over ssh reports everything as running / kills its own shell | Pattern self-match — bracket the first char (§4bis.1). Prefer row-count monitoring over process checks. |
+| A job dies with rc=137 shortly after another launch | OOM / watchdog kill from memory contention. Preflight was skipped (§4bis.4). Size on host RSS, not GPU memory. |
+| `pkill` the workers but memory goes straight back up | `xargs -P` respawned them. Kill the process group, not the pattern (§4bis.4). |
 | Multi-step ssh deploy stops partway with no error | Backgrounded remote child holds the ssh channel open (§4bis.2) — redirect its FDs and use `ssh -n`. |
 | Boltz-2 refold exits 0 having folded nothing | Every design hit the per-design skip — an environment fault, usually an unpatched Mosaic (§4bis.3). `refold_boltz2.py` now raises instead of reporting a clean run; older checkouts do not, so check `Processed N binder(s)` is non-zero. |
 | Machine unreachable | Marked down in the inventory (`reachable:false`, typed nulls) and surfaced by `status`/`probe`. Never a silent skip. |

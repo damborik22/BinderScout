@@ -146,7 +146,17 @@ PROTEINA_COMPLEXA_VENV = PROTEINA_COMPLEXA_DIR / ".venv"
 PROTEIN_HUNTER_DIR = BINDMASTER_DIR / "Protein-Hunter"
 FOUNDRY_WEIGHTS_DIR = BINDMASTER_DIR / "weights" / "foundry"
 MOSAIC_VENV = MOSAIC_DIR / ".venv"
-MOSAIC_HALLUCINATE_SRC = MOSAIC_DIR / "examples" / "bindmaster_examples" / "hallucinate_bindmaster.py"
+# The maintained template lives in this repo. The copy under Mosaic/ is written
+# at install time and then goes stale: a checkout installed before the 2026-07-08
+# epitope work carries a parameter block with no TARGET_PDB and no EPITOPE_IDX,
+# so the exact-match injection below silently missed and emitted a hallucinate.py
+# still containing TARGET_SEQUENCE = "REPLACE_ME". Prefer the repo copy; fall back
+# to the installed one only if the repo template is absent.
+MOSAIC_HALLUCINATE_SRC_REPO = BINDMASTER_DIR / "bindmaster_examples" / "hallucinate_bindmaster.py"
+MOSAIC_HALLUCINATE_SRC_INSTALLED = MOSAIC_DIR / "examples" / "bindmaster_examples" / "hallucinate_bindmaster.py"
+MOSAIC_HALLUCINATE_SRC = (
+    MOSAIC_HALLUCINATE_SRC_REPO if MOSAIC_HALLUCINATE_SRC_REPO.is_file() else MOSAIC_HALLUCINATE_SRC_INSTALLED
+)
 NANOBODY_SCAFFOLDS_SRC = BOLTZGEN_DIR / "example" / "nanobody_scaffolds"
 NANOBODY_SCAFFOLD_NAMES = ["7eow", "7xl0", "8coh", "8z8v"]
 
@@ -987,11 +997,21 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
         f"EPITOPE_IDX = {epitope_idx!r}  # 0-based target-residue indices the binder must contact (hotspots); None = whole surface"
     )
 
-    if old_block in content:
-        content = content.replace(old_block, new_block)
-    else:
-        print_warn("Could not inject parameters block — please edit hallucinate.py manually.")
+    if old_block not in content:
+        # Fatal, not a warning. Writing the file anyway ships a hallucinate.py whose
+        # TARGET_SEQUENCE is still the "REPLACE_ME" placeholder and whose EPITOPE_IDX
+        # is still None — a script that looks runnable, runs, and designs against the
+        # wrong target with no hotspots. A warning on stdout does not survive a
+        # generate-now-launch-later workflow, and the placeholder has leaked far enough
+        # downstream before that the evaluator carries a REPLACE_ME guard of its own.
+        print_fail(f"Mosaic template has drifted: {MOSAIC_HALLUCINATE_SRC}")
+        print_warn("  Its BINDMASTER PARAMETERS block does not match what the configurator injects.")
+        print_warn("  Most likely the Mosaic checkout predates a template change — re-run")
+        print_warn("  `bindmaster install --tool mosaic`, or point MOSAIC_HALLUCINATE_SRC at the")
+        print_warn("  repo copy in bindmaster_examples/.")
+        sys.exit(1)
 
+    content = content.replace(old_block, new_block)
     path.write_text(content)
 
 
@@ -2109,7 +2129,31 @@ def write_run_rfd3(path: Path, cfg: dict):
     diffusion_steps = cfg.get("rfd3_diffusion_steps", 200)
     step_scale = cfg.get("rfd3_step_scale", 1.5)
     mpnn_samples = cfg.get("rfd3_mpnn_samples", 5)
-    mpnn_temperature = cfg.get("rfd3_mpnn_temperature", 0.1)
+    # ProteinMPNN's field-default T=0.1 with no bias collapses RFD3 backbones to
+    # ~50% alanine — sequences that gate and tier normally (no engine in the stack
+    # penalises low-complexity sequence) but are not viable protein. Measured on the
+    # ApoE4-isoform pool; the fix below brings alanine 0.50 -> 0.102 and composition
+    # entropy H to 2.59, matching the pool that produced real selectives.
+    # NOTE the pair moves together: raising T without the bias does not fix it, and
+    # biasing off ALA alone on *helical-bundle* backbones can relocate the collapse to
+    # poly-Glu (seen on PXDesign, where GLU/ARG also need -0.6). Tune per backbone
+    # source, and check composition entropy afterwards, not alanine alone.
+    mpnn_temperature = cfg.get("rfd3_mpnn_temperature", 0.25)
+    mpnn_bias = cfg.get("rfd3_mpnn_bias", {"ALA": -1.5})
+    if isinstance(mpnn_bias, str):
+        try:
+            mpnn_bias = json.loads(mpnn_bias) if mpnn_bias.strip() else {}
+        except ValueError:
+            print_fail(f"rfd3_mpnn_bias is not valid JSON: {mpnn_bias!r}")
+            sys.exit(1)
+    if mpnn_bias and not isinstance(mpnn_bias, dict):
+        print_fail(f"rfd3_mpnn_bias must be a JSON object of three-letter codes, got {mpnn_bias!r}")
+        sys.exit(1)
+    # mpnn takes the bias as a JSON object argument; empty dict = pass no flag.
+    mpnn_bias_flag = f"--bias '{json.dumps(mpnn_bias)}' \\\n        " if mpnn_bias else ""
+    # Recorded in settings.json so a future session can tell a biased run from an
+    # unbiased one without re-reading the script (CLAUDE.md per-run settings.json).
+    mpnn_bias_json = json.dumps(mpnn_bias or {})
 
     hotspots_str = cfg.get("rfd3_hotspots") or cfg.get("hotspots", "") or ""
     hotspot_list = parse_hotspots(hotspots_str) if hotspots_str.strip() else []
@@ -2145,6 +2189,7 @@ def write_run_rfd3(path: Path, cfg: dict):
     "low_memory_mode": true,
     "mpnn_samples": {mpnn_samples},
     "mpnn_temperature": {mpnn_temperature},
+    "mpnn_bias": {mpnn_bias_json},
     "select_hotspots": "{select_hotspots_str}\"""",
         extra_env_inner='\nRFD3_VER=$(python -c \'import importlib.metadata;print(importlib.metadata.version("rfd3"))\' 2>/dev/null || echo "unknown")',
     )
@@ -2278,7 +2323,7 @@ for CIF in "${{CIFS[@]}}"; do
         --out_directory "$MPNN_DIR" \\
         --name "$NAME" \\
         --designed_chains '["B"]' \\
-        --temperature {mpnn_temperature} \\
+        {mpnn_bias_flag}--temperature {mpnn_temperature} \\
         --number_of_batches {mpnn_samples} \\
         --batch_size 1 \\
         --write_fasta True \\
@@ -2896,8 +2941,14 @@ def _missing_tool_assets(cfg: dict, tools_enabled: dict) -> list[tuple[str, Path
             if stem and not (src_dir / f"{stem}.json").is_file():
                 missing.append(("BindCraft", src_dir / f"{stem}.json", "bindmaster install --tool bindcraft"))
 
-    if tools_enabled.get("mosaic") and not MOSAIC_HALLUCINATE_SRC.is_file():
-        missing.append(("Mosaic", MOSAIC_HALLUCINATE_SRC, "bindmaster install --tool mosaic"))
+    # Ask the venv, NOT MOSAIC_HALLUCINATE_SRC. That constant now prefers the template
+    # in bindmaster_examples/, which is tracked in this repo and therefore ALWAYS exists —
+    # checking it here made "is Mosaic installed" unfalsifiable and silently deleted this
+    # guard. Two different questions were riding one constant: which template to inject
+    # from (the repo's, always present) versus whether the tool can actually run (the uv
+    # venv, which only the installer creates, and which run_mosaic.sh requires).
+    if tools_enabled.get("mosaic") and not MOSAIC_VENV.is_dir():
+        missing.append(("Mosaic", MOSAIC_VENV, "bindmaster install --tool mosaic"))
 
     if tools_enabled.get("boltzgen") and cfg.get("boltzgen_mode") == "nanobody":
         for name in NANOBODY_SCAFFOLD_NAMES:

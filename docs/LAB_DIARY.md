@@ -1372,6 +1372,83 @@ fixed when `nres` draws it per sample.
 
 ---
 
+## 2026-08-14 — AF3 fits a 24 GB GPU (the ">=100 GB" requirement was a preallocation artifact); compile cache + fixed bucket is 2.3x but moves the scores
+
+**What changed:**
+- **Step A of `docs/PLAN_af3_spark_runbook.md` ran on BM2 (RTX 3090, 24 GB) and passed.** A 258-token
+  complex (ApoE4 NTD 141 aa + PH-v2 binder 117 aa) peaks at **4,430 MiB** and takes 91 s including cold
+  compile (`iptm 0.88`, `plddt_binder 0.952`). A 391-token complex peaks at the **same** 4,430 MiB. A
+  20-design pool (241–286 tokens) ran **20/20 with zero empty rows**. Peak measured with
+  `XLA_PYTHON_CLIENT_PREALLOCATE=false` via a patched runner copy passed with `--scripts-path` —
+  `_build_af3_env` otherwise forces `true`, so the runbook's own Step A command cannot measure a true
+  peak unaided.
+- **The mechanism behind the wrong number was reproduced on the same card:** under the shipped default
+  (`PREALLOCATE=true`, fraction 0.9) AF3 sits at **21,996 MiB for a 4.4 GB working set**. The 2026-06-24
+  entry's *observation* (93.7 of 96 GB on Spark) was right; the inference "therefore AF3 needs >100 GB"
+  was not. Docs corrected across 15 files — the claim had spread well beyond the four the runbook listed.
+- **AF3 now installs on the 24 GB fleet.** No fleet box could run it before: BM4 had the *PyPI*
+  `alphafold3` stub with no jax; BM1/BM2 had nothing. Two build failures, both fixed without sudo —
+  BM1/BM2 needed conda-forge `zlib` (cifpp's `find_package(ZLIB)`); BM4 needed `cxx-compiler` +
+  `binutils` **plus unprefixed `ar`/`ranlib` symlinks**, because conda ships only
+  `x86_64-conda-linux-gnu-ar` and CMake's unprefixed probe returns `CMAKE_AR-NOTFOUND`.
+- **Step E (compile cache + pool-max bucket) implemented and benchmarked.** 20 designs, one GPU, back to
+  back: **70 s (≤256 tokens) / 91 s (>256) → 33–34 s flat**, pool wall 27.6 → 11.9 min (**2.31x**).
+  Compile is the dominant cost, since every binder is a fresh `run_alphafold.py` subprocess.
+
+**Why it mattered:**
+- The ">=100 GB" claim was the reason the >=3-engine gate was Spark-bound. It is now satisfiable on
+  BM1/BM2/BM4, which is worth more than the v3.0.4 upgrade the runbook was written for.
+- The default bucket ladder costs +30% wall clock for the sake of 8 tokens over the 256 boundary.
+
+**The catch — and its refutation (this is the real result):**
+- The two arms disagreed on scores (mean `iptm` 0.615 → 0.584, max |Δ| 0.18), and the first read blamed
+  the bucket. **A determinism control refuted that.** Rerunning the *before config unchanged* on 8 of the
+  same designs reproduced **0/8** exactly: before-vs-before mean |Δ iptm| = **0.0513** against
+  before-vs-after **0.0688** — the same order. Decisive detail: the 122 aa design went
+  **0.77 → 0.59 (control) → 0.59 (after)**; the two runs that *agree* used **different** buckets, the two
+  that *disagree* used the **same** bucket. Bucket is not the driver.
+- **So Step E does not move the scores** — it is a 2.31× speedup with no demonstrated bias, and no
+  "must not straddle" constraint attaches to it.
+- **The bigger finding: our AF3 refolds are not reproducible run-to-run.** 5/8 held to 2 dp on `iptm`
+  (0.86, 0.84, 0.82, 0.48, and 0.77 → 0.76); 3/8 swung hard (0.27 → 0.19, 0.52 → 0.38, 0.77 → 0.59).
+  **Stability does not track confidence cleanly** — one design scoring 0.77 barely moved while another
+  at the same 0.77 fell to 0.59, so "the top of the pool is safe" is NOT supported by this sample.
+  The seed is fixed (`modelSeeds: [1]`), so this is GPU/XLA-level nondeterminism, not a different seed.
+- **Re-measured at the production `--num-samples 5` (3 arms × 8 designs, same box) — and the
+  expectation that 5 samples would average the noise away was WRONG.** mean |Δ iptm| between two
+  identical runs: **0.0563 at 5 samples vs 0.0513 at 1 sample**, max **0.200 vs 0.180**. No
+  improvement. Mechanism: AF3 does not average samples — `_load_top_sample` keeps the **top-ranked**
+  one, an order statistic over 5 stochastic draws, so which sample wins varies per run and the
+  reported value hops between samples. More samples = more chances to hop, not less variance.
+  *Which* designs are unstable also changed with config (1 sample: 105/112/122 aa; 5 samples:
+  122/140/142 aa, where 140/142 had been exactly stable) — a selection effect, not a per-design
+  "this one is marginal" property.
+- **The Step E speedup HOLDS at production settings: 2.15× measured** (105 s → 48.9 s per design),
+  not the 1.24× projected. The projection wrongly assumed diffusion cost scales linearly with
+  `num_samples`; 5 samples costs only ~1.5× one sample (33.5 → 48.9 s) because the trunk runs once.
+  So the fixed ~40 s compile stays dominant and the cache keeps paying.
+- **The number that matters for the campaign:** `af3_iptm` carries **~0.06 mean / 0.20 worst-case
+  run-to-run uncertainty that the production config does not remove.** Designs whose
+  `consensus_iptm_mean` differ by less than that are not distinguished by the metric. AF3 is 1 of 3
+  engines, so the consensus effect is roughly a third of that — *if* the other two are stable, and
+  **nobody has measured Boltz-2 or ESMFold2 reproducibility.** That is the next experiment, and it is
+  a ranking-integrity question rather than an AF3 one.
+
+**Outcome:**
+- Docs corrected; Step A closed. Step E implemented, benchmarked, control-tested, **left uncommitted**
+  pending review — but the case for it is now clean: 2.31× with no score bias.
+- BM2's Mosaic run was paused twice (17:16–17:56 for the benchmark, 18:36–18:47 for the control) and
+  restarted cleanly each time; it resumes from its own checkpoint and the 150 designs on disk were
+  untouched.
+- Next: re-measure the AF3 noise floor at the production `--num-samples 5`; then B → C → D on Spark
+  after the v3.0.4 upgrade.
+
+**Operational note:** `pkill -f <pattern>` over ssh matched *this session's own remote command line*
+twice, killing the shell mid-operation (exit 255) and leaving a job half-dead. Kill by explicit PID, or
+use the `run_stepE[.]sh` bracket trick so the pattern text differs from what it matches.
+
+---
+
 ## 2026-08-14 — Terminal-path audit (PR #37): two silent failures, five usability defects, thirteen stale "known issues"
 
 **What changed:**
@@ -1469,3 +1546,379 @@ removed metric selection and contradicted three paragraphs later in that same se
 and `evaluate.sh`'s flags were undocumented anywhere despite `run_evaluate.sh` being the
 documented path. All three are fixed, but the lesson is that a targeted docs pass fixes
 what it was pointed at — a section is not verified until something checks it.
+
+## 2026-08-16 — Composition collapse is invisible to the whole funnel, and it shipped in the gene order; a skipped preflight destroyed a live experiment
+
+**What changed:**
+- **Audited every ApoE4-isoform pool for sequence complexity, and the pathology is campaign-wide.**
+  Already known for RFD3 (`--temperature 0.1`, no bias → ~50 % Ala). It is not an RFD3 quirk:
+  PXDesign v3 **0.329** mean alanine with **42.7 %** of designs above 35 %, Proteina-Complexa v4
+  **0.306** / 36.8 %, BoltzGen v3 **0.218** / 20.0 %. BindCraft v4 (0.051) and fixed-RFD3 (0.102) are
+  clean. Reported alongside Shannon entropy of composition `H` (natural proteome 2.89) because
+  alanine alone is the wrong yardstick — see the arm test below.
+- **It reached the order.** The 63 AF3-selective pool sits at ala **0.327 / 41.3 %** and the 10 ordered
+  genes at **0.247 / 20.0 %**. Per-design, one gene is genuinely bad: **`ApoE4iso_03_RFD3`, 47.9 %
+  alanine, H 1.81**, from the *unfixed* RFD3 pool. Deliverables are self-consistent
+  (`ORDER_10_genes.fasta` == `ORDER_10_final.csv` on all 10); only the intermediate `order10.fasta` is
+  stale, predating the slot-4 swap.
+- **Screened the 8 fixed-RFD3 AF3-selectives as replacements** (ESMFold2 ×3 isoforms, SoluProt,
+  TmProt, monomer folds). One is **GOLD**: `rfd3fix_655` — af3 0.88 / gaps **0.56**/**0.71**, esm
+  0.70 / gaps **0.54**/**0.60**, ala **0.091**, Tm **75.2 °C**. Against the incumbent's 0.90 /
+  0.30 / 0.36 and esm gaps **0.158**/0.189 — the incumbent scrapes the 0.15 Gold bar by 0.008; the
+  candidate clears it 3.6×. Swap recommended, held until the monomer check (the screen that overturned
+  slot 4 at RMSD 7.49 Å).
+- **PXDesign v3: MPNN re-run, not a composition filter.** Chain B of all 39,000 backbones is pure
+  poly-glycine (N/CA/C/O), so redesign loses nothing; filtering at ala ≤ 0.25 would keep 27 % and
+  delete the L60 arm (445 of 13,000 survive).
+
+**Why it mattered:**
+- **No engine in the stack penalises low-complexity sequence.** Boltz-2, AF3 and ESMFold2 all score a
+  half-alanine helix as a confident interface, so such a design gates, counter-screens, tiers GOLD and
+  reaches a gene order with nothing objecting. Every guard we have is a *structure-confidence* guard.
+- This also explains an old observation rather than adding a new one: 62 % of the original RFD3
+  selectives were >35 % Ala versus 0 % of the fixed ones, yet the selective *rate* barely moved
+  (4.72 % → 3.41 %, z=1.87, n.s.). Fixing composition does not find more hits — it makes the hits
+  orderable. Composition is an **orderability** axis, not a discovery axis.
+
+**The result that changed the recipe:**
+- Transferring the validated RFD3 fix verbatim to PXDesign backbones **would have been wrong**, and
+  measuring only alanine would have hidden it. On 30 backbones (10 each L60/L80/L100):
+
+  | arm | ala | E+R | H | eff types |
+  |---|---|---|---|---|
+  | RFD3 fixed (target; produced 8 AF3-selectives) | 0.102 | 0.280 | **2.59** | 13.4 |
+  | A — `T=0.25, ALA −1.5` (RFD3 recipe verbatim) | 0.047 | **0.375** | 2.45 | 11.6 |
+  | B — `T=0.30, ALA −1.0` | 0.077 | 0.354 | 2.47 | 11.8 |
+  | **C — `T=0.25, ALA −1.5, GLU −0.6, ARG −0.6`** | 0.052 | 0.153 | **2.59** | 13.3 |
+
+  Arm A posts the *best* alanine number and the *worst* complexity of the three — it relocates the
+  collapse from poly-Ala to poly-Glu (E 24.6 %). PXDesign's backbones are pure helical bundles, so
+  MPNN biased off Ala falls back on the charged helix set. Arm C matches the validated pool's entropy
+  to two decimals, which is the non-arbitrary target: not "better composition", but *the same
+  complexity as the pool that already worked*.
+- Corollary for the screens: `rfd3fix_727` led on AF3 gaps (0.70/0.40) and dropped to SILVER once
+  ESMFold2 ran (0.04/0.04). Screen before recommending, not after.
+
+**The mistake — a skipped preflight destroyed a running experiment:**
+- 16 MPNN workers were launched on BM5 sized off their **GPU** footprint (339 MiB). Real host RSS is
+  **3.06 GB each = 49 GB**. BM5 fell from 115 GB available to 24 GB, and the watchdog in
+  `repro_check/run_repro_capped.sh` (`FLOOR_GB=25`) killed **3 of that experiment's 4 arms** (rc=137).
+  A run-to-run reproducibility control needs both arms of a pair, so one surviving arm is worthless
+  and the whole thing re-runs. It then logged `REPRO2 ALL DONE`.
+- Seven minutes later ESMFold2 was launched on the same box **with no check at all**, and was
+  OOM-killed too.
+- Three compounding details, each now written down:
+  - **GPU memory is not host RSS** (339 MiB vs 3.06 GB — a 9× error).
+  - **RSS is not the footprint either.** JAX preallocates unified memory that never appears in RSS:
+    `fold_monomers.py` showed 8.5 GB RSS while MemAvailable fell to 15 GB of 121 GB. Two JAX jobs
+    cannot share BM5 at all.
+  - **A floor declared inside a script is invisible.** `FLOOR_GB=25` was a bash variable nothing else
+    could read.
+- `tools/preflight.sh` now exists and is mandatory (playbook §4bis.4): `measure` (peak RSS **and**
+  MemAvailable drop, plans on the larger), `check` (exits non-zero on insufficient headroom or any
+  declared floor), `declare`/`release` (publish a floor so the next launch is refused rather than
+  landing on it). Verified against the actual culprit — `measure` returns 3.06 GB and projects
+  49 GB for 16 workers, which plus the repro floor would have refused the launch.
+- Two cleanup traps, both cost a cycle: `pkill -f` on `xargs -P N` workers freed nothing because
+  xargs respawns each slot (25 GB → 55 GB in seconds; kill the **process group**), and bracketing
+  did **not** defeat the `pkill` self-match a third time — `pkill -f '[c]hain_after_screens.sh'`
+  killed the controlling shell because the same command line also contained
+  `cat > chain_after_screens.sh`. Kill by PID; give replacements a different filename.
+
+**Open:** gating all 39,000 redesigned PXDesign sequences is ~6 days on three machines — shard it and
+read the survivor rate off the first ~6,000 first. Round-2 E2 counter-screen finishes ~08-17 06:00
+(monitor the PDB count in `cs_E2/struct/`; this arm's CSV is not written incrementally). Whether the
+round-2 report should carry a composition column so this cannot recur silently is a live decision.
+
+---
+
+## 2026-08-19 → 08-21 — **The GPU pool on GB10 *is* system RAM**: two reboots were reservation, not demand; and `JAX_PLATFORMS=cpu` had been silently deleting AF3 from every aarch64 run for 4.5 months
+
+**What changed:**
+
+- **The mechanism behind two hard reboots, settled.** `cudaMemGetInfo` on GB10 returns
+  total == `SC_PHYS_PAGES` == **121.69 GiB** — there is no device. Every allocator knob in
+  JAX and PyTorch is *a fraction of device total*, so on this box they are fractions of the
+  whole machine:
+
+  | incident | knob | fraction × 121.7 GiB | reserved | OS left | outcome |
+  |---|---|---|---|---|---|
+  | 2026-08-18 AF3 | hard-coded `0.8` | 97.4 GiB | 99,960 MiB | ~24 GB | 17 min of `NVRM: NV_ERR_NO_MEMORY` → **hard reboot**, 22 d uptime lost |
+  | 2026-08-19 Boltz-2 | none set → JAX default `0.75` | 91.3 GiB | 93,802 MiB | ~30 GB | caught before cascade |
+
+  Both match the arithmetic to within 0.3 %. **Neither ran out of memory.** On unified
+  memory a 91 GiB request is *granted* — out of the kernel's pocket — instead of refused as
+  it would be on a card. It looks like success right up until sshd and the driver discover
+  their RAM is gone.
+
+- **cgroups do not contain NVIDIA allocations.** Measured: 12,288 MiB of `cudaMalloc` inside
+  a scope with `memory.max=8 GiB` succeeded; `memory.current` rose 5 → 92 MiB (+0.7 %),
+  `memory.events` `max 0`. Root cause found in NVIDIA's own source — the driver only wires up
+  the `dmem` cgroup controller from **610.43.02**; on 580.x `os_dmem_cgroup_try_charge()`
+  compiles to a stub returning `NV_OK`. This also explains why the kernel OOM killer never
+  saved the box: 97 GB is consumed and attributed to *nobody*, so it cannot pick a culprit.
+
+- **CUDA MPS per-client limits *do* enforce, and no published source reports this verified on
+  GB10.** `set_default_device_pinned_mem_limit` refused a 4 GiB alloc under a 2 GiB cap;
+  JAX computed `bytes_limit=91.27 GiB` (still wrong) but was physically truncated to
+  `pool_bytes=7.28 GiB`; exceeding the cap gives a clean `RESOURCE_EXHAUSTED`. Shipped as
+  `tools/gpu_mem_guard.sh` (`verify` / `start` / `stop` / `status` / `run` / `watch`).
+
+- **Demand measured, caps set from it.** At 340 tokens: AF3 **7,759 MiB**, Boltz-2
+  **17,187 MiB**, ESMFold2 **18,369 MiB**. Boltz-2 is **flat** across our regime — 273 and
+  340 tokens peak identically — so cost is fixed, not N². Caps at ~1.4–1.5×: **12 / 24 / 24 GiB**.
+  Above ~600 tokens Boltz-2 needs >56 GiB and does not fit; **the 869-token EGFR complex that
+  force-rebooted this box in June now returns a clean `RESOURCE_EXHAUSTED` with the machine
+  untouched.**
+
+- **Numerics gate passed.** AF3 is bit-identical under MPS and without. Boltz-2 and ESMFold2
+  differ only within their own run-to-run spread (**0.00096** and **0.0042** on iptm), which
+  same-config controls established is baseline nondeterminism, not the cap. *Two of the three
+  refold engines are nondeterministic run-to-run* — differences below those magnitudes in
+  `consensus_iptm_mean` are noise.
+
+- **Firmware EC `0x03000508` + SoC `0x02009b0b` applied** (NVIDIA's LVFS channel); driver and
+  kernel deliberately **held** at 580.159.03 / 6.17.0-1026, because 580.173.02 has two open
+  regression reports and the exact kernel+driver pair `apt` offered is the environment in an
+  unresolved hard-freeze bug. Post-update: enforcement PASS, `cudaMemGetInfo` total **still**
+  == system RAM. **The firmware did not fix the root cause and no release ever claimed to** —
+  NVIDIA's OOM work was already in 580.159.03 and is worded "adds user feedback", not
+  "prevents hangs".
+
+**The finding that mattered more than the one we went looking for:**
+
+- `evaluate.sh` exported **`JAX_PLATFORMS=cpu`** on aarch64 — added 2026-04-07 in `3cd03c5` as
+  a "platform guard", copied from PXDesign where JAX-on-sm_121 genuinely failed at the time.
+  It was wrong for the Evaluator and broke it silently for **~4.5 months**:
+
+  ```
+  JAX_PLATFORMS unset  ->  Mosaic venv ['gpu'],  binder-eval-af3 ['gpu']
+  JAX_PLATFORMS=cpu    ->  both ['cpu']
+  ```
+
+  - **Boltz-2 ran on CPU** — correct numbers, ~2.7× slower, and it never said so.
+  - **AF3 died on every binder** (`Unknown backend: 'gpu' requested`), wrote a full set of
+    **empty rows**, and **exited 0** — so the pipeline reported success and rendered a report
+    with AF3 contributing nothing.
+
+- **This silently defeats the ≥3-engine gate.** Every design looks like a 2-engine design, so
+  the pool either fails the gate wholesale or is ranked on a `consensus_iptm_mean` that
+  quietly excludes AF3 — with nothing anywhere objecting. Same shape as the composition
+  collapse of 2026-08-16: every guard we have is a *structure-confidence* guard, and none of
+  them notices an engine that simply is not there. x86 was never affected; any Spark-class
+  node on `master` still is.
+
+**Recurrence guards (arguably the point):**
+
+- AF3 now **raises when every binder fails**, mirroring the guard `refold_boltz2.py` already
+  had, instead of exiting 0 with empty rows.
+- AF3 child stderr was logged as `stderr[-500:]`, which severed the head off every traceback —
+  the reason this error was unreadable for months. Now 4000.
+- SoluProt is no longer fatal to the whole evaluation, **except under `--soluprot-filter`**,
+  which changes *which* sequences get refolded.
+- The A/B harness now validates per-engine output rows rather than trusting `rc=0`.
+
+**SoluProt:** `2ae1bdb` removed the committed USEARCH binaries (GPLv3 in an MIT repo) and moved
+the job to the installer. **Machines whose install predates that commit lost the binary on
+their next pull and never rebuilt it.**
+
+> **Fleet check, 2026-08-24 — my "BM1/BM2/BM4 will be too" was wrong, asserted without
+> probing.** Only **BM1** has the `binder-eval-soluprot` env at all; BM2 and BM4 do not,
+> and `evaluate.sh` auto-detects by env presence, so SoluProt never runs there. BM1 *was*
+> broken and had **two** independent faults: `binder-eval` was missing `requests`, so
+> `binder-compare` died before USEARCH was ever resolved, and `usearch.x86_64` was absent.
+> Both repaired; `filter-soluprot` verified end-to-end. **The x86 binary had to be built on
+> BM1 from source — BM5's `usearch.aarch64` is an ARM ELF and the resolver keys on
+> `platform.machine()`, so nothing can be copied between them.** Reassuringly, the same
+> sequence scores **0.823900 on both** BM5 (aarch64) and BM1 (x86_64) to six decimals, so
+> the source-built v12 + sklearn 0.20.4 pipeline is reproducible across architectures.
+> Two side-findings: BM1's checkout is on `master`, which lacks the `.gitignore` rule from
+> this branch, so the freshly built GPLv3 binary was *not* ignored there — added to
+> `.git/info/exclude` as a stopgap until PR #38 merges. And the fleet's eval envs have
+> drifted: BM1 still carries the retired `binder-eval-af2`, BM2 has no `binder-eval-esmfold2`
+> at all, BM4 does. A resolver returning `None` turned the missing
+file into `Path to USEARCH is invalid: None` and killed the run before any refold started.
+
+**Throughput, once the engines were actually on the GPU:**
+
+| arm | wall | min MemAvailable | peak GPU | NVRM |
+|---|---|---|---|---|
+| staggered-concurrent | **855 s** | 39.9 GiB | 56,067 MiB | 0 |
+| sequential | **1066 s** | 86.3 GiB | 24,864 MiB | 0 |
+
+`--concurrent` is worth **1.25× (19.8 %)** and costs **54 % of the OS headroom** — use it only
+when BM5 is dedicated. Perfect parallelism would be 1.9×; contention absorbs the rest, and the
+ceiling is Boltz-2 at 47 % of the sequential total.
+
+**The mistakes:**
+
+- **I called a run successful on `rc=0` and a rendered report, without checking that AF3
+  produced values.** The 1-binder `--concurrent` test on 08-20 "passed" that way; AF3 was
+  almost certainly already empty. This is the *same* lesson as the Mosaic 512/512-skipped
+  incident and the "REPRO2 ALL DONE" pipeline — check per-arm output, never the tail of the
+  log — and it cost a full 45-minute A/B that had to be discarded and re-run.
+- **A `pkill -f <pattern>` matched my own shell's command line and killed the launcher —
+  twice in one day** (`nvidia-cuda-mps`, then `bm5_throughput_test/ab.sh`), both surfacing as
+  a bare exit 144. Find PIDs with `ps`+`awk` and kill those; keep the kill in a different
+  command from the launch.
+- **`pid=$(sample_start …)` hung forever**: command substitution blocks until every writer to
+  that stdout pipe exits, and the backgrounded sampler loops forever. Redirect the loop's
+  stdout. A sibling of the same bug (`wait` waiting on the sampler) had already cost one run.
+- **An interim conclusion — "the engines are CPU-bound, concurrency cannot help" — was
+  confidently wrong**, because it measured a pipeline in which both JAX engines were on CPU.
+  Corrected in place in `PLAN_bm5_unified_memory.md` rather than deleted.
+
+**Outcome:**
+- 4 commits on `af3/24gb-and-compile-cache`, PR #38. Raw data for every number above under
+  `docs/data/bm5_unified_memory_2026-08-20/`.
+- **BM5 has now been up 4 days with zero NVRM errors**, spanning the firmware update and ~2 h
+  of heavy GPU work including the complex that used to force-reboot it. Before this it
+  rebooted itself twice in a week.
+- Still open, all needing root: `earlyoom`, sshd `OOMScoreAdjust=-1000`, and removing the
+  stale bioconda `usearch` (confirmed broken on aarch64) from `binder-eval-soluprot/bin/`.
+
+---
+
+## 2026-09-10 — CBG wet-lab results land: the metric we rank on is blind on this target, the epitope is the thing that was wrong, and a batched optimizer nearly took BM5 down
+
+**The data that started it.** The SPOC panel came back for both targets, 114 designs each,
+same pipeline: **CALCA 99 binders (87 %)**, **CBG/2VDY 10 binders (8.8 %)**. The stated plan was
+to raise CBG's yield by generating more designs above `consensus_iptm_mean` 0.85 — at least 15
+per tool.
+
+**That lever is measured inert on CBG, and the measurement is unambiguous:**
+
+| CBG panel slice | tested | binders | rate |
+|---|---|---|---|
+| `consensus_iptm_mean` >= 0.85 | 44 | 3 | **6.8 %** |
+| below 0.85 | 70 | 7 | **10.0 %** |
+
+Fisher p = 0.74. Within-target AUC **0.496** on CBG versus **0.706** on CALCA. A 114-design
+panel where every design cleared 0.85 projects to ~8 binders — *fewer than the 10 obtained*.
+Verified the sheet's `Mean_iPTM` really is our `consensus_iptm_mean`: 135/137 match to the
+decimal, so this is our metric being tested, not a proxy.
+
+The CALCA-vs-CBG contrast is real but it is a **between-target** signal on n=2 targets: pool mean
+iPTM tells you the target is tractable, not which design on a hard target will bind. Both facts
+hold at once, and conflating them is the trap. Costed the ask anyway: 15 per tool at current
+per-tool rates needs **~119,000 designs, ~5.6x the entire round-1 campaign**, and BoltzGen cannot
+reach it at any scale (0/9,986).
+
+Corroboration that CBG is a *target* problem, not a sampling-depth problem — BoltzGen, identical
+filters, ~10k designs against each target: `pass_filter_rmsd` ("folds as intended")
+**80.3 % CALCA vs 5.2 % CBG**, while every composition filter behaves the same on both. The
+collapse is purely structural.
+
+**Where the binders actually bind.** Joined `work/epitope.csv` contact maps to the SPOC results
+for all 116 tested designs:
+
+- The prior 13-residue epitope is **not** scattered — max pairwise Ca **20.7 A**, one cluster at
+  12 A linkage. My "scattered hotspots" hypothesis was refuted by my own measurement.
+- Designs converge on it unprompted: N264/S267/H368 are contacted by ~90 % of all 350 refolded
+  designs and 100 % of binders. The site is fine. David said as much before the analysis did.
+- **But adherence to the specified hotspots anti-correlates with binding** — match-fraction
+  quartiles Q1 13.8 % -> Q3 3.4 % -> Q4 6.9 %, AUC 0.404.
+- Binders make a **smaller, N-terminally shifted** interface: 22.6 vs 28.2 residues, and **7/10
+  contact both V8 and N12** (20.0 % vs 3.7 %, p=0.008 uncorrected). **0 of the 32** designs that
+  reach T99 bound anything.
+- `analyze-target`, blind to all of it, nominates A14/A15/A18/A23 — the same N-terminal face.
+
+So the hotspots 232/240/242 were steering designs onto the 234-239 / T99 / T186 flank. **Epitope
+v2 = `8,11,12,15,264,267,368`**, avoid 99/186/234-239.
+
+**Honesty about the statistics:** n = 10 binders, and these signals were found by scanning ~100
+residues and several region definitions. Nothing here survives Bonferroni. They are probe
+hypotheses. Round 3 keeps an **arm C** at the geometry-only site `14,15,18,22,23` precisely
+because it owes nothing to the n=10 signal — and David's instruction was explicit: learn from the
+lab data, but not too much.
+
+**A correction I had to make about my own reasoning.** I proposed dropping Mosaic on the strength
+of its wet-lab record (1/31 = 3 %, within-target iPTM AUC **0.133 — inverted**) versus PXDesign's
+4/17. David overruled it: "do not let results make us go the wrong way." He was right — that
+comparison is p=0.047 uncorrected, **p ~= 0.33 across 7 tools**. I was over-fitting to n=10 in the
+same breath as warning against it. All seven tools ship.
+
+**Round 3, launched.** 8 jobs: RFD3 arm B (BM4) and arm C alt-site (BM1), PXDesign `extended`
+(BM2), Mosaic (BM5), BindCraft (Clara l40s 209123), PH (Clara h200 209126), PC MCTS + hotspots
+(209124), BoltzGen 50-80 aa (209125). Success criterion is the **pool mean** (round-1 baseline
+0.568, target >= 0.70) plus the epitope criteria — explicitly *not* the >=0.85 count.
+
+---
+
+**Two configurator bugs, both silent-corruption shaped (`402933b`):**
+
+- **It was shipping unconfigured Mosaic scripts.** `MOSAIC_HALLUCINATE_SRC` pointed at the
+  *install-time* copy under `Mosaic/`, not the maintained template. BM5's copy is dated
+  2026-03-07 and predates the 2026-07-08 epitope work — no `TARGET_PDB`, no `EPITOPE_IDX` line.
+  The exact-string injection missed and the code only **warned**, emitting a `hallucinate.py`
+  still reading `TARGET_SEQUENCE = "REPLACE_ME"` with `EPITOPE_IDX = None`. That script runs, and
+  designs against a placeholder target with no hotspots. Now prefers the repo template and
+  **fails hard**. A warning does not survive a generate-now-launch-later workflow.
+- **No way to set the RFD3 MPNN bias.** Added `rfd3_mpnn_bias`; moved defaults to the validated
+  pair **T=0.25 + ALA -1.5**. ProteinMPNN's own default (T=0.1, no bias) collapses RFD3 backbones
+  to ~50 % alanine and *nothing in the stack objects*, because every guard we have is a
+  structure-confidence guard. Recorded in `settings.json` so a later session can tell a biased run
+  from an unbiased one.
+
+**A wrong conclusion I published mid-session and had to retract.** I reported "the installed
+Mosaic has no epitope support at all" after grepping `structure_prediction.py`. Wrong file:
+`BinderTargetContact(epitope_idx=...)` lives in **`losses/structure_prediction.py`** and is
+present in every commit. The real cause was that BM5 had **drifted off the pinned commit**
+(`0599248` installed vs `82593a8` pinned, 7 commits back) and only the pin carries
+`batched_simplex_APGM`. Checked out the pin, re-applied the offline-MSA patch and the aarch64
+`esmj` guard. Clara is on the same stale commit — the whole fleet had drifted off the pin.
+
+---
+
+**The near-miss: BM5 at 11 GB MemAvailable, twice, for two different reasons.**
+
+- **First: a cap that was not attached to anything.** MPS was up, enforcement freshly verified
+  (4 GiB refused under a 2 GiB cap), a floor was declared — and a Mosaic job launched with a bare
+  `tmux new-session` still took **93.6 GB**, driving MemAvailable **111 -> 11 GB**. The MPS
+  per-client limit binds only processes that inherit `CUDA_MPS_PIPE_DIRECTORY`; tmux does not.
+  **`gpu_mem_guard.sh start` protects nothing on its own — launch through
+  `gpu_mem_guard.sh run <cap> -- <cmd>`.** Killed by PID (not by pattern — that has bitten twice
+  before), relaunched under the guard, pinned at 40,434 MiB.
+- **Then the cap was genuinely too low**, which David called before I did: 40 GB on a 121 GB box.
+  Mosaic died at the *first* binder length with 10 x `RESOURCE_EXHAUSTED`, and the log named the
+  culprit — a **single 24.61 GiB allocation**.
+- **The real lever was not the cap.** `DESIGN_BATCH_SIZE = 4` in the template vmaps 4 seeds
+  through Boltz-2 per pass, and its own comment says memory scales ~linearly with it. That knob
+  **arrived with the pin we had just moved to** ("add batched optimizers"), so round-1 Mosaic had
+  no batching and never hit this. The default was sized against small targets; CBG's target is
+  389 aa (~449-499 tokens). At **batch 2** with an 80 GB cap: **0 OOMs, 68.8 GiB, MemAvailable
+  36 GB**.
+- `TF_GPU_ALLOCATOR=cuda_malloc_async` did nothing — that is a TensorFlow variable and this is
+  JAX on its own BFC allocator. The note in memory recommending it came from Protenix, which is
+  PyTorch. It does not transfer.
+
+**Fixed the way AF3 and Boltz-2 already were (`a827d22`)** — David's steer. Both refold engines
+call `apply_jax_memory_policy(engine, target_gib)` before importing jax; Mosaic never did, which
+is why JAX applied its default `MEM_FRACTION=0.75` = 0.75 of the *whole machine* on GB10. Mosaic
+now calls the same helper with a 64 GiB target, and `DESIGN_BATCH_SIZE` is env-overridable with
+the target-size dependence written down. Note `DEFAULT_MIN_OS_GIB = 40` in that module: **24 GB
+free is a measured reboot point**, so my initial watchdog floor of 18 GB was below the cliff —
+raised to 25 GB.
+
+**Protein-Hunter does not fit a 3090 at this target size.** On BM1 it emitted
+`WARNING: ran out of memory, skipping batch` and then died with `KeyError: 'pair_chains_iptm'` —
+a CUDA OOM wearing a misleading exception. 389 aa target + ~92 aa binder ~= 481 tokens, and PH is
+Boltz-2 *gradient* hallucination. Moved to Clara h200. General rule: **no gradient-through-Boltz-2
+tool fits 24 GB at this target size.**
+
+**Other traps hit, all now in the round-3 PROGRESS file:**
+- `fleet.sh launch` single-quotes the remote dir into the remote shell, so a `~/...` path creates
+  a **literal `~` directory**; the run died in hydra with `LexerNoViableAltException` on
+  `out_dir=<BM4_HOME>/~/runs/...`. Pass absolute paths. Worth fixing in `fleet.sh`.
+- `nvidia-smi | head -12` gets SIGPIPE (exit 141) under `set -o pipefail` + an ERR trap. The ApoE
+  template survived only because `head -20` consumed the whole output. Append `|| true`.
+- **`uv sync` silently uninstalled `binder-comparison` from `Mosaic/.venv`** — i.e. removed the
+  Boltz-2 refold engine, because it is not in Mosaic's own `pyproject.toml`. Re-install after every
+  sync (`Mosaic/.venv` has no `pip`; use `uv pip install --python ... -e Evaluator --no-deps`).
+- `tools_enabled` accepts both `pxdesign` and `pxdesign_local` but only the latter generates
+  anything; the dead key silently yields "No tools enabled".
+
+**Open:** whether the >=0.85 bar is inert on CBG *because the pool is too poor to discriminate*
+(range restriction — pool mean 0.568, almost nothing binder-competent) rather than because the
+metric is blind. Round 3 tests exactly that: if the epitope change lifts the pool mean, the metric
+should start separating. Also open: BM1/BM2/BM4/Clara are all still on Mosaic `0599248`, off the pin.

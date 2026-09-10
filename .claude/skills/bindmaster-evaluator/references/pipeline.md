@@ -1,6 +1,6 @@
 # Evaluation pipeline — canonical recipe
 
-The cross-engine refold + ranking, run **locally on the eval host** (Spark / any >100 GB-memory
+The cross-engine refold + ranking, run **locally on the eval host** (Spark / any CUDA
 box) as library code, not cluster jobs. Promotes + updates the orchestrator's `evaluation.md` to
 the current engine set (ESMFold2 default, two-stage ranking, + affinity/monomer).
 
@@ -10,7 +10,7 @@ the current engine set (ESMFold2 default, two-stage ranking, + affinity/monomer)
 |---|---|---|---|
 | extract | `binder-compare extract --<tool> DIR … -o seqs.fasta` | `binder-eval` | one extractor per tool; writes a native-metrics sidecar |
 | refold Boltz-2 | `binder-compare refold-boltz2 --sequences … --target-seq SEQ -o boltz2.csv` | **Mosaic venv** (`Mosaic/.venv`) | default; native `[binder\|target]` PAE, pLDDT [0,1] |
-| refold AF3 | `binder-compare refold-af3 …` | `binder-eval-af3` | canonical 2nd engine; >100 GB memory; pLDDT 0–100 → rescaled; PAE transposed |
+| refold AF3 | `binder-compare refold-af3 …` | `binder-eval-af3` | canonical 2nd engine; runs on 24 GB GPUs (~4.4 GB peak at ~260 tokens); pLDDT 0–100 → rescaled; PAE transposed |
 | refold ESMFold2 | `binder-compare refold-esmfold2 … --model full` | `binder-eval-esmfold2` | **default**, lightweight; the `chain_iptm_interface` gate |
 | report | `binder-compare report --boltz2-results … --af3-results … --esmfold2-results … -o report/` | `binder-eval` | ranking; HTML + `metrics.csv` |
 | affinity | `binder-compare affinity --metrics report/metrics.csv --structures-dir … --run-rosetta -o affinity.csv` | `BindCraft` (PyRosetta) | Part N — see `affinity.md` |

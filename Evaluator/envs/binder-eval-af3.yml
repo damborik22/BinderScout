@@ -2,8 +2,10 @@ name: binder-eval-af3
 # AlphaFold 3 v3.0.2 refolding step.
 #
 # Used for: binder-compare refold-af3
-# Platform: any host with >=100 GB GPU memory — H200 (x86_64), GH200, DGX Spark
-#           (aarch64). Full AF3 inference does not fit on consumer 24 GB GPUs.
+# Platform: any CUDA host — H200 (x86_64), GH200, DGX Spark (aarch64), and
+#           24 GB consumer GPUs. Measured 2026-08-14 on an RTX 3090: a 258-token
+#           binder:target complex peaks at 4,430 MiB (20/20 designs clean).
+#           The former ">=100 GB" note was preallocation misread as working set.
 #
 # AF3 model weights must be downloaded separately (gated by Google DeepMind):
 #   1. Request access at https://github.com/google-deepmind/alphafold3

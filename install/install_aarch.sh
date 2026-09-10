@@ -1699,9 +1699,12 @@ install_af3() {
     if command -v nvidia-smi >/dev/null 2>&1; then
         gpu_mem_mib="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')"
     fi
-    if [[ -n "${gpu_mem_mib}" && "${gpu_mem_mib}" -lt 100000 ]]; then
-        print_warn "Detected GPU has ${gpu_mem_mib} MiB memory (<100 GiB)."
-        print_warn "  Full AF3 inference will OOM. Install will proceed but refold-af3 won't run here."
+    # See install.sh: the old <100 GiB warning was preallocation misread as the
+    # working set. Measured 4,430 MiB peak for a 258-token complex (RTX 3090).
+    if [[ -n "${gpu_mem_mib}" && "${gpu_mem_mib}" -lt 8000 ]]; then
+        print_warn "Detected GPU has ${gpu_mem_mib} MiB memory (<8 GiB)."
+        print_warn "  AF3 needs ~4.4 GB for a ~260-token complex, more for larger ones."
+        print_warn "  Install will proceed — lower AF3_XLA_MEM_FRACTION if refold-af3 OOMs."
     fi
 
     if [[ ! -d "${EVALUATOR_DIR}" ]]; then
