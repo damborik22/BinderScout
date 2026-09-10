@@ -2941,8 +2941,14 @@ def _missing_tool_assets(cfg: dict, tools_enabled: dict) -> list[tuple[str, Path
             if stem and not (src_dir / f"{stem}.json").is_file():
                 missing.append(("BindCraft", src_dir / f"{stem}.json", "bindmaster install --tool bindcraft"))
 
-    if tools_enabled.get("mosaic") and not MOSAIC_HALLUCINATE_SRC.is_file():
-        missing.append(("Mosaic", MOSAIC_HALLUCINATE_SRC, "bindmaster install --tool mosaic"))
+    # Ask the venv, NOT MOSAIC_HALLUCINATE_SRC. That constant now prefers the template
+    # in bindmaster_examples/, which is tracked in this repo and therefore ALWAYS exists —
+    # checking it here made "is Mosaic installed" unfalsifiable and silently deleted this
+    # guard. Two different questions were riding one constant: which template to inject
+    # from (the repo's, always present) versus whether the tool can actually run (the uv
+    # venv, which only the installer creates, and which run_mosaic.sh requires).
+    if tools_enabled.get("mosaic") and not MOSAIC_VENV.is_dir():
+        missing.append(("Mosaic", MOSAIC_VENV, "bindmaster install --tool mosaic"))
 
     if tools_enabled.get("boltzgen") and cfg.get("boltzgen_mode") == "nanobody":
         for name in NANOBODY_SCAFFOLD_NAMES:
