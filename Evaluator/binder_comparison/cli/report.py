@@ -1329,8 +1329,11 @@ def add_parser(subparsers) -> None:
         metavar="TOOL=KEY:VALUE[;KEY:VALUE]",
         action="append",
         help="Override the per-tool fairness banner (e.g. mark a pool as pre-filtered). "
-        "Keys: pool_pre_filtered (true|false), source_csv (filename), notes (string). "
-        "Example: --tool-meta protein_hunter='pool_pre_filtered:true;source_csv:summary_high_iptm.csv'. "
+        "Keys: pool_pre_filtered (true|false), source_csv (filename), notes (string), "
+        "total (designs the tool generated), filtered (how many passed the tool's OWN "
+        "pass/fail filters; omit for tools that only rank). total+filtered drive the "
+        "generation-funnel banner at the top of the report. "
+        "Example: --tool-meta bindcraft='total:12270;filtered:568'. "
         "If absent, the static defaults in comparison.tool_classification apply.",
     )
     # Item 6: run provenance (engine versions / checkpoints / seeds for the footer).

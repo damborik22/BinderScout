@@ -1,9 +1,9 @@
 """CLI subcommand: binder-compare refold-af3
 
 Refold sequences from a FASTA file using AlphaFold 3 v3.0.2 (Google DeepMind).
-Run this in the 'binder-eval-af3' conda environment. Needs a host with
->=100 GB GPU memory (H200, GH200, DGX Spark) — full AF3 inference will OOM on
-consumer 24 GB GPUs.
+Run this in the 'binder-eval-af3' conda environment. Runs on H200 / GH200 /
+DGX Spark and on 24 GB consumer GPUs: a 258-token binder:target complex peaks
+at ~4.4 GB (measured on an RTX 3090, 2026-08-14).
 
 Usage:
     conda run -n binder-eval-af3 binder-compare refold-af3 \\
@@ -55,7 +55,7 @@ def run(args: argparse.Namespace) -> None:
 def add_parser(subparsers) -> None:
     p = subparsers.add_parser(
         "refold-af3",
-        help="Refold sequences with AlphaFold 3 v3.0.2 (run in 'binder-eval-af3' conda env; needs >=100 GB GPU memory).",
+        help="Refold sequences with AlphaFold 3 v3.0.2 (run in 'binder-eval-af3' conda env; runs on 24 GB GPUs).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
     )

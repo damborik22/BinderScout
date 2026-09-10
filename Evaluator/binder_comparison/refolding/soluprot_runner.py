@@ -67,8 +67,10 @@ def run_soluprot_filter(
                        (always the case on aarch64 — TMHMM ships x86 only).
         usearch_path:  path to the USEARCH binary for the identity
                        feature. If None, resolved from ``$SOLUPROT_USEARCH``,
-                       then ``<scripts_path>/usearch``, else left to
-                       SoluProt's own PATH lookup.
+                       then ``<scripts_path>/usearch.<arch>``, then
+                       ``<scripts_path>/usearch``, then ``usearch`` on PATH.
+                       Raises if none of those exist — SoluProt cannot score
+                       without it.
 
     Output schema (one row per sequence):
         ``binder_id (optional), sequence, soluprot_score,
@@ -112,8 +114,7 @@ def run_soluprot_filter(
         ]
         if use_no_tmhmm:
             cmd.append("--no_tmhmm")
-        if usearch is not None:
-            cmd += ["--usearch", str(usearch)]
+        cmd += ["--usearch", str(usearch)]
         # SoluProt's CWD matters because its data files (training-set features,
         # reference DB, model) are looked up relative to the script.
         env = os.environ.copy()
@@ -218,16 +219,20 @@ def _decide_no_tmhmm(override: bool | None, soluprot_dir: Path) -> bool:
     return not (bundled.exists() or shutil.which("tmhmm"))
 
 
-def _resolve_usearch(override: str | Path | None, soluprot_dir: Path) -> Path | None:
+def _resolve_usearch(override: str | Path | None, soluprot_dir: Path) -> Path:
     """Locate the USEARCH binary for SoluProt's identity feature.
 
     Order: explicit arg, ``$SOLUPROT_USEARCH``, ``<soluprot_dir>/usearch.<arch>``,
-    then a bare ``<soluprot_dir>/usearch``. USEARCH is a native binary and the
-    dist carries per-arch copies (``usearch.x86_64`` / ``usearch.aarch64``) so a
-    checkout/merge on one machine can't clobber the other's. Returns None if none
-    found, leaving SoluProt to look up ``usearch`` on PATH. Paths are returned
-    absolute (SoluProt resolves relative paths against its own script directory,
-    not the caller's CWD).
+    a bare ``<soluprot_dir>/usearch``, then ``usearch`` on PATH. USEARCH is a
+    native binary and the dist carries per-arch copies (``usearch.x86_64`` /
+    ``usearch.aarch64``, built from source by the installer) so a checkout/merge
+    on one machine can't clobber the other's. Paths are returned absolute
+    (SoluProt resolves relative paths against its own script directory, not the
+    caller's CWD).
+
+    Raises if nothing is found: SoluProt cannot score without USEARCH, and its
+    own diagnostic for a missing binary is the opaque "Path to USEARCH is
+    invalid: None", so we fail here with the remediation instead.
     """
     for cand in (override, os.environ.get("SOLUPROT_USEARCH")):
         if cand:
@@ -238,7 +243,16 @@ def _resolve_usearch(override: str | Path | None, soluprot_dir: Path) -> Path | 
     for bundled in (soluprot_dir / f"usearch.{platform.machine()}", soluprot_dir / "usearch"):
         if bundled.exists():
             return bundled.resolve()
-    return None
+    on_path = shutil.which("usearch")
+    if on_path:
+        return Path(on_path).resolve()
+    raise FileNotFoundError(
+        "USEARCH not found — SoluProt cannot compute its identity feature without it. "
+        f"Looked at: $SOLUPROT_USEARCH, {soluprot_dir}/usearch.{platform.machine()}, "
+        f"{soluprot_dir}/usearch, and 'usearch' on PATH.\n"
+        "Build it with `bindmaster install --tool soluprot` (source-builds "
+        "rcedgar/usearch12, GPLv3), or pass --usearch /path/to/usearch."
+    )
 
 
 def _find_entry_script(soluprot_dir: Path) -> Path:

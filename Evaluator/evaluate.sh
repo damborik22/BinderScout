@@ -28,6 +28,18 @@
 #   --soluprot-filter      drop sequences scoring below the threshold from FASTA BEFORE
 #                          refolding — saves GPU time on designs we wouldn't pursue.
 #                          Off by default; the score still lands in the report either way.
+#   --concurrent           run the refold engines SIMULTANEOUSLY instead of one after
+#                          another, with staggered starts. Requires the CUDA MPS ceiling
+#                          (tools/gpu_mem_guard.sh) and refuses to run without it, because
+#                          concurrency without a hard per-client cap is exactly what took
+#                          BM5 down. Per-engine output goes to $OUTPUT/refold_<engine>.log.
+#   --stagger N            seconds between concurrent engine starts (default: 30). The
+#                          measured peak is the simultaneous COLD START -- all engines
+#                          preallocating at once -- not steady state.
+#   --gpu-cap-boltz2 N     per-engine GPU ceiling, e.g. 24G (default: 24G)
+#   --gpu-cap-af3 N        default: 12G
+#   --gpu-cap-esmfold2 N   default: 24G
+#   --no-gpu-guard         do NOT apply the MPS ceiling (unsafe on unified memory)
 #   --primary-engine ENG   primary ranking engine: boltz | af3 | esmfold2 (default: boltz)
 #   --min-engines N        how many independent engines must have refolded a design for it
 #                          to be eligible for the ranking (default 3 = all of Boltz-2 / AF3 /
@@ -66,9 +78,22 @@ for _conda_sh in \
     [[ -f "$_conda_sh" ]] && { source "$_conda_sh"; break; }
 done
 
-# aarch64/Blackwell: set env vars for JAX and PyTorch CUDA compilation
+# aarch64/Blackwell: PyTorch CUDA compilation target.
+#
+# `export JAX_PLATFORMS=cpu` used to live here (added 2026-04-07 in 3cd03c5 as an
+# aarch64 "platform guard", copied from PXDesign where JAX-on-sm_121 genuinely
+# failed at the time).  It was WRONG for the Evaluator and silently broke it for
+# ~4.5 months: JAX_PLATFORMS=cpu hides the GPU from every JAX child, so
+#   * Boltz-2 ran on CPU -- correct numbers, ~2.7x slower, and it says nothing;
+#   * AF3 died on EVERY binder with "Unknown backend: 'gpu' requested, but no
+#     platforms that are instances of gpu are present", wrote empty rows, and
+#     still exited 0 -- silently removing a whole engine from consensus_iptm_mean
+#     and from the >=3-engine gate.
+# Measured 2026-08-20 on BM5: with it unset both engines report ['gpu'] and fold
+# correctly (AF3 iptm 0.8900, Boltz-2 17.2 GiB on-GPU).  Do not re-add it.
+# A machine that genuinely cannot run JAX on GPU can still export it externally;
+# evaluate.sh inherits the environment.
 if [[ "$(uname -m)" == "aarch64" ]]; then
-    export JAX_PLATFORMS=cpu
     export TORCH_CUDA_ARCH_LIST="12.0"
 fi
 
@@ -91,6 +116,12 @@ SOLUPROT_ENV="binder-eval-soluprot"
 SOLUPROT_THRESHOLD=0.5
 SOLUPROT_FILTER=0
 PRIMARY_ENGINE="boltz"
+CONCURRENT=0
+STAGGER=${BINDMASTER_STAGGER_S:-30}
+GPU_CAP_BOLTZ2=${BINDMASTER_GPU_CAP_BOLTZ2:-24G}
+GPU_CAP_AF3=${BINDMASTER_GPU_CAP_AF3:-12G}
+GPU_CAP_ESMFOLD2=${BINDMASTER_GPU_CAP_ESMFOLD2:-24G}
+USE_GPU_GUARD=1
 MIN_ENGINES=""          # empty = let binder-compare apply its own default (3)
 EPITOPE_RESIDUES=""
 WITH_AFFINITY=0
@@ -115,6 +146,12 @@ while [[ $# -gt 0 ]]; do
         --soluprot-env)      SOLUPROT_ENV="$2";        shift 2 ;;
         --soluprot-threshold) SOLUPROT_THRESHOLD="$2"; shift 2 ;;
         --soluprot-filter)   SOLUPROT_FILTER=1;        shift ;;
+        --concurrent)         CONCURRENT=1;              shift ;;
+        --stagger)            STAGGER="$2";              shift 2 ;;
+        --gpu-cap-boltz2)     GPU_CAP_BOLTZ2="$2";       shift 2 ;;
+        --gpu-cap-af3)        GPU_CAP_AF3="$2";          shift 2 ;;
+        --gpu-cap-esmfold2)   GPU_CAP_ESMFOLD2="$2";     shift 2 ;;
+        --no-gpu-guard)       USE_GPU_GUARD=0;           shift ;;
         --primary-engine)
             PRIMARY_ENGINE="$2"
             case "$PRIMARY_ENGINE" in
@@ -181,7 +218,7 @@ echo ""
 if [[ $SKIP_AF3 -eq 0 ]]; then
     if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${AF3_ENV}"; then
         echo "[note] conda env '${AF3_ENV}' not found — AF3 refolding will be skipped."
-        echo "        (requires >100 GB unified/device memory; see Evaluator/envs/binder-eval-af3.yml)"
+        echo "        (install with 'bindmaster install --tool af3'; runs on 24 GB GPUs — see Evaluator/envs/binder-eval-af3.yml)"
         echo ""
         SKIP_AF3=1
     fi
@@ -250,12 +287,17 @@ BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
 AF3_CSV="$OUTPUT/af3_results.csv"
 ESMFOLD2_CSV="$OUTPUT/esmfold2_results.csv"
 SOLUPROT_CSV="$OUTPUT/soluprot_results.csv"
+SOLUPROT_OK=1   # cleared if the optional screen fails; see Step 0.5
 
 # Step counter: 1 (report) + 1 per engine not skipped + 1 if SoluProt ran
 N_STEPS=1  # report
-[[ $SKIP_BOLTZ2 -eq 0 ]]   && (( N_STEPS++ ))
-[[ $SKIP_AF3 -eq 0 ]]      && (( N_STEPS++ ))
-[[ $SKIP_ESMFOLD2 -eq 0 ]] && (( N_STEPS++ ))
+if [[ $CONCURRENT -eq 1 ]]; then
+    (( N_STEPS++ ))            # the engines run as a single concurrent step
+else
+    [[ $SKIP_BOLTZ2 -eq 0 ]]   && (( N_STEPS++ ))
+    [[ $SKIP_AF3 -eq 0 ]]      && (( N_STEPS++ ))
+    [[ $SKIP_ESMFOLD2 -eq 0 ]] && (( N_STEPS++ ))
+fi
 [[ $SKIP_SOLUPROT -eq 0 ]] && (( N_STEPS++ ))
 STEP=1
 
@@ -270,10 +312,26 @@ if [[ $SKIP_SOLUPROT -eq 0 ]]; then
     # needs py3.10+ — so we cannot run binder-compare inside ${SOLUPROT_ENV}.
     SOLUPROT_PYTHON="$(conda run -n "${SOLUPROT_ENV}" python -c 'import sys; print(sys.executable)' 2>/dev/null)"
     export SOLUPROT_PYTHON
-    conda run -n binder-eval binder-compare filter-soluprot \
-        --sequences "$SEQUENCES" \
-        -o          "$SOLUPROT_CSV" \
-        --threshold "$SOLUPROT_THRESHOLD"
+    # SoluProt is an OPTIONAL pre-screen, so a failure must not take the whole
+    # evaluation down with it (it did: a missing USEARCH binary aborted the run
+    # before any refold engine started).  The one exception is --soluprot-filter:
+    # that flag changes WHICH sequences get refolded, so silently continuing
+    # would produce a different pool than was asked for.
+    if conda run -n binder-eval binder-compare filter-soluprot \
+            --sequences "$SEQUENCES" \
+            -o          "$SOLUPROT_CSV" \
+            --threshold "$SOLUPROT_THRESHOLD"; then
+        SOLUPROT_OK=1
+    else
+        SOLUPROT_OK=0
+        if [[ $SOLUPROT_FILTER -eq 1 ]]; then
+            echo "Error: --soluprot-filter was requested but the SoluProt screen failed." >&2
+            echo "       Continuing would refold a DIFFERENT pool than you asked for." >&2
+            exit 1
+        fi
+        echo "[soluprot] WARNING: screen failed — continuing WITHOUT the solubility" >&2
+        echo "[soluprot]          column. Refolding is unaffected. See the error above." >&2
+    fi
 
     if [[ $SOLUPROT_FILTER -eq 1 ]]; then
         # Hard filter: rewrite the FASTA, keeping only sequences whose
@@ -350,48 +408,132 @@ if [[ $SKIP_BOLTZ2 -eq 0 || $SKIP_AF3 -eq 0 || $SKIP_ESMFOLD2 -eq 0 ]]; then
     fi
 fi
 
-if [[ $SKIP_BOLTZ2 -eq 1 ]]; then
-    echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
-    [[ -f "$BOLTZ2_CSV" ]] || { echo "Error: $BOLTZ2_CSV not found"; exit 1; }
+# --- GPU memory ceiling ----------------------------------------------------
+# On unified-memory hosts (GB10 / DGX Spark) the GPU pool IS system RAM:
+# cudaMemGetInfo total == SC_PHYS_PAGES == 121.7 GiB. An engine sizing itself as a
+# fraction of "device total" therefore reserves a fraction of the WHOLE MACHINE and
+# starves the kernel -- that is what hard-rebooted BM5 on 2026-08-18.
+#
+# Each engine also computes its own absolute-GiB fraction
+# (binder_comparison.refolding.memory_policy), but that is COOPERATIVE. The hard
+# ceiling is a CUDA MPS per-client limit; cgroups do not contain NVIDIA allocations
+# on driver 580.x (measured). See docs/PLAN_bm5_unified_memory.md.
+GUARD="$SCRIPT_DIR/../tools/gpu_mem_guard.sh"
+MPS_ACTIVE=0
+MPS_WE_STARTED=0
+
+gpu_guard_up () {
+    [[ $USE_GPU_GUARD -eq 1 ]] || { echo "[gpu-guard] disabled by --no-gpu-guard"; return 1; }
+    [[ -x "$GUARD" ]] || { echo "[gpu-guard] $GUARD not executable — cooperative caps only" >&2; return 1; }
+    if "$GUARD" is-up 2>/dev/null; then
+        MPS_ACTIVE=1; echo "[gpu-guard] MPS already running — reusing it"; return 0
+    fi
+    if "$GUARD" start "$GPU_CAP_BOLTZ2" >/dev/null 2>&1 && "$GUARD" is-up 2>/dev/null; then
+        MPS_ACTIVE=1; MPS_WE_STARTED=1
+        echo "[gpu-guard] MPS started (fallback cap $GPU_CAP_BOLTZ2; each engine sets its own)"
+        return 0
+    fi
+    echo "[gpu-guard] WARNING: could not start MPS — no hard memory ceiling this run." >&2
+    return 1
+}
+gpu_guard_down () { if [[ $MPS_WE_STARTED -eq 1 ]]; then "$GUARD" stop >/dev/null 2>&1 || true; fi; }
+# EXIT alone is not enough: a SIGTERM (timeout, Ctrl-C, a scheduler) can leave the MPS
+# daemon running and holding machine-wide state. Re-raise as an exit so EXIT fires.
+trap gpu_guard_down EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Emit the per-client cap as an env assignment, or nothing when MPS is not active.
+cap_env () { if [[ $MPS_ACTIVE -eq 1 ]]; then printf 'CUDA_MPS_PINNED_DEVICE_MEM_LIMIT=0=%s' "$1"; fi; }
+
+gpu_guard_up || true
+
+# --- engine definitions (one place; sequential and concurrent both use these) --
+# shellcheck disable=SC2046  # cap_env deliberately expands to 0 or 1 words
+engine_boltz2 () {
+    local f=""; [[ $RESUME -eq 1 ]] && f="--resume"
+    env $(cap_env "$GPU_CAP_BOLTZ2") "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
+        --sequences "$SEQUENCES" --target-seq "$TARGET_SEQ" -o "$BOLTZ2_CSV" $f
+}
+# shellcheck disable=SC2046
+engine_af3 () {
+    local f=""; [[ $RESUME -eq 1 ]] && f="--resume"
+    env $(cap_env "$GPU_CAP_AF3") conda run -n "${AF3_ENV}" binder-compare refold-af3 \
+        --sequences "$SEQUENCES" --target-seq "$TARGET_SEQ" -o "$AF3_CSV" \
+        --output-dir "$OUTPUT/refold_af3" $f
+}
+# shellcheck disable=SC2046
+engine_esmfold2 () {
+    local f=""; [[ $RESUME -eq 1 ]] && f="--resume"
+    env $(cap_env "$GPU_CAP_ESMFOLD2") conda run -n "${ESMFOLD2_ENV}" binder-compare refold-esmfold2 \
+        --sequences "$SEQUENCES" --target-seq "$TARGET_SEQ" -o "$ESMFOLD2_CSV" \
+        --output-dir "$OUTPUT/refold_esmfold2" --model "${ESMFOLD2_MODEL}" $f
+}
+
+if [[ $SKIP_BOLTZ2 -eq 1 && ! -f "$BOLTZ2_CSV" ]]; then
+    echo "Error: --skip-boltz2 given but $BOLTZ2_CSV not found"; exit 1
+fi
+
+if [[ $CONCURRENT -eq 1 ]]; then
+    # Concurrency without a hard per-client ceiling is precisely the configuration
+    # that took this box down. Refuse rather than warn.
+    if [[ $MPS_ACTIVE -ne 1 ]]; then
+        echo "Error: --concurrent requires the CUDA MPS ceiling, which is not active." >&2
+        echo "       Fix the guard ($GUARD verify) or drop --concurrent." >&2
+        exit 2
+    fi
+    echo "[step ${STEP}/${N_STEPS}] Refolding — ${STAGGER}s staggered starts, caps ${GPU_CAP_BOLTZ2}/${GPU_CAP_AF3}/${GPU_CAP_ESMFOLD2}"
+    # Stagger exists because the measured peak is the simultaneous COLD START -- all
+    # engines preallocating at once -- not steady state. On 2026-08-20 a simultaneous
+    # launch peaked at 56.2 GiB and logged one NVRM NV_ERR_NO_MEMORY; 40 s later usage
+    # had fallen to 37.9 GiB. Serialising the startup costs nothing, because the
+    # engines do not finish together anyway.
+    E_PIDS=(); E_NAMES=(); DELAY=0
+    launch_engine () {
+        local name=$1 fn=$2
+        local log="$OUTPUT/refold_${name}.log"
+        ( sleep "$DELAY"; "$fn" ) > "$log" 2>&1 &
+        E_PIDS+=("$!"); E_NAMES+=("$name")
+        echo "    [$name] queued at +${DELAY}s → $log"
+        DELAY=$(( DELAY + STAGGER ))
+    }
+    [[ $SKIP_BOLTZ2 -eq 0 ]]   && launch_engine boltz2   engine_boltz2
+    [[ $SKIP_AF3 -eq 0 ]]      && launch_engine af3      engine_af3
+    [[ $SKIP_ESMFOLD2 -eq 0 ]] && launch_engine esmfold2 engine_esmfold2
+
+    ENGINE_FAIL=0
+    for i in "${!E_PIDS[@]}"; do
+        if wait "${E_PIDS[$i]}"; then
+            echo "    [${E_NAMES[$i]}] ok"
+        else
+            rc=$?
+            echo "    [${E_NAMES[$i]}] FAILED (rc=$rc) — last 15 lines:" >&2
+            tail -15 "$OUTPUT/refold_${E_NAMES[$i]}.log" | sed 's/^/      /' >&2
+            ENGINE_FAIL=1
+        fi
+    done
+    [[ $ENGINE_FAIL -eq 0 ]] || { echo "Error: at least one refold engine failed." >&2; exit 1; }
+    (( STEP++ ))
 else
-    echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding  (Mosaic venv)..."
-    BOLTZ2_RESUME_FLAG=""
-    [[ $RESUME -eq 1 ]] && BOLTZ2_RESUME_FLAG="--resume"
-    "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
-        --sequences  "$SEQUENCES" \
-        --target-seq "$TARGET_SEQ" \
-        -o           "$BOLTZ2_CSV" \
-        $BOLTZ2_RESUME_FLAG
-fi
-(( STEP++ ))
-
-# --- Step 2: AF3 refolding (optional) --------------------------------------
-if [[ $SKIP_AF3 -eq 0 ]]; then
-    echo "[step ${STEP}/${N_STEPS}] AF3 refolding       (conda env: ${AF3_ENV})..."
-    AF3_RESUME_FLAG=""
-    [[ $RESUME -eq 1 ]] && AF3_RESUME_FLAG="--resume"
-    conda run -n "${AF3_ENV}" binder-compare refold-af3 \
-        --sequences  "$SEQUENCES" \
-        --target-seq "$TARGET_SEQ" \
-        -o           "$AF3_CSV" \
-        --output-dir "$OUTPUT/refold_af3" \
-        $AF3_RESUME_FLAG
+    if [[ $SKIP_BOLTZ2 -eq 1 ]]; then
+        echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
+    else
+        echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding  (Mosaic venv, cap ${GPU_CAP_BOLTZ2})..."
+        engine_boltz2
+    fi
     (( STEP++ ))
-fi
 
-# --- Step 3: ESMFold2 refolding (optional) ---------------------------------
-if [[ $SKIP_ESMFOLD2 -eq 0 ]]; then
-    echo "[step ${STEP}/${N_STEPS}] ESMFold2 refolding  (conda env: ${ESMFOLD2_ENV})..."
-    ESMFOLD2_RESUME_FLAG=""
-    [[ $RESUME -eq 1 ]] && ESMFOLD2_RESUME_FLAG="--resume"
-    conda run -n "${ESMFOLD2_ENV}" binder-compare refold-esmfold2 \
-        --sequences  "$SEQUENCES" \
-        --target-seq "$TARGET_SEQ" \
-        -o           "$ESMFOLD2_CSV" \
-        --output-dir "$OUTPUT/refold_esmfold2" \
-        --model      "${ESMFOLD2_MODEL}" \
-        $ESMFOLD2_RESUME_FLAG
-    (( STEP++ ))
+    if [[ $SKIP_AF3 -eq 0 ]]; then
+        echo "[step ${STEP}/${N_STEPS}] AF3 refolding       (conda env: ${AF3_ENV}, cap ${GPU_CAP_AF3})..."
+        engine_af3
+        (( STEP++ ))
+    fi
+
+    if [[ $SKIP_ESMFOLD2 -eq 0 ]]; then
+        echo "[step ${STEP}/${N_STEPS}] ESMFold2 refolding  (conda env: ${ESMFOLD2_ENV}, cap ${GPU_CAP_ESMFOLD2})..."
+        engine_esmfold2
+        (( STEP++ ))
+    fi
 fi
 
 # --- Report ----------------------------------------------------------------
@@ -407,7 +549,7 @@ fi
 if [[ $SKIP_ESMFOLD2 -eq 0 && -f "$ESMFOLD2_CSV" ]]; then
     REPORT_ARGS+=(--esmfold2-results "$ESMFOLD2_CSV")
 fi
-if [[ $SKIP_SOLUPROT -eq 0 && -f "$SOLUPROT_CSV" ]]; then
+if [[ $SKIP_SOLUPROT -eq 0 && $SOLUPROT_OK -eq 1 && -f "$SOLUPROT_CSV" ]]; then
     REPORT_ARGS+=(--soluprot-results "$SOLUPROT_CSV")
 fi
 REPORT_ARGS+=(--primary-engine "$PRIMARY_ENGINE")

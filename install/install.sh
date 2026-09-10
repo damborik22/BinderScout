@@ -83,7 +83,7 @@ DO_PXDESIGN=false
 DO_PROTEINA_COMPLEXA=false
 DO_PROTEIN_HUNTER=false
 DO_RFD3=false
-DO_AF3=false            # opt-in via --tool af3 (>=100 GB GPU memory required; weights not bundled)
+DO_AF3=false            # opt-in via --tool af3 (runs on 24 GB GPUs; gated weights not bundled)
 DO_ESMFOLD2=false       # default refold engine (included in --tool all; lightweight, no gated weights)
 DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen; needs a C/C++ toolchain for the USEARCH v12 source build)
 
@@ -180,8 +180,9 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes] [--force]
                   bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3
                                        install one current-generation tool
                   af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
-                                       requires >=100 GB GPU memory (H200/GH200/Spark)
-                                       and gated AF3 weights you obtain from
+                                       runs on 24 GB GPUs for ~200-400-token
+                                       complexes (~4.4 GB peak, measured);
+                                       needs gated AF3 weights you obtain from
                                        https://github.com/google-deepmind/alphafold3
                   esmfold2             ESMFold2 refolder — default (in --tool all);
                                        lightweight refold engine, no gated weights
@@ -611,7 +612,8 @@ print_tool_status() {
 
 select_tools_interactive() {
     # Default: current-generation tools selected. AF3 is opt-in
-    # (--tool af3 on the CLI) due to its >=100 GB GPU memory requirement.
+    # (--tool af3 on the CLI) because its weights are gated by DeepMind and
+    # must be requested separately — not because of a GPU-memory limit.
     local sel_bc=true
     local sel_bg=true
     local sel_mo=true
@@ -713,7 +715,7 @@ select_tools_interactive() {
     [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
     [[ "$DO_PROTEINA_COMPLEXA" == true ]] && echo -e "    ${GREEN}✓${RESET} Proteina-Complexa"
     [[ "$DO_PROTEIN_HUNTER" == true ]] && echo -e "    ${GREEN}✓${RESET} Protein-Hunter"
-    [[ "$DO_AF3" == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; >=100 GB GPU; weights required)${RESET}"
+    [[ "$DO_AF3" == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; gated weights required)${RESET}"
     [[ "$DO_ESMFOLD2" == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (default refolder)"
     [[ "$DO_SOLUPROT" == true ]] && echo -e "    ${GREEN}✓${RESET} SoluProt 1.0 (pre-refold solubility screen)"
     echo ""
@@ -2167,10 +2169,15 @@ install_af3() {
     if command -v nvidia-smi >/dev/null 2>&1; then
         gpu_mem_mib="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')"
     fi
-    if [[ -n "${gpu_mem_mib}" && "${gpu_mem_mib}" -lt 100000 ]]; then
-        print_warn "Detected GPU has ${gpu_mem_mib} MiB memory (<100 GiB)."
-        print_warn "  Full AF3 inference will OOM on consumer 24 GB GPUs."
-        print_warn "  Install will proceed — refold-af3 will only run on H200 / GH200 / DGX Spark."
+    # NOTE: this used to warn below 100 GiB and claim AF3 would OOM on a 24 GB
+    # card. That was wrong — measured 2026-08-14 on an RTX 3090, a 258-token
+    # binder:target complex peaks at 4,430 MiB (20/20 designs clean). The old
+    # ">=100 GB" figure came from reading preallocated pool size as the working
+    # set. Warn only where the *working set* is genuinely at risk.
+    if [[ -n "${gpu_mem_mib}" && "${gpu_mem_mib}" -lt 8000 ]]; then
+        print_warn "Detected GPU has ${gpu_mem_mib} MiB memory (<8 GiB)."
+        print_warn "  AF3 needs ~4.4 GB for a ~260-token complex, more for larger ones."
+        print_warn "  Install will proceed — lower AF3_XLA_MEM_FRACTION if refold-af3 OOMs."
     fi
 
     # Evaluator dir must exist (bundled in monorepo)

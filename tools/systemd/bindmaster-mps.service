@@ -1,0 +1,37 @@
+# CUDA MPS control daemon — the hard memory ceiling for GB10/DGX Spark.
+#
+# WHY: on GB10 the GPU pool IS system RAM (cudaMemGetInfo total == SC_PHYS_PAGES ==
+# 121.7 GiB), so an over-allocating job starves the OS and wedges the box. cgroups do
+# NOT contain NVIDIA allocations on driver 580.x (measured: 12 GiB inside an 8 GiB
+# memory.max, memory.current +87 MiB). CUDA MPS per-client limits DO — verified here.
+#
+# This is a --user unit on purpose: it needs no root. Install with
+#   systemctl --user enable --now bindmaster-mps
+# and, to survive logout,  loginctl enable-linger $USER
+#
+# ⚠ BEFORE ENABLING PERMANENTLY: MPS is machine-wide — every CUDA client on the box
+# routes through it. The three refold engines (AF3, Boltz-2, ESMFold2) were validated
+# numerically under MPS on 2026-08-20. The DESIGN tools (Mosaic, PXDesign,
+# Proteina-Complexa, Protein-Hunter, RFD3) were NOT. Validate those first, or start MPS
+# only around refold work via `tools/gpu_mem_guard.sh start|stop`.
+#
+# 24G is the largest per-engine cap in the budget; it is only a fallback, because each
+# engine sets its own CUDA_MPS_PINNED_DEVICE_MEM_LIMIT.
+
+[Unit]
+Description=CUDA MPS control daemon (BindMaster GB10 memory ceiling)
+Documentation=file:///home/bindmaster5/dev/BindMaster/docs/PLAN_bm5_unified_memory.md
+
+[Service]
+Type=forking
+Environment=CUDA_MPS_PIPE_DIRECTORY=/tmp/bindmaster-mps/pipe
+Environment=CUDA_MPS_LOG_DIRECTORY=/tmp/bindmaster-mps/log
+ExecStartPre=/bin/mkdir -p /tmp/bindmaster-mps/pipe /tmp/bindmaster-mps/log
+ExecStart=/usr/bin/nvidia-cuda-mps-control -d
+ExecStartPost=/bin/sh -c 'sleep 2; echo "set_default_device_pinned_mem_limit 0 24G" | /usr/bin/nvidia-cuda-mps-control'
+ExecStop=/bin/sh -c 'echo quit | /usr/bin/nvidia-cuda-mps-control || true'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

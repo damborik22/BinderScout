@@ -1,0 +1,2 @@
+conc wall=855s rc=0 minMemAvail=40894MiB peakGPU=56067MiB nvrm=0  ENGINES[boltz2=254/254 af3=6/6 esmfold2=6/6]
+seq wall=1066s rc=0 minMemAvail=88401MiB peakGPU=24864MiB nvrm=0  ENGINES[boltz2=260/260 af3=6/6 esmfold2=6/6]
