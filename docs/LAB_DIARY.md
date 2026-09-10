@@ -1678,3 +1678,149 @@ ceiling is Boltz-2 at 47 % of the sequential total.
   rebooted itself twice in a week.
 - Still open, all needing root: `earlyoom`, sshd `OOMScoreAdjust=-1000`, and removing the
   stale bioconda `usearch` (confirmed broken on aarch64) from `binder-eval-soluprot/bin/`.
+
+---
+
+## 2026-09-10 — CBG wet-lab results land: the metric we rank on is blind on this target, the epitope is the thing that was wrong, and a batched optimizer nearly took BM5 down
+
+**The data that started it.** The SPOC panel came back for both targets, 114 designs each,
+same pipeline: **CALCA 99 binders (87 %)**, **CBG/2VDY 10 binders (8.8 %)**. The stated plan was
+to raise CBG's yield by generating more designs above `consensus_iptm_mean` 0.85 — at least 15
+per tool.
+
+**That lever is measured inert on CBG, and the measurement is unambiguous:**
+
+| CBG panel slice | tested | binders | rate |
+|---|---|---|---|
+| `consensus_iptm_mean` >= 0.85 | 44 | 3 | **6.8 %** |
+| below 0.85 | 70 | 7 | **10.0 %** |
+
+Fisher p = 0.74. Within-target AUC **0.496** on CBG versus **0.706** on CALCA. A 114-design
+panel where every design cleared 0.85 projects to ~8 binders — *fewer than the 10 obtained*.
+Verified the sheet's `Mean_iPTM` really is our `consensus_iptm_mean`: 135/137 match to the
+decimal, so this is our metric being tested, not a proxy.
+
+The CALCA-vs-CBG contrast is real but it is a **between-target** signal on n=2 targets: pool mean
+iPTM tells you the target is tractable, not which design on a hard target will bind. Both facts
+hold at once, and conflating them is the trap. Costed the ask anyway: 15 per tool at current
+per-tool rates needs **~119,000 designs, ~5.6x the entire round-1 campaign**, and BoltzGen cannot
+reach it at any scale (0/9,986).
+
+Corroboration that CBG is a *target* problem, not a sampling-depth problem — BoltzGen, identical
+filters, ~10k designs against each target: `pass_filter_rmsd` ("folds as intended")
+**80.3 % CALCA vs 5.2 % CBG**, while every composition filter behaves the same on both. The
+collapse is purely structural.
+
+**Where the binders actually bind.** Joined `work/epitope.csv` contact maps to the SPOC results
+for all 116 tested designs:
+
+- The prior 13-residue epitope is **not** scattered — max pairwise Ca **20.7 A**, one cluster at
+  12 A linkage. My "scattered hotspots" hypothesis was refuted by my own measurement.
+- Designs converge on it unprompted: N264/S267/H368 are contacted by ~90 % of all 350 refolded
+  designs and 100 % of binders. The site is fine. David said as much before the analysis did.
+- **But adherence to the specified hotspots anti-correlates with binding** — match-fraction
+  quartiles Q1 13.8 % -> Q3 3.4 % -> Q4 6.9 %, AUC 0.404.
+- Binders make a **smaller, N-terminally shifted** interface: 22.6 vs 28.2 residues, and **7/10
+  contact both V8 and N12** (20.0 % vs 3.7 %, p=0.008 uncorrected). **0 of the 32** designs that
+  reach T99 bound anything.
+- `analyze-target`, blind to all of it, nominates A14/A15/A18/A23 — the same N-terminal face.
+
+So the hotspots 232/240/242 were steering designs onto the 234-239 / T99 / T186 flank. **Epitope
+v2 = `8,11,12,15,264,267,368`**, avoid 99/186/234-239.
+
+**Honesty about the statistics:** n = 10 binders, and these signals were found by scanning ~100
+residues and several region definitions. Nothing here survives Bonferroni. They are probe
+hypotheses. Round 3 keeps an **arm C** at the geometry-only site `14,15,18,22,23` precisely
+because it owes nothing to the n=10 signal — and David's instruction was explicit: learn from the
+lab data, but not too much.
+
+**A correction I had to make about my own reasoning.** I proposed dropping Mosaic on the strength
+of its wet-lab record (1/31 = 3 %, within-target iPTM AUC **0.133 — inverted**) versus PXDesign's
+4/17. David overruled it: "do not let results make us go the wrong way." He was right — that
+comparison is p=0.047 uncorrected, **p ~= 0.33 across 7 tools**. I was over-fitting to n=10 in the
+same breath as warning against it. All seven tools ship.
+
+**Round 3, launched.** 8 jobs: RFD3 arm B (BM4) and arm C alt-site (BM1), PXDesign `extended`
+(BM2), Mosaic (BM5), BindCraft (Clara l40s 209123), PH (Clara h200 209126), PC MCTS + hotspots
+(209124), BoltzGen 50-80 aa (209125). Success criterion is the **pool mean** (round-1 baseline
+0.568, target >= 0.70) plus the epitope criteria — explicitly *not* the >=0.85 count.
+
+---
+
+**Two configurator bugs, both silent-corruption shaped (`402933b`):**
+
+- **It was shipping unconfigured Mosaic scripts.** `MOSAIC_HALLUCINATE_SRC` pointed at the
+  *install-time* copy under `Mosaic/`, not the maintained template. BM5's copy is dated
+  2026-03-07 and predates the 2026-07-08 epitope work — no `TARGET_PDB`, no `EPITOPE_IDX` line.
+  The exact-string injection missed and the code only **warned**, emitting a `hallucinate.py`
+  still reading `TARGET_SEQUENCE = "REPLACE_ME"` with `EPITOPE_IDX = None`. That script runs, and
+  designs against a placeholder target with no hotspots. Now prefers the repo template and
+  **fails hard**. A warning does not survive a generate-now-launch-later workflow.
+- **No way to set the RFD3 MPNN bias.** Added `rfd3_mpnn_bias`; moved defaults to the validated
+  pair **T=0.25 + ALA -1.5**. ProteinMPNN's own default (T=0.1, no bias) collapses RFD3 backbones
+  to ~50 % alanine and *nothing in the stack objects*, because every guard we have is a
+  structure-confidence guard. Recorded in `settings.json` so a later session can tell a biased run
+  from an unbiased one.
+
+**A wrong conclusion I published mid-session and had to retract.** I reported "the installed
+Mosaic has no epitope support at all" after grepping `structure_prediction.py`. Wrong file:
+`BinderTargetContact(epitope_idx=...)` lives in **`losses/structure_prediction.py`** and is
+present in every commit. The real cause was that BM5 had **drifted off the pinned commit**
+(`0599248` installed vs `82593a8` pinned, 7 commits back) and only the pin carries
+`batched_simplex_APGM`. Checked out the pin, re-applied the offline-MSA patch and the aarch64
+`esmj` guard. Clara is on the same stale commit — the whole fleet had drifted off the pin.
+
+---
+
+**The near-miss: BM5 at 11 GB MemAvailable, twice, for two different reasons.**
+
+- **First: a cap that was not attached to anything.** MPS was up, enforcement freshly verified
+  (4 GiB refused under a 2 GiB cap), a floor was declared — and a Mosaic job launched with a bare
+  `tmux new-session` still took **93.6 GB**, driving MemAvailable **111 -> 11 GB**. The MPS
+  per-client limit binds only processes that inherit `CUDA_MPS_PIPE_DIRECTORY`; tmux does not.
+  **`gpu_mem_guard.sh start` protects nothing on its own — launch through
+  `gpu_mem_guard.sh run <cap> -- <cmd>`.** Killed by PID (not by pattern — that has bitten twice
+  before), relaunched under the guard, pinned at 40,434 MiB.
+- **Then the cap was genuinely too low**, which David called before I did: 40 GB on a 121 GB box.
+  Mosaic died at the *first* binder length with 10 x `RESOURCE_EXHAUSTED`, and the log named the
+  culprit — a **single 24.61 GiB allocation**.
+- **The real lever was not the cap.** `DESIGN_BATCH_SIZE = 4` in the template vmaps 4 seeds
+  through Boltz-2 per pass, and its own comment says memory scales ~linearly with it. That knob
+  **arrived with the pin we had just moved to** ("add batched optimizers"), so round-1 Mosaic had
+  no batching and never hit this. The default was sized against small targets; CBG's target is
+  389 aa (~449-499 tokens). At **batch 2** with an 80 GB cap: **0 OOMs, 68.8 GiB, MemAvailable
+  36 GB**.
+- `TF_GPU_ALLOCATOR=cuda_malloc_async` did nothing — that is a TensorFlow variable and this is
+  JAX on its own BFC allocator. The note in memory recommending it came from Protenix, which is
+  PyTorch. It does not transfer.
+
+**Fixed the way AF3 and Boltz-2 already were (`a827d22`)** — David's steer. Both refold engines
+call `apply_jax_memory_policy(engine, target_gib)` before importing jax; Mosaic never did, which
+is why JAX applied its default `MEM_FRACTION=0.75` = 0.75 of the *whole machine* on GB10. Mosaic
+now calls the same helper with a 64 GiB target, and `DESIGN_BATCH_SIZE` is env-overridable with
+the target-size dependence written down. Note `DEFAULT_MIN_OS_GIB = 40` in that module: **24 GB
+free is a measured reboot point**, so my initial watchdog floor of 18 GB was below the cliff —
+raised to 25 GB.
+
+**Protein-Hunter does not fit a 3090 at this target size.** On BM1 it emitted
+`WARNING: ran out of memory, skipping batch` and then died with `KeyError: 'pair_chains_iptm'` —
+a CUDA OOM wearing a misleading exception. 389 aa target + ~92 aa binder ~= 481 tokens, and PH is
+Boltz-2 *gradient* hallucination. Moved to Clara h200. General rule: **no gradient-through-Boltz-2
+tool fits 24 GB at this target size.**
+
+**Other traps hit, all now in the round-3 PROGRESS file:**
+- `fleet.sh launch` single-quotes the remote dir into the remote shell, so a `~/...` path creates
+  a **literal `~` directory**; the run died in hydra with `LexerNoViableAltException` on
+  `out_dir=/home/bindmaster4/~/runs/...`. Pass absolute paths. Worth fixing in `fleet.sh`.
+- `nvidia-smi | head -12` gets SIGPIPE (exit 141) under `set -o pipefail` + an ERR trap. The ApoE
+  template survived only because `head -20` consumed the whole output. Append `|| true`.
+- **`uv sync` silently uninstalled `binder-comparison` from `Mosaic/.venv`** — i.e. removed the
+  Boltz-2 refold engine, because it is not in Mosaic's own `pyproject.toml`. Re-install after every
+  sync (`Mosaic/.venv` has no `pip`; use `uv pip install --python ... -e Evaluator --no-deps`).
+- `tools_enabled` accepts both `pxdesign` and `pxdesign_local` but only the latter generates
+  anything; the dead key silently yields "No tools enabled".
+
+**Open:** whether the >=0.85 bar is inert on CBG *because the pool is too poor to discriminate*
+(range restriction — pool mean 0.568, almost nothing binder-competent) rather than because the
+metric is blind. Round 3 tests exactly that: if the epitope change lifts the pool mean, the metric
+should start separating. Also open: BM1/BM2/BM4/Clara are all still on Mosaic `0599248`, off the pin.
