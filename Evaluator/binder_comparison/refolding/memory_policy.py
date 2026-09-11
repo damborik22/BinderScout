@@ -48,6 +48,38 @@ def _system_ram_gib() -> float:
         return 0.0
 
 
+def _nvidia_smi_total_gib() -> float:
+    """Device-0 total memory via nvidia-smi, in GiB.  0.0 if unavailable.
+
+    Second opinion for when ``libcudart`` is not on the loader path.  That is not
+    hypothetical: the Mosaic uv venv on the x86 fleet cannot dlopen libcudart at
+    all, so ``_cuda_pool_gib()`` returns 0 there while the card is perfectly usable.
+    """
+    import shutil
+    import subprocess
+
+    exe = shutil.which("nvidia-smi")
+    if not exe:
+        return 0.0
+    try:
+        out = subprocess.run(
+            [exe, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 0.0
+    if out.returncode != 0:
+        return 0.0
+    first = (out.stdout or "").strip().splitlines()
+    try:
+        return float(first[0].strip()) / 1024 if first else 0.0
+    except (ValueError, IndexError):
+        return 0.0
+
+
 def _cuda_pool_gib() -> float:
     """Total memory CUDA reports for device 0, in GiB.  0.0 if unreachable."""
     free, total = ctypes.c_size_t(), ctypes.c_size_t()
@@ -80,7 +112,16 @@ def resolve_mem_fraction(
     safety cap should do.  We invert that: name the absolute target, derive the
     fraction from the pool we actually have.
     """
-    pool = _cuda_pool_gib() or _system_ram_gib()
+    # NEVER fall back to system RAM here.  A RAM-derived "pool" passes the unified
+    # test below *by construction* (pool == ram), so an UNKNOWN pool was always
+    # classified as unified and handed the OS floor.  On a discrete card that is the
+    # wrong number entirely: BM2 (24 GB RTX 3090, 62.7 GiB RAM) could not dlopen
+    # libcudart from the Mosaic venv, resolved "unified 62.7 GiB", applied the 40 GiB
+    # floor for a fraction of 0.362, and JAX then took 0.362 of the *card* -- 8.5 GiB
+    # of 23.6 -- so Boltz-2 OOMed at 9 GB and it read as "this target is too big".
+    # Ask nvidia-smi for a real second opinion; if the pool is genuinely unknown, say
+    # so and use the JAX-like default rather than inventing a size.
+    pool = _cuda_pool_gib() or _nvidia_smi_total_gib()
     if pool <= 0:
         return f"{hard_cap:.3f}", "pool size unknown; falling back to the JAX-like default"
 
