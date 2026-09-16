@@ -17,6 +17,7 @@ from matplotlib.figure import Figure
 # Colour scheme per source tool
 TOOL_COLOURS = {
     "bindcraft": "#2196F3",  # blue
+    "bindcraft2": "#1565C0",  # dark blue (BindCraft 2)
     "boltzgen": "#FF9800",  # orange
     "boltzgen_nano": "#FF9800",  # orange (nano sub-variant)
     "boltzgen_protein": "#EF6C00",  # deep orange (protein sub-variant)
@@ -36,6 +37,7 @@ _TOOL_DISPLAY = {
     "boltzgen_nano": "BoltzGen (nano)",
     "boltzgen_protein": "BoltzGen (protein)",
     "bindcraft": "BindCraft",
+    "bindcraft2": "BindCraft 2",
     "proteina_complexa": "Proteina-Complexa",
     "rfd3": "RFD3",
     "protein_hunter": "Protein-Hunter",
@@ -995,6 +997,7 @@ _ENGINE_BAR_LABEL = {
     "mosaic": "Mosaic",
     "pxdesign": "PXDesign",
     "bindcraft": "BindCraft",
+    "bindcraft2": "BindCraft 2",
     "proteina_complexa": "Proteina-C",
     "protein_hunter": "Protein-Hunter",
     "rfd3": "RFD3",

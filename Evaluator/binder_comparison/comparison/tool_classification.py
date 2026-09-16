@@ -61,6 +61,19 @@ TOOL_CLASSIFICATION: dict[str, ToolClassification] = {
         ),
         convergence_check=None,
     ),
+    "bindcraft2": ToolClassification(
+        tool_name="bindcraft2",
+        display_name="BindCraft 2",
+        modality="de-novo",
+        pool_pre_filtered_default=False,
+        source_csv_default="<target>_ranked.csv",
+        native_metric_interpretation=(
+            "AF2-multimer i_pTM from the design-time hallucination (biased — "
+            "BindCraft 2 optimises for it). The native block is ordered by "
+            "BindCraft 2's own composite Rank, which is not a re-sort on i_pTM."
+        ),
+        convergence_check=None,
+    ),
     "boltzgen": ToolClassification(
         tool_name="boltzgen",
         display_name="BoltzGen",

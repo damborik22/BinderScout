@@ -96,6 +96,8 @@ def _agreement_phrase(df: pd.DataFrame, thresholds: dict[str, float]) -> str:
 _TOOL_LINKS = {
     # BindCraft — Pacesa et al. (Nature 2025), repo at martinpacesa/BindCraft
     "bindcraft": "https://github.com/martinpacesa/BindCraft",
+    # BindCraft 2 — same repo, v2 line
+    "bindcraft2": "https://github.com/martinpacesa/BindCraft",
     # BoltzGen — diffusion-based binder generator (installer pin)
     "boltzgen": "https://github.com/HannesStark/boltzgen",
     # Mosaic — escalante-bio JAX/Boltz-2 hallucinator
@@ -343,6 +345,7 @@ _TOOL_COLOURS_NGL = {
     "boltzgen_nano": "#FF9800",
     "boltzgen_protein": "#EF6C00",
     "bindcraft": "#2196F3",
+    "bindcraft2": "#1565C0",
     "proteina_complexa": "#00897B",
     "rfd3": "#D84315",
     "protein_hunter": "#00838F",

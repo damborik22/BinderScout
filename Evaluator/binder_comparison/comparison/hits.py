@@ -38,6 +38,7 @@ from .candidates import CANONICAL_TOOL_ORDER, TOOL_DISPLAY_NAMES, display_tool_n
 # yields exactly [target, tool, number].
 TOOL_CODE_SLUGS = {
     "bindcraft": "BindCraft",
+    "bindcraft2": "BindCraft2",
     "boltzgen": "BoltzGen",
     "mosaic": "Mosaic",
     "proteina_complexa": "ProteinaComplexa",
