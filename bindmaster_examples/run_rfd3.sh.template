@@ -24,6 +24,9 @@
 #                        drop to 4 if longer or smaller GPU)
 #   {{MPNN_SAMPLES}}     ProteinMPNN samples per backbone (5 = best-of-5)
 #   {{MPNN_TEMPERATURE}} ProteinMPNN sampling temperature (0.1 = field default)
+#   {{SELECT_HOTSPOTS_LINE}}  Either an empty string, or a line of the form
+#                        '  select_hotspots: "A15,A18,A22"'. infer_ori_strategy above
+#                        needs hotspots to aim at; with none it falls back to target COM.
 
 set -euo pipefail
 
@@ -120,6 +123,18 @@ cat > "$INPUTS_YAML" <<EOF
 helix_binder:
   input: ${TARGET_PDB}
   contig: "{{TARGET_CONTIG}},/0,{{BINDER_LO}}-{{BINDER_HI}}"
+  # LOAD-BEARING. Without this rfd3 falls back to centring the coordinate frame on
+  # the WHOLE fixed motif's centre of mass and seeds every diffused binder atom there,
+  # so the binder nucleates in the middle of the target instead of at the epitope and
+  # grows as an extended coil. It fails silently — no error, no warning, and the
+  # structures still have n_chainbreaks=0.
+  # Measured on CBG/2VDY, 304 backbones lost:  with key -> |fixed_com| 23.05 A,
+  # binder Rg 10.9 A, DSSP helix 0.85, Pro+Gly 0.059.  without -> 0.008 A, Rg 23.1 A,
+  # helix 0.27, 23% polyproline-II, Pro+Gly 0.286, and sequences that do not fold
+  # (binder pLDDT 0.38-0.44). The ApoE4 RFD3 run omitted it too (|fixed_com| 0.02 A).
+  # Check it on batch 1: every sidecar .json carries metrics.fixed_com.
+  infer_ori_strategy: hotspots
+{{SELECT_HOTSPOTS_LINE}}
 EOF
 
 rfd3 design \
