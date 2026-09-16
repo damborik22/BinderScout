@@ -407,6 +407,20 @@ The configurator now generates `run_rfd3.sh` from
 they live in the template and bit me on the CALCA run before being encoded
 there:
 
+- **`infer_ori_strategy: hotspots` is LOAD-BEARING in the input YAML, and omitting it fails SILENTLY.** Without it rfd3 centres the coordinate frame on the whole fixed motif's centre of mass (`set_com()`'s `else` branch) and seeds every diffused binder atom at that origin — so the binder nucleates *inside* the target rather than at the epitope and grows as an extended coil. There is no error, no warning, and the structures still report `n_chainbreaks=0`, so every downstream guard passes. Measured on CBG/2VDY (304 backbones lost, 2026-09-16):
+
+  | | with the key | without |
+  |---|---|---|
+  | `metrics.fixed_com` magnitude | **23.05 Å** | **0.008 Å** |
+  | binder radius of gyration | 10.9 Å | 23.1 Å |
+  | DSSP helix fraction | 0.85 | 0.27 |
+  | polyproline-II | 0.001 | **0.23** |
+  | long-range contacts / residue | 1.19 | 0.21 |
+  | MPNN Pro+Gly (same settings) | 0.059 | **0.286** |
+  | binder pLDDT after refold | 0.84–0.89 | **0.38–0.44** |
+
+  **Check it on batch 1**: every sidecar `.json` carries `metrics.fixed_com`; a magnitude near zero means the key is missing. The *configurator* emits this key correctly — the omission was in `bindmaster_examples/run_rfd3.sh.template`, so a hand-written script copied from that template inherited it. Prefer `bindmaster configure`. **The ApoE4 (6NCO) RFD3 run also omitted it** (`|fixed_com|` 0.02 Å, Rg 19.5 Å) — its RFD3 designs are suspect, and that campaign has already shipped a gene order.
+- **MPNN Pro/Gly collapse is a *symptom*, not a cause.** If sequences come back Pro/Gly-rich with low hydrophobic content, suspect the BACKBONE before touching MPNN settings: ProteinMPNN is correctly describing a coil. A 4-arm sweep (as-run, milder bias, MPNN default, temperature-only) all failed identically on bad backbones, while MPNN's *default* settings on good round-1 backbones gave Pro+Gly 0.059 / hydrophobic 0.658. Gate on geometry (Rg/expected ≤ 1.45, long-range contacts ≥ 0.80/res) BEFORE spending MPNN time, and gate composition on **Pro+Gly and hydrophobic fraction**, not just alanine and Shannon entropy — a Pro/Gly coil scores Ala 0.016 and H 2.47 and passes both.
 - **Output format.** RFD3 writes `.cif.gz` (compressed mmCIF), NOT `.pdb`. Decompress for downstream tools that need PDB.
 - **Chain IDs.** Output mmCIF labels target as chain `A` (preserved residues from the input contig) and binder as chain `B` (designed). The `label_entity_id` column shows `0`/`1`, but the actual chain IDs at `label_asym_id` are letters.
 - **MPNN CLI is `mpnn`, not `foundry mpnn`.** The `foundry` umbrella CLI only has `install` / `list-available` / `list-installed` / `clean`. Sequence design is its own console-script (`mpnn`).
