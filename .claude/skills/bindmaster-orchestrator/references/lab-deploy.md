@@ -26,7 +26,8 @@ handoff-doc model (SKILL.md §4 / the `bindmaster-worker` skill).
 | Job fits a 24 GB RTX 3090 (or BM5's own GB10), and at least one of BM1/BM2/BM4 is idle | **LAN deploy** (this doc) — lower latency, no VPN dependency, no shared-account contention |
 | Job needs H200/L40S-class VRAM (large-batch AF3, big Boltz-2 complexes, anything that doesn't fit 24 GB) | **Clara** (`clara-deploy.md`) |
 | All three LAN machines are busy (confirmed via `fleet.sh status`) and the job can't wait | **Clara** — don't queue silently against a busy LAN box; Clara has 16 GPUs across two partitions |
-| Need PyRosetta (Protein-Hunter) and the only idle box is BM5 | Neither — BM5 is aarch64 and PyRosetta has no aarch64 wheels (see §2). Route to BM1/BM2/BM4 or Clara. |
+| Need Protein-Hunter and the only idle box is BM5 | **BM1/BM2/BM4 or Clara** — but not for the reason this row used to give. PyRosetta demonstrably runs on BM5; Protein-Hunter as a whole has simply never been stood up there. Route on "proven elsewhere, unproven here," not on a PyRosetta block (§2). |
+| A **BindCraft 2** campaign, and more than one box is free | **BM1/BM2/BM4 first.** They pack two design workers on one 24 GB card; BM5 runs one, so the same trajectory budget finishes in roughly half the wall clock. **This is our own guard, not the hardware** — per trajectory the two platforms are equal (§2). If the x86 peers are busy, BM5 is a perfectly good place to run it, just slower to fan out. |
 
 LAN deploy does **not** change *what* you run or *what settings* — SKILL.md
 §5–6 (methodological diversity, kill criteria, math-first) still govern the
@@ -53,6 +54,7 @@ it lets a different operator reproduce or take over.
 | GPU | GB10 (unified) | RTX 3090 24 GB | RTX 3090 24 GB | RTX 3090 24 GB |
 | RAM (total) | 121 GB | **31 GB** | 62 GB | 62 GB |
 | Role | orchestrator + refold | design worker | design worker | design worker |
+| BindCraft 2 | ✓ main checkout | ✓ **worktree, unpushed branch** | — | — |
 
 Full field set (also captured per-probe in `~/.claude/fleet/inventory.json`):
 arch, GPU name, GPU busy-process count, total RAM, free disk, conda envs
@@ -65,8 +67,75 @@ enforced by `fleet.sh`, they're judgment calls at assignment time:**
   there.** The BindCraft JAX RSS leak killed BM4 at 58 GB after nine days; on
   BM1 the same run OOMs far sooner. The three x86 boxes are *not*
   interchangeable — BM1 gets short jobs or non-BindCraft tools.
-- **BM5 is aarch64 — Protein-Hunter cannot run there.** PyRosetta has no
-  aarch64 wheels. PH work must be assigned to BM1/BM2/BM4 or Clara.
+- **BindCraft 2 on BM1 lives in a git worktree on an unpushed branch — you
+  will not find it by looking at BM1's main checkout.** `~/dev/BindMaster`
+  there is still on `master` and untouched; BindCraft 2 sits in a second
+  worktree, `~/dev/bc2_x86_test`, checked out on `eight_tool`, with the tool
+  itself at `~/dev/bc2_x86_test/BindCraft2` (~4.7 GB, its own uv venv,
+  editable install). Verified working 2026-09-17: a 2-trajectory hPDL1
+  campaign ran to completion there, 1 accepted, 7 m 26 s.
+
+  The unusual part is how the branch got there, and it is worth stating so
+  nobody goes looking for it on GitHub: **`eight_tool` is deliberately not
+  pushed** — BindCraft 2 is pre-publication — so it reached BM1 as a **git
+  bundle** carried over the lab share (`DEV/BinderScout-eight_tool-backup/`),
+  not by `git fetch`. Two consequences. First, a bundle is a *snapshot*: BM1's
+  worktree sits at whatever commit the bundle captured and drifts behind BM5's
+  `eight_tool` HEAD until someone carries a fresh one. Check before you blame
+  a behaviour difference on the machine. Second, `fleet.sh probe` reports one
+  BindMaster SHA/branch per machine and it reads the **main** checkout — so
+  BM1 will keep reporting `master` while a BindCraft 2 job runs happily in the
+  worktree next door. That is not a stale probe; it is the probe answering a
+  different question than you asked.
+
+  **BM2 and BM4 do not have it** (confirmed 2026-09-17: no `BindCraft2` under
+  `~/dev`, single `master` worktree on each). Putting it there means carrying
+  the bundle again, not pulling.
+
+- **BM1/BM2/BM4 pack two BindCraft 2 design workers per card; BM5 runs one.
+  That is our guard, not a hardware verdict — do not read it as "aarch64 is
+  slow."** Measured head-to-head on the same campaign (hPDL1, 60 aa binder,
+  2 trajectories): BM1 at **328 s per trajectory** with 2 workers packed at
+  9.6 GB each, 7 m 26 s wall clock; BM5 at **343 s per trajectory** with a
+  single worker, 14 m 44 s wall clock. **Per trajectory the two platforms are
+  equal.** The whole ~2× throughput gap is worker fan-out, and fan-out is
+  gated on `auto_multi_gpu` — which the aarch64 run-script guard pins to
+  `false` (together with `subbatch_size=null`) because GB10's `nvidia-smi`
+  answers the card-memory query with `[N/A]` and the memory probe cannot parse
+  it. GB10 is not slow hardware; it is a card we currently refuse to let the
+  scheduler measure. Route BindCraft 2 to the x86 peers for throughput, and
+  reach for BM5 without hesitation when they are busy.
+
+- **BM5 is aarch64 — Protein-Hunter is untested there. But *not* because of
+  PyRosetta: that part of this note was simply wrong.** The old wording here
+  read "PyRosetta has no aarch64 wheels," and it was steering routing
+  decisions. Verified on BM5 2026-09-17, in the `BindCraft` env: `import
+  pyrosetta` succeeds, `pyrosetta.init()` runs, and a 10-residue pose builds
+  and scores — build tag
+  `PyRosetta4.conda.aarch64.cxx11thread.serialization.aarch64.Ubuntu.python310.Release 2023.11`.
+  That is a native aarch64 **conda** build from the graylab JHU channel, and
+  `install/install_aarch.sh` already installs it as a matter of course. The
+  "no wheels" claim was only ever about PyPI; the conda channel routes around
+  it, and BindMaster has been using that route on this machine all along.
+
+  **What remains true, and is untested rather than known:** Protein-Hunter's
+  installer takes the *wheel* path (`pyrosetta-installer` via pip, in
+  `install/install.sh`), and nobody has tried repointing it at the graylab
+  conda build on aarch64. PH also carries a vendored Boltz-2 + Chai-1 stack
+  that has never been built here. **Do not upgrade "PyRosetta works" into
+  "Protein-Hunter installs" — those are different questions and only the first
+  has been answered.**
+
+  One specific trap: a `bindmaster_protein_hunter` conda env **does exist on
+  BM5, and it is empty.** 198 MB, a bare python-3.10 shell whose
+  site-packages holds nothing but pip/setuptools/wheel/packaging — no
+  PyRosetta, no `boltz_ph`. The install never got past env creation. An env
+  name in `conda env list` is not evidence a tool is installed; on this
+  machine it is evidence someone started and stopped.
+
+  So: keep assigning PH to BM1/BM2/BM4 or Clara, because it is proven there
+  and unproven here — not because PyRosetta is unavailable.
+
 - **All three x86 peers are 24 GB Ampere — RFD3 needs
   `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` on every one of them,**
   not just BM4 (where the fragmentation OOM was first observed). `fleet.sh

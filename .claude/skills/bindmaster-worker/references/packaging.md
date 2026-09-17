@@ -14,6 +14,7 @@ Examples:
 
 ```
 2VDY_BindCraft_Clara.tar.gz
+2VDY_BindCraft2_BM1.tar.gz              ← BindCraft2, not BindCraft: separate tool, separate extractor
 2VDY_BoltzGen_BM4.tar.gz
 2VDY_BoltzGen_BM4_final.tar.gz          ← curated, only Accepted/ + key CSVs
 ApoE4_RFD3_Spark.tar.gz
@@ -36,6 +37,7 @@ Each tool has a different "real evidence" set. See per-tool guidance below. Gene
 
 **Exclude (to save space):**
 - Trajectory PDBs for failed designs (BindCraft `trajectories/` — usually optional)
+- BindCraft 2's `2_Refolded/` structure directories (every scored candidate, rejects included; keep that stage's CSV, drop its structures)
 - BindCraft's `bindcraft/outputs/` intermediate JAX log files (these are huge and rarely needed)
 - Tool conda env directories (they're rebuildable; never tar an env)
 - Boltz-2 cache (`~/.boltz/` — rebuildable, machine-specific)
@@ -73,6 +75,29 @@ tar czf /path/to/RESULTS/<TARGET>_BindCraft_<machine>_final.tar.gz \
 ```
 
 Skip `trajectories/` unless the campaign needs trajectory provenance. Skip `bindcraft/outputs/` unless debugging.
+
+### BindCraft 2
+
+```bash
+cd ~/runs/<TARGET>-<machine>-bindcraft2/
+tar czf /path/to/RESULTS/<TARGET>_BindCraft2_<machine>.tar.gz \
+    bindcraft2/3_Ranked/ \
+    bindcraft2/campaign.json \
+    bindcraft2/settings.json \
+    bindcraft2/1_Trajectories/!_Trajectories.csv \
+    bindcraft2/2_Refolded/!_Refolded.csv \
+    run_bindcraft2.sh \
+    run.log \
+    *.out
+```
+
+`3_Ranked/` is the entire result set: `!_Ranked.csv` is the source of truth and the accepted structures sit beside it as **mmCIF**, not PDB. Take the directory rather than just the CSV — a ranked table without its structures can be scored but not looked at.
+
+`1_Trajectories/` and `2_Refolded/` are diagnostics, not results. The first holds pre-ProteinMPNN hallucinated sequences, which are not designs; the second holds every scored candidate, the rejected ones included. Their two CSVs are worth keeping — they're what explains *why* a campaign accepted three designs out of two hundred attempts — but leave the directories behind: `2_Refolded/` keeps a complex and a binder-monomer structure for every scored candidate, rejects included, which makes it both the bulkiest thing in the run dir and the least likely to be read again.
+
+There's no `_final` variant here, and deliberately so: the recipe above already *is* the curated set, because the one bulky thing a `_final` would drop is excluded from the start.
+
+**Snapshot the ranked table only after the campaign has exited.** It is rewritten on every acceptance and reconciled at close against what is actually on disk, so it can *shrink*. A `--tool-csv` snapshot taken mid-run can be superseded by a smaller but correct one — the stale-`tool_csvs` failure mode, except that here nothing looks wrong at the time. Wait for the run script's closing `=== finished:` line (or for the tmux session to end) before you tar or snapshot anything.
 
 ### BoltzGen
 
