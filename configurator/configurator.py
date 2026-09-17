@@ -1363,6 +1363,11 @@ GIT_BRANCH=$(git -C "{BINDMASTER_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null |
 # block that exists to improve reproducibility.
 GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i {gpu_id_var} 2>/dev/null | head -1 || echo "unknown")
 GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i {gpu_id_var} 2>/dev/null | head -1 || echo 0)
+# GB10 (DGX Spark) answers this query SUCCESSFULLY and returns the string "[N/A]",
+# so the `|| echo 0` above never fires. gpu_memory_mib is the one unquoted value in
+# the JSON, so that string lands bare and settings.json stops parsing — on the very
+# machine that orchestrates the fleet. Keep the reading only when it is a number.
+GPU_MEM=$(printf '%s' "$GPU_MEM" | grep -E '^[0-9]+$' || echo 0)
 PY_VER=$(python -c 'import sys;print(".".join(map(str,sys.version_info[:3])))' 2>/dev/null || echo "unknown"){extra_env_inner}
 cat > "${settings_dir_var}/settings.json" <<SETTINGS_JSON_EOF
 {{
