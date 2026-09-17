@@ -132,7 +132,7 @@ registries that need a new entry:
 | `TOOL_SEQUENCE` (4-tuples) | `configurator/configurator.py:173` | needs entry |
 | `TOOL_SEQUENCE` (3-tuples) | `tui/app.py:35` | needs entry |
 | `TOOL_FLAGS` | `Evaluator/binder_comparison/cli/_tool_args.py:20` | needs entry |
-| `CANONICAL_TOOL_ORDER` | `comparison/candidates.py:97` | re-added in slice 8 (was in the reverted `407aa27`) |
+| `CANONICAL_TOOL_ORDER` | `comparison/candidates.py:97` | already present (`407aa27`, in this branch's ancestry) |
 
 ```
   Mosaic · BoltzGen · BindCraft · BindCraft 2 · PXDesign
@@ -460,62 +460,69 @@ then it is inert.
 
 ## Versioning
 
-`master` is cut as **BinderScout 1.0.0** before this work branches.
+> **Nothing in this plan touches `master`.** Master is frozen as
+> **BinderScout 1.0.0** — no cherry-pick, no revert, no tag, no commit. All
+> work happens on `eight_tool`, which becomes **1.1.0**.
 
-> **1.0.0 contains no BindCraft 2, and never will.** 1.0.0 is the validated
-> seven-tool pipeline; every line of BindCraft 2 support — the report
-> registration included — belongs to the 1.1.0 line. The tag is immutable:
-> BindCraft 2 is never back-fitted into it.
+**One thing to state honestly rather than claim otherwise.** `407aa27`
+("Register bindcraft2 as a first-class tool in the report") was pushed to
+`origin/master` on 2026-09-16 and touches eight files in `Evaluator/`. Because
+master is frozen, **1.0.0 does contain that registration** — a `bindcraft2`
+key in thirteen per-tool lookups, with no extractor, no installer and no way
+to produce a bindcraft2 design. It is inert: a pool without `bindcraft2` rows
+renders byte-identically, which is what that commit's own message claims and
+what makes freezing it harmless.
 
-**The registration is already on published master.** `407aa27` ("Register
-bindcraft2 as a first-class tool in the report") was pushed to `origin/master`
-on 2026-09-16 and touches eight files in `Evaluator/`. It cannot simply be
-kept off master — it has to be taken *off*, and without rewriting history that
-others may have pulled.
+It is not, however, defect-free (see the Report section), so nothing downstream
+should treat 1.0.0's registration as authoritative. Every correction lands on
+the 1.1.0 line.
 
 Branch topology:
 
-1. Fast-forward local `master` to `origin/master` (it is two commits stale:
-   `407aa27` and `60115d0` are both already published).
-2. Cherry-pick `c5c7dcc` (ESMFold2 revision pin) onto master — the only one of
-   the three branch commits not already there.
-3. **`git revert 407aa27` on master.** A new commit, not a force-push: every
-   existing clone stays valid. After this, master contains no `bindcraft2` key
-   in any lookup, and v1.0.0 is genuinely BindCraft-2-free.
-4. Do the version work and tag `v1.0.0`.
-5. Rebase `eight_tool` onto the tag. The registration is **re-added fresh in
-   slice 8**, which was already rewriting all of `407aa27`'s content anyway —
-   the "composite Rank" text, `source_csv_default`, the wrong tool link and
-   the missing CSS rule. Nothing is lost; the corrected version is what ships
-   in 1.1.0. Re-adding rather than reverting-the-revert also avoids the
-   revert-of-a-revert merge pitfall.
+```
+master ──── frozen at 1.0.0, contains the dormant registration
+   └── eight_tool ──── 1.1.0: everything in this plan
+```
+
+`eight_tool` already descends from `407aa27`, so the registration is **present
+and corrected in place** (slice 8) rather than re-added. `c5c7dcc` (the
+ESMFold2 revision pin) is likewise already in this branch's ancestry and simply
+ships in 1.1.0.
 
 Version mechanics:
 
-- `[Unreleased]` → `## [1.0.0] — 2026-09-17` in `CHANGELOG.md`.
-- `bindmaster.__version__` is the **product** version, surfaced as
-  `bindmaster --version` beside the existing `--help` branch.
+All of these land on `eight_tool`:
+
+- `CHANGELOG.md` — master's `[Unreleased]` body is retitled
+  `## [1.0.0] — 2026-09-17` **on this branch only**, recording what master
+  already shipped, and a fresh `[Unreleased]` opens above it for 1.1.0. Master's
+  own CHANGELOG is left alone.
+- `bindmaster.__version__ = "1.1.0"` is the **product** version — the repo has
+  had no version constant at all — surfaced as `bindmaster --version` beside
+  the existing `--help` branch, and consumed by every run's `settings.json`
+  provenance block.
 - `binder-comparison` keeps **independent** SemVer. Its three unlinked `0.1.0`
   literals (`Evaluator/pyproject.toml`, `binder_comparison/__init__.py`,
   `binder_comparison/main.py`) are collapsed into one: the package version is
   declared in `pyproject.toml` and the other two read
-  `importlib.metadata.version("binder-comparison")`. It stays `0.1.0` at this
-  tag; `bindmaster --version` and `binder-compare --version` legitimately
-  differ, and the docs say so.
-- First git tag in the repo's history: `v1.0.0`.
+  `importlib.metadata.version("binder-comparison")`. It stays `0.1.0`;
+  `bindmaster --version` and `binder-compare --version` legitimately differ,
+  and the docs say so.
 - The prose `v0.7.0` markers in `CLAUDE.md`, `docs/completed_plans.md` and
-  four skill reference files are updated.
+  four skill reference files become `1.1.0`.
 - `REFOLD_CODE_TOKEN = "BinderScout"` is **not** touched — historical design
   codes like `CALCA-BinderScout-16` parse against it. Nor is
   `binder-compare hits --version`, which stays a free-text operator field.
 
-`eight_tool` branches from the tag and opens a fresh `[Unreleased]` targeting
-**1.1.0**, released when BindCraft 2 lands.
+**Tagging is deferred.** No tag is created while master is frozen and this
+branch is unmerged; `v1.1.0` is cut when `eight_tool` lands, which is a
+separate decision outside this plan.
 
 ## Acceptance criteria
 
-1. `bindmaster --version` prints `1.0.0` on master at tag `v1.0.0`, and
-   `1.1.0` at tag `v1.1.0`.
+1. `bindmaster --version` prints `1.1.0` on `eight_tool`, and every
+   generated run's `settings.json` records it. `master` is unchanged: `git
+   diff master origin/master` stays empty throughout.
 2. `bindmaster install --tool bindcraft2 --yes` succeeds on x86 and is
    idempotent on a second run; `--uninstall --tool bindcraft2 --yes` leaves
    `runs/` intact; and `--tool all` on a machine with no `BINDCRAFT2_SOURCE`
@@ -536,9 +543,9 @@ Version mechanics:
 6. A regenerated BC2 report has no unmatched `.tool-*` class, names BindCraft 2's
    native metric as `i_pDAE`, and renders the tool name without a link.
 7. `git status` is clean of BindCraft 2 source after install;
-   `git check-ignore -v BindCraft2/` confirms the ignore. And at tag `v1.0.0`,
-   `git grep -i bindcraft2 v1.0.0` returns **nothing** — the release contains
-   no BindCraft 2 in any form.
+   `git check-ignore -v BindCraft2/` confirms the ignore. No BindCraft 2
+   *source file* is ever tracked on any branch — only our own code that talks
+   to it.
 8. `ruff check`, `ruff format --check`, `shellcheck` over the CI file list, and
    `pytest` pass **at every slice boundary** — the tool-count assertions are
    updated in the same commit that first changes the count.
@@ -556,8 +563,9 @@ Version mechanics:
 |---|---|
 | Source distribution | Staged from the lab share into a gitignored `BindCraft2/`; `BINDCRAFT2_SOURCE` accepts zip, directory or (later) git URL |
 | BindCraft 1 | Coexists; BindCraft 2 is tool #8 |
-| 1.0 cut | Roll `[Unreleased]` into `[1.0.0]`, add `__version__`, tag `v1.0.0`, branch `eight_tool` → 1.1.0 |
-| 1.0.0 contents | **No BindCraft 2, ever** — `407aa27` is already on published master and gets reverted there; the registration is re-added, corrected, on the 1.1.0 line |
+| Master | **Frozen at 1.0.0 — nothing touches it.** No cherry-pick, no revert, no tag, no commit |
+| This work | All on `eight_tool`, which becomes 1.1.0; `__version__` introduced there; tagging deferred until merge |
+| 1.0.0 contents | Includes the dormant `bindcraft2` registration from `407aa27`, already published. Inert, but not defect-free — corrected on the 1.1.0 line, never back-fitted into 1.0.0 |
 | Platforms | x86 in `--tool all`; aarch64 opt-in pending a Spark validation run |
 | Environment | `BindCraft2/.venv`, created by our installer, not a conda env |
 | Trajectory budget | Prompted every time, with a warning; unbounded stays selectable |
@@ -588,10 +596,9 @@ Each slice is one commit, **green at its own boundary**. The ordering below is
 deliberate: the extractor's CLI flag lands before the configurator emits it,
 and the campaign-JSON writer lands before the Spark validation that needs it.
 
-1. **Cut 1.0.0 on master** — fast-forward master to `origin/master`,
-   cherry-pick `c5c7dcc`, **revert `407aa27`**, CHANGELOG,
-   `bindmaster.__version__`, `--version`, Evaluator version collapse, v0.7.0
-   prose markers, tag `v1.0.0`. Then rebase `eight_tool` onto the tag.
+1. **Open 1.1.0 on `eight_tool`** — `bindmaster.__version__ = "1.1.0"`,
+   `bindmaster --version`, Evaluator version collapse, CHANGELOG retitle plus a
+   fresh `[Unreleased]`, v0.7.0 prose markers. Master untouched.
 2. **Ignore and stage** — `.gitignore` + `.dockerignore` for `BindCraft2/`;
    `BINDCRAFT2_SOURCE` resolution helper; verify nothing is tracked.
 3. **Installer (x86)** — `install_bindcraft2()`, AF2-params fallback chain,
@@ -621,7 +628,8 @@ and the campaign-JSON writer lands before the Spark validation that needs it.
 9. **Docs and skills** — `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`,
    `Evaluator/docs/pipeline_reference.md`, orchestrator / worker / evaluator
    skill trees, and the BindCraft 2 vs BindMaster 2 disambiguation.
-10. **Release 1.1.0** — bump `__version__`, CHANGELOG entry, tag `v1.1.0`.
+10. **Close 1.1.0** — final CHANGELOG entry. Tagging and the merge to master
+    are a separate decision, taken when this branch lands.
 
 ## Notes recorded during investigation
 
