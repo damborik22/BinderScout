@@ -272,10 +272,11 @@ class TestHotspotsToEpitopeIdx:
 # ── All seven tools reachable from every UI surface ───────────────────────────
 
 
-_ALL_SEVEN = {
+_ALL_TOOLS = {
     "mosaic": True,
     "boltzgen": True,
     "bindcraft": True,
+    "bindcraft2": True,
     "pxdesign_local": True,
     "proteina_complexa": True,
     "rfd3": True,
@@ -296,6 +297,7 @@ class TestToolSequenceCoverage:
             "mosaic",
             "boltzgen",
             "bindcraft",
+            "bindcraft2",
             "pxdesign_local",
             "proteina_complexa",
             "rfd3",
@@ -303,16 +305,16 @@ class TestToolSequenceCoverage:
         }
 
     def test_enabled_tools_preserves_execution_order(self):
-        got = [key for key, _s, _l, _d in conf.enabled_tools(_ALL_SEVEN)]
+        got = [key for key, _s, _l, _d in conf.enabled_tools(_ALL_TOOLS)]
         assert got == [key for key, _s, _l, _d in conf.TOOL_SEQUENCE]
 
     def test_enabled_tools_filters_disabled(self):
-        only = dict.fromkeys(_ALL_SEVEN, False)
+        only = dict.fromkeys(_ALL_TOOLS, False)
         only["rfd3"] = True
         assert [k for k, *_ in conf.enabled_tools(only)] == ["rfd3"]
 
     def test_preview_tree_lists_every_generated_script(self, base_cfg, capsys):
-        conf.print_tree(base_cfg["run_dir"], _ALL_SEVEN, base_cfg)
+        conf.print_tree(base_cfg["run_dir"], _ALL_TOOLS, base_cfg)
         out = capsys.readouterr().out
         for _key, script, _label, _subdir in conf.TOOL_SEQUENCE:
             assert script in out, f"{script} missing from the Step 7 preview tree"
@@ -321,7 +323,7 @@ class TestToolSequenceCoverage:
 
     def test_run_all_covers_every_enabled_tool(self, base_cfg, tmp_path):
         script = tmp_path / "run_all.sh"
-        conf.write_run_all(script, base_cfg, _ALL_SEVEN)
+        conf.write_run_all(script, base_cfg, _ALL_TOOLS)
         content = script.read_text()
         for _key, run_script, _label, _subdir in conf.TOOL_SEQUENCE:
             assert run_script in content, f"{run_script} missing from run_all.sh"
@@ -330,7 +332,7 @@ class TestToolSequenceCoverage:
         """The Mosaic block is emitted first; `exit 1` there aborted the whole run
         before any other tool started."""
         script = tmp_path / "run_all.sh"
-        conf.write_run_all(script, base_cfg, _ALL_SEVEN)
+        conf.write_run_all(script, base_cfg, _ALL_TOOLS)
         content = script.read_text()
         mosaic_block = content[content.index("=== Step: Mosaic ===") :]
         mosaic_block = mosaic_block[: mosaic_block.index("fi")]
@@ -350,7 +352,7 @@ class TestRunAllIsolatesToolFailures:
 
     def _content(self, base_cfg, tmp_path):
         script = tmp_path / "run_all.sh"
-        conf.write_run_all(script, base_cfg, _ALL_SEVEN)
+        conf.write_run_all(script, base_cfg, _ALL_TOOLS)
         return script.read_text()
 
     @staticmethod
@@ -402,13 +404,13 @@ class TestRunEvaluateAllowsEmptyOnlyWhenToldTo:
 
     def test_extract_honours_the_env_var(self, base_cfg, tmp_path):
         script = tmp_path / "run_evaluate.sh"
-        conf.write_run_evaluate(script, base_cfg, _ALL_SEVEN)
+        conf.write_run_evaluate(script, base_cfg, _ALL_TOOLS)
         assert "${BINDMASTER_ALLOW_EMPTY:+--allow-empty}" in script.read_text()
 
     def test_strict_by_default(self, base_cfg, tmp_path):
         """Unset means no flag: the guard stays on for a hand-run evaluation."""
         script = tmp_path / "run_evaluate.sh"
-        conf.write_run_evaluate(script, base_cfg, _ALL_SEVEN)
+        conf.write_run_evaluate(script, base_cfg, _ALL_TOOLS)
         content = script.read_text()
         assert "--allow-empty \\" not in content
         assert "\n        --allow-empty\n" not in content
@@ -419,7 +421,7 @@ class TestRunEvaluateRfd3Path:
         """run_rfd3.sh writes rfd3/sequences.csv; the flag used to point at
         rfd3/outputs/, an empty directory, so RFD3 designs never reached the report."""
         script = tmp_path / "run_evaluate.sh"
-        conf.write_run_evaluate(script, base_cfg, _ALL_SEVEN)
+        conf.write_run_evaluate(script, base_cfg, _ALL_TOOLS)
         content = script.read_text()
         run_dir = base_cfg["run_dir"]
         assert f"--rfd3 {run_dir}/rfd3 " in content or f'--rfd3 "{run_dir}/rfd3"' in content or "/rfd3 \\" in content
@@ -430,7 +432,7 @@ class TestRunEvaluateRfd3Path:
         evaluate.sh, and used to pass nothing to extract — where Proteina-Complexa
         needs it to cut the binder out of the encoded complex."""
         script = tmp_path / "run_evaluate.sh"
-        conf.write_run_evaluate(script, base_cfg, _ALL_SEVEN)
+        conf.write_run_evaluate(script, base_cfg, _ALL_TOOLS)
         content = script.read_text()
         extract_block = content[content.index("binder-compare extract") : content.index("# Step 2")]
         assert "--target-seq" in extract_block
@@ -646,6 +648,7 @@ class TestRequiredCfgKeysStayInSyncWithTheWriters:
 
     _WRITERS: ClassVar = {
         "bindcraft": ("write_bindcraft_target", "copy_bindcraft_preset", "write_run_bindcraft"),
+        "bindcraft2": ("write_bindcraft2_campaign", "write_run_bindcraft2"),
         "boltzgen": ("copy_nanobody_scaffolds", "write_boltzgen_yaml", "write_run_boltzgen"),
         "mosaic": ("write_mosaic_hallucinate", "write_run_mosaic", "hotspots_to_epitope_idx"),
         "pxdesign_local": ("write_pxdesign_yaml", "write_run_pxdesign"),

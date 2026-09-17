@@ -36,6 +36,9 @@ TOOL_SEQUENCE: list[tuple[str, str, str]] = [
     ("mosaic", "Mosaic", "Mosaic/.venv/bin/python"),
     ("boltzgen", "BoltzGen", "BoltzGen/boltzgen/__init__.py"),
     ("bindcraft", "BindCraft", "BindCraft/bindcraft_environment.yml"),
+    # The console script, not the checkout: BindCraft 2 is staged from an archive
+    # before its venv is built, so the directory exists before it is installable.
+    ("bindcraft2", "BindCraft 2", "BindCraft2/.venv/bin/bindcraft"),
     ("pxdesign", "PXDesign", "PXDesign/pxdesign"),
     ("proteina_complexa", "Proteina-Complexa", "Proteina-Complexa/.venv/bin/python"),
     # RFD3 has no clone dir (rc-foundry is pip-installed); the checkpoint fetched
