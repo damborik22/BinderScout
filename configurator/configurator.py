@@ -171,11 +171,13 @@ _BINDCRAFT2_SCAFFOLDED = frozenset({"VHH", "ARP", "scFv", "Fab"})
 # fold_switch — stays reachable through `bindmaster configure --config`, the same
 # scoping RFD3 and Protein-Hunter got.
 #
-# VHH is out of the wizard deliberately rather than by omission. Nanobody design
-# belongs to the separate nano effort, and our cross-engine ranking cannot score
-# nanobodies regardless: a validated 6.8 nM VHH scores 0.21 through it, and the
-# pooled ranking gives no binder/non-binder separation for that class at all.
-# Offering it here would invite a campaign whose output the report cannot rank.
+# The scaffolded formats are out deliberately rather than by omission: VHH, scFv
+# and Fab belong to the separate nano effort, where antibody-format design and its
+# scoring are handled together. VHH has a measured reason on top of that — our
+# ranking cannot score nanobodies (a validated 6.8 nM VHH scores 0.21 through it,
+# with no binder/non-binder separation for the class), so offering it here would
+# invite a campaign whose output the report cannot rank. That evidence is specific
+# to nanobodies and is NOT assumed to carry to scFv or Fab.
 _BINDCRAFT2_WIZARD_MODALITIES = ("binder", "large_binder", "peptide")
 # Design properties the wizard offers; the other six (bigbang, disulfide_staple,
 # initial_guess, mixed_topology, protease_stable, termini_together) are likewise

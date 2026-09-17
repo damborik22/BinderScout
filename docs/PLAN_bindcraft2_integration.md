@@ -316,13 +316,23 @@ wizard; `bigbang`, `disulfide_staple`, `initial_guess`, `mixed_topology`,
 `protease_stable`, `termini_together` via `--config`. So: 12 modalities, 3
 exposed, 9 via `--config`; 9 properties, 3 exposed, 6 via `--config`.
 
-**`VHH` is out of the wizard deliberately**, not by omission. Nanobody design
-belongs to the separate nano effort, and our ranking cannot score nanobodies
-regardless — a validated 6.8 nM VHH scores 0.21 through it, and the pooled
-ranking gives no binder/non-binder separation for that class. Offering it in the
-wizard would invite a campaign whose output the report cannot rank. It stays
-reachable through `--config` for anyone who wants it anyway, and the scaffolded
-set still governs `binder_lengths` on that path.
+**The scaffolded antibody formats are out of the wizard deliberately**, not by
+omission: `VHH`, `scFv` and `Fab` all belong to the separate nano effort, which
+is where antibody-format design and its scoring will be dealt with together.
+(`ARP` is an ankyrin-repeat scaffold rather than an antibody fragment, but it is
+scaffolded and equally unexercised here, so it sits on the same side of the
+line.)
+
+For VHH there is a measured reason on top of the scope one: our ranking cannot
+score nanobodies at all — a validated 6.8 nM VHH scores 0.21 through it, with no
+binder/non-binder separation for the class — so a wizard-driven VHH campaign
+would produce a pool the report cannot rank. **That evidence is specific to
+nanobodies and is not assumed to carry to `scFv` or `Fab`**; those are deferred
+on scope, not on measurement.
+
+All four stay reachable through `--config`, and the scaffolded set still
+suppresses `binder_lengths` on that path, so no capability is removed — only the
+invitation.
 
 Wizard-side conflict validation (so a bad combination is caught before a run
 script is written): scaffold ↔ {cyclize, `copies`>1, fold_switch,
