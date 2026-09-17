@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# BindCraft 2 binder-design template — copy to runs/<name>/run_bindcraft2.sh and
+# fill the placeholders. `bindmaster configure` generates this same shape via
+# write_run_bindcraft2(); this file is the canonical hand-written pattern.
+#
+# BindCraft 2 takes ONE layered campaign file. It stacks
+#   core → modality → property → target → your campaign → --set
+# each layer overriding the one above, so everything in the campaign JSON below
+# wins over the shipped presets. Write the campaign beside this script so it can
+# be edited and rerun without regenerating anything.
+#
+# Placeholders:
+#   {{RUN_DIR}}        Absolute path to runs/<name>
+#   {{BC2_DIR}}        Absolute path to the BindCraft2 checkout (its .venv lives inside)
+#   {{NAME}}           Campaign name, also the target's name
+#   {{TARGET_PDB}}     Absolute path to the target structure (.pdb/.cif/.fasta)
+#   {{CHAINS}}         Target chain(s), e.g. "A"
+#   {{HOTSPOTS}}       Input residue numbers, e.g. "54,56,66-70" (chain-prefixed
+#                      for a multi-chain target: "A54,B12-16"). May be empty.
+#   {{MODALITY}}       binder | large_binder | peptide | cyclic_peptide |
+#                      homo_oligomer | multidomain | VHH | ARP | scFv | Fab |
+#                      induced_fit | fold_switch
+#   {{BINDER_LO}}      Min binder length. OMIT the whole binder_lengths key for a
+#                      scaffolded format (VHH/ARP/scFv/Fab) — the scaffold sets it.
+#   {{BINDER_HI}}      Max binder length
+#   {{N_ACCEPTED}}     Number of ACCEPTED designs to reach (see the warning below)
+#   {{MAX_TRAJECTORIES}}  Attempt budget (see the warning below)
+#
+# ── Three things that are not obvious ────────────────────────────────────────
+#
+# 1. number_of_final_designs is a QUOTA OF ACCEPTED DESIGNS, not an attempt
+#    count, and the package has no wall-clock or timeout setting of any kind.
+#    max_trajectories is the only cap. Leave it out and the campaign runs until
+#    it reaches the quota, however long that takes — upstream warns a hard target
+#    may need "thousands of attempts per design". Measured on a GB10: ~7.4 min
+#    per trajectory for a 60 aa binder against a 115-residue target.
+#
+# 2. ALWAYS name a modality. With none named BindCraft 2 applies no modality
+#    layer at all — the CLI help's "(default: binder)" is misleading — and the
+#    resulting null binder_lengths surfaces as a bare TypeError traceback rather
+#    than a clean refusal.
+#
+# 3. On aarch64 (DGX Spark / GB10) the two --set flags at the bottom are
+#    load-bearing. design_gpu_memory_gb() calls float() on nvidia-smi's memory
+#    reading behind an `except (OSError, CalledProcessError)`; GB10 answers
+#    "[N/A]", which raises ValueError, so the campaign is refused immediately
+#    after preflight. auto_multi_gpu=false alone is NOT enough — the campaign
+#    reaches the same call again through campaign_subbatch_size while
+#    subbatch_size is at its default of "auto". Both are needed, and both are
+#    documented settings, so nothing in BindCraft 2's source is modified.
+set -euo pipefail
+
+RUN_DIR="{{RUN_DIR}}"
+BC2_DIR="{{BC2_DIR}}"
+BC2_PY="$BC2_DIR/.venv/bin/python"
+BC2_BIN="$BC2_DIR/.venv/bin/bindcraft"
+BC2_OUT="$RUN_DIR/bindcraft2"
+CAMPAIGN="$BC2_OUT/campaign.json"
+
+mkdir -p "$BC2_OUT"
+
+if [[ ! -x "$BC2_BIN" ]]; then
+    echo "ERROR: BindCraft 2 is not installed at $BC2_DIR" >&2
+    echo "       bindmaster install --tool bindcraft2 --bc2-source /path/to/BindCraft2.zip" >&2
+    exit 1
+fi
+
+# The venv's bin first, so `python` below is the interpreter that runs the campaign.
+export PATH="$BC2_DIR/.venv/bin:$PATH"
+
+# Reuse the AlphaFold 2 parameters already on this machine instead of letting
+# BindCraft 2 download another 5.3 GB. Exported ONLY when a directory was found:
+# an exported-but-empty BINDCRAFT_* variable counts as a value and fails rather
+# than falling back to the default.
+for _af2 in \
+    "${BINDCRAFT2_AF2_PARAMS:-}" \
+    "$(dirname "$BC2_DIR")/BindCraft/params" \
+    "${HOME}/Documents/OLD/BindMaster/bindcraft-tools/af2_params"; do
+    if [[ -n "$_af2" && -d "$_af2" ]]; then
+        export BINDCRAFT_AF2_PARAMS="$_af2"
+        break
+    fi
+done
+
+# Compiled graphs are cached per CAMPAIGN by default, under the project folder,
+# so a new campaign re-pays ~60 s per prediction shape from cold. Point it at a
+# per-machine cache. The card name is appended BY US: an operator-set
+# JAX_COMPILATION_CACHE_DIR is used verbatim and BindCraft 2's own per-card
+# keying is skipped, and an executable is not portable between GPU models.
+_card=$(nvidia-smi --query-gpu=name --format=csv,noheader -i 0 2>/dev/null | head -1 || echo "")
+if [[ -n "$_card" ]]; then
+    _card=$(printf '%s' "$_card" | sed 's/[^A-Za-z0-9]\+/_/g; s/^_//; s/_$//')
+    export JAX_COMPILATION_CACHE_DIR="${HOME}/.cache/bindmaster/bc2_xla/$_card"
+    mkdir -p "$JAX_COMPILATION_CACHE_DIR"
+fi
+# BindCraft 2 sets its own XLA_PYTHON_CLIENT_PREALLOCATE and appends its own
+# XLA_FLAGS; upstream says to leave both alone. Use BC2_XLA_EXTRA if needed.
+
+# ── The campaign ─────────────────────────────────────────────────────────────
+# Every path absolute: BindCraft 2 re-bases only targets[].target_path and
+# binder_scaffold against this file's directory. project_folder is taken
+# verbatim and resolves against the caller's cwd, so a relative value nests the
+# results inside themselves.
+cat > "$CAMPAIGN" <<CAMPAIGN_EOF
+{
+  "targets": [
+    {
+      "name": "{{NAME}}",
+      "target_path": "{{TARGET_PDB}}",
+      "chains": "{{CHAINS}}",
+      "hotspots": "{{HOTSPOTS}}"
+    }
+  ],
+  "modality": "{{MODALITY}}",
+  "campaign_name": "{{NAME}}",
+  "binder_lengths": [{{BINDER_LO}}, {{BINDER_HI}}],
+  "number_of_final_designs": {{N_ACCEPTED}},
+  "max_trajectories": {{MAX_TRAJECTORIES}},
+  "core": "benchmark",
+  "project_folder": "$BC2_OUT"
+}
+CAMPAIGN_EOF
+
+# ── Per-run provenance (CLAUDE.md "Per-run settings.json") ───────────────────
+# Written BEFORE the design step, so a future session can answer "what produced
+# these designs" without trusting this script, which may have been edited since.
+GIT_SHA=$(git -C "$RUN_DIR/../.." rev-parse HEAD 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git -C "$RUN_DIR/../.." rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i 0 2>/dev/null | head -1 || echo "unknown")
+GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i 0 2>/dev/null | head -1 || echo 0)
+# GB10 answers this query SUCCESSFULLY with the string "[N/A]", so the fallback
+# above never fires; gpu_memory_mib is the one unquoted field and a bare [N/A]
+# makes the file unparseable.
+GPU_MEM=$(printf '%s' "$GPU_MEM" | grep -E '^[0-9]+$' || echo 0)
+PY_VER=$(python -c 'import sys;print(".".join(map(str,sys.version_info[:3])))' 2>/dev/null || echo "unknown")
+BC2_VER=$("$BC2_PY" -c 'import importlib.metadata as m;print(m.version("bindcraft"))' 2>/dev/null || echo "unknown")
+
+# aarch64 guard, decided on the machine that is RUNNING. Do not bake these into
+# campaign.json: configs are generated on one machine and run on another, so a
+# baked-in value would disable multi-GPU packing on x86 whenever an aarch64 box
+# wrote the config, and would still crash on Spark whenever an x86 box did.
+GUARD_APPLIED=false
+BC2_ARGS=()
+if [[ "$(uname -m)" == "aarch64" ]]; then
+    BC2_ARGS+=(--set 'auto_multi_gpu=false' --set 'subbatch_size=null')
+    GUARD_APPLIED=true
+    echo "  aarch64: pinning auto_multi_gpu=false subbatch_size=null (GB10 nvidia-smi returns [N/A])"
+fi
+
+cat > "$BC2_OUT/settings.json" <<SETTINGS_JSON_EOF
+{
+  "tool": "bindcraft2",
+  "started_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "version": {
+    "bindmaster_git_sha": "$GIT_SHA",
+    "bindmaster_git_branch": "$GIT_BRANCH",
+    "bindcraft2_version": "$BC2_VER"
+  },
+  "target": {
+    "name": "{{NAME}}",
+    "pdb": "{{TARGET_PDB}}",
+    "sequence": "",
+    "length": 0,
+    "chains": "{{CHAINS}}"
+  },
+  "design_params": {
+    "campaign_json": "$CAMPAIGN",
+    "modality": "{{MODALITY}}",
+    "binder_lengths": [{{BINDER_LO}}, {{BINDER_HI}}],
+    "number_of_final_designs": {{N_ACCEPTED}},
+    "max_trajectories": {{MAX_TRAJECTORIES}},
+    "arch_guard_applied": $GUARD_APPLIED
+  },
+  "env": {
+    "conda_env": "(uv venv: BindCraft2/.venv)",
+    "python": "$PY_VER",
+    "gpu_id": 0,
+    "gpu_name": "$GPU_NAME",
+    "gpu_memory_mib": $GPU_MEM
+  }
+}
+SETTINGS_JSON_EOF
+
+echo "=== BindCraft 2 campaign: {{NAME}} ==="
+echo "  Campaign:  $CAMPAIGN"
+echo "  Requested: {{N_ACCEPTED}} ACCEPTED design(s), budget {{MAX_TRAJECTORIES}} trajectories"
+echo "  Output:    $BC2_OUT"
+echo ""
+
+"$BC2_BIN" design "$CAMPAIGN" "${BC2_ARGS[@]}"
+
+# The ranked table is rewritten on every acceptance and reconciled at campaign
+# close, so it is only final now. Anything that snapshots it for a report — the
+# evaluator's --tool-csv in particular — must run after this point, not during.
+if [[ -s "$BC2_OUT/3_Ranked/!_Ranked.csv" ]]; then
+    echo ""
+    echo "=== finished: $(( $(wc -l < "$BC2_OUT/3_Ranked/!_Ranked.csv") - 1 )) accepted design(s) ==="
+    echo "    Ranked table: $BC2_OUT/3_Ranked/!_Ranked.csv  (ordered by i_pDAE, best first)"
+else
+    echo ""
+    echo "=== finished with NO accepted designs ==="
+    echo "    Per-attempt detail: $BC2_OUT/1_Trajectories/!_Trajectories.csv"
+    echo "    Rejected candidates and the filters they failed: $BC2_OUT/2_Refolded/!_Refolded.csv"
+fi
