@@ -16,8 +16,9 @@ pytest.importorskip("pandas")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "Evaluator"))
 from binder_comparison.cli._tool_args import TOOL_DESTS, TOOL_FLAGS, add_tool_args, requested_tools
 
-_ALL_SEVEN = {
+_ALL_TOOLS = {
     "bindcraft",
+    "bindcraft2",
     "boltzgen",
     "mosaic",
     "pxdesign",
@@ -35,7 +36,7 @@ def _parser_with_tools():
 
 class TestSharedToolFlags:
     def test_table_covers_every_design_tool(self):
-        assert set(TOOL_DESTS) == _ALL_SEVEN
+        assert set(TOOL_DESTS) == _ALL_TOOLS
 
     def test_hyphenated_flags_keep_underscore_dests(self):
         args = _parser_with_tools().parse_args(["--proteina-complexa", "/a", "--protein-hunter", "/b"])
@@ -66,13 +67,13 @@ class TestExtractAndRunAgreeOnTools:
         mod.add_parser(sub)
         parser = sub.choices[module_name.replace("_", "-")]
         opts = {a.dest for a in parser._actions}
-        return opts & _ALL_SEVEN
+        return opts & _ALL_TOOLS
 
-    def test_extract_offers_all_seven(self):
-        assert self._dests("extract") == _ALL_SEVEN
+    def test_extract_offers_every_tool(self):
+        assert self._dests("extract") == _ALL_TOOLS
 
-    def test_run_offers_all_seven(self):
-        assert self._dests("run") == _ALL_SEVEN
+    def test_run_offers_every_tool(self):
+        assert self._dests("run") == _ALL_TOOLS
 
     def test_run_forwards_every_flag_it_accepts(self):
         """A flag `run` accepts but never forwards to extract is worse than no flag."""
@@ -81,7 +82,7 @@ class TestExtractAndRunAgreeOnTools:
             "run.py should build the extract command from the shared table, "
             "not a hand-written if-chain that can fall behind"
         )
-        assert len(TOOL_FLAGS) == 7
+        assert len(TOOL_FLAGS) == 8
 
 
 class TestZeroYieldIsAnError:

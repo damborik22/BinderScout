@@ -23,6 +23,19 @@ from pathlib import Path
 # multiple matches.
 _TOOL_PATTERNS: dict[str, list[str]] = {
     "bindcraft": ["**/bindcraft_default/outputs/final_design_stats.csv", "**/bindcraft/outputs/final_design_stats.csv"],
+    # BindCraft 2's ranked table is the ONLY one of its CSVs that is a design
+    # pool. The patterns are deliberately specific rather than a "*ranked*.csv"
+    # catch-all, which would also match `bindcraft rank --on <metric>`'s
+    # ranked_by_*.csv — a user re-sort on a different metric, which would hand
+    # the report a wrongly-ordered native block under the right name. The
+    # leading "!" is a literal part of the v1.0.0 filename.
+    "bindcraft2": [
+        "**/bindcraft2/3_Ranked/!_Ranked.csv",
+        "**/bindcraft2*/3_Ranked/!_Ranked.csv",
+        "**/bindcraft2*/ranked.csv",
+        "**/bindcraft2*/inputs/*_ranked.csv",
+        "**/bindcraft2*/*_ranked.csv",
+    ],
     "boltzgen": [
         "**/boltzgen/outputs/final_ranked_designs/final_designs_metrics_*.csv",
         "**/boltzgen/outputs/**/final_designs_metrics_*.csv",
@@ -62,6 +75,9 @@ _TOOL_PDB_DIR_PATTERNS: dict[str, list[str]] = {
         "**/boltzgen/outputs/final_ranked_designs/final_*_designs",
         "**/boltzgen/outputs/final_ranked_designs",
     ],
+    # Accepted complexes are mmCIF, not PDB, and the delivered archives carry a
+    # "<Rank>_" filename prefix that a fresh campaign does not.
+    "bindcraft2": ["**/bindcraft2/3_Ranked", "**/bindcraft2*/structures", "**/bindcraft2*"],
     "pxdesign": ["**/pxdesign"],  # has nested outputs_len*/ subdirs; per-tool viewer rglobs
     "proteina_complexa": ["**/proteina_complexa/raw_evaluation_results", "**/proteina_complexa"],
     "rfd3": ["**/rfd3"],

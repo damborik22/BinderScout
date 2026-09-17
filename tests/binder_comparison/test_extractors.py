@@ -1,4 +1,4 @@
-"""Tests for the seven live extractors — the pipeline's ingestion layer.
+"""Tests for the eight live extractors — the pipeline's ingestion layer.
 
 Before this file the only parser tests in the repo targeted
 `evaluator_legacy/evaluator.py`, documented as retired and dispatched by nothing, so
@@ -22,6 +22,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "Evaluator"))
 from binder_comparison.extractors import (
+    BindCraft2Extractor,
     BindCraftExtractor,
     BoltzGenExtractor,
     MosaicExtractor,
@@ -635,6 +636,12 @@ class TestSequenceHygieneAcrossExtractors:
                 "final_designs_metrics_a.csv",
                 {"designed_chain_sequence": _SEQ_A, "id": "d"},
                 "boltzgen",
+            ),
+            (
+                BindCraft2Extractor(),
+                "3_Ranked/!_Ranked.csv",
+                {"Binder_Sequence": _SEQ_A, "design": "d", "rank": 1, "i_pDAE": 0.4},
+                "bindcraft2",
             ),
             (PXDesignExtractor(), "summary.csv", {"sequence": _SEQ_A, "rank": 1}, "pxdesign"),
             (RFD3Extractor(), "sequences.csv", {"sequence": _SEQ_A, "design_id": "d"}, "rfd3"),
