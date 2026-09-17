@@ -237,9 +237,16 @@ an x86 box generated it. So the generated `run_bindcraft2.sh` inspects
 `uname -m` on the **executing** host and injects the two keys only on aarch64.
 
 Ship it **opt-in, not in `--tool all`** on aarch64, the same posture RFD3
-has. Unknowns only a run can answer: whether `jax-cuda13` initialises sm_121,
-whether `biotraj` (the one source build in the tree) compiles on aarch64, and
-whether throughput on unified memory is worth having.
+has.
+
+**The aarch64 unknowns are now answered** (measured on BM5, ahead of slice 7):
+`jax-cuda13` 0.11.1 initialises sm_121 and reports `backend: gpu` with
+`CudaDevice(id=0)`; `biotraj` 1.2.2 — the one source build in the tree —
+compiles; the install completes and the CLI runs. With the two guard settings a
+campaign runs to completion. What remains for slice 7 is only the throughput
+question, and the first measurement is not encouraging (see Notes). BindCraft 2
+is nonetheless the first AF2-hallucination designer that runs on Spark at all,
+where BindCraft 1 cannot be installed.
 
 ### Per-worker memory, and what a 24 GB card actually holds
 
@@ -656,7 +663,29 @@ and the campaign-JSON writer lands before the Spark validation that needs it.
 - Upstream's only published timing is a 40-trajectory campaign on a GH200:
   3620 s at one worker, 2021 s at seven. Modality, binder length and target
   size are unstated, so it does not transfer to an RTX 3090 or to a large
-  target. Slice 4 exists to replace it with our own number.
+  target.
+
+- **Measured here (slice 4), BM5 / GB10 / sm_121, single worker.** A `binder`
+  campaign against the shipped hPDL1 target (115 residues), `binder_lengths`
+  [60,60], `max_trajectories` 2: **14 min 44 s wall clock, 5.9 GB peak host
+  RSS, 1 design accepted from 2 trajectories.** That is ~7.4 min per
+  trajectory, against upstream's ~90 s on a GH200 — roughly 5× slower, on a
+  smaller binder than they are likely to have measured. Treat the GH200 figure
+  as inapplicable to this fleet.
+
+  The yield number is far too small a sample to plan a campaign from (1 of 2,
+  and trajectory 1 was rejected for i_pTM 0.64 / pLDDT 0.69 against the 0.70
+  gates). It does establish the order of magnitude: on a hard target, where
+  upstream warns of "thousands of attempts per design", a GB10 at 7.4 min per
+  trajectory is days of card time per accepted design. Budget accordingly, and
+  prefer the x86 boxes for production.
+
+- **The v1.0.0 output tree is exactly as this plan predicted**, confirmed
+  against that campaign: `3_Ranked/!_Ranked.csv` with lowercase
+  `rank`/`design`/`Binder_Sequence`, `i_pDAE` leading the confidence block,
+  accepted structures as `<design>_seq<n>.cif` with a 0-based index, and
+  `1_Trajectories/` / `2_Refolded/{Complexes,BinderMonomer}/` beside it. Its
+  own closing line reads `campaign done: … ranked by i_pDAE`.
 - The delivered pre-1.0 modality value is `miniprotein`, which v1.0.0 does not
   ship. The schema divergence extends to settings *values*, not only column
   names — relevant if we ever replay a delivered campaign's settings.
