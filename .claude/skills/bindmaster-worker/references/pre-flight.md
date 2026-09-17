@@ -42,6 +42,19 @@ set -u
 
 If the env doesn't exist, or activation fails, or the import errors out — that's a pre-flight failure. Report and stop.
 
+### 2.1 BindCraft 2 — the checkout *is* the installation
+
+BindCraft 2 has no conda env, so `conda env list` will never find it. It installs editable into a uv venv inside its own source tree, which makes the console script the only thing that actually proves it is installed:
+
+```bash
+ls -la <BC2_DIR>/.venv/bin/bindcraft      # BC2_DIR is named at the top of run_bindcraft2.sh
+<BC2_DIR>/.venv/bin/bindcraft --help
+```
+
+Read `BC2_DIR` out of the run script rather than assuming `~/dev/BindMaster/BindCraft2` — the source is supplied per machine, so the checkout that got built isn't always the one under the main BindMaster tree.
+
+This check earns its place. BindCraft 2's source arrives as an archive per machine rather than a `git clone`, so `BindCraft2/` can perfectly well have been **staged but never built** — the tree is there, the sources are there, and the install either never ran or died part-way. Every looser check passes on that state (the directory exists, the Python files are present) and the campaign then dies at launch. If `.venv/bin/bindcraft` is missing or won't run, that's a pre-flight failure: report it rather than hunting for the source yourself, because there is nowhere to fetch it from.
+
 ## 3. Verify GPU + memory class
 
 ```bash
@@ -101,6 +114,8 @@ Budget guide per tool (rough):
 | RFD3 | 20-50 GB | 5-15 GB |
 
 If <100 GB free on `~/runs`, clean up old run dirs (with user confirmation) before starting.
+
+BindCraft 2 is absent from that table because its footprint isn't in the run dir. The installation itself is **~4.7 GB** — the uv venv plus the editable checkout — and it lives inside the BindMaster tree rather than a conda envs directory, so neither `df ~/runs` nor a conda-env audit accounts for it. Where the checkout and `~/runs` share a filesystem, budget those 4.7 GB on top of whatever the campaign writes.
 
 ## 5. Verify BindMaster repo is at pinned commit
 
@@ -162,6 +177,22 @@ python -c "from boltz.main import download_boltz2; from pathlib import Path; dow
 # NOTE: positional Path argument, NOT a string
 ```
 
+### BindCraft 2 (AlphaFold 2 parameters)
+
+BindCraft 2's own selfcheck **exits 1** when it can't find an AF2 parameter directory. It doesn't warn and carry on, and it doesn't quietly proceed without them — so an unresolved params path isn't a slow first run, it's a campaign that refuses to start after you queued it and walked away.
+
+The run script tries these in order and exports the first that exists. At least one must print:
+
+```bash
+ls -d "${BINDCRAFT2_AF2_PARAMS:-/nonexistent}" \
+      ~/dev/BindMaster/BindCraft/params \
+      ~/Documents/OLD/BindMaster/bindcraft-tools/af2_params 2>/dev/null
+```
+
+`BindCraft/params` is BindCraft 1's copy, so it only exists where BindCraft 1 was installed — don't count on it on a machine that has only ever run BindCraft 2.
+
+One trap: never export `BINDCRAFT_AF2_PARAMS` as an empty string to mean "unset". An exported empty value is still a value, and it fails instead of falling through to the next candidate.
+
 ### PXDesign (its internal Protenix — not a refold engine)
 
 ```bash
@@ -212,6 +243,7 @@ Confirm tool-specific aarch64 ports:
 Some tools have a dry-run / check mode that validates the config without launching the full pipeline:
 
 - **BindCraft:** `python bindcraft.py --settings <target>.json --check_only` (if available in your fork)
+- **BindCraft 2:** no dry-run mode — instead open `campaign.json` and confirm `max_trajectories` is set. `number_of_final_designs` is a quota of *accepted* designs rather than an attempt count, and there is no wall-clock or timeout setting anywhere in the package, so `max_trajectories` is the only thing that can end a campaign that isn't converging. Left unset it runs until the quota fills, however long that takes — every other tool here is bounded by attempts, and this one is the exception.
 - **BoltzGen:** `boltzgen check example/<TARGET>/<TARGET>.yaml` — validates the YAML, writes a check.cif, opens binding-site visualization
 - **PXDesign:** `pxdesign pipeline --validate -i <yaml>` (if available)
 - **Proteina-Complexa:** `complexa validate design configs/<pipeline>.yaml`
