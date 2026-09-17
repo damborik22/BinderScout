@@ -41,10 +41,12 @@ It refuses rather than guesses on the tables that would parse cleanly and be
 wrong — the pre-ProteinMPNN trajectory table, the candidate table that mixes
 rejects in, and `accepted.csv`, which has no rank column at all.
 
-Runs on **aarch64**, where it is opt-in — at ~7.4 min per trajectory against
-~90 s on a GH200, it is kept out of `--tool all` for throughput rather than
-capability. It joins BindCraft 1 on that platform rather than replacing it;
-both AF2-hallucination designers run there.
+Runs on **aarch64**, where it is opt-in for throughput rather than capability —
+and the throughput cost is ours. Per trajectory a GB10 matches a 24 GB RTX 3090
+(343 s against 328 s, same binder and target), but the guard that avoids the
+`[N/A]` crash also disables worker fan-out, so a GB10 runs one design worker
+where the 3090 packs two. It joins BindCraft 1 on that platform rather than
+replacing it; both AF2-hallucination designers run there.
 
 Two settings avoid a crash there that neither one alone does.
 `design_gpu_memory_gb()` calls `float()` on nvidia-smi's memory reading behind

@@ -687,20 +687,38 @@ and the campaign-JSON writer lands before the Spark validation that needs it.
   size are unstated, so it does not transfer to an RTX 3090 or to a large
   target.
 
-- **Measured here (slice 4), BM5 / GB10 / sm_121, single worker.** A `binder`
-  campaign against the shipped hPDL1 target (115 residues), `binder_lengths`
-  [60,60], `max_trajectories` 2: **14 min 44 s wall clock, 5.9 GB peak host
-  RSS, 1 design accepted from 2 trajectories.** That is ~7.4 min per
-  trajectory, against upstream's ~90 s on a GH200 — roughly 5× slower, on a
-  smaller binder than they are likely to have measured. Treat the GH200 figure
-  as inapplicable to this fleet.
+- **Measured head-to-head (slices 4 and 7).** Same campaign both sides: shipped
+  hPDL1 target (115 residues), `binder` modality, `binder_lengths` [60,60],
+  `max_trajectories` 2, `core: benchmark`.
 
-  The yield number is far too small a sample to plan a campaign from (1 of 2,
-  and trajectory 1 was rejected for i_pTM 0.64 / pLDDT 0.69 against the 0.70
-  gates). It does establish the order of magnitude: on a hard target, where
-  upstream warns of "thousands of attempts per design", a GB10 at 7.4 min per
-  trajectory is days of card time per accepted design. Budget accordingly, and
-  prefer the x86 boxes for production.
+  | | per trajectory | design workers | 2 trajectories | peak RSS |
+  |---|---|---|---|---|
+  | BM5 — GB10, aarch64 | 343 s warm, 413 s cold | **1** (guard disables fan-out) | 14 m 44 s | 5.9 GB |
+  | BM1 — RTX 3090, x86 | 328 s / 339 s cold | **2** packed @ 9.6 GB | 7 m 26 s | 5.4 GB |
+
+  **Per trajectory the two platforms are equal.** The GB10 is not slow: 343 s
+  against 328 s is noise. The entire 2× throughput gap is worker fan-out — the
+  3090 packs two workers on one card, the GB10 runs one, because the guard that
+  avoids the `[N/A]` crash sets `auto_multi_gpu: false` and that is what fan-out
+  is gated on.
+
+  This corrects an earlier claim in this plan, which read total wall clock over
+  two trajectories including a cold compile as "~7.4 min per trajectory" and
+  then compared it to upstream's ~90 s GH200 figure to conclude that aarch64 is
+  slow. Both halves were wrong: the real figure is ~5.7 min, our x86 box is
+  ~5.5 min, and neither is near 90 s — that number belongs to a much larger
+  card, not to x86 versus aarch64.
+
+  **Follow-up worth taking.** The fan-out loss is ours to recover, and the prize
+  is larger on Spark than anywhere else: 121 GB of unified memory could hold far
+  more than the two workers a 24 GB card fits. It is not reachable today —
+  `plan_design_workers` probes card memory *unconditionally*, before
+  `BINDCRAFT_DESIGN_WORKERS` or `workers_per_gpu` is consulted, so every route to
+  fan-out runs through the call that raises on `[N/A]`. The only openings are a
+  change upstream, or presenting a corrected `nvidia-smi` to that process. The
+  second is environment rather than source, so it stays inside this plan's
+  no-patching rule, but it redirects every other memory query in the tree and
+  should not be done casually.
 
 - **The v1.0.0 output tree is exactly as this plan predicted**, confirmed
   against that campaign: `3_Ranked/!_Ranked.csv` with lowercase
