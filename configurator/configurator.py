@@ -145,6 +145,10 @@ PROTEINA_COMPLEXA_DIR = BINDMASTER_DIR / "Proteina-Complexa"
 PROTEINA_COMPLEXA_VENV = PROTEINA_COMPLEXA_DIR / ".venv"
 PROTEIN_HUNTER_DIR = BINDMASTER_DIR / "Protein-Hunter"
 FOUNDRY_WEIGHTS_DIR = BINDMASTER_DIR / "weights" / "foundry"
+# BindCraft 2 installs EDITABLE into a venv beside its own checkout, so the
+# directory is the installation: both halves must exist for it to be usable.
+BINDCRAFT2_DIR = BINDMASTER_DIR / "BindCraft2"
+BINDCRAFT2_VENV = BINDCRAFT2_DIR / ".venv"
 MOSAIC_VENV = MOSAIC_DIR / ".venv"
 # The maintained template lives in this repo. The copy under Mosaic/ is written
 # at install time and then goes stale: a checkout installed before the 2026-07-08
@@ -157,6 +161,21 @@ MOSAIC_HALLUCINATE_SRC_INSTALLED = MOSAIC_DIR / "examples" / "bindmaster_example
 MOSAIC_HALLUCINATE_SRC = (
     MOSAIC_HALLUCINATE_SRC_REPO if MOSAIC_HALLUCINATE_SRC_REPO.is_file() else MOSAIC_HALLUCINATE_SRC_INSTALLED
 )
+# BindCraft 2's binder formats. Identifiers only — the tuned contents of its
+# preset files are its own and are not reproduced here. A scaffolded modality
+# takes its length from the scaffold, so binder_lengths must NOT be written
+# alongside one.
+_BINDCRAFT2_SCAFFOLDED = frozenset({"VHH", "ARP", "scFv", "Fab"})
+# The subset the wizard prompts for. The rest — cyclic_peptide, homo_oligomer,
+# multidomain, ARP, scFv, Fab, induced_fit, fold_switch — stay reachable through
+# `bindmaster configure --config`, the same scoping RFD3 and Protein-Hunter got.
+_BINDCRAFT2_WIZARD_MODALITIES = ("binder", "large_binder", "peptide", "VHH")
+# Design properties the wizard offers; the other six (bigbang, disulfide_staple,
+# initial_guess, mixed_topology, protease_stable, termini_together) are likewise
+# --config only. Written as JSON booleans, which is the campaign-file equivalent
+# of BindCraft 2's --<property> command-line switches.
+_BINDCRAFT2_PROPERTIES = ("forced_targeting", "humanize", "termini_accessible")
+
 NANOBODY_SCAFFOLDS_SRC = BOLTZGEN_DIR / "example" / "nanobody_scaffolds"
 NANOBODY_SCAFFOLD_NAMES = ["7eow", "7xl0", "8coh", "8z8v"]
 
@@ -174,6 +193,7 @@ TOOL_SEQUENCE: list[tuple[str, str, str, str]] = [
     ("mosaic", "run_mosaic.sh", "Mosaic", "mosaic"),
     ("boltzgen", "run_boltzgen.sh", "BoltzGen", "boltzgen"),
     ("bindcraft", "run_bindcraft.sh", "BindCraft", "bindcraft"),
+    ("bindcraft2", "run_bindcraft2.sh", "BindCraft 2", "bindcraft2"),
     ("pxdesign_local", "run_pxdesign.sh", "PXDesign", "pxdesign"),
     ("proteina_complexa", "run_proteina_complexa.sh", "Proteina-Complexa", "proteina_complexa"),
     ("rfd3", "run_rfd3.sh", "RFD3", "rfd3"),
@@ -239,6 +259,10 @@ def detect_installs() -> dict:
         "evaluator": ((EVALUATOR_DIR / "evaluate.sh").exists() and _env_exists("binder-eval")),
         "pxdesign_local": _env_exists("bindmaster_pxdesign"),
         "proteina_complexa": (PROTEINA_COMPLEXA_VENV / "bin" / "python").exists(),
+        # Not a conda env: BindCraft 2 builds its own venv, and the `bindcraft`
+        # console script only exists once the editable install succeeded, so it
+        # distinguishes a finished install from a staged-but-unbuilt checkout.
+        "bindcraft2": (BINDCRAFT2_VENV / "bin" / "bindcraft").exists(),
         "rfd3": _env_exists("bindmaster_rfd3") and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
         "protein_hunter": _env_exists("bindmaster_protein_hunter") and PROTEIN_HUNTER_DIR.exists(),
         "af3": _env_exists("binder-eval-af3"),
@@ -814,6 +838,12 @@ def print_tree(run_dir: Path, tools_enabled: dict, cfg: dict | None = None):
         print("  │   ├── filters.json")
         print("  │   ├── advanced.json")
         print("  │   └── outputs/")
+    if tools_enabled.get("bindcraft2"):
+        print(f"  ├── {CYAN}bindcraft2/{RESET}")
+        print("  │   ├── campaign.json")
+        print("  │   ├── 1_Trajectories/")
+        print("  │   ├── 2_Refolded/")
+        print("  │   └── 3_Ranked/")
     if tools_enabled.get("pxdesign_local"):
         print(f"  ├── {CYAN}pxdesign/{RESET}")
         print("  │   ├── input.yaml")
@@ -1827,6 +1857,15 @@ def write_run_all(path: Path, cfg: dict, tools_enabled: dict):
             "",
         ]
 
+    if tools_enabled.get("bindcraft2"):
+        lines += [
+            # The ranked table only exists once a design has been accepted, which
+            # is the honest completion check for a tool whose budget is a quota
+            # of accepted designs rather than a number of attempts.
+            'run_tool "BindCraft 2" "$RUN_DIR/run_bindcraft2.sh" "$RUN_DIR/bindcraft2/3_Ranked/!_Ranked.csv"',
+            "",
+        ]
+
     if tools_enabled.get("pxdesign_local"):
         lines += [
             # In length-scan mode the script writes per-length outputs_lenN/ dirs
@@ -2116,6 +2155,247 @@ print(f'  -> {{len(rows)}} binder sequences written to {{out_csv}}')
 """
     )
 
+    path.write_text(content)
+    path.chmod(0o755)
+
+
+def write_bindcraft2_campaign(path: Path, cfg: dict):
+    """Write the BindCraft 2 campaign JSON — its single layered input file.
+
+    BindCraft 2 layers settings core → modality → property → target → this file,
+    each overriding the one above, so everything written here wins. We emit our
+    own campaign rather than copying one of the shipped examples: those are
+    PD-L1/PD-1/IL-7Ra demos whose tuned values are not ours to redistribute, and
+    their targets are not ours.
+
+    Every path is absolute. Only `targets[].target_path` and `binder_scaffold`
+    are re-based against the JSON's own directory by BindCraft 2; `project_folder`
+    is taken verbatim and resolves against the caller's cwd, so a relative value
+    would nest the results inside themselves.
+    """
+    run_dir = Path(cfg["run_dir"])
+    name = cfg["name"]
+    modality = cfg.get("bindcraft2_modality", "binder")
+    target_pdb = Path(cfg["target_pdb"]).resolve()
+    chains = cfg.get("chains", "A")
+    hotspots = (cfg.get("bindcraft2_hotspots") or cfg.get("hotspots", "") or "").strip()
+
+    target_entry: dict = {"name": name, "target_path": str(target_pdb), "chains": chains}
+    if hotspots:
+        # Same syntax as every other tool here: input residue numbers, comma
+        # separated, chain-prefixed when the target has several chains.
+        target_entry["hotspots"] = hotspots
+
+    campaign: dict = {
+        "targets": [target_entry],
+        # Always explicit. With no modality named, BindCraft 2 applies no modality
+        # layer at all -- the CLI help's "(default: binder)" is misleading -- and
+        # the resulting null binder_lengths surfaces as a bare TypeError traceback
+        # rather than a refusal, because TypeError is not in the CLI's except clause.
+        "modality": modality,
+        "campaign_name": name,
+        "number_of_final_designs": int(cfg.get("bindcraft2_n_designs", cfg.get("n_designs", 10))),
+        "project_folder": str((run_dir / "bindcraft2").resolve()),
+    }
+
+    # A scaffold sets its own length; naming binder_lengths alongside one is
+    # meaningless and BindCraft 2 ignores it.
+    if modality not in _BINDCRAFT2_SCAFFOLDED:
+        campaign["binder_lengths"] = [
+            int(cfg.get("bindcraft2_min_length", cfg.get("min_length", 60))),
+            int(cfg.get("bindcraft2_max_length", cfg.get("max_length", 150))),
+        ]
+
+    # The only cap BindCraft 2 has. number_of_final_designs is a quota of ACCEPTED
+    # designs and there is no wall-clock setting anywhere in the package, so an
+    # unset budget means the campaign runs until it fills the quota, however long
+    # that takes. Left unset only when the operator said so deliberately.
+    max_traj = cfg.get("bindcraft2_max_trajectories")
+    if max_traj:
+        campaign["max_trajectories"] = int(max_traj)
+
+    for prop in _BINDCRAFT2_PROPERTIES:
+        if cfg.get(f"bindcraft2_{prop}"):
+            campaign[prop] = True
+
+    if cfg.get("bindcraft2_benchmark_core", True):
+        # Fixes the seed and disables both autotuning and the desperation ladder.
+        # The ladder silently loosens validation after 750 fruitless trajectories
+        # and stamps an `autotuned` column when it does, which is precisely what
+        # makes an A/B comparison meaningless without this.
+        campaign["core"] = "benchmark"
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(campaign, indent=2) + "\n")
+
+
+def write_run_bindcraft2(path: Path, cfg: dict):
+    """Generate run_bindcraft2.sh.
+
+    Mirrors bindmaster_examples/run_bindcraft2.sh.template. BindCraft 2 differs
+    from every other tool here in three ways that shape this script:
+
+      - It lives in a uv venv beside its own checkout, not a conda env, because
+        it installs editable. There is nothing to `conda activate`.
+      - Its budget is a quota of ACCEPTED designs and the package has no
+        wall-clock setting, so an unset max_trajectories runs until the quota is
+        met. The campaign JSON carries the budget; this script additionally
+        honours an optional wall clock via timeout(1).
+      - On aarch64 it reads card memory through nvidia-smi and calls float() on
+        the answer. GB10 replies "[N/A]" and the exception handler does not catch
+        ValueError, so every campaign dies just after preflight. Two documented
+        settings avoid it, and they are injected HERE rather than written into
+        campaign.json, because configs are generated on one machine and run on
+        another: baking them in would disable multi-GPU packing on the x86 boxes
+        whenever BM5 generated the config, and omitting them would still crash on
+        Spark whenever an x86 box did.
+    """
+    run_dir = cfg["run_dir"]
+    name = cfg["name"]
+    target_pdb = Path(cfg["target_pdb"]).resolve()
+    target_seq = cfg.get("target_sequence", "")
+    modality = cfg.get("bindcraft2_modality", "binder")
+    n_designs = int(cfg.get("bindcraft2_n_designs", cfg.get("n_designs", 10)))
+    max_traj = cfg.get("bindcraft2_max_trajectories")
+    wall_clock = str(cfg.get("bindcraft2_timeout", "") or "").strip()
+    min_len = int(cfg.get("bindcraft2_min_length", cfg.get("min_length", 60)))
+    max_len = int(cfg.get("bindcraft2_max_length", cfg.get("max_length", 150)))
+    lengths_json = "null" if modality in _BINDCRAFT2_SCAFFOLDED else f"[{min_len}, {max_len}]"
+
+    settings_block = _settings_json_block(
+        tool="bindcraft2",
+        settings_dir_var="BC2_OUT",
+        conda_env="(uv venv: BindCraft2/.venv)",
+        version_dict_inner="""
+    "bindmaster_git_sha": "$GIT_SHA",
+    "bindmaster_git_branch": "$GIT_BRANCH",
+    "bindcraft2_version": "$BC2_VER",
+    "bindcraft2_source_sha256": "$BC2_SRC\"""",
+        target_dict_inner=f"""
+    "name": "{name}",
+    "pdb": "{target_pdb}",
+    "sequence": "{target_seq}",
+    "length": {len(target_seq)},
+    "chains": "{cfg.get("chains", "A")}\"""",
+        design_params_inner=f"""
+    "campaign_json": "$CAMPAIGN",
+    "modality": "{modality}",
+    "binder_lengths": {lengths_json},
+    "number_of_final_designs": {n_designs},
+    "max_trajectories": {int(max_traj) if max_traj else "null"},
+    "wall_clock": "{wall_clock}",
+    "arch_guard_applied": $GUARD_APPLIED""",
+        extra_env_inner=(
+            '\nBC2_VER=$("$BC2_PY" -c \'import importlib.metadata as m;print(m.version("bindcraft"))\''
+            ' 2>/dev/null || echo "unknown")'
+            # BindCraft 2 is not a git checkout here (it is staged from an archive),
+            # so there is no SHA to record. Hash the campaign-relevant source instead,
+            # which is what actually has to match for a rerun to mean anything.
+            '\nBC2_SRC=$(find "$BC2_DIR/bindcraft" -name "*.py" -type f -print0 2>/dev/null'
+            ' | sort -z | xargs -0 cat 2>/dev/null | sha256sum | cut -c1-16 || echo "unknown")'
+        ),
+    )
+
+    content = (
+        f"""\
+#!/usr/bin/env bash
+# Run BindCraft 2 for {name}
+# Generated by BindMaster Configurator (mirrors bindmaster_examples/run_bindcraft2.sh.template).
+#
+# BindCraft 2 reads ONE layered campaign file; everything in it wins over the
+# presets beneath. The campaign is written beside this script, not inline, so it
+# can be edited and rerun without regenerating anything.
+set -euo pipefail
+
+RUN_DIR="{run_dir}"
+BC2_DIR="{BINDCRAFT2_DIR}"
+BC2_PY="$BC2_DIR/.venv/bin/python"
+BC2_BIN="$BC2_DIR/.venv/bin/bindcraft"
+BC2_OUT="$RUN_DIR/bindcraft2"
+CAMPAIGN="$BC2_OUT/campaign.json"
+
+mkdir -p "$BC2_OUT"
+
+if [[ ! -x "$BC2_BIN" ]]; then
+    echo "ERROR: BindCraft 2 is not installed at $BC2_DIR" >&2
+    echo "       bindmaster install --tool bindcraft2 --bc2-source /path/to/BindCraft2.zip" >&2
+    exit 1
+fi
+
+# The venv's bin first, so `python` in the provenance block below is the
+# interpreter that will actually run the campaign.
+export PATH="$BC2_DIR/.venv/bin:$PATH"
+
+# Reuse the AlphaFold 2 parameters already on this machine rather than letting
+# BindCraft 2 download another 5.3 GB. Exported ONLY when a directory was found:
+# an exported-but-empty BINDCRAFT_* variable counts as a value and fails, rather
+# than falling back.
+for _af2 in \\
+    "${{BINDCRAFT2_AF2_PARAMS:-}}" \\
+    "{BINDMASTER_DIR}/BindCraft/params" \\
+    "${{HOME}}/Documents/OLD/BindMaster/bindcraft-tools/af2_params"; do
+    if [[ -n "$_af2" && -d "$_af2" ]]; then
+        export BINDCRAFT_AF2_PARAMS="$_af2"
+        break
+    fi
+done
+
+# Compiled graphs are cached per CAMPAIGN by default, under the project folder,
+# so every new campaign re-pays ~60 s per prediction shape from cold. Point it at
+# a per-machine cache instead. The card name is appended BY US: an operator-set
+# JAX_COMPILATION_CACHE_DIR is used verbatim and BindCraft 2's own per-card keying
+# is skipped, and a compiled executable is not portable between GPU models.
+_card=$(nvidia-smi --query-gpu=name --format=csv,noheader -i 0 2>/dev/null | head -1 || echo "")
+if [[ -n "$_card" ]]; then
+    _card=$(printf '%s' "$_card" | sed 's/[^A-Za-z0-9]\\+/_/g; s/^_//; s/_$//')
+    export JAX_COMPILATION_CACHE_DIR="${{HOME}}/.cache/bindmaster/bc2_xla/$_card"
+    mkdir -p "$JAX_COMPILATION_CACHE_DIR"
+fi
+# BindCraft 2 sets its own XLA_PYTHON_CLIENT_PREALLOCATE and appends its own
+# XLA_FLAGS; upstream says to leave both alone. Use BC2_XLA_EXTRA if ever needed.
+
+# aarch64 guard, decided on the machine that is RUNNING, not the one that
+# generated this script. design_gpu_memory_gb() calls float() on nvidia-smi's
+# memory reading behind an `except (OSError, CalledProcessError)`; GB10 answers
+# "[N/A]", which is a ValueError, so the campaign is refused immediately after
+# preflight. auto_multi_gpu alone is NOT enough -- the campaign reaches the same
+# call again through campaign_subbatch_size while subbatch_size is "auto".
+GUARD_APPLIED=false
+BC2_ARGS=()
+if [[ "$(uname -m)" == "aarch64" ]]; then
+    BC2_ARGS+=(--set 'auto_multi_gpu=false' --set 'subbatch_size=null')
+    GUARD_APPLIED=true
+    echo "  aarch64: pinning auto_multi_gpu=false subbatch_size=null (GB10 nvidia-smi returns [N/A])"
+fi
+"""
+        + settings_block
+        + f"""
+echo "=== BindCraft 2 campaign: {name} ==="
+echo "  Campaign:  $CAMPAIGN"
+echo "  Modality:  {modality}"
+echo "  Requested: {n_designs} ACCEPTED design(s)"
+echo "  Budget:    {("max_trajectories=" + str(int(max_traj))) if max_traj else "UNBOUNDED — no attempt limit is set, so this runs until it reaches the quota"}"
+echo "  Output:    $BC2_OUT"
+echo "  Settings persisted: $BC2_OUT/settings.json"
+echo ""
+
+{("timeout " + wall_clock + " ") if wall_clock else ""}"$BC2_BIN" design "$CAMPAIGN" "${{BC2_ARGS[@]}}"
+
+# The ranked table is rewritten on every acceptance and reconciled at campaign
+# close, so it is only final now. Anything that snapshots it for a report must
+# run after this point, not during the campaign.
+if [[ -s "$BC2_OUT/3_Ranked/!_Ranked.csv" ]]; then
+    echo ""
+    echo "=== BindCraft 2 finished: $(( $(wc -l < "$BC2_OUT/3_Ranked/!_Ranked.csv") - 1 )) accepted design(s) ==="
+    echo "    Ranked table: $BC2_OUT/3_Ranked/!_Ranked.csv  (ordered by i_pDAE, best first)"
+else
+    echo ""
+    echo "=== BindCraft 2 finished with NO accepted designs ==="
+    echo "    Per-attempt detail: $BC2_OUT/1_Trajectories/!_Trajectories.csv"
+    echo "    Rejected candidates and the filters they failed: $BC2_OUT/2_Refolded/!_Refolded.csv"
+fi
+"""
+    )
     path.write_text(content)
     path.chmod(0o755)
 
@@ -2721,6 +3001,12 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         design_dirs.append(("--mosaic", str(run_dir / "mosaic")))
     if tools_enabled.get("boltzgen"):
         design_dirs.append(("--boltzgen", str(run_dir / "boltzgen" / "outputs")))
+    if tools_enabled.get("bindcraft2"):
+        # The CAMPAIGN folder, not a subdirectory of it: the extractor resolves
+        # 3_Ranked/!_Ranked.csv beneath whatever it is given, and run_bindcraft2.sh
+        # sets project_folder to exactly this path. Pointing one level too deep is
+        # the mistake that cost RFD3 a whole 23 h campaign (see the note below).
+        design_dirs.append(("--bindcraft2", str(run_dir / "bindcraft2")))
     if tools_enabled.get("bindcraft"):
         design_dirs.append(("--bindcraft", str(run_dir / "bindcraft" / "outputs")))
     if tools_enabled.get("pxdesign_local"):
@@ -3010,6 +3296,9 @@ REQUIRED_CFG_KEYS: dict[str, tuple[str, ...]] = {
     "pxdesign_local": ("pxdesign_binder_length", "target_pdb"),
     "proteina_complexa": ("target_pdb",),
     "rfd3": ("target_pdb",),
+    # Only what write_run_bindcraft2 reads as cfg["literal"]; everything else is
+    # cfg.get() with a default, so a headless --config need not carry it.
+    "bindcraft2": ("target_pdb",),
     "protein_hunter": (),
     "evaluator": (),
 }
@@ -3112,6 +3401,11 @@ def generate(cfg: dict, tools_enabled: dict):
         copy_bindcraft_preset(FILTERS_DIR, cfg["filter_preset"], run_dir / "bindcraft" / "filters.json")
         copy_bindcraft_preset(ADVANCED_DIR, cfg["advanced_preset"], run_dir / "bindcraft" / "advanced.json")
         write_run_bindcraft(run_dir / "run_bindcraft.sh", cfg)
+
+    if tools_enabled.get("bindcraft2"):
+        (run_dir / "bindcraft2").mkdir(parents=True, exist_ok=True)
+        write_bindcraft2_campaign(run_dir / "bindcraft2" / "campaign.json", cfg)
+        write_run_bindcraft2(run_dir / "run_bindcraft2.sh", cfg)
 
     if tools_enabled.get("boltzgen"):
         if cfg.get("boltzgen_mode") == "nanobody":
@@ -3376,6 +3670,8 @@ def wizard():
     use_boltzgen = ask_yn("  Enable BoltzGen?", default=False)
     print(f"  {BOLD}BindCraft{RESET} [{_tag('bindcraft')}]")
     use_bindcraft = ask_yn("  Enable BindCraft?", default=True)
+    print(f"  {BOLD}BindCraft 2{RESET} [{_tag('bindcraft2')}]")
+    use_bindcraft2 = ask_yn("  Enable BindCraft 2?", default=False)
     print(f"  {BOLD}PXDesign{RESET}  [{_tag('pxdesign_local')}] / [external import]")
     pxdesign_mode, _ = ask_choice(
         "  PXDesign mode",
@@ -3470,6 +3766,7 @@ def wizard():
         "mosaic": use_mosaic,
         "boltzgen": use_boltzgen,
         "bindcraft": use_bindcraft,
+        "bindcraft2": use_bindcraft2,
         "pxdesign": use_pxdesign,
         "pxdesign_local": use_pxdesign_local,
         "pxdesign_import": use_pxdesign_import,
@@ -3768,6 +4065,72 @@ def wizard():
             ask("  Number of backbone designs", default=n_designs, validator=validate_int(min_val=1, max_val=10000))
         )
 
+    if use_bindcraft2:
+        print_step("Step 6h — BindCraft 2 settings")
+        bc2_modality_idx, _ = ask_choice(
+            "  Binder format",
+            [
+                "binder — de novo miniprotein (default)",
+                "large_binder — over ~300 aa; set the lengths below",
+                "peptide — short, may fold only when bound",
+                "VHH — single-domain antibody on a shipped scaffold",
+            ],
+            default_index=0,
+        )
+        cfg["bindcraft2_modality"] = _BINDCRAFT2_WIZARD_MODALITIES[bc2_modality_idx]
+        # The other eight modalities and six properties stay reachable through
+        # `bindmaster configure --config`; this prompts for what we actually run.
+        cfg["bindcraft2_n_designs"] = int(
+            ask(
+                "  Number of ACCEPTED designs to reach (a quota, not an attempt count)",
+                default=min(n_designs, 20),
+                validator=validate_int(min_val=1, max_val=1000),
+            )
+        )
+        # BindCraft 2 has no wall-clock setting of any kind, and this is its only
+        # cap. Unset means the campaign runs until it reaches the quota, however
+        # many attempts that takes; upstream warns a hard target can need
+        # thousands per design. Measured here: ~7.4 min/trajectory on a GB10.
+        print(f"  {YELLOW}BindCraft 2 counts ACCEPTED designs, not attempts, and has no timeout.{RESET}")
+        print(f"  {YELLOW}Without an attempt budget a campaign runs until it reaches the quota.{RESET}")
+        # Asked as a yes/no first so that "unbounded" is a deliberate answer and
+        # never the result of pressing Enter past a prompt.
+        if ask_yn("  Set an attempt budget (max_trajectories)?", default=True):
+            cfg["bindcraft2_max_trajectories"] = int(
+                ask(
+                    "  Max trajectories",
+                    default=cfg["bindcraft2_n_designs"] * 50,
+                    validator=validate_int(min_val=1, max_val=1000000),
+                )
+            )
+        else:
+            cfg["bindcraft2_max_trajectories"] = None
+            print(f"  {YELLOW}⚠ No attempt budget — this campaign runs until it reaches the quota.{RESET}")
+        if ask_yn("  Set a wall-clock limit (timeout)?", default=False):
+            cfg["bindcraft2_timeout"] = ask("  Wall clock, e.g. 24h or 90m", default="24h")
+        else:
+            cfg["bindcraft2_timeout"] = ""
+        cfg["bindcraft2_benchmark_core"] = ask_yn(
+            "  Reproducible run (fixes the seed, disables autotuning and the desperation ladder)?",
+            default=True,
+        )
+        for _prop, _label in (
+            ("forced_targeting", "Force contacts onto the named hotspots"),
+            ("humanize", "Humanize the binder sequence"),
+            ("termini_accessible", "Keep the termini solvent-accessible (for fusions/tags)"),
+        ):
+            cfg[f"bindcraft2_{_prop}"] = ask_yn(f"  {_label}?", default=False)
+        print(f"  {YELLOW}Per-tool overrides (Enter = keep global default):{RESET}")
+        if cfg["bindcraft2_modality"] not in _BINDCRAFT2_SCAFFOLDED:
+            cfg["bindcraft2_min_length"] = int(
+                ask("  Min binder length", default=min_length, validator=validate_int(min_val=10, max_val=500))
+            )
+            cfg["bindcraft2_max_length"] = int(
+                ask("  Max binder length", default=max_length, validator=validate_int(min_val=10, max_val=500))
+            )
+        else:
+            print(f"  {CYAN}  (a scaffolded format takes its length from the scaffold){RESET}")
+
     if use_protein_hunter:
         print_step("Step 6g — Protein-Hunter settings")
         cfg["protein_hunter_num_cycles"] = int(
@@ -3845,6 +4208,19 @@ def wizard():
             f"replicas={cfg.get('complexa_replicas')}  "
             f"length={pc_min}–{pc_max}  "
             f"max_designs={cfg.get('complexa_n_designs')}"
+        )
+    if use_bindcraft2:
+        bc2_budget = cfg.get("bindcraft2_max_trajectories")
+        bc2_mod = cfg.get("bindcraft2_modality", "binder")
+        bc2_len = (
+            "scaffold"
+            if bc2_mod in _BINDCRAFT2_SCAFFOLDED
+            else f"{cfg.get('bindcraft2_min_length', min_length)}–{cfg.get('bindcraft2_max_length', max_length)}"
+        )
+        print(
+            f"  {CYAN}BindCraft 2{RESET}:   modality={bc2_mod}  length={bc2_len}  "
+            f"accepted_target={cfg.get('bindcraft2_n_designs', n_designs)}  "
+            f"budget={bc2_budget if bc2_budget else f'{YELLOW}UNBOUNDED{RESET}'}"
         )
     if use_rfd3:
         r_min = cfg.get("rfd3_min_length", min_length)
@@ -3966,6 +4342,8 @@ def cmd_status():
             tools.append("BoltzGen")
         if (run_dir / "run_bindcraft.sh").exists():
             tools.append("BindCraft")
+        if (run_dir / "run_bindcraft2.sh").exists():
+            tools.append("BindCraft 2")
         if (run_dir / "run_pxdesign.sh").exists():
             tools.append("PXDesign")
         if (run_dir / "run_proteina_complexa.sh").exists():
@@ -4005,6 +4383,19 @@ def cmd_status():
             statuses.append(f"BindCraft: {len(bc_outputs)} PDBs")
         elif "BindCraft" in tools:
             statuses.append("BindCraft: pending")
+
+        # Count accepted designs, not files on disk: BindCraft 2's budget is a
+        # quota of accepted designs, and it writes structures for rejected
+        # candidates too (2_Refolded/), so a directory count would overstate it.
+        bc2_ranked = run_dir / "bindcraft2" / "3_Ranked" / "!_Ranked.csv"
+        if bc2_ranked.is_file():
+            try:
+                accepted = max(0, sum(1 for _ in bc2_ranked.open()) - 1)
+            except OSError:
+                accepted = 0
+            statuses.append(f"BindCraft 2: {accepted} accepted")
+        elif "BindCraft 2" in tools:
+            statuses.append("BindCraft 2: pending")
 
         report_html = run_dir / "evaluate" / "evaluate_report" / "report.html"
         if report_html.exists():

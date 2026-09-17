@@ -18,13 +18,14 @@ import tui.app as app
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# The seven design tools, spelled out here on purpose: this is the spec the TUI
+# The eight design tools, spelled out here on purpose: this is the spec the TUI
 # must meet, so the behavioural tests below stay independent of app.TOOL_SEQUENCE.
 # (output subdir under runs/<name>/, display label)
 EXPECTED_TOOLS = [
     ("mosaic", "Mosaic"),
     ("boltzgen", "BoltzGen"),
     ("bindcraft", "BindCraft"),
+    ("bindcraft2", "BindCraft 2"),
     ("pxdesign", "PXDesign"),
     ("proteina_complexa", "Proteina-Complexa"),
     ("rfd3", "RFD3"),
@@ -60,8 +61,8 @@ def test_only_one_hardcoded_tool_list_in_the_tui():
     assert hits == [], f"tool names enumerated outside TOOL_SEQUENCE: {hits}"
 
 
-def test_tool_sequence_knows_all_seven_tools():
-    assert len(app.TOOL_SEQUENCE) == 7
+def test_tool_sequence_knows_every_tool():
+    assert len(app.TOOL_SEQUENCE) == 8
     subdirs = [subdir for subdir, _label, _marker in app.TOOL_SEQUENCE]
     assert set(subdirs) == EXPECTED_SUBDIRS
     assert len(subdirs) == len(set(subdirs)), "duplicate output subdir in TOOL_SEQUENCE"
@@ -69,7 +70,7 @@ def test_tool_sequence_knows_all_seven_tools():
 
 
 def test_run_status_line_reports_every_tool(tmp_path):
-    """A run with output from all seven tools must name all seven."""
+    """A run with output from every tool must name every one of them."""
     run_dir = tmp_path / "runs" / "CALCA"
     for subdir, _label in EXPECTED_TOOLS:
         (run_dir / subdir).mkdir(parents=True)
@@ -77,9 +78,13 @@ def test_run_status_line_reports_every_tool(tmp_path):
 
     line = _normalise(app._run_status_line(run_dir))
 
-    for subdir, label in EXPECTED_TOOLS:
+    for _subdir, label in EXPECTED_TOOLS:
+        # The status line is built from display labels. It used to be asserted
+        # that the output subdir appeared too, which passed only because every
+        # label happened to lowercase to its own subdir — until "BindCraft 2",
+        # whose subdir is "bindcraft2" but whose label carries a space. The
+        # contract is that the tool is named, not how the directory is spelled.
         assert _normalise(label) in line, f"{label} missing from run status line: {line}"
-        assert subdir in line
 
 
 def test_run_status_line_ignores_empty_tool_dirs(tmp_path):
@@ -92,7 +97,7 @@ def test_run_status_line_ignores_empty_tool_dirs(tmp_path):
     assert "configured" in app._run_status_line(tmp_path / "runs" / "never-launched")
 
 
-def test_detect_tools_covers_all_seven(tmp_path):
+def test_detect_tools_covers_every_tool(tmp_path):
     """The header "Tools:" bar must list all seven, not just the original four."""
     for _subdir, label, marker in app.TOOL_SEQUENCE:
         if label == "RFD3":
