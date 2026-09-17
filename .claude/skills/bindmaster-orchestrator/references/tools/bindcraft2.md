@@ -7,7 +7,7 @@
 
 ## Principle
 
-BindCraft 2 keeps the shape of BindCraft 1's method — hallucinate a binder through AF2, redesign the sequence with ProteinMPNN, validate what comes back — and replaces nearly everything around it. PyRosetta is gone, so the physics battery that BindCraft 1 filters on is gone with it; validation is instead done by AlphaFold models held out from the design step, plus structural filters. Conda is gone too: it installs from pip wheels into a venv we create for it, which is why it runs on machines BindCraft 1 cannot be installed on at all.
+BindCraft 2 keeps the shape of BindCraft 1's method — hallucinate a binder through AF2, redesign the sequence with ProteinMPNN, validate what comes back — and replaces nearly everything around it. PyRosetta is gone, so the physics battery that BindCraft 1 filters on is gone with it; validation is instead done by AlphaFold models held out from the design step, plus structural filters. Conda is gone too: it installs from pip wheels into a venv we create for it, which makes it far lighter to stand up on a new machine — though not a platform unlock, since BindCraft 1 runs on aarch64 as well.
 
 The other half of the rewrite is the interface. One layered campaign file replaces BindCraft 1's three JSONs: `core → modality → property → target → your campaign → --set`, each layer overriding the one above. That makes a campaign a single archivable artifact, and it makes the *modality* a first-class choice rather than a weight-tuning exercise — including scaffolded formats (VHH, ARP, scFv, Fab) and objectives (cyclic peptide, homo-oligomer, multidomain, induced-fit, fold-switch) that BindCraft 1 has no equivalent for. Outputs are mmCIF, not PDB, and land in a three-stage tree rather than one flat CSV.
 
@@ -17,8 +17,8 @@ The other half of the rewrite is the interface. One layered campaign file replac
 
 ## Strengths
 
-- **Modalities nothing else in the stack offers.** Scaffolded VHH / ARP / scFv / Fab, cyclic peptides, homo-oligomers, multidomain binders, induced-fit and fold-switch objectives — named, not hand-tuned. The wizard exposes `binder`, `large_binder`, `peptide` and `VHH`; the other eight reach through `bindmaster configure --config`.
-- **Installs where BindCraft 1 cannot.** No PyRosetta (so no PyRosetta licence to clear) and no conda `jaxlib`. It is the **only AF2-hallucination designer in the stack that runs on DGX Spark at all**.
+- **Modalities nothing else in the stack offers.** Scaffolded VHH / ARP / scFv / Fab, cyclic peptides, homo-oligomers, multidomain binders, induced-fit and fold-switch objectives — named, not hand-tuned. The wizard exposes the de novo formats — `binder`, `large_binder`, `peptide`; the other nine reach through `bindmaster configure --config`. **`VHH` is held back on purpose**: nanobodies belong to the nano effort, and our ranking cannot score them (a validated 6.8 nM VHH scores 0.21 through it), so a wizard-driven VHH campaign would produce a pool the report cannot rank.
+- **A much lighter dependency stack.** No PyRosetta and no conda `jaxlib` — pip wheels into a venv. That is a maintenance and portability win rather than a platform one: BindCraft 1 runs on aarch64 too (measured on BM5, jaxlib 0.4.34 on the GPU, pyrosetta importing), so on Spark you have both, and they are complementary rather than substitutes.
 - **One campaign file.** The whole run is a single JSON beside the run script; edit and rerun without regenerating anything.
 - **A reproducible profile.** `core: benchmark` fixes the seed and disables autotuning and the desperation ladder — mandatory for any A/B against BindCraft 1 or against another preset, because the ladder silently loosens validation after a long fruitless stretch and stamps the designs it produced that way.
 - **A second AF2 arm that is not a duplicate.** Running both BindCrafts on one target is a genuine method comparison (different filters, different ranking metric, different validation models) that costs nothing extra in the report.
@@ -37,7 +37,7 @@ The other half of the rewrite is the interface. One layered campaign file replac
 ## Pick when
 
 - **You need a modality BindCraft 1 has no equivalent for** — a scaffolded antibody format (VHH / ARP / scFv / Fab), a cyclic peptide, a homo-oligomer, a multidomain binder, or an induced-fit / fold-switch objective. This is the main reason to reach for it over BindCraft 1.
-- **The machine cannot host BindCraft 1** — aarch64 / DGX Spark, or any node where PyRosetta's licence or conda `jaxlib` is the blocker. It is the only AF2-hallucination arm available there.
+- **A second AF2 arm on one target.** Running both BindCrafts is a genuine method comparison — different filters, different ranking metric, different validation models — not a duplicate. Both run on every platform we have, aarch64 included.
 - **You want an AF2-hallucination arm that is not BindCraft 1** — same family, different filters and different ranking metric, so a head-to-head on one target is informative rather than redundant.
 - The target is protein with a clear epitope; hotspots map 1:1 onto our existing prompts (`A54,A56,B12-16` syntax).
 

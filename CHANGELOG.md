@@ -41,10 +41,10 @@ It refuses rather than guesses on the tables that would parse cleanly and be
 wrong — the pre-ProteinMPNN trajectory table, the candidate table that mixes
 rejects in, and `accepted.csv`, which has no rank column at all.
 
-Runs on **aarch64**, where it is opt-in. That makes it the only
-AF2-hallucination designer that works on DGX Spark, since BindCraft 1 cannot be
-installed there at all — but at ~7.4 min per trajectory against ~90 s on a
-GH200, it is kept out of `--tool all` for throughput rather than capability.
+Runs on **aarch64**, where it is opt-in — at ~7.4 min per trajectory against
+~90 s on a GH200, it is kept out of `--tool all` for throughput rather than
+capability. It joins BindCraft 1 on that platform rather than replacing it;
+both AF2-hallucination designers run there.
 
 Two settings avoid a crash there that neither one alone does.
 `design_gpu_memory_gb()` calls `float()` on nvidia-smi's memory reading behind
