@@ -32,7 +32,7 @@ BindMaster/
 ```bash
 # Step 1: Extract sequences (any tool combination)
 conda run -n binder-eval binder-compare extract \
-    --bindcraft DIR --boltzgen DIR --mosaic DIR --pxdesign DIR -o seqs.fasta
+    --bindcraft DIR --bindcraft2 DIR --boltzgen DIR --mosaic DIR --pxdesign DIR -o seqs.fasta
 
 # Step 2: Boltz-2 refolding (uses Mosaic uv venv)
 Mosaic/.venv/bin/binder-compare refold-boltz2 \
@@ -75,6 +75,24 @@ bash Evaluator/evaluate.sh \
 | `pae_tb_mean` | lower = better | Mean target-to-binder PAE |
 | `plddt_binder_mean` | higher = better | Mean binder pLDDT [0,1] |
 | `agreement_count` | higher = better | Engines agreeing ipsae_min > 0.61 |
+
+### BindCraft 2 native metrics
+
+Each design carries the numbers its own tool produced, under a `bindcraft2_`
+prefix so they sit beside the refold columns without being mistaken for them.
+They are worth reading separately because none of their scales matches the rest
+of the table.
+
+| Metric | Direction | Description |
+|--------|-----------|-------------|
+| `bindcraft2_ipdae` | higher = better | BindCraft 2's own ranking metric. Its `rank` column is a plain descending sort on this and nothing else — not i_pTM, not a composite. Bounded [0,1]; it reads like an error term but behaves as a TM-score analogue |
+| `bindcraft2_iptm` | higher = better | Design-time i_pTM, already on [0,1]. Biased by the engine that designed the sequence exactly as BindCraft 1's is, so it never enters `consensus_iptm_mean` |
+| `bindcraft2_plddt` | higher = better | Binder pLDDT, already on [0,1] |
+| `bindcraft2_ipae` | lower = better | Interface PAE divided by 31 — **not in angstroms**, so it is not comparable with `pae_*` above |
+
+Do not rescale `bindcraft2_plddt` or `bindcraft2_iptm` on reflex: unlike AF3's
+[0,100] pLDDT, which the ingest divides by 100, they arrive on [0,1] and
+dividing them again would quietly flatten the pool.
 
 ## Known Issues
 

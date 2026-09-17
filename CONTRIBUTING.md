@@ -30,6 +30,7 @@ bindmaster install --tool all
 | Environment | Purpose | Python |
 |---|---|---|
 | `BindCraft` | BindCraft AF2 + MPNN design | 3.10 |
+| BindCraft2 `.venv` (uv) | BindCraft 2 AF2 hallucination (JAX, no PyRosetta) | >= 3.12 |
 | `BoltzGen` | BoltzGen Boltz-1 design | 3.12 |
 | Mosaic `.venv` (uv) | Mosaic hallucination + Boltz-2 refolding | 3.12 |
 | `bindmaster_pxdesign` | PXDesign (Protenix) | 3.11 |
@@ -38,6 +39,16 @@ bindmaster install --tool all
 | `binder-eval-af2` | Evaluator AF2 refolding | 3.10 |
 
 > Each tool/environment is isolated. Never mix packages across environments.
+
+BindCraft 2 is a uv venv and not a conda environment because it is a rewrite
+rather than a new version of BindCraft: no PyRosetta, no conda dependency, JAX
+and Python >= 3.12 the whole requirement. It coexists with BindCraft 1, which
+keeps its own environment. It is installed **editable**, so `BindCraft2/` is not
+a disposable build artefact — the checkout *is* the installation. That directory
+is gitignored and must never be committed. There is no public download either:
+the source is supplied per machine, with
+`bindmaster install --tool bindcraft2 --bc2-source <zip|dir>` or by exporting
+`$BINDCRAFT2_SOURCE` once for the host.
 
 ---
 

@@ -109,10 +109,10 @@ grants you in that code.
 
 ## 3. Not vendored — fetched at install time
 
-The seven design tools and the refolding engines are **cloned or pip-installed
-by the installer at install time**, not redistributed here. Their licences are
-their own and travel with them; consult each project directly. They are listed
-so the full dependency surface is visible in one place:
+The design tools and the refolding engines are **cloned or pip-installed by the
+installer at install time**, not redistributed here — with one exception noted
+below. Their licences are their own and travel with them; consult each project
+directly. They are listed so the full dependency surface is visible in one place:
 
 | Component | Upstream |
 |---|---|
@@ -123,6 +123,7 @@ so the full dependency surface is visible in one place:
 | Proteina-Complexa | [NVIDIA-Digital-Bio/proteina-complexa](https://github.com/NVIDIA-Digital-Bio/proteina-complexa) |
 | Protein-Hunter (vendored Boltz-2 / Chai-1) | Cho et al. 2025 |
 | RFD3 / `rc-foundry` | [RosettaCommons/foundry](https://github.com/RosettaCommons/foundry) — BSD-3 |
+| BindCraft 2 | not fetched by the installer — see below |
 | AlphaFold 3 v3.0.2 | [google-deepmind/alphafold3](https://github.com/google-deepmind/alphafold3) — weights are **gated**; obtain them from DeepMind under their terms |
 | ESMFold2 | Biohub `esm` |
 | PyRosetta (BindCraft, Protein-Hunter) | Academic/non-commercial free; commercial use requires a licence |
@@ -130,6 +131,25 @@ so the full dependency surface is visible in one place:
 Model weights — AF2 parameters, Boltz-1/Boltz-2 checkpoints, RFD3 and
 ProteinMPNN checkpoints, ESMFold2 weights — are downloaded at install or first
 run and are **not** in this repository. Each carries its own terms.
+
+## 4. Neither vendored nor fetched — supplied per machine
+
+**BindCraft 2** is the one design tool the installer cannot obtain for you. It is
+source-available under its own licence — not MIT, not OSI-approved — and is
+pre-publication, so there is no public URL to clone and no file of it appears in
+this repository. Whoever installs it supplies their own copy through
+`--bc2-source` (or `$BINDCRAFT2_SOURCE`); the installer unpacks it into a
+gitignored `BindCraft2/` and installs it editable there.
+
+Its licence permits redistribution for others to run themselves, including
+commercially; the restrictions are on offering it as a hosted or managed service
+and on using its name to market a derivative. Nothing in BinderScout does either
+— it installs the tool on your own machine and runs it there. That licence, and
+the Apache-2.0 AlphaFold 2 code and MIT ProteinMPNN weights it carries, travel
+with the copy you supply and are not granted by anything here.
+
+Nothing in this repository is licensed under BindCraft 2's terms, and BindCraft 2
+is not licensed under this repository's MIT.
 
 ---
 

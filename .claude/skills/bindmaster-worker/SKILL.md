@@ -147,7 +147,7 @@ Each tool has its own way of receiving the target structure. The assignment's "S
 
 ### 4.3 Generate the run script
 
-**Preferred path: `bindmaster configure`** — BindMaster's interactive wizard (steps 1–7; step 6 expands into per-tool sub-steps 6a–6g). It (a) writes the target_settings JSON into the right per-tool location, (b) generates the run script from `bindmaster_examples/run_<tool>.sh.template` with the settings filled in, (c) writes the per-run `settings.json` reproducibility manifest the campaign relies on, and (d) creates a single `run_all.sh` to dispatch enabled tools. Use this whenever the assignment's settings map cleanly to the wizard's flow. The wizard's output lives at `~/runs/<TARGET>-<machine>-<tool>/` — same convention this skill assumes for the run dir.
+**Preferred path: `bindmaster configure`** — BindMaster's interactive wizard (steps 1–7; step 6 expands into per-tool sub-steps 6a–6h). It (a) writes the target_settings JSON into the right per-tool location, (b) generates the run script from `bindmaster_examples/run_<tool>.sh.template` with the settings filled in, (c) writes the per-run `settings.json` reproducibility manifest the campaign relies on, and (d) creates a single `run_all.sh` to dispatch enabled tools. Use this whenever the assignment's settings map cleanly to the wizard's flow. The wizard's output lives at `~/runs/<TARGET>-<machine>-<tool>/` — same convention this skill assumes for the run dir.
 
 **Fall-back path: hand-copy the template.** If the assignment specifies a setting the wizard doesn't expose (e.g. an experimental flag, a non-stock filter preset), copy `bindmaster_examples/run_<tool>.sh.template` directly to `~/runs/<TARGET>-<machine>-<tool>/run.sh` and edit. Do not hand-write a run script from scratch — the templates encode the JAX / PyRosetta env traps (`LD_LIBRARY_PATH`, `LD_PRELOAD`, `set +u`) that have cost the campaign days. See `references/troubleshooting.md` §6.
 
@@ -193,6 +193,7 @@ Summary:
 | Tool | Source-of-truth file | What "real progress" looks like |
 |---|---|---|
 | BindCraft | `final_design_stats.csv` | new row per accept (NOT `ls Accepted/` — always has 4 empty subdirs) |
+| BindCraft 2 | `bindcraft2/3_Ranked/!_Ranked.csv` | new row per ACCEPTED design — the budget is a quota of accepts, not attempts, so attempt-level progress is in `1_Trajectories/!_Trajectories.csv`. The ranked table is rewritten on every acceptance and reconciled at campaign close, so it can **shrink**; snapshot it for `--tool-csv` only after the run ends |
 | BoltzGen | `final_ranked_designs/final_<budget>_designs/` + `all_designs_metrics.csv` | directory populated + CSV row growth |
 | Mosaic | `designs.csv` | row count growth |
 | Protein-Hunter | `summary_high_iptm.csv` + `high_iptm_yaml/` | CSV row + YAML file growth (row count > num_designs is normal) |
