@@ -261,6 +261,17 @@ def detect_installs() -> dict:
             return False
         return (CONDA_ENVS_DIR / name).is_dir()
 
+    def _env_has_package(env: str, package: str) -> bool:
+        """True if `package` is importable-on-disk in `env`'s site-packages.
+
+        Checked by looking for the directory rather than by importing, because
+        importing costs an interpreter start per tool on every wizard launch.
+        """
+        if CONDA_ENVS_DIR is None:
+            return False
+        libs = (CONDA_ENVS_DIR / env / "lib").glob("python3.*/site-packages")
+        return any((lib / package).is_dir() for lib in libs)
+
     return {
         "bindcraft": _env_exists("BindCraft"),
         "boltzgen": _env_exists("BoltzGen"),
@@ -273,7 +284,15 @@ def detect_installs() -> dict:
         # distinguishes a finished install from a staged-but-unbuilt checkout.
         "bindcraft2": (BINDCRAFT2_VENV / "bin" / "bindcraft").exists(),
         "rfd3": _env_exists("bindmaster_rfd3") and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
-        "protein_hunter": _env_exists("bindmaster_protein_hunter") and PROTEIN_HUNTER_DIR.exists(),
+        # An env directory is not an install: BM5 carried a `bindmaster_protein_hunter`
+        # env for months that held only pip and setuptools — no PyRosetta, no boltz_ph —
+        # and this probe reported the tool as ready. Look for PyRosetta, which is the
+        # part that actually fails to install, and which design.py imports at startup.
+        "protein_hunter": (
+            _env_exists("bindmaster_protein_hunter")
+            and PROTEIN_HUNTER_DIR.exists()
+            and _env_has_package("bindmaster_protein_hunter", "pyrosetta")
+        ),
         "af3": _env_exists("binder-eval-af3"),
         "esmfold2": _env_exists("binder-eval-esmfold2"),
         "soluprot": _env_exists("binder-eval-soluprot"),

@@ -54,6 +54,9 @@ MOSAIC_COMMIT="82593a8"
 PXDESIGN_REPO="https://github.com/bytedance/PXDesign.git"
 PXDESIGN_COMMIT="HEAD"
 PXDESIGN_DIR="${BINDMASTER_DIR}/PXDesign"
+PROTEIN_HUNTER_REPO="https://github.com/yehlincho/Protein-Hunter.git"
+PROTEIN_HUNTER_COMMIT="d4bd9515882c2aa81e97f3d3bf7f42247a9fe80c"
+PROTEIN_HUNTER_DIR="${BINDMASTER_DIR}/Protein-Hunter"
 
 ARCH="$(uname -m)"     # expected: aarch64
 CUDA_VERSION="13.0"    # DGX Spark GB10 (Blackwell, sm_121)
@@ -91,6 +94,11 @@ DO_EVALUATOR=false
 DO_PXDESIGN=false
 DO_AF3=false            # opt-in via --tool af3 (gated weights; not in --tool all)
 DO_BINDCRAFT2=false     # opt-in via --tool bindcraft2 + --bc2-source (see the note above)
+DO_PROTEIN_HUNTER=false # opt-in via --tool protein-hunter. PyRosetta comes from the graylab
+                        # conda channel -- the same aarch64 build install_bindcraft() already
+                        # uses here -- not from the pip wheel, which has no aarch64 build and
+                        # whose installer hard-aborts on this architecture. UNVALIDATED on
+                        # aarch64 hardware, so it is kept out of --tool all.
 DO_RFD3=false           # opt-in via --tool rfd3. Should work (pip-only, no DGL) but is
                         # UNVALIDATED on aarch64 hardware, so it is kept out of --tool all.
 DO_ESMFOLD2=false       # in --tool all (default refold engine) (lightweight 4th refold engine; no gated weights)
@@ -129,8 +137,7 @@ while [[ $# -gt 0 ]]; do
                 rfd3|foundry)
                     DO_RFD3=true ;;
                 protein-hunter|protein_hunter|phunter)
-                    echo -e "${RED}Protein-Hunter is not supported on aarch64: PyRosetta publishes no aarch64 wheels.${RESET}"
-                    exit 1 ;;
+                    DO_PROTEIN_HUNTER=true ;;
                 proteina-complexa|proteina_complexa|complexa)
                     # DEPRECATED 2026-07-29 — a throughput verdict, not an install failure.
                     # Upstream complexa DOES install and generate on Spark. But there is no CUDA
@@ -151,7 +158,7 @@ while [[ $# -gt 0 ]]; do
                 soluprot|solu|solubility)
                     DO_SOLUPROT=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, bindcraft2, boltzgen, mosaic, evaluator, pxdesign, rfd3, af3, esmfold2, soluprot${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, bindcraft2, boltzgen, mosaic, evaluator, pxdesign, protein-hunter, rfd3, af3, esmfold2, soluprot${RESET}"
                     exit 1
                     ;;
             esac
@@ -222,6 +229,16 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
                                        download — pass the copy you were given with
                                        --bc2-source (a .zip, a directory, or a git URL
                                        once upstream opens).
+                  protein-hunter       Protein-Hunter — opt-in on aarch64, and NEWLY enabled:
+                                       this platform used to refuse it outright, on the
+                                       incorrect grounds that PyRosetta has no aarch64 build.
+                                       It does — the graylab conda channel ships the same
+                                       serialization flavour BindCraft already uses here, and
+                                       that is what this installs instead of the pip wheel.
+                                       Chai-1 is skipped (the Boltz-2 edition does not use
+                                       it). UNVALIDATED on aarch64 hardware, so not in
+                                       --tool all. gemmi builds from source: needs a
+                                       C/C++ toolchain.
                   rfd3                 RFD3 / foundry — opt-in on aarch64. Pure pip (no DGL),
                                        so it should work, but it is UNVALIDATED on aarch64
                                        hardware and is therefore not in --tool all.
@@ -2171,6 +2188,149 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/bindcraft2"
 }
 
+# ─── Protein-Hunter (aarch64) ─────────────────────────────────────────────────
+# Ported from install.sh with four platform deltas. The one that matters is
+# PyRosetta: upstream's `pyrosetta-installer` is a thin wheel downloader whose
+# allow-list is ['ubuntu','mac','m1'], so on aarch64 it prints "Could not find
+# PyRosetta wheel" and exits 1 -- and even patched it would 404, because the
+# release mirror publishes no cxx11thread.serialization flavour for aarch64.
+# The graylab CONDA channel does: pyrosetta 2023.11, py310, linux-aarch64,
+# build tag PyRosetta4.conda.aarch64.cxx11thread.serialization -- the same
+# package install_bindcraft() already uses on this platform, and the same
+# serialization flavour PH asks the wheel installer for.
+install_protein_hunter() {
+    print_step "Installing Protein-Hunter (aarch64)"
+
+    if [[ -d "${PROTEIN_HUNTER_DIR}" ]]; then
+        print_ok "Protein-Hunter already cloned at ${PROTEIN_HUNTER_DIR}"
+    else
+        run_logged "Cloning Protein-Hunter" \
+            git clone --depth 50 "${PROTEIN_HUNTER_REPO}" "${PROTEIN_HUNTER_DIR}" \
+            || { print_fail "Failed to clone Protein-Hunter"; return 1; }
+        git -C "${PROTEIN_HUNTER_DIR}" checkout "${PROTEIN_HUNTER_COMMIT}" --quiet \
+            || print_warn "Could not pin Protein-Hunter to ${PROTEIN_HUNTER_COMMIT} — using latest"
+    fi
+
+    # PyRosetta goes in the ENV-CREATION solve, not afterwards. It depends on
+    # zlib <1.3.0a0, which conda-forge's newer python-3.10 builds conflict with,
+    # so adding it later drags python 3.10.21 back to 3.10.14 -- and every pip
+    # package built against the first interpreter is then orphaned. numpy is
+    # pinned <2 in the same solve: rosetta.so reaches numpy.core, which numpy 2
+    # renamed, and boltz_ph pins numpy<2 anyway, so the two agree.
+    if env_exists bindmaster_protein_hunter; then
+        print_warn "Conda environment 'bindmaster_protein_hunter' already exists — skipping creation."
+        print_warn "  If it predates this installer it may lack PyRosetta; the smoke test below will say."
+    else
+        print_step "Creating bindmaster_protein_hunter conda environment (Python 3.10 + PyRosetta)"
+        run_logged "Creating bindmaster_protein_hunter env" \
+            "${CONDA_CMD}" create -n bindmaster_protein_hunter -y \
+            python=3.10 pip "numpy<2" pyrosetta \
+            -c conda-forge --channel https://conda.graylab.jhu.edu \
+            || { print_fail "Failed to create bindmaster_protein_hunter env with PyRosetta"; return 1; }
+    fi
+
+    # cu130, matching every other torch install on this platform (x86 uses cu121).
+    run_logged "Installing PyTorch (CUDA 13.0)" \
+        "${CONDA_CMD}" run -n bindmaster_protein_hunter \
+        pip install -q "torch>=2.2" "torchvision" "torchaudio" --index-url https://download.pytorch.org/whl/cu130 \
+        || { print_fail "Failed to install PyTorch"; return 1; }
+
+    # pyrosetta-installer is deliberately absent from this list -- see the header.
+    # gemmi 0.6.5 has no aarch64 wheel and builds from its sdist here; that is the
+    # only source build in the set and it needs a C/C++ toolchain.
+    run_logged "Installing Protein-Hunter Python deps (gemmi builds from source)" \
+        "${CONDA_CMD}" run -n bindmaster_protein_hunter bash -c \
+        "cd '${PROTEIN_HUNTER_DIR}' && pip install -q -e './boltz_ph' && pip install -q matplotlib seaborn prody py3Dmol pyyaml ml_collections biopython modelcif jaxtyping pandera logmd==0.1.45" \
+        || print_warn "Some Protein-Hunter deps failed — may need manual follow-up"
+
+    # Chai-1 is skipped on aarch64, and skipping costs nothing we use: the
+    # Boltz-2 entrypoint (boltz_ph/design.py) never imports chai_lab -- only the
+    # chai_ph/ backend does -- and install.sh already treats the step as
+    # non-fatal on x86 for the same reason.
+    print_warn "Skipping Chai-1 on aarch64 — the Boltz-2 edition does not use it."
+
+    # DAlphaBall is invoked by a hardcoded in-repo path, so the ARM64 binary has
+    # to be copied over the x86 one. Only --use_alphafold3_validation needs it.
+    local ph_dab="${PROTEIN_HUNTER_DIR}/utils/DAlphaBall.gcc"
+    if [[ -f "${BINDMASTER_DIR}/tools/aarch64/DAlphaBall.gcc" && -f "${ph_dab}" ]]; then
+        [[ -f "${ph_dab}.x86.bak" ]] || cp "${ph_dab}" "${ph_dab}.x86.bak"
+        cp "${BINDMASTER_DIR}/tools/aarch64/DAlphaBall.gcc" "${ph_dab}" \
+            && chmod +x "${ph_dab}" \
+            && print_ok "Installed ARM64 DAlphaBall (x86 original kept as .x86.bak)"
+    else
+        print_warn "No ARM64 DAlphaBall available — --use_alphafold3_validation will not work"
+    fi
+
+    local ph_mpnn_dir="${PROTEIN_HUNTER_DIR}/LigandMPNN/model_params"
+    if [[ ! -d "${ph_mpnn_dir}" ]] && [[ -f "${PROTEIN_HUNTER_DIR}/LigandMPNN/get_model_params.sh" ]]; then
+        run_logged "Downloading LigandMPNN weights (Protein-Hunter)" \
+            bash -c "cd '${PROTEIN_HUNTER_DIR}/LigandMPNN' && bash get_model_params.sh ./model_params" \
+            || print_warn "LigandMPNN weights download failed — download manually"
+    fi
+
+    # design.py aborts at startup with "CCD component ALA not found!" if mols/ is
+    # absent, which reads like a bug rather than a missing cache. Mosaic populates
+    # the same directory, so on a machine with Mosaic this usually passes already.
+    if [[ ! -f "${HOME}/.boltz/mols/ALA.pkl" ]]; then
+        print_warn "Boltz-2 cache incomplete (~/.boltz/mols/ALA.pkl missing). Bootstrap it with:"
+        echo "    conda run -n bindmaster_protein_hunter python -c \"from boltz.main import download_boltz2; from pathlib import Path; download_boltz2(cache=Path.home()/'.boltz')\""
+    else
+        print_ok "Boltz-2 cache present at ${HOME}/.boltz"
+    fi
+
+    # Two smoke tests, because the two halves fail independently: PyRosetta is
+    # the platform risk, boltz the dependency risk.
+    smoke_test "PyRosetta (aarch64 conda build)" \
+        "${CONDA_CMD}" run -n bindmaster_protein_hunter python -c \
+        "import pyrosetta; print(pyrosetta.version())" \
+        || print_warn "PyRosetta import failed — Protein-Hunter design will not run"
+
+    smoke_test "Protein-Hunter import check" \
+        "${CONDA_CMD}" run -n bindmaster_protein_hunter bash -c \
+        "cd '${PROTEIN_HUNTER_DIR}' && python -c 'import boltz; print(\"boltz_ph import OK\")'" \
+        || print_warn "Protein-Hunter import failed — env may still work after first-use weight download"
+
+    _write_protein_hunter_shortcut
+
+    print_ok "Protein-Hunter installation complete (aarch64 — UNVALIDATED, please report results)"
+    print_ok "  Usage: protein-hunter  (opens env shell)"
+    print_ok "         python boltz_ph/design.py --protein_seqs TARGET --num_designs N --name JOBNAME"
+}
+
+_write_protein_hunter_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# Protein-Hunter shortcut — activates bindmaster_protein_hunter conda env"
+        echo "# and opens an interactive shell in the Protein-Hunter directory."
+        echo ""
+        echo "PROTEIN_HUNTER_DIR=\"${PROTEIN_HUNTER_DIR}\""
+        echo "CONDA_CMD=\"${CONDA_CMD}\""
+    } > "${SHORTCUTS_DIR}/protein-hunter"
+    cat >> "${SHORTCUTS_DIR}/protein-hunter" << 'EOF'
+
+cd "${PROTEIN_HUNTER_DIR}"
+
+echo "Protein-Hunter environment (bindmaster_protein_hunter) activated."
+echo "Working directory: ${PROTEIN_HUNTER_DIR}"
+echo "Minimal protein binder run:"
+echo "  python boltz_ph/design.py --num_designs 50 --num_cycles 7 \\"
+echo "      --protein_seqs <TARGET_AA> --msa_mode mmseqs --gpu_id 0 \\"
+echo "      --name JOBNAME --min_protein_length 90 --max_protein_length 150 \\"
+echo "      --high_iptm_threshold 0.7 --percent_X 80"
+echo ""
+echo "Modalities (flags on design.py):"
+echo "  --cyclic                  cyclic peptide binder"
+echo "  --ligand_ccd CCD          small-molecule binder (CCD code)"
+echo "  --ligand_smiles 'SMILES'  small-molecule binder (SMILES)"
+echo "  --nucleic_seq SEQ --nucleic_type dna|rna    DNA / RNA binder"
+echo ""
+
+exec "${CONDA_CMD}" run --live-stream -n bindmaster_protein_hunter bash
+EOF
+    chmod +x "${SHORTCUTS_DIR}/protein-hunter"
+}
+
 install_rfd3() {
     print_step "Installing RFD3 (foundry) — aarch64"
     ensure_conda_in_path
@@ -2420,6 +2580,14 @@ uninstall_tool() {
             rm -f "${SHORTCUTS_DIR}/rfd3"
             [[ -d "${FOUNDRY_WEIGHTS_DIR}" ]] && { rm -rf "${FOUNDRY_WEIGHTS_DIR}"; print_ok "Removed ${FOUNDRY_WEIGHTS_DIR}"; }
             print_ok "RFD3 uninstalled"
+            ;;
+        protein-hunter|protein_hunter|phunter)
+            print_step "Uninstalling Protein-Hunter"
+            env_exists bindmaster_protein_hunter && run_logged "Removing bindmaster_protein_hunter env" \
+                "${CONDA_CMD}" env remove -n bindmaster_protein_hunter -y
+            rm -f "${SHORTCUTS_DIR}/protein-hunter"
+            [[ -d "${PROTEIN_HUNTER_DIR}" ]] && { rm -rf "${PROTEIN_HUNTER_DIR}"; print_ok "Removed ${PROTEIN_HUNTER_DIR}"; }
+            print_ok "Protein-Hunter uninstalled"
             ;;
         bindcraft2|bc2)
             print_step "Uninstalling BindCraft 2"
@@ -2784,6 +2952,7 @@ preflight() {
     [[ "${DO_PROTEIN_HUNTER}" == true ]]    && need=$(( need + 8 ))   # vendored Boltz-2 + Chai-1
     [[ "${DO_RFD3}"      == true ]]         && need=$(( need + 6 ))   # rfd3_latest.ckpt ~2.5 GB
     [[ "${DO_BINDCRAFT2}" == true ]]        && need=$(( need + 12 ))  # jax+cuda wheels; AF2 params reused
+    [[ "${DO_PROTEIN_HUNTER}" == true ]]    && need=$(( need + 14 ))  # torch + vendored Boltz-2 + PyRosetta (1.5 GB conda pkg)
     [[ "${DO_AF3}"       == true ]]         && need=$(( need + 6 ))
     [[ "${DO_ESMFOLD2}"  == true ]]         && need=$(( need + 6 ))
     [[ "${DO_SOLUPROT}"  == true ]]         && need=$(( need + 2 ))
@@ -2877,6 +3046,7 @@ main() {
         # NOTE: RFD3 has no line here, so `--uninstall --tool all` leaves it on
         # disk on this platform. Pre-existing; flagged rather than fixed here.
         [[ "${DO_BINDCRAFT2}" == true ]] && { uninstall_tool bindcraft2 || failed_uninstalls+=("BindCraft 2"); }
+        [[ "${DO_PROTEIN_HUNTER}" == true ]] && { uninstall_tool protein-hunter || failed_uninstalls+=("Protein-Hunter"); }
         [[ "${DO_AF3}"       == true ]] && { uninstall_tool af3       || failed_uninstalls+=("AF3"); }
         [[ "${DO_ESMFOLD2}"  == true ]] && { uninstall_tool esmfold2  || failed_uninstalls+=("ESMFold2"); }
         [[ "${DO_SOLUPROT}"  == true ]] && { uninstall_tool soluprot  || failed_uninstalls+=("SoluProt"); }
@@ -2928,6 +3098,7 @@ main() {
     [[ "${DO_PXDESIGN}"  == true ]] && (( total++ ))
     [[ "${DO_RFD3}"      == true ]] && (( total++ ))
     [[ "${DO_BINDCRAFT2}" == true ]] && (( total++ ))
+    [[ "${DO_PROTEIN_HUNTER}" == true ]] && (( total++ ))
     [[ "${DO_AF3}"       == true ]] && (( total++ ))
     [[ "${DO_ESMFOLD2}"  == true ]] && (( total++ ))
     [[ "${DO_SOLUPROT}"  == true ]] && (( total++ ))
@@ -2944,6 +3115,7 @@ main() {
     # Opt-in on this platform, so an unresolvable source is always a hard failure:
     # nothing reaches this line without an explicit --tool bindcraft2.
     [[ "${DO_BINDCRAFT2}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft 2${RESET}"; install_bindcraft2 || failed_tools+=("BindCraft 2"); }
+    [[ "${DO_PROTEIN_HUNTER}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Protein-Hunter${RESET}"; install_protein_hunter || failed_tools+=("Protein-Hunter"); }
     [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
     [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
     [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; install_soluprot || failed_tools+=("SoluProt"); }
