@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 
+from . import __version__
 from .cli import (
     affinity,
     analyze_target,
@@ -49,7 +50,7 @@ def main(argv=None) -> None:
         "PXDesign, Proteina-Complexa, and Protein Hunter.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
     subparsers.required = True

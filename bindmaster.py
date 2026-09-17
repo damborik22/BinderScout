@@ -13,6 +13,7 @@ Usage:
   bindmaster install   [--tool all|<tool>] [--cuda VERSION] [--skip-examples]   (--help for the tool list)
   bindmaster configure [options passed through to configurator.py]
   bindmaster evaluate  <binder-compare args>   (e.g. run --mosaic DIR --target-seq SEQ -o OUT)
+  bindmaster --version
   bindmaster --help
 """
 
@@ -22,6 +23,13 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
+
+# The product version. This is the single source of truth: every generated run
+# script stamps it into `runs/<name>/<tool>/settings.json`, so a run directory
+# records which BinderScout produced it without anyone having to guess from a
+# commit date. The bundled evaluator package (`binder-comparison`) carries its
+# own, independent version — the two are allowed to differ and usually do.
+__version__ = "1.1.0"
 
 BOLD = "\033[1m"
 CYAN = "\033[0;36m"
@@ -36,6 +44,7 @@ USAGE = f"""{BOLD}BindMaster{RESET} — GPU-accelerated protein binder design to
   bindmaster install   [--tool all|<tool>] [--cuda VERSION] [--skip-examples]   (--help for the tool list)
   bindmaster configure [options passed through]
   bindmaster evaluate  <binder-compare args>   (e.g. run --mosaic DIR --target-seq SEQ -o OUT)
+  bindmaster --version
   bindmaster --help
 
 {BOLD}Commands:{RESET}
@@ -157,6 +166,12 @@ def main() -> None:
     # and it must still work on a read-only checkout.
     if args and args[0] in ("-h", "--help"):
         print(USAGE)
+        sys.exit(0)
+
+    # Same contract as `--help`: an inspection command with no side effects, so
+    # it answers on a read-only checkout and before anything is installed.
+    if args and args[0] in ("-V", "--version"):
+        print(f"BinderScout {__version__}")
         sys.exit(0)
 
     _install_bindmaster_shortcut()
