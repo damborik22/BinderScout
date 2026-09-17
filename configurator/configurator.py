@@ -166,10 +166,17 @@ MOSAIC_HALLUCINATE_SRC = (
 # takes its length from the scaffold, so binder_lengths must NOT be written
 # alongside one.
 _BINDCRAFT2_SCAFFOLDED = frozenset({"VHH", "ARP", "scFv", "Fab"})
-# The subset the wizard prompts for. The rest — cyclic_peptide, homo_oligomer,
-# multidomain, ARP, scFv, Fab, induced_fit, fold_switch — stay reachable through
-# `bindmaster configure --config`, the same scoping RFD3 and Protein-Hunter got.
-_BINDCRAFT2_WIZARD_MODALITIES = ("binder", "large_binder", "peptide", "VHH")
+# The subset the wizard prompts for: the de novo formats. Everything else —
+# VHH, ARP, scFv, Fab, cyclic_peptide, homo_oligomer, multidomain, induced_fit,
+# fold_switch — stays reachable through `bindmaster configure --config`, the same
+# scoping RFD3 and Protein-Hunter got.
+#
+# VHH is out of the wizard deliberately rather than by omission. Nanobody design
+# belongs to the separate nano effort, and our cross-engine ranking cannot score
+# nanobodies regardless: a validated 6.8 nM VHH scores 0.21 through it, and the
+# pooled ranking gives no binder/non-binder separation for that class at all.
+# Offering it here would invite a campaign whose output the report cannot rank.
+_BINDCRAFT2_WIZARD_MODALITIES = ("binder", "large_binder", "peptide")
 # Design properties the wizard offers; the other six (bigbang, disulfide_staple,
 # initial_guess, mixed_topology, protease_stable, termini_together) are likewise
 # --config only. Written as JSON booleans, which is the campaign-file equivalent
@@ -4073,7 +4080,6 @@ def wizard():
                 "binder — de novo miniprotein (default)",
                 "large_binder — over ~300 aa; set the lengths below",
                 "peptide — short, may fold only when bound",
-                "VHH — single-domain antibody on a shipped scaffold",
             ],
             default_index=0,
         )
@@ -4120,16 +4126,16 @@ def wizard():
             ("termini_accessible", "Keep the termini solvent-accessible (for fusions/tags)"),
         ):
             cfg[f"bindcraft2_{_prop}"] = ask_yn(f"  {_label}?", default=False)
+        # Every modality the wizard offers is a de novo format, so a length range
+        # always applies. A scaffolded format reached through --config takes its
+        # length from the scaffold instead; write_bindcraft2_campaign handles that.
         print(f"  {YELLOW}Per-tool overrides (Enter = keep global default):{RESET}")
-        if cfg["bindcraft2_modality"] not in _BINDCRAFT2_SCAFFOLDED:
-            cfg["bindcraft2_min_length"] = int(
-                ask("  Min binder length", default=min_length, validator=validate_int(min_val=10, max_val=500))
-            )
-            cfg["bindcraft2_max_length"] = int(
-                ask("  Max binder length", default=max_length, validator=validate_int(min_val=10, max_val=500))
-            )
-        else:
-            print(f"  {CYAN}  (a scaffolded format takes its length from the scaffold){RESET}")
+        cfg["bindcraft2_min_length"] = int(
+            ask("  Min binder length", default=min_length, validator=validate_int(min_val=10, max_val=500))
+        )
+        cfg["bindcraft2_max_length"] = int(
+            ask("  Max binder length", default=max_length, validator=validate_int(min_val=10, max_val=500))
+        )
 
     if use_protein_hunter:
         print_step("Step 6g — Protein-Hunter settings")

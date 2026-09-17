@@ -2,9 +2,11 @@
 
 ## Why
 
-BindCraft 1 is the only AF2-hallucination designer in the pipeline, and it is
-our most constrained one: it needs PyRosetta and conda `jaxlib`, which is why
-it does not run on aarch64 at all. BindCraft 2 is a full rewrite of the same
+BindCraft 1 has been the only AF2-hallucination designer in the pipeline, and it
+carries the heaviest dependency stack in it: PyRosetta plus conda `jaxlib`.
+(Both do in fact work on aarch64 — measured on BM5, jaxlib 0.4.34 on the GPU
+and pyrosetta importing — so this is a maintenance burden, not a platform
+block.) BindCraft 2 is a full rewrite of the same
 lab's method — JAX only, no PyRosetta, no conda, Python ≥3.12, pip wheels —
 and it ships modalities BindCraft 1 has no equivalent for (scaffolded VHH /
 ARP / scFv / Fab, cyclic peptides, induced-fit and fold-switch objectives).
@@ -246,9 +248,9 @@ has.
 `CudaDevice(id=0)`; `biotraj` 1.2.2 — the one source build in the tree —
 compiles; the install completes and the CLI runs. With the two guard settings a
 campaign runs to completion. What remains for slice 7 is only the throughput
-question, and the first measurement is not encouraging (see Notes). BindCraft 2
-is nonetheless the first AF2-hallucination designer that runs on Spark at all,
-where BindCraft 1 cannot be installed.
+question, and the first measurement is not encouraging (see Notes). It joins
+BindCraft 1 there rather than replacing it — that tool also runs on Spark, which
+an earlier draft of this plan got wrong.
 
 ### Per-worker memory, and what a 24 GB card actually holds
 
@@ -291,15 +293,15 @@ Campaign settings the wizard writes:
 | `core` | Prompt `Reproducible run (fixes the seed, disables autotuning and the desperation ladder)? [Y/n]`, default **yes** → writes `core: benchmark`. Answering no omits the key entirely. `benchmark` is the only selectable profile. Mandatory for any A/B comparison — the desperation ladder silently loosens validation after 750 fruitless trajectories and stamps an `autotuned` column when it does. |
 | `auto_multi_gpu`, `subbatch_size` | Not written by the wizard — injected by the run script on aarch64 hosts only (see above). |
 
-Wizard scope is **de novo core + VHH**. Full identifier set, so the counts are
-checkable and the `--config` path has a contract:
+Wizard scope is **the de novo formats only**. Full identifier set, so the counts
+are checkable and the `--config` path has a contract:
 
 | Modality | Wizard | Scaffolded (omit `binder_lengths`) |
 |---|---|---|
 | `binder` | ✅ default | |
 | `large_binder` | ✅ | |
 | `peptide` | ✅ | |
-| `VHH` | ✅ | ✅ |
+| `VHH` | | ✅ |
 | `cyclic_peptide` | | |
 | `homo_oligomer` | | |
 | `multidomain` | | |
@@ -311,8 +313,16 @@ checkable and the `--config` path has a contract:
 
 Properties — `forced_targeting`, `humanize`, `termini_accessible` in the
 wizard; `bigbang`, `disulfide_staple`, `initial_guess`, `mixed_topology`,
-`protease_stable`, `termini_together` via `--config`. So: 12 modalities, 4
-exposed, 8 via `--config`; 9 properties, 3 exposed, 6 via `--config`.
+`protease_stable`, `termini_together` via `--config`. So: 12 modalities, 3
+exposed, 9 via `--config`; 9 properties, 3 exposed, 6 via `--config`.
+
+**`VHH` is out of the wizard deliberately**, not by omission. Nanobody design
+belongs to the separate nano effort, and our ranking cannot score nanobodies
+regardless — a validated 6.8 nM VHH scores 0.21 through it, and the pooled
+ranking gives no binder/non-binder separation for that class. Offering it in the
+wizard would invite a campaign whose output the report cannot rank. It stays
+reachable through `--config` for anyone who wants it anyway, and the scaffolded
+set still governs `binder_lengths` on that path.
 
 Wizard-side conflict validation (so a bad combination is caught before a run
 script is written): scaffold ↔ {cyclize, `copies`>1, fold_switch,
