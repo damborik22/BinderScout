@@ -6,8 +6,85 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased] — 1.1.0
 
-Work on the eighth design tool, BindCraft 2. See
+### Added — BindCraft 2, the eighth design tool
+
+BindCraft 2 is a rewrite of BindCraft rather than a new version of it — JAX only,
+no PyRosetta, no conda, Python >=3.12, one layered campaign file instead of three
+settings JSONs, mmCIF instead of PDB — so the two coexist as separate tools with
+separate environments. Every archived BindCraft 1 campaign stays reproducible,
+and the two can be run head-to-head against one target inside a single report.
+The full design and its evidence are in
 [docs/PLAN_bindcraft2_integration.md](docs/PLAN_bindcraft2_integration.md).
+
+Installed with `bindmaster install --tool bindcraft2 --bc2-source <zip|dir>`. It
+is the one tool the installer cannot fetch: it is source-available under its own
+non-MIT licence and pre-publication, so there is no public URL, `BindCraft2/` is
+gitignored, and no upstream URL appears in any committed file. Under `--tool all`
+a missing source warns and skips, so a machine without a copy still installs
+everything else; an explicit `--tool bindcraft2` fails and says which flag is
+needed.
+
+**It ranks on `i_pDAE`, not i_pTM, and not a composite.** The `rank` column is a
+plain descending sort on that one metric, higher-is-better despite the name
+reading like an error term, verified across all 100 rows of the two design sets
+delivered to us and against a campaign run here. Ties are pervasive — the values
+are rounded, giving a 17-way tie in one pool — so rank inside a tie block is
+acceptance order, not quality order, and it is read from the tool's own file
+rather than recomputed. Its i_pTM is design-time-biased exactly as BindCraft 1's
+is, so it stays a native metric and never enters `consensus_iptm_mean`.
+
+`BindCraft2Extractor` reads **two schemas**, because we hold pools in both: the
+`3_Ranked/!_Ranked.csv` that v1.0.0 writes, and the flat `<target>_ranked.csv`
+of the pre-1.0 build our archived CBG and CALCA pools came from. An extractor
+written to the current documentation alone could not re-report our own archive.
+It refuses rather than guesses on the tables that would parse cleanly and be
+wrong — the pre-ProteinMPNN trajectory table, the candidate table that mixes
+rejects in, and `accepted.csv`, which has no rank column at all.
+
+Runs on **aarch64**, where it is opt-in. That makes it the only
+AF2-hallucination designer that works on DGX Spark, since BindCraft 1 cannot be
+installed there at all — but at ~7.4 min per trajectory against ~90 s on a
+GH200, it is kept out of `--tool all` for throughput rather than capability.
+
+Two settings avoid a crash there that neither one alone does.
+`design_gpu_memory_gb()` calls `float()` on nvidia-smi's memory reading behind
+an `except (OSError, CalledProcessError)`; GB10 answers `[N/A]`, which raises
+`ValueError` and escapes that handler. `auto_multi_gpu=false` silences only the
+first of two call sites — the campaign reaches the same call again through
+`campaign_subbatch_size` while `subbatch_size` is at its default. Both are
+documented settings, so nothing in BindCraft 2's source is patched, and they are
+applied by the machine that is running rather than written into the campaign
+file, because configs here are generated on one machine and run on another.
+
+The wizard prompts for an attempt budget on every campaign, as a yes/no before
+the number. `number_of_final_designs` is a quota of *accepted* designs and
+`max_trajectories` is the only cap in the package — there is no wall-clock
+setting anywhere — so an unset budget runs until the quota is met. Unbounded
+remains available; it cannot be reached by pressing Enter past a prompt.
+
+### Fixed
+
+- **`settings.json` was invalid JSON on any GB10.** `gpu_memory_mib` is the one
+  unquoted value in the provenance block every run script writes, and it came
+  from an `nvidia-smi` call guarded only against failure. On GB10 that query
+  *succeeds* and returns the string `[N/A]`, so the guard never fired and the
+  bare string landed in the file — on the machine that orchestrates the fleet.
+  It went unnoticed because every `settings.json` in `runs/` was produced on the
+  x86 boxes, where the query returns a number. Fixed for all eight writers at
+  once.
+
+  The test meant to catch this could not run on a machine with a GPU: it built a
+  PATH to simulate "no nvidia-smi" but included `/usr/bin`, where nvidia-smi
+  lives, so its own guard assertion failed before the test body ever ran. It
+  passed in CI and failed for anyone with a card.
+
+- **`boltzgen` was missing from two per-tool render registries.** `_ENGINE_BAR_LABEL`
+  and `_TOOLCOL` carried only the `boltzgen_protein` and `boltzgen_nano`
+  sub-variants, never the canonical key the extractor actually tags designs
+  with. Found by the new registry-completeness test, which asserts every key in
+  `CANONICAL_TOOL_ORDER` appears in all thirteen per-tool lookups and has a
+  `.tool-<key>` CSS rule — the check that would have caught the eighth tool
+  shipping with no CSS rule and a link pointing at BindCraft 1's repository.
 
 ### Added
 
