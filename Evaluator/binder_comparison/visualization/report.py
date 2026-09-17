@@ -96,6 +96,11 @@ def _agreement_phrase(df: pd.DataFrame, thresholds: dict[str, float]) -> str:
 _TOOL_LINKS = {
     # BindCraft — Pacesa et al. (Nature 2025), repo at martinpacesa/BindCraft
     "bindcraft": "https://github.com/martinpacesa/BindCraft",
+    # BindCraft 2 — deliberately absent. It is a different tool from BindCraft,
+    # not a version of it, and linking it to BindCraft 1's repository (as this
+    # entry used to) is simply wrong. Its own repository is unpublished, so there
+    # is no URL to put here; the tool renders unlinked until there is. Anything
+    # asserting link coverage must exempt it explicitly.
     # BoltzGen — diffusion-based binder generator (installer pin)
     "boltzgen": "https://github.com/HannesStark/boltzgen",
     # Mosaic — escalante-bio JAX/Boltz-2 hallucinator
@@ -159,6 +164,7 @@ _HTML_TEMPLATE = """\
     filter: brightness(0.85);
   }}
   .tool-bindcraft          {{ color: #1565C0; font-weight: bold; }}
+  .tool-bindcraft2         {{ color: #0D47A1; font-weight: bold; }}
   .tool-boltzgen           {{ color: #E65100; font-weight: bold; }}
   .tool-boltzgen_nano      {{ color: #E65100; font-weight: bold; }}
   .tool-boltzgen_protein   {{ color: #EF6C00; font-weight: bold; }}

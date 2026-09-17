@@ -61,6 +61,30 @@ TOOL_CLASSIFICATION: dict[str, ToolClassification] = {
         ),
         convergence_check=None,
     ),
+    "bindcraft2": ToolClassification(
+        tool_name="bindcraft2",
+        display_name="BindCraft 2",
+        modality="de-novo",
+        # The delivered pools have been pre-ranked top-50 slices of 200-300
+        # design campaigns, whose metric means are not comparable to an
+        # unfiltered pool. A locally-run campaign is not pre-filtered, so this
+        # stays False and is set per run when a slice is what arrived.
+        pool_pre_filtered_default=False,
+        # v1.0.0 writes the first; the pre-1.0 build our archived pools came from
+        # wrote a flat ranked.csv, delivered to us renamed per target.
+        source_csv_default="3_Ranked/!_Ranked.csv (or <target>_ranked.csv, pre-1.0)",
+        native_metric_interpretation=(
+            "Ranked by i_pDAE — BindCraft 2's own ranking metric, a TM-score "
+            "analogue of the interface PAE bounded 0-1 where HIGHER is better, "
+            "despite the name reading like an error term. The rank column is a "
+            "plain descending sort on that one metric with no tie-breaker, NOT "
+            "on i_pTM and not a composite; ties are common, so rank inside a "
+            "tie block is acceptance order. i_pTM is also reported but is "
+            "design-time-biased, since BindCraft 2 optimises for it during "
+            "hallucination."
+        ),
+        convergence_check=None,
+    ),
     "boltzgen": ToolClassification(
         tool_name="boltzgen",
         display_name="BoltzGen",

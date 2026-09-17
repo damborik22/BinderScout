@@ -998,6 +998,9 @@ _ENGINE_BAR_LABEL = {
     "proteina_complexa": "Proteina-C",
     "protein_hunter": "Protein-Hunter",
     "rfd3": "RFD3",
+    # The canonical key the extractor actually tags designs with. Only the two
+    # sub-variants were listed, so a plain BoltzGen pool matched neither.
+    "boltzgen": "BoltzGen",
     "boltzgen_protein": "BoltzGen-prot",
     "boltzgen_nano": "BoltzGen-nano",
 }
