@@ -130,7 +130,13 @@ class TestEveryWriterPersistsSettingsJson:
         provenance block that exists to make runs reproducible."""
         lines = _emit(writer, full_cfg, script)
         probes = [ln for ln in lines if ln.startswith(("GPU_NAME=", "GPU_MEM="))]
-        assert len(probes) == 2, f"{script} is missing the GPU provenance probes"
+        # Both probes must exist and every one must be guarded. Counted rather
+        # than fixed at two: GPU_MEM is assigned twice, because a successful
+        # nvidia-smi can still answer "[N/A]" (GB10 does), and that string has to
+        # be clamped to a number before it reaches the one unquoted field in the
+        # JSON. The invariant is the guard, not the line count.
+        assert any(ln.startswith("GPU_NAME=") for ln in probes), f"{script} has no GPU_NAME probe"
+        assert any(ln.startswith("GPU_MEM=") for ln in probes), f"{script} has no GPU_MEM probe"
         for line in probes:
             assert "|| echo" in line, f"unguarded GPU probe in {script}: {line}"
 
@@ -162,8 +168,18 @@ class TestEveryWriterPersistsSettingsJson:
             "\n".join(["#!/usr/bin/env bash", "set -euo pipefail", *prelude, *lines[start : end + 1]]) + "\n"
         )
 
-        env_path = f"{tmp_path}:/usr/bin:/bin"  # deliberately excludes any nvidia-smi
-        assert shutil.which("nvidia-smi", path=env_path) is None
+        # Shadow nvidia-smi with a stub that fails, rather than asserting it is
+        # absent. The old guard excluded it by leaving its directory off PATH and
+        # then asserted which() found nothing — which is false on any machine with
+        # a GPU, including this project's own orchestrator box, where
+        # /usr/bin/nvidia-smi sits in the /usr/bin the same PATH includes. The test
+        # therefore passed only in CI and failed for every developer with a card.
+        # A failing stub tests what was meant: the `|| echo` fallbacks.
+        stub = tmp_path / "nvidia-smi"
+        stub.write_text("#!/usr/bin/env bash\nexit 127\n")
+        stub.chmod(0o755)
+        env_path = f"{tmp_path}:/usr/bin:/bin"
+        assert shutil.which("nvidia-smi", path=env_path) == str(stub)
         proc = subprocess.run(
             ["bash", str(runner)], capture_output=True, text=True, env={"PATH": env_path, "HOME": str(tmp_path)}
         )
