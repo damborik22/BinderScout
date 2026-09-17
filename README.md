@@ -15,7 +15,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 | Component | What it does | Runs in |
 |---|---|---|
-| `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the default refold engine ESMFold2 and the SoluProt solubility screen; AF3 is a separate `--tool` add (gated weights) | bash |
+| `bindmaster install` | Installs design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the default refold engine ESMFold2 and the SoluProt solubility screen; BindCraft 2 needs its source handed to `--bc2-source`, and AF3 is a separate `--tool` add (gated weights) | bash |
 | `bindmaster configure` | Interactive wizard: target → configs → run scripts | system Python |
 | `bindmaster evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by two-stage cross-engine iPTM, generate HTML report | conda env `binder-eval` |
 
@@ -24,6 +24,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 | Tool | What it does | Environment | Platform |
 |---|---|---|---|
 | **BindCraft** | AF2 hallucination + ProteinMPNN + PyRosetta filtering | conda env `BindCraft` (Python 3.10) | x86_64 |
+| **BindCraft 2** | AF2 hallucination rewritten for JAX — no PyRosetta, no conda. A separate tool, not a newer BindCraft: the two coexist | uv venv `BindCraft2/.venv` (Python ≥3.12, installed editable) | x86_64 + aarch64 (opt-in there) |
 | **BoltzGen** | Boltz-1 diffusion structure generation | conda env `BoltzGen` (Python 3.12) | x86_64 + aarch64 |
 | **Mosaic** | JAX / Boltz-2 gradient hallucination | uv venv `Mosaic/.venv` (Python 3.12) | x86_64 |
 | **PXDesign** | Protenix-based de novo design (diffusion + MPNN + AF2 eval) | conda env `bindmaster_pxdesign` (Python 3.11) | x86_64 + aarch64 |
@@ -32,6 +33,26 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 | **RFD3** | RosettaCommons foundry diffusion (RFdiffusion3 + ProteinMPNN, BSD-3, commercial-use OK) | conda env `bindmaster_rfd3` (Python 3.12) | x86_64 + aarch64 |
 
 > Each tool runs in its own isolated environment. Environments must not be mixed.
+
+BindCraft 2 is the one tool the installer cannot fetch for you. It is
+pre-publication and source-available under its own licence — not this
+repository's MIT — so there is no public download and no URL here. Hand the
+installer the copy you were given, with
+`bindmaster install --tool bindcraft2 --bc2-source <zip|dir>`, or export
+`$BINDCRAFT2_SOURCE` once for the machine.
+It installs **editable**, which makes `BindCraft2/` itself the installation:
+moving or deleting that directory breaks the `bindcraft` command inside its
+venv. Under `--tool all` on x86_64 a missing source is a warning and a skip, so
+a machine that has never been given the source still installs everything else;
+an explicit `--tool bindcraft2` fails instead of pretending to succeed.
+
+BindCraft 2 ranks its own accepted designs on `i_pDAE` — its own metric, sorted
+descending, higher being better despite the name reading like an error term.
+That rank is read from its file and never recomputed. Its i_pTM is
+design-time-biased exactly as BindCraft 1's is, so it never enters
+`consensus_iptm_mean`; the cross-engine refold is what places its designs
+against the other tools'. The integration is written up in
+[docs/PLAN_bindcraft2_integration.md](docs/PLAN_bindcraft2_integration.md).
 
 ### Evaluator engines & filters
 
@@ -53,6 +74,7 @@ flowchart LR
 
     subgraph Design["Design tools (configurator domain — run via run_all.sh)"]
         BC["BindCraft\n(AF2 + MPNN + PyRosetta)"]
+        BC2["BindCraft 2\n(AF2 hallucination in JAX,\nno PyRosetta)"]
         BG["BoltzGen\n(Boltz-1 diffusion)"]
         MosaicT["Mosaic\n(JAX + Boltz-2 hallucination)"]
         PX["PXDesign\n(Protenix + MPNN + AF2 eval)"]
@@ -108,6 +130,7 @@ flowchart TB
 
     subgraph GenEnvs["Design-tool environments (one per tool)"]
         EnvBC["BindCraft<br/>(conda, py3.10)"]:::gen
+        EnvBC2["BindCraft2/.venv<br/>(uv, py3.12+, editable)"]:::gen
         EnvBG["BoltzGen<br/>(conda, py3.12)"]:::gen
         EnvMo["Mosaic/.venv<br/>(uv, py3.12)"]:::gen
         EnvPX["bindmaster_pxdesign<br/>(conda, py3.11)"]:::gen
@@ -134,7 +157,7 @@ flowchart TB
     EvaluateSh -->|conda run -n …| EvalEnvs
 ```
 
-Solid blue boxes are the seven design tools' isolated environments; green / yellow boxes are the four evaluator environments (ESMFold2 and SoluProt ship in `--tool all`; AF3 is opt-in via `--tool af3`). The grey panel shows the per-run output layout the configurator generates and `evaluate.sh` fills in.
+Solid blue boxes are the eight design tools' isolated environments; green / yellow boxes are the four evaluator environments (ESMFold2 and SoluProt ship in `--tool all`; AF3 is opt-in via `--tool af3`). The grey panel shows the per-run output layout the configurator generates and `evaluate.sh` fills in.
 
 ---
 
@@ -162,7 +185,7 @@ BindMaster/
 ├── scripts/                    ← helper install scripts (PXDesign)
 ├── tests/                      ← unit + integration tests
 ├── docs/                       ← development plans, completed plans, environments reference, scientific notes
-├── bindmaster_examples/        ← canonical run-script templates (Mosaic hallucination, RFD3, Protein-Hunter)
+├── bindmaster_examples/        ← canonical run-script templates (Mosaic hallucination, RFD3, Protein-Hunter, BindCraft 2)
 ├── tools/
 │   └── aarch64/                ← pre-built ARM64 binaries (dssp, DAlphaBall)
 ├── conda/                      ← local Miniforge3 (standalone mode, gitignored)
@@ -170,7 +193,7 @@ BindMaster/
 └── runs/                       ← generated run folders (gitignored)
 ```
 
-Tool directories (`BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/`) are cloned by the installer and gitignored. RFD3 has no clone — it is pip-installed (`rc-foundry`) into `bindmaster_rfd3` and stores weights at `weights/foundry/`. AF3 v3.0.2 refolding runs in its own `binder-eval-af3` conda env on any CUDA host (measured ~4.4 GiB peak for 258-391 tokens, so a 24 GB card suffices; DGX Spark today; H200 / GH200 should also work); `refold_af3.py` is the canonical wrapper.
+Tool directories (`BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/`) are cloned by the installer and gitignored. `BindCraft2/` is gitignored too, but nothing clones it: the installer stages it from the source you supply and then installs into it editable, so the directory is the installation rather than a disposable checkout. RFD3 has no clone — it is pip-installed (`rc-foundry`) into `bindmaster_rfd3` and stores weights at `weights/foundry/`. AF3 v3.0.2 refolding runs in its own `binder-eval-af3` conda env on any CUDA host (measured ~4.4 GiB peak for 258-391 tokens, so a 24 GB card suffices; DGX Spark today; H200 / GH200 should also work); `refold_af3.py` is the canonical wrapper.
 
 ---
 
@@ -202,16 +225,18 @@ bindmaster evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bind
 > **Prefer menus to flags?** Run `bindmaster` with no arguments for the interactive TUI —
 > installer checkbox menu, configurator wizard, run launcher and status view.
 > **[docs/walkthrough_and_dataflow.html](docs/walkthrough_and_dataflow.html)** reproduces
-> every screen you will see, verbatim, and traces the full data flow: what each of the seven
-> tools writes, which file and column the pipeline reads from it, and what happens to those
-> numbers on the way to the report.
+> every screen you will see, verbatim, and traces the full data flow: what each tool
+> writes, which file and column the pipeline reads from it, and what happens to those
+> numbers on the way to the report. It was generated before BindCraft 2 landed and does
+> not cover it yet.
 
 ---
 
 ## `bindmaster` CLI reference
 
 ```
-bindmaster install   [--tool bindcraft|boltzgen|mosaic|pxdesign|proteina-complexa|protein-hunter|rfd3|all]
+bindmaster install   [--tool bindcraft|bindcraft2|boltzgen|mosaic|pxdesign|proteina-complexa|protein-hunter|rfd3|all]
+                     [--bc2-source <zip|dir>]          # where BindCraft 2's source is — there is no public download
                      [--tool af3|soluprot]             # extra evaluator engines (esmfold2 ships in --tool all)
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
 bindmaster configure [options passed through to configurator.py]
@@ -225,7 +250,8 @@ Options:
 
 | Flag | Description |
 |---|---|
-| `--tool all\|bindcraft\|boltzgen\|mosaic\|pxdesign\|proteina-complexa\|protein-hunter\|rfd3` | Which design tool(s) to install. Omit for interactive menu. |
+| `--tool all\|bindcraft\|bindcraft2\|boltzgen\|mosaic\|pxdesign\|proteina-complexa\|protein-hunter\|rfd3` | Which design tool(s) to install. Omit for interactive menu. |
+| `--bc2-source <zip\|dir>` | Where BindCraft 2's source is — a `.zip` or an unpacked directory. Same as exporting `$BINDCRAFT2_SOURCE`. Required by `--tool bindcraft2`, since there is nothing public to download; without it `--tool all` warns and skips BindCraft 2 rather than failing the whole install. |
 | `--tool esmfold2` | ESMFold2 refolder — **default** (already in `--tool all`); lightweight, no gated weights; also the `autosize` gate. Listed here for explicit re-install. |
 | `--tool af3\|soluprot` | Extra evaluator tools (not in `--tool all`). `af3` = AlphaFold 3 v3.0.2 (gated weights — canonical cross-check). `soluprot` = solubility screen (x86 needs the SoluProt + USEARCH downloads; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it source-builds scikit-learn 0.20.4 + USEARCH v12 and uses the `--no_tmhmm` model). |
 | `--cuda VERSION` | CUDA version for conda package resolution (default: 12.4) |
@@ -240,7 +266,7 @@ Options:
 Interactive wizard that:
 1. Asks for a target name, PDB file, chain(s), and hotspot residues
 2. Sets global binder length and design count, with per-tool overrides
-3. Lets you enable/disable each current-generation tool (Mosaic, BoltzGen, BindCraft, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3)
+3. Lets you enable/disable each current-generation tool (Mosaic, BoltzGen, BindCraft, BindCraft 2, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3)
 4. Writes all config files and shell scripts into `runs/<name>/`
 5. Optionally runs the full pipeline immediately
 
@@ -276,6 +302,11 @@ runs/<name>/
 │   ├── filters.json
 │   ├── advanced.json
 │   └── outputs/
+├── bindcraft2/
+│   ├── campaign.json           ← one layered campaign file, not a settings tree
+│   ├── 1_Trajectories/
+│   ├── 2_Refolded/
+│   └── 3_Ranked/               ← !_Ranked.csv, the accepted-design pool
 ├── pxdesign/
 ├── proteina_complexa/
 ├── protein_hunter/
@@ -283,6 +314,7 @@ runs/<name>/
 ├── run_mosaic.sh
 ├── run_boltzgen.sh
 ├── run_bindcraft.sh
+├── run_bindcraft2.sh
 ├── run_pxdesign.sh
 ├── run_proteina_complexa.sh
 ├── run_protein_hunter.sh
@@ -365,7 +397,7 @@ Every one takes `--help`. `bindmaster evaluate <cmd> …` runs the same thing in
 
 | Subcommand | What it does |
 |---|---|
-| `extract` | Pull binder sequences out of any combination of the seven tools' outputs into one FASTA |
+| `extract` | Pull binder sequences out of any combination of the eight tools' outputs into one FASTA (`--bindcraft2 DIR` for a BindCraft 2 campaign folder) |
 | `parse-seqs` | Convert sequences from FASTA / one-per-line / CSV / comma-separated into FASTA |
 | `validate` | Sanity-check sequences (alphabet, length, duplicates, target parse) before spending GPU time |
 | `run` | The whole pipeline in one call: extract → refold-boltz2 → report |
@@ -497,6 +529,7 @@ Both branches: `bindmaster install` or `bash install/install.sh`.
 ### aarch64 notes
 
 - **BindCraft**: ARM64 binaries (`DAlphaBall.gcc`, `dssp`) bundled in `tools/aarch64/` — copied automatically. Runs on the GPU as of 1.0.1: the installer pins `jax[cuda12]==0.6.2`, the first jaxlib whose LLVM knows `sm_121`. On the older 0.4.34 pin any real AF2 forward pass aborts with `LLVM ERROR: Unsupported rounding mode for conversion`. Older text here said it was blocked by missing aarch64 jaxlib CUDA packages; that was wrong — those exist, the problem was the LLVM target. For aarch64.
+- **BindCraft 2**: `install_aarch.sh --tool bindcraft2 --bc2-source <zip|dir>` — **validated** on GB10 / sm_121: JAX takes the GPU, `biotraj` compiles from source, and a campaign runs to completion. It is the only AF2-hallucination designer that runs on Spark at all, since BindCraft 1 cannot be installed here. It is nonetheless kept out of `--tool all` on **throughput, not capability**: ~7.4 min per trajectory measured here against ~90 s on a GH200, so production campaigns belong on x86.
 - **BoltzGen**: PyTorch from the **cu130 wheel index**, pinned (`torch==2.10.0+cu130`). Plain PyPI torch is **CPU-only** on aarch64 for the versions we pin — an earlier note here said the opposite, and acting on it silently replaces a working CUDA build with a CPU one.
 - **Mosaic**: `esmj` excluded (no aarch64 wheel). `torchtext` may also fail (no Linux aarch64 wheel).
 - **PXDesign**: Full pipeline works on aarch64 / Blackwell. The installer applies automatic patches for CUDA arch compatibility (sm_120) **and `-std=c++20`** (torch >= 2.9 headers hard-error on c++17, so protenix's fused kernel will not build without it), JSON serialization (`NumpyEncoder`), **`use_bfloat16=False` in the AF2 eval** (jaxlib's AArch64 backend cannot lower a bf16 convert under SVE, so the eval subprocess SIGABRTs and surfaces only as a `JSONDecodeError` on an empty file), and dataloader (`num_workers`) config. PyTorch must come from the **cu130** index; a cu124 build reports `torch.cuda.is_available() == True` and then fails every kernel launch.
@@ -505,10 +538,14 @@ Both branches: `bindmaster install` or `bash install/install.sh`.
 - **RFD3**: `install_aarch.sh --tool rfd3` installs it (cu130 torch wheels, `rc-foundry[rfd3,mpnn]`, weights + ProteinMPNN checkpoint into `weights/foundry/`). Opt-in rather than part of `--tool all` because it is **not yet validated on aarch64 hardware**.
 
 > **aarch64 tool matrix.** `install/install_aarch.sh` accepts `all`, `bindcraft`,
-> `boltzgen`, `mosaic`, `evaluator`, `pxdesign`, `rfd3`, `af3`, `esmfold2`,
-> `soluprot`. `--tool all` installs BindCraft, BoltzGen, Mosaic, Evaluator, PXDesign
-> and **ESMFold2** (the default refold engine).
+> `bindcraft2`, `boltzgen`, `mosaic`, `evaluator`, `pxdesign`, `rfd3`, `af3`,
+> `esmfold2`, `soluprot`. `--tool all` installs BindCraft, BoltzGen, Mosaic,
+> Evaluator, PXDesign and **ESMFold2** (the default refold engine).
 >
+> - **BindCraft 2 is opt-in on aarch64:** `--tool bindcraft2 --bc2-source …`.
+>   Unlike RFD3 below it *has* been validated on this hardware — it sits outside
+>   `--tool all` because a trajectory costs minutes here that it costs seconds
+>   elsewhere, not because anything is in doubt.
 > - **RFD3 is opt-in on aarch64:** `--tool rfd3`. It is pure pip with no DGL
 >   dependency so it should work, but it has **not been validated on aarch64
 >   hardware** — which is why it is not in `--tool all`. Please report results.
@@ -528,6 +565,7 @@ After installation, launchers are available in `BindMaster/bin/`:
 ```bash
 bindmaster         # unified CLI (install / configure / evaluate)
 bindcraft          # activates BindCraft conda env, cd to BindCraft dir
+bindcraft2         # runs `bindcraft design ...` from the BindCraft2 venv, or opens its shell
 boltzgen           # activates BoltzGen conda env, cd to BoltzGen dir
 mosaic             # activates Mosaic uv venv, cd to Mosaic dir
 pxdesign           # activates PXDesign conda env

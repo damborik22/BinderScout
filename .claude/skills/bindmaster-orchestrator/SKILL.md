@@ -91,7 +91,7 @@ binder-eval-esmfold2/                          ← ESMFold2 refold env (default 
 The three CLI verbs that matter campaign-side:
 
 - `bindmaster install --tool <tool>` — provisions or verifies a tool's env (worker pre-flight; orchestrator uses it to stand Spark up after a fresh clone). Standalone Miniforge auto-detect handles servers without writable system conda.
-- `bindmaster configure` — interactive wizard, steps 1–7 (step 6 expands into per-tool sub-steps 6a–6g), ~80 prompts. `--config <file>` replays a saved `runs/<name>/config.json` with no prompts. Workers use it to translate an assignment into a run dir; orchestrator rarely needs it directly. `bindmaster configure --status` lists runs and completion state, `--archive <run>` tars a run dir.
+- `bindmaster configure` — interactive wizard, steps 1–7 (step 6 expands into per-tool sub-steps 6a–6h), ~80 prompts. `--config <file>` replays a saved `runs/<name>/config.json` with no prompts. Workers use it to translate an assignment into a run dir; orchestrator rarely needs it directly. `bindmaster configure --status` lists runs and completion state, `--archive <run>` tars a run dir.
 - `bindmaster evaluate <subcommand> …` — a **passthrough** to the `binder-compare` CLI. It takes a SUBCOMMAND, not a run directory: `bindmaster evaluate <dir>` is rejected by argparse, and there are no `--refold` / `--target` / `--metric` / `--top` flags. The canonical entry point for Phase 3' below is the generated script `bash runs/<name>/run_evaluate.sh`, which drives `Evaluator/evaluate.sh` (that is where `--min-engines`, `--skip-<engine>` and the SoluProt pre-filter live).
 
 On each worker machine (BM1, BM2, BM4, Clara, others):

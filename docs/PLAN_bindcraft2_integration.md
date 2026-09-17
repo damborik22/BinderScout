@@ -98,8 +98,10 @@ third parties as a hosted/managed/API/SaaS service, and (b) using the
 BindCraft2 name to market a derivative as if official. Nothing BinderScout
 does touches either.
 
-**The constraint is an embargo, not the licence.** `PacesaLab/BC2` returns
-404 — the code is pre-publication. Therefore:
+**The constraint is an embargo, not the licence.** The upstream repository is
+not published yet — checked, and it 404s. Its location is deliberately not named
+here either: this repository is public, so naming an unreleased project's path
+is itself a small disclosure. Therefore:
 
 - `BindCraft2/` is **gitignored and never committed**, in `.gitignore` and
   `.dockerignore` both. It is not listed in `THIRD_PARTY_NOTICES.md` section 1

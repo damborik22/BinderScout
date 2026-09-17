@@ -2,7 +2,7 @@
 
 ## Overview
 
-BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. It wraps seven independent design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) behind a single CLI (`bindmaster`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders.
+BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. It wraps eight independent design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) behind a single CLI (`bindmaster`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders. BindCraft 2 is a rewrite, not a new version of BindCraft: it does not replace it, and the two coexist as separate tools in separate environments.
 
 **Current status:** `master` is **frozen at 1.0.3** — the validated seven-tool pipeline (Parts A–H plus I, J, K, L, M, N, T and U; 1.0.1 added three aarch64 platform fixes — BindCraft 1 on jax 0.6.2, PXDesign's cu130 torch and its AF2 bf16 abort; 1.0.2 pinned the ESMFold2 model revision; 1.0.3 stopped AF3 reserving half of any large card and stopped ESMFold2 failing silently). It is not committed to. Active work is **1.1.0** on the `v1.1.x` branch, adding BindCraft 2 as the eighth design tool — see [docs/PLAN_bindcraft2_integration.md](docs/PLAN_bindcraft2_integration.md). Engine line-up: Evaluator AF2 refolding removed (Part I), AF3 v3.0.2 as the canonical 2nd refolding engine (Part K — **runs on 24 GB consumer GPUs for our size regime**; the old ">=100 GB" figure was a preallocation artifact, see the AF3 memory note below), Protenix refolding removed (Part J reverted — AF3 covers the 2nd-engine role), Protein-Hunter (Part L) and RFD3 (Part M) installed and configurable. Ranking: affinity-from-structure-confidence closed as a negative result (Part N), and three ranking methods collapsed into one — cross-engine gate then `consensus_iptm_mean` (Part U). SoluProt is part of `--tool all` and both platforms build USEARCH v12 from source. Proteina-Complexa is deprecated on aarch64 (throughput, not an install failure). **Both BindCraft 1 and PXDesign now run on the GPU on DGX Spark** — each previously reported itself healthy while being unusable there.
 
@@ -88,6 +88,7 @@ Target structure (.pdb / .mmcif)
        Mosaic               (JAX + Boltz-2 hallucination)
        BoltzGen             (Boltz-1 diffusion)
        BindCraft            (AF2 + MPNN + PyRosetta)
+       BindCraft 2          (AF2 hallucination + MPNN, JAX only — no PyRosetta; ranks on i_pDAE)
        PXDesign             (Protenix + MPNN + AF2 eval)
        Proteina-Complexa    (NVIDIA flow matching + ITO)
        Protein-Hunter       (Boltz-2 / Chai-1; 6 modalities: protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA)
@@ -129,7 +130,8 @@ BindMaster/
 ├── bindmaster_examples/       ← canonical run-script templates
 │   ├── hallucinate_bindmaster.py     ← Mosaic template (copied into Mosaic/ on install)
 │   ├── run_rfd3.sh.template          ← RFD3 two-stage (backbone diffusion + MPNN)
-│   └── run_protein_hunter.sh.template ← Protein-Hunter Boltz-2 hallucination
+│   ├── run_protein_hunter.sh.template ← Protein-Hunter Boltz-2 hallucination
+│   └── run_bindcraft2.sh.template    ← BindCraft 2 layered campaign JSON + design run
 ├── tools/
 │   └── aarch64/               ← pre-built ARM64 binaries (DAlphaBall, dssp)
 ├── .github/workflows/ci.yml  ← shellcheck + ruff + pytest + Docker build
@@ -145,6 +147,7 @@ BindMaster/
 
 **Gitignored (created at runtime):**
 - `BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/` — cloned by installer
+- `BindCraft2/` — *staged*, not cloned: BindCraft 2 is pre-publication and source-available under its own (non-MIT) licence, so there is no public URL to clone from and no file of it belongs in this repo. The installer unpacks it from `--bc2-source` and installs it **editable**, so the checkout is the installation — moving or deleting it breaks the `bindcraft` command
 - `weights/foundry/` — RFD3 / ProteinMPNN checkpoints fetched by `foundry install` (no clone dir; `rc-foundry` is pip-installed into `bindmaster_rfd3`)
 - `runs/` — generated experiment directories
 - `install.log`, `install_aarch.log` — installer output
@@ -157,6 +160,7 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | Environment | Tool | Python | Manager | Purpose |
 |---|---|---|---|---|
 | `BindCraft` | BindCraft | 3.10 | conda | AF2 + MPNN + PyRosetta binder design |
+| `BindCraft2/.venv` | BindCraft 2 | >=3.12 | **uv** | AF2 hallucination + MPNN, JAX only — **no conda env and no PyRosetta**. Installed editable into a venv beside its own checkout, so `BindCraft2/.venv/bin/python` is the one detection marker |
 | `BoltzGen` | BoltzGen | 3.12 | conda | Boltz-1 diffusion-based generation |
 | `Mosaic/.venv` | Mosaic | 3.12 | uv | JAX + Boltz-2 hallucination |
 | `bindmaster_pxdesign` | PXDesign | 3.11 | conda | Protenix-based binder design + eval (PXDesign's own internal Protenix; not a refold engine) |
@@ -194,6 +198,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 
   Caveat on the history: the env was byte-identical to May (untouched since 2026-03-07) and both runs used multimer, so why it compiled then is **unexplained**. The only changed variable is the driver (580.95.05 → 580.142 on 2026-06-30, now 580.159.03). Don't repeat that as fact.
 
+- **BindCraft 2: VALIDATED on GB10/sm_121, but opt-in and not in `--tool all`** — and the reason is throughput, not capability. `jax-cuda13` takes the GPU, `biotraj` (the only source build in its tree) compiles, and a campaign runs to completion with the two guard settings `run_bindcraft2.sh` injects (see the runtime gotchas below). It is kept out of `all` because a trajectory costs ~7.4 min here against ~90 s on a GH200. That still makes it the **only AF2-hallucination designer that runs on Spark at all** — BindCraft 1 cannot install here (no aarch64 jaxlib CUDA conda packages), so on this platform the two tools are not interchangeable. Install with `bash install/install_aarch.sh --tool bindcraft2 --bc2-source <zip|dir>`
 - BoltzGen: PyTorch from the **cu130 wheel index**, pinned (`torch==2.10.0+cu130`). Plain PyPI torch is **CPU-only** on aarch64 for the versions we pin — an earlier note here said the opposite, and acting on it silently replaced a working CUDA build with a CPU one. Verified on BM5: the live `BoltzGen` env is `torch 2.10.0+cu130` with `sm_120`/`compute_120` in its arch list.
 - Mosaic: `esmj` excluded (no aarch64 wheel); `torchtext` also may fail
 - RFD3: installable on aarch64 via `install/install_aarch.sh --tool rfd3` (no DGL dependency; pip-installs cleanly). **Opt-in, not in `--tool all`, because it is unvalidated on aarch64 hardware** — validate on Spark and promote it once confirmed.
@@ -321,6 +326,7 @@ the parameter sweep.
 | Tool | Method | Key papers/repos |
 |---|---|---|
 | **BindCraft** | AF2 hallucination + MPNN sequence design + PyRosetta filtering | `martinpacesa/BindCraft` |
+| **BindCraft 2** | A rewrite of BindCraft, not a new version: AF2 hallucination + MPNN, JAX only, no PyRosetta. Ranks its own designs on `i_pDAE` | not public — source-available, pre-publication; supplied per machine via `--bc2-source` |
 | **BoltzGen** | Boltz-1 structure diffusion + flow matching for binder generation | `HannesStark/boltzgen` |
 | **Mosaic** | JAX-based Boltz-2 gradient hallucination (no internal AF2 cross-val) | `escalante-bio/mosaic` |
 | **PXDesign** | Protenix-based de novo binder design (diffusion + MPNN + AF2 eval) | `bytedance/PXDesign` |
@@ -367,7 +373,7 @@ the parameter sweep.
 
 ### Critical domain facts
 
-- **iptm is gameable by the designing engine** — BindCraft games AF2 ipTM; Mosaic games `boltz_iptm` by construction (it *is* Boltz-2 gradient hallucination). Never rank on a single engine's ipTM. The two-stage `consensus_iptm_mean` (mean across independent engines) resists this — a design one engine loves but another rejects is demoted by the mean.
+- **iptm is gameable by the designing engine** — BindCraft games AF2 ipTM, and BindCraft 2's i_pTM is design-time-biased in exactly the same way (it hallucinates against AF2 too), so neither tool's own i_pTM ever enters `consensus_iptm_mean`; Mosaic games `boltz_iptm` by construction (it *is* Boltz-2 gradient hallucination). Never rank on a single engine's ipTM. The two-stage `consensus_iptm_mean` (mean across independent engines) resists this — a design one engine loves but another rejects is demoted by the mean.
 - **Engine disagreement lowers the mean — but is NOT a useful stratifier.** For short binders (~60aa), refolding engines often disagree on interface quality, and `consensus_iptm_mean` captures that continuously (disagreement drags the mean down). That much holds. What does *not* hold is using disagreement to slice the pool: on Cao, splitting at the median engine spread changed AUC by −0.006/+0.005 against a random-split null of ±0.018 (p=0.71/0.81), and `agreement_count` scores macro-AUC 0.532 with 87.2% of designs tied at zero. Keep `agreement_count` as a diagnostic column; do not gate or stratify on it (Part U).
 - **The ranking is a triage filter, not a decision procedure.** Calibrate expectations before presenting a top-N as "the best". On the Cao 2022 near-miss pool (4,442 Rosetta minibinders, 12 targets — the closest analogue to a real campaign pool: hundreds of same-tool, same-length designs against one target) the whole 72-metric field spans macro-AUC **0.471–0.560**, and taking the top decile by the best metric is worth ~**1.5–2× enrichment** (FGFR2 8.98 → 2.13 designs-per-hit) — but it beats a random ranking on only **6/12 targets**, and on TrkA and Tie2 it is *worse than not ranking at all*. Ranking looks much stronger on easier pools (Adaptyv 0.68–0.72, de novo BindCraft 0.72–0.78 macro) and on label-clean positives (Cao rises to 0.73 once one-sided-Kd "binders" are excluded — 73.4% of Cao's binder labels are one-sided and are experimentally indistinguishable from non-binders on Cao's own independent binary assay). Part U.
 - **Binder length is a main driver** — Longer binders tend to score lower on `ipsae_min` (r ≈ -0.78). (Not testable on Cao: 75.1% of that set is exactly 65 aa.)
@@ -466,6 +472,26 @@ being encoded there:
 - **`summary_high_iptm.csv` row count > num_designs is normal.** Every cycle that crosses the `--high_iptm_threshold` gets a row, so 7-cycle runs with several passing cycles produce more rows than designs (CALCA: 133 rows from 100 designs).
 - **"No structure was generated for run N (no eligible best design …)" is not a failure.** It just means none of the N cycles produced a sequence under the `--percent_X` alanine cap. Final-run row may be absent from `summary_all_runs.csv` for that reason.
 
+### BindCraft 2 runtime gotchas
+
+The configurator generates `run_bindcraft2.sh` from
+`bindmaster_examples/run_bindcraft2.sh.template`, and every guard below already
+lives in that template — they are written down here because each of them fails
+quietly or expensively, and a hand-written campaign inherits none of them.
+**Not to be confused with BindMaster 2** (`docs/bindmaster2_grafts.md`), the
+abandoned agentic concept whose orchestration capabilities were grafted onto the
+Evaluator as `binder-compare` subcommands — that is evaluation machinery, not a
+design tool, and it shares nothing with BindCraft 2 but a number.
+
+- **A campaign has no time limit, and `number_of_final_designs` is a quota of *accepted* designs, not an attempt budget.** `max_trajectories` is the only cap in the package — grepping the whole tree for a wall-clock setting finds nothing but a socket timeout on the weight download. Left unset, a campaign runs until it fills the quota, however long that takes, and a hard target can need very many attempts per accepted design. Every other design tool in BindMaster is bounded by attempts, so budget BindCraft 2 by setting `max_trajectories` explicitly and treat the quota as a ceiling you may not reach.
+- **ALWAYS name a modality.** With none named, BindCraft 2 applies no modality layer at all — the CLI help's "(default: binder)" is misleading — and the resulting null `binder_lengths` surfaces as a bare `TypeError` traceback rather than a clean refusal, so it reads like a bug in our run script.
+- **On aarch64 BOTH `--set auto_multi_gpu=false` and `--set subbatch_size=null` are needed; one is not enough.** `design_gpu_memory_gb()` calls `float()` on nvidia-smi's memory reading behind an `except (OSError, CalledProcessError)`; GB10 answers `[N/A]`, which raises `ValueError` and escapes that handler, so the campaign is refused immediately after preflight. `auto_multi_gpu=false` silences only the first of two call sites — the campaign reaches the same call again through `campaign_subbatch_size` while `subbatch_size` is at its default of `"auto"`. Both are documented settings, so nothing in BindCraft 2's source is patched. Apply them from the run script on the machine that is *running*, never bake them into `campaign.json`: configs are generated on one machine and run on another, so a baked-in value would disable multi-GPU packing on x86 whenever an aarch64 box wrote the config, and would still crash on Spark whenever an x86 box did.
+- **The compile cache is per *campaign* by default, so set `JAX_COMPILATION_CACHE_DIR` per machine — and append the card name yourself.** Left unset, the cache lands under the campaign's own project folder, and every new campaign re-pays the compile of every prediction shape from cold. But an operator-set `JAX_COMPILATION_CACHE_DIR` is used **verbatim**: the lookup short-circuits on it before the card is ever consulted, so BindCraft 2's own per-card keying is skipped. A compiled executable is not portable between GPU models, so the template appends a sanitised card name (`NVIDIA GB10` → `NVIDIA_GB10`) itself. Getting this wrong on a mixed-GPU host silently feeds one card's executables to another.
+- **The ranked table is rewritten on every acceptance and can *shrink* at campaign close.** `3_Ranked/!_Ranked.csv` is rebuilt each time a design is accepted, and a reconcile pass at the end drops any row whose structure is no longer on disk — so a mid-run snapshot can be superseded by a smaller one. Any `--tool-csv` snapshot for a report must therefore be taken **after** the campaign exits, or we re-enter the known stale-`tool_csvs` failure mode where a tool's native block ships short.
+- **BindCraft 2's own selfcheck EXITS 1 — it does not warn — when `--no-weights` is passed and no AF2 parameters can be found.** That is why the installer passes `--no-weights` only when it has actually located a parameter cache to reuse; passing it hopefully to save the ~5.3 GB download turns a slow install into a failed one.
+- **Two output layouts, and structures are mmCIF.** v1.0.0 writes `3_Ranked/!_Ranked.csv` with lowercase `rank` / `design` / `Binder_Sequence`; the pre-1.0 build that produced our archived CBG/CALCA pools writes a flat `<target>_ranked.csv` with TitleCase `Rank` / `Design` / `Sequence`. Nothing in either file records which it is, so `BindCraft2Extractor` distinguishes them by column vocabulary alone. Only the ranked table is a design pool — `1_Trajectories/` holds pre-MPNN hallucinated sequences and `2_Refolded/` mixes rejected rows in with the passes.
+- **`i_pDAE` is the ranking metric, and higher is better** despite reading like an error term. The `rank` column is a plain descending sort on it — not i_pTM, not a composite — and the delivered values are rounded to two decimals, so ties are pervasive (17-way in one archived pool). Rank *within* a tie block is acceptance order, not quality order. Read the rank from the tool's own file; never recompute it.
+
 ---
 
 ## Commands
@@ -495,6 +521,10 @@ bindmaster install --tool all --yes --skip-examples  # non-interactive (CI)
 bindmaster install --tool proteina-complexa # install Proteina-Complexa
 bindmaster install --tool protein-hunter    # install Protein-Hunter (Part L)
 bindmaster install --tool rfd3              # install RFD3 / foundry (Part M)
+bindmaster install --tool bindcraft2 --bc2-source /path/to/BindCraft2.zip   # install BindCraft 2 (eighth tool)
+# BindCraft 2 has no public download: --bc2-source takes a .zip or an unpacked directory (or export
+# $BINDCRAFT2_SOURCE once per machine). Under --tool all a missing source warns and skips, so `all`
+# still succeeds on a machine with no copy; an explicit --tool bindcraft2 fails instead.
 bindmaster install --tool esmfold2          # install ESMFold2 refolder individually (default engine; also in --tool all)
 bindmaster install --tool soluprot          # install SoluProt screen alone (also in --tool all; x86 + aarch64)
 bindmaster install --uninstall --tool all   # remove envs + shortcuts (preserves runs/)
@@ -525,6 +555,7 @@ bash runs/<name>/run_evaluate.sh
 
 # Full pipeline in one command (extract → refold-boltz2 → report)
 bindmaster evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bindcraft \
+                       --bindcraft2 runs/<name>/bindcraft2 \
                        --rfd3 runs/<name>/rfd3 --target-seq "<TARGET_SEQ>" \
                        -o runs/<name>/evaluate
 
@@ -578,7 +609,7 @@ docker run --rm -it bindmaster-test bash
 ```bash
 # Extract sequences from all tool outputs (Mosaic: is_top=1 only by default)
 conda run -n binder-eval binder-compare extract \
-    --bindcraft DIR --boltzgen DIR --mosaic DIR \
+    --bindcraft DIR --bindcraft2 DIR --boltzgen DIR --mosaic DIR \
     --pxdesign DIR --proteina-complexa DIR \
     --protein-hunter DIR --rfd3 DIR \
     -o seqs.fasta

@@ -1,6 +1,6 @@
 # BindMaster Orchestrator — Tool Reference Database
 
-Static knowledge base for the `bindmaster-orchestrator` skill. Each file describes one tool used in BindMaster (six design tools, three refolding/evaluation engines), focused on **orchestration decisions** rather than encyclopedic facts.
+Static knowledge base for the `bindmaster-orchestrator` skill. Each file describes one tool used in BindMaster (eight design tools, three refolding/evaluation engines), focused on **orchestration decisions** rather than encyclopedic facts.
 
 ## Philosophy
 
@@ -27,6 +27,7 @@ Threshold 0.61 is the agreement threshold (the per-engine "pass" cutoff used in 
 | File | One-line summary | Engine | Same-model bias to flag |
 |---|---|---|---|
 | `bindcraft.md` | AF2 backprop hallucination + MPNN + PyRosetta filtering. Turnkey reference, internal AF2 cross-val. | AF2-multimer / AF2-ptm | Independent of Boltz-2, AF3, ESMFold2 |
+| `bindcraft2.md` | The same method rewritten: no PyRosetta, no conda, one campaign file. Ranks on `i_pDAE`. Scaffolded VHH/ARP/scFv/Fab and peptide modalities; runs where BindCraft 1 cannot. | AF2 (design + held-out AF2 validation) | Independent of Boltz-2, AF3, ESMFold2 |
 | `boltzgen.md` | Diffusion → inverse-folding → Boltz-2 refold pipeline. Two-checkpoint ensemble, diversity-aware filter. | Boltz-2 internally | **Boltz-2 refold is correlated** |
 | `mosaic.md` | JAX gradient hallucination over 8 structure predictors. Composable losses, framework not turnkey. | Boltz-2, AF3, AF2 (composable) | **Boltz-2 refold is correlated** |
 | `protein-hunter.md` | Iterative structure-hallucination-within-diffusion. Multi-modal, all-X initial sequence. | Boltz-2 (or Chai-1) | **Boltz-2 refold is correlated** |
@@ -88,6 +89,7 @@ Same-model bias to watch for when interpreting `agreement_count`:
 |  | Boltz-2 refold | AF3 refold | ESMFold2 refold |
 |---|---|---|---|
 | BindCraft outputs | clean | clean | clean |
+| BindCraft 2 outputs | clean | clean | clean |
 | BoltzGen outputs | **correlated** | clean | clean |
 | Mosaic outputs | **correlated** | clean | clean |
 | Protein-Hunter outputs | **correlated** | clean | clean |

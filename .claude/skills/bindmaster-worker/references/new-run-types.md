@@ -1,6 +1,6 @@
 # New run types (extension to the worker skill)
 
-Execution playbooks for the BindMaster2-graft capabilities the worker now runs, beyond the seven
+Execution playbooks for the BindMaster2-graft capabilities the worker now runs, beyond the eight
 design tools. Each is driven by a `binder-compare …` spec from the orchestrator/evaluator.
 
 ## 1. Rosetta interface energy (for `affinity`, Part N)

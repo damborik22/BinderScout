@@ -16,6 +16,14 @@ the current engine set (ESMFold2 default, two-stage ranking, + affinity/monomer)
 | affinity | `binder-compare affinity --metrics report/metrics.csv --structures-dir … --run-rosetta -o affinity.csv` | `BindCraft` (PyRosetta) | Part N — see `affinity.md` |
 | monomer | `binder-compare monomer --complex-dir … --monomer-dir … -o monomer.csv` | refold env | fold-robustness QC — see `qc.md` |
 
+**Per-tool flags.** `extract` (and `run`) take one `--<tool> DIR` flag per design tool:
+`--bindcraft`, `--bindcraft2`, `--boltzgen`, `--mosaic`, `--pxdesign`, `--proteina-complexa`,
+`--protein-hunter`, `--rfd3`. Native metrics are namespaced by the tool that produced them, and
+**`bindcraft2_*` is deliberately kept distinct from `bindcraft_*`** — BindCraft 2 is a separate
+tool, not a newer BindCraft: different filters, no Rosetta battery, and its own ranking metric
+(`i_pDAE`, higher is better). Collapsing the two prefixes would merge two methods into one column.
+Neither tool's confidence enters `consensus_iptm_mean`; both are AF2-biased by construction.
+
 **One-shot:** `bindmaster evaluate run …` / `Evaluator/evaluate.sh` auto-detects installed engines
 (`--skip-<engine>`) and drives extract → refold → two-stage report. Drop to individual subcommands
 for partial re-runs.
@@ -23,10 +31,13 @@ for partial re-runs.
 ## Pre-flight
 
 1. All tool tarballs staged + untarred under `~/eval_workdir/<TARGET>/` (per-tool subdirs).
-2. Each tool's **source-of-truth CSV** is parseable (BindCraft `final_design_stats.csv`, Mosaic
-   `designs.csv` `is_top=1`, PH `summary_high_iptm.csv`, PXDesign `summary.csv`, BoltzGen
-   `final_designs_metrics_*.csv`, PC analysis CSV, RFD3 `.cif.gz` + MPNN `.fa`). See the worker
-   tool playbooks.
+2. Each tool's **source-of-truth CSV** is parseable (BindCraft `final_design_stats.csv`, BindCraft 2
+   `3_Ranked/!_Ranked.csv`, Mosaic `designs.csv` `is_top=1`, PH `summary_high_iptm.csv`, PXDesign
+   `summary.csv`, BoltzGen `final_designs_metrics_*.csv`, PC analysis CSV, RFD3 `.cif.gz` + MPNN
+   `.fa`). See the worker tool playbooks. BindCraft 2's pre-1.0 layout writes a flat
+   `<target>_ranked.csv` instead — both are read — and its ranked table is rewritten on every
+   acceptance and reconciled at campaign close, so take the `--tool-csv` snapshot only once the
+   campaign has ended, or a smaller table can supersede it.
 3. Boltz-2 cache at `~/.boltz/` populated (incl. `mols/` ~45k `.pkl`).
 4. `export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` on Ampere with mixed batch sizes.
 5. Target MSA reused from the `get_target_msa` cache (AF3/ESMFold2 read it).
