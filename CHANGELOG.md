@@ -4,7 +4,45 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [Unreleased] — 1.1.0
+
+Work on the eighth design tool, BindCraft 2. See
+[docs/PLAN_bindcraft2_integration.md](docs/PLAN_bindcraft2_integration.md).
+
+### Added
+
+- **A product version.** The repository had none: `bindmaster.py` carried no
+  constant and the bundled evaluator repeated `0.1.0` as three independent
+  literals. `bindmaster.__version__` is now the single source of truth for the
+  product, printed by `bindmaster --version` (a side-effect-free inspection
+  command, like `--help`, so it answers on a read-only checkout) and destined
+  for every run's `settings.json` provenance block.
+
+  `binder-comparison` keeps its own, independent SemVer — it is a separately
+  packaged library installed editable into four conda environments, and tying
+  it to the product version would make every product release a reinstall. Its
+  number is now declared once, in `Evaluator/pyproject.toml`, with
+  `binder_comparison.__version__` and `binder-compare --version` reading it
+  back through package metadata instead of restating it. The two versions are
+  expected to differ.
+
+## [1.0.0] — 2026-09-17
+
+The seven-tool pipeline as validated and running: Mosaic, BoltzGen, BindCraft,
+PXDesign, Proteina-Complexa, Protein-Hunter and RFD3, evaluated by the
+three-engine cross-refold (Boltz-2 + AF3 + ESMFold2) and ranked by
+`consensus_iptm_mean` behind the engine gate.
+
+Everything below shipped in 1.0.0. The version was assigned retrospectively, at
+the point the eighth tool began, so that release has a name to be compared
+against — `master` is frozen here and this heading records what it contains.
+
+> **Note.** 1.0.0 also contains a dormant `bindcraft2` key in the report's
+> per-tool lookups, from "Register bindcraft2 as a first-class tool in the
+> report". No extractor, installer or run path exists for it in this release,
+> and a pool without `bindcraft2` rows renders identically. It is corrected and
+> completed on the 1.1.0 line; do not treat the 1.0.0 registration as
+> authoritative.
 
 ## [1.0.3] — 2026-09-22
 

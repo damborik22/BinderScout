@@ -520,9 +520,11 @@ separate decision outside this plan.
 
 ## Acceptance criteria
 
-1. `bindmaster --version` prints `1.1.0` on `eight_tool`, and every
-   generated run's `settings.json` records it. `master` is unchanged: `git
-   diff master origin/master` stays empty throughout.
+1. `bindmaster --version` prints `1.1.0` on `eight_tool`, and every generated
+   run's `settings.json` records it. Master is untouched: `origin/master`
+   still points at `60115d0` when this branch is done, and no commit on it is
+   authored by this work. (Local `master` is two commits stale and stays that
+   way — it is not fast-forwarded either.)
 2. `bindmaster install --tool bindcraft2 --yes` succeeds on x86 and is
    idempotent on a second run; `--uninstall --tool bindcraft2 --yes` leaves
    `runs/` intact; and `--tool all` on a machine with no `BINDCRAFT2_SOURCE`
