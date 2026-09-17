@@ -14,6 +14,14 @@ Protein-Hunter/
 LigandMPNN/
 rf_diffusion_all_atom/
 
+# BindCraft 2 — staged by install.sh from BINDCRAFT2_SOURCE, never committed.
+# Separate block because the comment above does not apply: it is not cloned
+# from a public URL. It is source-available under a licence that is NOT this
+# repository's MIT, and it is pre-publication, so no file of it belongs in git
+# even once its upstream repo opens. `BC2/` is the upstream directory name.
+BindCraft2/
+BC2/
+
 # Local Miniforge3 installation (standalone mode)
 conda/
 

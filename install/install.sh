@@ -52,6 +52,17 @@ AF3_REPO="https://github.com/google-deepmind/alphafold3"
 AF3_COMMIT="fd39d2c5dcaadfc7333c3466951b27563fa7d6fa"  # v3.0.3.dev, compatible with the v3.0.2 weights
 AF3_DIR="${BINDMASTER_DIR}/alphafold3"
 
+# BindCraft 2 (Pacesa Lab). Unlike every other tool here there is NO public URL
+# to clone: it is source-available under its own licence (not this repo's MIT)
+# and is pre-publication, so the source is supplied per machine through
+# BINDCRAFT2_SOURCE — a .zip, a directory, or a git URL for when upstream opens.
+# Nothing of it is committed; BindCraft2/ is gitignored. It installs EDITABLE
+# into a .venv beside its own checkout, so that directory is permanent: moving
+# or deleting it breaks the `bindcraft` command.
+BINDCRAFT2_DIR="${BINDMASTER_DIR}/BindCraft2"
+BINDCRAFT2_SOURCE="${BINDCRAFT2_SOURCE:-}"   # set by --bc2-source or the environment
+BINDCRAFT2_COMMIT="${BINDCRAFT2_COMMIT:-HEAD}"   # only consulted for a git source
+
 CONDA_CMD=""          # set by detect_conda: full path to mamba (preferred) or conda
 ARCH="$(uname -m)"   # x86_64 or aarch64 (e.g. DGX Spark / Grace-Hopper)
 
@@ -76,6 +87,7 @@ STANDALONE="auto"      # auto | true | false — controls local Miniforge instal
 
 # Per-tool install flags (set by arg parsing or interactive menu)
 DO_BINDCRAFT=false
+DO_BINDCRAFT2=false      # opt-in: needs --bc2-source (or $BINDCRAFT2_SOURCE); skipped, not failed, under --tool all
 DO_BOLTZGEN=false
 DO_MOSAIC=false
 DO_EVALUATOR=false
@@ -100,6 +112,9 @@ while [[ $# -gt 0 ]]; do
                     TOOL_ALL=true
                     DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true
                     DO_PROTEINA_COMPLEXA=true; DO_PROTEIN_HUNTER=true; DO_RFD3=true; DO_ESMFOLD2=true
+                    # Attempted, but skipped with a warning when no source was
+                    # supplied -- see the dispatch block.
+                    DO_BINDCRAFT2=true
                     # SoluProt is a first-class part of the pipeline: it screens the
                     # pool BEFORE any GPU refolding, so leaving it out of `all` means
                     # the documented full install cannot run the documented workflow.
@@ -108,6 +123,8 @@ while [[ $# -gt 0 ]]; do
                     DO_SOLUPROT=true ;;
                 bindcraft)
                     DO_BINDCRAFT=true ;;
+                bindcraft2|bc2)
+                    DO_BINDCRAFT2=true ;;
                 boltzgen)
                     DO_BOLTZGEN=true ;;
                 mosaic)
@@ -129,7 +146,7 @@ while [[ $# -gt 0 ]]; do
                 soluprot|solu|solubility)
                     DO_SOLUPROT=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfd3, pxdesign, proteina-complexa, protein-hunter, af3, esmfold2, soluprot${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, bindcraft2, boltzgen, mosaic, evaluator, rfd3, pxdesign, proteina-complexa, protein-hunter, af3, esmfold2, soluprot${RESET}"
                     exit 1
                     ;;
             esac
@@ -137,6 +154,13 @@ while [[ $# -gt 0 ]]; do
             ;;
         --cuda)
             CUDA_VERSION="$2"
+            shift 2
+            ;;
+        --bc2-source)
+            # BindCraft 2 has no public URL to clone; the source is supplied
+            # per machine as a .zip, a directory, or (once upstream opens) a
+            # git URL. BINDCRAFT2_SOURCE in the environment does the same.
+            BINDCRAFT2_SOURCE="$2"
             shift 2
             ;;
         --skip-examples)
@@ -176,9 +200,20 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes] [--force]
                   all                  current-generation tools: bindcraft, boltzgen,
                                        mosaic, evaluator, pxdesign, proteina-complexa,
                                        protein-hunter, rfd3, esmfold2 (default refold
-                                       engine) and soluprot (pre-refold screen)
+                                       engine) and soluprot (pre-refold screen).
+                                       bindcraft2 is attempted too, and skipped with
+                                       a warning when no --bc2-source is given.
                   bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3
                                        install one current-generation tool
+                  bindcraft2|bc2       BindCraft 2 — the eighth design tool. It is
+                                       source-available and not published, so there
+                                       is nothing to clone: pass the copy you were
+                                       given with --bc2-source (a .zip, a directory,
+                                       or a git URL once upstream opens). Installs
+                                       editable into BindCraft2/.venv, which makes
+                                       that directory permanent. Reuses the AF2
+                                       parameters already on the machine instead of
+                                       downloading another 5.3 GB.
                   af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
                                        runs on 24 GB GPUs for ~200-400-token
                                        complexes (~4.4 GB peak, measured);
@@ -194,6 +229,11 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes] [--force]
                                        required. Uses the shipped --no_tmhmm model, so
                                        no TMHMM registration and no drive5.com download.
   --cuda        CUDA version for conda package resolution (default: 12.4).
+                Not passed to BindCraft 2, which reads the driver itself and picks
+                its own CUDA wheels; override that with BINDCRAFT2_ACCELERATOR.
+  --bc2-source  Where BindCraft 2's source is: a .zip, an unpacked directory, or a
+                git URL. Equivalent to exporting BINDCRAFT2_SOURCE. Required for
+                --tool bindcraft2, since there is no public download.
   --skip-examples
                 Do not prompt to run bundled examples after install.
   --yes, -y     Auto-confirm SAFE prompts (proceed?, run the example?) — for
@@ -364,6 +404,110 @@ smoke_test() {
         print_fail "Smoke test FAILED: ${label}"
         return 1
     fi
+}
+
+# _stage_bindcraft2_source
+# Populates ${BINDCRAFT2_DIR} from ${BINDCRAFT2_SOURCE}, which may be a .zip, a
+# directory, or a git URL. Returns 0 when the directory holds a BindCraft 2
+# checkout and 1 when it does not — the caller decides whether that is fatal
+# (an explicit --tool bindcraft2) or a skip (--tool all on a machine that was
+# never given the source).
+#
+# Idempotent: an already-staged checkout is left alone, so re-running the
+# installer never re-extracts over a working .venv. Use --force to replace.
+_stage_bindcraft2_source() {
+    if [[ -f "${BINDCRAFT2_DIR}/pyproject.toml" && -d "${BINDCRAFT2_DIR}/bindcraft" ]]; then
+        if [[ "${FORCE}" != true ]]; then
+            print_ok "BindCraft 2 source already staged at ${BINDCRAFT2_DIR}"
+            return 0
+        fi
+        confirm_destructive "Replace the existing BindCraft 2 source at ${BINDCRAFT2_DIR}?" || return 0
+        rm -rf "${BINDCRAFT2_DIR}"
+    fi
+
+    if [[ -z "${BINDCRAFT2_SOURCE}" ]]; then
+        print_warn "BindCraft 2 source not supplied."
+        echo "    BindCraft 2 is not public, so there is nothing to clone. Point the"
+        echo "    installer at the copy you were given:"
+        echo ""
+        echo "      bindmaster install --tool bindcraft2 --bc2-source /path/to/BindCraft2.zip"
+        echo "      bindmaster install --tool bindcraft2 --bc2-source /path/to/BindCraft2/"
+        echo ""
+        echo "    or export BINDCRAFT2_SOURCE once for the machine."
+        return 1
+    fi
+
+    print_step "Staging BindCraft 2 source from ${BINDCRAFT2_SOURCE}"
+    local staging
+    staging="$(mktemp -d)"
+    # shellcheck disable=SC2064
+    trap "rm -rf '${staging}'" RETURN
+
+    case "${BINDCRAFT2_SOURCE}" in
+        *.git|git@*|https://*|http://*)
+            command -v git >/dev/null 2>&1 || { print_fail "git not found; cannot clone ${BINDCRAFT2_SOURCE}"; return 1; }
+            run_logged "Cloning BindCraft 2" \
+                git clone --quiet "${BINDCRAFT2_SOURCE}" "${staging}/src" || return 1
+            if [[ "${BINDCRAFT2_COMMIT}" != "HEAD" ]]; then
+                run_logged "Pinning BindCraft 2 to ${BINDCRAFT2_COMMIT}" \
+                    git -C "${staging}/src" checkout --quiet "${BINDCRAFT2_COMMIT}" || return 1
+            fi
+            ;;
+        *.zip)
+            [[ -f "${BINDCRAFT2_SOURCE}" ]] || { print_fail "No such file: ${BINDCRAFT2_SOURCE}"; return 1; }
+            command -v unzip >/dev/null 2>&1 || { print_fail "unzip not found; install it or pass an unpacked directory"; return 1; }
+            mkdir -p "${staging}/src"
+            run_logged "Extracting BindCraft 2" \
+                unzip -q -o "${BINDCRAFT2_SOURCE}" -d "${staging}/src" || return 1
+            ;;
+        *)
+            [[ -d "${BINDCRAFT2_SOURCE}" ]] || { print_fail "Not a file or directory: ${BINDCRAFT2_SOURCE}"; return 1; }
+            mkdir -p "${staging}/src"
+            cp -a "${BINDCRAFT2_SOURCE}/." "${staging}/src/" || return 1
+            ;;
+    esac
+
+    # A zip made on macOS carries a resource-fork sibling for every file and a
+    # top-level wrapper directory; neither is part of the source.
+    rm -rf "${staging}/src/__MACOSX"
+    find "${staging}/src" -name '.DS_Store' -delete 2>/dev/null || true
+
+    # Find the checkout root: either the staging dir itself or a single wrapper
+    # directory inside it. Identify it by content, not by name, so a zip that
+    # unpacks to BC2/ or bindcraft-2/ works as well as BindCraft2/.
+    local root=""
+    if [[ -f "${staging}/src/pyproject.toml" && -d "${staging}/src/bindcraft" ]]; then
+        root="${staging}/src"
+    else
+        local candidate
+        while IFS= read -r candidate; do
+            if [[ -f "${candidate}/pyproject.toml" && -d "${candidate}/bindcraft" ]]; then
+                root="${candidate}"
+                break
+            fi
+        done < <(find "${staging}/src" -mindepth 1 -maxdepth 1 -type d)
+    fi
+
+    if [[ -z "${root}" ]]; then
+        print_fail "That source does not look like BindCraft 2"
+        echo "    Expected a directory containing pyproject.toml and bindcraft/, found:"
+        find "${staging}/src" -mindepth 1 -maxdepth 1 -printf '      %f\n' 2>/dev/null | head -10
+        return 1
+    fi
+
+    # Refuse a look-alike rather than build a .venv against the wrong package:
+    # the same repository name is used by BindCraft 1, whose pyproject differs.
+    if ! grep -q '^name *= *"bindcraft"' "${root}/pyproject.toml" 2>/dev/null; then
+        print_fail "${root}/pyproject.toml does not declare the 'bindcraft' package"
+        return 1
+    fi
+
+    mkdir -p "$(dirname "${BINDCRAFT2_DIR}")"
+    rm -rf "${BINDCRAFT2_DIR}"
+    mv "${root}" "${BINDCRAFT2_DIR}" || { print_fail "Could not move the source into ${BINDCRAFT2_DIR}"; return 1; }
+
+    print_ok "BindCraft 2 source staged at ${BINDCRAFT2_DIR}"
+    return 0
 }
 
 # env_exists <name>
@@ -581,6 +725,12 @@ is_protein_hunter_installed() {
 
 is_rfd3_installed() {
     env_exists bindmaster_rfd3
+}
+
+is_bindcraft2_installed() {
+    # The checkout IS the installation (editable install), so both halves must
+    # be present: a staged source with no venv is a half-finished install.
+    [[ -d "${BINDCRAFT2_DIR}" ]] && [[ -x "${BINDCRAFT2_DIR}/.venv/bin/bindcraft" ]]
 }
 
 is_proteina_complexa_installed() {
@@ -1959,6 +2109,165 @@ EOF
 # — no DGL, no SE3-Transformer, works on aarch64 / DGX Spark. Weights live
 # under BindMaster/weights/foundry.
 
+# ─── BindCraft 2 ──────────────────────────────────────────────────────────────
+
+# _bindcraft2_af2_params
+# Echoes the first usable AlphaFold 2 parameter directory, or nothing.
+#
+# BindCraft 2 wants to download 5.3 GB of AF2 parameters on first install. We
+# almost always already have them, so this resolves an existing cache instead.
+# It matters more than convenience: BindCraft 2's own selfcheck EXITS 1 (it does
+# not warn) when --no-weights was passed and no parameters can be found, and
+# BindCraft 1 -- the usual source of ${BINDMASTER_DIR}/BindCraft/params -- cannot
+# be installed on aarch64 at all. Without a fallback chain the Spark install
+# would fail on a machine that has the files sitting in another directory.
+_bindcraft2_af2_params() {
+    local candidate
+    for candidate in \
+        "${BINDCRAFT2_AF2_PARAMS:-}" \
+        "${BINDMASTER_DIR}/BindCraft/params" \
+        "${HOME}/Documents/OLD/BindMaster/bindcraft-tools/af2_params" \
+        "${HOME}/bindcraft-tools/af2_params"
+    do
+        [[ -n "${candidate}" && -d "${candidate}" ]] || continue
+        # Require one real checkpoint rather than just a directory: an
+        # interrupted download leaves the folder present and empty, which would
+        # otherwise be reported as a cache hit and fail much later.
+        if compgen -G "${candidate}/*multimer_v3.npz" > /dev/null \
+           || compgen -G "${candidate}/params/*multimer_v3.npz" > /dev/null; then
+            echo "${candidate}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+install_bindcraft2() {
+    print_step "Installing BindCraft 2"
+
+    _stage_bindcraft2_source || return 1
+
+    # Build the venv ourselves rather than letting BindCraft 2's install.sh do
+    # it. Left alone, that script installs into whatever environment is already
+    # active whenever CONDA_PREFIX or VIRTUAL_ENV is set -- and this installer
+    # activates conda for almost everything -- which would put jax>=0.11 into an
+    # unrelated env and leave no .venv for the configurator to detect. Creating
+    # it here also removes its conda fallback path, so BindCraft2/.venv/bin/python
+    # is the one detection marker everything else can rely on.
+    print_step "Checking for uv package manager"
+    if ! command -v uv &>/dev/null; then
+        print_warn "uv not found — installing via official installer"
+        curl -LsSf https://astral.sh/uv/install.sh | sh \
+            || { print_fail "Failed to install uv"; return 1; }
+        export PATH="${HOME}/.local/bin:${PATH}"
+        if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
+            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
+            print_ok "Added ~/.local/bin to PATH in ~/.bashrc"
+        fi
+    fi
+    command -v uv &>/dev/null || { print_fail "uv still not found after install; check PATH"; return 1; }
+    print_ok "uv is available: $(command -v uv)"
+
+    if [[ -x "${BINDCRAFT2_DIR}/.venv/bin/python" ]]; then
+        print_ok "BindCraft 2 venv already exists — skipping creation"
+    else
+        # BindCraft 2 needs >=3.12; uv fetches an interpreter when the machine
+        # has none that new, which is the usual case on an older login node.
+        run_logged "Creating BindCraft 2 venv (Python >=3.12)" \
+            uv venv --seed --python ">=3.12" "${BINDCRAFT2_DIR}/.venv" \
+            || { print_fail "Failed to create ${BINDCRAFT2_DIR}/.venv"; return 1; }
+    fi
+
+    local af2_params
+    if af2_params="$(_bindcraft2_af2_params)"; then
+        print_ok "Reusing AlphaFold 2 parameters at ${af2_params}"
+    else
+        af2_params=""
+        print_warn "No AlphaFold 2 parameter cache found — BindCraft 2 will download ~5.3 GB"
+    fi
+
+    # The accelerator argument is deliberately omitted unless asked for.
+    # BindCraft 2 reads the driver's CUDA version itself and already downgrades
+    # to cuda12 for any card below compute capability 7.5. Deriving it from our
+    # ${CUDA_VERSION} would be wrong -- that is a pip wheel-index version, not a
+    # driver version -- and passing it explicitly bypasses that downgrade.
+    local bc2_args=()
+    [[ -n "${BINDCRAFT2_ACCELERATOR:-}" ]] && bc2_args+=("${BINDCRAFT2_ACCELERATOR}")
+    [[ -n "${af2_params}" ]] && bc2_args+=("--no-weights")
+
+    run_logged "Installing BindCraft 2 (this compiles biotraj on aarch64)" \
+        env -u CONDA_PREFIX -u VIRTUAL_ENV \
+            BINDCRAFT_PYTHON="${BINDCRAFT2_DIR}/.venv/bin/python" \
+            BINDCRAFT_AF2_PARAMS="${af2_params}" \
+            bash -c "cd '${BINDCRAFT2_DIR}' && bash install.sh ${bc2_args[*]}" \
+        || { print_fail "BindCraft 2 install failed — see ${LOG_FILE}"; return 1; }
+
+    smoke_test "BindCraft 2 CLI" \
+        "${BINDCRAFT2_DIR}/.venv/bin/bindcraft" --help \
+        || { print_fail "BindCraft 2 CLI did not run"; return 1; }
+
+    # A CPU-only JAX is an installation a hundred times slower than the person
+    # running it expects, with nothing afterwards to say so. Fail on x86, where
+    # the GPU wheels are well trodden; warn on aarch64, where sm_121 support is
+    # exactly the open question the first Spark campaign exists to answer.
+    print_step "Smoke test: BindCraft 2 sees the GPU"
+    local backend
+    if backend="$("${BINDCRAFT2_DIR}/.venv/bin/python" -c 'import jax; print(jax.default_backend())' 2>/dev/null)"; then
+        if [[ "${backend}" == "gpu" ]]; then
+            print_ok "Smoke test passed: jax backend is gpu"
+        elif [[ "${ARCH}" == "aarch64" ]]; then
+            print_warn "jax fell back to '${backend}' on aarch64 — BindCraft 2 is unvalidated here; a campaign would run on the CPU"
+        else
+            print_fail "jax fell back to '${backend}' — a campaign would run on the CPU"
+            return 1
+        fi
+    else
+        print_warn "jax did not start here (normal on a login node); check inside your allocation"
+    fi
+
+    _write_bindcraft2_shortcut
+
+    print_ok "BindCraft 2 installation complete"
+    print_ok "  Usage: bindcraft2 design campaign.json"
+}
+
+_write_bindcraft2_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# BindCraft 2 shortcut — runs 'bindcraft ...' from its own venv."
+        echo "# With no args: opens an interactive shell with the venv active."
+        echo ""
+        echo "BINDCRAFT2_DIR=\"${BINDCRAFT2_DIR}\""
+        echo "BINDCRAFT2_AF2_PARAMS=\"$(_bindcraft2_af2_params || true)\""
+    } > "${SHORTCUTS_DIR}/bindcraft2"
+    cat >> "${SHORTCUTS_DIR}/bindcraft2" << 'EOF'
+
+# Point BindCraft 2 at the parameters we already have, so it neither downloads
+# 5.3 GB nor refuses to start. An EMPTY value would count as a value and fail,
+# so the variable is exported only when it resolved to something.
+if [[ -n "${BINDCRAFT2_AF2_PARAMS}" ]]; then
+    export BINDCRAFT_AF2_PARAMS="${BINDCRAFT2_AF2_PARAMS}"
+fi
+
+# JAX_COMPILATION_CACHE_DIR is deliberately NOT set: BindCraft 2 keys its own
+# cache per GPU model under ~/.cache/bindcraft/compile_cache/<card>, and setting
+# this variable overrides that keying wholesale. An executable is not portable
+# across cards, so the per-card layout is the one that works.
+
+if [[ $# -eq 0 ]]; then
+    echo "BindCraft 2 (${BINDCRAFT2_DIR})"
+    echo "Examples:"
+    echo "  bindcraft2 design campaign.json"
+    echo "  bindcraft2 design --list-modalities"
+    exec "${BINDCRAFT2_DIR}/.venv/bin/python" -c 'import subprocess,sys,os; os.execvp("bash",["bash"])'
+fi
+
+exec "${BINDCRAFT2_DIR}/.venv/bin/bindcraft" "$@"
+EOF
+    chmod +x "${SHORTCUTS_DIR}/bindcraft2"
+}
+
 install_rfd3() {
     print_step "Installing RFD3 (foundry)"
 
@@ -2738,6 +3047,24 @@ uninstall_tool() {
             [[ -d "${FOUNDRY_DIR}" ]] && { rm -rf "${FOUNDRY_DIR}"; print_ok "Removed ${FOUNDRY_DIR}"; }
             print_ok "RFD3 uninstalled"
             ;;
+        bindcraft2|bc2)
+            print_step "Uninstalling BindCraft 2"
+            rm -f "${SHORTCUTS_DIR}/bindcraft2"
+            # The venv lives inside the checkout (BindCraft 2 installs editable),
+            # so removing the directory removes the environment with it.
+            if [[ -d "${BINDCRAFT2_DIR}" ]]; then
+                rm -rf "${BINDCRAFT2_DIR}"
+                print_ok "Removed ${BINDCRAFT2_DIR}"
+            fi
+            # Left in place deliberately: ~/.cache/bindcraft holds the XLA compile
+            # cache and, on a machine that had no AF2 parameters of its own, the
+            # 5.3 GB download. Both are expensive to recreate and are shared with
+            # any other BindCraft 2 checkout, so they are reported, not deleted.
+            if [[ -d "${HOME}/.cache/bindcraft" ]]; then
+                print_warn "Left in place: ${HOME}/.cache/bindcraft ($(du -sh "${HOME}/.cache/bindcraft" 2>/dev/null | cut -f1)) — compile cache and any downloaded AF2 parameters"
+            fi
+            print_ok "BindCraft 2 uninstalled"
+            ;;
         af3|alphafold3|alphafold)
             print_step "Uninstalling AlphaFold 3 refolder"
             env_exists binder-eval-af3 && run_logged "Removing binder-eval-af3 conda env" \
@@ -2795,6 +3122,7 @@ preflight() {
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && need=$(( need + 8 ))
     [[ "${DO_PROTEIN_HUNTER}" == true ]]    && need=$(( need + 8 ))   # vendored Boltz-2 + Chai-1
     [[ "${DO_RFD3}"      == true ]]         && need=$(( need + 6 ))   # rfd3_latest.ckpt ~2.5 GB
+    [[ "${DO_BINDCRAFT2}" == true ]]        && need=$(( need + 12 ))  # jax+cuda wheels; AF2 params reused, not re-downloaded
     [[ "${DO_AF3}"       == true ]]         && need=$(( need + 6 ))
     [[ "${DO_ESMFOLD2}"  == true ]]         && need=$(( need + 6 ))
     [[ "${DO_SOLUPROT}"  == true ]]         && need=$(( need + 2 ))
@@ -2897,6 +3225,7 @@ main() {
         [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { uninstall_tool proteina-complexa || failed_uninstalls+=("Proteina-Complexa"); }
         [[ "${DO_PROTEIN_HUNTER}" == true ]] && { uninstall_tool protein-hunter || failed_uninstalls+=("Protein-Hunter"); }
         [[ "${DO_RFD3}"      == true ]] && { uninstall_tool rfd3      || failed_uninstalls+=("RFD3"); }
+        [[ "${DO_BINDCRAFT2}" == true ]] && { uninstall_tool bindcraft2 || failed_uninstalls+=("BindCraft 2"); }
         [[ "${DO_AF3}"       == true ]] && { uninstall_tool af3       || failed_uninstalls+=("AF3"); }
         [[ "${DO_ESMFOLD2}"  == true ]] && { uninstall_tool esmfold2  || failed_uninstalls+=("ESMFold2"); }
         [[ "${DO_SOLUPROT}"  == true ]] && { uninstall_tool soluprot  || failed_uninstalls+=("SoluProt"); }
@@ -2949,6 +3278,7 @@ main() {
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && (( total++ ))
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && (( total++ ))
     [[ "${DO_RFD3}"      == true ]] && (( total++ ))
+    [[ "${DO_BINDCRAFT2}" == true ]] && (( total++ ))
     [[ "${DO_AF3}"       == true ]] && (( total++ ))
     [[ "${DO_ESMFOLD2}"  == true ]] && (( total++ ))
     [[ "${DO_SOLUPROT}"  == true ]] && (( total++ ))
@@ -2957,6 +3287,14 @@ main() {
     FAILED_EXAMPLES=()   # populated by install functions on example failure
 
     [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; install_bindcraft || failed_tools+=("BindCraft"); }
+    # Under --tool all a missing source is a skip, not a failure: BindCraft 2 is
+    # not public, so most machines legitimately have no copy to install from and
+    # `--tool all` must still succeed there (CI and the Docker build included).
+    # An explicit --tool bindcraft2 asked for it by name, so that one fails.
+    [[ "${DO_BINDCRAFT2}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft 2${RESET}"; \
+        if install_bindcraft2; then :; elif [[ "${TOOL_ALL}" == true && -z "${BINDCRAFT2_SOURCE}" ]]; then \
+            print_warn "Skipping BindCraft 2 — no --bc2-source given (it is not a public download)"; \
+        else failed_tools+=("BindCraft 2"); fi; }
     [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
     [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
@@ -2992,6 +3330,7 @@ main() {
     [[ "${DO_MOSAIC}"    == true ]] && echo -e "  ${GREEN}mosaic${RESET}     — open Mosaic shell"
     [[ "${DO_EVALUATOR}" == true ]] && echo -e "  ${GREEN}evaluate${RESET}   — launch evaluation wizard"
     [[ "${DO_RFD3}"      == true ]] && echo -e "  ${GREEN}rfd3${RESET}       — run RFD3 design / open env shell"
+    [[ "${DO_BINDCRAFT2}" == true && -x "${SHORTCUTS_DIR}/bindcraft2" ]] && echo -e "  ${GREEN}bindcraft2${RESET} — run BindCraft 2 design / open env shell"
     [[ "${DO_PXDESIGN}"  == true ]] && echo -e "  ${GREEN}pxdesign${RESET}   — open PXDesign shell"
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && echo -e "  ${GREEN}complexa${RESET}   — open Proteina-Complexa shell"
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && echo -e "  ${GREEN}protein-hunter${RESET} — open Protein-Hunter shell"
