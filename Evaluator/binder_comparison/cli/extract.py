@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ..core.schema import ExtractedBinder
 from ..extractors import (
+    BindCraft2Extractor,
     BindCraftExtractor,
     BoltzGenExtractor,
     MosaicExtractor,
@@ -47,6 +48,11 @@ def run(args: argparse.Namespace) -> None:
         print(f"[extract] BindCraft: {args.bindcraft}")
         extracted = BindCraftExtractor(collapse_variants=collapse).extract(args.bindcraft)
         _take("bindcraft", extracted)
+
+    if args.bindcraft2:
+        print(f"[extract] BindCraft 2: {args.bindcraft2}")
+        extracted = BindCraft2Extractor().extract(args.bindcraft2)
+        _take("bindcraft2", extracted)
 
     if args.boltzgen:
         print(f"[extract] BoltzGen: {args.boltzgen}")
@@ -140,6 +146,7 @@ def run(args: argparse.Namespace) -> None:
 
         tool_dir = {
             "bindcraft": args.bindcraft,
+            "bindcraft2": args.bindcraft2,
             "boltzgen": args.boltzgen,
             "mosaic": args.mosaic,
             "pxdesign": args.pxdesign,

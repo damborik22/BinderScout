@@ -19,6 +19,11 @@ import argparse
 # their underscore attribute names regardless of argparse version behaviour.
 TOOL_FLAGS: list[tuple[str, str, str]] = [
     ("--bindcraft", "bindcraft", "BindCraft output directory"),
+    (
+        "--bindcraft2",
+        "bindcraft2",
+        "BindCraft 2 campaign folder (containing 3_Ranked/!_Ranked.csv)",
+    ),
     ("--boltzgen", "boltzgen", "BoltzGen output directory"),
     ("--mosaic", "mosaic", "Mosaic output directory (containing designs.csv)"),
     ("--pxdesign", "pxdesign", "PXDesign output directory (containing summary.csv)"),

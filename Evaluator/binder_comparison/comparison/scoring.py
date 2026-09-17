@@ -937,6 +937,17 @@ def add_design_groups(df: pd.DataFrame) -> pd.DataFrame:
             return re.sub(r"_c\d+$", "", bid)
         if tool == "bindcraft":
             return re.sub(r"_mpnn\d+.*$", "", bid)
+        if tool == "bindcraft2":
+            # BindCraft 2 names an accepted design <trajectory>_seq<n>, so
+            # several retained sequences from one backbone share everything
+            # before the suffix. Without this each sibling is its own design and
+            # occupies its own Top-N slot, which over-represents one backbone.
+            #
+            # Inert on the two archived pools: both are pre-collapsed top-50
+            # exports where every trajectory hash appears exactly once, and
+            # BindCraft 2's default keeps one sequence per trajectory. It bites
+            # only on a campaign configured to keep several.
+            return re.sub(r"_seq\d+$", "", bid)
         return bid
 
     result["design_group"] = result.apply(_grp, axis=1)

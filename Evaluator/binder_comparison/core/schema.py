@@ -49,6 +49,38 @@ class NativeMetrics:
     hbonds_pct: float | None = None  # H-bonds as % of interface residues
     mpnn_recovery: float | None = None  # MPNN sequence recovery score
 
+    # ---- BindCraft 2 (AF2 hallucination + held-out AF2 validation) ----
+    # Prefixed, and deliberately NOT merged into BindCraft 1's unprefixed fields
+    # above: they are different tools with different metrics, and a pool can
+    # contain both.
+    #
+    # `bindcraft2_ipdae` is the one that matters — it is BindCraft 2's OWN
+    # ranking metric (`RANKING_METRIC = 'i_pDAE'`), and its `rank` column is a
+    # plain descending sort on it with no tie-breaker. It reads like an error
+    # term but is a TM-score analogue bounded 0–1 where HIGHER IS BETTER;
+    # upstream's LOWER_IS_BETTER_METRICS pointedly omits it. The one-off script
+    # that ingested the first delivered pools dropped this column entirely and
+    # labelled the pool by i_pTM instead, which is why it is named first here.
+    #
+    # Scales differ from every other engine we carry, so do not rescale on
+    # reflex: `bindcraft2_plddt` and `bindcraft2_iptm` are ALREADY 0–1 (unlike
+    # AF3's 0–100 pLDDT), while `bindcraft2_ipae` is PAE divided by 31 Å and is
+    # therefore not in Ångströms at all.
+    bindcraft2_ipdae: float | None = None  # native rank key, 0–1, higher better
+    bindcraft2_iptm: float | None = None  # design-time AF2-multimer i_pTM (biased)
+    bindcraft2_ptm: float | None = None
+    bindcraft2_plddt: float | None = None  # already 0–1
+    bindcraft2_ipae: float | None = None  # PAE/31, lower better — NOT Ångströms
+    bindcraft2_target_plddt: float | None = None
+    bindcraft2_ss_plddt: float | None = None  # helix/sheet residues only
+    bindcraft2_interface_residues: int | None = None
+    bindcraft2_interface_buried_area: float | None = None  # Å²
+    bindcraft2_interface_hydrophobicity: float | None = None  # lower better
+    bindcraft2_surface_hydrophobicity: float | None = None  # lower better
+    bindcraft2_backbone_clashes: int | None = None  # lower better
+    bindcraft2_binder_rmsd: float | None = None  # Å, lower better
+    bindcraft2_target_rmsd: float | None = None  # Å, absent from IDR-protocol exports
+
     # ---- BoltzGen (Boltz-1 internal eval) ----
     # `bg_design_ipsae_min` is BG's own ipSAE; ρ vs Boltz-2 refold ipSAE = +0.84.
     # `bg_final_rank` is a composite (diversity+pTM+hbond+RMSD); ρ vs refold ipSAE = -0.15.

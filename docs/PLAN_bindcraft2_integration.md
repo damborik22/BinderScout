@@ -310,12 +310,25 @@ script is written): scaffold ↔ {cyclize, `copies`>1, fold_switch,
 mixed_topology}; `copies`>1 ↔ multidomain; FASTA target ↔ {forced_targeting,
 coldspots}; induced_fit ↔ any detarget target.
 
-Run-script environment: export the resolved `BINDCRAFT_AF2_PARAMS`. **Leave
-`JAX_COMPILATION_CACHE_DIR` unset** — setting it overrides BindCraft 2's
-per-card cache keying outright, and a per-run path would re-pay ~60 s per
-prediction shape on every run. Its own `~/.cache/bindcraft/compile_cache/<card>`
-works on Spark, because only the *memory* query returns `[N/A]` on GB10; the
-card-*name* query is clean. Do not re-export BindCraft 2's `XLA_*` variables —
+Run-script environment: export the resolved `BINDCRAFT_AF2_PARAMS`, and set
+`JAX_COMPILATION_CACHE_DIR` to a **per-machine, per-card** path —
+`$HOME/.cache/bindmaster/bc2_xla/<sanitised card name>`.
+
+Measured, not assumed: left unset, `use_campaign_compile_cache` puts the cache
+at `<project_folder>/compile_cache/<card>`, which is **per campaign**, so every
+new run re-pays ~60 s per prediction shape from cold. Observed directly on the
+first calibration run, which reported
+`compiled graphs cached in .../out_noguard/compile_cache/NVIDIA_GB10`.
+
+But an operator-set `JAX_COMPILATION_CACHE_DIR` is returned **verbatim, with no
+per-card subdirectory appended** — the function short-circuits on it before the
+card is ever consulted. A compiled executable is not portable across GPU
+models, so *we* must add the card segment ourselves, matching BindCraft 2's own
+sanitisation (non-alphanumeric runs collapse to `_`, then strip leading and
+trailing `_`; `NVIDIA GB10` → `NVIDIA_GB10`). Getting this wrong on a mixed-GPU
+host silently feeds one card's executables to another.
+
+Do not re-export BindCraft 2's `XLA_*` variables —
 it sets `XLA_PYTHON_CLIENT_PREALLOCATE` and appends its own `XLA_FLAGS`.
 Separately, never export an **empty** `BINDCRAFT_*` override: an exported-but-
 empty variable counts as a value and fails on `int('')` rather than falling
