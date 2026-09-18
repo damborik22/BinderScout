@@ -1104,7 +1104,9 @@ install_boltzgen() {
         || { print_fail "Failed to install gcc into BoltzGen env"; return 1; }
 
     # Install packages
-    # aarch64: +cuXXX wheels don't exist; plain PyPI torch includes CUDA for Linux aarch64
+        # NOTE: plain PyPI torch is CPU-ONLY on Linux aarch64. This branch is
+        # unreachable now (the arch guard above exits first) and is kept only so
+        # the override path does something defined. Use install_aarch.sh.
     print_step "Installing PyTorch and BoltzGen"
     if [[ "${ARCH}" == "aarch64" ]]; then
         run_logged "Installing PyTorch (aarch64, from PyPI)" \
@@ -3172,12 +3174,29 @@ main() {
         print_ok "Standalone mode — all environments local to ${BINDMASTER_DIR}"
     fi
 
+    # REFUSE on aarch64 rather than warn. This script is x86-shaped throughout —
+    # it pins cu121 wheel indexes that have no aarch64 build, and its BoltzGen arm
+    # installs plain PyPI torch, which on aarch64 is CPU-only. A warning is not
+    # enough protection: running `--tool all` here once replaced a working
+    # torch 2.10.0+cu130 in the BoltzGen env with CPU torch 2.5.1, silently, while
+    # printing "BoltzGen installation complete". Four other tools failed outright
+    # on cu121, and only SoluProt's arm refused properly — that guard is now
+    # hoisted to the top, where it protects every tool instead of one.
+    #
+    # `bindmaster install` already routes aarch64 here correctly (bindmaster.py);
+    # this only catches a direct `bash install/install.sh` invocation.
     if [[ "${ARCH}" == "aarch64" ]]; then
-        print_warn "aarch64 detected (e.g. DGX Spark / Grace-Hopper)."
-        print_warn "  BindCraft: may fail — jaxlib CUDA conda packages not available for aarch64."
-        print_warn "  BoltzGen:  PyTorch will be installed from PyPI (no +cuXXX suffix)."
-        print_warn "  Mosaic:    may fail — torchtext has no Linux aarch64 wheel."
-        print_warn "  Proteina-Complexa: may need patches — some deps (PyG, torchtext) may lack aarch64 wheels."
+        print_fail "install/install.sh is the x86_64 installer, and this machine is aarch64."
+        echo ""
+        echo "    Use the aarch64 installer instead:"
+        echo "        bash install/install_aarch.sh <same arguments>"
+        echo "    or let the dispatcher pick for you:"
+        echo "        bindmaster install <same arguments>"
+        echo ""
+        echo "    Override with BINDMASTER_ALLOW_X86_INSTALLER=1 if you truly mean to"
+        echo "    run the x86 script here — it will degrade CUDA-enabled environments."
+        [[ "${BINDMASTER_ALLOW_X86_INSTALLER:-}" == "1" ]] || exit 1
+        print_warn "BINDMASTER_ALLOW_X86_INSTALLER=1 — continuing on aarch64 anyway."
     fi
 
     print_tool_status
