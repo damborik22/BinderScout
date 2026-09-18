@@ -963,16 +963,27 @@ install_bindcraft() {
     # jax-cuda12-plugin does NOT pull in cuDNN or the full CUDA runtime.
     # nvidia-cudnn-cu12 needs libcudart.so.12 + friends at dlopen time, so we
     # install the complete set of nvidia-cu12 runtime packages explicitly.
-    # Pinned to 0.4.34 — tested working on DGX Spark (GH200, CUDA 12.1).
-    print_step "Installing JAX 0.4.34 with CUDA 12 plugins (PyPI)"
+    # Pinned to 0.6.2, and the version is load-bearing on GB10 (sm_121).
+    # jaxlib 0.4.34's bundled LLVM knows sm_20..sm_90a only.  Asked for sm_121 it
+    # falls back to a subtarget with no bf16, and ColabDesign runs AF2 in bf16 by
+    # default (colabdesign/af/model.py: use_bfloat16=True) -- so every AF2 graph
+    # dies at compile time with:
+    #     Unsupported conversion from bf16 to f16
+    #     LLVM ERROR: Unsupported rounding mode for conversion.
+    # 0.5.3 is NOT enough: it tops out at sm_120.  0.6.2 is the first jaxlib that
+    # knows sm_121/sm_121a AND still ships a cp310 wheel (so the py3.10 env, and
+    # its aarch64 conda PyRosetta, are unchanged).  It also still exposes the
+    # deprecated jax.lib.xla_bridge.get_backend that ColabDesign's clear_mem()
+    # calls, so ColabDesign needs no patch.
+    # Measured on BM5 (GB10), 120aa target + 40aa binder, AF2 fwd+bwd:
+    #   0.4.34 + bf16 disabled : 5.40 s/iter   (the only way to make 0.4.34 run)
+    #   0.6.2  + bf16 enabled  : 2.39 s/iter   (2.3x faster, and half the memory)
+    print_step "Installing JAX 0.6.2 with CUDA 12 plugins (PyPI)"
     run_logged "Installing JAX + CUDA 12 plugins" \
         "${CONDA_CMD}" run -n BindCraft \
         pip install \
             "numpy<2.0.0" \
-            "jax==0.4.34" \
-            "jax-cuda12-pjrt==0.4.34" \
-            "jax-cuda12-plugin==0.4.34" \
-            "jaxlib==0.4.34" \
+            "jax[cuda12]==0.6.2" \
             "nvidia-cudnn-cu12" \
             "nvidia-cuda-runtime-cu12" \
             "nvidia-cublas-cu12" \
@@ -1573,7 +1584,8 @@ install_pxdesign() {
         pip install --no-cache-dir "git+https://github.com/sokrypton/ColabDesign.git" \
         || print_warn "ColabDesign install failed — AF2 eval may not work"
 
-    # Pin JAX <=0.4.34 (newer JAX removes jax.lib.xla_bridge, breaks ColabDesign)
+    # Pin JAX <=0.4.34 here (PXDesign's ColabDesign path; BindCraft itself now
+    # uses 0.6.2 -- see the sm_121 note in install_bindcraft)
     run_logged "Pinning JAX for ColabDesign compatibility" \
         "${CONDA_CMD}" run -n bindmaster_pxdesign \
         pip install -q "jax<=0.4.34" "jaxlib<=0.4.34" \
