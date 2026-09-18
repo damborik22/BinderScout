@@ -1642,6 +1642,37 @@ for fn in ['tools/af2/main_af2_complex.py', 'tools/af2/main_af2_monomer.py']:
     fp.write_text(t); print(f'Patched: {fn}')
 PATCHEOF
 
+    # Patch: pxdbench AF2 eval must not use bf16 on aarch64.
+    # The AF2 eval runs under JAX_PLATFORMS=cpu here (the JAX CUDA backend is
+    # unusable for this tool's pinned jax), and jaxlib's *AArch64* backend cannot
+    # lower a bf16 convert under SVE.  ColabDesign defaults use_bfloat16=True, so
+    # the eval subprocess aborts (SIGABRT) with
+    #     LLVM ERROR: Cannot select: nxv4bf16 = AArch64ISD::UINT_TO_FP_MERGE_PASSTHRU
+    # and pxdbench then reads the empty output file and dies on a JSONDecodeError
+    # that says nothing about the real cause.  Bisected on BM5: bf16 on = abort,
+    # bf16 off = AF2 completes on CPU in 89 s.  x86 is unaffected, so this patch
+    # lives only in the aarch64 installer.
+    run_logged "Patching pxdbench AF2 eval (no bf16 on aarch64)" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign python << 'PATCHEOF'
+import importlib.util, pathlib, re
+spec = importlib.util.find_spec('pxdbench')
+if not spec or not spec.submodule_search_locations:
+    print('pxdbench not found - skipping'); raise SystemExit(0)
+base = pathlib.Path(spec.submodule_search_locations[0]) / 'tools' / 'af2'
+for fn in ('main_af2_complex.py', 'main_af2_monomer.py'):
+    fp = base / fn
+    if not fp.exists():
+        print(f'{fn} not found - skipping'); continue
+    t = fp.read_text()
+    if 'use_bfloat16' in t:
+        print(f'Already patched: {fn}'); continue
+    t2, n = re.subn(r'(prediction_model = mk_afdesign_model\(\n)',
+                    r'\1        use_bfloat16=False,\n', t, count=1)
+    if not n:
+        print(f'Anchor not found in {fn} - skipping'); continue
+    fp.write_text(t2); print(f'Patched {fn} (use_bfloat16=False)')
+PATCHEOF
+
     # Patch: protenix torch_ext_compile.py.  TWO independent fixes, and they are
     # applied independently on purpose -- an env patched by an older installer has
     # the arch fix but not the C++ one, and a single "already patched" guard would
