@@ -41,7 +41,7 @@ The evaluator (`bindmaster evaluate` / `binder-compare`) runs on top of the desi
 |---|---|---|---|---|
 | **Boltz-2** | Primary refold engine; ranking reference | `Mosaic/.venv` (rides Mosaic install) | x86_64 + aarch64 | default (with Mosaic) |
 | **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.10) | x86_64 + aarch64 | default (in `--tool all`) |
-| **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion on big-VRAM hosts | conda env `binder-eval-af3` (Python 3.10, gated weights) | x86_64 + aarch64; needs ≥100 GB GPU memory | `--tool af3` (gated weights) |
+| **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.10, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | `--tool af3` (gated weights) |
 | **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model — see [docs/PLAN_soluprot_integration.md](docs/PLAN_soluprot_integration.md) | in `--tool all` |
 
 ### Architecture
@@ -69,7 +69,7 @@ flowchart LR
 
     subgraph Refold["Refolding engines (evaluator domain — independent cross-validation)"]
         Boltz2["Boltz-2\n(Mosaic venv;\nprimary engine)"]
-        AF3["AF3 v3.0.2\n(binder-eval-af3;\nneeds ≥100 GB GPU)"]
+        AF3["AF3 v3.0.2\n(binder-eval-af3;\ngated weights)"]
         ESMFold2["ESMFold2\n(binder-eval-esmfold2;\nlightweight, no gated weights)"]
     end
 
@@ -156,7 +156,7 @@ BindMaster/
 │   ├── binder_comparison/      ← core Python package (extractors, refolding, scoring)
 │   ├── scripts/                ← standalone refold scripts (refold_boltz2.py, refold_af3.py, refold_esmfold2.py)
 │   ├── docs/                   ← pipeline reference, analysis notes
-│   └── envs/                   ← conda env specs (binder-eval, binder-eval-af3 [needs ≥100 GB GPU memory])
+│   └── envs/                   ← conda env specs (binder-eval, binder-eval-af3 [gated weights])
 ├── .claude/
 │   └── skills/                 ← Claude Code skills (bindmaster-orchestrator, bindmaster-worker)
 ├── scripts/                    ← helper install scripts (PXDesign)
@@ -170,7 +170,7 @@ BindMaster/
 └── runs/                       ← generated run folders (gitignored)
 ```
 
-Tool directories (`BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/`) are cloned by the installer and gitignored. RFD3 has no clone — it is pip-installed (`rc-foundry`) into `bindmaster_rfd3` and stores weights at `weights/foundry/`. AF3 v3.0.2 refolding runs in its own `binder-eval-af3` conda env on any host with ≥100 GB GPU memory (DGX Spark today; H200 / GH200 should also work); `refold_af3.py` is the canonical wrapper.
+Tool directories (`BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/`) are cloned by the installer and gitignored. RFD3 has no clone — it is pip-installed (`rc-foundry`) into `bindmaster_rfd3` and stores weights at `weights/foundry/`. AF3 v3.0.2 refolding runs in its own `binder-eval-af3` conda env on any CUDA host (measured ~4.4 GiB peak for 258-391 tokens, so a 24 GB card suffices; DGX Spark today; H200 / GH200 should also work); `refold_af3.py` is the canonical wrapper.
 
 ---
 
@@ -227,7 +227,7 @@ Options:
 |---|---|
 | `--tool all\|bindcraft\|boltzgen\|mosaic\|pxdesign\|proteina-complexa\|protein-hunter\|rfd3` | Which design tool(s) to install. Omit for interactive menu. |
 | `--tool esmfold2` | ESMFold2 refolder — **default** (already in `--tool all`); lightweight, no gated weights; also the `autosize` gate. Listed here for explicit re-install. |
-| `--tool af3\|soluprot` | Extra evaluator tools (not in `--tool all`). `af3` = AlphaFold 3 v3.0.2 (≥100 GB GPU, gated weights — canonical cross-check). `soluprot` = solubility screen (x86 needs the SoluProt + USEARCH downloads; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it source-builds scikit-learn 0.20.4 + USEARCH v12 and uses the `--no_tmhmm` model). |
+| `--tool af3\|soluprot` | Extra evaluator tools (not in `--tool all`). `af3` = AlphaFold 3 v3.0.2 (gated weights — canonical cross-check). `soluprot` = solubility screen (x86 needs the SoluProt + USEARCH downloads; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it source-builds scikit-learn 0.20.4 + USEARCH v12 and uses the `--no_tmhmm` model). |
 | `--cuda VERSION` | CUDA version for conda package resolution (default: 12.4) |
 | `--skip-examples` | Do not prompt to run bundled examples after install |
 | `--standalone` | Force local Miniforge3 install (no system conda needed) |
@@ -305,7 +305,7 @@ choose — see [Ranking metrics](#ranking-metrics) below.
 |---|---|---|---|
 | **Boltz-2** | `binder-compare refold-boltz2` | Mosaic `.venv` | Anywhere with a 24 GB GPU |
 | **ESMFold2** | `binder-compare refold-esmfold2` | `binder-eval-esmfold2` conda | Anywhere — lightweight, no gated weights. The default engine (`--tool all`), and the source of the `chain_iptm_interface` gate `autosize` uses. |
-| **AF3 v3.0.2** | `binder-compare refold-af3` | `binder-eval-af3` conda | Any host with ≥100 GB GPU memory — DGX Spark (aarch64), H200 (x86_64), GH200, etc. Full AF3 inference doesn't fit on consumer 24 GB GPUs. |
+| **AF3 v3.0.2** | `binder-compare refold-af3` | `binder-eval-af3` conda | Any CUDA host — measured at ~4.4 GiB peak for 258-391 tokens, so a 24 GB card is enough; DGX Spark (aarch64), H200, RTX 3090, etc. Full AF3 inference doesn't fit on consumer 24 GB GPUs. |
 
 Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). There is **one ranking and no way to select another**: a cross-engine gate (`--min-engines`, default 3) then `consensus_iptm_mean`, emitted as a single `rank` column. `ipsae_min` (DunbrackLab 2025 formula) and `agreement_count` are diagnostic columns — `agreement_count` in particular is a flat null as a screen (macro-AUC 0.532), so do not gate on it. Part U removed the `--rank-by` / `--screen-metric` flags and the `two_stage_rank` / `adaptyv_rank` / `consensus_rank` / `active_rank` columns; see `docs/INVESTIGATION_partU_cao_benchmark.md`. AF3 and ESMFold2 produce token-order PAE which the evaluator transposes to match Boltz-2's `[binder|target]` order.
 
@@ -372,7 +372,7 @@ Every one takes `--help`. `bindmaster evaluate <cmd> …` runs the same thing in
 | `report` | Merge the per-engine refold CSVs, rank, and write `report.html` + `metrics.csv` |
 | **Refolding** | |
 | `refold-boltz2` | Refold with Boltz-2 (Mosaic venv) |
-| `refold-af3` | Refold with AlphaFold 3 v3.0.2 (`binder-eval-af3`; needs ≥100 GB GPU memory) |
+| `refold-af3` | Refold with AlphaFold 3 v3.0.2 (`binder-eval-af3`; gated weights) |
 | `refold-esmfold2` | Refold with ESMFold2 (`binder-eval-esmfold2`) — the default engine |
 | **Screening before the GPU** | |
 | `filter-soluprot` | Sequence-only *E. coli* solubility score (`binder-eval-soluprot`, no GPU) |
@@ -496,10 +496,10 @@ Both branches: `bindmaster install` or `bash install/install.sh`.
 
 ### aarch64 notes
 
-- **BindCraft**: ARM64 binaries (`DAlphaBall.gcc`, `dssp`) bundled in `tools/aarch64/` — copied automatically. May fail at smoke-test time because jaxlib CUDA conda packages are not yet available for aarch64.
-- **BoltzGen**: PyTorch installed from PyPI without `+cuXXX` suffix (aarch64 wheels already include CUDA).
+- **BindCraft**: ARM64 binaries (`DAlphaBall.gcc`, `dssp`) bundled in `tools/aarch64/` — copied automatically. Runs on the GPU as of 1.0.1: the installer pins `jax[cuda12]==0.6.2`, the first jaxlib whose LLVM knows `sm_121`. On the older 0.4.34 pin any real AF2 forward pass aborts with `LLVM ERROR: Unsupported rounding mode for conversion`. Older text here said it was blocked by missing aarch64 jaxlib CUDA packages; that was wrong — those exist, the problem was the LLVM target. For aarch64.
+- **BoltzGen**: PyTorch from the **cu130 wheel index**, pinned (`torch==2.10.0+cu130`). Plain PyPI torch is **CPU-only** on aarch64 for the versions we pin — an earlier note here said the opposite, and acting on it silently replaces a working CUDA build with a CPU one.
 - **Mosaic**: `esmj` excluded (no aarch64 wheel). `torchtext` may also fail (no Linux aarch64 wheel).
-- **PXDesign**: Full pipeline works on aarch64 / Blackwell. The installer applies automatic patches for CUDA arch compatibility (sm_120), JSON serialization (`NumpyEncoder`), and dataloader (`num_workers`) config.
+- **PXDesign**: Full pipeline works on aarch64 / Blackwell. The installer applies automatic patches for CUDA arch compatibility (sm_120) **and `-std=c++20`** (torch >= 2.9 headers hard-error on c++17, so protenix's fused kernel will not build without it), JSON serialization (`NumpyEncoder`), **`use_bfloat16=False` in the AF2 eval** (jaxlib's AArch64 backend cannot lower a bf16 convert under SVE, so the eval subprocess SIGABRTs and surfaces only as a `JSONDecodeError` on an empty file), and dataloader (`num_workers`) config. PyTorch must come from the **cu130** index; a cu124 build reports `torch.cuda.is_available() == True` and then fails every kernel launch.
 - **Proteina-Complexa**: May need patches — PyTorch Geometric and `torchtext` may lack aarch64 wheels. Core deps (PyTorch 2.7, JAX 0.4.29) are fine. Same approach as Mosaic: mark missing packages with `platform_machine != 'aarch64'` in `pyproject.toml`. **Not wired into `install_aarch.sh`** — `--tool proteina-complexa` there exits with that explanation.
 - **Protein-Hunter**: **Not supported on aarch64** — PyRosetta has no aarch64 wheels. `install_aarch.sh` rejects `--tool protein-hunter` with that reason.
 - **RFD3**: `install_aarch.sh --tool rfd3` installs it (cu130 torch wheels, `rc-foundry[rfd3,mpnn]`, weights + ProteinMPNN checkpoint into `weights/foundry/`). Opt-in rather than part of `--tool all` because it is **not yet validated on aarch64 hardware**.
@@ -517,7 +517,7 @@ Both branches: `bindmaster install` or `bash install/install.sh`.
 > - `bindmaster install` now selects the installer for the host architecture
 >   automatically, so you no longer need to invoke `install_aarch.sh` by hand — the
 >   TUI's "Install tools" does the same.
-- **AF3 refolding**: Live on aarch64 / DGX Spark via the `binder-eval-af3` conda env and `binder-compare refold-af3`. Not aarch64-exclusive — AF3 runs anywhere with ≥100 GB GPU memory (an H200, GH200, etc. should work too); DGX Spark is just our primary host because Spark is where the unified memory headroom lives.
+- **AF3 refolding**: Live on aarch64 / DGX Spark via the `binder-eval-af3` conda env and `binder-compare refold-af3`. Not aarch64-exclusive — AF3 runs anywhere with a CUDA GPU — measured at ~4.4 GiB peak for 258-391 tokens, so a 24 GB card is enough (H200, GH200, RTX 3090 all work); DGX Spark is just our primary host because Spark is where the unified memory headroom lives.
 
 ---
 
@@ -609,8 +609,8 @@ The items below are what is still true today.
 
 Not defects — behaviour that will surprise you if you have not met it.
 
-- **The cross-engine gate defaults to 3, and most hosts run two engines.** AF3 needs
-  >100 GB of GPU memory, so a typical box runs Boltz-2 + ESMFold2 and *every* design
+- **The cross-engine gate defaults to 3, and most hosts run two engines.** AF3 fits a
+  24 GB card, but needs **gated weights**, so a box without them runs Boltz-2 + ESMFold2 and *every* design
   fails a gate of 3 — ranked last, no shortlist. `evaluate.sh` says so before spending
   any GPU time and names the flag; pass `--min-engines 2` to rank on the engines you
   have. It is never lowered for you: deriving the gate from whatever happens to be
