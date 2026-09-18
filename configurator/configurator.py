@@ -1084,9 +1084,34 @@ done
 conda activate BindCraft
 set -u
 
-# aarch64/Blackwell: JAX CUDA backend may not support sm_121
+# aarch64 / GB10: run on the GPU, but cap it in ABSOLUTE terms.
+# Two things are different here and both bite. (1) jax must be >= 0.6.2 -- 0.4.34's
+# LLVM has no sm_121, so AF2 dies at compile with "Unsupported rounding mode for
+# conversion". This script no longer forces JAX_PLATFORMS=cpu; that workaround cost
+# ~10x (measured 5.40 -> 2.39 s/iter moving to 0.6.2, and CPU is far worse again).
+# (2) The GPU pool IS system RAM, so XLA's default fraction of 0.75 reserves ~91 GiB
+# of a 121.7 GiB machine and takes the box down.
+# tools/gb10-env.sh owns the per-tool budget table (bindcraft = 24 GiB) and also
+# joins the MPS server, so prefer it; the inline fallback only exists so a run
+# script still caps itself on a checkout that does not have it.
 if [[ "$(uname -m)" == "aarch64" ]]; then
-    export JAX_PLATFORMS=cpu
+    _gb10_env="$(dirname "$BINDCRAFT_DIR")/tools/gb10-env.sh"
+    if [[ -r "$_gb10_env" ]]; then
+        # shellcheck disable=SC1090
+        source "$_gb10_env" && gb10_apply bindcraft
+    else
+        export XLA_PYTHON_CLIENT_PREALLOCATE=true
+        _bc_pool_gib=$(awk '/MemTotal/{{printf "%d", $2/1048576}}' /proc/meminfo)
+        _bc_target_gib=${{BINDCRAFT_GPU_GIB:-24}}
+        XLA_PYTHON_CLIENT_MEM_FRACTION=$(awk -v t="$_bc_target_gib" -v p="$_bc_pool_gib" \
+            'BEGIN{{ if (p <= 0) {{ print "0.200"; exit }} f = t/p; if (f > 0.5) f = 0.5; printf "%.3f", f }}')
+        export XLA_PYTHON_CLIENT_MEM_FRACTION
+    fi
+    # First AF2 compile is ~500 s (Triton autotuning), ~177 s once cached. Key the
+    # cache per card: a compiled executable is not portable between GPU models.
+    JAX_COMPILATION_CACHE_DIR="${{HOME}}/.cache/jax_bindcraft_$(uname -m)"
+    export JAX_COMPILATION_CACHE_DIR
+    echo "  aarch64: XLA fraction ${{XLA_PYTHON_CLIENT_MEM_FRACTION:-unset}}, jax compile cache $JAX_COMPILATION_CACHE_DIR"
 fi
 
 mkdir -p "$SETTINGS_DIR"
