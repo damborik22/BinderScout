@@ -1330,7 +1330,7 @@ install_boltzgen() {
     # compute_120 PTX which JIT-compiles to sm_121 at runtime.
     run_logged "Installing PyTorch (aarch64, CUDA 13.0)" \
         "${CONDA_CMD}" run -n BoltzGen \
-        pip install torch --index-url https://download.pytorch.org/whl/cu130 \
+        pip install "torch==2.10.0+cu130" --index-url https://download.pytorch.org/whl/cu130 \
         || { print_fail "Failed to install PyTorch"; return 1; }
 
     # On aarch64, gemmi==0.6.5 has no binary wheel and fails to build from source.
