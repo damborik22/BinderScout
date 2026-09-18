@@ -1642,8 +1642,17 @@ for fn in ['tools/af2/main_af2_complex.py', 'tools/af2/main_af2_monomer.py']:
     fp.write_text(t); print(f'Patched: {fn}')
 PATCHEOF
 
-    # Patch: protenix torch_ext_compile.py (CUDA 13 dropped sm_70; Blackwell needs sm_120)
-    run_logged "Patching protenix CUDA arch (sm_120 for Blackwell)" \
+    # Patch: protenix torch_ext_compile.py.  TWO independent fixes, and they are
+    # applied independently on purpose -- an env patched by an older installer has
+    # the arch fix but not the C++ one, and a single "already patched" guard would
+    # skip the second one forever.
+    #   1. arch: CUDA 13 dropped sm_70, and Blackwell needs sm_120.  sm_120 cubin
+    #      runs on GB10's sm_121 (minor-version compatibility), so one gencode is
+    #      enough -- verified by a fused-kernel run on this box.
+    #   2. -std=c++17 -> c++20: torch >= 2.9 headers hard-error with
+    #      "C++20 or later compatible compiler is required to use PyTorch", so the
+    #      extension fails to build against the cu130 torch we install below.
+    run_logged "Patching protenix CUDA arch (sm_120) + C++20" \
         "${CONDA_CMD}" run -n bindmaster_pxdesign python << 'PATCHEOF'
 import importlib.util, pathlib, re
 spec = importlib.util.find_spec('protenix')
@@ -1654,8 +1663,7 @@ fp = base / 'model' / 'layer_norm' / 'torch_ext_compile.py'
 if not fp.exists():
     print(f'{fp} not found — skipping'); exit(0)
 t = fp.read_text()
-if 'compute_120' in t:
-    print('Already patched'); exit(0)
+orig = t
 # Set TORCH_CUDA_ARCH_LIST
 if 'TORCH_CUDA_ARCH_LIST' not in t:
     t = t.replace(
@@ -1664,13 +1672,23 @@ if 'TORCH_CUDA_ARCH_LIST' not in t:
         '    os.environ["TORCH_CUDA_ARCH_LIST"] = "12.0"'
     )
 # Replace all gencode lines with sm_120 only
-t = re.sub(
-    r'(\s*"-gencode",\s*"arch=compute_\d+,code=sm_\d+",?\s*\n?)+',
-    '            "-gencode",\n            "arch=compute_120,code=sm_120",\n',
-    t
-)
+if 'compute_120' not in t:
+    t = re.sub(
+        r'(\s*"-gencode",\s*"arch=compute_\d+,code=sm_\d+",?\s*\n?)+',
+        '            "-gencode",\n            "arch=compute_120,code=sm_120",\n',
+        t
+    )
+# torch >= 2.9 requires C++20; protenix hardcodes c++17.
+t = t.replace('"-std=c++17"', '"-std=c++20"')
+if t == orig:
+    print('Already patched'); exit(0)
 fp.write_text(t)
-print('Patched torch_ext_compile.py for sm_120')
+# Stale objects were built against the old torch ABI -- drop them or the rebuild
+# links against headers it no longer matches.
+for stale in list(fp.parent.glob('*.so')) + list(fp.parent.glob('*.o')) + \
+             list(fp.parent.glob('build.ninja')) + list(fp.parent.glob('.ninja_*')):
+    stale.unlink()
+print('Patched torch_ext_compile.py (sm_120 + C++20); cleared stale build artifacts')
 PATCHEOF
 
     # Download weights if script exists
