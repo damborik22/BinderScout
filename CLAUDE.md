@@ -181,6 +181,19 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 
 **aarch64 specifics:**
 - BindCraft ARM64 binaries (`DAlphaBall.gcc`, `dssp`) bundled in `tools/aarch64/`
+- **BindCraft 1 RUNS on aarch64 — but only on jax 0.6.2, and this entry has been wrong in both directions.** It *did* work here before: `runs/2VDY-Spark-BindCraft/` holds a completed May 2026 campaign — 27 trajectories, 211 MPNN designs, 4 accepted, zero LLVM errors in 7,397 log lines. But it was running at **1–2.5 h per trajectory**, because the configurator emitted `export JAX_PLATFORMS=cpu` for aarch64 — it was on the CPU by construction. Take that out on the stock 0.4.34 pin and AF2 aborts at compile:
+  `Unsupported conversion from bf16 to f16` / `LLVM ERROR: Unsupported rounding mode for conversion.`
+  Root cause: **jaxlib 0.4.34's bundled LLVM knows sm_20..sm_90a only** (checked in the shipped `.so`); GB10 reports **cc 12.1**, so LLVM falls back to a subtarget with no bf16, and ColabDesign runs AF2 in bf16 by default (`colabdesign/af/model.py:35`). The model contains no f16 anywhere — XLA's lowering introduces it. Measured on a 120aa target + 40aa binder, AF2 fwd+bwd:
+
+  | | steady state | notes |
+  |---|---|---|
+  | 0.4.34 + `use_bfloat16=False` | 5.40 s/iter | works, but fp32 **doubles** memory — a 389-res target then needs a 21.4 GB allocation |
+  | **0.6.2 + bf16 left on** | **2.39 s/iter** | 2.3x faster, half the memory, no ColabDesign patch — **what the installer now does** |
+
+  **"ColabDesign pins us to jax 0.4.x" was wrong.** `jax.lib.xla_bridge.get_backend` is still present (deprecated) in 0.6.2, and ColabDesign calls it in exactly one place — `shared/utils.py:9`, inside `clear_mem()`, already behind a `hasattr` guard. 0.6.2 is the first jaxlib that knows sm_121 *and* still ships a cp310 wheel, so the py3.10 env and its conda PyRosetta are untouched; 0.5.3 tops out at sm_120 and is not enough. The same reasoning does NOT rescue Proteina-Complexa — its blocker is the CPU-bound AF2 reward, a different problem.
+
+  Caveat on the history: the env was byte-identical to May (untouched since 2026-03-07) and both runs used multimer, so why it compiled then is **unexplained**. The only changed variable is the driver (580.95.05 → 580.142 on 2026-06-30, now 580.159.03). Don't repeat that as fact.
+
 - BoltzGen: PyTorch installed from PyPI (no `+cuXXX` suffix needed)
 - Mosaic: `esmj` excluded (no aarch64 wheel); `torchtext` also may fail
 - RFD3: installable on aarch64 via `install/install_aarch.sh --tool rfd3` (no DGL dependency; pip-installs cleanly). **Opt-in, not in `--tool all`, because it is unvalidated on aarch64 hardware** — validate on Spark and promote it once confirmed.
@@ -395,7 +408,7 @@ the parameter sweep.
 - **Mosaic CSV column mismatch:** `designs.csv` can mix two column formats when multiple workers run. Parser may misalign columns for some workers. Documented in `Evaluator/docs/pipeline_reference.md`.
 - **BoltzGen pass rate is low:** In CALCA target testing, only 1/50 BoltzGen designs passed the `ipsae_min > 0.61` threshold. Sequences designed for Boltz-2 often don't cross-validate well.
 - **BoltzGen sequence column (`designed_chain_sequence` vs `designed_sequence`):** Extract the binder from `designed_chain_sequence` (the full chain). `designed_sequence` holds only the *designed residues* — for nanobody CDR-redesign that is just the CDR subset (~25-40 aa), so refolding it feeds a truncated binder. Verified on 2VDY: nano `designed_sequence` len 24-42 vs `designed_chain_sequence` len 112-133 (full VHH). `BoltzGenExtractor._SEQUENCE_COL_CANDIDATES` was reordered to prefer `designed_chain_sequence`.
-- **aarch64 BindCraft:** May fail because jaxlib CUDA conda packages are not available for aarch64.
+- **aarch64 BindCraft: FIXED by moving to jax 0.6.2.** On the old 0.4.34 pin the env looks healthy (GPU backend, pyrosetta imports) but any real AF2 forward pass aborts with `LLVM ERROR: Unsupported rounding mode for conversion` — jaxlib 0.4.34's LLVM has no sm_121, so bf16 cannot be lowered. `install/install_aarch.sh` now installs `jax[cuda12]==0.6.2`. If you meet this error, the env predates that change: `pip install -U "jax[cuda12]==0.6.2"` in it. Set `JAX_COMPILATION_CACHE_DIR` too — first compile is ~500 s (Triton autotuning), ~177 s cached.
 - **aarch64 Mosaic:** May fail because `torchtext` has no Linux aarch64 wheel.
 - **aarch64 Proteina-Complexa: deprecated, and the old reason here was wrong.** PyG/torchtext were never the blocker — PC imports neither (`torch_scatter` is its only PyG-family reference, satisfied by a 2 KB native shim, and the code path that would use it is disabled in the shipped checkpoint). The real blocker is the missing CUDA `jaxlib` for aarch64, which puts the AF2 reward on CPU and makes the MCTS recipe ~130× slower. See the aarch64-specifics entry above and `docs/plans.md`.
 - **AF2 smoke test:** Fails if `BindCraft/params/` is missing `.npz` weight files (interrupted download).
