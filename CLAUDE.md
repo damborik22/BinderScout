@@ -4,7 +4,7 @@
 
 BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. It wraps seven independent design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) behind a single CLI (`bindmaster`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders.
 
-**Current status:** v0.7.0 + Parts I, J, K, L, M, N, T and U landed on `[Unreleased]`. Engine line-up: Evaluator AF2 refolding removed (Part I), AF3 v3.0.2 as the canonical 2nd refolding engine (Part K — **runs on 24 GB consumer GPUs for our size regime**; the old ">=100 GB" figure was a preallocation artifact, see the AF3 memory note below), Protenix refolding removed (Part J reverted — AF3 covers the 2nd-engine role), Protein-Hunter (Part L) and RFD3 (Part M) installed and configurable. Ranking: affinity-from-structure-confidence closed as a negative result (Part N), and three ranking methods collapsed into one — cross-engine gate then `consensus_iptm_mean` (Part U). SoluProt is part of `--tool all` and both platforms build USEARCH v12 from source. Proteina-Complexa is deprecated on aarch64 (throughput, not an install failure). Active development on `master`; `aarch64` branch tracks DGX Spark / Grace-Hopper and is periodically rebased.
+**Current status:** **1.0.1** (tagged `v1.0.1`) — v1.0.0 was the validated seven-tool pipeline (Parts A–H plus I, J, K, L, M, N, T and U); 1.0.1 adds three aarch64 platform fixes (BindCraft 1 on jax 0.6.2, PXDesign's cu130 torch and its AF2 bf16 abort). Engine line-up: Evaluator AF2 refolding removed (Part I), AF3 v3.0.2 as the canonical 2nd refolding engine (Part K — **runs on 24 GB consumer GPUs for our size regime**; the old ">=100 GB" figure was a preallocation artifact, see the AF3 memory note below), Protenix refolding removed (Part J reverted — AF3 covers the 2nd-engine role), Protein-Hunter (Part L) and RFD3 (Part M) installed and configurable. Ranking: affinity-from-structure-confidence closed as a negative result (Part N), and three ranking methods collapsed into one — cross-engine gate then `consensus_iptm_mean` (Part U). SoluProt is part of `--tool all` and both platforms build USEARCH v12 from source. Proteina-Complexa is deprecated on aarch64 (throughput, not an install failure). Active development on `master`; `aarch64` branch tracks DGX Spark / Grace-Hopper and is periodically rebased. **Both BindCraft 1 and PXDesign now run on the GPU on DGX Spark** — each previously reported itself healthy while being unusable there.
 
 **Repository:** `github.com/damborik22/BinderScout` (the working-tree directory may be checked out as `BinderScout`; the CLI command and Python package are both `bindmaster`. The old `damborik22/BindMaster` URL redirects.)
 
@@ -194,7 +194,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 
   Caveat on the history: the env was byte-identical to May (untouched since 2026-03-07) and both runs used multimer, so why it compiled then is **unexplained**. The only changed variable is the driver (580.95.05 → 580.142 on 2026-06-30, now 580.159.03). Don't repeat that as fact.
 
-- BoltzGen: PyTorch installed from PyPI (no `+cuXXX` suffix needed)
+- BoltzGen: PyTorch from the **cu130 wheel index**, pinned (`torch==2.10.0+cu130`). Plain PyPI torch is **CPU-only** on aarch64 for the versions we pin — an earlier note here said the opposite, and acting on it silently replaced a working CUDA build with a CPU one. Verified on BM5: the live `BoltzGen` env is `torch 2.10.0+cu130` with `sm_120`/`compute_120` in its arch list.
 - Mosaic: `esmj` excluded (no aarch64 wheel); `torchtext` also may fail
 - RFD3: installable on aarch64 via `install/install_aarch.sh --tool rfd3` (no DGL dependency; pip-installs cleanly). **Opt-in, not in `--tool all`, because it is unvalidated on aarch64 hardware** — validate on Spark and promote it once confirmed.
 - Protein-Hunter: NOT supported on aarch64 (PyRosetta has no aarch64 wheels)
@@ -474,7 +474,7 @@ cd ~/BindMaster
 bindmaster install              # interactive menu (auto-detects standalone mode)
 bindmaster configure            # interactive wizard
 bash runs/<name>/run_all.sh     # run all enabled tools
-bindmaster evaluate runs/<name> # rank and report
+bash runs/<name>/run_evaluate.sh  # rank and report (drives Evaluator/evaluate.sh)
 
 # Add BindMaster/bin to PATH:
 export PATH="$(pwd)/bin:$PATH"

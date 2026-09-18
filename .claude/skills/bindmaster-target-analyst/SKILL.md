@@ -78,7 +78,7 @@ sequence do three things before §3 — **find the right PDB, build the MSA, fol
 
 **Which folding engine?** For an *unsolved target* (a natural protein), **MSA-based AF-class
 prediction is best** — accuracy matters because every site/difficulty call rides on the model:
-- **AF3** (`binder-eval-af3`, big-VRAM) — highest accuracy when available.
+- **AF3** (`binder-eval-af3`) — highest accuracy when available. Availability is gated by the **weights** (fetched per machine), not by VRAM: measured ~4.4 GiB peak for a 258-391 token complex, so a 24 GB card is enough.
 - **Boltz-2 + MSA** (`predict_structure.py`, already wired) — AF3-class, the practical default.
 - **AF2 / ColabFold** (via the BindCraft env) — gold-standard monomer accuracy with a deep MSA.
 - **ESMFold2** — MSA-free, fast, good for a first pass, but **weaker on novel / low-homology**

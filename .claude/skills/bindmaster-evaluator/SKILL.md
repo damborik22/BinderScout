@@ -18,7 +18,7 @@ not the final affinity word (no metric ranks affinity perfectly — see `affinit
 ```bash
 binder-compare extract  --<tool> DIR …            -o seqs.fasta
 binder-compare refold-boltz2   --sequences seqs.fasta --target-seq SEQ -o boltz2.csv   # Mosaic venv
-binder-compare refold-af3      … -o af3.csv        # binder-eval-af3, big-VRAM
+binder-compare refold-af3      … -o af3.csv        # binder-eval-af3; GATED WEIGHTS, not big-VRAM (~4.4 GiB peak, fits 24 GB)
 binder-compare refold-esmfold2 … -o esmfold2.csv   # default, lightweight; also the autosize gate
 binder-compare report   --boltz2-results … --af3-results … --esmfold2-results … -o report/
 binder-compare affinity --metrics report/metrics.csv --structures-dir … --run-rosetta -o affinity.csv
