@@ -6,6 +6,92 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-09-18
+
+Three aarch64 platform fixes. Each tool reported itself healthy and was not:
+BindCraft 1 was silently on the CPU, and PXDesign could not launch a CUDA kernel
+at all. No behaviour change on x86_64.
+
+### Fixed
+
+- **BindCraft 1 now runs on the GPU on DGX Spark (GB10 / sm_121).** It was never
+  using the GPU there: the configurator emitted `export JAX_PLATFORMS=cpu` for
+  aarch64, so trajectories ran on the CPU at 1-2.5 h each. Removing that exposes
+  the real fault -- `jaxlib 0.4.34`'s bundled LLVM knows `sm_20..sm_90a` only, so
+  for GB10 (cc 12.1) it falls back to a subtarget without bf16, while ColabDesign
+  runs AF2 in bf16 by default. Every AF2 graph then died at compile with
+  `Unsupported conversion from bf16 to f16` / `LLVM ERROR: Unsupported rounding
+  mode for conversion`. The installer now pins `jax[cuda12]==0.6.2`: the first
+  jaxlib that knows `sm_121` *and* still ships a cp310 wheel, so the py3.10 env
+  and its aarch64 conda PyRosetta are untouched, and ColabDesign needs no patch
+  (`jax.lib.xla_bridge.get_backend` is still there, deprecated). Measured on a
+  120aa target + 40aa binder: **2.39 s/iter against 5.40 s/iter** for the only
+  configuration that made 0.4.34 run at all (bf16 disabled, which also doubles
+  memory). The generated run script now also caps GPU memory -- on this box the
+  GPU pool *is* system RAM, so XLA's default 0.75 would reserve ~91 GiB of 122
+  and take the machine down.
+
+- **PXDesign can launch CUDA kernels again.** `torch.cuda.is_available()`
+  returned `True` while every kernel launch failed with `no kernel image is
+  available for execution on the device`: a `torch 2.5.1` built against cu124 had
+  displaced the cu130 build, and CUDA 12.4 predates Blackwell. Reinstalling from
+  the cu130 index then exposed a second fault -- protenix hardcodes
+  `-std=c++17` and torch >= 2.9 headers hard-error on it, so its fused LayerNorm
+  extension would not build. The installer's protenix patch now applies the arch
+  fix and the C++20 fix **independently** (the previous single "already patched"
+  guard skipped the second one forever on any env an older installer had already
+  arch-patched) and clears stale build artefacts left from the previous torch ABI.
+
+- **PXDesign's AF2 evaluation no longer aborts on aarch64.** Hidden behind the
+  above: with diffusion working, the pipeline reached the AF2 eval and died on a
+  `JSONDecodeError` reading an empty file. The real event was one line earlier --
+  `Run subprocess success: -6`, a SIGABRT from
+  `LLVM ERROR: Cannot select: nxv4bf16 = AArch64ISD::UINT_TO_FP_MERGE_PASSTHRU`.
+  jaxlib's **AArch64** backend cannot lower a bf16 convert under SVE, the AF2
+  eval is pinned to the CPU here, and ColabDesign defaults to bf16. The installer
+  now patches `use_bfloat16=False` into both pxdbench AF2 entry points (bf16 buys
+  nothing on a CPU path; x86 is unaffected). Verified: both AF2 subprocesses
+  return 0, and the eval writes real metrics -- pLDDT 0.65, pTM 0.52, i_pTM 0.37
+  -- against a two-chain 675-atom complex.
+
+- **Documentation corrected against the shipped behaviour.** The README asserted AF3
+  needs **>=100 GB of GPU memory** in seven places while already carrying the
+  correction elsewhere in the same file; AF3 peaks at ~4.4 GiB for a 258-391 token
+  complex and runs on a 24 GB card, and the real constraint is the **gated weights**.
+  The README's aarch64 notes also said BindCraft "may fail because jaxlib CUDA conda
+  packages are not available for aarch64" (those exist; the problem was the LLVM
+  target) and that BoltzGen takes plain PyPI torch "without +cuXXX suffix" -- the
+  opposite of the truth, and acting on it replaces a working CUDA build with a
+  CPU-only one. Verified against the live env: `torch 2.10.0+cu130`, arch list
+  `sm_120`/`compute_120`.
+
+- **`bindmaster evaluate <run-dir>` removed from the docs: it never worked.**
+  `bindmaster evaluate` is a passthrough to `binder-compare`, whose first argument
+  must be a subcommand -- a directory is rejected by argparse. It was nevertheless
+  shown as the primary usage in `CLAUDE.md`'s Quick start, twice in
+  `Evaluator/README.md` (with `--refold` / `--target` flags that also do not exist),
+  and in the orchestrator skill, which would send an agent straight into the error.
+  All four now show `bash runs/<name>/run_evaluate.sh`.
+
+- **The agent skills no longer instruct a ranking we removed.** `bindmaster-orchestrator`
+  still described the pre-Part-U pipeline: *"Ranking is `agreement_count` desc, then
+  `ipsae_min` desc."* `agreement_count` is a flat null as a screen — macro-AUC **0.532**
+  with **87.2 %** of designs tied at zero — and the shipped ranking is a cross-engine gate
+  then `consensus_iptm_mean`. Skills are executable instructions, so an agent reading that
+  line would have ranked a whole campaign by a discredited metric. The same skill also
+  documented the non-existent `bindmaster evaluate <run-dir>` interface, and the evaluator
+  and target-analyst skills labelled AF3 "big-VRAM" rather than gated-weights. Verified
+  already-correct and left alone: `bindmaster-evaluator` (both files state the removals),
+  `orchestrator/references/evaluation.md`, and `tools/protenix.md`.
+
+### Note on this file
+
+Everything previously filed under `[Unreleased]` shipped in **v1.0.0** -- the tag
+sits on the commit this release branches from, with no commits in between -- so
+that section is now labelled `[1.0.0]` rather than left open.
+
+## [1.0.0] — 2026-09-16
+
 ### Fixed (2026-08-14 — the rest of the terminal-path audit: the gate you cannot reach, the wizard session you lose, the menu that errors)
 
 Follow-on to the two fixes below, closing every remaining finding from the same pass.

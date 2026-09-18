@@ -113,8 +113,18 @@ This runs all steps in the correct environments automatically and writes:
 ### Via the BindMaster CLI
 
 ```bash
-bindmaster evaluate runs/<name>
-bindmaster evaluate runs/<name> --refold 5 --target runs/<name>/target/target.pdb
+# `bindmaster evaluate` is a PASSTHROUGH to this CLI. There is no run-directory
+# mode and no --refold / --target flags: the first argument must be a subcommand,
+# or argparse rejects it. The usual path is the script the configurator writes:
+bash runs/<name>/run_evaluate.sh
+
+# ...which is equivalent to driving evaluate.sh yourself:
+bash Evaluator/evaluate.sh --sequences seqs.fasta \
+                          --target-seq "<TARGET_SEQ>" \
+                          --output runs/<name>/evaluate
+
+# Or call any subcommand straight through:
+bindmaster evaluate run --mosaic runs/<name>/mosaic --target-seq "<TARGET_SEQ>" -o out/
 ```
 
 ### Resume a partial run
