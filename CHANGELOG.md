@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.2] — 2026-09-18
+
+### Fixed
+
+- **ESMFold2 — the default refold engine — was broken on every machine tracking
+  `master`.** `ESMFold2Model.from_pretrained()` was called with no `revision`, so each
+  host silently got whatever upstream had tagged `main` on the day it installed. A
+  machine that installed on 2026-09-16 gets `69869f737bef`, whose config nests
+  `architectures` / `model_type` inside `structure_head`; the pinned transformers
+  4.57.6 `DiffusionStructureHeadConfig` rejects those and the run dies with
+  `TypeError: ... unexpected keyword argument 'architectures'`. Confirmed on BM2 while
+  benchmarking. The revision is now pinned to `8fc3ff471022`, the one every validated
+  result in this project was produced with, overridable per-run via `$ESMFOLD2_REVISION`.
+  The engine also announces which revision it loaded, so an unpinned host is visible in
+  the log instead of silent.
+
+  Two machines in the same campaign could previously fold with **different weights** and
+  nothing anywhere said so — and because a failing engine still left the run looking
+  complete, it could contribute an entire engine of nothing to a 3-engine gate.
+
+
 ## [1.0.1] — 2026-09-18
 
 Three aarch64 platform fixes. Each tool reported itself healthy and was not:

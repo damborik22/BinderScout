@@ -37,6 +37,26 @@ _MODEL_IDS: dict[str, str] = {
     "full": "biohub/ESMFold2",
 }
 
+# Pin the HF revision. Without this every machine silently gets whatever upstream
+# tagged `main` on the day it installed, so two nodes in the same campaign can fold
+# with different weights and nothing anywhere says so.
+#
+# It is not hypothetical: Clara installed on 2026-09-16 and got 69869f737bef, whose
+# config nests `architectures`/`model_type` inside `structure_head` (30 keys). The
+# pinned transformers 4.57.6 DiffusionStructureHeadConfig rejects those, so the run
+# died with `TypeError: ... unexpected keyword argument 'architectures'` — and
+# evaluate.sh swallowed it and printed REFOLD_DONE with exit 0, contributing an
+# entire engine of nothing to a 3-engine gate. BM5, installed earlier, had
+# 8fc3ff471022 (12 clean keys) and worked.
+#
+# 8fc3ff471022 is the revision every validated result in this project was produced
+# with. Override per-run with $ESMFOLD2_REVISION if a newer one is deliberately
+# adopted — and re-validate before trusting cross-run comparisons.
+_MODEL_REVISIONS: dict[str, str | None] = {
+    "biohub/ESMFold2-Fast": os.environ.get("ESMFOLD2_REVISION") or None,
+    "biohub/ESMFold2": os.environ.get("ESMFOLD2_REVISION") or "8fc3ff471022fdce52c77030685eb775de0c00a3",
+}
+
 # --- shared target MSA: pre-warm + enforce (F21) -----------------------------
 # The target MSA is fetched ONCE per target into the shared on-disk cache, so
 # every engine folds the target with the same evolutionary context.  An engine
@@ -343,7 +363,13 @@ def _load_model_and_builder(repo_id: str, *, target_msa=None):
     if not torch.cuda.is_available():
         raise RuntimeError("ESMFold2 requires CUDA — no GPU detected.")
 
-    model = ESMFold2Model.from_pretrained(repo_id).cuda().eval()
+    revision = _MODEL_REVISIONS.get(repo_id)
+    _kw = {"revision": revision} if revision else {}
+    if revision:
+        print(f"  [esmfold2] {repo_id} @ pinned revision {revision[:12]}")
+    else:
+        print(f"  [esmfold2] {repo_id} @ UNPINNED main — weights may differ between machines")
+    model = ESMFold2Model.from_pretrained(repo_id, **_kw).cuda().eval()
     builder = ESMFold2InputBuilder()
 
     def _fold(
