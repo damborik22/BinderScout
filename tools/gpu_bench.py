@@ -39,6 +39,46 @@ def tiled(n: int) -> str:
     return s
 
 
+def _is_unified_memory() -> bool:
+    """True when the GPU pool IS system RAM (GB10 / Grace-Hopper)."""
+    import ctypes as _c
+    free, total = _c.c_size_t(), _c.c_size_t()
+    for lib in ("libcudart.so", "libcudart.so.13", "libcudart.so.12"):
+        try:
+            rt = _c.CDLL(lib)
+        except OSError:
+            continue
+        try:
+            if rt.cudaMemGetInfo(_c.byref(free), _c.byref(total)) == 0 and total.value:
+                ram = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+                return abs(total.value - ram) / ram < 0.2
+        except (AttributeError, OSError, ValueError):
+            pass
+        break
+    return False
+
+
+def _wrap_gpurun(cmd: list[str], repo: str, cap_gib: int, disabled: bool) -> list[str]:
+    """Route through gpurun when present. NEVER launch an uncapped GPU job on GB10.
+
+    gpurun is not only an MPS cap: it registers the job in /run/gb10-guard/jobs so a
+    LATER job can see this one's reservation. A job started outside it is invisible to
+    that admission check -- which is how a concurrent pair wedged nvidia-modeset and
+    froze this box on 2026-09-21. The freeze had no OOM kills and no guard trip; the
+    driver's allocation path failed and a kernel thread hung, which no MemFree
+    threshold catches.
+
+    Cost, because it changes what the numbers mean: under MPS, per-process GPU
+    attribution collapses onto nvidia-cuda-mps-server, so the NVML peak sampled here
+    is not this job's alone. On such a host treat the cap as the memory figure and use
+    a reservation sweep for demand.
+    """
+    gr = Path(repo) / "tools" / "gpurun"
+    if disabled or not gr.exists():
+        return cmd
+    return [str(gr), "--cap", str(cap_gib), "--name", "gpubench", "--", *cmd]
+
+
 def peak_sampler(root_pid: int, stop: threading.Event, out: dict, hz: float = 5.0):
     """Max summed GPU memory over the process tree, via NVML."""
     peak = 0
@@ -93,6 +133,10 @@ def main() -> int:
     ap.add_argument("--python", required=True, help="engine env's python")
     ap.add_argument("--workdir", required=True)
     ap.add_argument("--label", default="")
+    ap.add_argument("--measure-demand", action="store_true",
+                    help="PREALLOCATE=false to measure demand; refused on unified-memory hosts")
+    ap.add_argument("--cap-gib", type=int, default=24, help="GPU cap handed to gpurun")
+    ap.add_argument("--no-gpurun", action="store_true", help="skip gpurun (discrete cards only)")
     a = ap.parse_args()
 
     wd = Path(a.workdir)
@@ -108,8 +152,12 @@ def main() -> int:
         return 2
 
     env = dict(os.environ)
-    env["BINDMASTER_ALLOW_NO_MSA"] = "1"  # single-sequence: token count is the variable
-    env["BINDMASTER_XLA_PREALLOCATE"] = "false"  # JAX: measure demand, not the pool
+    env["BINDMASTER_ALLOW_NO_MSA"] = "1"
+    if a.measure_demand:
+        if _is_unified_memory():
+            print(json.dumps({"error": "--measure-demand refused on a unified-memory host"}))
+            return 2
+        env["BINDMASTER_XLA_PREALLOCATE"] = "false"
     env["JAX_COMPILATION_CACHE_DIR"] = str(wd / "jaxcache")
 
     base = [a.python, "-u", str(script), "--sequences", str(fa), "--target-seq", target, "--no-msa", "--allow-no-msa"]
@@ -120,6 +168,7 @@ def main() -> int:
         "esmfold2": ["--output", str(wd / "e.csv"), "--output-dir", str(wd / "eout")],
     }
     cmd = base + outs[a.engine]
+    cmd = _wrap_gpurun(cmd, a.repo, a.cap_gib, a.no_gpurun)
 
     cold_s, cold_peak, rc1 = run_once(cmd, env, wd / f"{a.engine}_{a.target_len}_cold.log")
     warm_s, warm_peak, rc2 = run_once(cmd, env, wd / f"{a.engine}_{a.target_len}_warm.log")
