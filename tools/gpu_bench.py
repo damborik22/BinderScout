@@ -42,6 +42,7 @@ def tiled(n: int) -> str:
 def _is_unified_memory() -> bool:
     """True when the GPU pool IS system RAM (GB10 / Grace-Hopper)."""
     import ctypes as _c
+
     free, total = _c.c_size_t(), _c.c_size_t()
     for lib in ("libcudart.so", "libcudart.so.13", "libcudart.so.12"):
         try:
@@ -133,8 +134,11 @@ def main() -> int:
     ap.add_argument("--python", required=True, help="engine env's python")
     ap.add_argument("--workdir", required=True)
     ap.add_argument("--label", default="")
-    ap.add_argument("--measure-demand", action="store_true",
-                    help="PREALLOCATE=false to measure demand; refused on unified-memory hosts")
+    ap.add_argument(
+        "--measure-demand",
+        action="store_true",
+        help="PREALLOCATE=false to measure demand; refused on unified-memory hosts",
+    )
     ap.add_argument("--cap-gib", type=int, default=24, help="GPU cap handed to gpurun")
     ap.add_argument("--no-gpurun", action="store_true", help="skip gpurun (discrete cards only)")
     a = ap.parse_args()
