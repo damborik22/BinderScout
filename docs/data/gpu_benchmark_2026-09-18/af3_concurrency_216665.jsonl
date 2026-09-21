@@ -1,0 +1,6 @@
+{"workers":1,"frac":0.8500,"folds_attempted":2,"folds_done":2,"wall_s":76,"gpu_used_after_MiB":0,"throughput_folds_per_min":1.58}
+{"workers":2,"frac":0.4250,"folds_attempted":4,"folds_done":4,"wall_s":104,"gpu_used_after_MiB":0,"throughput_folds_per_min":2.31}
+{"workers":4,"frac":0.2125,"folds_attempted":8,"folds_done":8,"wall_s":151,"gpu_used_after_MiB":0,"throughput_folds_per_min":3.18}
+{"workers":8,"frac":0.1062,"folds_attempted":16,"folds_done":16,"wall_s":245,"gpu_used_after_MiB":0,"throughput_folds_per_min":3.92}
+{"workers":15,"frac":0.0567,"folds_attempted":30,"folds_done":30,"wall_s":412,"gpu_used_after_MiB":0,"throughput_folds_per_min":4.37}
+CONC_DONE
