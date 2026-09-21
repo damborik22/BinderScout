@@ -37,6 +37,15 @@ docs/local/
 # Run outputs — generated per-experiment
 runs/
 refold_boltz2/
+# Shared target-MSA cache written by the refold engines at runtime
+# (ColabFold hits, keyed by target-sequence hash).
+msa_cache/
+# Refold resume checkpoints and scratch outputs, written to the CWD by the
+# refold engines. These four are all {"interrupted": true} -- the residue of
+# runs killed by the GB10 guard and the 2026-09-21 freeze.
+checkpoint_refold_*.json
+refold_designs.csv
+refold_designs.txt
 
 # RFD3 / foundry checkpoints — fetched by `foundry install` (~2.5 GB), not part of repo
 weights/
