@@ -1,5 +1,11 @@
 # Tool directories — cloned fresh by install.sh
 BindCraft/
+# BindCraft 2 is pre-publication and source-available under its own (non-MIT)
+# licence. No file of it belongs in this MIT repo -- not even its LICENSE or
+# README. It is unpacked here by the installer from --bc2-source, so the tree
+# is present on disk on any machine that has it; without this line a plain
+# `git add -A` on this branch stages 157 of its source files.
+BindCraft2/
 BoltzGen/
 Mosaic/
 PXDesign/
