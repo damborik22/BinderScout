@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     SourceTool = Literal[
         "bindcraft",
+        "bindcraft2",
         "boltzgen",
         "mosaic",
         "pxdesign",

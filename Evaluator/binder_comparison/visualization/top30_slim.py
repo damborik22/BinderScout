@@ -53,6 +53,7 @@ _TOOLCOL = {
     "mosaic": "#3b82f6",
     "pxdesign": "#8b5cf6",
     "bindcraft": "#ef4444",
+    "bindcraft2": "#b91c1c",
     "proteina_complexa": "#10b981",
     "protein_hunter": "#f59e0b",
     "rfd3": "#ec4899",
