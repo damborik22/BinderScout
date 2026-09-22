@@ -1,0 +1,2 @@
+{"label": "gb10-bm5-cap72", "engine": "boltz2", "gpu": "NVIDIA GB10, [N/A]", "framework": "jax 0.9.2 | torch 2.7.1+cpu", "target_len": 540, "binder_len": 60, "tokens": 600, "cold_s": 542.8, "warm_s": 338.8, "peak_mib_cold": 66698, "peak_mib_warm": 66696, "rc_cold": 0, "rc_warm": 0, "ok": true}
+CEILING_DONE
