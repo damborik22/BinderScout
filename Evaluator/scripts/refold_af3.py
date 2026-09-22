@@ -422,7 +422,20 @@ def _default_mem_fraction() -> str:
         if unified:
             frac = min(frac, max(0.0, (pool_gib - _AF3_MIN_OS_GIB) / pool_gib))
         else:
-            frac = max(frac, 0.5)  # discrete: keep plenty of card for big complexes
+            # Cap at half the card; do NOT floor at it. This was `max(frac, 0.5)`, which
+            # forced every discrete host to reserve 50% regardless of need -- 22.5 GiB on an
+            # L40S and 70.2 GiB on an H200, for a working set measured at 2.3-5.2 GiB across
+            # 150-900 tokens (docs/data/gpu_benchmark_2026-09-18). PREALLOCATE stays true, so
+            # that is taken in full at import: two concurrent AF3 jobs did not fit a 140 GB
+            # H200, and the concurrency sweep had to override the fraction by hand. The 12 GiB
+            # target is already ~2.3x the largest measured need. The ceiling only bites on
+            # small cards, where 12/23.6 = 0.508 would hand AF3 more than half a 24 GB card.
+            #
+            # A complex far outside our regime (AF3 documents 5,120 tokens on an 80 GB A100,
+            # and pair activations scale super-linearly) needs more than 12 GiB -- raise
+            # AF3_XLA_MEM_FRACTION for that run. Reserving 70 GiB by default to cover a case
+            # we have never run is what blocked the cases we do run.
+            frac = min(frac, 0.5)
         frac = max(0.02, min(frac, 0.8))
         return f"{frac:.3f}"
     except Exception:

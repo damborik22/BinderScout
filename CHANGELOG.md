@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.3] — 2026-09-22
+
+Two refold-engine fixes, both found by benchmarking the engines across every GPU we
+own (`docs/data/gpu_benchmark_2026-09-18/`). Both affect every machine.
+
+### Fixed
+
+- **AF3 no longer reserves half of a large GPU.** The discrete-host branch of
+  `_default_mem_fraction` floored the fraction at 0.5 (`max(frac, 0.5)`), so AF3
+  reserved **22.5 GiB on an L40S and 70.2 GiB on an H200** — for a working set
+  measured at **2.3–5.2 GiB** across 150–900 tokens. Because `PREALLOCATE` stays
+  true (correctly — `false` removes the only ceiling), that is taken in full at
+  import, so **two concurrent AF3 jobs would not fit a 140 GB H200** and the
+  concurrency sweep had to override the fraction by hand. The floor is now a
+  ceiling (`min(frac, 0.5)`): every host reserves the 12 GiB target, already ~2.3×
+  the largest measured need, and ~11 concurrent jobs fit an H200 where 2 did.
+  The 0.5 clamp still bites on small cards, where `12/23.6 = 0.508` would
+  otherwise hand AF3 more than half a 24 GB card. A complex far outside our regime
+  needs `AF3_XLA_MEM_FRACTION` raised for that run.
+
+- **ESMFold2 now exits non-zero when every binder fails.** It caught each
+  per-binder failure, wrote an **empty row** and continued, so a CUDA OOM printed
+  `Wrote 1 row(s)` and returned 0 — measured on a 24 GB card at 900 tokens, where
+  the engine needs ~28.7 GB. The run looked complete while contributing a column
+  of blanks, and every design silently dropped to a 2-engine mean and failed the
+  ≥3-engine gate for no visible reason: **a design demoted for a hardware reason,
+  reading as a quality judgement.** All four empty-row paths now count, and an
+  all-failed run raises with the first underlying error. `refold_af3.py` and
+  `refold_boltz2.py` already had this guard; ESMFold2 was the only engine missing it.
+
+
 ## [1.0.2] — 2026-09-18
 
 ### Fixed

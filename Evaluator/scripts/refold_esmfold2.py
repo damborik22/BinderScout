@@ -180,6 +180,8 @@ def refold_batch(
             writer.writeheader()
             fh.flush()
 
+        n_failed = 0
+        first_exc: Exception | None = None
         for idx, binder_seq in jobs:
             binder_len = len(binder_seq)
             print(f"[esmfold2] Binder #{idx}  length={binder_len} aa")
@@ -196,6 +198,8 @@ def refold_batch(
                 )
             except Exception as exc:
                 print(f"[esmfold2] ERROR on binder #{idx}: {exc}")
+                first_exc = first_exc or exc
+                n_failed += 1
                 writer.writerow(_empty_row(idx, binder_seq, target_sequence))
                 fh.flush()
                 _free_torch_cache()
@@ -208,6 +212,7 @@ def refold_batch(
             if isinstance(result, (list, tuple)):
                 if not result:
                     print(f"[esmfold2] No samples returned for #{idx}; recording empty row.")
+                    n_failed += 1
                     writer.writerow(_empty_row(idx, binder_seq, target_sequence))
                     fh.flush()
                     _free_torch_cache()
@@ -249,6 +254,7 @@ def refold_batch(
                 cif_str = complex_obj.to_mmcif() if complex_obj is not None else None
             except Exception as exc:
                 print(f"[esmfold2] ERROR extracting outputs for #{idx}: {exc}")
+                n_failed += 1
                 writer.writerow(_empty_row(idx, binder_seq, target_sequence))
                 fh.flush()
                 _free_torch_cache()
@@ -256,6 +262,7 @@ def refold_batch(
 
             if pae is None or pae.size == 0:
                 print(f"[esmfold2] No PAE returned for #{idx}; recording empty row.")
+                n_failed += 1
                 writer.writerow(_empty_row(idx, binder_seq, target_sequence))
                 fh.flush()
                 _free_torch_cache()
@@ -316,6 +323,22 @@ def refold_batch(
             _free_torch_cache()
 
     print(f"[esmfold2] Wrote {len(jobs)} row(s) → {csv_path}")
+
+    # Failing EVERY binder is an environment fault, not bad input, and must not exit 0.
+    # ESMFold2 catches a per-binder failure, writes an EMPTY row and continues, so a CUDA
+    # OOM produced "Wrote 1 row(s)" with rc=0 -- measured 2026-09-18 on a 24 GB card at 900
+    # tokens, where the engine needs ~28.7 GB. The run then looks complete while
+    # contributing a column of blanks, and every design silently drops to a 2-engine mean
+    # and fails the >=3-engine gate for no visible reason. A design must not be demoted for
+    # a hardware reason and have that read as a quality judgement.
+    if jobs and n_failed == len(jobs):
+        raise RuntimeError(
+            f"All {len(jobs)} binder(s) failed — ESMFold2 produced no usable output. "
+            f"This is an environment fault, not bad input. First error: {first_exc}. "
+            "Common cause: CUDA OOM (~14 GB at 150 tokens rising to ~28.7 GB at 900, so a "
+            "24 GB card cannot hold the largest complexes), or the pinned HF revision "
+            "could not be fetched."
+        )
 
 
 # ---------------------------------------------------------------------------
