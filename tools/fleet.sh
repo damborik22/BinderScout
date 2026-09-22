@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# fleet.sh — drive the BindMaster LAN fleet (BM1/BM2/BM4) from BM5.
+# fleet.sh — drive the BindMaster LAN fleet over SSH from the driver machine.
 # Design: docs/PLAN_fleet_orchestration.md
 set -euo pipefail
 
-FLEET_MACHINES=(bm1 bm2 bm4)
+# Machines this driver controls. Default is the three x86 workers as driven
+# from BM5; override to drive from a different machine, e.g. on BM4:
+#     FLEET_MACHINES="bm1 bm2 bm5" tools/fleet.sh probe
+# Every name must be a Host alias in ~/.ssh/config that resolves non-interactively.
+read -r -a FLEET_MACHINES <<<"${FLEET_MACHINES:-bm1 bm2 bm4}"
 FLEET_DIR="${FLEET_DIR:-$HOME/.claude/fleet}"
 INVENTORY="$FLEET_DIR/inventory.json"
 GPU_BUSY_MIB=512   # ignore snapd-desktop-integration (~6 MiB) on BM4
@@ -70,8 +74,10 @@ cmd_probe() {
         fi
         args+=(--argjson "$m" "$json")
     done
+    # $ARGS.named collects every --arg/--argjson passed above, so the machines
+    # object follows FLEET_MACHINES instead of a hardcoded bm1/bm2/bm4 key set.
     jq -n "${args[@]}" --arg generated "$(date -Is)" \
-        '{generated:$generated, machines:{bm1:$bm1, bm2:$bm2, bm4:$bm4}}' > "$INVENTORY"
+        '{generated:$generated, machines:($ARGS.named | del(.generated))}' > "$INVENTORY"
     ok "wrote $INVENTORY"
 }
 
