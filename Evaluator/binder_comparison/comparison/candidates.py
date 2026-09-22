@@ -69,6 +69,7 @@ N_REFOLD = 50
 # only, applied at render time, so nothing downstream has to know about it.
 TOOL_DISPLAY_NAMES = {
     "bindcraft": "BindCraft",
+    "bindcraft2": "BindCraft 2",
     "boltzgen": "BoltzGen",
     "mosaic": "Mosaic",
     "proteina_complexa": "Proteina-Complexa",
@@ -97,6 +98,7 @@ def display_tool_name(tool: str) -> str:
 # Native blocks are emitted in this order; the refold block always comes last.
 CANONICAL_TOOL_ORDER = [
     "bindcraft",
+    "bindcraft2",
     "boltzgen",
     "mosaic",
     "proteina_complexa",

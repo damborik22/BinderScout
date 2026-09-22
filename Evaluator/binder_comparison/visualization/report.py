@@ -349,6 +349,7 @@ _TOOL_COLOURS_NGL = {
     "boltzgen_nano": "#FF9800",
     "boltzgen_protein": "#EF6C00",
     "bindcraft": "#2196F3",
+    "bindcraft2": "#1565C0",
     "proteina_complexa": "#00897B",
     "rfd3": "#D84315",
     "protein_hunter": "#00838F",
