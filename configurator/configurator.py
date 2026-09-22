@@ -2319,8 +2319,15 @@ def write_run_bindcraft2(path: Path, cfg: dict):
             # BindCraft 2 is not a git checkout here (it is staged from an archive),
             # so there is no SHA to record. Hash the campaign-relevant source instead,
             # which is what actually has to match for a rerun to mean anything.
-            '\nBC2_SRC=$(find "$BC2_DIR/bindcraft" -name "*.py" -type f -print0 2>/dev/null'
-            ' | sort -z | xargs -0 cat 2>/dev/null | sha256sum | cut -c1-16 || echo "unknown")'
+            # `... | cut -c1-16 || echo unknown` appends instead of replacing: under
+            # `set -o pipefail` a failing find fails the whole pipeline, but cut has
+            # already printed the empty-input hash, so the substitution captures BOTH
+            # and the newline between them makes settings.json invalid JSON. Validate
+            # the shape instead and substitute only when it does not hold.
+            '\nBC2_SRC=$([ -d "$BC2_DIR/bindcraft" ]'
+            ' && find "$BC2_DIR/bindcraft" -name "*.py" -type f -print0 2>/dev/null'
+            " | sort -z | xargs -0 cat 2>/dev/null | sha256sum 2>/dev/null | cut -c1-16"
+            " || printf unknown)"
         ),
     )
 
