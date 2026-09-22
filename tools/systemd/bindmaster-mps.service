@@ -20,7 +20,7 @@
 
 [Unit]
 Description=CUDA MPS control daemon (BindMaster GB10 memory ceiling)
-Documentation=file://<BM5_HOME>/dev/BindMaster/docs/PLAN_bm5_unified_memory.md
+Documentation=https://github.com/damborik22/BinderScout/blob/master/docs/PLAN_bm5_unified_memory.md
 
 [Service]
 Type=forking

@@ -288,6 +288,11 @@ the parameter sweep.
 - **Platform branch:** `aarch64` (periodically rebased from master)
 - **Commit style:** `Part X: description` matching STAGES.md parts, or imperative mood for smaller changes
 - **PR conventions:** imperative title < 70 chars, body references STAGES.md items, CI must pass, one logical change per PR
+- **This repo is PUBLIC — no infrastructure identifiers in tracked files.** No machine IPs,
+  DNS hostnames, Unix usernames, absolute `/home/<user>` paths, cluster account names or SSH
+  host-key fingerprints. Use the `~/.ssh/config` aliases (`bm1`/`bm2`/`bm4`/`bm5`, `clara`),
+  `$HOME`, and repo-relative paths. Real values live in machine-local, gitignored files
+  (`CLAUDE.local.md`, `docs/local/`). Scrubbed from tree and history 2026-09-22.
 
 ---
 

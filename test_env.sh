@@ -17,7 +17,7 @@ IMAGE_NAME="bindmaster-test"
 CONTAINER_NAME="bindmaster-test-run"
 
 # Pre-cached resources (AF2 weights, ARM64 binaries) — mounted read-only
-OLD_TOOLS_DIR="<BM5_HOME>/Documents/OLD/BindMaster/bindcraft-tools"
+OLD_TOOLS_DIR="${OLD_TOOLS_DIR:-$HOME/Documents/OLD/BindMaster/bindcraft-tools}"
 
 REBUILD=false
 GPU=false
