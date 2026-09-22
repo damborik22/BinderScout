@@ -52,16 +52,17 @@ AF3_REPO="https://github.com/google-deepmind/alphafold3"
 AF3_COMMIT="fd39d2c5dcaadfc7333c3466951b27563fa7d6fa"  # v3.0.3.dev, compatible with the v3.0.2 weights
 AF3_DIR="${BINDMASTER_DIR}/alphafold3"
 
-# BindCraft 2 (Pacesa Lab). Unlike every other tool here there is NO public URL
-# to clone: it is source-available under its own licence (not this repo's MIT)
-# and is pre-publication, so the source is supplied per machine through
-# BINDCRAFT2_SOURCE — a .zip, a directory, or a git URL for when upstream opens.
-# Nothing of it is committed; BindCraft2/ is gitignored. It installs EDITABLE
-# into a .venv beside its own checkout, so that directory is permanent: moving
-# or deleting it breaks the `bindcraft` command.
+# BindCraft 2 (Pacesa Lab). Public since 2026-09-16, but source-available under
+# its own licence (BindCraft2 Source-Available, hosting-restricted), not this
+# repo's MIT, so nothing of it is committed here and BindCraft2/ stays
+# gitignored — the same posture as the AF3 weights. --bc2-source still takes a
+# .zip or a directory for an air-gapped machine or a pre-release copy.
+# It installs EDITABLE into a .venv beside its own checkout, so that directory
+# is permanent: moving or deleting it breaks the `bindcraft` command.
 BINDCRAFT2_DIR="${BINDMASTER_DIR}/BindCraft2"
-BINDCRAFT2_SOURCE="${BINDCRAFT2_SOURCE:-}"   # set by --bc2-source or the environment
-BINDCRAFT2_COMMIT="${BINDCRAFT2_COMMIT:-HEAD}"   # only consulted for a git source
+BINDCRAFT2_REPO="https://github.com/PacesaLab/BindCraft2.git"
+BINDCRAFT2_SOURCE="${BINDCRAFT2_SOURCE:-$BINDCRAFT2_REPO}"   # --bc2-source, env, or upstream
+BINDCRAFT2_COMMIT="${BINDCRAFT2_COMMIT:-v1.0.1}"   # only consulted for a git source
 
 CONDA_CMD=""          # set by detect_conda: full path to mamba (preferred) or conda
 ARCH="$(uname -m)"   # x86_64 or aarch64 (e.g. DGX Spark / Grace-Hopper)
@@ -157,8 +158,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --bc2-source)
-            # BindCraft 2 has no public URL to clone; the source is supplied
-            # per machine as a .zip, a directory, or (once upstream opens) a
+            # Overrides the upstream default: a .zip, a directory, or another
             # git URL. BINDCRAFT2_SOURCE in the environment does the same.
             BINDCRAFT2_SOURCE="$2"
             shift 2
@@ -205,11 +205,10 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes] [--force]
                                        a warning when no --bc2-source is given.
                   bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3
                                        install one current-generation tool
-                  bindcraft2|bc2       BindCraft 2 — the eighth design tool. It is
-                                       source-available and not published, so there
-                                       is nothing to clone: pass the copy you were
-                                       given with --bc2-source (a .zip, a directory,
-                                       or a git URL once upstream opens). Installs
+                  bindcraft2|bc2       BindCraft 2 — the eighth design tool. Cloned
+                                       from https://github.com/PacesaLab/BindCraft2
+                                       at v1.0.1; override with --bc2-source (a .zip,
+                                       a directory, or another git URL). Installs
                                        editable into BindCraft2/.venv, which makes
                                        that directory permanent. Reuses the AF2
                                        parameters already on the machine instead of
@@ -232,8 +231,8 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes] [--force]
                 Not passed to BindCraft 2, which reads the driver itself and picks
                 its own CUDA wheels; override that with BINDCRAFT2_ACCELERATOR.
   --bc2-source  Where BindCraft 2's source is: a .zip, an unpacked directory, or a
-                git URL. Equivalent to exporting BINDCRAFT2_SOURCE. Required for
-                --tool bindcraft2, since there is no public download.
+                git URL. Equivalent to exporting BINDCRAFT2_SOURCE. Optional —
+                defaults to https://github.com/PacesaLab/BindCraft2 at v1.0.1.
   --skip-examples
                 Do not prompt to run bundled examples after install.
   --yes, -y     Auto-confirm SAFE prompts (proceed?, run the example?) — for
@@ -426,14 +425,12 @@ _stage_bindcraft2_source() {
     fi
 
     if [[ -z "${BINDCRAFT2_SOURCE}" ]]; then
-        print_warn "BindCraft 2 source not supplied."
-        echo "    BindCraft 2 is not public, so there is nothing to clone. Point the"
-        echo "    installer at the copy you were given:"
+        print_fail "BindCraft 2 source is empty — BINDCRAFT2_SOURCE was set to nothing."
+        echo "    Leave it unset to clone upstream, or point it at a copy:"
         echo ""
         echo "      bindmaster install --tool bindcraft2 --bc2-source /path/to/BindCraft2.zip"
         echo "      bindmaster install --tool bindcraft2 --bc2-source /path/to/BindCraft2/"
         echo ""
-        echo "    or export BINDCRAFT2_SOURCE once for the machine."
         return 1
     fi
 
@@ -3306,14 +3303,9 @@ main() {
     FAILED_EXAMPLES=()   # populated by install functions on example failure
 
     [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; install_bindcraft || failed_tools+=("BindCraft"); }
-    # Under --tool all a missing source is a skip, not a failure: BindCraft 2 is
-    # not public, so most machines legitimately have no copy to install from and
-    # `--tool all` must still succeed there (CI and the Docker build included).
-    # An explicit --tool bindcraft2 asked for it by name, so that one fails.
-    [[ "${DO_BINDCRAFT2}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft 2${RESET}"; \
-        if install_bindcraft2; then :; elif [[ "${TOOL_ALL}" == true && -z "${BINDCRAFT2_SOURCE}" ]]; then \
-            print_warn "Skipping BindCraft 2 — no --bc2-source given (it is not a public download)"; \
-        else failed_tools+=("BindCraft 2"); fi; }
+    # BindCraft 2 is cloned from upstream like every other tool now that it is
+    # public, so a failure here is a real failure -- no skip special case.
+    [[ "${DO_BINDCRAFT2}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft 2${RESET}"; install_bindcraft2 || failed_tools+=("BindCraft 2"); }
     [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
     [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }

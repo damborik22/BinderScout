@@ -16,13 +16,12 @@ and the two can be run head-to-head against one target inside a single report.
 The full design and its evidence are in
 [docs/PLAN_bindcraft2_integration.md](docs/PLAN_bindcraft2_integration.md).
 
-Installed with `bindmaster install --tool bindcraft2 --bc2-source <zip|dir>`. It
-is the one tool the installer cannot fetch: it is source-available under its own
-non-MIT licence and pre-publication, so there is no public URL, `BindCraft2/` is
-gitignored, and no upstream URL appears in any committed file. Under `--tool all`
-a missing source warns and skips, so a machine without a copy still installs
-everything else; an explicit `--tool bindcraft2` fails and says which flag is
-needed.
+Installed with `bindmaster install --tool bindcraft2`, which clones
+[https://github.com/PacesaLab/BindCraft2](https://github.com/PacesaLab/BindCraft2) at `v1.0.1`.
+BindCraft 2 went public on 2026-09-16; it is source-available under its own
+non-MIT licence, so `BindCraft2/` stays gitignored and no file of it is
+committed here — the same posture as the AF3 weights. `--bc2-source` overrides
+the default with a `.zip`, a directory, or another git URL.
 
 **It ranks on `i_pDAE`, not i_pTM, and not a composite.** The `rank` column is a
 plain descending sort on that one metric, higher-is-better despite the name

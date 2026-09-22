@@ -30,16 +30,17 @@ AF3_REPO="https://github.com/google-deepmind/alphafold3"
 AF3_COMMIT="fd39d2c5dcaadfc7333c3466951b27563fa7d6fa"  # v3.0.3.dev, compatible with the v3.0.2 weights
 AF3_DIR="${BINDMASTER_DIR}/alphafold3"
 
-# BindCraft 2 (Pacesa Lab). Unlike every other tool here there is NO public URL
-# to clone: it is source-available under its own licence (not this repo's MIT)
-# and is pre-publication, so the source is supplied per machine through
-# BINDCRAFT2_SOURCE — a .zip, a directory, or a git URL for when upstream opens.
-# Nothing of it is committed; BindCraft2/ is gitignored. It installs EDITABLE
-# into a .venv beside its own checkout, so that directory is permanent: moving
-# or deleting it breaks the `bindcraft` command.
+# BindCraft 2 (Pacesa Lab). Public since 2026-09-16, but source-available under
+# its own licence (BindCraft2 Source-Available, hosting-restricted), not this
+# repo's MIT, so nothing of it is committed here and BindCraft2/ stays
+# gitignored — the same posture as the AF3 weights. --bc2-source still takes a
+# .zip or a directory for an air-gapped machine or a pre-release copy.
+# It installs EDITABLE into a .venv beside its own checkout, so that directory
+# is permanent: moving or deleting it breaks the `bindcraft` command.
 BINDCRAFT2_DIR="${BINDMASTER_DIR}/BindCraft2"
-BINDCRAFT2_SOURCE="${BINDCRAFT2_SOURCE:-}"   # set by --bc2-source or the environment
-BINDCRAFT2_COMMIT="${BINDCRAFT2_COMMIT:-HEAD}"   # only consulted for a git source
+BINDCRAFT2_REPO="https://github.com/PacesaLab/BindCraft2.git"
+BINDCRAFT2_SOURCE="${BINDCRAFT2_SOURCE:-$BINDCRAFT2_REPO}"   # --bc2-source, env, or upstream
+BINDCRAFT2_COMMIT="${BINDCRAFT2_COMMIT:-v1.0.1}"   # only consulted for a git source
 
 # aarch64: VALIDATED on GB10/sm_121 — jax-cuda13 0.11.1 takes the GPU, biotraj
 # (the only source build in the tree) compiles, and a campaign runs to completion
@@ -173,8 +174,8 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --bc2-source)
-            # BindCraft 2 has no public URL to clone; the source is supplied per
-            # machine as a .zip, a directory, or (once upstream opens) a git URL.
+            # Overrides the upstream default: a .zip, a directory, or another
+            # git URL. BINDCRAFT2_SOURCE in the environment does the same.
             BINDCRAFT2_SOURCE="$2"
             shift 2
             ;;
@@ -253,8 +254,8 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
                                        --no_tmhmm model (TMHMM/USEARCH x86 binaries
                                        are not used). Needs a C/C++ toolchain.
   --bc2-source  Where BindCraft 2's source is: a .zip, an unpacked directory, or a
-                git URL. Equivalent to exporting BINDCRAFT2_SOURCE. Required for
-                --tool bindcraft2, since there is no public download.
+                git URL. Equivalent to exporting BINDCRAFT2_SOURCE. Optional —
+                defaults to https://github.com/PacesaLab/BindCraft2 at v1.0.1.
   --tools-dir   Path to pre-cached resources (AF2 weights, ARM64 binaries).
                 Default: <repo>/../../OLD/BindMaster/bindcraft-tools
   --cuda        CUDA version (default: 13.0). Only 13.0 has been tested on DGX Spark (GB10).
@@ -456,14 +457,12 @@ _stage_bindcraft2_source() {
     fi
 
     if [[ -z "${BINDCRAFT2_SOURCE}" ]]; then
-        print_warn "BindCraft 2 source not supplied."
-        echo "    BindCraft 2 is not public, so there is nothing to clone. Point the"
-        echo "    installer at the copy you were given:"
+        print_fail "BindCraft 2 source is empty — BINDCRAFT2_SOURCE was set to nothing."
+        echo "    Leave it unset to clone upstream, or point it at a copy:"
         echo ""
         echo "      bindmaster install --tool bindcraft2 --bc2-source /path/to/BindCraft2.zip"
         echo "      bindmaster install --tool bindcraft2 --bc2-source /path/to/BindCraft2/"
         echo ""
-        echo "    or export BINDCRAFT2_SOURCE once for the machine."
         return 1
     fi
 

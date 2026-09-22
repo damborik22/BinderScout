@@ -45,10 +45,11 @@ rather than a new version of BindCraft: no PyRosetta, no conda dependency, JAX
 and Python >= 3.12 the whole requirement. It coexists with BindCraft 1, which
 keeps its own environment. It is installed **editable**, so `BindCraft2/` is not
 a disposable build artefact — the checkout *is* the installation. That directory
-is gitignored and must never be committed. There is no public download either:
-the source is supplied per machine, with
-`bindmaster install --tool bindcraft2 --bc2-source <zip|dir>` or by exporting
-`$BINDCRAFT2_SOURCE` once for the host.
+is gitignored and must never be committed — its licence is its own, not this
+repo's MIT. The installer clones it from [https://github.com/PacesaLab/BindCraft2](https://github.com/PacesaLab/BindCraft2)
+at `v1.0.1`; override with
+`bindmaster install --tool bindcraft2 --bc2-source <zip|dir|git-url>` or by
+exporting `$BINDCRAFT2_SOURCE` once for the host.
 
 ---
 

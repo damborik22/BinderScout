@@ -96,11 +96,10 @@ def _agreement_phrase(df: pd.DataFrame, thresholds: dict[str, float]) -> str:
 _TOOL_LINKS = {
     # BindCraft — Pacesa et al. (Nature 2025), repo at martinpacesa/BindCraft
     "bindcraft": "https://github.com/martinpacesa/BindCraft",
-    # BindCraft 2 — deliberately absent. It is a different tool from BindCraft,
-    # not a version of it, and linking it to BindCraft 1's repository (as this
-    # entry used to) is simply wrong. Its own repository is unpublished, so there
-    # is no URL to put here; the tool renders unlinked until there is. Anything
-    # asserting link coverage must exempt it explicitly.
+    # BindCraft 2 — its OWN repository, public since 2026-09-16. It is a different
+    # tool from BindCraft, not a version of it, so this must never point at
+    # BindCraft 1's repo (as an earlier entry did). Guarded by a test.
+    "bindcraft2": "https://github.com/PacesaLab/BindCraft2",
     # BoltzGen — diffusion-based binder generator (installer pin)
     "boltzgen": "https://github.com/HannesStark/boltzgen",
     # Mosaic — escalante-bio JAX/Boltz-2 hallucinator

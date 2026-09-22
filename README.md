@@ -34,10 +34,11 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 > Each tool runs in its own isolated environment. Environments must not be mixed.
 
-BindCraft 2 is the one tool the installer cannot fetch for you. It is
-pre-publication and source-available under its own licence — not this
-repository's MIT — so there is no public download and no URL here. Hand the
-installer the copy you were given, with
+BindCraft 2 is public as of September 2026 — [PacesaLab/BindCraft2](https://github.com/PacesaLab/BindCraft2) —
+but it is source-available under its own licence (BindCraft2 Source-Available,
+hosting-restricted), not this repository's MIT, so no file of it is vendored
+here. The installer stages it from whatever you point `--bc2-source` at,
+including that URL:
 `bindmaster install --tool bindcraft2 --bc2-source <zip|dir>`, or export
 `$BINDCRAFT2_SOURCE` once for the machine.
 It installs **editable**, which makes `BindCraft2/` itself the installation:
@@ -236,7 +237,7 @@ bindmaster evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bind
 
 ```
 bindmaster install   [--tool bindcraft|bindcraft2|boltzgen|mosaic|pxdesign|proteina-complexa|protein-hunter|rfd3|all]
-                     [--bc2-source <zip|dir>]          # where BindCraft 2's source is — there is no public download
+                     [--bc2-source <zip|dir|git-url>]  # override BindCraft 2's source (default: upstream)
                      [--tool af3|soluprot]             # extra evaluator engines (esmfold2 ships in --tool all)
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
 bindmaster configure [options passed through to configurator.py]
