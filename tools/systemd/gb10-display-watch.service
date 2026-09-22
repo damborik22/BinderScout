@@ -1,0 +1,29 @@
+# @REPO@ is a placeholder for this checkout's root; apply-gb10-failsafe.sh substitutes it
+# at install time. Do not hardcode a path here -- this file is tracked in a public repo.
+# Detector for the DISPLAY failure mode (see the "OTHER failure mode" section of ~/.claude/CLAUDE.md).
+#
+# A --user unit ON PURPOSE. It needs no privilege -- /proc/<pid>/stat is world-readable and NVML
+# needs no root -- and running in the user session is what lets notify-send actually reach the
+# person at the keyboard, which is the entire point of the early warning.
+#
+# It does NOT kill anything. gb10-guard kills because a memory runaway takes the whole box; here,
+# killing a design campaign to save a compositor is a trade only the operator can price.
+# GB10_DW_KILL_ON_CRIT=1 opts in.
+[Unit]
+Description=GB10 display-path watcher (compute-vs-display wedge detector)
+Documentation=file://@REPO@/docs/GB10_FREEZE_FAILSAFE.md
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -u @REPO@/tools/gb10-display-watch.py
+Restart=always
+RestartSec=5
+# Must not be reclaimed or killed while investigating a wedge.
+OOMScoreAdjust=-900
+MemoryMax=128M
+# Environment=GB10_DW_KILL_ON_CRIT=1
+# Environment=GB10_DW_SUSTAINED_S=600
+
+[Install]
+WantedBy=default.target
