@@ -1,0 +1,37 @@
+# @REPO@ is a placeholder for this checkout's root; apply-gb10-failsafe.sh substitutes it
+# at install time. Do not hardcode a path here -- this file is tracked in a public repo.
+# Reactive failsafe: kills the GPU job instead of letting the OOM killer dismantle the box.
+#
+# Runs as root because it must be able to SIGKILL any uid's job, and must be exempt from the
+# pressure it watches. It is ordered late enough that NVML is available, but its NVML init
+# also retries on a timer, so start order is not load-bearing.
+[Unit]
+Description=GB10 unified-memory guard (kill the GPU job, not the device)
+Documentation=file://@REPO@/docs/PLAN_bm5_unified_memory.md
+After=nvidia-persistenced.service
+Wants=nvidia-persistenced.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -u @REPO@/tools/gb10-guard.py
+Restart=always
+RestartSec=2
+
+# Must never be the victim, and must never be reclaimed.
+OOMScoreAdjust=-1000
+MemoryMin=128M
+Nice=-15
+IOSchedulingClass=realtime
+
+# Small, fixed footprint. If the guard ever leaks, kill the guard, not the box.
+MemoryMax=256M
+
+StandardOutput=journal
+StandardError=journal
+
+# Environment=GB10_TRIP_MIB=40960
+# Environment=GB10_WARN_MIB=57344
+# Environment=GB10_DRY_RUN=1
+
+[Install]
+WantedBy=multi-user.target

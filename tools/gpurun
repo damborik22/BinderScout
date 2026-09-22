@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+# gpurun -- launch a GPU job on GB10 with a bounded memory budget.
+#
+# THE POINT: on this box the failure is not "a job ran out of memory", it is "a job was told
+# to take most of the computer and complied". cudaMemGetInfo(total) == MemTotal == 121.69 GiB,
+# so every "fraction of device memory" knob in JAX and PyTorch is a fraction of the WHOLE
+# MACHINE. JAX's default (preallocate=true, fraction=0.75) reserves 91.3 GiB at import.
+# Those pages are unmovable, unswappable and charged to no process, so once they are taken
+# nothing -- not cgroups, not the OOM killer, not swap -- can get them back.
+#
+# So the budget has to be set BEFORE the allocation. That is all this script does.
+#
+# Usage:
+#   gpurun --cap 24 -- boltz predict input.yaml --out_dir out/
+#   gpurun --cap 40 --name af3 -- python run_af3.py
+#   gpurun --cap 24 --host-max 48 -- ./run_bindcraft_relaxed_r2.sh
+#
+# --cap N        GPU budget in GiB (required). Never sized so that pool-N < 40 GiB.
+# --host-max N   cgroup memory.max for the job's HOST-side memory, GiB (default 64).
+#                This genuinely works: anon, pinned host memory and cudaMallocManaged are
+#                all memcg-charged and produce a clean per-job OOM kill. Plain cudaMalloc is
+#                NOT -- that is what --cap is for.
+# --name NAME    label for the transient scope and the logs.
+# --dry-run      print the resolved environment and exit without launching.
+set -euo pipefail
+
+# Derived from this script's own location so the tool is machine-independent.
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+EVALUATOR="$REPO/Evaluator"
+# Default floor. 40 matches memory_policy.DEFAULT_MIN_OS_GIB and is a POLICY number for the shared
+# case (several jobs, desktop up), not a law of the machine. 24 GiB free is the MEASURED failure
+# point (2026-08-18) -- but that job was UNBOUNDED and kept asking. A job under a hard MPS cap
+# cannot overshoot, so a single large job can safely run closer to the metal. Lower it
+# deliberately with --min-os for that case; never lower it below ~28.
+# THE FLOOR IS A FUNCTION OF WHETHER THE CAP IS ENFORCED.
+#
+# 40 GiB came from the 2026-08-18 reboot, which happened with ~24 GiB nominally free. But that job
+# was UNBOUNDED: AF3 reserved 97.4 GiB and kept asking, looping on NVRM OOM for 17 minutes. The
+# lesson was never "Linux needs 40 GiB" -- measured on this box, the OS genuinely needs ~4.4 GiB
+# (kernel unreclaimable 0.47 + all userspace anon 1.88 + min watermark 1.99). The lesson was "an
+# unbounded allocator eats whatever you leave it."
+#
+# CUDA MPS per-client limits are now proven enforcing on 580.159.03 (a 4 GiB allocation refused
+# under a 2 GiB cap). Under an enforced cap the job CANNOT overshoot, so the conservative floor
+# buys nothing and costs ~40 GiB of the capacity this machine was bought for.
+#
+#   MPS up   -> ENFORCED_FLOOR   the job is bounded; leave what the OS actually needs plus cache
+#   MPS down -> UNENFORCED_FLOOR the old regime; nothing stops a runaway, so stay well back
+# MEASURED: the box held 90 GiB with 12.6 GiB left, PSI 1.0%, desktop responsive, cache reclaiming
+# smoothly the whole way up. 12 is therefore a demonstrated-survivable floor, not a guess.
+# A GPU cap is not the job's footprint. On unified memory the job ALSO holds host RSS -- weights,
+# the Python heap, MSA buffers -- and one Evaluator job measured 7.6 GiB GPU against 14.1 GiB
+# total. v1 of this check predicted the landing from the cap alone, admitted a 12 GiB AF3 job at
+# "53.8 -> 41.8 GiB", the real landing was ~32 GiB, and gb10-guard then killed the job gpurun had
+# just admitted. Admission and enforcement have to agree on the arithmetic.
+# MEASURED 2026-09-22, not estimated. A 90 GiB bounded allocation left 12.6 GiB (MemFree and
+# MemAvailable converged), against 18.8 GiB predicted from a 7 GiB overhead -- so the true cost of
+# a job beyond its GPU cap is ~13 GiB here (Python + torch + the CUDA context's host mappings).
+HOST_OVERHEAD_GIB=${GPURUN_HOST_OVERHEAD_GIB:-13}
+ENFORCED_FLOOR_GIB=${GPURUN_ENFORCED_FLOOR_GIB:-12}
+UNENFORCED_FLOOR_GIB=${GPURUN_UNENFORCED_FLOOR_GIB:-40}
+ABSOLUTE_MIN_OS_GIB=10          # below this the kernel has no reclaim headroom at all
+MIN_OS_GIB=${GPURUN_MIN_OS_GIB:-}   # explicit override; otherwise chosen from MPS state below
+
+CAP_GIB=""; HOST_MAX_GIB=64; NAME="gpujob"; DRY=0; SHOW_MAX=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --cap)      CAP_GIB="$2"; shift 2 ;;
+    --min-os)   MIN_OS_GIB="$2"; shift 2 ;;
+    --host-max) HOST_MAX_GIB="$2"; shift 2 ;;
+    --name)     NAME="$2"; shift 2 ;;
+    --dry-run)  DRY=1; shift ;;
+    --max)      SHOW_MAX=1; shift ;;
+    --)         shift; break ;;
+    -h|--help)  sed -n '2,25p' "$0"; exit 0 ;;
+    *)          echo "gpurun: unknown option $1" >&2; exit 2 ;;
+  esac
+done
+
+# Probe MPS first: it decides the floor.
+export CUDA_MPS_PIPE_DIRECTORY="${BINDMASTER_MPS_DIR:-/tmp/bindmaster-mps}/pipe"
+MPS_UP=0
+if command -v nvidia-cuda-mps-control >/dev/null 2>&1 \
+   && echo get_default_device_pinned_mem_limit 0 2>/dev/null \
+      | timeout 5 nvidia-cuda-mps-control >/dev/null 2>&1; then
+  MPS_UP=1
+fi
+if [[ -z "$MIN_OS_GIB" ]]; then
+  if [[ "$MPS_UP" -eq 1 ]]; then MIN_OS_GIB=$ENFORCED_FLOOR_GIB
+  else                           MIN_OS_GIB=$UNENFORCED_FLOOR_GIB; fi
+fi
+
+# --max: report the ceiling that is admissible RIGHT NOW, and what is eating it.
+#
+# This exists because the ceiling is NOT a constant and must not be quoted as one. It is
+# pool - unreclaimable(live) - watermark - host cost - floor, and "unreclaimable" moves with
+# whatever else is running: measured 3.9 GiB on a quiet box (90 GiB admissible) and 12.1 GiB with
+# a browser and several sessions up (82 GiB admissible). A number copied into a doc goes stale the
+# moment someone opens a tab. Ask here instead.
+if [[ "$SHOW_MAX" -eq 1 ]]; then
+  eval "$(awk '
+    /^MemTotal:/{t=$2} /^AnonPages:/{a=$2} /^SUnreclaim:/{su=$2} /^PageTables:/{pt=$2}
+    /^KernelStack:/{ks=$2} /^Mapped:/{m=$2} /^Shmem:/{sh=$2}
+    END{printf "T=%.1f; U=%.2f; A=%.2f; M=%.2f; SH=%.2f",
+        t/1048576,(a+su+pt+ks+m+sh)/1048576,a/1048576,m/1048576,sh/1048576}' /proc/meminfo)"
+  W=$(awk '/zone +Normal/{z=1} z&&/^ *min/{printf "%.1f", $2*4096/1073741824; exit}' /proc/zoneinfo)
+  MAX=$(awk -v t="$T" -v u="$U" -v w="$W" -v o="$HOST_OVERHEAD_GIB" -v f="$MIN_OS_GIB" \
+        'BEGIN{printf "%d", int(t-u-w-o-f)}')
+  cat <<EOF
+gpurun --max
+  pool                    ${T} GiB
+  - unreclaimable (live)  ${U} GiB   anon ${A}, mapped ${M}, shmem ${SH}
+  - kernel min watermark  ${W} GiB
+  - host cost of the job  ${HOST_OVERHEAD_GIB} GiB   (measured: python + torch + CUDA host mappings)
+  - OS floor              ${MIN_OS_GIB} GiB   ($([[ $MPS_UP -eq 1 ]] && echo "MPS enforcing" || echo "MPS DOWN — conservative"))
+  ------------------------------------------------
+  max admissible --cap    ${MAX} GiB
+
+  This moves. It was 90 on a quiet box (unreclaimable 3.9) and drops ~1 GiB for every GiB of anon
+  anything else holds. To raise it, close what is holding memory — biggest first:
+EOF
+  ps -eo rss,comm --sort=-rss --no-headers | awk '{x[$2]+=$1} END{for(k in x) if(x[k]>300000) printf "    %6.1f GiB  %s\n", x[k]/1048576, k}' | sort -rh | head -6
+  exit 0
+fi
+
+[[ -n "$CAP_GIB" ]] || { echo "gpurun: --cap <GiB> is required (or --max to see the ceiling)" >&2; exit 2; }
+
+if awk -v m="$MIN_OS_GIB" -v a="$ABSOLUTE_MIN_OS_GIB" 'BEGIN{exit !(m < a)}'; then
+  echo "gpurun: REFUSING -- --min-os ${MIN_OS_GIB} is below the hard floor of ${ABSOLUTE_MIN_OS_GIB} GiB." >&2
+  echo "        Below that the kernel, the driver and the display stack have no room to breathe" >&2
+  echo "        and the box wedges instead of the job failing. That is the whole problem." >&2
+  exit 1
+fi
+if awk -v m="$MIN_OS_GIB" 'BEGIN{exit !(m < 40)}'; then
+  echo "gpurun: NOTE -- OS floor lowered to ${MIN_OS_GIB} GiB (default 40)." >&2
+  echo "        Only safe for a SINGLE job under a hard MPS cap, ideally with the desktop" >&2
+  echo "        stopped. Do not start anything else while it runs." >&2
+fi
+[[ $# -gt 0 ]]      || { echo "gpurun: no command given (did you forget --?)" >&2; exit 2; }
+
+
+POOL_GIB=$(awk '/^MemTotal:/ {printf "%.1f", $2/1048576}' /proc/meminfo)
+HEADROOM=$(awk -v p="$POOL_GIB" -v c="$CAP_GIB" 'BEGIN{printf "%.1f", p-c}')
+if awk -v h="$HEADROOM" -v m="$MIN_OS_GIB" 'BEGIN{exit !(h < m)}'; then
+  echo "gpurun: REFUSING -- cap ${CAP_GIB} GiB of a ${POOL_GIB} GiB unified pool leaves only" >&2
+  echo "        ${HEADROOM} GiB for the OS; the floor is ${MIN_OS_GIB} GiB. The 2026-08-18 hard" >&2
+  echo "        reboot happened with ~24 GiB nominally free. Lower --cap." >&2
+  exit 1
+fi
+
+# Second gate: does the cap fit in what is ACTUALLY free right now? The pool check above only
+# catches a single oversized job. The shape that actually kills this box is STACKING -- a JAX
+# job reserves its whole budget at import, so two 32 GiB jobs are 64 GiB gone the moment the
+# second one starts. MemFree, not MemAvailable: CUDA cannot use reclaimable page cache.
+# Which "free" to judge against. MemFree alone is WRONG here and it is worth being precise about
+# why, because the guard made the same mistake and killed a run of jobs over it: CUDA cannot read
+# page cache directly, but the driver's allocation path DRIVES reclaim, so cache is available to a
+# starting job in practice. Judging on MemFree with ~56 GiB sitting in cache refuses jobs the
+# machine can easily run. MemAvailable is the kernel's own estimate of what a new allocation can
+# actually obtain, so that is the admission metric -- and gb10-guard corroborates with it too.
+read -r FREE_GIB AVAIL_GIB CACHED_GIB <<<"$(awk '
+  /^MemFree:/{f=$2} /^MemAvailable:/{a=$2} /^Cached:/{if(!c)c=$2}
+  END{printf "%.1f %.1f %.1f", f/1048576, a/1048576, c/1048576}' /proc/meminfo)"
+# WHICH BASELINE THE CAP COMES OUT OF.
+#
+# MemAvailable is the kernel's estimate of what a new allocation can get WITHOUT disturbing much:
+# it deliberately withholds watermarks and assumes ~half the reclaimable slab stays. That is the
+# right conservatism for a job sharing the box. It is the WRONG baseline for a single large
+# bounded reservation, which evicts page cache wholesale on its way up -- judging against it costs
+# ~20 GiB of capacity that the job would simply have reclaimed.
+#
+# So under an enforced cap we measure against what is genuinely unavailable: memory that cannot be
+# reclaimed at any price. Everything else is cache the job will take.
+UNRECLAIM_GIB=$(awk '
+  /^AnonPages:/{a=$2} /^SUnreclaim:/{su=$2} /^PageTables:/{pt=$2} /^KernelStack:/{ks=$2}
+  /^Mapped:/{m=$2} /^Shmem:/{sh=$2}
+  END{printf "%.1f", (a+su+pt+ks+m+sh)/1048576}' /proc/meminfo)
+WMARK_GIB=$(awk '/zone +Normal/{z=1} z&&/^ *min/{printf "%.1f", $2*4096/1073741824; exit}' /proc/zoneinfo)
+if [[ "$MPS_UP" -eq 1 ]]; then
+  BASE_GIB=$(awk -v p="$POOL_GIB" -v u="$UNRECLAIM_GIB" -v w="$WMARK_GIB" 'BEGIN{printf "%.1f", p-u-w}')
+  BASE_LABEL="pool ${POOL_GIB} - unreclaimable ${UNRECLAIM_GIB} - watermark ${WMARK_GIB}"
+else
+  BASE_GIB="$AVAIL_GIB"
+  BASE_LABEL="MemAvailable (MPS down — cannot assume the job stops at its cap)"
+fi
+AFTER=$(awk -v f="$BASE_GIB" -v c="$CAP_GIB" -v o="$HOST_OVERHEAD_GIB" 'BEGIN{printf "%.1f", f-c-o}')
+if awk -v a="$AFTER" -v m="$MIN_OS_GIB" 'BEGIN{exit !(a < m)}'; then
+  echo "gpurun: REFUSING -- usable baseline is ${BASE_GIB} GiB" >&2
+  echo "        (${BASE_LABEL}); a ${CAP_GIB} GiB job (plus" >&2
+  echo "        ~${HOST_OVERHEAD_GIB} GiB host footprint) would leave ${AFTER} GiB, under the" >&2
+  echo "        ${MIN_OS_GIB} GiB floor. Something else is already holding memory:" >&2
+  nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader 2>/dev/null \
+    | sed 's/^/          /' >&2 || true
+  echo "        Wait for it to finish, or lower --cap. Override with GPURUN_FORCE=1 (don't)." >&2
+  [[ "${GPURUN_FORCE:-}" == "1" ]] || exit 1
+  echo "gpurun: GPURUN_FORCE=1 set -- proceeding against the floor check" >&2
+fi
+
+# Derive the JAX fraction from the repo's own resolver so this stays a single source of
+# truth (it handles unified-vs-discrete and applies the OS floor). Fall back to local math
+# with the same floor if the Evaluator is not importable.
+XLA_FRAC=$(python3 - "$CAP_GIB" "$EVALUATOR" <<'PY' 2>/dev/null || true
+import sys
+target, evaluator = float(sys.argv[1]), sys.argv[2]
+sys.path.insert(0, evaluator)
+try:
+    from binder_comparison.refolding.memory_policy import resolve_mem_fraction
+    print(resolve_mem_fraction(target)[0])
+except Exception:
+    pass
+PY
+)
+if [[ -z "$XLA_FRAC" ]]; then
+  XLA_FRAC=$(awk -v c="$CAP_GIB" -v p="$POOL_GIB" -v m="$MIN_OS_GIB" \
+    'BEGIN{f=c/p; ce=(p-m)/p; if(f>ce)f=ce; if(f<0.02)f=0.02; if(f>0.8)f=0.8; printf "%.3f", f}')
+fi
+
+# --- framework ceilings -------------------------------------------------------------------
+# PREALLOCATE stays TRUE on purpose. The dGPU habit of preallocate=false is wrong here: with
+# no device ceiling, a growing allocator has nothing to stop it and the host dies. A
+# preallocating BFC allocator that fails INSIDE the job is exactly the failure mode we want.
+export XLA_PYTHON_CLIENT_PREALLOCATE=true
+export XLA_PYTHON_CLIENT_MEM_FRACTION="$XLA_FRAC"
+unset XLA_PYTHON_CLIENT_ALLOCATOR   # =platform bypasses BFC, so the cap would cap nothing
+
+# PyTorch does not preallocate, so this is about fragmentation, not a ceiling. Only the
+# option that is safe to ship untested; garbage_collection_threshold is deliberately omitted
+# until measured on a real refold.
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+export GPURUN_CAP_GIB="$CAP_GIB"    # torch jobs can read this for set_per_process_memory_fraction
+
+# The Evaluator entrypoints compute their own per-engine budget and give an INHERITED
+# fraction precedence over it -- so leaking ours would silently RAISE their reservation.
+case "${1##*/}" in
+  evaluate|binder-compare)
+    unset XLA_PYTHON_CLIENT_MEM_FRACTION
+    echo "gpurun: Evaluator entrypoint detected -- deferring to its own memory_policy" >&2
+    ;;
+esac
+
+# --- driver-enforced ceiling (only if MPS is actually running AND we can reach it) ---------
+# We join the BindMaster MPS server on its OWN pipe directory, not NVIDIA's default
+# /tmp/nvidia-mps. That is deliberate isolation, not an oversight: on the default pipe EVERY
+# CUDA client on the box auto-joins, including rustdesk -- and MPS clients die with the server.
+# Putting the remote-desktop session's fate in the MPS daemon's hands is a bad trade. So only
+# jobs launched through gpurun (or gpu_mem_guard.sh run) get the driver-enforced ceiling;
+# everything else stays in direct mode and is covered by gb10-guard instead.
+export CUDA_MPS_PIPE_DIRECTORY="${BINDMASTER_MPS_DIR:-/tmp/bindmaster-mps}/pipe"
+MPS_STATE="down (no driver-enforced ceiling; --cap is advisory to the frameworks only)"
+if [[ "$MPS_UP" -eq 1 ]]; then
+  # Per-client limits only ever clamp DOWNWARD from the server default; a client asking for
+  # more than the server default is silently ignored. Warn rather than pretend.
+  SRV=$(echo get_default_device_pinned_mem_limit 0 | timeout 5 nvidia-cuda-mps-control 2>/dev/null | tr -dc '0-9')
+  export CUDA_MPS_PINNED_DEVICE_MEM_LIMIT="0=${CAP_GIB}G"
+  MPS_STATE="up (CUDA_MPS_PINNED_DEVICE_MEM_LIMIT=0=${CAP_GIB}G, driver-enforced)"
+  if [[ -n "$SRV" ]] && (( CAP_GIB > SRV )); then
+    MPS_STATE="up but server default is ${SRV}G < requested ${CAP_GIB}G -- the SERVER value wins"
+  fi
+fi
+
+# --- kernel victim selection ---------------------------------------------------------------
+# The OOM killer scores this job at ~0 because driver pages are charged to no task. Say
+# explicitly that it is the expendable one, so if the kernel ever does choose, it chooses right.
+echo 800 > /proc/self/oom_score_adj 2>/dev/null || true
+
+cat >&2 <<INFO
+gpurun: ${NAME}
+  pool              ${POOL_GIB} GiB unified   (GPU pool IS system RAM on GB10)
+  gpu cap           ${CAP_GIB} GiB  -> XLA_PYTHON_CLIENT_MEM_FRACTION=${XLA_FRAC}
+  os headroom       ${HEADROOM} GiB of pool (floor ${MIN_OS_GIB}, $([[ $MPS_UP -eq 1 ]] && echo "MPS-enforced" || echo "UNENFORCED — stay back"))
+  usable baseline   ${BASE_GIB} GiB -> ~${AFTER} GiB left after this job
+                    (${BASE_LABEL})
+                    (MemFree ${FREE_GIB}, cache ${CACHED_GIB} — cache is reclaimed above ~60 GiB held)
+                    (cap ${CAP_GIB} + ~${HOST_OVERHEAD_GIB} GiB host footprint)
+  host cgroup max   ${HOST_MAX_GIB} GiB, swap 0
+  MPS               ${MPS_STATE}
+  oom_score_adj     800 (this job is the designated victim)
+INFO
+
+[[ "$DRY" -eq 1 ]] && { echo "gpurun: --dry-run, not launching"; exit 0; }
+
+# --- host-side containment -----------------------------------------------------------------
+# memory.max does NOT bound plain cudaMalloc on driver 580.x -- verified: 8 GiB of device
+# memory charged +14.7 MiB. It DOES bound anon, pinned host memory and managed memory, all of
+# which were confirmed to produce clean cgroup OOM kills. MemorySwapMax=0 so a runaway takes a
+# prompt memcg OOM instead of dragging the box through 16 GiB of swap first.
+# Register the declared budget with gb10-guard. This is what lets the guard rank victims by
+# "who is OVER the budget they promised" instead of "who is biggest" -- so a 90 GiB job that
+# declared 90 GiB is left alone, while a job that declared 8 and took 12 is the one that dies.
+# Registration happens INSIDE the final process so the pid is the one that holds the memory; the
+# guard walks up the process tree, so children inherit it.
+REG='D=/run/gb10-guard/jobs; [ -d "$D" ] && printf "{\"cap_gib\":%s,\"name\":\"%s\",\"started\":%s}" \
+  "$1" "$2" "$(awk "{print \$1}" /proc/uptime)" > "$D/$$" 2>/dev/null; shift 2; exec "$@"'
+
+if systemd-run --user --scope -q -p MemoryMax=1M true 2>/dev/null; then
+  exec systemd-run --user --scope -q --unit="gpurun-${NAME}-$$" \
+      -p "MemoryMax=${HOST_MAX_GIB}G" -p MemorySwapMax=0 \
+      -- /bin/sh -c "$REG" gpurun "$CAP_GIB" "$NAME" "$@"
+fi
+echo "gpurun: cgroup delegation unavailable; running without host-side cap" >&2
+exec /bin/sh -c "$REG" gpurun "$CAP_GIB" "$NAME" "$@"

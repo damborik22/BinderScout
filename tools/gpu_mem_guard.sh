@@ -154,6 +154,22 @@ PY
 }
 
 cmd_watch () {
+    # SUPERSEDED. This loop thresholds on MemAvailable and kills by a simpler rule than
+    # gb10-guard.service, which is the supported failsafe. Two killers racing is strictly worse
+    # than one: they cannot see each other's kills, and the driver returns GPU pages
+    # asynchronously, so both would conclude their kill failed and take a second victim. That is
+    # precisely the 23-kill cascade of 2026-09-18. Refuse rather than let someone find out.
+    if systemctl is-active --quiet gb10-guard 2>/dev/null; then
+        echo "gpu_mem_guard.sh watch: REFUSING -- gb10-guard.service is active and supersedes this." >&2
+        echo "  Use it instead:  journalctl -fu gb10-guard" >&2
+        echo "  Its tunables are documented in tools/gb10-guard.py." >&2
+        echo "  If you really want this loop, stop gb10-guard first (and read why not:" >&2
+        echo "  docs/GB10_FREEZE_FAILSAFE.md)." >&2
+        return 1
+    fi
+    echo "gpu_mem_guard.sh watch: WARNING -- thresholds on MemAvailable and has no settle window;" >&2
+    echo "  gb10-guard.service is the supported failsafe. Continuing because it is not running." >&2
+
     # Backstop for what MPS does not cover: host RSS, non-CUDA memory, MPS down.
     # Victim selection MUST come from NVML, not RSS: GPU pages do not inflate a
     # process's RSS, so the kernel OOM killer and earlyoom fire at the right TIME
