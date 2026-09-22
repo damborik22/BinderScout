@@ -2197,7 +2197,7 @@ install_bindcraft2() {
     [[ -n "${BINDCRAFT2_ACCELERATOR:-}" ]] && bc2_args+=("${BINDCRAFT2_ACCELERATOR}")
     [[ -n "${af2_params}" ]] && bc2_args+=("--no-weights")
 
-    run_logged "Installing BindCraft 2 (this compiles biotraj on aarch64)" \
+    run_logged "Installing BindCraft 2" \
         env -u CONDA_PREFIX -u VIRTUAL_ENV \
             BINDCRAFT_PYTHON="${BINDCRAFT2_DIR}/.venv/bin/python" \
             BINDCRAFT_AF2_PARAMS="${af2_params}" \
