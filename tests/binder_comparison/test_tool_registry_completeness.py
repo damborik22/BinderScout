@@ -38,12 +38,6 @@ _LOOKUPS: list[tuple[str, dict]] = [
     ("cli/report.py _TOOL_DISPLAY_PYMOL", cli_report._TOOL_DISPLAY_PYMOL),
 ]
 
-# BindCraft 2's repository is unpublished, so there is no URL to link it to and
-# its entry is deliberately absent from _TOOL_LINKS. Exempted by name so the
-# omission is a recorded decision rather than the same oversight that produced
-# the missing CSS rule.
-_TOOL_LINK_EXEMPT = {"bindcraft2"}
-
 
 @pytest.mark.parametrize(("where", "lookup"), _LOOKUPS, ids=[w for w, _ in _LOOKUPS])
 def test_every_canonical_tool_is_registered(where, lookup):
@@ -69,10 +63,8 @@ def test_tool_colours_are_distinct():
         used[colour] = tool
 
 
-def test_tool_links_cover_every_tool_or_are_exempt():
-    missing = [
-        t for t in candidates.CANONICAL_TOOL_ORDER if t not in viz_report._TOOL_LINKS and t not in _TOOL_LINK_EXEMPT
-    ]
+def test_tool_links_cover_every_tool():
+    missing = [t for t in candidates.CANONICAL_TOOL_ORDER if t not in viz_report._TOOL_LINKS]
     assert not missing, f"visualization/report.py _TOOL_LINKS is missing: {missing}"
 
 

@@ -1,4 +1,4 @@
-# BinderScout / BindMaster — Computational Lab Diary
+# BinderScout / BindMaster — Repo Diary
 
 **Purpose:** Chronological record of architectural decisions, metric breakthroughs, and tool integration milestones from BinderScout's development (Feb–Jun 2026).
 

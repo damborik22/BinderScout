@@ -31,7 +31,7 @@ The other half of the rewrite is the interface. One layered campaign file replac
 - **Length ceiling is a crash, not a refusal.** Roughly one worker per 24 GB card at ~256 residues. Past ~512 residues it does not refuse — it floors the plan at one worker, runs single-process, and OOMs at prediction time. Nothing upstream catches this.
 - **Two output schemas exist in the wild.** v1.0.0 writes `3_Ranked/!_Ranked.csv` with lowercase `rank`/`design`/`Binder_Sequence`; the pre-1.0 build that produced our archived CBG and CALCA pools wrote a flat `<target>_ranked.csv` with TitleCase columns, and renamed/rescaled several metric columns besides. The extractor reads both; anything hand-written must not assume one.
 - **The ranked table is rewritten as the campaign runs, and it can shrink** — it is rebuilt on every acceptance and reconciled at close against what is actually on disk. A `--tool-csv` snapshot taken mid-run can be superseded by a *smaller* one, which is the known stale-`tool_csvs` failure mode. Snapshot after the campaign closes.
-- **Source is not public.** Pre-publication and source-available under its own licence, supplied per machine — there is no download to point a new node at, and `BindCraft2/` is gitignored and never committed.
+- **Source is public, but not vendored.** [PacesaLab/BindCraft2](https://github.com/PacesaLab/BindCraft2) since 2026-09-16, source-available under its own hosting-restricted licence. The installer clones it at `v1.0.1`; `BindCraft2/` stays gitignored and is never committed — the same posture as the AF3 weights.
 - **Column set is campaign-dependent.** A metric column exists only if the campaign set a threshold for it, so two pools from the same tool legitimately differ in width. Every native read is optional.
 
 ## Pick when
@@ -95,7 +95,7 @@ Under `--tool all` on x86, a missing source **warns and skips**; an explicit `--
 
 ## Sources
 
-- **Upstream repository: not public.** BindCraft 2 is pre-publication and source-available under its own (non-MIT) licence; the source is supplied per machine via `--bc2-source` / `$BINDCRAFT2_SOURCE`, and `BindCraft2/` is gitignored. No URL is recorded here or anywhere in this repository.
+- **Upstream repository: [PacesaLab/BindCraft2](https://github.com/PacesaLab/BindCraft2)** — public since 2026-09-16, source-available under its own (non-MIT, hosting-restricted) licence. The installer clones it at `v1.0.1`; `--bc2-source` / `$BINDCRAFT2_SOURCE` overrides with a `.zip`, a directory or another git URL. `BindCraft2/` is gitignored and never committed.
 - Lineage: the same lab's rewrite of BindCraft (Pacesa et al. 2024, bioRxiv 2024.09.30.615802), which remains a separate tool — see `bindcraft.md`.
 - BindMaster integration plan, with the measurements quoted above: `docs/PLAN_bindcraft2_integration.md`
 - Extractor (and the dual-schema reasoning): `Evaluator/binder_comparison/extractors/bindcraft2.py`

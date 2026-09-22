@@ -147,7 +147,7 @@ BindMaster/
 
 **Gitignored (created at runtime):**
 - `BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/` — cloned by installer
-- `BindCraft2/` — *staged*, not cloned: BindCraft 2 is pre-publication and source-available under its own (non-MIT) licence, so there is no public URL to clone from and no file of it belongs in this repo. The installer unpacks it from `--bc2-source` and installs it **editable**, so the checkout is the installation — moving or deleting it breaks the `bindcraft` command
+- `BindCraft2/` — *staged*, not vendored: BindCraft 2 is public (https://github.com/PacesaLab/BindCraft2, released September 2026) but source-available under its own licence (BindCraft2 Source-Available, hosting-restricted), not this repo's MIT, so no file of it is committed here — the same posture as the AF3 weights. The installer unpacks it from `--bc2-source` and installs it **editable**, so the checkout is the installation — moving or deleting it breaks the `bindcraft` command
 - `weights/foundry/` — RFD3 / ProteinMPNN checkpoints fetched by `foundry install` (no clone dir; `rc-foundry` is pip-installed into `bindmaster_rfd3`)
 - `runs/` — generated experiment directories
 - `install.log`, `install_aarch.log` — installer output
@@ -326,7 +326,7 @@ the parameter sweep.
 | Tool | Method | Key papers/repos |
 |---|---|---|
 | **BindCraft** | AF2 hallucination + MPNN sequence design + PyRosetta filtering | `martinpacesa/BindCraft` |
-| **BindCraft 2** | A rewrite of BindCraft, not a new version: AF2 hallucination + MPNN, JAX only, no PyRosetta. Ranks its own designs on `i_pDAE` | not public — source-available, pre-publication; supplied per machine via `--bc2-source` |
+| **BindCraft 2** | A rewrite of BindCraft, not a new version: AF2 hallucination + MPNN, JAX only, no PyRosetta. Ranks its own designs on `i_pDAE` | [PacesaLab/BindCraft2](https://github.com/PacesaLab/BindCraft2) — source-available (hosting-restricted), cloned at `v1.0.1`, not vendored |
 | **BoltzGen** | Boltz-1 structure diffusion + flow matching for binder generation | `HannesStark/boltzgen` |
 | **Mosaic** | JAX-based Boltz-2 gradient hallucination (no internal AF2 cross-val) | `escalante-bio/mosaic` |
 | **PXDesign** | Protenix-based de novo binder design (diffusion + MPNN + AF2 eval) | `bytedance/PXDesign` |
@@ -521,10 +521,10 @@ bindmaster install --tool all --yes --skip-examples  # non-interactive (CI)
 bindmaster install --tool proteina-complexa # install Proteina-Complexa
 bindmaster install --tool protein-hunter    # install Protein-Hunter (Part L)
 bindmaster install --tool rfd3              # install RFD3 / foundry (Part M)
-bindmaster install --tool bindcraft2 --bc2-source /path/to/BindCraft2.zip   # install BindCraft 2 (eighth tool)
-# BindCraft 2 has no public download: --bc2-source takes a .zip or an unpacked directory (or export
-# $BINDCRAFT2_SOURCE once per machine). Under --tool all a missing source warns and skips, so `all`
-# still succeeds on a machine with no copy; an explicit --tool bindcraft2 fails instead.
+bindmaster install --tool bindcraft2        # install BindCraft 2 (eighth tool), cloned from upstream
+# Clones https://github.com/PacesaLab/BindCraft2 at v1.0.1. Its licence is its own
+# (hosting-restricted), so BindCraft2/ stays gitignored and nothing of it is committed here.
+# --bc2-source overrides with a .zip, a directory or another git URL (or export $BINDCRAFT2_SOURCE).
 bindmaster install --tool esmfold2          # install ESMFold2 refolder individually (default engine; also in --tool all)
 bindmaster install --tool soluprot          # install SoluProt screen alone (also in --tool all; x86 + aarch64)
 bindmaster install --uninstall --tool all   # remove envs + shortcuts (preserves runs/)

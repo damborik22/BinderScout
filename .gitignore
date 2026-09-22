@@ -1,10 +1,9 @@
 # Tool directories — cloned fresh by install.sh
 BindCraft/
-# BindCraft 2 is pre-publication and source-available under its own (non-MIT)
-# licence. No file of it belongs in this MIT repo -- not even its LICENSE or
-# README. It is unpacked here by the installer from --bc2-source, so the tree
-# is present on disk on any machine that has it; without this line a plain
-# `git add -A` on this branch stages 157 of its source files.
+# BindCraft 2 is staged here by the installer, never committed. Its licence is
+# its own (BindCraft2 Source-Available, hosting-restricted), not this repo's
+# MIT, so we do not vendor it -- the same posture as the AF3 weights. Without
+# this line a plain `git add -A` stages 157 of its source files.
 BindCraft2/
 BoltzGen/
 Mosaic/
@@ -14,12 +13,7 @@ Protein-Hunter/
 LigandMPNN/
 rf_diffusion_all_atom/
 
-# BindCraft 2 — staged by install.sh from BINDCRAFT2_SOURCE, never committed.
-# Separate block because the comment above does not apply: it is not cloned
-# from a public URL. It is source-available under a licence that is NOT this
-# repository's MIT, and it is pre-publication, so no file of it belongs in git
-# even once its upstream repo opens. `BC2/` is the upstream directory name.
-BindCraft2/
+# `BC2/` is the upstream directory name; same treatment as BindCraft2/ above.
 BC2/
 
 # Local Miniforge3 installation (standalone mode)

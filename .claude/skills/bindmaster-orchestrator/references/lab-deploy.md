@@ -76,9 +76,10 @@ enforced by `fleet.sh`, they're judgment calls at assignment time:**
   campaign ran to completion there, 1 accepted, 7 m 26 s.
 
   The unusual part is how the branch got there, and it is worth stating so
-  nobody goes looking for it on GitHub: **`eight_tool` is deliberately not
-  pushed** — BindCraft 2 is pre-publication — so it reached BM1 as a **git
-  bundle** carried over the lab share (`DEV/BinderScout-eight_tool-backup/`),
+  nobody goes looking for it on GitHub: at the time **`eight_tool` was
+  deliberately not pushed** — BindCraft 2 was still under embargo — so it
+  reached BM1 as a **git bundle** carried over the lab share
+  (`DEV/BinderScout-eight_tool-backup/`),
   not by `git fetch`. Two consequences. First, a bundle is a *snapshot*: BM1's
   worktree sits at whatever commit the bundle captured and drifts behind BM5's
   `eight_tool` HEAD until someone carries a fresh one. Check before you blame

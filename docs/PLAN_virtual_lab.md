@@ -12,7 +12,7 @@
 > - `grep -rniE 'critic|adversar|red.?team'` over `.claude/skills/` returns **no critic
 >   role**. Adversarial review lives only as prose heuristics inside the orchestrator
 >   (§6.1 "math first", §6.7 "propose, don't decide silently"). → **Part Y premise is real.**
-> - `docs/LAB_DIARY.md` records **≥ 8 distinct methodology/claim errors** caught late or by
+> - `docs/REPO_DIARY.md` records **≥ 8 distinct methodology/claim errors** caught late or by
 >   the human (see the evidence table below), including six in a single 2026-07-01 report
 >   review. → **the critic has a measured base rate to beat, not a hypothetical one.**
 > - Related roadmap: `PLAN_ranking_and_engines_roadmap.md` **Part X** (report gap audit) is
@@ -51,7 +51,7 @@ or actively counter-indicated (below).
 
 ## The evidence: what a critic would have been for
 
-Drawn from `docs/LAB_DIARY.md`. "Catchability" is an honest estimate of whether an LLM
+Drawn from `docs/REPO_DIARY.md`. "Catchability" is an honest estimate of whether an LLM
 critic *with repo access* would plausibly have flagged it.
 
 | Date | Miss | Caught by | Catchability |
@@ -68,7 +68,7 @@ critic *with repo access* would plausibly have flagged it.
 
 **Read of the table.** Value concentrates in the **High** rows — claims, provenance,
 legends, gaming, doc-vs-record consistency. Those are reasoning-over-text tasks with an
-authoritative ground truth already in-repo (`LAB_DIARY.md`, `CHANGELOG.md`). The **Low**
+authoritative ground truth already in-repo (`REPO_DIARY.md`, `CHANGELOG.md`). The **Low**
 rows are ops footguns better fixed in code (already TODO'd in the diary) and should *not*
 be used to justify this part.
 
@@ -101,7 +101,7 @@ the failure mode being fixed, and is why the Virtual Lab makes the Critic a sepa
 
 Fires before a report is trusted or wet-lab picks are committed:
 
-- Every quantitative claim traced to a source in `LAB_DIARY.md` / `CHANGELOG.md` / a
+- Every quantitative claim traced to a source in `REPO_DIARY.md` / `CHANGELOG.md` / a
   results CSV. **Unsourced or contradicted numbers are the top finding class** (2026-07-01).
 - Benchmark provenance stated exactly: Adaptyv 4-target/662-design (macro AUC mean 0.710 /
   max 0.689) and ProteinBase 4-target/175-design (max ~0.755). Never "planned scope".
@@ -128,7 +128,7 @@ Hotspot claims literature-backed vs geometry-only; difficulty band not optimisti
 - [ ] Y1. Consume **Part X**'s findings — the module → CSV → HTML gap table *is* the
       audit checklist. Do not invent a parallel one.
 - [ ] Y2. Inventory the authoritative ground-truth sources a critic may cite
-      (`LAB_DIARY.md`, `CHANGELOG.md`, per-engine refold CSVs, benchmark reports on MUNI)
+      (`REPO_DIARY.md`, `CHANGELOG.md`, per-engine refold CSVs, benchmark reports on MUNI)
       and write the precedence rule when they disagree.
 - [ ] Y3. Draft `SKILL.md` + `references/` (claim-audit checklist, gaming matrix,
       statistical-hygiene checks). Mirror the existing five skills' structure.
@@ -224,7 +224,7 @@ parallel once X is done.
   nanobodies.* Nature (2025). Preprint: bioRxiv `10.1101/2024.11.11.623004`.
   Code: `github.com/zou-group/virtual-lab` (reference only — not a dependency).
 - `PLAN_ranking_and_engines_roadmap.md` — Parts X/T/U/O/V/W; Part X precedes Part Y.
-- `docs/LAB_DIARY.md` — the evidence table above; entries 2026-06-18, 06-22, 06-23,
+- `docs/REPO_DIARY.md` — the evidence table above; entries 2026-06-18, 06-22, 06-23,
   06-28, 07-01, 07-07→15, 07-16→23.
 - `docs/completed_plans.md` — Part N (interface ΔG, landed negative).
 - `.claude/skills/` — the five existing lab roles Part Y would join.

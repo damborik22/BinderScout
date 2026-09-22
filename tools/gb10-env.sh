@@ -32,7 +32,7 @@ gb10_budget () {
                                      # Must cover max(lengths) in the target JSON, not the mean.
         bindcraft2)     echo 20 ;;
         mosaic)         echo 56 ;;   # EXCLUSIVE - see the note below. Pair carry alone was measured at
-                                     # 24.61 GiB in one allocation (LAB_DIARY.md:1884-1886) and a 68.8 GiB
+                                     # 24.61 GiB in one allocation (REPO_DIARY.md:1884-1886) and a 68.8 GiB
                                      # run left MemAvailable at 36 GiB, already under the 40 GiB floor.
         # --- PyTorch: a CEILING, not a reservation. Generosity is free until the job hits it.
         boltzgen)       echo 24 ;;   # its folding stage loads boltz2_conf_final.ckpt, i.e. a Boltz-2
@@ -106,7 +106,7 @@ PY
         mosaic)
             # hallucinate_bindmaster.py:19 defaults MOSAIC_TARGET_GIB to 64. That is above the
             # empirically safe footprint: a 68.8 GiB run left MemAvailable at 36 GiB, already under
-            # the 40 GiB floor (LAB_DIARY.md:1889-1890). Drive it to the budget instead, and stand
+            # the 40 GiB floor (REPO_DIARY.md:1889-1890). Drive it to the budget instead, and stand
             # down our own fraction so the engine's resolver is the single source of truth.
             export MOSAIC_TARGET_GIB="$cap"
             unset XLA_PYTHON_CLIENT_MEM_FRACTION

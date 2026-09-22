@@ -16,7 +16,7 @@ step A is the highest-value experiment we have and does not touch Spark.
 ## ⚠️ Before touching Spark
 
 The failure mode this guard exists to prevent is a **whole-box reboot**, not a
-clean crash (`docs/LAB_DIARY.md`, 2026-06-24). So:
+clean crash (`docs/REPO_DIARY.md`, 2026-06-24). So:
 
 - Never run a first-of-its-kind AF3 config on Spark while another job is live.
 - Run under `tmux`, and watch memory in a second pane:
@@ -378,7 +378,7 @@ Do not re-pin `AF3_COMMIT` until A and E are done and B passes.
 
 ## Recording results
 
-Append to `docs/LAB_DIARY.md` with the date, host, exact env vars, token count,
+Append to `docs/REPO_DIARY.md` with the date, host, exact env vars, token count,
 peak memory and outcome — including failures. The 2026-06-24 entry is the
 template. If step A passes, the follow-up is a docs correction across
 `CLAUDE.md`, `install/install.sh`, `install/install_aarch.sh` and
