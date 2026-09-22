@@ -40,11 +40,15 @@ it lets a different operator reproduce or take over.
 
 ## 2. Machine facts you must respect
 
+> **This repo is public — no infrastructure identifiers live here.** Hostnames, IPs,
+> usernames, home paths and host-key fingerprints are kept in the gitignored
+> `docs/local/fleet-access.md`. Placeholders like `<BM5_HOST>` elsewhere in this file
+> resolve there. Reach machines by their `~/.ssh/config` alias (`bm1`/`bm2`/`bm4`/`bm5`),
+> never by a literal address.
+
 | | **BM5** | **BM1** | **BM2** | **BM4** |
 |---|---|---|---|---|
-| DNS | `<BM5_HOST>` | `<BM1_HOST>` | `<BM2_HOST>` | `<BM4_HOST>` |
-| IP | <BM5_IP> | <BM1_IP> | <BM2_IP> | <BM4_IP> |
-| Alias (`~/.ssh/config`) | — (orchestrator) | `bm1` | `bm2` | `bm4` |
+| Alias (`~/.ssh/config`) | `bm5` | `bm1` | `bm2` | `bm4` |
 | Arch | aarch64 | x86_64 | x86_64 | x86_64 |
 | GPU | GB10 (unified) | RTX 3090 24 GB | RTX 3090 24 GB | RTX 3090 24 GB |
 | RAM (total) | 121 GB | **31 GB** | 62 GB | 62 GB |

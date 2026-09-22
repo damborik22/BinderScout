@@ -105,7 +105,11 @@ cmd_status() {
     local tunnel key
     if ip link show ppp0 >/dev/null 2>&1; then tunnel=up; else tunnel=DOWN; fi
     if ssh-add -l 2>/dev/null | grep -q clara; then key=unlocked; else key=locked; fi
-    printf '\n%-5s %s  tunnel=%s  key=%s\n' clara <CLARA_LOGIN_HOST> "$tunnel" "$key"
+    # Resolve the login host from the local ssh config at runtime — the repo is
+    # public, so no internal hostname is stored here.
+    local clara_host
+    clara_host=$(ssh -G clara 2>/dev/null | awk '/^hostname /{print $2; exit}')
+    printf '\n%-5s %s  tunnel=%s  key=%s\n' clara "${clara_host:-<not configured>}" "$tunnel" "$key"
     [ "$tunnel" = up ]     || warn "Clara unreachable: run vpn-ciirc manually in a dedicated terminal."
     [ "$key" = unlocked ]  || warn "Clara key not in agent: ssh-add -t 8h ~/.ssh/id_ed25519_clara"
     printf 'inventory generated: %s\n' "$(jq -r .generated "$INVENTORY")"

@@ -28,11 +28,14 @@ coordination substrate to archive of record.
 
 ## 2. Fleet inventory (probed 2026-07-27)
 
+> **This repo is public — no infrastructure identifiers live here.** Hostnames, IPs,
+> usernames, home paths and host-key fingerprints are kept in the gitignored
+> `docs/local/fleet-access.md`. Placeholders like `<BM5_HOST>` elsewhere in this file
+> resolve there. Reach machines by their `~/.ssh/config` alias (`bm1`/`bm2`/`bm4`/`bm5`),
+> never by a literal address.
+
 | | **BM5** | **BM1** | **BM2** | **BM4** |
 |---|---|---|---|---|
-| DNS | `<BM5_HOST>` | `<BM1_HOST>` | `<BM2_HOST>` | `<BM4_HOST>` |
-| IP | <BM5_IP> | <BM1_IP> | <BM2_IP> | <BM4_IP> |
-| User | `<BM5_USER>` | `<BM1_USER>` | `<BM2_USER>` | `<BM4_USER>` |
 | Arch | aarch64 | x86_64 | x86_64 | x86_64 |
 | OS | Ubuntu 24.04.4 | Ubuntu 24.04.4 | Ubuntu 24.04.4 | Ubuntu 24.04.4 |
 | GPU | GB10 (unified) | RTX 3090 24 GB | RTX 3090 24 GB | RTX 3090 24 GB |
@@ -45,11 +48,7 @@ coordination substrate to archive of record.
 SSH host keys pinned in `~/.ssh/known_hosts` on BM5 after fingerprint
 verification against two independent scans:
 
-```
-BM1 <BM1_HOSTKEY_FP>
-BM2 <BM2_HOSTKEY_FP>
-BM4 <BM4_HOSTKEY_FP>
-```
+The fingerprints themselves are recorded in `docs/local/fleet-access.md`.
 
 Key-based login from BM5 works to all three as of this date. No passwordless
 sudo exists on any machine, and none is requested by this plan.
@@ -89,10 +88,10 @@ sudo exists on any machine, and none is requested by this plan.
 ## 4. Architecture
 
 ```
-BM5  <BM5_HOST> · <BM5_IP> · aarch64 GB10 · ORCHESTRATOR + REFOLD
- ├── ssh bm1   <BM1_HOST> · .203 · RTX 3090 ┐
- ├── ssh bm2   <BM2_HOST> · .202 · RTX 3090 ├── LAN · direct · no VPN · no NAT
- ├── ssh bm4   <BM4_HOST> · .204 · RTX 3090 ┘
+BM5  aarch64 GB10 · ORCHESTRATOR + REFOLD
+ ├── ssh bm1   RTX 3090 ┐
+ ├── ssh bm2   RTX 3090 ├── LAN · direct · no VPN · no NAT
+ ├── ssh bm4   RTX 3090 ┘
  └── ssh clara CIIRC Slurm ─── human-established FortiClient tunnel
 
 muni-disk (CIFS) ── archive of record, OFF the hot path
