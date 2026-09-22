@@ -470,6 +470,50 @@ engine_esmfold2 () {
         --output-dir "$OUTPUT/refold_esmfold2" --model "${ESMFOLD2_MODEL}" $f
 }
 
+# --- engine result guards ---------------------------------------------------
+# 2026-09-16 ESMFold2 died on Clara with a TypeError from an unpinned model
+# revision, wrote 0 rows, and evaluate.sh printed REFOLD_DONE and exited 0 -- an
+# entire engine contributing nothing to a >=3-engine gate, invisibly. An engine
+# that exits 0 and writes nothing is the same failure wearing a success code
+# (cf. the AF3 empty-rows incident of 2026-08-21), so rc alone is not enough:
+# the CSV must actually gain rows.
+csv_rows () { if [[ -f "$1" ]]; then tail -n +2 "$1" | wc -l; else echo 0; fi; }
+
+engine_csv () {
+    case "$1" in
+        boltz2)   echo "$BOLTZ2_CSV" ;;
+        af3)      echo "$AF3_CSV" ;;
+        esmfold2) echo "$ESMFOLD2_CSV" ;;
+        *)        echo "" ;;
+    esac
+}
+
+# $1=label  $2=csv  $3=rows before  $4=rc
+check_engine_rows () {
+    local name=$1 csv=$2 before=$3 rc=$4 after
+    after=$(csv_rows "$csv")
+    if [[ $rc -ne 0 ]]; then
+        echo "Error: $name refolding failed (rc=$rc). Refusing to report a partial pool." >&2
+        return 1
+    fi
+    if [[ "$after" -le "$before" ]]; then
+        echo "Error: $name exited 0 but wrote no new rows to $csv ($before -> $after)." >&2
+        echo "       A missing engine silently breaks the cross-engine gate -- aborting." >&2
+        return 1
+    fi
+    echo "    [$name] ok -- $((after - before)) new row(s)"
+    return 0
+}
+
+# Sequential wrapper. `"$fn"; rc=$?` would abort under `set -e` before the
+# message could be printed, so the call is guarded by an if.
+run_engine_checked () {   # $1=label  $2=fn  $3=csv
+    local name=$1 fn=$2 csv=$3 before rc
+    before=$(csv_rows "$csv")
+    if "$fn"; then rc=0; else rc=$?; fi
+    check_engine_rows "$name" "$csv" "$before" "$rc" || exit 1
+}
+
 if [[ $SKIP_BOLTZ2 -eq 1 && ! -f "$BOLTZ2_CSV" ]]; then
     echo "Error: --skip-boltz2 given but $BOLTZ2_CSV not found"; exit 1
 fi
@@ -488,10 +532,11 @@ if [[ $CONCURRENT -eq 1 ]]; then
     # launch peaked at 56.2 GiB and logged one NVRM NV_ERR_NO_MEMORY; 40 s later usage
     # had fallen to 37.9 GiB. Serialising the startup costs nothing, because the
     # engines do not finish together anyway.
-    E_PIDS=(); E_NAMES=(); DELAY=0
+    E_PIDS=(); E_NAMES=(); E_BEFORE=(); DELAY=0
     launch_engine () {
         local name=$1 fn=$2
         local log="$OUTPUT/refold_${name}.log"
+        E_BEFORE+=("$(csv_rows "$(engine_csv "$name")")")
         ( sleep "$DELAY"; "$fn" ) > "$log" 2>&1 &
         E_PIDS+=("$!"); E_NAMES+=("$name")
         echo "    [$name] queued at +${DELAY}s → $log"
@@ -503,11 +548,10 @@ if [[ $CONCURRENT -eq 1 ]]; then
 
     ENGINE_FAIL=0
     for i in "${!E_PIDS[@]}"; do
-        if wait "${E_PIDS[$i]}"; then
-            echo "    [${E_NAMES[$i]}] ok"
-        else
-            rc=$?
-            echo "    [${E_NAMES[$i]}] FAILED (rc=$rc) — last 15 lines:" >&2
+        if wait "${E_PIDS[$i]}"; then rc=0; else rc=$?; fi
+        if ! check_engine_rows "${E_NAMES[$i]}" \
+                "$(engine_csv "${E_NAMES[$i]}")" "${E_BEFORE[$i]}" "$rc"; then
+            echo "    [${E_NAMES[$i]}] last 15 lines:" >&2
             tail -15 "$OUTPUT/refold_${E_NAMES[$i]}.log" | sed 's/^/      /' >&2
             ENGINE_FAIL=1
         fi
@@ -519,19 +563,19 @@ else
         echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
     else
         echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding  (Mosaic venv, cap ${GPU_CAP_BOLTZ2})..."
-        engine_boltz2
+        run_engine_checked "Boltz-2" engine_boltz2 "$BOLTZ2_CSV"
     fi
     (( STEP++ ))
 
     if [[ $SKIP_AF3 -eq 0 ]]; then
         echo "[step ${STEP}/${N_STEPS}] AF3 refolding       (conda env: ${AF3_ENV}, cap ${GPU_CAP_AF3})..."
-        engine_af3
+        run_engine_checked "AF3" engine_af3 "$AF3_CSV"
         (( STEP++ ))
     fi
 
     if [[ $SKIP_ESMFOLD2 -eq 0 ]]; then
         echo "[step ${STEP}/${N_STEPS}] ESMFold2 refolding  (conda env: ${ESMFOLD2_ENV}, cap ${GPU_CAP_ESMFOLD2})..."
-        engine_esmfold2
+        run_engine_checked "ESMFold2" engine_esmfold2 "$ESMFOLD2_CSV"
         (( STEP++ ))
     fi
 fi
