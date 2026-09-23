@@ -1093,6 +1093,11 @@ install_bindcraft() {
                 "${CONDA_CMD}" env remove -n BindCraft -y || return 1
         else
             print_warn "Keeping existing env — skipping package installation."
+            # Still refresh the shortcut. It is generated (it carries the GB10
+            # guard) and lives in a gitignored bin/, so this early return was the
+            # one path by which re-running the installer could NOT repair a
+            # wrapper -- exactly the repair an operator runs it for.
+            _write_bindcraft_shortcut
             _bindcraft_smoke_test; return $?
         fi
     fi
