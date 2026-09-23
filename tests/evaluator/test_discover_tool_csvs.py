@@ -1,7 +1,7 @@
 """F43(c): `Evaluator/scripts/discover_tool_csvs.py` must match the layout the
 configurator actually writes.
 
-`bindmaster configure` generates run scripts that aggregate every tool into
+`binderscout configure` generates run scripts that aggregate every tool into
 ``runs/<name>/<tool>/sequences.csv`` (see the ``check_outputs`` lines in
 ``write_run_all``), and Protein-Hunter's own ``boltz_ph/design.py`` writes its raw
 summaries one level deeper, in ``protein_hunter/<run-name>/``.
@@ -39,7 +39,7 @@ def discover():
 
 @pytest.fixture
 def canonical_run(tmp_path):
-    """The directory tree `bindmaster configure` + `run_all.sh` produce."""
+    """The directory tree `binderscout configure` + `run_all.sh` produce."""
     run = tmp_path / "runs" / "CALCA_helix"
     files = [
         "pxdesign/sequences.csv",

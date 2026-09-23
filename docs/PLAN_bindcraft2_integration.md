@@ -73,7 +73,7 @@ Differences from BindCraft 1 that drive this plan:
    *accepted* designs, not an attempt budget, and `max_trajectories` is the
    only cap in the package — grepping the whole tree for a wall-clock setting
    finds only a 60 s socket timeout on the weight download. Left unset, a
-   campaign runs until it fills the quota. Every other tool in BindMaster is
+   campaign runs until it fills the quota. Every other tool in BinderScout is
    bounded by attempts.
 
 4. **The ranked table is rewritten, and it can shrink.** `3_Ranked/!_Ranked.csv`
@@ -269,7 +269,7 @@ length guidance must say so, because nothing upstream catches it.
 
 - `runs/<name>/bindcraft2/campaign.json` — our own campaign file.
 - `runs/<name>/run_bindcraft2.sh` from a new
-  `bindmaster_examples/run_bindcraft2.sh.template`, carrying the mandatory
+  `binderscout_examples/run_bindcraft2.sh.template`, carrying the mandatory
   `settings.json` provenance block **before** the design step, per the per-run
   convention in `CLAUDE.md`.
 
@@ -341,7 +341,7 @@ coldspots}; induced_fit ↔ any detarget target.
 
 Run-script environment: export the resolved `BINDCRAFT_AF2_PARAMS`, and set
 `JAX_COMPILATION_CACHE_DIR` to a **per-machine, per-card** path —
-`$HOME/.cache/bindmaster/bc2_xla/<sanitised card name>`.
+`$HOME/.cache/binderscout/bc2_xla/<sanitised card name>`.
 
 Measured, not assumed: left unset, `use_campaign_compile_cache` puts the cache
 at `<project_folder>/compile_cache/<card>`, which is **per campaign**, so every
@@ -539,8 +539,8 @@ All of these land on `eight_tool`:
   `## [1.0.0] — 2026-09-17` **on this branch only**, recording what master
   already shipped, and a fresh `[Unreleased]` opens above it for 1.1.0. Master's
   own CHANGELOG is left alone.
-- `bindmaster.__version__ = "1.1.0"` is the **product** version — the repo has
-  had no version constant at all — surfaced as `bindmaster --version` beside
+- `binderscout.__version__ = "1.1.0"` is the **product** version — the repo has
+  had no version constant at all — surfaced as `binderscout --version` beside
   the existing `--help` branch, and consumed by every run's `settings.json`
   provenance block.
 - `binder-comparison` keeps **independent** SemVer. Its three unlinked `0.1.0`
@@ -548,7 +548,7 @@ All of these land on `eight_tool`:
   `binder_comparison/main.py`) are collapsed into one: the package version is
   declared in `pyproject.toml` and the other two read
   `importlib.metadata.version("binder-comparison")`. It stays `0.1.0`;
-  `bindmaster --version` and `binder-compare --version` legitimately differ,
+  `binderscout --version` and `binder-compare --version` legitimately differ,
   and the docs say so.
 - The prose `v0.7.0` markers in `CLAUDE.md`, `docs/completed_plans.md` and
   four skill reference files become `1.1.0`.
@@ -562,12 +562,12 @@ separate decision outside this plan.
 
 ## Acceptance criteria
 
-1. `bindmaster --version` prints `1.1.0` on `eight_tool`, and every generated
+1. `binderscout --version` prints `1.1.0` on `eight_tool`, and every generated
    run's `settings.json` records it. Master is untouched: `origin/master`
    still points at `60115d0` when this branch is done, and no commit on it is
    authored by this work. (Local `master` is two commits stale and stays that
    way — it is not fast-forwarded either.)
-2. `bindmaster install --tool bindcraft2 --yes` succeeds on x86 and is
+2. `binderscout install --tool bindcraft2 --yes` succeeds on x86 and is
    idempotent on a second run; `--uninstall --tool bindcraft2 --yes` leaves
    `runs/` intact; and `--tool all` on a machine with no `BINDCRAFT2_SOURCE`
    warns, skips BindCraft 2, and exits 0.
@@ -575,7 +575,7 @@ separate decision outside this plan.
    `3_Ranked/!_Ranked.csv` with matching mmCIF structures. Its
    trajectories-per-accepted-design ratio and wall clock are recorded — nothing
    upstream quantifies either.
-4. `bindmaster configure` generates a `run_bindcraft2.sh` that passes
+4. `binderscout configure` generates a `run_bindcraft2.sh` that passes
    `tests/configurator/test_settings_json_convention.py`, and a `campaign.json`
    from which a campaign reaches trajectory 1 and is then cancelled.
 5. The extractor parses **both** real delivered files — CBG (62 columns, with
@@ -632,7 +632,7 @@ separate decision outside this plan.
   so the pool is reconstructable from structures alone — worth having, but not
   needed while the raw CSVs are archived.
 - Invoking `bindcraft rank` / `bindcraft filter` for pool triage.
-- Finishing the BindMaster → BinderScout rename.
+- Finishing the BinderScout → BinderScout rename.
 
 ## Implementation slices
 
@@ -640,8 +640,8 @@ Each slice is one commit, **green at its own boundary**. The ordering below is
 deliberate: the extractor's CLI flag lands before the configurator emits it,
 and the campaign-JSON writer lands before the Spark validation that needs it.
 
-1. **Open 1.1.0 on `eight_tool`** — `bindmaster.__version__ = "1.1.0"`,
-   `bindmaster --version`, Evaluator version collapse, CHANGELOG retitle plus a
+1. **Open 1.1.0 on `eight_tool`** — `binderscout.__version__ = "1.1.0"`,
+   `binderscout --version`, Evaluator version collapse, CHANGELOG retitle plus a
    fresh `[Unreleased]`, v0.7.0 prose markers. Master untouched.
 2. **Ignore and stage** — `.gitignore` + `.dockerignore` for `BindCraft2/`;
    `BINDCRAFT2_SOURCE` resolution helper; verify nothing is tracked.

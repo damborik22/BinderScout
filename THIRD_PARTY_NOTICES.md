@@ -1,6 +1,6 @@
 # Third-party notices
 
-`LICENSE` (MIT) covers **BindMaster's own source** — the CLI, the configurator,
+`LICENSE` (MIT) covers **BinderScout's own source** — the CLI, the configurator,
 the TUI, the installers and the `binder-comparison` package. It does **not**
 cover the third-party assets listed below, which are redistributed inside this
 repository and carry their own terms.
@@ -47,7 +47,7 @@ Two notes for anyone auditing this:
   them from `HEAD` stops future release tarballs and source archives from
   carrying them, but a full `git clone` still fetches them from history. Ending
   that outright would need a history rewrite, which would break every existing
-  clone and invalidate the `bindmaster_git_sha` recorded in every past run's
+  clone and invalidate the `binderscout_git_sha` recorded in every past run's
   `settings.json` — the provenance record this project deliberately keeps. That
   trade-off has not been taken; the **written offer below** covers the
   historical distribution instead.

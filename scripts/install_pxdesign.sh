@@ -4,7 +4,7 @@
 # ┌─ READ THIS FIRST ────────────────────────────────────────────────────────┐
 # │ The SUPPORTED way to install PXDesign is:                                │
 # │                                                                          │
-# │     bindmaster install --tool pxdesign                                   │
+# │     binderscout install --tool pxdesign                                   │
 # │                                                                          │
 # │ (install/install.sh on x86_64, install/install_aarch.sh on aarch64).      │
 # │ That is what the docs and skills point at, and it does considerably more  │
@@ -16,7 +16,7 @@
 # │ and the unversioned .so dev symlinks, and runs the JIT-kernel smoke test. │
 # │                                                                          │
 # │ THIS script is a stripped-down manual fallback for standing up a bare     │
-# │ bindmaster_pxdesign env on a host where the full installer cannot run.    │
+# │ binderscout_pxdesign env on a host where the full installer cannot run.    │
 # │ It does NOT apply any of the patches or hooks listed above. Its one       │
 # │ addition over the canonical path is per-architecture PyTorch/CUDA/CUTLASS │
 # │ SM selection (aarch64 Blackwell SM 100 vs x86_64 SM 80;86;89).            │
@@ -35,7 +35,7 @@
 #
 # Environment:
 #   CUTLASS_PATH        CUTLASS checkout directory   (default: $HOME/cutlass)
-#   PXDESIGN_ENV_NAME   conda env name               (default: bindmaster_pxdesign)
+#   PXDESIGN_ENV_NAME   conda env name               (default: binderscout_pxdesign)
 
 set -euo pipefail
 
@@ -93,13 +93,13 @@ echo "PyTorch: ${PYTORCH_VERSION}  |  CUDA: ${CUDA_VERSION}  |  CUTLASS SM: ${CU
 # ──────────────────────────────────────────────────────────────────────────
 
 # Default install locations match install/install.sh: PXDesign lives inside the
-# BindMaster checkout, CUTLASS at $HOME/cutlass (what the activate.d hook reads).
+# BinderScout checkout, CUTLASS at $HOME/cutlass (what the activate.d hook reads).
 PXDESIGN_DIR="${PXDESIGN_DIR_ARG:-${REPO_ROOT}/PXDesign}"
 CUTLASS_DIR="${CUTLASS_PATH:-${HOME}/cutlass}"
-ENV_NAME="${PXDESIGN_ENV_NAME:-bindmaster_pxdesign}"
+ENV_NAME="${PXDESIGN_ENV_NAME:-binderscout_pxdesign}"
 
-echo "=== BindMaster: Installing PXDesign (manual fallback) ==="
-echo "Canonical path: bindmaster install --tool pxdesign"
+echo "=== BinderScout: Installing PXDesign (manual fallback) ==="
+echo "Canonical path: binderscout install --tool pxdesign"
 echo "Install dir:  $PXDESIGN_DIR"
 echo "CUTLASS dir:  $CUTLASS_DIR"
 echo ""
@@ -129,7 +129,7 @@ fi
 
 # 3. Create conda env (reuse an existing one unless --force was passed)
 #
-# Deleting the env is DESTRUCTIVE: bindmaster_pxdesign carries the CPATH /
+# Deleting the env is DESTRUCTIVE: binderscout_pxdesign carries the CPATH /
 # CUTLASS_PATH activate.d hooks and the .so dev symlinks written by
 # install/install.sh, plus hours of downloaded wheels. So it is opt-in behind
 # --force, mirroring install.sh (confirm_destructive / FORCE).
@@ -145,7 +145,7 @@ fi
 
 if ! env_exists "$ENV_NAME"; then
     echo ">>> Creating conda environment: ${ENV_NAME} (arch=${ARCH})"
-    ENV_YAML=$(mktemp "${TMPDIR:-/tmp}/bindmaster_pxdesign_env_XXXX.yml")
+    ENV_YAML=$(mktemp "${TMPDIR:-/tmp}/binderscout_pxdesign_env_XXXX.yml")
     cat > "$ENV_YAML" << EOF
 name: ${ENV_NAME}
 channels:
@@ -183,7 +183,7 @@ conda run -n "$ENV_NAME" \
 # 6. Set environment variables
 if ! grep -q "CUTLASS_PATH" ~/.bashrc 2>/dev/null; then
     echo "" >> ~/.bashrc
-    echo "# BindMaster PXDesign / CUTLASS (arch=${ARCH})" >> ~/.bashrc
+    echo "# BinderScout PXDesign / CUTLASS (arch=${ARCH})" >> ~/.bashrc
     echo "export CUTLASS_PATH=$CUTLASS_DIR" >> ~/.bashrc
     echo "export CUTLASS_NVCC_ARCHS=$CUTLASS_ARCHS" >> ~/.bashrc
     echo ">>> Added CUTLASS env vars to ~/.bashrc — run: source ~/.bashrc"
@@ -209,9 +209,9 @@ echo ""
 echo "Next steps:"
 echo "  source ~/.bashrc"
 echo "  conda activate ${ENV_NAME}"
-echo "  cd ${REPO_ROOT} && bindmaster configure"
+echo "  cd ${REPO_ROOT} && binderscout configure"
 echo ""
 echo "NOTE: this fallback skips the compatibility patches and activate.d hooks"
-echo "      that 'bindmaster install --tool pxdesign' applies. If PXDesign fails"
+echo "      that 'binderscout install --tool pxdesign' applies. If PXDesign fails"
 echo "      at runtime (protenix LayerNorm / DS4Sci EvoformerAttention JIT,"
 echo "      pxdbench JSON errors), re-run the canonical installer."

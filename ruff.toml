@@ -22,7 +22,7 @@ ignore = [
 
 [lint.per-file-ignores]
 "Evaluator/scripts/refold_*.py" = ["E402"]
-"bindmaster_examples/*.py" = ["ALL"]
+"binderscout_examples/*.py" = ["ALL"]
 
 [format]
 quote-style = "double"

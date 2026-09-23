@@ -107,7 +107,7 @@ say "done"
 cat <<'EOF'
 State after this run — check against `systemctl status`:
   gb10-guard.service   kills the GPU job instead of letting the kernel dismantle the box
-  bindmaster-mps       driver-enforced per-client GPU ceiling (enable separately, --user unit)
+  binderscout-mps       driver-enforced per-client GPU ceiling (enable separately, --user unit)
   /dev/watchdog0       owned by PID 1 — a true wedge auto-reboots
   /run/gb10-guard/jobs 1777, where gpurun registers each job's declared budget
 
@@ -134,7 +134,7 @@ Remaining by hand:
     indistinguishable from a crash from inside the job; that file names the guard, the reason,
     and the memory state at the trip. Full log: /var/log/gb10-guard.log (world-readable).
 
-NOTE: MPS deliberately uses its own pipe directory (/tmp/bindmaster-mps/pipe) rather than
+NOTE: MPS deliberately uses its own pipe directory (/tmp/binderscout-mps/pipe) rather than
 NVIDIA's default. That is isolation, not a bug: on the default pipe every CUDA client
 auto-joins, including rustdesk, and MPS clients die with the server. Only gpurun and the bin/
 wrappers join it.

@@ -65,7 +65,7 @@ _interrupt_state = {
 # that quietly ran single-sequence is systematically penalised (the MSA drives
 # target fold confidence and iPTM is an interface metric over both chains), so
 # it drags consensus_iptm_mean down and can demote a good design invisibly.
-# Default: abort.  Explicit opt-out: --allow-no-msa / BINDMASTER_ALLOW_NO_MSA=1.
+# Default: abort.  Explicit opt-out: --allow-no-msa / BINDERSCOUT_ALLOW_NO_MSA=1.
 try:
     from binder_comparison.refolding.target_msa import MissingTargetMSA, prepare_target_msa
 except Exception as _exc:  # binder_comparison unavailable in this env
@@ -75,12 +75,12 @@ except Exception as _exc:  # binder_comparison unavailable in this env
         pass
 
     def prepare_target_msa(target_seq, *, engine, cache_dir=None, out_dir=None, use_msa=True, allow_no_msa=False):
-        if use_msa and not (allow_no_msa or os.environ.get("BINDMASTER_ALLOW_NO_MSA", "").lower() in ("1", "true")):
+        if use_msa and not (allow_no_msa or os.environ.get("BINDERSCOUT_ALLOW_NO_MSA", "").lower() in ("1", "true")):
             raise MissingTargetMSA(
                 f"[{engine}] ABORTING: cannot reach the shared target-MSA cache — "
                 f"binder_comparison is not importable here ({_MSA_IMPORT_ERROR}). "
                 f"Install it in this environment (pip install -e Evaluator --no-deps), or re-run with "
-                f"--allow-no-msa (BINDMASTER_ALLOW_NO_MSA=1) to fold single-sequence with scores that are "
+                f"--allow-no-msa (BINDERSCOUT_ALLOW_NO_MSA=1) to fold single-sequence with scores that are "
                 f"NOT comparable to engines that used an MSA."
             )
         print(f"[{engine}] WARNING: no target MSA — scores not comparable to MSA-using engines", flush=True)
@@ -393,7 +393,7 @@ def refold_batch(
             # MSA ONCE PER TARGET, ACROSS SESSIONS. Redirect Boltz's unpaired
             # (target) MSA to the shared on-disk cache used by AF3 + ESMFold2
             # (binder_comparison.refolding.target_msa.get_target_msa — keyed by
-            # target-sequence SHA-256 at ~/.cache/bindmaster/target_msa/). This
+            # target-sequence SHA-256 at ~/.cache/binderscout/target_msa/). This
             # means (a) all three engines see identical evolutionary context and
             # (b) a fresh Boltz-2 process is a disk hit — it never re-queries
             # api.colabfold.com and so never trips the ColabFold rate-limit that

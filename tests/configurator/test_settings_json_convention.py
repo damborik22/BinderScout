@@ -28,7 +28,7 @@ CAT_RE = re.compile(r'^cat > "\$\{?\w+\}?/settings\.json" <<' + HEREDOC_MARKER +
 
 # Required by CLAUDE.md. Nested entries are the sub-keys each object must carry.
 REQUIRED_TOP = ("tool", "started_at", "version", "target", "design_params", "env")
-REQUIRED_VERSION = ("bindmaster_git_sha", "bindmaster_git_branch")
+REQUIRED_VERSION = ("binderscout_git_sha", "binderscout_git_branch")
 REQUIRED_TARGET = ("sequence", "length")
 REQUIRED_ENV = ("conda_env", "python", "gpu_id", "gpu_name", "gpu_memory_mib")
 
@@ -94,7 +94,7 @@ def _block_bounds(lines, script_name):
     assert starts, (
         f"{script_name} never writes settings.json. CLAUDE.md requires every run script to "
         f"persist runs/<name>/<tool>/settings.json before the design step "
-        f"(see bindmaster_examples/run_rfd3.sh.template)."
+        f"(see binderscout_examples/run_rfd3.sh.template)."
     )
     assert len(starts) == 1, f"{script_name} writes settings.json {len(starts)} times"
     start = starts[0]

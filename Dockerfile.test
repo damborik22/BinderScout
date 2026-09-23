@@ -1,7 +1,7 @@
-# BindMaster test environment — GPU-capable CUDA 12.4 base image (x86_64, Ubuntu 22.04)
+# BinderScout test environment — GPU-capable CUDA 12.4 base image (x86_64, Ubuntu 22.04)
 #
-# Build (base):  docker build -f Dockerfile.test -t bindmaster-test .
-# Build (test):  docker build -f Dockerfile.test --target test -t bindmaster-test-run .
+# Build (base):  docker build -f Dockerfile.test -t binderscout-test .
+# Build (test):  docker build -f Dockerfile.test --target test -t binderscout-test-run .
 # Run:           ./test_env.sh
 
 # ── Base stage: CUDA 12.4 + Miniforge + system packages ──────────────────────
@@ -58,8 +58,8 @@ RUN bash install/install.sh --tool all --yes --skip-examples
 # colleague's /software/ncbr/... setup). Tests that standalone auto-detection,
 # .condarc pinning, binutils install, and BindCraft all work correctly.
 #
-# Build:  docker build -f Dockerfile.test --target standalone-test -t bindmaster-standalone .
-# Verify: docker run --rm bindmaster-standalone bash -c "conda/bin/conda env list && cat conda/.condarc"
+# Build:  docker build -f Dockerfile.test --target standalone-test -t binderscout-standalone .
+# Verify: docker run --rm binderscout-standalone bash -c "conda/bin/conda env list && cat conda/.condarc"
 FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS standalone-test
 
 ENV DEBIAN_FRONTEND=noninteractive

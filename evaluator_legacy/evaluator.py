@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-BindMaster Evaluator — parses design outputs from Mosaic, BoltzGen, and BindCraft,
+BinderScout Evaluator — parses design outputs from Mosaic, BoltzGen, and BindCraft,
 cross-ranks candidates by a configurable metric, and optionally re-folds top designs
 with Boltz2.
 
 IMPORTANT: Must run inside the Mosaic uv venv (the only env that has JAX + Boltz2):
   /path/to/Mosaic/.venv/bin/python evaluator.py <run-dir> [options]
   OR via the unified CLI:
-  bindmaster evaluate <run-dir> [options]
+  binderscout evaluate <run-dir> [options]
 
 Modes:
   1. Parse mode (default): reads CSV outputs from run-dir subdirs, merges and ranks.
@@ -614,7 +614,7 @@ def _write_report(path: Path, rows: list, metric: str, top_n: int):
     report_rows = rows[:top_n]
     lines = [
         "=" * 70,
-        "BindMaster Evaluation Report",
+        "BinderScout Evaluation Report",
         f"Sorted by: {metric}  |  Showing top {len(report_rows)} of {len(rows)} designs",
         "=" * 70,
         "",
@@ -758,7 +758,7 @@ def _load_sequences(seq_source: str) -> list:
 
 def _make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="bindmaster evaluate",
+        prog="binderscout evaluate",
         description=(
             "Parse design outputs (Mosaic / BoltzGen / BindCraft), rank by metric, "
             "and optionally re-fold top designs with Boltz2 (Mosaic venv)."
@@ -823,7 +823,7 @@ def main():
     if args.sequences:
         print()
         print(f"{BOLD}{'═' * 60}{RESET}")
-        print(f"{BOLD}  BindMaster Evaluator — Sequence Mode{RESET}")
+        print(f"{BOLD}  BinderScout Evaluator — Sequence Mode{RESET}")
         print(f"{BOLD}{'═' * 60}{RESET}")
 
         rows = _load_sequences(args.sequences)
@@ -859,7 +859,7 @@ def main():
 
     print()
     print(f"{BOLD}{'═' * 60}{RESET}")
-    print(f"{BOLD}  BindMaster Evaluator{RESET}")
+    print(f"{BOLD}  BinderScout Evaluator{RESET}")
     print(f"{BOLD}{'═' * 60}{RESET}")
     print(f"  Run directory : {run_dir}")
     print(f"  Metric        : {args.metric}")

@@ -63,7 +63,7 @@ _MODEL_REVISIONS: dict[str, str | None] = {
 # that quietly ran single-sequence is systematically penalised (the MSA drives
 # target fold confidence and iPTM is an interface metric over both chains), so
 # it drags consensus_iptm_mean down and can demote a good design invisibly.
-# Default: abort.  Explicit opt-out: --allow-no-msa / BINDMASTER_ALLOW_NO_MSA=1.
+# Default: abort.  Explicit opt-out: --allow-no-msa / BINDERSCOUT_ALLOW_NO_MSA=1.
 try:
     from binder_comparison.refolding.target_msa import MissingTargetMSA, prepare_target_msa
 except Exception as _exc:  # binder_comparison unavailable in this env
@@ -73,12 +73,12 @@ except Exception as _exc:  # binder_comparison unavailable in this env
         pass
 
     def prepare_target_msa(target_seq, *, engine, cache_dir=None, out_dir=None, use_msa=True, allow_no_msa=False):
-        if use_msa and not (allow_no_msa or os.environ.get("BINDMASTER_ALLOW_NO_MSA", "").lower() in ("1", "true")):
+        if use_msa and not (allow_no_msa or os.environ.get("BINDERSCOUT_ALLOW_NO_MSA", "").lower() in ("1", "true")):
             raise MissingTargetMSA(
                 f"[{engine}] ABORTING: cannot reach the shared target-MSA cache — "
                 f"binder_comparison is not importable here ({_MSA_IMPORT_ERROR}). "
                 f"Install it in this environment (pip install -e Evaluator --no-deps), or re-run with "
-                f"--allow-no-msa (BINDMASTER_ALLOW_NO_MSA=1) to fold single-sequence with scores that are "
+                f"--allow-no-msa (BINDERSCOUT_ALLOW_NO_MSA=1) to fold single-sequence with scores that are "
                 f"NOT comparable to engines that used an MSA."
             )
         print(f"[{engine}] WARNING: no target MSA — scores not comparable to MSA-using engines", flush=True)
@@ -155,11 +155,11 @@ def refold_batch(
             print(f"[esmfold2] Target MSA loaded: {a3m_str.count('>')} sequences", flush=True)
         except Exception as exc:
             # Same gate as a failed fetch: never fold single-sequence by accident.
-            if not (allow_no_msa or os.environ.get("BINDMASTER_ALLOW_NO_MSA", "").lower() in ("1", "true")):
+            if not (allow_no_msa or os.environ.get("BINDERSCOUT_ALLOW_NO_MSA", "").lower() in ("1", "true")):
                 raise MissingTargetMSA(
                     f"[esmfold2] ABORTING: the shared target MSA was obtained but ESMFold2 could not "
                     f"parse it ({exc}). Fix the cached a3m, or re-run with --allow-no-msa "
-                    f"(BINDMASTER_ALLOW_NO_MSA=1) to fold single-sequence — those scores are NOT "
+                    f"(BINDERSCOUT_ALLOW_NO_MSA=1) to fold single-sequence — those scores are NOT "
                     f"comparable to engines that used an MSA."
                 ) from exc
             print(f"[esmfold2] WARNING: could not parse target MSA ({exc}); single-sequence mode", flush=True)

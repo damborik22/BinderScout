@@ -6,7 +6,7 @@ calls the ColabFold server internally).
 
 The cache key is the SHA-256 of the target sequence — sequences identical
 across runs share the same cache entry.  Default cache directory:
-``$BINDMASTER_MSA_CACHE`` or ``~/.cache/bindmaster/target_msa/``.
+``$BINDERSCOUT_MSA_CACHE`` or ``~/.cache/binderscout/target_msa/``.
 
 The implementation queries the public ColabFold MSA server
 (``https://api.colabfold.com``) using the same protocol as the
@@ -65,7 +65,7 @@ def get_target_msa(target_seq: str, cache_dir: str | Path | None = None) -> str:
     Args:
         target_seq: target amino acid sequence (no header, no whitespace).
         cache_dir: directory for the on-disk cache.  Defaults to
-            ``$BINDMASTER_MSA_CACHE`` then ``~/.cache/bindmaster/target_msa``.
+            ``$BINDERSCOUT_MSA_CACHE`` then ``~/.cache/binderscout/target_msa``.
 
     Returns:
         The A3M MSA as a single string (suitable for AF3's ``unpairedMsa``
@@ -141,11 +141,11 @@ class MissingTargetMSA(RuntimeError):
 
 
 #: Env-var opt-out, for callers that cannot pass ``allow_no_msa`` (shared CLI).
-ALLOW_NO_MSA_ENV = "BINDMASTER_ALLOW_NO_MSA"
+ALLOW_NO_MSA_ENV = "BINDERSCOUT_ALLOW_NO_MSA"
 
 
 def allow_no_msa_default() -> bool:
-    """True when ``$BINDMASTER_ALLOW_NO_MSA`` opts this host out of the MSA gate."""
+    """True when ``$BINDERSCOUT_ALLOW_NO_MSA`` opts this host out of the MSA gate."""
     return os.environ.get(ALLOW_NO_MSA_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -181,7 +181,7 @@ def prepare_target_msa(
 
     Raises:
         MissingTargetMSA: the MSA could not be obtained and neither
-            ``allow_no_msa`` nor ``$BINDMASTER_ALLOW_NO_MSA`` was set.
+            ``allow_no_msa`` nor ``$BINDERSCOUT_ALLOW_NO_MSA`` was set.
     """
     if not use_msa:
         note_msa_mode(engine, MSA_MODE_NONE, out_dir=out_dir, detail="explicit --no-msa (single-sequence requested)")
@@ -460,10 +460,21 @@ def _atomic_write_text(path: Path, text: str) -> None:
 def _resolve_cache_dir(override: str | Path | None) -> Path:
     if override is not None:
         return Path(override)
-    env = os.environ.get("BINDMASTER_MSA_CACHE")
+    env = os.environ.get("BINDERSCOUT_MSA_CACHE") or os.environ.get("BINDMASTER_MSA_CACHE")
     if env:
         return Path(env)
-    return Path.home() / ".cache" / "bindmaster" / "target_msa"
+    new = Path.home() / ".cache" / "binderscout" / "target_msa"
+    # 2.0 renamed this cache. A machine that already has the pre-2.0 one
+    # populated must keep using it: starting cold here re-queries ColabFold for
+    # every target, which is exactly what trips the "Too many failed attempts
+    # for the MSA generation request" rate limit that this cache exists to
+    # prevent. Prefer the new path, fall back to the legacy one only when it is
+    # the only one that exists.
+    if not new.exists():
+        legacy = Path.home() / ".cache" / "bindmaster" / "target_msa"
+        if legacy.exists():
+            return legacy
+    return new
 
 
 def _cache_key(seq: str) -> str:

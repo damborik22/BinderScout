@@ -62,7 +62,7 @@ not cgroups, not the OOM killer, not swap — can get them back.
 | # | layer | what it does | file |
 |---|---|---|---|
 | 0 | **budget before allocation** | every job launched with an explicit GiB cap; refuses if OS headroom < 40 GiB *or* if the cap will not fit in live `MemFree`. Per-tool budgets in `tools/gb10-env.sh:gb10_budget`, applied automatically by the `bin/` wrappers | `tools/gpurun`, `tools/gb10-env.sh` |
-| 1 | **driver-enforced ceiling** | MPS per-client pinned limit → clean `RESOURCE_EXHAUSTED` in the job. **Live and proven** 2026-09-18: 4 GiB refused under a 2 GiB cap on 580.159.03 | `~/.config/systemd/user/bindmaster-mps.service` |
+| 1 | **driver-enforced ceiling** | MPS per-client pinned limit → clean `RESOURCE_EXHAUSTED` in the job. **Live and proven** 2026-09-18: 4 GiB refused under a 2 GiB cap on 580.159.03 | `~/.config/systemd/user/binderscout-mps.service` |
 | 2 | **reactive guard** | watches `MemFree`, STOPs+KILLs the GPU holder at 40 GiB | `tools/gb10-guard.py` |
 | 3 | **widen the window** | `min_free_kbytes` 44 MiB → 2 GiB; `watermark_scale_factor` 10 → 200 | `tools/sysctl/99-gb10-unified-memory.conf` |
 | 4 | **host-side backstop** | earlyoom for the anon shape only — it cannot see driver pages | apply stage `earlyoom` |
@@ -109,7 +109,7 @@ Revert:  `sudo tools/revert-gb10-failsafe.sh <same stages>`
 - **`gpu_mem_guard.sh watch` thresholds on `MemAvailable`**, which is the wrong metric (CUDA
   cannot use reclaimable page cache; the two differ by ~26 GiB here). It is superseded by
   `gb10-guard.service` and must not be run alongside it — two killers racing is worse than one.
-- **MPS deliberately uses a non-default pipe directory** (`/tmp/bindmaster-mps/pipe`), so only
+- **MPS deliberately uses a non-default pipe directory** (`/tmp/binderscout-mps/pipe`), so only
   jobs launched via `gpurun` / the `bin/` wrappers / `gpu_mem_guard.sh run` join it. On NVIDIA's
   default pipe every CUDA client auto-joins — including `rustdesk`, whose session would then die
   with the MPS server. Ad-hoc CUDA work is covered by `gb10-guard`, not by MPS.

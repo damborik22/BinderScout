@@ -78,7 +78,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Probe MPS first: it decides the floor.
-export CUDA_MPS_PIPE_DIRECTORY="${BINDMASTER_MPS_DIR:-/tmp/bindmaster-mps}/pipe"
+export CUDA_MPS_PIPE_DIRECTORY="${BINDERSCOUT_MPS_DIR:-/tmp/binderscout-mps}/pipe"
 MPS_UP=0
 if command -v nvidia-cuda-mps-control >/dev/null 2>&1 \
    && echo get_default_device_pinned_mem_limit 0 2>/dev/null \
@@ -239,13 +239,13 @@ case "${1##*/}" in
 esac
 
 # --- driver-enforced ceiling (only if MPS is actually running AND we can reach it) ---------
-# We join the BindMaster MPS server on its OWN pipe directory, not NVIDIA's default
+# We join the BinderScout MPS server on its OWN pipe directory, not NVIDIA's default
 # /tmp/nvidia-mps. That is deliberate isolation, not an oversight: on the default pipe EVERY
 # CUDA client on the box auto-joins, including rustdesk -- and MPS clients die with the server.
 # Putting the remote-desktop session's fate in the MPS daemon's hands is a bad trade. So only
 # jobs launched through gpurun (or gpu_mem_guard.sh run) get the driver-enforced ceiling;
 # everything else stays in direct mode and is covered by gb10-guard instead.
-export CUDA_MPS_PIPE_DIRECTORY="${BINDMASTER_MPS_DIR:-/tmp/bindmaster-mps}/pipe"
+export CUDA_MPS_PIPE_DIRECTORY="${BINDERSCOUT_MPS_DIR:-/tmp/binderscout-mps}/pipe"
 MPS_STATE="down (no driver-enforced ceiling; --cap is advisory to the frameworks only)"
 if [[ "$MPS_UP" -eq 1 ]]; then
   # Per-client limits only ever clamp DOWNWARD from the server default; a client asking for

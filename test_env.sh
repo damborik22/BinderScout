@@ -1,5 +1,5 @@
 #!/bin/bash
-# BindMaster test environment launcher
+# BinderScout test environment launcher
 #
 # Builds a clean Docker image (Ubuntu 24.04 + Miniforge) and drops you into
 # an interactive shell where you can run ./install_aarch.sh as if on a
@@ -13,11 +13,11 @@
 #   ./test_env.sh --clean    # remove test artifacts created in previous runs
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE_NAME="bindmaster-test"
-CONTAINER_NAME="bindmaster-test-run"
+IMAGE_NAME="binderscout-test"
+CONTAINER_NAME="binderscout-test-run"
 
 # Pre-cached resources (AF2 weights, ARM64 binaries) — mounted read-only
-OLD_TOOLS_DIR="${OLD_TOOLS_DIR:-$HOME/Documents/OLD/BindMaster/bindcraft-tools}"
+OLD_TOOLS_DIR="${OLD_TOOLS_DIR:-$HOME/Documents/OLD/BinderScout/bindcraft-tools}"
 
 REBUILD=false
 GPU=false
@@ -58,13 +58,13 @@ if [[ "${CLEAN}" == true ]]; then
         "${IMAGE_NAME}" \
         /bin/bash -c "
             rm -rf /workspace/Mosaic/.venv
-            rm -rf /workspace/Mosaic/examples/bindmaster_examples
+            rm -rf /workspace/Mosaic/examples/binderscout_examples
             rm -f  /workspace/install_aarch.log /workspace/install.log
             echo 'Done.'
         " 2>/dev/null \
     || sudo rm -rf \
         "${SCRIPT_DIR}/Mosaic/.venv" \
-        "${SCRIPT_DIR}/Mosaic/examples/bindmaster_examples" \
+        "${SCRIPT_DIR}/Mosaic/examples/binderscout_examples" \
         "${SCRIPT_DIR}/install_aarch.log" \
         "${SCRIPT_DIR}/install.log"
     echo "Clean."

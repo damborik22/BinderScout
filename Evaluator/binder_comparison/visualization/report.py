@@ -91,7 +91,7 @@ def _agreement_phrase(df: pd.DataFrame, thresholds: dict[str, float]) -> str:
 
 # Display names for tools (source_tool values are lowercase internally)
 # Primary reference link per tool. Points at the canonical repository used by
-# the BindMaster installer (so the link matches the code the user actually
+# the BinderScout installer (so the link matches the code the user actually
 # ran). Swap to a paper URL once each method is published.
 _TOOL_LINKS = {
     # BindCraft — Pacesa et al. (Nature 2025), repo at martinpacesa/BindCraft

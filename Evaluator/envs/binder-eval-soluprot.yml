@@ -10,7 +10,7 @@ name: binder-eval-soluprot
 # source, the --no_tmhmm model). See that installer's install_soluprot().
 #
 # SoluProt is NOT redistributed with BinderScout. The installer
-# (`bindmaster install --tool soluprot`) fetches the standalone bundle
+# (`binderscout install --tool soluprot`) fetches the standalone bundle
 # (soluprot.zip) from
 #   https://loschmidt.chemi.muni.cz/soluprot/?page=download
 # and unpacks it into Evaluator/tools/soluprot/. The user must also

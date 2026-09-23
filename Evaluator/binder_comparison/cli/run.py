@@ -14,7 +14,7 @@ Usage:
         --output     ./comparison_report
 
 Environment requirements:
-    Boltz-2 refolding:  uv venv at ~/BindMaster/Mosaic/.venv (preferred)
+    Boltz-2 refolding:  uv venv at ~/BinderScout/Mosaic/.venv (preferred)
                         OR conda env 'mosaic' if populated
     Other steps:        any env with binder_comparison installed
 
@@ -160,7 +160,7 @@ def add_parser(subparsers) -> None:
         metavar="PYTHON",
         help=(
             "Direct Python executable for Boltz-2 refolding — use this for the "
-            "uv venv (e.g. ~/BindMaster/Mosaic/.venv/bin/python). "
+            "uv venv (e.g. ~/BinderScout/Mosaic/.venv/bin/python). "
             "Takes precedence over --boltz2-env."
         ),
     )

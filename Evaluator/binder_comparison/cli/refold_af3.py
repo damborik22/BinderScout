@@ -100,6 +100,6 @@ def add_parser(subparsers) -> None:
         "--msa-cache-dir",
         default=None,
         metavar="DIR",
-        help="MSA cache directory (default: $BINDMASTER_MSA_CACHE or ~/.cache/bindmaster/target_msa)",
+        help="MSA cache directory (default: $BINDERSCOUT_MSA_CACHE or ~/.cache/binderscout/target_msa)",
     )
     p.set_defaults(func=run)

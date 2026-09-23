@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# BindMaster Evaluator — run a full evaluation
+# BinderScout Evaluator — run a full evaluation
 #
 # Usage:
 #   bash evaluate.sh --sequences sequences.fasta \
@@ -65,9 +65,9 @@
 set -euo pipefail
 
 # Initialise conda — prefer local standalone install, then system locations
-_BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_BINDERSCOUT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 for _conda_sh in \
-    "${_BINDMASTER_DIR}/conda/etc/profile.d/conda.sh" \
+    "${_BINDERSCOUT_DIR}/conda/etc/profile.d/conda.sh" \
     "${HOME}/miniforge3/etc/profile.d/conda.sh" \
     "${HOME}/mambaforge/etc/profile.d/conda.sh" \
     "${HOME}/miniconda3/etc/profile.d/conda.sh" \
@@ -104,7 +104,7 @@ MOSAIC_VENV_FILE="$SCRIPT_DIR/envs/mosaic_venv_path"
 SEQUENCES=""
 TARGET_SEQ=""
 OUTPUT=""
-ALLOW_NO_MSA=${BINDMASTER_ALLOW_NO_MSA:-0}
+ALLOW_NO_MSA=${BINDERSCOUT_ALLOW_NO_MSA:-0}
 SKIP_BOLTZ2=0
 SKIP_AF3=0
 AF3_ENV="binder-eval-af3"
@@ -117,10 +117,10 @@ SOLUPROT_THRESHOLD=0.5
 SOLUPROT_FILTER=0
 PRIMARY_ENGINE="boltz"
 CONCURRENT=0
-STAGGER=${BINDMASTER_STAGGER_S:-30}
-GPU_CAP_BOLTZ2=${BINDMASTER_GPU_CAP_BOLTZ2:-24G}
-GPU_CAP_AF3=${BINDMASTER_GPU_CAP_AF3:-12G}
-GPU_CAP_ESMFOLD2=${BINDMASTER_GPU_CAP_ESMFOLD2:-24G}
+STAGGER=${BINDERSCOUT_STAGGER_S:-30}
+GPU_CAP_BOLTZ2=${BINDERSCOUT_GPU_CAP_BOLTZ2:-24G}
+GPU_CAP_AF3=${BINDERSCOUT_GPU_CAP_AF3:-12G}
+GPU_CAP_ESMFOLD2=${BINDERSCOUT_GPU_CAP_ESMFOLD2:-24G}
 USE_GPU_GUARD=1
 MIN_ENGINES=""          # empty = let binder-compare apply its own default (3)
 EPITOPE_RESIDUES=""
@@ -195,7 +195,7 @@ if [[ $SKIP_BOLTZ2 -eq 0 ]]; then
         MOSAIC_VENV="$(cat "$MOSAIC_VENV_FILE")"
     else
         echo "Error: Mosaic venv path not found — Boltz-2 refolding runs in the Mosaic venv." >&2
-        echo "       Run 'bindmaster install --tool mosaic', or pass --skip-boltz2." >&2
+        echo "       Run 'binderscout install --tool mosaic', or pass --skip-boltz2." >&2
         exit 1
     fi
     [[ -f "$MOSAIC_VENV/bin/binder-compare" ]] || {
@@ -209,7 +209,7 @@ mkdir -p "$OUTPUT"
 SEQUENCES="$(realpath "$SEQUENCES")"
 OUTPUT="$(realpath "$OUTPUT")"
 
-echo "=== BindMaster Evaluator ==="
+echo "=== BinderScout Evaluator ==="
 echo "Sequences : $SEQUENCES"
 echo "Output    : $OUTPUT"
 echo ""
@@ -218,7 +218,7 @@ echo ""
 if [[ $SKIP_AF3 -eq 0 ]]; then
     if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${AF3_ENV}"; then
         echo "[note] conda env '${AF3_ENV}' not found — AF3 refolding will be skipped."
-        echo "        (install with 'bindmaster install --tool af3'; runs on 24 GB GPUs — see Evaluator/envs/binder-eval-af3.yml)"
+        echo "        (install with 'binderscout install --tool af3'; runs on 24 GB GPUs — see Evaluator/envs/binder-eval-af3.yml)"
         echo ""
         SKIP_AF3=1
     fi
@@ -228,7 +228,7 @@ fi
 if [[ $SKIP_ESMFOLD2 -eq 0 ]]; then
     if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${ESMFOLD2_ENV}"; then
         echo "[note] conda env '${ESMFOLD2_ENV}' not found — ESMFold2 refolding will be skipped."
-        echo "        (install with: bindmaster install --tool esmfold2; see Evaluator/envs/binder-eval-esmfold2.yml)"
+        echo "        (install with: binderscout install --tool esmfold2; see Evaluator/envs/binder-eval-esmfold2.yml)"
         echo ""
         SKIP_ESMFOLD2=1
     fi
@@ -238,7 +238,7 @@ fi
 if [[ $SKIP_SOLUPROT -eq 0 ]]; then
     if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${SOLUPROT_ENV}"; then
         echo "[note] conda env '${SOLUPROT_ENV}' not found — SoluProt solubility screen will be skipped."
-        echo "        (install with: bindmaster install --tool soluprot)"
+        echo "        (install with: binderscout install --tool soluprot)"
         echo ""
         SKIP_SOLUPROT=1
     fi
@@ -265,7 +265,7 @@ if [[ -z "$MIN_ENGINES" ]] && (( _N_ENGINES < 3 )); then
         echo "       To rank on the engines you have, re-run with:  --min-engines ${_N_ENGINES}"
     else
         echo "       A cross-engine ranking needs at least 2 engines; install another refold"
-        echo "       engine (bindmaster install --tool esmfold2) before trusting the ranking."
+        echo "       engine (binderscout install --tool esmfold2) before trusting the ranking."
     fi
     echo ""
 elif [[ -n "$MIN_ENGINES" ]] && (( _N_ENGINES < MIN_ENGINES )); then
@@ -391,7 +391,7 @@ if [[ $SKIP_BOLTZ2 -eq 0 || $SKIP_AF3 -eq 0 || $SKIP_ESMFOLD2 -eq 0 ]]; then
         echo "[msa] WARNING: could not obtain the target MSA; --allow-no-msa given, so engines"
         echo "[msa]          will fold the target single-sequence. Their scores are NOT directly"
         echo "[msa]          comparable to an MSA run, and this is recorded in target_msa_mode.json."
-        export BINDMASTER_ALLOW_NO_MSA=1
+        export BINDERSCOUT_ALLOW_NO_MSA=1
     else
         echo "Error: could not obtain the target MSA, and engines would otherwise disagree on" >&2
         echo "       whether they used one. The MSA drives target fold confidence, so an" >&2
@@ -403,7 +403,7 @@ if [[ $SKIP_BOLTZ2 -eq 0 || $SKIP_AF3 -eq 0 || $SKIP_ESMFOLD2 -eq 0 ]]; then
         echo "        --target-seq '<TARGET_SEQ>'" >&2
         echo "" >&2
         echo "  Or proceed single-sequence on every engine (recorded in the report):" >&2
-        echo "    $0 --allow-no-msa ...   (or BINDMASTER_ALLOW_NO_MSA=1)" >&2
+        echo "    $0 --allow-no-msa ...   (or BINDERSCOUT_ALLOW_NO_MSA=1)" >&2
         exit 2
     fi
 fi

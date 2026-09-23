@@ -171,11 +171,11 @@ def apply_jax_memory_policy(engine: str, target_gib: float, *, env=None, verbose
     # The escape hatch exists for ONE purpose: measuring an engine's true demand
     # (preallocation hides it -- you measure supply, not demand). Only ever use it
     # under a CUDA MPS cap, which supplies the ceiling that "false" removes.
-    prealloc = (env.get("BINDMASTER_XLA_PREALLOCATE") or "").strip().lower()
+    prealloc = (env.get("BINDERSCOUT_XLA_PREALLOCATE") or "").strip().lower()
     if prealloc in ("0", "false", "no"):
         env["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
         print(
-            f"  [{engine}] WARNING: BINDMASTER_XLA_PREALLOCATE=false -- no fail-fast ceiling. "
+            f"  [{engine}] WARNING: BINDERSCOUT_XLA_PREALLOCATE=false -- no fail-fast ceiling. "
             f"Run under tools/gpu_mem_guard.sh or this can starve the host.",
             file=sys.stderr,
         )

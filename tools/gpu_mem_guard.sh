@@ -30,10 +30,10 @@ set -uo pipefail
 
 # Socket dir must be SHORT: AF_UNIX sun_path caps at 108 bytes and a long path
 # makes the daemon log "Starting control daemon" and then die silently.
-MPS_DIR=${BINDMASTER_MPS_DIR:-/tmp/bindmaster-mps}
+MPS_DIR=${BINDERSCOUT_MPS_DIR:-/tmp/binderscout-mps}
 export CUDA_MPS_PIPE_DIRECTORY="$MPS_DIR/pipe"
 export CUDA_MPS_LOG_DIRECTORY="$MPS_DIR/log"
-DEFAULT_CAP=${BINDMASTER_GPU_CAP:-16G}
+DEFAULT_CAP=${BINDERSCOUT_GPU_CAP:-16G}
 
 RED=$'\033[31m'; GRN=$'\033[32m'; YEL=$'\033[33m'; BLD=$'\033[1m'; RST=$'\033[0m'
 
@@ -46,7 +46,7 @@ ctl () { echo "$1" | timeout 20 nvidia-cuda-mps-control 2>&1; }
 # Otherwise `verify` stops the unit's daemon, starts its own replacement, and
 # `systemctl stop` then no longer tracks it -- leaving a stray daemon holding
 # machine-wide MPS state. Observed 2026-08-20.
-UNIT=bindmaster-mps
+UNIT=binderscout-mps
 unit_active () { systemctl --user is-active --quiet "$UNIT" 2>/dev/null; }
 # NB: capture into a variable and match the string -- do NOT pipe into grep.
 # `set -o pipefail` is on, and nvidia-cuda-mps-control exits 1 when the daemon is

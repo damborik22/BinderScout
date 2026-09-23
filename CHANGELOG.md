@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **BindMaster is now BinderScout, everywhere.** The repository had been
+  `BinderScout` on GitHub while the CLI, the Python package, the conda
+  environments and ~3,000 references stayed `bindmaster`. 2.0 closes that:
+  `bindmaster` → `binderscout`, `BindMaster` → `BinderScout`,
+  `BINDMASTER_*` → `BINDERSCOUT_*`. The command is `binderscout`,
+  `bindmaster.py` is `binderscout.py`, `bindmaster_examples/` is
+  `binderscout_examples/`, the five `.claude/skills/bindmaster-*` are
+  `binderscout-*`, and the conda environments are `binderscout_pxdesign`,
+  `binderscout_protein_hunter` and `binderscout_rfd3`.
+
+  **Three names were deliberately NOT renamed**, because they do not refer to
+  this project:
+  - `BindMaster1/2/4` in `docs/superpowers/plans/2026-07-27-fleet-orchestration.md`
+    are **machine hostnames**, not the project.
+  - `BindMaster 2` (`docs/bindmaster2_grafts.md`, and the
+    `damborik22/BindMaster2` URL) is a **separate, abandoned repository** whose
+    orchestration capabilities were grafted onto the Evaluator. Renaming it to
+    "BinderScout 2" would have been factually wrong and would have collided
+    with BinderScout 2.0 — this version.
+  - `docs/data/**` and the two dated HTML snapshots record filesystem paths as
+    they were at measurement time. They are experimental records, not brand
+    surface.
+
+  **Two back-compat shims** keep pre-2.0 machines working:
+  `BINDMASTER_DIR` is still honoured by the configurator, and
+  `_resolve_cache_dir()` falls back to `~/.cache/bindmaster/target_msa` when
+  the new path does not exist — starting that cache cold would re-query
+  ColabFold for every target and trip the rate limit the cache exists to
+  prevent.
+
+  The MPS pipe directory, the floor directory and the systemd unit moved with
+  everything else (`/tmp/binderscout-mps`, `/tmp/binderscout-floors`,
+  `binderscout-mps.service`). **Operators on GB10 must re-install the systemd
+  unit** — the old `bindmaster-mps.service` will keep running under its old
+  name until it is disabled and the new unit installed, and
+  `gpu_mem_guard.sh` now looks for `UNIT=binderscout-mps`.
+
 ## [1.1.1] — 2026-09-23
 
 ### Fixed
@@ -57,7 +96,7 @@ and the two can be run head-to-head against one target inside a single report.
 The full design and its evidence are in
 [docs/PLAN_bindcraft2_integration.md](docs/PLAN_bindcraft2_integration.md).
 
-Installed with `bindmaster install --tool bindcraft2`, which clones
+Installed with `binderscout install --tool bindcraft2`, which clones
 [https://github.com/PacesaLab/BindCraft2](https://github.com/PacesaLab/BindCraft2) at `v1.0.1`.
 BindCraft 2 went public on 2026-09-16; it is source-available under its own
 non-MIT licence, so `BindCraft2/` stays gitignored and no file of it is
@@ -130,10 +169,10 @@ remains available; it cannot be reached by pressing Enter past a prompt.
 
 ### Added
 
-- **A product version.** The repository had none: `bindmaster.py` carried no
+- **A product version.** The repository had none: `binderscout.py` carried no
   constant and the bundled evaluator repeated `0.1.0` as three independent
-  literals. `bindmaster.__version__` is now the single source of truth for the
-  product, printed by `bindmaster --version` (a side-effect-free inspection
+  literals. `binderscout.__version__` is now the single source of truth for the
+  product, printed by `binderscout --version` (a side-effect-free inspection
   command, like `--help`, so it answers on a read-only checkout) and destined
   for every run's `settings.json` provenance block.
 
@@ -274,23 +313,23 @@ at all. No behaviour change on x86_64.
   CPU-only one. Verified against the live env: `torch 2.10.0+cu130`, arch list
   `sm_120`/`compute_120`.
 
-- **`bindmaster evaluate <run-dir>` removed from the docs: it never worked.**
-  `bindmaster evaluate` is a passthrough to `binder-compare`, whose first argument
+- **`binderscout evaluate <run-dir>` removed from the docs: it never worked.**
+  `binderscout evaluate` is a passthrough to `binder-compare`, whose first argument
   must be a subcommand -- a directory is rejected by argparse. It was nevertheless
   shown as the primary usage in `CLAUDE.md`'s Quick start, twice in
   `Evaluator/README.md` (with `--refold` / `--target` flags that also do not exist),
   and in the orchestrator skill, which would send an agent straight into the error.
   All four now show `bash runs/<name>/run_evaluate.sh`.
 
-- **The agent skills no longer instruct a ranking we removed.** `bindmaster-orchestrator`
+- **The agent skills no longer instruct a ranking we removed.** `binderscout-orchestrator`
   still described the pre-Part-U pipeline: *"Ranking is `agreement_count` desc, then
   `ipsae_min` desc."* `agreement_count` is a flat null as a screen — macro-AUC **0.532**
   with **87.2 %** of designs tied at zero — and the shipped ranking is a cross-engine gate
   then `consensus_iptm_mean`. Skills are executable instructions, so an agent reading that
   line would have ranked a whole campaign by a discredited metric. The same skill also
-  documented the non-existent `bindmaster evaluate <run-dir>` interface, and the evaluator
+  documented the non-existent `binderscout evaluate <run-dir>` interface, and the evaluator
   and target-analyst skills labelled AF3 "big-VRAM" rather than gated-weights. Verified
-  already-correct and left alone: `bindmaster-evaluator` (both files state the removals),
+  already-correct and left alone: `binderscout-evaluator` (both files state the removals),
   `orchestrator/references/evaluation.md`, and `tools/protenix.md`.
 
 ### Note on this file
@@ -322,7 +361,7 @@ Follow-on to the two fixes below, closing every remaining finding from the same 
 - **The configurator turned a missing tool into a traceback and ate the session.**
   Step 5 shows install status but never stopped you enabling a tool that is not there,
   and the generators read that tool's files unguarded — BindCraft's filter/advanced
-  presets, Mosaic's `hallucinate_bindmaster.py`, BoltzGen's nanobody scaffolds. The
+  presets, Mosaic's `hallucinate_binderscout.py`, BoltzGen's nanobody scaffolds. The
   failure landed as a bare `FileNotFoundError` partway through, over a half-written run
   directory. A new `preflight()` runs before anything is written and reports **every**
   problem at once — each missing asset with the install command that supplies it —
@@ -338,7 +377,7 @@ Follow-on to the two fixes below, closing every remaining finding from the same 
   nothing to replay. Written immediately after the run directory is created, and again
   at the end to capture the paths `generate()` derives.
 - **The TUI's "Evaluate results" entry showed an error, not the subcommands.** It ran
-  `bindmaster evaluate` with no arguments, which reaches argparse with a required
+  `binderscout evaluate` with no arguments, which reaches argparse with a required
   subcommand missing: one usage line, exit 2 — while the code comment promised it
   "shows available subcommands". It now asks for `--help`.
 - **`run_all.sh` housekeeping.** The header comment named all seven tools regardless of
@@ -390,7 +429,7 @@ unit tests as they stood, and neither announced itself at runtime.
   returns, the Evaluator reports on whatever completed, and the script exits non-zero at
   the end naming every failed step. Because a failed tool leaves an empty output dir and
   `extract` treats that as fatal (deliberately — a mistyped path must not silently shrink
-  the pool), `run_all.sh` exports `BINDMASTER_ALLOW_EMPTY=1` when it knows a tool died;
+  the pool), `run_all.sh` exports `BINDERSCOUT_ALLOW_EMPTY=1` when it knows a tool died;
   `run_evaluate.sh` passes `--allow-empty` only then, so a hand-run evaluation stays
   strict. An entirely empty pool still errors inside `extract`.
 
@@ -406,7 +445,7 @@ tables are replaced by what is actually true today (the configurator's traceback
 missing-tool, the unvalidated `--config` replay, `evaluate.sh` having no `--min-engines`
 passthrough, the TUI's dead-end Evaluate entry) plus the PAE caveat above.
 
-Also corrected: `CLAUDE.md`'s Evaluate section documented `bindmaster evaluate
+Also corrected: `CLAUDE.md`'s Evaluate section documented `binderscout evaluate
 runs/<name>`, `--metric`, `--top`, `--refold` and `--target`, none of which have existed
 since `evaluate` became a `binder-compare` passthrough — argparse rejects all of them;
 `CLAUDE.md`'s status line stopped at Part M (master is through Part U) and pointed at
@@ -414,7 +453,7 @@ the pre-rename repository URL; `install.sh --help` omitted `soluprot` from the `
 all` list it *is* in, called it "opt-in only" and "x86 only (USEARCH dep is x86 binary)"
 with TMHMM/drive5.com download instructions, when both platforms build open-source
 USEARCH v12 from source and the shipped `--no_tmhmm` model needs neither; and
-`bindmaster --help` still advertised `--tool bindcraft|boltzgen|mosaic|all` out of
+`binderscout --help` still advertised `--tool bindcraft|boltzgen|mosaic|all` out of
 eleven valid values.
 
 ### Fixed (2026-07-29 — candidates.csv: every cell now describes the sequence in its own row)
@@ -470,7 +509,7 @@ Part U removed `--rank-by` and `--screen-metric` from the code but not from the 
 
 - **`binder-compare validate --target-pdb` returned an error string as the target sequence.** `cli/validate.py` imported `extract_sequence_from_pdb` from `io.read`, which defines no such function — the real helper is `parse_pdb_sequence`. The import sat inside a bare `except Exception: return f"ERROR: {e}"`, so the command reported the ImportError *as the sequence*, compared every design length against it, and exited 0.
 - **Every report shipped a pre-Part-U benchmark blurb.** `_benchmark_provenance_html()` is rendered unconditionally and still presented the retired Stage-1 max screen as live, tabulated "Mean-screen AUC / Max-screen AUC", and instructed the reader to "Pass `--screen-metric max` to revert to max-first" — a flag that now exits 2. Rewritten around the Cao 2022 result: the three-benchmark AUC ladder, why Cao's 0.556 is label censoring rather than metric failure, that metric selection is closed, and the honest headline — **~1.9× enrichment from the top decile, beating a random ordering on only 6 of 12 targets**. It is a triage filter, not a decision procedure.
-- **The `bindmaster-evaluator` skill prescribed a removed flag.** `SKILL.md` and `references/pipeline.md` both handed out `binder-compare report … --rank-by two_stage`; `references/ranking.md` was entirely pre-Part-U (Stage-1 `passes_max_screen`, `two_stage_rank` "is the column", "`adaptyv_rank` and `consensus_rank` coexist for comparison"). These are agent instructions — they get executed. Rewritten to the shipped ranking, with `agreement_count` demoted to diagnostic-only and the inflated `chain_iptm_interface` ≈ 0.745 figure corrected to ≈ 0.69.
+- **The `binderscout-evaluator` skill prescribed a removed flag.** `SKILL.md` and `references/pipeline.md` both handed out `binder-compare report … --rank-by two_stage`; `references/ranking.md` was entirely pre-Part-U (Stage-1 `passes_max_screen`, `two_stage_rank` "is the column", "`adaptyv_rank` and `consensus_rank` coexist for comparison"). These are agent instructions — they get executed. Rewritten to the shipped ranking, with `agreement_count` demoted to diagnostic-only and the inflated `chain_iptm_interface` ≈ 0.745 figure corrected to ≈ 0.69.
 - **New guard: `tests/test_skill_commands_are_real.py`** parses every `binder-compare <cmd> --flag` in `.claude/skills/**` against the real argparse subparsers, so a skill can no longer outlive the flag it documents. It reproduces both known defects before the fix.
 - **Bookkeeping:** `docs/plans.md` still listed F2 (headless configurator) as deferred three days after it shipped, and budgeted a `binder-eval-af2` env that Part I deleted. `PLAN_ranking_and_engines_roadmap.md`'s Part U *section* still described the unbuilt ProtDBench harness its own summary row marked done — rewritten to record what was actually run (Cao 2022) and what stays open.
 
@@ -522,19 +561,19 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 - Tests: `test_two_stage_ranks_purely_by_mean_not_by_screen` and `test_two_stage_rank_is_invariant_to_screen_metric` replace the old pin that asserted the screen was the primary sort key; the `TestTwoStageMethodologyText` drift-guards now assert the blurb no longer claims a "binder-likely pool" or that Stage 2 ranks only "survivors", and that the calibrated enrichment is present. 357 → 359 pass.
 
 ### Fixed (2026-07-27 — audit leftovers, part 2: MSA cache, QC coverage, provenance, ingestion)
-- **No engine folds without an MSA any more (F21).** On a cold cache one engine could fold single-sequence while another got a full MSA, with nothing recording which. The MSA drives *target* fold confidence and iPTM is a two-chain interface metric, so an MSA-less engine is *systematically* penalised — it drags `consensus_iptm_mean` down and can demote a good design with nothing visible in the report. `prepare_target_msa()` is now the single entry point all three engines call up front: the first fetches, the rest hit disk. If the MSA cannot be obtained the engine **aborts before model load** with a message naming the cause, the pre-warm command and the opt-out. Proceeding single-sequence requires `--allow-no-msa` (or `BINDMASTER_ALLOW_NO_MSA=1`) and is recorded to `target_msa_mode.json`. Enforced per-engine rather than in `evaluate.sh`, so the rule holds however an engine is invoked. **Behaviour change:** an air-gapped host with a cold cache that previously produced silently non-comparable results will now abort until it pre-warms or passes the flag.
+- **No engine folds without an MSA any more (F21).** On a cold cache one engine could fold single-sequence while another got a full MSA, with nothing recording which. The MSA drives *target* fold confidence and iPTM is a two-chain interface metric, so an MSA-less engine is *systematically* penalised — it drags `consensus_iptm_mean` down and can demote a good design with nothing visible in the report. `prepare_target_msa()` is now the single entry point all three engines call up front: the first fetches, the rest hit disk. If the MSA cannot be obtained the engine **aborts before model load** with a message naming the cause, the pre-warm command and the opt-out. Proceeding single-sequence requires `--allow-no-msa` (or `BINDERSCOUT_ALLOW_NO_MSA=1`) and is recorded to `target_msa_mode.json`. Enforced per-engine rather than in `evaluate.sh`, so the rule holds however an engine is invoked. **Behaviour change:** an air-gapped host with a cold cache that previously produced silently non-comparable results will now abort until it pre-warms or passes the flag.
 - **The MSA cache write is atomic and reads are validated (F22).** It was a bare `write_text()` "validated" by `st_size > 0`; two engines starting together could race, one reading a partially-written a3m that passes a size check. Writes now go to a temp file in the same directory, `flush` + `fsync`, then `os.replace()`. Reads reject empty files, a missing leading `>`, headers with no sequence, a missing trailing newline (the classic truncation) and a trailing bare header; an invalid entry is discarded and re-fetched. `target_msa_cache_path` — the offline Boltz-2/Mosaic path — uses the same validation. Deliberately, the "first record matches the target" check is a **warning, not a reject**: rejecting would cause an unbounded re-fetch loop across processes against the ColabFold rate limit, the exact failure this cache exists to prevent.
 - **`qc-annotate` no longer deletes designs it never measured (F36).** The metrics↔panel merge is a LEFT join, so a design the Rosetta panel never processed got NaN in all five `interface_*` columns → `qc_pass=False`, indistinguishable from a measured failure, and `--drop-failures` deleted it. `qc_pass` is now three-state, with NA **never** dropped; a measured violation still beats missing metrics, so partial coverage plus a real failure cannot smuggle a bad design through. New `qc_covered` / `qc_missing_metrics` columns carry what the old `=NA` tokens said, and both are now wired through `_QC_PANEL_COLS` into the report — without that the fix would have been invisible to the reader it exists for. Also fixed: the summary counted flagged rows *after* the drop, so a hard-filter run reported "0 flagged" while deleting the whole shortlist.
 - **All seven run-script writers emit `settings.json` (F28).** `write_run_bindcraft`, `write_run_boltzgen` and `write_run_mosaic` had no provenance at all, breaking CLAUDE.md's reproducibility convention for three of the seven tools. All three now use the shared `_settings_json_block()` helper, so the guarded GPU probes come with it. Verified on a host without `nvidia-smi`: all seven emitted blocks execute under `set -euo pipefail`, exit 0 and produce valid JSON.
 - **Three ingestion mismatches (F43).** PXDesign `binder_id`s were positional (`pxdesign_0`, `pxdesign_1`) because `_make_id` ignored the `design_id` the configurator's collector writes — not greppable back to `sequences.csv` and unstable under any re-sort; ids now prefer `design_id`/`name`, with a warning and a deterministic hash suffix when the collector's file-stem fallback produces duplicates that `add_design_groups` would otherwise silently collapse. Proteina-Complexa's native-metric map expected raw evaluation names while the collector writes renamed ones, so **no native metric was picked up at all** for the layout the extractor's own docstring claimed to support. And `discover_tool_csvs.py` matched neither PXDesign nor Protein-Hunter in the canonical layout — `protein_hunter_*` misses `protein_hunter/` by one character, a miss repeated in `_TOOL_PDB_DIR_PATTERNS`. Join safety was checked before changing the producer: refold merges and the native-metrics sidecar all join on `sequence`; only the optional advisory panels join on `binder_id`, so a **stale** advisory artifact must be regenerated once.
 - `--allow-no-msa` is exposed on `binder-compare refold-af3` / `refold-esmfold2` and forwarded through the runners, and `MissingTargetMSA` now exits 2 with its message instead of a traceback — an expected operator condition should not look like a crash.
-- **`evaluate.sh` pre-warms the shared MSA before any engine starts**, and gained `--allow-no-msa`. Correctness does not depend on this step — each engine enforces the rule itself — but without it a cold-cache failure only surfaces *after* the first engine has loaded its weights, which on AF3 is minutes of GPU time. The step is skipped entirely when every engine is skipped, so a report-only re-run makes no network call. When `--allow-no-msa` is given it exports `BINDMASTER_ALLOW_NO_MSA=1` so all three engines degrade *together* rather than one silently diverging. Verified across all four paths (fetch OK / fetch fails without the flag → exit 2 / fetch fails with the flag → warn and continue / all engines skipped → no call) by stubbing `conda`.
+- **`evaluate.sh` pre-warms the shared MSA before any engine starts**, and gained `--allow-no-msa`. Correctness does not depend on this step — each engine enforces the rule itself — but without it a cold-cache failure only surfaces *after* the first engine has loaded its weights, which on AF3 is minutes of GPU time. The step is skipped entirely when every engine is skipped, so a report-only re-run makes no network call. When `--allow-no-msa` is given it exports `BINDERSCOUT_ALLOW_NO_MSA=1` so all three engines degrade *together* rather than one silently diverging. Verified across all four paths (fetch OK / fetch fails without the flag → exit 2 / fetch fails with the flag → warn and continue / all engines skipped → no call) by stubbing `conda`.
 - Tests: `test_target_msa.py` (22, network mocked — including a temp-then-`os.replace` spy and the full abort/opt-in matrix), `test_qc_annotate.py` (11), `test_settings_json_convention.py` (29, derived from `TOOL_SEQUENCE` so a new tool is covered automatically), `test_discover_tool_csvs.py` (7), plus 9 extractor cases. Each was verified to fail against the pre-fix code. 356 → 452 pass.
 
 ### Fixed (2026-07-27 — audit leftovers: the findings never scheduled into a batch)
 - **The installer's `evaluate` shortcut always died on startup (F10).** `Evaluator/run.sh` passed `--target-pdb` to `evaluate.sh`, which has no such case arm and falls through to `*) echo "Unknown argument: $1"; exit 1`. Both installers write that shortcut as `exec bash Evaluator/run.sh`, so the documented human entry point failed before printing its banner. **Fixed by dropping the flag, not by wiring it through** — of the eight `binder-compare` subcommands `evaluate.sh` calls, only `refold-boltz2` accepts a `--target-pdb`, and its own help calls that opt-in "forced template mode … omit for sequence-only mode". Threading it through would have silently moved every wizard user into template mode **for Boltz-2 only**, constraining one engine's target backbone while AF3 and ESMFold2 still predicted it de novo — making the per-engine iPTMs non-comparable and corrupting `consensus_iptm_mean`, the primary ranking metric. `$TARGET_PDB` is not orphaned; `run.sh` still uses it to derive `$TARGET_SEQ`. The stale troubleshooting row for this symptom is removed from `README.md`.
 - **The TUI knew only 4 of the 7 tools (F27).** Three status surfaces each hardcoded `("mosaic", "boltzgen", "bindcraft", "pxdesign")` — the run-picker hint, the curses run-status view and its dumb-terminal fallback — so a run that produced RFD3, Protein-Hunter or Proteina-Complexa designs showed nothing for them. A fourth site, `_detect_tools`, had the same defect with different keys and drives the `Tools: BindCraft: OK | …` header. All four now iterate one `TOOL_SEQUENCE` table, mirroring the fix already proven in the configurator; it is defined locally rather than imported, because the TUI is stdlib-only. Output subdirs were verified against the configurator's `write_run_*` heredocs and both run-script templates, and a drift test asserts the two tables agree entry-for-entry. Protein-Hunter's nested `<name>/` layout is handled. Status views now print display labels (`Proteina-Complexa`) instead of raw subdir names, matching `configurator.cmd_status`.
-- **`scripts/install_pxdesign.sh` could destroy a working environment (F25).** It carried another user's absolute paths (`/home/david/tools/PXDesign`, `/home/david/cutlass`, `/home/david/BindMaster/tests/…`) and ran `conda env create --force`, which silently deletes and recreates the live `bindmaster_pxdesign` env — taking the `CPATH`/`CUTLASS_PATH` `activate.d` hooks, the `.so` dev symlinks and hours of downloaded wheels with it. **Kept rather than deleted:** its genuine value over the canonical installer is per-architecture selection (aarch64 torch 2.5 / CUDA 12.6 / CUTLASS SM 100 vs x86_64 2.1 / 12.1 / SM 80;86;89) plus `git submodule init`, where `install/install.sh` hardcodes x86 CUDA 12.4. Paths now derive from the repo root via `${BASH_SOURCE[0]}`, `--force` is opt-in matching `install.sh`'s convention, and a header states that `bindmaster install --tool pxdesign` is the supported path.
+- **`scripts/install_pxdesign.sh` could destroy a working environment (F25).** It carried another user's absolute paths (`/home/david/tools/PXDesign`, `/home/david/cutlass`, `/home/david/BinderScout/tests/…`) and ran `conda env create --force`, which silently deletes and recreates the live `binderscout_pxdesign` env — taking the `CPATH`/`CUTLASS_PATH` `activate.d` hooks, the `.so` dev symlinks and hours of downloaded wheels with it. **Kept rather than deleted:** its genuine value over the canonical installer is per-architecture selection (aarch64 torch 2.5 / CUDA 12.6 / CUTLASS SM 100 vs x86_64 2.1 / 12.1 / SM 80;86;89) plus `git submodule init`, where `install/install.sh` hardcodes x86 CUDA 12.4. Paths now derive from the repo root via `${BASH_SOURCE[0]}`, `--force` is opt-in matching `install.sh`'s convention, and a header states that `binderscout install --tool pxdesign` is the supported path.
 - Tests: `tests/evaluator/test_evaluate_sh_flags.py` parses `evaluate.sh`'s case arms (handling `--output|-o)` alternation) and the flags `run.sh` passes, asserting subset — so future drift in either file is caught rather than just this one flag. `tests/tui/test_tool_sequence.py` AST-walks for re-introduced inline tool lists. `tests/test_script_hygiene.py` is repo-wide over `scripts/` and `install/`: no literal `/home/<name>` paths, no `conda env create` carrying an unconditional `--force`. Each was verified to fail against the pre-fix code.
 
 ### Removed (2026-07-27 — the vestigial AF2 refold engine entry)
@@ -558,27 +597,27 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 ### Changed (2026-07-26 — USEARCH is built from source, not redistributed)
 - **The two committed USEARCH binaries are removed** (`Evaluator/tools/soluprot/usearch.x86_64`, `usearch.aarch64`, 4.2 MB). USEARCH v12 is **GPLv3**, so shipping it inside this MIT-licensed repository put a copyleft redistribution obligation on every clone. `install_aarch.sh` already had a complete `_build_usearch_v12()` and only skipped it because the committed binary pre-empted the check; that function is now ported to `install.sh` as well (x86_64 is usearch12's native platform), so **both** installers build it from [`rcedgar/usearch12`](https://github.com/rcedgar/usearch12) during `--tool soluprot`. The binary is produced on the user's machine and never distributed by us.
   - **Verified equivalent before removing anything:** cloned and built usearch12 on x86_64 (static link, clean), then ran SoluProt's exact `-usearch_global … -db Ecoli_xray_nmr_pdb_no_nesg.fa -id 0.0 -blast6out … -top_hits_only` command with both the previously committed binary and the fresh build. Output is **byte-identical** (`diff` clean at `-threads 1`; at `-threads 2` only row order differs, as thread scheduling dictates). The built binary is 2,250,936 bytes against the committed 2,306,888 — the committed one was this same source build.
-  - **Caveat recorded, not papered over:** the binaries remain reachable in git history (they entered in `b8d2b87`), so a full clone still fetches them. Removing them from `HEAD` stops future archives from carrying them; ending that outright needs a history rewrite, which would break every existing clone *and* invalidate the `bindmaster_git_sha` recorded in every past run's `settings.json` — the provenance record this project deliberately keeps. That trade-off was declined, and a **GPLv3 written offer** added to `THIRD_PARTY_NOTICES.md` covers the historical distribution instead: it names the exact distribution window (`b8d2b87` 2026-06-30 → `2ae1bdb` 2026-07-26), identifies both binaries by size and SHA-256, points at the upstream source with the commit pinned, and adds a three-year offer to supply corresponding source on request. Every hash and size in the offer was verified against the objects in git. The text is careful about what is *known*: it states that this project applies no source patches and names the one build-time deviation (the aarch64 fallback stripping `-static`), while declining to claim bit-for-bit reproducibility for binaries built before the current records.
+  - **Caveat recorded, not papered over:** the binaries remain reachable in git history (they entered in `b8d2b87`), so a full clone still fetches them. Removing them from `HEAD` stops future archives from carrying them; ending that outright needs a history rewrite, which would break every existing clone *and* invalidate the `binderscout_git_sha` recorded in every past run's `settings.json` — the provenance record this project deliberately keeps. That trade-off was declined, and a **GPLv3 written offer** added to `THIRD_PARTY_NOTICES.md` covers the historical distribution instead: it names the exact distribution window (`b8d2b87` 2026-06-30 → `2ae1bdb` 2026-07-26), identifies both binaries by size and SHA-256, points at the upstream source with the commit pinned, and adds a three-year offer to supply corresponding source on request. Every hash and size in the offer was verified against the objects in git. The text is careful about what is *known*: it states that this project applies no source patches and names the one build-time deviation (the aarch64 fallback stripping `-static`), while declining to claim bit-for-bit reproducibility for binaries built before the current records.
 - **A missing USEARCH now fails the SoluProt install instead of warning.** `install.sh` only *checked* for the binary and printed a warning — but SoluProt cannot score without it and **fails silently**: `soluprot.py` catches `UsearchInvalidPath`, prints to stderr, and returns, so the process exits **0** having written no output CSV. The `--help` smoke test cannot catch this (argparse exits before the USEARCH path runs). Both installers now build it, and abort `--tool soluprot` with the toolchain requirement and the source URL if they cannot.
 - **New: the installer verifies USEARCH can actually start.** `-x` only tests the mode bit, which passes for a wrong-architecture binary or one missing a shared library — and the bioconda `usearch 12.0_beta` build is known to crash at startup on aarch64. `_check_usearch_runs` executes it and fails only on a failure to exec (126/127) or a fatal signal (≥128), so no assumption is made about USEARCH's CLI. Verified against four fixtures: ordinary non-zero exit passes, exit 127 fails, SIGSEGV (139) fails, and `$SOLUPROT_USEARCH` overrides correctly.
 - **Both installers resolve USEARCH the way the runner does.** New `_resolve_usearch` mirrors `soluprot_runner._resolve_usearch` — `$SOLUPROT_USEARCH`, then `<dir>/usearch.<arch>`, then `<dir>/usearch`, then PATH — so what the installer validates is what `binder-compare` will execute, rather than a hardcoded per-arch filename that could diverge.
 - **Removed a recommendation that made the licensing worse.** `install.sh` told users to download USEARCH from `drive5.com/usearch/` — "32-bit, free for academic". That is the older **proprietary** USEARCH under an academic-use-only licence: stricter than the GPLv3 v12 it would replace, in a repository that advertises RFD3 as "commercial-use OK", and not the version SoluProt is patched for (`usearch_global` vs `search_global`). Both installers now point at the GPLv3 source instead and say explicitly not to substitute the drive5 build.
 
 ### Fixed (2026-07-26 — skill references and wizard step numbering)
-- **Two skill references prescribed an installer flag that does not exist.** `bindmaster-worker/references/troubleshooting.md` §5.6 told the reader to "rerun `install/install.sh --pxdesign`" to restore the PXDesign patches, and `references/tools/pxdesign.md` suggested `install.sh --pxdesign --check` "(if available)". The installer selects tools with `--tool <name>` and has no `--check` mode, so the documented recovery for a known, documented failure mode exits 1 on the spot. Both now say `bindmaster install --tool pxdesign`, and note that the re-run resumes into the existing env rather than rebuilding it (per the installer resumability fix earlier in this release), so only the patch steps redo work.
+- **Two skill references prescribed an installer flag that does not exist.** `binderscout-worker/references/troubleshooting.md` §5.6 told the reader to "rerun `install/install.sh --pxdesign`" to restore the PXDesign patches, and `references/tools/pxdesign.md` suggested `install.sh --pxdesign --check` "(if available)". The installer selects tools with `--tool <name>` and has no `--check` mode, so the documented recovery for a known, documented failure mode exits 1 on the spot. Both now say `binderscout install --tool pxdesign`, and note that the re-run resumes into the existing env rather than rebuilding it (per the installer resumability fix earlier in this release), so only the patch steps redo work.
 - **The wizard's step numbering skipped 6e.** Per-tool sub-steps ran 6a, 6b, 6c, 6d, **6f**, 6g, 6h — a visible off-by-one for every user who enables Proteina-Complexa or later. Renumbered to 6a–6g. The two `Step 6d` labels are left as they are: they are an `if`/`elif` pair (PXDesign local run vs. import), so only one ever prints.
 - **Two skills still described a "5-step wizard".** It has been steps 1–7 with per-tool sub-steps and ~80 prompts for some time; both now say so, and the orchestrator skill gains the `--config` headless replay added earlier in this release.
 - `docs/walkthrough_and_dataflow.html`'s step table is updated to the new numbering and line numbers, and its "duplicate label" flag on the second `Step 6d` is corrected — the duplicate is deliberate, the 6e gap was the real defect.
 
 ### Fixed (2026-07-26 — repository hygiene)
-- **`bindmaster --help` no longer writes to the filesystem.** `main()` called `_install_bindmaster_shortcut()` before parsing anything, so merely asking for usage created `BindMaster/bin/`, created `~/.local/bin/`, and dropped an executable named `bindmaster` into the user's PATH. An inspection command must not do that. The shortcut install now runs after the `--help` short-circuit, so it still happens for the TUI and every dispatched sub-command — the paths that actually benefit from it.
+- **`binderscout --help` no longer writes to the filesystem.** `main()` called `_install_binderscout_shortcut()` before parsing anything, so merely asking for usage created `BinderScout/bin/`, created `~/.local/bin/`, and dropped an executable named `binderscout` into the user's PATH. An inspection command must not do that. The shortcut install now runs after the `--help` short-circuit, so it still happens for the TUI and every dispatched sub-command — the paths that actually benefit from it.
 - **A read-only checkout no longer kills the CLI.** The primary `REPO/bin` write was unguarded (only the `~/.local/bin` one was), so an unwritable repository directory raised `OSError` out of `main()` before any sub-command ran. It now warns and continues, matching how the secondary location was already handled. Verified both ways: `--help` on a fresh tree creates neither directory and exits 0, and an un-creatable `REPO/bin` prints a warning and returns normally instead of raising.
 - **`INVESTIGATION_RANKING_DISCREPANCY.md` existed twice**, byte-identical at the repository root and in `docs/` — so a reader had no way to know which was current, and an edit to one would silently diverge from the other. The root copy is removed; the four code comments and one doc reference that cited it by bare filename now point at `docs/`. `PLAN_chai_and_designers.md` moved to `docs/` alongside its five `PLAN_*.md` siblings.
-- **The Quick Start handed out the pre-rename clone URL.** `README.md`, `CLAUDE.md` and `CONTRIBUTING.md` all said `git clone https://github.com/damborik22/BindMaster.git` while the README's own rename notice states the remote is `damborik22/BinderScout` — so the first command a new user runs relied on a GitHub redirect that the project does not control. All three now clone the real remote. (`bindmaster.py`'s usage text was already correct.)
+- **The Quick Start handed out the pre-rename clone URL.** `README.md`, `CLAUDE.md` and `CONTRIBUTING.md` all said `git clone https://github.com/damborik22/BinderScout.git` while the README's own rename notice states the remote is `damborik22/BinderScout` — so the first command a new user runs relied on a GitHub redirect that the project does not control. All three now clone the real remote. (`binderscout.py`'s usage text was already correct.)
 
 ### Added (2026-07-26 — `THIRD_PARTY_NOTICES.md`)
-- **The repository redistributes third-party binaries and data under a top-level MIT licence that said nothing about them.** `LICENSE` and the README's "License: MIT" badge were the only licensing statements in the tree, so anyone cloning, forking or packaging BindMaster inherited terms they had no way to see. New `THIRD_PARTY_NOTICES.md` documents each vendored asset with its in-tree path and size, the version verified **from the artifact itself** (binary version strings and copyright banners, not assumption), the upstream project and URL, and its licence — marking explicitly which ones could *not* be verified from a licence file in-tree, since the vendored copies carry none. Covered: `Evaluator/tools/ngl/ngl-2.3.1.min.js` (NGL Viewer, MIT), `Evaluator/tools/soluprot/` (SoluProt 1.0 — Hon et al. 2021, Loschmidt Laboratories — ~51 MB of code, trained classifiers and reference FASTA databases), the bundled `usearch.x86_64` / `usearch.aarch64` binaries, and the ARM64 `tools/aarch64/DAlphaBall.gcc` (Rosetta-derived) and `tools/aarch64/dssp` (`mkdssp 3.1.4`, CMBI) builds.
-- **Flagged: the vendored USEARCH binaries are GPLv3**, self-reporting `usearch v12.0` with Robert C. Edgar's copyright, sitting in an MIT repository. The notice states plainly what this does and does not mean — it does *not* relicense BindMaster (SoluProt invokes USEARCH as a separate process, so this is aggregation), but it *does* mean anyone distributing this repository is distributing GPLv3 binaries and inherits the obligation to pass on those terms and offer corresponding source. The practical fix is recorded alongside it: drop the two binaries and fetch or build them at install time, which `install/install_aarch.sh` already does for aarch64 — the x86_64 binary is the only reason the obligation exists on `master` today. Flagged for the repository owner to decide; nothing was removed.
+- **The repository redistributes third-party binaries and data under a top-level MIT licence that said nothing about them.** `LICENSE` and the README's "License: MIT" badge were the only licensing statements in the tree, so anyone cloning, forking or packaging BinderScout inherited terms they had no way to see. New `THIRD_PARTY_NOTICES.md` documents each vendored asset with its in-tree path and size, the version verified **from the artifact itself** (binary version strings and copyright banners, not assumption), the upstream project and URL, and its licence — marking explicitly which ones could *not* be verified from a licence file in-tree, since the vendored copies carry none. Covered: `Evaluator/tools/ngl/ngl-2.3.1.min.js` (NGL Viewer, MIT), `Evaluator/tools/soluprot/` (SoluProt 1.0 — Hon et al. 2021, Loschmidt Laboratories — ~51 MB of code, trained classifiers and reference FASTA databases), the bundled `usearch.x86_64` / `usearch.aarch64` binaries, and the ARM64 `tools/aarch64/DAlphaBall.gcc` (Rosetta-derived) and `tools/aarch64/dssp` (`mkdssp 3.1.4`, CMBI) builds.
+- **Flagged: the vendored USEARCH binaries are GPLv3**, self-reporting `usearch v12.0` with Robert C. Edgar's copyright, sitting in an MIT repository. The notice states plainly what this does and does not mean — it does *not* relicense BinderScout (SoluProt invokes USEARCH as a separate process, so this is aggregation), but it *does* mean anyone distributing this repository is distributing GPLv3 binaries and inherits the obligation to pass on those terms and offer corresponding source. The practical fix is recorded alongside it: drop the two binaries and fetch or build them at install time, which `install/install_aarch.sh` already does for aarch64 — the x86_64 binary is the only reason the obligation exists on `master` today. Flagged for the repository owner to decide; nothing was removed.
 - Also listed, for a complete dependency surface in one place, the components the installer **fetches** rather than redistributes (the seven design tools, AF3 with its gated weights, ESMFold2, PyRosetta) and a note that no model weights live in this repository.
 - `README.md`'s License section and a note appended below the MIT grant in `LICENSE` both point at the new file. The MIT grant text itself is unchanged.
 
@@ -615,12 +654,12 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 ### Fixed (2026-07-26 — installer safety: non-destructive `--yes`, resumable, preflight)
 - **`--yes` no longer deletes your weights.** `confirm()` returned true unconditionally under `--yes`, so `--tool all --yes --skip-examples` — simultaneously the documented CI command (`Dockerfile.test`, `test_env.sh`) and the skills' recommended *repair* step — answered **yes** to "Remove and reclone?" on a second run, deleting `BindCraft/` including `params/*.npz` (~4 GB of AF2 weights that Proteina-Complexa symlinks against). It also inverted the prompt's own displayed `[y/N]` default. Split into `confirm()` (safe prompts: proceed?, run the example? — still auto-accepted, so CI is unaffected) and **`confirm_destructive()`** (re-clone, re-create env, remove local Miniforge3 — `--yes` answers *no* and says so; new **`--force`** opts in). 7 destructive call sites in `install.sh` and 6 in `install_aarch.sh` switched; both share one `_confirm_interactive()` read loop.
 - **The PXDesign install is resumable.** Its `conda create` had no `env_exists` guard, so a re-run after a mid-install network failure aborted there instead of continuing — and every remaining step of that ~25-step function is network-bound (Protenix, PXDesignBench, ColabDesign, deepspeed, the CUTLASS clone, weight downloads), which is exactly where it drops out. Now reuses the existing env (the later steps are idempotent) unless `--force` is passed, matching the pattern `binder-eval-esmfold2` already used.
-- **`--uninstall --tool all` now removes everything it installed, and admits what it does not.** The `all` case is shared with install, which deliberately omits AF3 (gated weights) and SoluProt (opt-in), so their envs plus `alphafold3/` and `Evaluator/tools/soluprot` survived an "uninstall everything" while the script printed "Uninstall complete." A new `TOOL_ALL` flag widens the set in uninstall mode only. `uninstall_tool pxdesign` now also removes the `~/cutlass` clone (~150 MB) it created. And the summary lists what is deliberately left behind — `runs/`, `install.log`, `~/.boltz/`, `~/.cache/bindmaster/`, `~/.cache/huggingface/`, and the `~/.bashrc` PATH line — rather than implying the disk is clean. Those are the user's data and shell config, so they are reported, not deleted.
+- **`--uninstall --tool all` now removes everything it installed, and admits what it does not.** The `all` case is shared with install, which deliberately omits AF3 (gated weights) and SoluProt (opt-in), so their envs plus `alphafold3/` and `Evaluator/tools/soluprot` survived an "uninstall everything" while the script printed "Uninstall complete." A new `TOOL_ALL` flag widens the set in uninstall mode only. `uninstall_tool pxdesign` now also removes the `~/cutlass` clone (~150 MB) it created. And the summary lists what is deliberately left behind — `runs/`, `install.log`, `~/.boltz/`, `~/.cache/binderscout/`, `~/.cache/huggingface/`, and the `~/.bashrc` PATH line — rather than implying the disk is clean. Those are the user's data and shell config, so they are reported, not deleted.
 - **New preflight before ~60 GB of downloads.** Neither installer checked anything, so an under-provisioned host failed an hour in with an opaque tar/pip error deep in `install.log`, leaving half-built envs that (before the fix above) could not be resumed. `preflight()` runs after tool selection — so the estimate matches what was chosen — and checks free disk against a per-tool footprint table (**aborts** if short, with the shortfall and the three ways out), plus GPU presence and pypi.org reachability (advisory: an install can legitimately precede the driver, or sit behind a proxy). `--skip-preflight` bypasses it; uninstall skips it. Verified on this host: 30 GB free → passes for `--tool evaluator` (~2 GB), aborts for everything (~76 GB) with exit 1.
 - Verified by extracting `confirm`/`confirm_destructive` and `preflight` and executing them standalone across all modes: `--yes` alone (destructive=no, safe=yes), `--yes --force` (both yes), interactive-Enter (both no), interactive-y (both yes); preflight pass / abort / skip. `bash -n` clean on both installers.
 
 ### Fixed (2026-07-26 — aarch64 parity: both platforms actually installable)
-- **`bindmaster install` now picks the installer for the host.** Both it (`bindmaster.py`) and the TUI's "Install tools" (two call sites in `tui/app.py`) hardcoded `install/install.sh`, so on a DGX Spark the documented command ran the **x86_64** installer: CUDA defaulting to 12.4 instead of 13.0, conda asked for `pytorch-cuda=12.4` and `gcc_linux-64` (no linux-aarch64 builds), and none of the aarch64 patches applied. `install.sh` warned but proceeded. Dispatch is now `platform.machine() == "aarch64"` in one place, and the TUI routes through a shared `_installer_for_host()`.
+- **`binderscout install` now picks the installer for the host.** Both it (`binderscout.py`) and the TUI's "Install tools" (two call sites in `tui/app.py`) hardcoded `install/install.sh`, so on a DGX Spark the documented command ran the **x86_64** installer: CUDA defaulting to 12.4 instead of 13.0, conda asked for `pytorch-cuda=12.4` and `gcc_linux-64` (no linux-aarch64 builds), and none of the aarch64 patches applied. `install.sh` warned but proceeded. Dispatch is now `platform.machine() == "aarch64"` in one place, and the TUI routes through a shared `_installer_for_host()`.
 - **aarch64 ESMFold2 installed a package that does not exist.** `install_aarch.sh` ran `pip install esmfold gemmi`, while `install.sh` carries the comment "*there is NO `esmfold` PyPI package*" and installs the real runtime: `torch` (from an arch-aware wheel index), `transformers>=4.50`, `safetensors`, `gemmi`, and `esm @ git+https://github.com/Biohub/esm.git@c94ed8d`. The aarch64 env therefore had no torch and no biohub SDK, so `refold-esmfold2` died at import — while the `--help`-only smoke test still passed, letting the installer report success. Now installs the same dependency set with the cu130 wheel index.
 - **`--tool all` on aarch64 now includes ESMFold2**, the documented default refold engine. It previously installed five things and omitted it, so `evaluate.sh` silently skipped the engine and `consensus_iptm` was built from fewer engines than the two-stage ranking assumes.
 - **`--tool rfd3` exists on aarch64.** The value was rejected outright while CLAUDE.md claimed "RFD3: fully supported on aarch64", so the documented install path for a landed feature could not be run. `install_rfd3()` is ported from `install.sh` (cu130 torch wheels, `rc-foundry[rfd3]` + `[mpnn]` pinned to `FOUNDRY_VERSION`, RFD3 weights **and** the separate ProteinMPNN checkpoint into `weights/foundry/`), with a matching `uninstall_tool rfd3` case, step-counter and summary entries. **Opt-in, deliberately not in `--tool all`:** it is unvalidated on aarch64 hardware, and the docs now say so instead of overclaiming.
@@ -649,9 +688,9 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 
 ### Removed (2026-07-26 — Protenix refolding removed; AF3 is the 2nd engine)
 - **Protenix v0.5.0 is no longer a refold engine (Part J reverted).** AF3 already fills the independent-cross-check role, so the pipeline is now exactly three engines: **Boltz-2 + AF3 + ESMFold2**. Deleted `Evaluator/scripts/refold_protenix.py`, `refolding/protenix_runner.py` and `cli/refold_protenix.py`; pruned the `refold-protenix` subcommand, every `protenix_*` field from `StandardisedMetrics` / `PerResidueData` / `ZSCORE_METRICS`, the `protenix_csv` merge input, the entries in `_ENGINE_IPSAE_COLS` / `_ENGINE_IPSAE_THRESHOLDS` and the consensus/agreement column lists, the `--protenix-results` / `--threshold-protenix` report flags, the radar + per-engine table rows, the `evaluate.sh` step and its `--skip-protenix` / `--protenix-env` flags, and the wizard's Protenix engine prompt.
-  - **This also fixes a live reproducibility bug.** `evaluate.sh` ran Protenix **opt-OUT** — whenever the `bindmaster_pxdesign` env existed — while `CLAUDE.md` stated three times that it ran "only when explicitly enabled". Because `protenix_pae_iptm` fed `consensus_iptm` / `consensus_iptm_mean`, two operators with identical designs could get **different rankings** depending only on whether they had installed PXDesign. Mirrors the Part I removal of AF2 refolding.
+  - **This also fixes a live reproducibility bug.** `evaluate.sh` ran Protenix **opt-OUT** — whenever the `binderscout_pxdesign` env existed — while `CLAUDE.md` stated three times that it ran "only when explicitly enabled". Because `protenix_pae_iptm` fed `consensus_iptm` / `consensus_iptm_mean`, two operators with identical designs could get **different rankings** depending only on whether they had installed PXDesign. Mirrors the Part I removal of AF2 refolding.
   - **PXDesign is unaffected.** It uses Protenix internally as a *design* tool: the `protenix` pip install, the sm_120 / LayerNorm / `ProtenixFilter` patches and the JIT smoke test all stay, and `pxdesign_protenix_iptm` remains a native metric (never used for ranking, since a tool's self-assessment favours its own designs).
-  - Removed as now-purposeless: the `pip install binder-compare` step into `bindmaster_pxdesign`, which existed solely so `refold-protenix` could run there.
+  - Removed as now-purposeless: the `pip install binder-compare` step into `binderscout_pxdesign`, which existed solely so `refold-protenix` could run there.
   - `--primary-engine` choices are now `boltz | af3 | esmfold2` in both `evaluate.sh` and `report`.
 - Fixed while in the same code: the wizard's Step 7 preview listed Boltz-2/AF3/Protenix but never **ESMFold2**, so a selected ESMFold2 was invisible in the run summary.
 
@@ -699,7 +738,7 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 - **`binder-compare` can't live in the Python 3.7 SoluProt env** — `binder-comparison` is `requires-python>=3.10` (`numpy>=1.24` / `pandas>=2.0`), so installing it into `binder-eval-soluprot` (py3.7, scikit-learn 0.20.x) is impossible; yet `evaluate.sh`, the installer smoke test, and the `soluprot` shortcut all ran it *there*. Decoupled: `binder-compare filter-soluprot` now runs in `binder-eval` (py3.10) and the runner shells out to the py3.7 env's interpreter via `$SOLUPROT_PYTHON` (auto-resolved to the sibling `binder-eval-soluprot` env otherwise). Installers no longer pip-install binder-compare into the py3.7 env; the smoke test is `soluprot.py --help` in that env. Also fixes `core/schema.py` importing `typing.Literal` (3.8+) — now guarded for the py3.7 env via `TYPE_CHECKING`.
 
 ### Added (2026-05-28 / 29 — repo rename + master/aarch64 alignment + SoluProt)
-- **Project renamed from BindMaster (working name) to BinderScout** (GitHub repo `damborik22/BinderScout`). CLI command, conda env names, file/dir names, and env vars still use `bindmaster` and will be migrated incrementally. README + CI badge URL updated; old `damborik22/BindMaster` URL redirects.
+- **Project renamed from BinderScout (working name) to BinderScout** (GitHub repo `damborik22/BinderScout`). CLI command, conda env names, file/dir names, and env vars still use `binderscout` and will be migrated incrementally. README + CI badge URL updated; old `damborik22/BinderScout` URL redirects.
 - **AF3 v3.0.2 ported from aarch64-only to master** — `binder-compare refold-af3` subcommand, `Evaluator/scripts/refold_af3.py`, runner, env spec, and full installer integration on both `install/install.sh` (x86) and `install/install_aarch.sh` (aarch64). Opt-in via `--tool af3`; not in `--tool all` because of the ≥100 GB GPU memory gate and gated weights. Auto-detected by `evaluate.sh` and the configurator.
 - **ESMFold2 ported from aarch64 to master** — `binder-compare refold-esmfold2` subcommand + producer files + installer (`--tool esmfold2`, both installers, opt-in). Lightweight 4th refold engine, no gated weights. Merger + report consume the CSV; `--primary-engine` choices extended to include `esmfold2`. Configurator's Step 5 picker surfaces ESMFold2 when `binder-eval-esmfold2` env is present.
 - **SoluProt 1.0 solubility screen** (Hon et al. 2021) integrated as opt-in via `--tool soluprot` on both installers (aarch64 enabled as of 2026-06-16 — see entry above). New `binder-compare filter-soluprot` subcommand, `binder-eval-soluprot` conda env (Python 3.7 + scikit-learn 0.20.1 pinned), standalone `Evaluator/scripts/filter_soluprot.py`, runner wrapper. `evaluate.sh` runs SoluProt as Step 0.5 with `--skip-soluprot` / `--soluprot-env` / `--soluprot-threshold` / `--soluprot-filter` flags; the last drops sub-threshold designs from the FASTA *before* any refold engine sees them. Report consumes `--soluprot-results` CSV; `NativeMetrics` gains `soluprot_score` + `soluprot_passes` fields. Configurator Step 5 sub-prompt walks the user through enable / threshold / filter-mode. Not part of `agreement_count` — it's a screen, not a re-ranker. Plan at `docs/PLAN_soluprot_integration.md`.
@@ -710,19 +749,19 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 - **Two repository visualizations** in README: upgraded pipeline Mermaid (now shows all 4 refold engines + SoluProt screen + the optional drop path) plus a new "Components at a glance" Mermaid (CLI → install/configure/evaluate dispatch → design-tool envs / evaluator envs / per-run artifact layout, colour-coded).
 
 ### Changed (2026-05-28 / 29)
-- **Best-practice defaults for the configurator.** Mosaic `TOP_K` default `n_designs` → `min(5, n_designs)` (matches the `hallucinate_bindmaster.py` template). RFD3 `diffusion_batch_size` default 8 → 10 (template guidance). Protein-Hunter `num_cycles` 5 → 7 (CALCA-validated). Protein-Hunter `msa_mode` `mmseqs` → `single` (paper-fastest, no ColabFold roundtrip).
+- **Best-practice defaults for the configurator.** Mosaic `TOP_K` default `n_designs` → `min(5, n_designs)` (matches the `hallucinate_binderscout.py` template). RFD3 `diffusion_batch_size` default 8 → 10 (template guidance). Protein-Hunter `num_cycles` 5 → 7 (CALCA-validated). Protein-Hunter `msa_mode` `mmseqs` → `single` (paper-fastest, no ColabFold roundtrip).
 - **`Evaluator/evaluate.sh` is a 4-engine orchestrator** + SoluProt screen. Engine selection via `--skip-{boltz2,protenix,af3,esmfold2,soluprot}`, env override via `--{protenix,af3,esmfold2,soluprot}-env ENV`, primary picked via `--primary-engine boltz|protenix|af3|esmfold2`. Step counter `N_STEPS` auto-sizes to active engines + report.
 - **`binder-compare report`** accepts `--esmfold2-results`, `--soluprot-results`. `--primary-engine` choices extended to `boltz|protenix|af3|esmfold2`. `_ENGINE_IPSAE_COLS` gains the esmfold2 entry.
 - **`write_run_evaluate` (configurator)** now produces correct calls into `evaluate.sh`: dropped the broken `--target-pdb` and `--mosaic-path` flags (`evaluate.sh` never accepted them); appends correct `--skip-*` flags per the user's engine selection, plus `--primary-engine` and `--soluprot-threshold` / `--soluprot-filter` when relevant.
 
 ### Fixed (2026-05-28 / 29)
-- **`bindmaster evaluate` dispatcher path** (`bindmaster.py:110`) — was pointing at `evaluator/evaluator.py` (which doesn't exist) instead of `evaluator_legacy/evaluator.py`. Same fix applied to `tui/app.py` Evaluate menu paths.
+- **`binderscout evaluate` dispatcher path** (`binderscout.py:110`) — was pointing at `evaluator/evaluator.py` (which doesn't exist) instead of `evaluator_legacy/evaluator.py`. Same fix applied to `tui/app.py` Evaluate menu paths.
 - **Installer drift on master**: `install.sh:142` `--help` Usage line was missing `protein-hunter` and `rfd3` (the validator accepted them but `--help` didn't list them). Now lists all current-generation tools + the opt-in eval tools.
 - **`Evaluator/evaluate.sh` arg parsing**: `Evaluator/run.sh` and configurator-generated `run_evaluate.sh` were both passing `--target-pdb` to `evaluate.sh` which rejected it with `Unknown argument`. The flag is removed from the configurator (target sequence is already passed separately) and `evaluate.sh`'s arg parser is unchanged.
 
 ### Removed
-- **Unused `bindmaster/` Python package removed.** The experimental scaffolding — `BinderScore`/`ToolOrigin` unified scoring (`scoring/unified.py`), the `ToolAdapter`/`ToolResult` contract + `PXDesignRunner` (`tools/`), the `FeatureFlags` system (`feature_flags.py`), and the empty `scheduler/` stub — was never wired into the CLI, TUI, configurator, or evaluator; its only importers were `examples/pxdesign_pdl1_test.py` and its own unit tests. The `Evaluator` package (`StandardisedMetrics` + benchmark-validated `consensus_iptm` ranking) is the single scoring layer, so the parallel records were dead duplication. Removed the package, the example, and `tests/scoring/` + `tests/tools/`. Git history retains it if the pre-refold-screen idea is ever revived.
-- **RFAA fully removed.** RFDiffusionAA + LigandMPNN install path, the `bindmaster_rfaa` conda env, the `--tool rfaa` flag in both installers, the RFAA extractor in the Evaluator package, the `--rfaa` flag on `binder-compare extract`, the `_parse_rfaa()` legacy parser, the `bindmaster.tools.rfaa` Python package, the `bindmaster_examples/`-equivalent test scripts, the `bin/rfaa` shortcut, the `rf_diffusion_all_atom/` and `LigandMPNN/` cloned repos, and `docs/rfaa_manual_reinstall.md`. Use RFD3 (`--tool rfd3`) for all-atom diffusion-based binder design instead. Git history retains the recipe if anyone ever needs to reproduce an old RFAA result.
+- **Unused `binderscout/` Python package removed.** The experimental scaffolding — `BinderScore`/`ToolOrigin` unified scoring (`scoring/unified.py`), the `ToolAdapter`/`ToolResult` contract + `PXDesignRunner` (`tools/`), the `FeatureFlags` system (`feature_flags.py`), and the empty `scheduler/` stub — was never wired into the CLI, TUI, configurator, or evaluator; its only importers were `examples/pxdesign_pdl1_test.py` and its own unit tests. The `Evaluator` package (`StandardisedMetrics` + benchmark-validated `consensus_iptm` ranking) is the single scoring layer, so the parallel records were dead duplication. Removed the package, the example, and `tests/scoring/` + `tests/tools/`. Git history retains it if the pre-refold-screen idea is ever revived.
+- **RFAA fully removed.** RFDiffusionAA + LigandMPNN install path, the `binderscout_rfaa` conda env, the `--tool rfaa` flag in both installers, the RFAA extractor in the Evaluator package, the `--rfaa` flag on `binder-compare extract`, the `_parse_rfaa()` legacy parser, the `binderscout.tools.rfaa` Python package, the `binderscout_examples/`-equivalent test scripts, the `bin/rfaa` shortcut, the `rf_diffusion_all_atom/` and `LigandMPNN/` cloned repos, and `docs/rfaa_manual_reinstall.md`. Use RFD3 (`--tool rfd3`) for all-atom diffusion-based binder design instead. Git history retains the recipe if anyone ever needs to reproduce an old RFAA result.
 
 ### Added (previous Unreleased entries)
 - **PXDesign** (Protenix): full pipeline support — diffusion, MPNN sequence design, AF2 complex/monomer evaluation
@@ -733,8 +772,8 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 - **BindCraft pin** `828fd9f` → `7cd4ace` (3 upstream bugfixes): graylab→west.rosettacommons.org PyRosetta wheels (x86_64), `range(11,15)→(11,16)` model-selection fix, stage-3 `onehot_plddt` init + `align_pdbs` crash guard
 
 ### Added (Parts L + M — Protein-Hunter & RFD3, on `refactor/af3-rfd3-ph`)
-- **Part L — Protein-Hunter** (Cho et al. 2025) installable via `bindmaster install --tool protein-hunter` (x86 only; aarch64 blocked by pyrosetta). Conda env `bindmaster_protein_hunter` (Py 3.10), vendored Boltz-2 + LigandMPNN + Chai-1 (sokrypton fork), shortcut `bin/protein-hunter`. New Evaluator extractor reads `summary_high_iptm.csv` by default (`--all-protein-hunter-designs` for all runs). Supports all 6 modalities via upstream `design.py` flags (protein / cyclic / ligand-CCD / ligand-SMILES / DNA / RNA). `SourceTool` Literal + tool colors/displays extended.
-- **Part M — RFD3 (RosettaCommons/foundry v0.1.9)** installable via `bindmaster install --tool rfd3`. Conda env `bindmaster_rfd3` (Py 3.12), `rc-foundry[rfd3,mpnn]` from PyPI, weights at `BindMaster/weights/foundry/`. BSD-3-Clause, commercial-use OK, works on aarch64 (no DGL). Shortcut `bin/rfd3` runs `rfd3 design ...` or opens an env shell. New `RFD3Extractor` with defensive CSV/FASTA parsing. Tool colors/displays added.
+- **Part L — Protein-Hunter** (Cho et al. 2025) installable via `binderscout install --tool protein-hunter` (x86 only; aarch64 blocked by pyrosetta). Conda env `binderscout_protein_hunter` (Py 3.10), vendored Boltz-2 + LigandMPNN + Chai-1 (sokrypton fork), shortcut `bin/protein-hunter`. New Evaluator extractor reads `summary_high_iptm.csv` by default (`--all-protein-hunter-designs` for all runs). Supports all 6 modalities via upstream `design.py` flags (protein / cyclic / ligand-CCD / ligand-SMILES / DNA / RNA). `SourceTool` Literal + tool colors/displays extended.
+- **Part M — RFD3 (RosettaCommons/foundry v0.1.9)** installable via `binderscout install --tool rfd3`. Conda env `binderscout_rfd3` (Py 3.12), `rc-foundry[rfd3,mpnn]` from PyPI, weights at `BinderScout/weights/foundry/`. BSD-3-Clause, commercial-use OK, works on aarch64 (no DGL). Shortcut `bin/rfd3` runs `rfd3 design ...` or opens an env shell. New `RFD3Extractor` with defensive CSV/FASTA parsing. Tool colors/displays added.
 
 ### Added (Part K — AF3 v3.0.2 refolder, canonical 2nd engine)
 - **AlphaFold 3 v3.0.2 as the canonical 2nd refolding engine on big-VRAM hardware** (DGX Spark, H200, any host with >100 GB unified or device memory — full AF3 inference does not fit on consumer 24 GB GPUs).
@@ -745,17 +784,17 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 
 ### Added (Part J — Protenix refolder, optional fallback, on `refactor/af3-rfd3-ph`)
 - **Protenix v0.5.0 as optional 3rd refolding engine for smaller GPUs** — ByteDance's open-source AlphaFold 3 reimplementation (~3-4 GB weights auto-downloaded from ByteDance TOS, runs comfortably on 24 GB GPUs). Not part of the canonical Boltz-2 + AF3 pipeline; opt in when AF3 isn't an option.
-- New CLI: `binder-compare refold-protenix` — runs inside the existing `bindmaster_pxdesign` conda env (no new env needed).
+- New CLI: `binder-compare refold-protenix` — runs inside the existing `binderscout_pxdesign` conda env (no new env needed).
 - New files: `Evaluator/scripts/refold_protenix.py`, `Evaluator/binder_comparison/refolding/protenix_runner.py`, `Evaluator/binder_comparison/cli/refold_protenix.py`.
 - Schema: `protenix_*` columns in `StandardisedMetrics` (iptm, ptm, ranking_score, plddt_binder_mean/min, plddt_target_mean, pae_bt/tb/bb, bt_ipsae, tb_ipsae, ipsae_min). `af3_*` counterparts also reserved for Part K. pLDDT rescaled 0-100 → 0-1 on ingest.
 - Scoring: new generic `add_ipsae_from_pae_files(df, prefix=...)` for any engine's saved PAE matrix.
 - Merger: multi-engine support — `merge_refold_results(boltz2_csv, ..., protenix_csv=..., af3_csv=...)`. Accepts any combination; outer-joins on `sequence`.
 - `compute_agreement` now sums {boltz_pae_ipsae_min, protenix_ipsae_min, af3_ipsae_min} passing the 0.61 threshold (0–3 on Spark, 0–2 on x86).
 - Orchestration:
-  - `Evaluator/evaluate.sh` auto-detects `bindmaster_pxdesign`; Protenix step runs between Boltz-2 and report unless `--skip-protenix` or env missing.
-  - `binder-compare run --protenix-env bindmaster_pxdesign` enables Protenix; omit to skip.
+  - `Evaluator/evaluate.sh` auto-detects `binderscout_pxdesign`; Protenix step runs between Boltz-2 and report unless `--skip-protenix` or env missing.
+  - `binder-compare run --protenix-env binderscout_pxdesign` enables Protenix; omit to skip.
   - `binder-compare report` gains `--protenix-results` and `--af3-results`.
-- Installer: PXDesign step now pip-installs `binder-compare` into `bindmaster_pxdesign` env so Protenix refolding is available after `bindmaster install --tool pxdesign`.
+- Installer: PXDesign step now pip-installs `binder-compare` into `binderscout_pxdesign` env so Protenix refolding is available after `binderscout install --tool pxdesign`.
 - **Live smoke test passed** — 2 × 43aa random binders against 76aa ubiquitin target: inference ~12 s/design on RTX 3090, CSV + `*_pae.npy` populated, token-pair PAE extracted via `need_atom_confidence=True`, DunbrackLab ipSAE computed downstream in the report.
 
 ### Removed (Part I — AF2 refolding removal, on `refactor/af3-rfd3-ph`)
@@ -778,7 +817,7 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 ## [0.7.0] — Part H: Standalone installer (server-friendly)
 
 ### Added
-- **Standalone mode**: installer auto-downloads Miniforge3 into `BindMaster/conda/` when system conda is unavailable or read-only (H1–H3)
+- **Standalone mode**: installer auto-downloads Miniforge3 into `BinderScout/conda/` when system conda is unavailable or read-only (H1–H3)
 - `--standalone` flag to force local Miniforge install (H1)
 - `--system-conda` flag to opt out and use existing system conda (H1)
 - Local conda detection in all Evaluator shell scripts — `evaluate.sh`, `run.sh`, `install.sh` (H13–H15)
@@ -787,12 +826,12 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 - `TODO_standalone_pack.md` — future plan for pre-packed distribution (Part I)
 
 ### Changed
-- Shortcuts now write to `BindMaster/bin/` instead of `~/.local/bin/` (H4, H9)
+- Shortcuts now write to `BinderScout/bin/` instead of `~/.local/bin/` (H4, H9)
 - `detect_conda()` rewritten with priority: local conda → writable system conda → auto-bootstrap (H3)
-- `_find_conda_base()` in configurator checks `BindMaster/conda/` first (H11)
-- `bindmaster.py` shortcut writes to `REPO/bin/` as primary, `~/.local/bin/` as non-fatal fallback (H9)
+- `_find_conda_base()` in configurator checks `BinderScout/conda/` first (H11)
+- `binderscout.py` shortcut writes to `REPO/bin/` as primary, `~/.local/bin/` as non-fatal fallback (H9)
 - Uninstall offers to remove local Miniforge when all tools are uninstalled (H7)
-- Install summary now prints PATH instructions for `BindMaster/bin/` (H4)
+- Install summary now prints PATH instructions for `BinderScout/bin/` (H4)
 - All changes mirrored in `install_aarch.sh` for aarch64 / DGX Spark (H8)
 
 ## [0.6.1] — Part G: Documentation & CI
@@ -877,7 +916,7 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 ## [0.1.0] — Initial Release
 
 ### Added
-- Unified `bindmaster` CLI entry point (`install`, `configure`, `evaluate`)
+- Unified `binderscout` CLI entry point (`install`, `configure`, `evaluate`)
 - Installers for BindCraft, BoltzGen, and Mosaic
 - Interactive configurator wizard
 - Evaluator with Boltz-2 and AF2 refolding pipeline

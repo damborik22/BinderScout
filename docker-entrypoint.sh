@@ -1,5 +1,5 @@
 #!/bin/bash
-# Entrypoint for the bindmaster-test container.
+# Entrypoint for the binderscout-test container.
 # Sets up a usable home directory for whatever UID the container runs as,
 # and initialises conda/mamba for the current shell session.
 
@@ -9,9 +9,9 @@ set -e
 # When running with a host UID (--user $(id -u):$(id -g)), $HOME may be /
 # or unset. Give ourselves a real writable home inside the container.
 if [[ ! -d "${HOME}" ]] || [[ "${HOME}" == "/" ]]; then
-    export HOME=/home/bindmaster-user
+    export HOME=/home/binderscout-user
 fi
-mkdir -p "${HOME}" 2>/dev/null || { export HOME=/tmp/bindmaster-home; mkdir -p "${HOME}"; }
+mkdir -p "${HOME}" 2>/dev/null || { export HOME=/tmp/binderscout-home; mkdir -p "${HOME}"; }
 
 # ── conda init ────────────────────────────────────────────────────────────────
 if [[ -f /opt/miniforge3/etc/profile.d/conda.sh ]]; then

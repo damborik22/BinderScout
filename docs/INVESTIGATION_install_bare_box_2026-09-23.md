@@ -32,7 +32,7 @@ this document records only what was observed.
 | B6 | `print_tool_status()` shows 6 of 12 tools; 3 detectors exist but are unused | code | wrong status |
 | B7 | GPU occupancy detection **fails open** when `--query-compute-apps` is empty-but-successful | code | **correctness** |
 | B8 | Three different toolchain strategies for three tools | design | inconsistency |
-| B9 | README Quick start calls `bindmaster` before it is on `PATH` | doc | first-run failure |
+| B9 | README Quick start calls `binderscout` before it is on `PATH` | doc | first-run failure |
 | B10 | `install.sh` appends to `~/.bashrc` unprompted, from 3 duplicated blocks | code | unasked mutation |
 | B11 | The interactive menu cannot install ESMFold2 — the **default** refold engine | code | **capability loss** |
 | B12 | `--yes` without `--tool` installs a 5-tool subset and reports total success | code | **false success** |
@@ -179,7 +179,7 @@ local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "RFD3" "PXDesign" "Prot
 ```
 
 with exactly 8 matching `DO_*` assignments at `846-853`. A user who runs
-`bindmaster install` with no `--tool` — the interactive path the README offers
+`binderscout install` with no `--tool` — the interactive path the README offers
 first, and what the TUI's "Install tools" entry shells out to — **cannot select
 ESMFold2 at all**. ESMFold2 is the *default* refold engine (CLAUDE.md), and
 without it the cross-engine gate has one engine instead of three, so every
@@ -230,13 +230,13 @@ A 70 GB disk satisfies the README and is then refused by the installer.
 ```bash
 git clone … ~/BinderScout
 cd ~/BinderScout
-bindmaster install --tool all
+binderscout install --tool all
 ```
 
-`bindmaster` is a shortcut the installer *creates* in `bin/`; the
+`binderscout` is a shortcut the installer *creates* in `bin/`; the
 `export PATH="$(pwd)/bin:$PATH"` line appears later in the document. On a fresh
 clone step 2 is `command not found`. The working first command is
-`python3 bindmaster.py install --tool all` (or `bash install/install.sh`).
+`python3 binderscout.py install --tool all` (or `bash install/install.sh`).
 CLAUDE.md's quick start has the same ordering.
 
 ---
@@ -303,7 +303,7 @@ gate among the three is PXDesign's, and it is `install.sh:1678-1680`:
 
 ```bash
 smoke_test "PXDesign import check" \
-    "${CONDA_CMD}" run -n bindmaster_pxdesign python -c "import torch; print('PXDesign env OK')" \
+    "${CONDA_CMD}" run -n binderscout_pxdesign python -c "import torch; print('PXDesign env OK')" \
     || return 1
 ```
 

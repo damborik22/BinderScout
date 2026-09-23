@@ -2,9 +2,9 @@
 
 Regression guard for audit finding F25: ``scripts/install_pxdesign.sh`` shipped
 another user's absolute paths (``/home/david/tools/PXDesign``,
-``/home/david/cutlass``, ``/home/david/BindMaster/tests/...``) and ran
+``/home/david/cutlass``, ``/home/david/BinderScout/tests/...``) and ran
 ``conda env create --force``, which silently deletes and recreates the live
-``bindmaster_pxdesign`` env — the env that carries the CPATH/CUTLASS
+``binderscout_pxdesign`` env — the env that carries the CPATH/CUTLASS
 ``activate.d`` hooks written by ``install/install.sh``.
 
 These checks are directory-wide (not file-specific) so they also cover any
@@ -122,7 +122,7 @@ def test_detectors_catch_the_original_f25_patterns():
         'PXDESIGN_DIR="${1:-/home/david/tools/PXDesign}"\n'
         'CUTLASS_DIR="${CUTLASS_PATH:-/home/david/cutlass}"\n'
         'conda env create -f "$ENV_YAML" --force\n'
-        'echo "  python -m pytest /home/david/BindMaster/tests/tools/pxdesign/ -v"\n'
+        'echo "  python -m pytest /home/david/BinderScout/tests/tools/pxdesign/ -v"\n'
     )
     assert [m for _, m in find_user_home_paths(original)] == [
         "/home/david",

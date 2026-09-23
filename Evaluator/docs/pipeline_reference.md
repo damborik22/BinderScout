@@ -1,11 +1,11 @@
-# BindMaster Evaluator — Pipeline Reference
+# BinderScout Evaluator — Pipeline Reference
 
 ## Repo Structure
 
-The Evaluator is bundled inside the BindMaster monorepo:
+The Evaluator is bundled inside the BinderScout monorepo:
 
 ```
-BindMaster/
+BinderScout/
 ├── Evaluator/                  # This directory
 │   ├── binder_comparison/      # Core Python package
 │   ├── scripts/                # Standalone refold scripts
@@ -23,9 +23,9 @@ BindMaster/
 | Env | Used for | Status |
 |-----|----------|--------|
 | `binder-eval` | Sequence extraction + reporting | Created by `Evaluator/install.sh` |
-| `binder-eval-af3` | AF3 v3.0.2 refolding | `bindmaster install --tool af3` (gated weights; runs on 24 GB GPUs) |
-| `binder-eval-esmfold2` | ESMFold2 refolding | `bindmaster install --tool esmfold2` (in `--tool all`) |
-| Mosaic `.venv` | Boltz-2 refolding | Created by `bindmaster install --tool mosaic` |
+| `binder-eval-af3` | AF3 v3.0.2 refolding | `binderscout install --tool af3` (gated weights; runs on 24 GB GPUs) |
+| `binder-eval-esmfold2` | ESMFold2 refolding | `binderscout install --tool esmfold2` (in `--tool all`) |
+| Mosaic `.venv` | Boltz-2 refolding | Created by `binderscout install --tool mosaic` |
 
 ## Quick CLI Reference
 
