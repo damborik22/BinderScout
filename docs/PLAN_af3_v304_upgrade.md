@@ -1,4 +1,4 @@
-# AlphaFold 3 v3.0.4 — what it changes for BindMaster
+# AlphaFold 3 v3.0.4 — what it changes for BinderScout
 
 Analysis of <https://github.com/google-deepmind/alphafold3/releases/tag/v3.0.4>
 against our current AF3 integration (Part K). Written 2026-08-11.

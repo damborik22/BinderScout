@@ -178,7 +178,7 @@ resist that). `chai_ph` is already vendored, so install cost should be low.
 **Investigate-first checklist:**
 - [ ] O1. Verify the vendored `Protein-Hunter/chai_ph/` can be driven for **refold**
       (complex prediction from sequence), not just PH's design loop — and whether it needs
-      its own `binder-eval-chai` env or can reuse `bindmaster_protein_hunter`.
+      its own `binder-eval-chai` env or can reuse `binderscout_protein_hunter`.
 - [ ] O2. Confirm the older "Part O plan (O1–O13)" the task list references still matches
       reality (it may be stale) — reconcile before adopting it.
 - [ ] O3. Map Chai-1 output → `StandardisedMetrics` (`chai_*` column prefix, pLDDT scale,
@@ -217,7 +217,7 @@ from the **Boltz-2 affinity head**, not `ipsae_min`.
 
 **Investigate-first checklist:**
 - [ ] W1. Confirm license, weights, deps; relationship to the RFD3/foundry stack already
-      installed (`bindmaster_rfd3`).
+      installed (`binderscout_rfd3`).
 - [ ] W2. Scope configurator + extractor + affinity-head scoring path.
 - [ ] W3. Confirm a real small-molecule/PTM target exists before building.
 

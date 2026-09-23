@@ -30,7 +30,7 @@ clean crash (`docs/REPO_DIARY.md`, 2026-06-24). So:
 ## Step 0 — confirm the fix is on the box (2 min, any machine)
 
 ```bash
-cd ~/BindMaster && git log --oneline -1 -- Evaluator/scripts/refold_af3.py
+cd ~/BinderScout && git log --oneline -1 -- Evaluator/scripts/refold_af3.py
 python3 -m pytest tests/binder_comparison/test_af3_env.py -q
 ```
 
@@ -83,7 +83,7 @@ fleet, and the ≥3-engine gate stops being Spark-bound.
 Needs `binder-eval-af3` + the gated weights present on a 24 GB Ampere box.
 
 ```bash
-cd ~/BindMaster
+cd ~/BinderScout
 TARGET=<~250 aa target sequence>          # target + binder ≈ 300 tokens
 printf '>probe\n<~60 aa binder sequence>\n' > /tmp/af3_probe.fasta
 

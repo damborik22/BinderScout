@@ -8,7 +8,7 @@ default, and the right one there) nvidia-smi reports the *pool*, not the working
 set -- reserving a fixed fraction of the device regardless of need.  Measuring
 that way is exactly how ">=100 GB GPU" entered our docs for AF3, which actually
 peaks at ~4.4 GiB for a 258-token complex.  So for JAX engines this harness sets
-BINDMASTER_XLA_PREALLOCATE=false, the one sanctioned use of that escape hatch
+BINDERSCOUT_XLA_PREALLOCATE=false, the one sanctioned use of that escape hatch
 (memory_policy.py: "measuring an engine's true demand").
 
 Peak is sampled from NVML across the whole process tree, because the torch
@@ -130,7 +130,7 @@ def main() -> int:
     ap.add_argument("--engine", required=True, choices=["boltz2", "af3", "esmfold2"])
     ap.add_argument("--target-len", type=int, required=True)
     ap.add_argument("--binder-len", type=int, default=60)
-    ap.add_argument("--repo", required=True, help="BindMaster checkout")
+    ap.add_argument("--repo", required=True, help="BinderScout checkout")
     ap.add_argument("--python", required=True, help="engine env's python")
     ap.add_argument("--workdir", required=True)
     ap.add_argument("--label", default="")
@@ -156,12 +156,12 @@ def main() -> int:
         return 2
 
     env = dict(os.environ)
-    env["BINDMASTER_ALLOW_NO_MSA"] = "1"
+    env["BINDERSCOUT_ALLOW_NO_MSA"] = "1"
     if a.measure_demand:
         if _is_unified_memory():
             print(json.dumps({"error": "--measure-demand refused on a unified-memory host"}))
             return 2
-        env["BINDMASTER_XLA_PREALLOCATE"] = "false"
+        env["BINDERSCOUT_XLA_PREALLOCATE"] = "false"
     env["JAX_COMPILATION_CACHE_DIR"] = str(wd / "jaxcache")
 
     base = [a.python, "-u", str(script), "--sequences", str(fa), "--target-seq", target, "--no-msa", "--allow-no-msa"]

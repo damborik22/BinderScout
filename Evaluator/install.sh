@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# BindMaster Evaluator — environment setup
+# BinderScout Evaluator — environment setup
 # Run once after cloning the repository:
 #   bash install.sh
 #
 # Creates one conda environment:
 #   binder-eval     extract + report  (lightweight, no ML)
 #
-# For Boltz-2 refolding the Mosaic environment from the BindMaster installer
+# For Boltz-2 refolding the Mosaic environment from the BinderScout installer
 # is used. Mosaic must be installed first:
-#   cd /path/to/BindMaster && bash install/install.sh --tool mosaic
+#   cd /path/to/BinderScout && bash install/install.sh --tool mosaic
 #
 # The additional refolding engines (AF3, ESMFold2) are
-# installed by the main BindMaster installer's `--tool af3` and `--tool esmfold2`
+# installed by the main BinderScout installer's `--tool af3` and `--tool esmfold2`
 # flags — not here.
 #
 # Prerequisites:
 #   - conda (miniforge/miniconda)
-#   - Mosaic installed via BindMaster installer (provides Boltz-2)
+#   - Mosaic installed via BinderScout installer (provides Boltz-2)
 #   - GPU with CUDA drivers (required for refold steps)
 
 set -euo pipefail
@@ -24,9 +24,9 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Initialise conda — prefer local standalone install, then system locations
-_BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_BINDERSCOUT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 for _conda_sh in \
-    "${_BINDMASTER_DIR}/conda/etc/profile.d/conda.sh" \
+    "${_BINDERSCOUT_DIR}/conda/etc/profile.d/conda.sh" \
     "${HOME}/miniforge3/etc/profile.d/conda.sh" \
     "${HOME}/mambaforge/etc/profile.d/conda.sh" \
     "${HOME}/miniconda3/etc/profile.d/conda.sh" \
@@ -37,12 +37,12 @@ for _conda_sh in \
     [[ -f "$_conda_sh" ]] && { source "$_conda_sh"; break; }
 done
 
-echo "=== BindMaster Evaluator — install ==="
+echo "=== BinderScout Evaluator — install ==="
 echo "Repo: $REPO_DIR"
 echo ""
 
 # ---------------------------------------------------------------------------
-# 0. Locate Mosaic venv (created by BindMaster installer)
+# 0. Locate Mosaic venv (created by BinderScout installer)
 # ---------------------------------------------------------------------------
 echo "[0/2] Locating Mosaic venv (Boltz-2 environment)..."
 
@@ -55,8 +55,8 @@ fi
 if [[ -z "$MOSAIC_VENV" ]]; then
     for _candidate in \
         "$(dirname "$REPO_DIR")/Mosaic/.venv" \
-        "${HOME}/Documents/BindMaster/Mosaic/.venv" \
-        "${HOME}/BindMaster/Mosaic/.venv"; do
+        "${HOME}/Documents/BinderScout/Mosaic/.venv" \
+        "${HOME}/BinderScout/Mosaic/.venv"; do
         if [[ -f "$_candidate/bin/python" ]]; then
             MOSAIC_VENV="$_candidate"
             break
@@ -69,13 +69,13 @@ if [[ -z "$MOSAIC_VENV" ]]; then
     echo "  ERROR: Could not find the Mosaic virtual environment."
     echo ""
     echo "  The Boltz-2 refolding step uses the Mosaic environment"
-    echo "  created by the BindMaster installer. Please install it first:"
+    echo "  created by the BinderScout installer. Please install it first:"
     echo ""
-    echo "    cd /path/to/BindMaster"
+    echo "    cd /path/to/BinderScout"
     echo "    bash install/install.sh --tool mosaic"
     echo ""
     echo "  Then re-run this script, or set MOSAIC_DIR before running:"
-    echo "    MOSAIC_DIR=/path/to/BindMaster/Mosaic bash install.sh"
+    echo "    MOSAIC_DIR=/path/to/BinderScout/Mosaic bash install.sh"
     echo ""
     exit 1
 fi
@@ -114,5 +114,5 @@ echo "Usage:"
 echo "  bash evaluate.sh --sequences seqs.fasta --target-seq SEQ --output ./results"
 echo ""
 echo "Note: the additional refolding engines are installed via the main"
-echo "      BindMaster installer (--tool af3 / --tool esmfold2) and are"
+echo "      BinderScout installer (--tool af3 / --tool esmfold2) and are"
 echo "      auto-detected by evaluate.sh when their conda envs exist."

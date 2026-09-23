@@ -241,7 +241,7 @@ distinct background so the user can decide per-design.
 
 ## Acceptance criteria
 
-1. `bindmaster install --tool soluprot` creates the conda env,
+1. `binderscout install --tool soluprot` creates the conda env,
    downloads `soluprot.zip`, prints a clear message if TMHMM /
    USEARCH need manual placement, smoke-tests
    `binder-compare filter-soluprot --help`.

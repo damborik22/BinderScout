@@ -1,4 +1,4 @@
-# BindMaster — Implementation Stages
+# BinderScout — Implementation Stages
 
 ## Part A: Merge evaluator into monorepo
 
@@ -27,7 +27,7 @@
 ## Part C: Finalize batch 1
 
 - [x] C1. Push all changes to `origin/master`
-- [x] C2. Archive `damborik22/BindMaster-evaluator` on GitHub
+- [x] C2. Archive `damborik22/BinderScout-evaluator` on GitHub
 
 ---
 
@@ -71,21 +71,21 @@
 
 ## Part H: Standalone installer — local Miniforge (server-friendly)
 
-> Goal: BindMaster installs and runs entirely within its own directory.
+> Goal: BinderScout installs and runs entirely within its own directory.
 > No writes to system conda, no writes to ~/.local/bin, no root/admin needed.
 > Works on restricted HPC/shared servers where users cannot modify system packages.
 
 - [x] H1.  `install.sh`: add `--standalone` / `--system-conda` flags + auto-detection logic
-- [x] H2.  `install.sh`: add `install_local_conda()` — downloads + installs Miniforge3 into `BindMaster/conda/`
+- [x] H2.  `install.sh`: add `install_local_conda()` — downloads + installs Miniforge3 into `BinderScout/conda/`
 - [x] H3.  `install.sh`: modify `detect_conda()` — check local conda first, then system, auto-bootstrap if needed
-- [x] H4.  `install.sh`: change `SHORTCUTS_DIR` from `~/.local/bin` to `BindMaster/bin/`
+- [x] H4.  `install.sh`: change `SHORTCUTS_DIR` from `~/.local/bin` to `BinderScout/bin/`
 - [x] H5.  `install.sh`: ensure local conda is on PATH before calling BindCraft's `install_bindcraft.sh`
 - [x] H6.  `install.sh`: update `ensure_conda_in_path()` to use local conda base
 - [x] H7.  `install.sh`: update uninstall to handle local conda envs + local conda removal
 - [x] H8.  `install_aarch.sh`: mirror all H1–H7 changes for aarch64
-- [x] H9.  `bindmaster.py`: shortcut writes to `REPO/bin/` (fallback `~/.local/bin` if writable)
-- [x] H10. `bindmaster.py`: detect local conda when resolving Mosaic venv path
-- [x] H11. `configurator.py`: `_find_conda_base()` checks `BINDMASTER_DIR/conda/` first
+- [x] H9.  `binderscout.py`: shortcut writes to `REPO/bin/` (fallback `~/.local/bin` if writable)
+- [x] H10. `binderscout.py`: detect local conda when resolving Mosaic venv path
+- [x] H11. `configurator.py`: `_find_conda_base()` checks `BINDERSCOUT_DIR/conda/` first
 - [x] H12. `configurator.py`: generated run scripts add local conda path as first entry in conda-search loop
 - [x] H13. `Evaluator/evaluate.sh`: add local conda to conda init search
 - [x] H14. `Evaluator/run.sh`: add local conda to conda init search
@@ -98,14 +98,14 @@
 
 ## Part I: Pre-packed standalone distribution (future)
 
-> Goal: Ship BindMaster as a single archive needing zero install on the target server.
+> Goal: Ship BinderScout as a single archive needing zero install on the target server.
 > Depends on Part H (complete). Detailed plan in `docs/plans.md`.
 
 - [ ] I1.  Add `conda-pack` dependency + verify env packing works
 - [ ] I2.  Create `pack/build_pack.sh` — build relocatable archive on dev machine
 - [ ] I3.  Create `pack/unpack.sh` — extract + fix paths on target server
 - [ ] I4.  Create `pack/manifest.py` — version/checksum metadata
-- [ ] I5.  Add `bindmaster pack` subcommand to CLI
+- [ ] I5.  Add `binderscout pack` subcommand to CLI
 - [ ] I6.  Handle Mosaic uv venv relocation (shebang + pyvenv.cfg patching)
 - [ ] I7.  BoltzGen weights optional inclusion (`--include-boltzgen-weights`)
 - [ ] I8.  Platform build matrix (x86_64-cuda124, aarch64-cuda130)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fleet.sh — drive the BindMaster LAN fleet over SSH from the driver machine.
+# fleet.sh — drive the BinderScout LAN fleet over SSH from the driver machine.
 # Design: docs/PLAN_fleet_orchestration.md
 set -euo pipefail
 
@@ -37,10 +37,10 @@ gpu=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null
 procs=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits 2>/dev/null \
         | awk -v floor="$GPU_BUSY_MIB" '$1+0 > floor' | wc -l)
 envs=$(ls -1 "$HOME"/miniforge3/envs "$HOME"/miniconda3/envs "$HOME"/anaconda3/envs \
-             "$HOME"/dev/BindMaster/conda/envs 2>/dev/null \
+             "$HOME"/dev/BinderScout/conda/envs 2>/dev/null \
        | grep -vE '^$|:' | sort -u | paste -sd,)
-sha=$(git -C "$HOME/dev/BindMaster" rev-parse --short HEAD 2>/dev/null || echo none)
-br=$(git -C "$HOME/dev/BindMaster" rev-parse --abbrev-ref HEAD 2>/dev/null || echo none)
+sha=$(git -C "$HOME/dev/BinderScout" rev-parse --short HEAD 2>/dev/null || echo none)
+br=$(git -C "$HOME/dev/BinderScout" rev-parse --abbrev-ref HEAD 2>/dev/null || echo none)
 printf '%s\n' \
     "$(hostname)" "$(uname -m)" "$gpu" "${procs:-0}" \
     "$(free -g | awk '/^Mem:/{print $2}')" \

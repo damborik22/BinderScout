@@ -1,4 +1,4 @@
-# Contributing to BindMaster
+# Contributing to BinderScout
 
 ## Development setup
 
@@ -7,20 +7,20 @@
 - Linux (x86_64 or aarch64 with NVIDIA GPU)
 - NVIDIA driver with CUDA >= 12.1
 - Miniconda, Anaconda, or Miniforge
-- Python >= 3.10 (system Python for `bindmaster.py` and `configurator.py`)
+- Python >= 3.10 (system Python for `binderscout.py` and `configurator.py`)
 - `git`, `docker` (for testing)
 
 ### Clone
 
 ```bash
 git clone https://github.com/damborik22/BinderScout.git
-cd BindMaster
+cd BinderScout
 ```
 
 ### Install tools
 
 ```bash
-bindmaster install --tool all
+binderscout install --tool all
 ```
 
 ---
@@ -33,7 +33,7 @@ bindmaster install --tool all
 | BindCraft2 `.venv` (uv) | BindCraft 2 AF2 hallucination (JAX, no PyRosetta) | >= 3.12 |
 | `BoltzGen` | BoltzGen Boltz-1 design | 3.12 |
 | Mosaic `.venv` (uv) | Mosaic hallucination + Boltz-2 refolding | 3.12 |
-| `bindmaster_pxdesign` | PXDesign (Protenix) | 3.11 |
+| `binderscout_pxdesign` | PXDesign (Protenix) | 3.11 |
 | Proteina-Complexa `.venv` (uv) | Flow matching binder design | 3.12 |
 | `binder-eval` | Evaluator extract + report | 3.10 |
 | `binder-eval-af2` | Evaluator AF2 refolding | 3.10 |
@@ -48,7 +48,7 @@ a disposable build artefact — the checkout *is* the installation. That directo
 is gitignored and must never be committed — its licence is its own, not this
 repo's MIT. The installer clones it from [https://github.com/PacesaLab/BindCraft2](https://github.com/PacesaLab/BindCraft2)
 at `v1.0.1`; override with
-`bindmaster install --tool bindcraft2 --bc2-source <zip|dir|git-url>` or by
+`binderscout install --tool bindcraft2 --bc2-source <zip|dir|git-url>` or by
 exporting `$BINDCRAFT2_SOURCE` once for the host.
 
 ---
@@ -88,8 +88,8 @@ over rewriting existing patterns.
 ### Docker test environment
 
 ```bash
-docker build -f Dockerfile.test --target base -t bindmaster-test .
-docker run --rm -it bindmaster-test bash
+docker build -f Dockerfile.test --target base -t binderscout-test .
+docker run --rm -it binderscout-test bash
 ```
 
 The `base` target validates the build without requiring a GPU. Full tests

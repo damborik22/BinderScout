@@ -167,13 +167,13 @@ def _resolve_scripts_path(override: str | Path | None) -> Path:
         p = Path(env_path).resolve()
         if p.exists():
             return p
-    # Default install location used by `bindmaster install --tool soluprot`.
+    # Default install location used by `binderscout install --tool soluprot`.
     repo_root = Path(__file__).resolve().parents[3]
     bundled = repo_root / "Evaluator" / "tools" / "soluprot"
     if bundled.exists():
         return bundled
     raise FileNotFoundError(
-        "SoluProt is not installed. Run `bindmaster install --tool soluprot`, "
+        "SoluProt is not installed. Run `binderscout install --tool soluprot`, "
         "set $SOLUPROT_HOME, or pass --scripts-path."
     )
 
@@ -250,7 +250,7 @@ def _resolve_usearch(override: str | Path | None, soluprot_dir: Path) -> Path:
         "USEARCH not found — SoluProt cannot compute its identity feature without it. "
         f"Looked at: $SOLUPROT_USEARCH, {soluprot_dir}/usearch.{platform.machine()}, "
         f"{soluprot_dir}/usearch, and 'usearch' on PATH.\n"
-        "Build it with `bindmaster install --tool soluprot` (source-builds "
+        "Build it with `binderscout install --tool soluprot` (source-builds "
         "rcedgar/usearch12, GPLv3), or pass --usearch /path/to/usearch."
     )
 

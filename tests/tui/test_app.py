@@ -23,7 +23,7 @@ def test_launch_tui_falls_back_when_curses_missing(monkeypatch):
 
 
 def test_evaluate_menu_lists_subcommands_instead_of_erroring(monkeypatch):
-    """`bindmaster evaluate` with no arguments reaches argparse with a required
+    """`binderscout evaluate` with no arguments reaches argparse with a required
     subcommand missing: one usage line and exit 2. The menu entry promised "shows
     available subcommands" and delivered that error, so it asks for --help.
     """

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BinderScout / BindMaster — Repository Analysis, 2026-07-26</title>
+<title>BinderScout / BinderScout — Repository Analysis, 2026-07-26</title>
 <style>
   :root{
     --bg:#fbfbfa; --fg:#1c1c1a; --muted:#6b6b66; --line:#e2e0da; --card:#fff;
@@ -83,7 +83,7 @@
 <body>
 <div class="wrap">
 
-<h1>BinderScout / BindMaster — repository analysis</h1>
+<h1>BinderScout / BinderScout — repository analysis</h1>
 <p class="sub">
   Read-only audit · 2026-07-26 · working tree at <code>a600090</code>, branch
   <code>claude/repo-analysis-non-agentic-nb3kbk</code><br>
@@ -137,7 +137,7 @@
 <h2>1. What this repository is</h2>
 
 <p>
-BinderScout (the package, CLI and docs all call it <em>BindMaster</em>) is an integration layer for
+BinderScout (the package, CLI and docs all call it <em>BinderScout</em>) is an integration layer for
 <strong>GPU protein-binder design</strong>. It implements no design method of its own. It installs seven
 third-party design tools, generates run scripts for them from one interactive interview, then
 cross-validates whatever they produce by re-folding the designed sequences with independent structure
@@ -168,8 +168,8 @@ predictors and ranking the results.
   │              └── bindcraft/target_settings.json
   │
   ├─▶ run_all.sh ─▶ 7 design tools, each in its OWN environment
-  │     BindCraft │ BoltzGen │ Mosaic/.venv │ bindmaster_pxdesign │
-  │     Proteina-Complexa/.venv │ bindmaster_protein_hunter │ bindmaster_rfd3
+  │     BindCraft │ BoltzGen │ Mosaic/.venv │ binderscout_pxdesign │
+  │     Proteina-Complexa/.venv │ binderscout_protein_hunter │ binderscout_rfd3
   │     raw output ─▶ runs/&lt;name&gt;/&lt;tool&gt;/…   (designs.csv, summary_high_iptm.csv, *.cif.gz, …)
   │
   ├─▶ binder-compare extract                                      [binder-eval]
@@ -182,8 +182,8 @@ predictors and ranking the results.
   │     Boltz-2    ─▶ boltz2_results.csv      [Mosaic/.venv]
   │     AF3 3.0.2  ─▶ af3_results.csv         [binder-eval-af3,  &gt;100 GB VRAM]
   │     ESMFold2   ─▶ esmfold2_results.csv    [binder-eval-esmfold2]   ← documented default
-  │     Protenix   ─▶ protenix_results.csv    [bindmaster_pxdesign]    ← "optional", but opt-OUT (F4)
-  │     all read ONE shared target MSA:  ~/.cache/bindmaster/target_msa/target_&lt;sha256[:16]&gt;.a3m
+  │     Protenix   ─▶ protenix_results.csv    [binderscout_pxdesign]    ← "optional", but opt-OUT (F4)
+  │     all read ONE shared target MSA:  ~/.cache/binderscout/target_msa/target_&lt;sha256[:16]&gt;.a3m
   │
   ├─▶ comparison/merger.py       outer-join every engine CSV  ON sequence   ← fan-out risk (F6)
   ├─▶ comparison/scoring.py      iPSAE · PAE-recomputed per-engine iPTM ·
@@ -201,7 +201,7 @@ predictors and ranking the results.
 <p>
 This was the main question, and the answer is <strong>mostly yes, with one hard blocker</strong>. The executable
 pipeline has <strong>zero runtime LLM dependency</strong>: no <code>anthropic</code>, <code>openai</code> or
-model-endpoint call exists anywhere in <code>bindmaster.py</code>, <code>configurator/</code>,
+model-endpoint call exists anywhere in <code>binderscout.py</code>, <code>configurator/</code>,
 <code>install/</code> or <code>Evaluator/</code>. The five <code>.claude/skills/</code> packages are an
 operating manual, not a dependency.
 </p>
@@ -287,8 +287,8 @@ implemented, mostly unit-tested, and undiscoverable except via <code>binder-comp
 </div>
 
 <h3>3.2 Verified by running it</h3>
-<pre><code>$ python3 bindmaster.py --help            → works, but writes bin/bindmaster as a side effect (F24)
-$ python3 bindmaster.py configure --help  → only --archive / --status
+<pre><code>$ python3 binderscout.py --help            → works, but writes bin/binderscout as a side effect (F24)
+$ python3 binderscout.py configure --help  → only --archive / --status
 $ python3 -m py_compile &lt;all main modules&gt; → all parse clean
 $ PYTHONPATH=Evaluator python3 -m binder_comparison --help
     ModuleNotFoundError: No module named 'numpy'
@@ -382,8 +382,8 @@ $ python3 -m pytest --collect-only        → No module named pytest</code></pre
      Note that README's engine table is <em>correct</em> here — "<code>evaluate.sh</code> auto-detects and
      runs whichever engine envs are present" — so the contradiction is CLAUDE.md against both the code and
      the README.</p>
-  <p><strong>Failure:</strong> <code>bindmaster install --tool all</code> creates
-     <code>bindmaster_pxdesign</code>, so on any full x86 install <code>evaluate.sh</code> runs a fourth,
+  <p><strong>Failure:</strong> <code>binderscout install --tool all</code> creates
+     <code>binderscout_pxdesign</code>, so on any full x86 install <code>evaluate.sh</code> runs a fourth,
      unrequested GPU refold pass over the whole pool — then folds <code>protenix_pae_iptm</code> into
      <code>consensus_iptm</code> and <code>consensus_iptm_mean</code>, the primary two-stage ranking. Two
      operators with identical designs get <em>different rankings</em> depending on whether they happened to
@@ -521,7 +521,7 @@ $ python3 -m pytest --collect-only        → No module named pytest</code></pre
      <code>evaluator</code>, <code>pxdesign</code>, <code>af3</code>, <code>esmfold2</code>,
      <code>soluprot</code></p>
   <p>CLAUDE.md states "<strong>Part M — RFD3</strong> installable via
-     <code>bindmaster install --tool rfd3</code> (x86 + aarch64)" and "RFD3: fully supported on aarch64 (no
+     <code>binderscout install --tool rfd3</code> (x86 + aarch64)" and "RFD3: fully supported on aarch64 (no
      DGL dependency; pip-installs cleanly)".</p>
   <p><strong>Failure:</strong> on a DGX Spark, <code>bash install/install_aarch.sh --tool rfd3</code> exits 1
      with <code>Invalid --tool value: rfd3</code>. There is no way to install a feature documented as landed
@@ -592,10 +592,10 @@ exit=127          # "REACHED-AFTER-GPU_NAME" never prints</code></pre>
 
 <div class="f">
   <h4><span class="sev c-med">Medium</span> &nbsp;F16 · No architecture dispatch in any entry point</h4>
-  <p class="loc"><code>bindmaster.py:105</code> <code>script = REPO / "install" / "install.sh"</code>;
+  <p class="loc"><code>binderscout.py:105</code> <code>script = REPO / "install" / "install.sh"</code>;
      <code>tui/app.py:259, 418</code> hardcode the same path</p>
   <p><strong>Failure:</strong> a DGX Spark operator following README:391 runs
-     <code>bindmaster install --tool all</code> and silently gets the x86_64 installer — CUDA defaulting to
+     <code>binderscout install --tool all</code> and silently gets the x86_64 installer — CUDA defaulting to
      12.4 instead of 13.0, conda asked for <code>pytorch-cuda=12.4</code> and <code>gcc_linux-64</code>
      (no linux-aarch64 builds), and none of the aarch64 patches applied. <code>install.sh:2615</code> warns
      but proceeds.</p>
@@ -605,9 +605,9 @@ exit=127          # "REACHED-AFTER-GPU_NAME" never prints</code></pre>
 
 <div class="f">
   <h4><span class="sev c-med">Medium</span> &nbsp;F17 · The skills prescribe a recovery flag that does not exist</h4>
-  <p class="loc"><code>.claude/skills/bindmaster-worker/references/troubleshooting.md:238</code> and
+  <p class="loc"><code>.claude/skills/binderscout-worker/references/troubleshooting.md:238</code> and
      <code>references/tools/pxdesign.md:21</code> and
-     <code>.claude/skills/bindmaster-orchestrator/references/evaluation.md:216</code> —
+     <code>.claude/skills/binderscout-orchestrator/references/evaluation.md:216</code> —
      "<em>rerun <code>install/install.sh --pxdesign</code> to reapply the patches</em>"</p>
   <p><strong>Failure:</strong> this is the documented recovery for the exact failure CLAUDE.md's Known Issues
      warns about ("patches … would be lost if packages are upgraded manually"). Typing it yields
@@ -702,7 +702,7 @@ exit=127          # "REACHED-AFTER-GPU_NAME" never prints</code></pre>
     <td><code>scripts/install_pxdesign.sh:83</code> <code>conda env create --force</code>, plus
         hardcoded <code>/home/david</code> paths</td>
     <td>It looks like the way to install PXDesign, but <code>--force</code> deletes the existing
-        <code>bindmaster_pxdesign</code> env — the env that also hosts the Protenix refolder plus the
+        <code>binderscout_pxdesign</code> env — the env that also hosts the Protenix refolder plus the
         CPATH/CUTLASS <code>activate.d</code> hooks written by <code>install.sh</code>. <em>Fix:</em> delete
         the script, or reduce it to a thin call into <code>install.sh --tool pxdesign</code>.</td></tr>
 
@@ -765,9 +765,9 @@ exit=127          # "REACHED-AFTER-GPU_NAME" never prints</code></pre>
     <td>Assorted: filesystem side effects on <code>--help</code>, tracked blobs, and documentation drift</td>
     <td>see cells →</td>
     <td>
-      <strong>(a)</strong> <code>bindmaster.py:142</code> — <code>_install_bindmaster_shortcut()</code> is the
-      first statement of <code>main()</code>, so <code>--help</code> writes <code>bin/bindmaster</code> and
-      <code>~/.local/bin/bindmaster</code> and prints "✓ Shortcut installed" into the help output. Move it
+      <strong>(a)</strong> <code>binderscout.py:142</code> — <code>_install_binderscout_shortcut()</code> is the
+      first statement of <code>main()</code>, so <code>--help</code> writes <code>bin/binderscout</code> and
+      <code>~/.local/bin/binderscout</code> and prints "✓ Shortcut installed" into the help output. Move it
       after the <code>--help</code> branch.<br>
       <strong>(b)</strong> ~65 MB of tracked binaries and data (44 MB SoluProt FASTAs, 8.6 MB pickles,
       4.2 MB USEARCH, 9.4 MB dssp, 1.3 MB NGL) with no LFS; and
@@ -783,7 +783,7 @@ exit=127          # "REACHED-AFTER-GPU_NAME" never prints</code></pre>
       <strong>(e)</strong> <code>INVESTIGATION_RANKING_DISCREPANCY.md</code> is byte-identical at the repo
       root and in <code>docs/</code> (both 32 816 B) — two copies that will diverge on first edit. Same for
       root-level <code>PLAN_chai_and_designers.md</code>.<br>
-      <strong>(f)</strong> <code>git clone …/BindMaster.git</code> appears in <code>bindmaster.py:52</code>,
+      <strong>(f)</strong> <code>git clone …/BinderScout.git</code> appears in <code>binderscout.py:52</code>,
       <code>CLAUDE.md:424</code> and <code>CONTRIBUTING.md:16</code>. README:10 documents the rename and
       states the old URL redirects, so this is a consistency nit rather than a breakage — but the README's own
       quick start used the old URL too, contradicting its rename note. (Corrected in the README as part of
@@ -916,7 +916,7 @@ exit=127          # "REACHED-AFTER-GPU_NAME" never prints</code></pre>
         <code>--mosaic</code>, <code>--pxdesign</code><br>
         while <code>cli/extract.py:177–181</code> accepts <code>--rfd3</code> and the rest</td>
     <td>A human following <code>binder-compare run --help</code> — or README's quick start, which uses
-        <code>bindmaster evaluate run --mosaic … --bindcraft …</code> — gets a report that silently omits
+        <code>binderscout evaluate run --mosaic … --bindcraft …</code> — gets a report that silently omits
         every design from the three newest tools, including both Part L and Part M additions. Passing
         <code>--rfd3</code> is rejected by argparse outright, with no hint that <code>extract</code> supports
         it. <em>Fix:</em> mirror <code>extract</code>'s tool flags in <code>run</code>; better, share one

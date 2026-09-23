@@ -5,7 +5,7 @@
 # still wins under that handicap, the result is trustworthy.
 set -uo pipefail
 W=~/bm5_throughput_test
-R=<BM5_HOME>/dev/BindMaster
+R=<BM5_HOME>/dev/BinderScout
 P=$W/pools/tp6
 TGT=$(cat $P.target)
 : > $W/ab_results.txt

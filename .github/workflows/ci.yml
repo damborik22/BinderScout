@@ -72,4 +72,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build base image
-        run: docker build -f Dockerfile.test --target base -t bindmaster-test-base .
+        run: docker build -f Dockerfile.test --target base -t binderscout-test-base .

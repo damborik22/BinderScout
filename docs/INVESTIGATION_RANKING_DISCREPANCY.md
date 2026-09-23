@@ -54,7 +54,7 @@ Concretely:
 All analysis lives in `notebooks/_analysis.py` (a single Python script that emits `notebooks/_artifacts/`). Notebook `notebooks/ranking_discrepancy.ipynb` consumes those artifacts. Reproduce with:
 
 ```bash
-<BM5_HOME>/dev/BindMaster/Mosaic/.venv/bin/python <BM5_HOME>/dev/BindMaster/notebooks/_analysis.py
+<BM5_HOME>/dev/BinderScout/Mosaic/.venv/bin/python <BM5_HOME>/dev/BinderScout/notebooks/_analysis.py
 ```
 
 ### Caveats
@@ -330,10 +330,10 @@ If the user wants a single ranking metric **right now** without code changes: us
 
 ## 9. Deliverables
 
-- This file: `<BM5_HOME>/dev/BindMaster/INVESTIGATION_RANKING_DISCREPANCY.md`
-- Notebook: `<BM5_HOME>/dev/BindMaster/notebooks/ranking_discrepancy.ipynb`
-- Analysis script: `<BM5_HOME>/dev/BindMaster/notebooks/_analysis.py` (re-runnable, regenerates all artifacts under `notebooks/_artifacts/`)
-- Plots: `<BM5_HOME>/dev/BindMaster/notebooks/_artifacts/plots/{per_tool_scatter,rank_rank,cross_engine,length_vs_ipsae,pae_distributions}.png`
-- Tables (CSV): `<BM5_HOME>/dev/BindMaster/notebooks/_artifacts/{per_tool_correlations,top20_outliers}.csv`
-- Per-tool merged data: `<BM5_HOME>/dev/BindMaster/notebooks/_artifacts/{bindcraft,boltzgen,mosaic,proteina_complexa,pxdesign}_merged.csv`
-- BoltzGen deep-dive JSON: `<BM5_HOME>/dev/BindMaster/notebooks/_artifacts/boltzgen_deep_dive.json`
+- This file: `<BM5_HOME>/dev/BinderScout/INVESTIGATION_RANKING_DISCREPANCY.md`
+- Notebook: `<BM5_HOME>/dev/BinderScout/notebooks/ranking_discrepancy.ipynb`
+- Analysis script: `<BM5_HOME>/dev/BinderScout/notebooks/_analysis.py` (re-runnable, regenerates all artifacts under `notebooks/_artifacts/`)
+- Plots: `<BM5_HOME>/dev/BinderScout/notebooks/_artifacts/plots/{per_tool_scatter,rank_rank,cross_engine,length_vs_ipsae,pae_distributions}.png`
+- Tables (CSV): `<BM5_HOME>/dev/BinderScout/notebooks/_artifacts/{per_tool_correlations,top20_outliers}.csv`
+- Per-tool merged data: `<BM5_HOME>/dev/BinderScout/notebooks/_artifacts/{bindcraft,boltzgen,mosaic,proteina_complexa,pxdesign}_merged.csv`
+- BoltzGen deep-dive JSON: `<BM5_HOME>/dev/BinderScout/notebooks/_artifacts/boltzgen_deep_dive.json`

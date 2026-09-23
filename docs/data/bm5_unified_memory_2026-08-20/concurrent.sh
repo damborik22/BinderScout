@@ -3,7 +3,7 @@
 set -uo pipefail
 P=/tmp/mps5/pools/L2_pdl1_340
 TGT=$(cat $P.target)
-BOLTZ=<BM5_HOME>/dev/BindMaster/Mosaic/.venv/bin/binder-compare
+BOLTZ=<BM5_HOME>/dev/BinderScout/Mosaic/.venv/bin/binder-compare
 SAMP=/tmp/mps5/conc_samples.csv
 : > "$SAMP"
 

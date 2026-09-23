@@ -2,7 +2,7 @@
 
 Handles two output layouts:
 
-1. **Configurator-aggregated** — `sequences.csv` produced by the BindMaster
+1. **Configurator-aggregated** — `sequences.csv` produced by the BinderScout
    run script's collector. Columns include a string ``sequence`` and a
    ``design_id``. The collector **renames** the raw evaluation metrics on the
    way out: ``self_complex_i_pTM`` → ``iptm``, ``self_complex_pLDDT`` →

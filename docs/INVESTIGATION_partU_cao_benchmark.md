@@ -137,7 +137,7 @@ tarball and only 61 binders; excluded.
 
 **Prerequisites handled:**
 - Clara compute nodes have no internet → target MSAs pre-fetched on the login node into
-  `~/.cache/bindmaster/target_msa/`; array submission is chained to wait for it
+  `~/.cache/binderscout/target_msa/`; array submission is chained to wait for it
   (`chain_submit.sh`).
 - Clara's `binder-eval` env was missing `requests` (needed by `target_msa`) — installed.
 - The Mosaic offline-MSA patch was already applied on Clara (it is **required**; without it
@@ -457,7 +457,7 @@ Recorded so they are not re-derived **[✗]**:
   Not disproved, untested.
 
 **Data location.** `runs/` is gitignored, so nothing here is in the repo. Archived to MUNI at
-`Project-01-BINDMASTER/EVALUATOR/cao_partU_2026-07/` — the merged table, the per-engine
+`Project-01-BINDERSCOUT/EVALUATOR/cao_partU_2026-07/` — the merged table, the per-engine
 augmented CSVs, `cao_lib.py`, every analysis script, and the assembled 654k-design master.
 Deliberately **not** archived: the 2.4 GB of ESMFold2 structures and the 234 MB source
 tarball (re-downloadable from the URL in §2).

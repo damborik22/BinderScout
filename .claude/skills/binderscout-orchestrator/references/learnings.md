@@ -1,0 +1,229 @@
+# BinderScout — Empirical Campaign Learnings
+
+Lessons accumulated from real campaigns. The **categories** are portable; the specific **2VDY / CBG numbers** are examples, not predictions for new targets.
+
+Read this at the start of any campaign session. Test category claims early on a new target before committing serious compute to them.
+
+## How to read this file
+
+Each lesson is tagged:
+
+- **[Likely portable]** — architectural facts or infrastructure quirks that generalize cleanly across targets and chemistries.
+- **[Probable, test early]** — config heuristics validated on 1-2 targets that should re-validate quickly on a new target before scaling up.
+- **[Worker-side]** — operational lessons that primarily affect the worker skill's responsibilities (env setup, log parsing). Cross-referenced here for orchestrator awareness; canonical home is the worker skill.
+
+Specific numbers in examples are **anchors, not estimates**. A "95× yield lift" on 2VDY tells you the direction and rough magnitude of an effect — it doesn't predict the yield lift on ApoE4 or CALCA.
+
+---
+
+## 1. Boltz-2 MSA mode for known targets
+**[Likely portable]**
+
+For Boltz-2-based tools (Protein-Hunter, BoltzGen, Mosaic): if the target is in databases, use `mmseqs` MSA mode, not `single`. The de novo binder correctly gets no MSA either way, but the target gets a real MSA that drives iPTM scoring.
+
+**2VDY example:** `single` → 1 design ≥ 0.85 (10.5 h wasted). `mmseqs` → 95 designs ≥ 0.85 (median 0.857). ~95× yield lift from one flag change.
+
+**Mosaic specifically:** set binder `use_msa=False` (de novo binder, no MSA available) but keep target `use_msa=True`. Otherwise Mosaic's continuously-evolving binder triggers a fresh MMseqs request per design step and accumulates past the rate limit.
+
+**Generalization rule:** ColabFold's MMseqs2 server is fine at ~200 designs/batch for known targets. For genuinely novel targets where ColabFold has no homologs either, `single` is correct.
+
+**Applies to tool entries:** `tools/protein-hunter.md`, `tools/boltzgen.md`, `tools/mosaic.md`, `tools/boltz2.md`.
+
+---
+
+## 2. BindCraft hotspots and AF2 hallucination
+**[Probable, test early]**
+
+If a target's hotspots span multiple distant regions (different secondary-structure elements, different chain regions), BindCraft's AF2 hallucination may not be able to satisfy all of them simultaneously.
+
+**2VDY example:** Four hotspot clusters — N-term helix (15–22), central sheet (232–242), pocket lid (260–267), C-term helix (366–371). With hotspots ON: BM2 10/10 trajectories failed pre-MPNN; BM4 ran 9 days with 0/203 accepted (every MPNN sequence failed AF2 cross-val on the V2 interface PAE filters). Same V2+V4 preset with hotspots OFF: BM2 22 accepts, Clara L40S 10 accepts.
+
+**Generalization rule:** Hotspots clustered on one face (single binding pocket on one side) → hotspots-ON is fine. Hotspots spanning the protein → run BindCraft no-hotspots and let the trajectory find the binding mode unguided. Cross-engine refold at the end filters on actual interface metrics anyway.
+
+**Applies to tool entries:** `tools/bindcraft.md` (Weaknesses, Pick when, Key knobs `target_hotspot_residues`).
+
+---
+
+## 3. BindCraft V2+V4 vs V1+default
+**[Probable, test early]** — pair with §4 hardtarget
+
+For difficult targets (large, no clear deep pocket, many surface residues), V2 relaxed filters + V4 advanced (`default_4stage_multimer_flexible_mpnn40_V4`) consistently produce more accepts than V1 default + plain `default_4stage_multimer`.
+
+**2VDY example:** V1+default = 0/250+ trajectories across two machines. V2+V4 = 32 accepts across three machines.
+
+**But:** the `default_4stage_multimer_hardtarget` variant (V1 filters + hardtarget advanced) produces extremely high-quality but very low-yield accepts. 2VDY_0002 (Feb 2026, ~80–100 trajectories) yielded 1 accept at iPTM 0.90 — higher than any V2+V4 accept. Worth running in parallel for the high-quality tail.
+
+**Generalization rule:** V2+V4 is the workhorse for quantity. `default+hardtarget` is the specialty for top-quality outliers. Run both.
+
+**Applies to tool entries:** `tools/bindcraft.md` (Key knobs — filters preset choice as an orchestration knob).
+
+---
+
+## 4. 24 GB cards have a length ceiling for BindCraft
+**[Likely portable]** — physics, not target-specific
+
+3090-class cards OOM in JAX BindCraft's Stage 1 Logits at lengths ≥130 aa with hotspots ON, or ≥145 aa even without hotspots. Cap at 120 on 24 GB. L40S (48 GB) handles 150 fine; H200 (141 GB) / GH200 fine to 200.
+
+PXDesign, Mosaic, Protein-Hunter, Proteina-Complexa OOM on 24 GB at large targets (e.g. 2VDY's 389 aa) regardless of binder length — ship them to ≥48 GB cards.
+
+**Applies to tool entries:** `tools/bindcraft.md`, `tools/pxdesign.md`, `tools/mosaic.md`, `tools/protein-hunter.md`, `tools/proteina-complexa.md`. Orchestrator must not assign length ≥ 130 BindCraft to a 24 GB node.
+
+---
+
+## 5. Scoring engines are not comparable
+**[Likely portable]** — architectural fact
+
+PC scores via AF2-multimer (stricter). PH scores via Boltz-2 + target MSA (more permissive). Empirically on 2VDY, PC iPTM 0.70 ≈ PH iPTM 0.85 in difficulty.
+
+Don't filter PC outputs at "PH thresholds" or vice versa. Let the cross-engine refold step do unified scoring through `ipsae_min` (the evaluator's unbiased judge across methods).
+
+**Applies to tool entries:** `tools/README.md` cross-method bias matrix, all design tool entries' "Outputs the evaluator parses" sections.
+
+---
+
+## 6. JAX / PyRosetta env traps on conda
+**[Likely portable] [Worker-side]**
+
+Two recurring traps that have cost days across the campaign:
+
+- `set +u` around `conda activate` for envs that use cuda-nvcc activate.d hooks (they reference unset `NVCC_PREPEND_FLAGS`).
+- PyRosetta's DAlphaBall.gcc subprocess strips env vars on Slurm — set `LD_LIBRARY_PATH` AND `LD_PRELOAD` inline on the python command with absolute paths to `libgfortran.so.5`.
+
+Both are documented in `binderscout_examples/run_*.sh.template`. Use the templates; don't hand-write run scripts.
+
+**Canonical home:** the worker skill (`binderscout-worker`). Listed here so the orchestrator knows to flag the trap in kickoff docs when relevant.
+
+---
+
+## 7. Slurm `.err` lies; the real error is in the tool's inner log
+**[Likely portable] [Worker-side]**
+
+Slurm `.err` only shows wrapper-level Python exceptions. Real Python tracebacks live in:
+
+- PC: `$PC/logs/.../generate.log`
+- PH: `runs/<n>/protein_hunter/.../*.log`
+- BindCraft: `<run>/bindcraft/outputs/*.log` (inner) and `<run>/bindcraft.log` (outer)
+- Mosaic: stdout in the sbatch `.out`
+
+**Canonical home:** the worker skill. Listed here because the orchestrator may need to triage worker failures from PROGRESS.md updates without direct log access.
+
+---
+
+## 8. Compute budget tracking
+**[Likely portable]** — methodology
+
+Every PROGRESS.md row should record compute hours. By end of 2VDY, knowing "PH cost 22 GPU-h for 95 designs at ≥0.85" vs "PC cost 30 GPU-h for 13 at ≥0.70" was decisive for picking which tool to scale up.
+
+Format: `"Compute: <wall> GPU-time on <node-id>."` Wrap up the campaign with a total budget summary.
+
+**Applies to:** SKILL.md §3.2 (status table row format), §6.1 (math first heuristic).
+
+---
+
+## 9. BinderScout `bin/` wrappers fail non-interactively
+**[Likely portable] [Worker-side]**
+
+The `~/BinderScout/bin/<tool>` shortcuts work interactively but break under SLURM / nohup / any non-TTY shell, in two distinct ways:
+
+- **`mamba run` wrappers** (e.g. `rfd3`) materialize a `/tmp/mambaXXXX` script whose `exec --` line dies on some bash builds: `exec: --: invalid option` (Clara Rocky 9.6 / bash 5.1.8; ApoE4 SLURM 119818 died in 1 s).
+- **Interactive wrappers** (e.g. `boltzgen`) `source` conda, `cd`, print a banner, then `exec bash` with **no `$@` relay** — under SLURM stdin closes, the wrapper exits rc=0 with zero work (ApoE4 119820 silent no-op).
+
+**Fix:** after `conda activate <env>`, call **`"$CONDA_PREFIX/bin/<tool>"`** (absolute env binary, bypasses the PATH-shadowing wrapper). Note `conda activate` does not guarantee the env bin precedes `~/BinderScout/bin` in PATH — verified on Clara that `which rfd3` still resolved to the wrapper post-activate. `$CONDA_PREFIX/bin/<tool>` is unambiguous.
+
+**Applies to tool entries:** `tools/rfd3.md`, `tools/boltzgen.md`, and any tool whose run script calls the tool by bare name. The configurator's `write_run_*` functions should emit `"$CONDA_PREFIX/bin/<tool>"`.
+
+---
+
+## 10. Don't hand-author tool CLIs — the configurator/templates are the source of truth
+**[Likely portable]** — process lesson
+
+Every CLI-drift bug this campaign hit (PC `pipeline=` shorthand + wrong Hydra paths, PH `--plot`, BoltzGen `--design_spec`/`--output_dir` + `--additional_filters` ordering, RFD3 `spec=` vs `inputs=` + space-vs-comma contig + `--pdb_path_multi` vs `--structure_path`) lived in a **hand-written kickoff doc** — never in the configurator, which already generated the verified form. Hand-editing a kickoff re-introduces solved bugs.
+
+**Rule:** generate run commands from `configurator/configurator.py` `write_run_<tool>` (or `binderscout_examples/run_*.sh.template`), or validate a hand-edited command against them, before committing to a long run. When a campaign discovers a CLI fix or better default, push it **into the configurator + this skill**, not just the one kickoff. Always smoke-test the exact CLI (1 batch / `nsamples=4`) on the deployed tool version before a multi-hour commit — tool versions drift and CLIs change between releases.
+
+**Applies to:** SKILL.md (kickoff authoring), all `tools/*.md` "Key knobs".
+
+---
+
+## 11. Generation is cheap; the cross-engine refold is the funnel — draw more, filter hard
+**[Likely portable]** — orchestration strategy
+
+When the goal is "best possible designs" (expensive wet-lab validation downstream), the binding constraint is **not** design-tool compute — it's the cross-engine refold (Boltz-2 + AF3 + ESMFold2 on the big-VRAM/Spark node). Cheap generators (esp. **RFD3** — ApoE4 did 100 backbones in 1h59m on H200) can flood a large pool, but tools that emit *unscored* designs (RFD3 has no native interface metric) load the refold 1:1.
+
+**Pattern — decouple the cheap engine from the Spark-locked one:**
+1. Scale up the cheap generator (RFD3 backbones, MPNN best-of-N) + filter cheaply first: geometry (drop chainbreaks/clashes), then a cheap fold.
+2. **ESMFold2-Fast** (`binder-eval-esmfold2`) folds the *complex* and emits `iptm` directly — it is NOT Spark-locked, runs on any idle 24 GB card. Use it as a pre-filter: gate on `iptm` up front (cheap, conventional), keep the top slice (~40%).
+3. Promote only survivors to the expensive Boltz-2 + AF3 + ESMFold2 merge, where `ipsae_min` does the real ranking (`scoring.py` computes `esmfold2_ipsae_min` too; ESMFold2 is reported-not-counted in `agreement_count`).
+
+This keeps the Spark refold load flat as the generated pool grows. (ApoE4 2026-05-29: RFD3 v2 = 500 backbones → geometry → MPNN best-of-30 → ESMFold2 iPTM top-40% → cross-engine merge.)
+
+**Applies to tool entries:** `tools/rfd3.md`, `tools/boltz2.md`, `evaluation.md` (triage stage), SKILL.md §6 (cheap-first / funnel heuristics).
+
+---
+
+## 12. Never put CUDA PyTorch in the Mosaic (JAX) venv — it silently breaks JAX
+**[Likely portable]** — dependency fact
+
+The Mosaic venv is JAX-first: both Mosaic design and the `refold-boltz2` refolder are JAX/jax-cuda and use the GPU via JAX, *not* torch. PyTorch is only a transitive **CPU** dep (via `boltz`). Do NOT "upgrade" it to a CUDA build:
+
+- A CUDA torch wheel (e.g. `2.7.1+cu128`) hard-pins `nvidia-cudnn-cu12==9.7.x`, but jaxlib (>=0.10) requires `nvidia-cudnn-cu12>=9.8`. They cannot coexist — installing CUDA torch drags cuDNN below JAX's floor and JAX dies at runtime with `RET_CHECK failure ... dnn_support != nullptr` (XLA can't init cuDNN). **The break is silent:** `jax.devices()` still lists the GPU; only an actual op fails.
+- This bit the ApoE4 campaign: a CUDA-torch install (to run torch `boltz predict` for a homodimer) broke `refold-boltz2`. Fix = revert torch to CPU + restore cuDNN ≥9.8 — cleanest is re-run `binderscout install --tool mosaic`, which `uv sync`s the venv back to its lock.
+- If you genuinely need torch-on-GPU (e.g. `boltz predict` for a homodimer, which `refold-boltz2` skips because binder==target), do it in a **separate** env, never the Mosaic venv.
+
+**Applies to:** `install/install.sh` (install_mosaic must NOT force CUDA torch), `tools/mosaic.md`, `tools/boltz2.md`.
+
+---
+
+## 13. Each tool's native ranking criterion (for per-tool unification)
+**[Likely portable]** — fact
+
+For the Phase 3.5 unification step (SKILL.md §4), each tool needs to be re-ranked across its sessions using **the tool's own primary criterion**, not an orchestrator-invented composite. Inventing a composite contaminates the per-tool view that the cross-engine refold then re-evaluates. Use what the tool itself uses.
+
+Verified per-tool primary sort (from source where available):
+
+| Tool | Primary sort | Source file | Source-code reference |
+|---|---|---|---|
+| **BindCraft** | `Average_i_pTM` desc | `bindcraft/outputs/final_design_stats.csv` | `BindCraft/functions/generic_utils.py` — `design_df.sort_values('Average_i_pTM', ascending=False)` |
+| **Proteina-Complexa** | `i_pTM` desc | `evaluation_results/binder_results_*.csv` | PC's own evaluator emits this as primary |
+| **Protein-Hunter** | best-of-cycle `iPTM` desc | `summary_high_iptm.csv` (already filtered ≥ threshold) | PH writes one row per passing cycle, sorted natively |
+| **PXDesign** | `af2_iptm` desc | `pxdesign/sequences.csv` | PXDesign's `sequences.csv` is pre-ranked by AF2 ipTM |
+| **Mosaic** | `iPTM` desc on `is_top=1` rows | `designs.csv` filtered `is_top=1` | Mosaic Stage-2 marks top-K per length as `is_top=1` |
+| **BoltzGen** | tool's per-protocol `ranking` column | `final_designs.csv` | varies by protocol (nano CDR vs protein-anything) |
+| **RFD3** | composite: MPNN `sequence_recovery` × interface score | manually computed | no native ranking script; backbone-best-of-5 MPNN already filtered |
+
+**No composites by default.** BindCraft has no native tiebreaker; adding `Average_pLDDT` desc as a deterministic secondary is fine but document the addition explicitly in the unification's `summary.md` so downstream readers know what's faithful and what's added.
+
+**Important:** these rankings are **per-tool, not cross-tool**. A BindCraft sequence at `Average_i_pTM 0.84` is not directly comparable to a PC sample at `i_pTM 0.84` — different scoring engines (see learning 5). Unification produces tool-native rankings; the cross-engine refold then re-evaluates everyone on a common basis.
+
+**Applies to:** SKILL.md §4 (Phase 3.5 — Per-tool unification). New tools added to BinderScout should document their primary sort here.
+
+---
+
+## When to add a new learning
+
+- The lesson would change behavior in a future campaign
+- The reason is non-obvious or counter-intuitive
+- It's not derivable from the current codebase (this file is for tribal knowledge, not for things grep can find)
+
+When NOT to add:
+
+- Tool-specific gotcha that already lives in `tools/<tool>.md` or `CLAUDE.md`
+- Status of the current campaign (that's `PROGRESS.md`)
+- Things that will likely be irrelevant after this campaign
+
+When the new learning fits in an existing tool's reference (engine principle, knob, output format), add it to the tool file and cross-reference here. When it's a campaign-level pattern that spans tools or machines, add it as a new section here.
+
+## Categorical patterns to watch for
+
+Categories of lessons that have repeated themselves across the campaign. If a new puzzle fits one of these patterns, the existing learning may apply — check first before doing a new experiment:
+
+- **Scoring engine ≠ scoring engine.** Numbers from different engines are not on the same scale (§5).
+- **Same-model self-judging.** A design tool that uses engine X internally cannot be cross-validated by engine X alone. Use the bias matrix in `tools/README.md`.
+- **GPU memory ceilings are tool × length, not just tool.** §4.
+- **Negative results compound into campaign-level knowledge.** Don't delete 0-accept runs; archive them with explanation.
+- **MSA mode is a per-tool axis, not a campaign default.** §1.
+- **Filter presets matter more than you'd expect.** V2+V4 vs V1+default is a 0 → 32 effect on 2VDY (§3).
+- **Logs lie at the wrapper level.** Real errors are deeper (§7).
+- **`bin/` wrappers fail non-interactively.** Use `$CONDA_PREFIX/bin/<tool>` in batch (§9).
+- **Hand-written CLIs drift; the configurator doesn't.** Generate/validate against it; smoke-test before long runs (§10).
+- **Generation is cheap; the refold is the funnel.** Draw more, filter hard, triage off-Spark with ESMFold2 (§11).

@@ -26,10 +26,10 @@ GOOD_A3M = f">101\n{TARGET}\n>UniRef90_A0A1\n{TARGET[:-2]}--\n"
 
 @pytest.fixture
 def cache_dir(tmp_path, monkeypatch):
-    """Isolated MSA cache — never the real ~/.cache/bindmaster."""
+    """Isolated MSA cache — never the real ~/.cache/binderscout."""
     d = tmp_path / "msa_cache"
     d.mkdir()
-    monkeypatch.setenv("BINDMASTER_MSA_CACHE", str(d))
+    monkeypatch.setenv("BINDERSCOUT_MSA_CACHE", str(d))
     monkeypatch.delenv(tm.ALLOW_NO_MSA_ENV, raising=False)
     return d
 

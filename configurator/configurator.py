@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-BindMaster Configurator — interactive CLI wizard for setting up
+BinderScout Configurator — interactive CLI wizard for setting up
 protein binder design runs (Mosaic → BoltzGen → BindCraft).
 
 Usage:
-    bindmaster configure        # via unified CLI
-    bindmaster-config           # via legacy shortcut
+    binderscout configure        # via unified CLI
+    binderscout-config           # via legacy shortcut
     python configurator/configurator.py  # directly
 """
 
@@ -51,7 +51,7 @@ def print_fail(msg):
 
 def _find_conda_base() -> Path | None:
     """Find conda/mamba base directory. Prefers mamba (faster installs)."""
-    # Check local standalone conda first (BindMaster/conda/)
+    # Check local standalone conda first (BinderScout/conda/)
     local_conda = Path(__file__).resolve().parent.parent / "conda"
     if (local_conda / "etc" / "profile.d" / "conda.sh").exists():
         return local_conda
@@ -89,23 +89,25 @@ def _find_conda_base() -> Path | None:
     return None
 
 
-def _find_bindmaster_dir() -> Path:
+def _find_binderscout_dir() -> Path:
     """
-    Find the BindMaster repo root (the one containing install/install.sh
+    Find the BinderScout repo root (the one containing install/install.sh
     and the cloned tool subdirectories).
 
     Search order:
-      1. BINDMASTER_DIR environment variable
+      1. BINDERSCOUT_DIR environment variable
       2. Parent of this script (new layout: configurator/configurator.py)
       3. This script's own dir (legacy: configurator.py at repo root)
       4. Sibling / standard locations
       5. Fallback: parent of this script
     """
-    if env := os.environ.get("BINDMASTER_DIR"):
+    # BINDMASTER_DIR is the pre-2.0 spelling and is still honoured, so an
+    # operator who exported it in a shell rc or a CI job keeps working.
+    if env := (os.environ.get("BINDERSCOUT_DIR") or os.environ.get("BINDMASTER_DIR")):
         return Path(env).expanduser()
     script_parent = Path(__file__).resolve().parent
     # New layout: configurator lives in configurator/ subdir
-    if (script_parent.parent / "bindmaster.py").exists():
+    if (script_parent.parent / "binderscout.py").exists():
         return script_parent.parent
     if (script_parent.parent / "install" / "install.sh").exists():
         return script_parent.parent
@@ -115,10 +117,10 @@ def _find_bindmaster_dir() -> Path:
     if (script_parent / "install" / "install.sh").exists():
         return script_parent
     for candidate in [
-        script_parent.parent / "BindMaster-installator",
-        script_parent.parent / "BindMaster",
-        Path.home() / "BindMaster-installator",
-        Path.home() / "BindMaster",
+        script_parent.parent / "BinderScout-installator",
+        script_parent.parent / "BinderScout",
+        Path.home() / "BinderScout-installator",
+        Path.home() / "BinderScout",
     ]:
         if (candidate / "install" / "install.sh").exists():
             return candidate
@@ -132,22 +134,22 @@ def _find_bindmaster_dir() -> Path:
 CONDA_BASE = _find_conda_base()
 CONDA_ENVS_DIR = (CONDA_BASE / "envs") if CONDA_BASE else None
 
-BINDMASTER_DIR = _find_bindmaster_dir()
-BINDCRAFT_DIR = BINDMASTER_DIR / "BindCraft"
-BOLTZGEN_DIR = BINDMASTER_DIR / "BoltzGen"
-MOSAIC_DIR = BINDMASTER_DIR / "Mosaic"
-RUNS_DIR = BINDMASTER_DIR / "runs"
+BINDERSCOUT_DIR = _find_binderscout_dir()
+BINDCRAFT_DIR = BINDERSCOUT_DIR / "BindCraft"
+BOLTZGEN_DIR = BINDERSCOUT_DIR / "BoltzGen"
+MOSAIC_DIR = BINDERSCOUT_DIR / "Mosaic"
+RUNS_DIR = BINDERSCOUT_DIR / "runs"
 FILTERS_DIR = BINDCRAFT_DIR / "settings_filters"
 ADVANCED_DIR = BINDCRAFT_DIR / "settings_advanced"
-EVALUATOR_DIR = BINDMASTER_DIR / "Evaluator"
-PXDESIGN_DIR = BINDMASTER_DIR / "PXDesign"
-PROTEINA_COMPLEXA_DIR = BINDMASTER_DIR / "Proteina-Complexa"
+EVALUATOR_DIR = BINDERSCOUT_DIR / "Evaluator"
+PXDESIGN_DIR = BINDERSCOUT_DIR / "PXDesign"
+PROTEINA_COMPLEXA_DIR = BINDERSCOUT_DIR / "Proteina-Complexa"
 PROTEINA_COMPLEXA_VENV = PROTEINA_COMPLEXA_DIR / ".venv"
-PROTEIN_HUNTER_DIR = BINDMASTER_DIR / "Protein-Hunter"
-FOUNDRY_WEIGHTS_DIR = BINDMASTER_DIR / "weights" / "foundry"
+PROTEIN_HUNTER_DIR = BINDERSCOUT_DIR / "Protein-Hunter"
+FOUNDRY_WEIGHTS_DIR = BINDERSCOUT_DIR / "weights" / "foundry"
 # BindCraft 2 installs EDITABLE into a venv beside its own checkout, so the
 # directory is the installation: both halves must exist for it to be usable.
-BINDCRAFT2_DIR = BINDMASTER_DIR / "BindCraft2"
+BINDCRAFT2_DIR = BINDERSCOUT_DIR / "BindCraft2"
 BINDCRAFT2_VENV = BINDCRAFT2_DIR / ".venv"
 MOSAIC_VENV = MOSAIC_DIR / ".venv"
 # The maintained template lives in this repo. The copy under Mosaic/ is written
@@ -156,8 +158,8 @@ MOSAIC_VENV = MOSAIC_DIR / ".venv"
 # so the exact-match injection below silently missed and emitted a hallucinate.py
 # still containing TARGET_SEQUENCE = "REPLACE_ME". Prefer the repo copy; fall back
 # to the installed one only if the repo template is absent.
-MOSAIC_HALLUCINATE_SRC_REPO = BINDMASTER_DIR / "bindmaster_examples" / "hallucinate_bindmaster.py"
-MOSAIC_HALLUCINATE_SRC_INSTALLED = MOSAIC_DIR / "examples" / "bindmaster_examples" / "hallucinate_bindmaster.py"
+MOSAIC_HALLUCINATE_SRC_REPO = BINDERSCOUT_DIR / "binderscout_examples" / "hallucinate_binderscout.py"
+MOSAIC_HALLUCINATE_SRC_INSTALLED = MOSAIC_DIR / "examples" / "binderscout_examples" / "hallucinate_binderscout.py"
 MOSAIC_HALLUCINATE_SRC = (
     MOSAIC_HALLUCINATE_SRC_REPO if MOSAIC_HALLUCINATE_SRC_REPO.is_file() else MOSAIC_HALLUCINATE_SRC_INSTALLED
 )
@@ -168,7 +170,7 @@ MOSAIC_HALLUCINATE_SRC = (
 _BINDCRAFT2_SCAFFOLDED = frozenset({"VHH", "ARP", "scFv", "Fab"})
 # The subset the wizard prompts for: the de novo formats. Everything else —
 # VHH, ARP, scFv, Fab, cyclic_peptide, homo_oligomer, multidomain, induced_fit,
-# fold_switch — stays reachable through `bindmaster configure --config`, the same
+# fold_switch — stays reachable through `binderscout configure --config`, the same
 # scoping RFD3 and Protein-Hunter got.
 #
 # The scaffolded formats are out deliberately rather than by omission: VHH, scFv
@@ -277,21 +279,21 @@ def detect_installs() -> dict:
         "boltzgen": _env_exists("BoltzGen"),
         "mosaic": (MOSAIC_VENV / "bin" / "python").exists(),
         "evaluator": ((EVALUATOR_DIR / "evaluate.sh").exists() and _env_exists("binder-eval")),
-        "pxdesign_local": _env_exists("bindmaster_pxdesign"),
+        "pxdesign_local": _env_exists("binderscout_pxdesign"),
         "proteina_complexa": (PROTEINA_COMPLEXA_VENV / "bin" / "python").exists(),
         # Not a conda env: BindCraft 2 builds its own venv, and the `bindcraft`
         # console script only exists once the editable install succeeded, so it
         # distinguishes a finished install from a staged-but-unbuilt checkout.
         "bindcraft2": (BINDCRAFT2_VENV / "bin" / "bindcraft").exists(),
-        "rfd3": _env_exists("bindmaster_rfd3") and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
-        # An env directory is not an install: BM5 carried a `bindmaster_protein_hunter`
+        "rfd3": _env_exists("binderscout_rfd3") and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
+        # An env directory is not an install: BM5 carried a `binderscout_protein_hunter`
         # env for months that held only pip and setuptools — no PyRosetta, no boltz_ph —
         # and this probe reported the tool as ready. Look for PyRosetta, which is the
         # part that actually fails to install, and which design.py imports at startup.
         "protein_hunter": (
-            _env_exists("bindmaster_protein_hunter")
+            _env_exists("binderscout_protein_hunter")
             and PROTEIN_HUNTER_DIR.exists()
-            and _env_has_package("bindmaster_protein_hunter", "pyrosetta")
+            and _env_has_package("binderscout_protein_hunter", "pyrosetta")
         ),
         "af3": _env_exists("binder-eval-af3"),
         "esmfold2": _env_exists("binder-eval-esmfold2"),
@@ -305,10 +307,10 @@ def detect_installs() -> dict:
 def banner():
     print()
     print(f"{BOLD}{'═' * 60}{RESET}")
-    print(f"{BOLD}  BindMaster Configurator{RESET}")
+    print(f"{BOLD}  BinderScout Configurator{RESET}")
     print("  Protein Binder Design Pipeline Setup Wizard")
     print(f"{BOLD}{'═' * 60}{RESET}")
-    print(f"  {CYAN}Tools dir{RESET} : {BINDMASTER_DIR}")
+    print(f"  {CYAN}Tools dir{RESET} : {BINDERSCOUT_DIR}")
     if CONDA_BASE:
         print(f"  {CYAN}Conda base{RESET}: {CONDA_BASE}")
     else:
@@ -317,9 +319,9 @@ def banner():
     if CONDA_BASE is None:
         print_warn("conda/mamba not found. Install detection will be disabled.")
         print()
-    if not (BINDMASTER_DIR / "install" / "install.sh").exists():
-        print_warn(f"install/install.sh not found in {BINDMASTER_DIR}")
-        print(f"  Set {YELLOW}BINDMASTER_DIR{RESET} env var to the correct path if tools are elsewhere.")
+    if not (BINDERSCOUT_DIR / "install" / "install.sh").exists():
+        print_warn(f"install/install.sh not found in {BINDERSCOUT_DIR}")
+        print(f"  Set {YELLOW}BINDERSCOUT_DIR{RESET} env var to the correct path if tools are elsewhere.")
         print()
 
 
@@ -926,7 +928,7 @@ def write_boltzgen_yaml(path: Path, cfg: dict):
     lines = [
         f"# BoltzGen design specification for {cfg['name']}",
         f"# Mode: {'nanobody scaffold CDR redesign' if nanobody else 'de-novo protein binder'}",
-        "# Generated by BindMaster Configurator",
+        "# Generated by BinderScout Configurator",
         "#",
         "# Run with:",
         "#   boltzgen run config.yaml \\",
@@ -1026,8 +1028,8 @@ def hotspots_to_epitope_idx(cfg: dict) -> list[int] | None:
 
 def write_mosaic_hallucinate(path: Path, cfg: dict):
     """
-    Copy hallucinate_bindmaster.py and inject run parameters into the
-    BINDMASTER PARAMETERS block at the top of the file.
+    Copy hallucinate_binderscout.py and inject run parameters into the
+    BINDERSCOUT PARAMETERS block at the top of the file.
     """
     content = MOSAIC_HALLUCINATE_SRC.read_text()
 
@@ -1063,10 +1065,10 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
         # generate-now-launch-later workflow, and the placeholder has leaked far enough
         # downstream before that the evaluator carries a REPLACE_ME guard of its own.
         print_fail(f"Mosaic template has drifted: {MOSAIC_HALLUCINATE_SRC}")
-        print_warn("  Its BINDMASTER PARAMETERS block does not match what the configurator injects.")
+        print_warn("  Its BINDERSCOUT PARAMETERS block does not match what the configurator injects.")
         print_warn("  Most likely the Mosaic checkout predates a template change — re-run")
-        print_warn("  `bindmaster install --tool mosaic`, or point MOSAIC_HALLUCINATE_SRC at the")
-        print_warn("  repo copy in bindmaster_examples/.")
+        print_warn("  `binderscout install --tool mosaic`, or point MOSAIC_HALLUCINATE_SRC at the")
+        print_warn("  repo copy in binderscout_examples/.")
         sys.exit(1)
 
     content = content.replace(old_block, new_block)
@@ -1076,7 +1078,7 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
 def write_run_bindcraft(path: Path, cfg: dict):
     run_dir = cfg["run_dir"]
     conda_base = str(CONDA_BASE) if CONDA_BASE else ""
-    bindmaster_dir = str(BINDMASTER_DIR)
+    binderscout_dir = str(BINDERSCOUT_DIR)
     name = cfg["name"]
     target_seq = cfg.get("target_sequence", "")
     chains_str = cfg.get("chains", "A")
@@ -1087,8 +1089,8 @@ def write_run_bindcraft(path: Path, cfg: dict):
         settings_dir_var="SETTINGS_DIR",
         conda_env="BindCraft",
         version_dict_inner="""
-    "bindmaster_git_sha": "$GIT_SHA",
-    "bindmaster_git_branch": "$GIT_BRANCH",
+    "binderscout_git_sha": "$GIT_SHA",
+    "binderscout_git_branch": "$GIT_BRANCH",
     "bindcraft_repo_git_sha": "$BINDCRAFT_SHA\"""",
         target_dict_inner=f"""
     "name": "{name}",
@@ -1113,7 +1115,7 @@ def write_run_bindcraft(path: Path, cfg: dict):
         f"""\
 #!/usr/bin/env bash
 # Run BindCraft for {cfg["name"]}
-# Generated by BindMaster Configurator
+# Generated by BinderScout Configurator
 set -euo pipefail
 
 BINDCRAFT_DIR="{BINDCRAFT_DIR}"
@@ -1127,7 +1129,7 @@ ADVANCED="{run_dir}/bindcraft/advanced.json"
 set +u
 _conda_found=false
 for _conda_sh in \\
-    "{bindmaster_dir}/conda/etc/profile.d/conda.sh" \\
+    "{binderscout_dir}/conda/etc/profile.d/conda.sh" \\
     "{conda_base}/etc/profile.d/conda.sh" \\
     "${{HOME}}/miniforge3/etc/profile.d/conda.sh" \\
     "${{HOME}}/mambaforge/etc/profile.d/conda.sh" \\
@@ -1193,7 +1195,7 @@ python -u ./bindcraft.py \\
 def write_run_boltzgen(path: Path, cfg: dict):
     run_dir = cfg["run_dir"]
     conda_base = str(CONDA_BASE) if CONDA_BASE else ""
-    bindmaster_dir = str(BINDMASTER_DIR)
+    binderscout_dir = str(BINDERSCOUT_DIR)
     name = cfg["name"]
     target_seq = cfg.get("target_sequence", "")
     chains_str = cfg.get("chains", "A")
@@ -1204,8 +1206,8 @@ def write_run_boltzgen(path: Path, cfg: dict):
         settings_dir_var="SETTINGS_DIR",
         conda_env="BoltzGen",
         version_dict_inner="""
-    "bindmaster_git_sha": "$GIT_SHA",
-    "bindmaster_git_branch": "$GIT_BRANCH",
+    "binderscout_git_sha": "$GIT_SHA",
+    "binderscout_git_branch": "$GIT_BRANCH",
     "boltzgen_repo_git_sha": "$BOLTZGEN_SHA\"""",
         target_dict_inner=f"""
     "name": "{name}",
@@ -1230,7 +1232,7 @@ def write_run_boltzgen(path: Path, cfg: dict):
         f"""\
 #!/usr/bin/env bash
 # Run BoltzGen for {cfg["name"]}
-# Generated by BindMaster Configurator
+# Generated by BinderScout Configurator
 set -euo pipefail
 
 CONFIG="{run_dir}/boltzgen/config.yaml"
@@ -1242,7 +1244,7 @@ OUTPUT_DIR="{run_dir}/boltzgen/outputs"
 set +u
 _conda_found=false
 for _conda_sh in \\
-    "{bindmaster_dir}/conda/etc/profile.d/conda.sh" \\
+    "{binderscout_dir}/conda/etc/profile.d/conda.sh" \\
     "{conda_base}/etc/profile.d/conda.sh" \\
     "${{HOME}}/miniforge3/etc/profile.d/conda.sh" \\
     "${{HOME}}/mambaforge/etc/profile.d/conda.sh" \\
@@ -1292,8 +1294,8 @@ def write_run_mosaic(path: Path, cfg: dict):
         settings_dir_var="MOSAIC_DIR",
         conda_env="(uv venv: Mosaic/.venv)",
         version_dict_inner="""
-    "bindmaster_git_sha": "$GIT_SHA",
-    "bindmaster_git_branch": "$GIT_BRANCH",
+    "binderscout_git_sha": "$GIT_SHA",
+    "binderscout_git_branch": "$GIT_BRANCH",
     "mosaic_repo_git_sha": "$MOSAIC_SHA\"""",
         target_dict_inner=f"""
     "name": "{name}",
@@ -1322,7 +1324,7 @@ def write_run_mosaic(path: Path, cfg: dict):
         f"""\
 #!/usr/bin/env bash
 # Run Mosaic for {cfg["name"]}
-# Generated by BindMaster Configurator
+# Generated by BinderScout Configurator
 set -euo pipefail
 
 MOSAIC_PYTHON="{mosaic_python}"
@@ -1330,7 +1332,7 @@ MOSAIC_DIR="{run_dir}/mosaic"
 
 if [[ ! -x "$MOSAIC_PYTHON" ]]; then
     echo "ERROR: Mosaic uv venv not found at $MOSAIC_PYTHON" >&2
-    echo "Run: bindmaster install --tool mosaic  (or: bash {BINDMASTER_DIR}/install/install.sh --tool mosaic)" >&2
+    echo "Run: binderscout install --tool mosaic  (or: bash {BINDERSCOUT_DIR}/install/install.sh --tool mosaic)" >&2
     exit 1
 fi
 
@@ -1387,7 +1389,7 @@ def _settings_json_block(
 
     Implements the convention from CLAUDE.md > Conventions > "Per-run settings.json".
     Caller must have already activated the conda env (so `python` is on PATH and
-    `git -C "{BINDMASTER_DIR}" rev-parse HEAD` works).
+    `git -C "{BINDERSCOUT_DIR}" rev-parse HEAD` works).
 
     Parameters are bash snippets (not full strings) because each tool's version /
     target / design_params dicts have tool-specific keys.  The block resolves
@@ -1411,8 +1413,8 @@ def _settings_json_block(
 # self-describing settings.json into its output subdir BEFORE launching the
 # design step, so future sessions can audit `cat <tool>/settings.json` instead
 # of grepping run.log.
-GIT_SHA=$(git -C "{BINDMASTER_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")
-GIT_BRANCH=$(git -C "{BINDMASTER_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+GIT_SHA=$(git -C "{BINDERSCOUT_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git -C "{BINDERSCOUT_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 # `|| echo` is load-bearing: every generated script runs under `set -euo pipefail`, and
 # with pipefail a failing nvidia-smi in a command substitution kills the script (exit 127)
 # BEFORE the design step. GIT_SHA/GIT_BRANCH/PY_VER above are already guarded this way;
@@ -1452,11 +1454,11 @@ SETTINGS_JSON_EOF
 def _pxdesign_conda_header(cfg: dict) -> str:
     """Return the common bash header for PXDesign run scripts (conda init + env vars)."""
     conda_base = str(CONDA_BASE) if CONDA_BASE else ""
-    bindmaster_dir = str(BINDMASTER_DIR)
+    binderscout_dir = str(BINDERSCOUT_DIR)
     return f"""\
 #!/usr/bin/env bash
 # Run PXDesign for {cfg["name"]}
-# Generated by BindMaster Configurator
+# Generated by BinderScout Configurator
 set -euo pipefail
 
 PXDESIGN_DIR="{PXDESIGN_DIR}"
@@ -1465,7 +1467,7 @@ PXDESIGN_DIR="{PXDESIGN_DIR}"
 set +u
 _conda_found=false
 for _conda_sh in \\
-    "{bindmaster_dir}/conda/etc/profile.d/conda.sh" \\
+    "{binderscout_dir}/conda/etc/profile.d/conda.sh" \\
     "{conda_base}/etc/profile.d/conda.sh" \\
     "${{HOME}}/miniforge3/etc/profile.d/conda.sh" \\
     "${{HOME}}/mambaforge/etc/profile.d/conda.sh" \\
@@ -1477,7 +1479,7 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
-conda activate bindmaster_pxdesign
+conda activate binderscout_pxdesign
 export CUDA_HOME="$CONDA_PREFIX"
 
 # Surface CUDA dev headers + libs for PyTorch's JIT compiler.
@@ -1700,10 +1702,10 @@ def write_run_pxdesign(path: Path, cfg: dict):
     settings_block = _settings_json_block(
         tool="pxdesign",
         settings_dir_var="SETTINGS_DIR",
-        conda_env="bindmaster_pxdesign",
+        conda_env="binderscout_pxdesign",
         version_dict_inner="""
-    "bindmaster_git_sha": "$GIT_SHA",
-    "bindmaster_git_branch": "$GIT_BRANCH",
+    "binderscout_git_sha": "$GIT_SHA",
+    "binderscout_git_branch": "$GIT_BRANCH",
     "pxdesign_repo_git_sha": "$PXDESIGN_SHA\"""",
         target_dict_inner=f"""
     "name": "{name}",
@@ -1819,7 +1821,7 @@ def write_run_all(path: Path, cfg: dict, tools_enabled: dict):
         # The order line used to name all seven tools regardless of what was enabled,
         # so a two-tool run advertised five tools it would never start.
         f"# Run all enabled tools for {cfg['name']} in order: {_run_all_order(tools_enabled)}",
-        "# Generated by BindMaster Configurator",
+        "# Generated by BinderScout Configurator",
         "#",
         "# Deliberately NOT `set -e`, and no `exit 1` per step. These tools run for hours",
         "# to days each and fail independently — a BoltzGen OOM at hour 2 used to abort the",
@@ -1931,7 +1933,7 @@ def write_run_all(path: Path, cfg: dict, tools_enabled: dict):
             "# which tool died and want the report on the ones that finished. An entirely",
             "# empty pool still errors out inside extract.",
             "if [ ${#FAILED[@]} -gt 0 ]; then",
-            "    export BINDMASTER_ALLOW_EMPTY=1",
+            "    export BINDERSCOUT_ALLOW_EMPTY=1",
             "fi",
             'if ! "$RUN_DIR/run_evaluate.sh"; then',
             '    FAILED+=("Evaluator")',
@@ -2000,8 +2002,8 @@ def write_run_proteina_complexa(path: Path, cfg: dict):
         settings_dir_var="SETTINGS_DIR",
         conda_env="(uv venv: Proteina-Complexa/.venv)",
         version_dict_inner="""
-    "bindmaster_git_sha": "$GIT_SHA",
-    "bindmaster_git_branch": "$GIT_BRANCH",
+    "binderscout_git_sha": "$GIT_SHA",
+    "binderscout_git_branch": "$GIT_BRANCH",
     "complexa_repo_git_sha": "$COMPLEXA_SHA\"""",
         target_dict_inner=f"""
     "name": "{name}",
@@ -2026,7 +2028,7 @@ def write_run_proteina_complexa(path: Path, cfg: dict):
         f"""\
 #!/usr/bin/env bash
 # Run Proteina-Complexa for {name}
-# Generated by BindMaster Configurator
+# Generated by BinderScout Configurator
 set -euo pipefail
 
 PROTEINA_COMPLEXA_DIR="{PROTEINA_COMPLEXA_DIR}"
@@ -2052,11 +2054,11 @@ echo "=== Running Proteina-Complexa for {name} ==="
 echo "  Settings persisted: $SETTINGS_DIR/settings.json"
 
 # Write custom target definition
-TARGET_YAML="$RUN_DIR/proteina_complexa/target_bindmaster.yaml"
+TARGET_YAML="$RUN_DIR/proteina_complexa/target_binderscout.yaml"
 cat > "$TARGET_YAML" << 'TARGETEOF'
 target_dict_cfg:
-  bindmaster_{cfg["name"]}:
-    source: bindmaster
+  binderscout_{cfg["name"]}:
+    source: binderscout
     target_filename: "{cfg["name"]}"
     target_path: "{target_pdb}"
     target_input:
@@ -2079,7 +2081,7 @@ echo ""
 # Run Proteina-Complexa design pipeline
 complexa design configs/search_binder_local_pipeline.yaml \\
     ++run_name="{cfg["name"]}" \\
-    ++generation.task_name="bindmaster_{cfg["name"]}" \\
+    ++generation.task_name="binderscout_{cfg["name"]}" \\
     ++generation.dataloader.dataset.nres.low={min_len} \\
     ++generation.dataloader.dataset.nres.high={max_len} \\
     ++generation.search.algorithm={search_algo} \\
@@ -2260,7 +2262,7 @@ def write_bindcraft2_campaign(path: Path, cfg: dict):
 def write_run_bindcraft2(path: Path, cfg: dict):
     """Generate run_bindcraft2.sh.
 
-    Mirrors bindmaster_examples/run_bindcraft2.sh.template. BindCraft 2 differs
+    Mirrors binderscout_examples/run_bindcraft2.sh.template. BindCraft 2 differs
     from every other tool here in three ways that shape this script:
 
       - It lives in a uv venv beside its own checkout, not a conda env, because
@@ -2295,8 +2297,8 @@ def write_run_bindcraft2(path: Path, cfg: dict):
         settings_dir_var="BC2_OUT",
         conda_env="(uv venv: BindCraft2/.venv)",
         version_dict_inner="""
-    "bindmaster_git_sha": "$GIT_SHA",
-    "bindmaster_git_branch": "$GIT_BRANCH",
+    "binderscout_git_sha": "$GIT_SHA",
+    "binderscout_git_branch": "$GIT_BRANCH",
     "bindcraft2_version": "$BC2_VER",
     "bindcraft2_source_sha256": "$BC2_SRC\"""",
         target_dict_inner=f"""
@@ -2335,7 +2337,7 @@ def write_run_bindcraft2(path: Path, cfg: dict):
         f"""\
 #!/usr/bin/env bash
 # Run BindCraft 2 for {name}
-# Generated by BindMaster Configurator (mirrors bindmaster_examples/run_bindcraft2.sh.template).
+# Generated by BinderScout Configurator (mirrors binderscout_examples/run_bindcraft2.sh.template).
 #
 # BindCraft 2 reads ONE layered campaign file; everything in it wins over the
 # presets beneath. The campaign is written beside this script, not inline, so it
@@ -2353,7 +2355,7 @@ mkdir -p "$BC2_OUT"
 
 if [[ ! -x "$BC2_BIN" ]]; then
     echo "ERROR: BindCraft 2 is not installed at $BC2_DIR" >&2
-    echo "       bindmaster install --tool bindcraft2 --bc2-source /path/to/BindCraft2.zip" >&2
+    echo "       binderscout install --tool bindcraft2 --bc2-source /path/to/BindCraft2.zip" >&2
     exit 1
 fi
 
@@ -2367,8 +2369,8 @@ export PATH="$BC2_DIR/.venv/bin:$PATH"
 # than falling back.
 for _af2 in \\
     "${{BINDCRAFT2_AF2_PARAMS:-}}" \\
-    "{BINDMASTER_DIR}/BindCraft/params" \\
-    "${{HOME}}/Documents/OLD/BindMaster/bindcraft-tools/af2_params"; do
+    "{BINDERSCOUT_DIR}/BindCraft/params" \\
+    "${{HOME}}/Documents/OLD/BinderScout/bindcraft-tools/af2_params"; do
     if [[ -n "$_af2" && -d "$_af2" ]]; then
         export BINDCRAFT_AF2_PARAMS="$_af2"
         break
@@ -2383,7 +2385,7 @@ done
 _card=$(nvidia-smi --query-gpu=name --format=csv,noheader -i 0 2>/dev/null | head -1 || echo "")
 if [[ -n "$_card" ]]; then
     _card=$(printf '%s' "$_card" | sed 's/[^A-Za-z0-9]\\+/_/g; s/^_//; s/_$//')
-    export JAX_COMPILATION_CACHE_DIR="${{HOME}}/.cache/bindmaster/bc2_xla/$_card"
+    export JAX_COMPILATION_CACHE_DIR="${{HOME}}/.cache/binderscout/bc2_xla/$_card"
     mkdir -p "$JAX_COMPILATION_CACHE_DIR"
 fi
 # BindCraft 2 sets its own XLA_PYTHON_CLIENT_PREALLOCATE and appends its own
@@ -2438,7 +2440,7 @@ fi
 def write_run_rfd3(path: Path, cfg: dict):
     """Generate run_rfd3.sh — two-stage RFD3 (backbone diffusion) + ProteinMPNN (sequences).
 
-    Mirrors bindmaster_examples/run_rfd3.sh.template (the canonical CALCA-validated
+    Mirrors binderscout_examples/run_rfd3.sh.template (the canonical CALCA-validated
     pattern).  See CLAUDE.md "RFD3 / foundry runtime gotchas" for non-obvious bits:
       - rfd3 design writes .cif.gz with UNK residues (no real sequence)
       - chain IDs in output are A=target, B=binder (matches contig order)
@@ -2511,10 +2513,10 @@ def write_run_rfd3(path: Path, cfg: dict):
     settings_block = _settings_json_block(
         tool="rfd3",
         settings_dir_var="RFD3_DIR",
-        conda_env="bindmaster_rfd3",
+        conda_env="binderscout_rfd3",
         version_dict_inner="""
-    "bindmaster_git_sha": "$GIT_SHA",
-    "bindmaster_git_branch": "$GIT_BRANCH",
+    "binderscout_git_sha": "$GIT_SHA",
+    "binderscout_git_branch": "$GIT_BRANCH",
     "rfd3_pkg_version": "$RFD3_VER\"""",
         target_dict_inner=f"""
     "name": "{name}",
@@ -2543,7 +2545,7 @@ def write_run_rfd3(path: Path, cfg: dict):
         f"""\
 #!/usr/bin/env bash
 # Run RFdiffusion3 (foundry) + ProteinMPNN for {name}
-# Generated by BindMaster Configurator (mirrors bindmaster_examples/run_rfd3.sh.template).
+# Generated by BinderScout Configurator (mirrors binderscout_examples/run_rfd3.sh.template).
 #
 # Two-stage flow:
 #   1. rfd3 design  → .cif.gz backbones (chain A=target, chain B=binder, UNK residues)
@@ -2567,7 +2569,7 @@ mkdir -p "$DIFF_DIR" "$MPNN_DIR"
 set +u
 _conda_found=false
 for _conda_sh in \\
-    "{BINDMASTER_DIR}/conda/etc/profile.d/conda.sh" \\
+    "{BINDERSCOUT_DIR}/conda/etc/profile.d/conda.sh" \\
     "{CONDA_BASE}/etc/profile.d/conda.sh" \\
     "${{HOME}}/miniforge3/etc/profile.d/conda.sh" \\
     "${{HOME}}/mambaforge/etc/profile.d/conda.sh" \\
@@ -2579,7 +2581,7 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
-conda activate bindmaster_rfd3
+conda activate binderscout_rfd3
 
 # foundry's checkpoint registry reads FOUNDRY_CHECKPOINT_DIRS / FOUNDRY_CHECKPOINTS_DIR.
 # Singular FOUNDRY_CHECKPOINT_DIR is silently ignored (rfd3 design then aborts with
@@ -2761,7 +2763,7 @@ echo "  Aggregated FASTA:    $RFD3_DIR/sequences.fasta"
 def write_run_protein_hunter(path: Path, cfg: dict):
     """Generate run_protein_hunter.sh — Boltz-2 protein binder design (Protein-Hunter).
 
-    Mirrors bindmaster_examples/run_protein_hunter.sh.template (the canonical
+    Mirrors binderscout_examples/run_protein_hunter.sh.template (the canonical
     CALCA-validated pattern). See CLAUDE.md "Protein-Hunter / boltz_ph runtime
     gotchas" for the non-obvious bits:
       - --msa_mode accepts only "single" / "mmseqs" (NOT "single_sequence").
@@ -2792,10 +2794,10 @@ def write_run_protein_hunter(path: Path, cfg: dict):
     settings_block = _settings_json_block(
         tool="protein-hunter",
         settings_dir_var="PH_DIR_OUT",
-        conda_env="bindmaster_protein_hunter",
+        conda_env="binderscout_protein_hunter",
         version_dict_inner="""
-    "bindmaster_git_sha": "$GIT_SHA",
-    "bindmaster_git_branch": "$GIT_BRANCH",
+    "binderscout_git_sha": "$GIT_SHA",
+    "binderscout_git_branch": "$GIT_BRANCH",
     "tool_repo_git_sha": "$PH_SHA\"""",
         target_dict_inner=f"""
     "name": "{name}",
@@ -2819,7 +2821,7 @@ def write_run_protein_hunter(path: Path, cfg: dict):
         f"""\
 #!/usr/bin/env bash
 # Run Protein-Hunter (Boltz-2 binder design with cycle optimization) for {name}
-# Generated by BindMaster Configurator (mirrors bindmaster_examples/run_protein_hunter.sh.template).
+# Generated by BinderScout Configurator (mirrors binderscout_examples/run_protein_hunter.sh.template).
 set -euo pipefail
 
 RUN_DIR="{run_dir}"
@@ -2831,7 +2833,7 @@ mkdir -p "$PH_DIR_OUT"
 set +u
 _conda_found=false
 for _conda_sh in \\
-    "{BINDMASTER_DIR}/conda/etc/profile.d/conda.sh" \\
+    "{BINDERSCOUT_DIR}/conda/etc/profile.d/conda.sh" \\
     "{CONDA_BASE}/etc/profile.d/conda.sh" \\
     "${{HOME}}/miniforge3/etc/profile.d/conda.sh" \\
     "${{HOME}}/mambaforge/etc/profile.d/conda.sh" \\
@@ -2843,7 +2845,7 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
-conda activate bindmaster_protein_hunter
+conda activate binderscout_protein_hunter
 set -u
 
 # Gotcha: boltz_ph reads Boltz-2 weights + CCD library from ~/.boltz. The
@@ -3064,18 +3066,18 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     # Build the evaluate.sh invocation
     eval_sh = EVALUATOR_DIR / "evaluate.sh"
     conda_base = str(CONDA_BASE) if CONDA_BASE else ""
-    bindmaster_dir = str(BINDMASTER_DIR)
+    binderscout_dir = str(BINDERSCOUT_DIR)
     lines = [
         "#!/usr/bin/env bash",
         f"# Run Evaluator for {cfg['name']}",
-        "# Generated by BindMaster Configurator",
+        "# Generated by BinderScout Configurator",
         "set -euo pipefail",
         "",
         "# Robust conda init — works in non-interactive shells (no conda on PATH by default)",
         "set +u",
         "_conda_found=false",
         "for _conda_sh in \\",
-        f'    "{bindmaster_dir}/conda/etc/profile.d/conda.sh" \\',
+        f'    "{binderscout_dir}/conda/etc/profile.d/conda.sh" \\',
         f'    "{conda_base}/etc/profile.d/conda.sh" \\',
         '    "${HOME}/miniforge3/etc/profile.d/conda.sh" \\',
         '    "${HOME}/mambaforge/etc/profile.d/conda.sh" \\',
@@ -3094,7 +3096,7 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         "",
         'if [[ ! -f "$EVAL_SCRIPT" ]]; then',
         '    echo "ERROR: Evaluator not found at $EVAL_SCRIPT" >&2',
-        '    echo "Run: bindmaster install --tool evaluator" >&2',
+        '    echo "Run: binderscout install --tool evaluator" >&2',
         "    exit 1",
         "fi",
         "",
@@ -3120,7 +3122,7 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
             # Set by run_all.sh when a design tool failed, so the tools that DID finish
             # still get evaluated. Unset (the standalone case) keeps extract strict: a
             # requested directory that yields nothing is an error, not a shrug.
-            "        ${BINDMASTER_ALLOW_EMPTY:+--allow-empty}",
+            "        ${BINDERSCOUT_ALLOW_EMPTY:+--allow-empty}",
             "fi",
             "",
         ]
@@ -3191,7 +3193,7 @@ def write_run_config(path: Path, cfg: dict, tools_enabled: dict) -> None:
     """
     payload = {
         "_comment": (
-            "Written by `bindmaster configure`. Replay with: "
+            "Written by `binderscout configure`. Replay with: "
             "`python configurator/configurator.py --config <this file>`. "
             "Edit freely — every key maps to one wizard answer."
         ),
@@ -3216,7 +3218,7 @@ def load_run_config(path: Path) -> tuple[dict, dict]:
         sys.exit(1)
 
     if not isinstance(payload, dict) or "cfg" not in payload or "tools_enabled" not in payload:
-        print_fail(f"{path} is not a BindMaster run config (expected 'cfg' and 'tools_enabled' keys).")
+        print_fail(f"{path} is not a BinderScout run config (expected 'cfg' and 'tools_enabled' keys).")
         sys.exit(1)
 
     version = payload.get("config_version")
@@ -3290,23 +3292,23 @@ def _missing_tool_assets(cfg: dict, tools_enabled: dict) -> list[tuple[str, Path
     if tools_enabled.get("bindcraft"):
         for src_dir, stem in ((FILTERS_DIR, cfg.get("filter_preset")), (ADVANCED_DIR, cfg.get("advanced_preset"))):
             if stem and not (src_dir / f"{stem}.json").is_file():
-                missing.append(("BindCraft", src_dir / f"{stem}.json", "bindmaster install --tool bindcraft"))
+                missing.append(("BindCraft", src_dir / f"{stem}.json", "binderscout install --tool bindcraft"))
 
     # Ask the venv, NOT MOSAIC_HALLUCINATE_SRC. That constant now prefers the template
-    # in bindmaster_examples/, which is tracked in this repo and therefore ALWAYS exists —
+    # in binderscout_examples/, which is tracked in this repo and therefore ALWAYS exists —
     # checking it here made "is Mosaic installed" unfalsifiable and silently deleted this
     # guard. Two different questions were riding one constant: which template to inject
     # from (the repo's, always present) versus whether the tool can actually run (the uv
     # venv, which only the installer creates, and which run_mosaic.sh requires).
     if tools_enabled.get("mosaic") and not MOSAIC_VENV.is_dir():
-        missing.append(("Mosaic", MOSAIC_VENV, "bindmaster install --tool mosaic"))
+        missing.append(("Mosaic", MOSAIC_VENV, "binderscout install --tool mosaic"))
 
     if tools_enabled.get("boltzgen") and cfg.get("boltzgen_mode") == "nanobody":
         for name in NANOBODY_SCAFFOLD_NAMES:
             for ext in (".yaml", ".cif"):
                 src = NANOBODY_SCAFFOLDS_SRC / f"{name}{ext}"
                 if not src.is_file():
-                    missing.append(("BoltzGen (nanobody mode)", src, "bindmaster install --tool boltzgen"))
+                    missing.append(("BoltzGen (nanobody mode)", src, "binderscout install --tool boltzgen"))
 
     return missing
 
@@ -3526,11 +3528,11 @@ def run_pipeline(cfg: dict, tools_enabled: dict):
 
 def install_shortcut():
     """
-    Write ~/.local/bin/bindmaster-config pointing at this script.
+    Write ~/.local/bin/binderscout-config pointing at this script.
     Silent no-op if the shortcut already exists and is up to date.
     """
     shortcuts_dir = Path.home() / ".local" / "bin"
-    shortcut = shortcuts_dir / "bindmaster-config"
+    shortcut = shortcuts_dir / "binderscout-config"
     script = Path(__file__).resolve()
     target_line = f'exec python3 "{script}" "$@"\n'
 
@@ -3538,7 +3540,7 @@ def install_shortcut():
         return
 
     shortcuts_dir.mkdir(parents=True, exist_ok=True)
-    shortcut.write_text(f"#!/usr/bin/env bash\n# BindMaster Configurator shortcut — auto-generated\n{target_line}")
+    shortcut.write_text(f"#!/usr/bin/env bash\n# BinderScout Configurator shortcut — auto-generated\n{target_line}")
     shortcut.chmod(0o755)
     print_ok(f"Shortcut installed: {shortcut}")
 
@@ -3571,7 +3573,7 @@ def _handle_sequence_input(run_dir: Path) -> str:
     else:
         method = "alphafold"
         print_warn("Mosaic not installed — local Boltz-2 prediction unavailable.")
-        print(f"  Install with: {CYAN}bindmaster install --tool mosaic{RESET}")
+        print(f"  Install with: {CYAN}binderscout install --tool mosaic{RESET}")
         print()
 
     if "boltz" in method.lower():
@@ -3697,7 +3699,7 @@ def wizard():
     def _tag(key):
         if installed.get(key):
             return f"{GREEN}installed{RESET}"
-        return f"{RED}NOT installed — run: bindmaster install{RESET}"
+        return f"{RED}NOT installed — run: binderscout install{RESET}"
 
     print(f"  {BOLD}Mosaic{RESET}    [{_tag('mosaic')}]")
     use_mosaic = ask_yn("  Enable Mosaic?", default=False)
@@ -4113,7 +4115,7 @@ def wizard():
         )
         cfg["bindcraft2_modality"] = _BINDCRAFT2_WIZARD_MODALITIES[bc2_modality_idx]
         # The other eight modalities and six properties stay reachable through
-        # `bindmaster configure --config`; this prompts for what we actually run.
+        # `binderscout configure --config`; this prompts for what we actually run.
         cfg["bindcraft2_n_designs"] = int(
             ask(
                 "  Number of ACCEPTED designs to reach (a quota, not an attempt count)",
@@ -4459,7 +4461,7 @@ def cmd_status():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BindMaster Configurator — setup wizard for protein binder design runs",
+        description="BinderScout Configurator — setup wizard for protein binder design runs",
     )
     parser.add_argument(
         "--archive",

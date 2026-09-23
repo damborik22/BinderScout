@@ -106,7 +106,7 @@ PY
     # ours would override the tool's own resolver rather than cooperate with it.
     case "$tool" in
         mosaic)
-            # hallucinate_bindmaster.py:19 defaults MOSAIC_TARGET_GIB to 64. That is above the
+            # hallucinate_binderscout.py:19 defaults MOSAIC_TARGET_GIB to 64. That is above the
             # empirically safe footprint: a 68.8 GiB run left MemAvailable at 36 GiB, already under
             # the 40 GiB floor (REPO_DIARY.md:1889-1890). Drive it to the budget instead, and stand
             # down our own fraction so the engine's resolver is the single source of truth.
@@ -115,8 +115,8 @@ PY
             ;;
     esac
 
-    # Join the BindMaster MPS server if it is up -- see the isolation note in gpurun.
-    export CUDA_MPS_PIPE_DIRECTORY="${BINDMASTER_MPS_DIR:-/tmp/bindmaster-mps}/pipe"
+    # Join the BinderScout MPS server if it is up -- see the isolation note in gpurun.
+    export CUDA_MPS_PIPE_DIRECTORY="${BINDERSCOUT_MPS_DIR:-/tmp/binderscout-mps}/pipe"
     local mps="down"
     if echo get_default_device_pinned_mem_limit 0 2>/dev/null \
        | timeout 5 nvidia-cuda-mps-control >/dev/null 2>&1; then

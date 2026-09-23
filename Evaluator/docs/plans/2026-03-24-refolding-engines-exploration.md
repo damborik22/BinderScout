@@ -371,11 +371,11 @@ def refold_batch_protenix(
 - [ ] **Step 6: Test with 1 binder sequence to verify the pipeline works**
 
 ```bash
-cd /home/david/BindMaster
+cd /home/david/BinderScout
 Mosaic/.venv/bin/python Evaluator/scripts/refold_protenix.py \
     --sequences <(echo -e ">test\nPAELSERERRIIEDVWYPVVHSGKRYIEEFKPTEWEKRFWEEVAEEVREMLEDYFRWSRS") \
     --target-seq "APFRSALESSPADPATLSEDEARLLLAALVQDYVQMKASELEQEQEREGSSLDSPRSKRCGNLSTCMLGTYTQDFNKFHTFPQTAIGVGAPGKKRDMSSDLERDHRPHVSMPQNAN" \
-    --target-pdb runs/CALCA_combined/target/CALCA_BindMaster_test_01.pdb \
+    --target-pdb runs/CALCA_combined/target/CALCA_BinderScout_test_01.pdb \
     --output-dir /tmp/test_protenix
 ```
 
@@ -680,11 +680,11 @@ CSV columns: `run_id, idx, sequence, target_sequence, binder_length, iptm, ptm, 
 - [ ] **Step 6: Test with 1 binder**
 
 ```bash
-cd /home/david/BindMaster
+cd /home/david/BinderScout
 Mosaic/.venv/bin/python Evaluator/scripts/refold_boltz2_cli.py \
     --sequences <(echo -e ">test\nPAELSERERRIIEDVWYPVVHSGKRYIEEFKPTEWEKRFWEEVAEEVREMLEDYFRWSRS") \
     --target-seq "APFRSALESSPADPATLSEDEARLLLAALVQDYVQMKASELEQEQEREGSSLDSPRSKRCGNLSTCMLGTYTQDFNKFHTFPQTAIGVGAPGKKRDMSSDLERDHRPHVSMPQNAN" \
-    --target-pdb runs/CALCA_combined/target/CALCA_BindMaster_test_01.pdb \
+    --target-pdb runs/CALCA_combined/target/CALCA_BinderScout_test_01.pdb \
     --output-dir /tmp/test_boltz2_cli
 ```
 
@@ -708,7 +708,7 @@ head -6 runs/CALCA_combined/evaluate/sequences_final.fasta > /tmp/test_3_binders
 Mosaic/.venv/bin/python Evaluator/scripts/refold_protenix.py \
     --sequences /tmp/test_3_binders.fasta \
     --target-seq "APFRSALESSPADPATLSEDEARLLLAALVQDYVQMKASELEQEQEREGSSLDSPRSKRCGNLSTCMLGTYTQDFNKFHTFPQTAIGVGAPGKKRDMSSDLERDHRPHVSMPQNAN" \
-    --target-pdb runs/CALCA_combined/target/CALCA_BindMaster_test_01.pdb \
+    --target-pdb runs/CALCA_combined/target/CALCA_BinderScout_test_01.pdb \
     --output-dir /tmp/test_protenix_calca
 ```
 
@@ -718,7 +718,7 @@ Mosaic/.venv/bin/python Evaluator/scripts/refold_protenix.py \
 Mosaic/.venv/bin/python Evaluator/scripts/refold_boltz2_cli.py \
     --sequences /tmp/test_3_binders.fasta \
     --target-seq "APFRSALESSPADPATLSEDEARLLLAALVQDYVQMKASELEQEQEREGSSLDSPRSKRCGNLSTCMLGTYTQDFNKFHTFPQTAIGVGAPGKKRDMSSDLERDHRPHVSMPQNAN" \
-    --target-pdb runs/CALCA_combined/target/CALCA_BindMaster_test_01.pdb \
+    --target-pdb runs/CALCA_combined/target/CALCA_BinderScout_test_01.pdb \
     --output-dir /tmp/test_boltz2_cli_calca
 ```
 

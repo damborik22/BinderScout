@@ -7,7 +7,7 @@
 
 A unified toolkit for GPU-accelerated protein binder design — installer, configurator, and evaluator in one repository.
 
-> **Renamed from *BindMaster*.** This project was developed under the internal working name *BindMaster* and is now being released as **BinderScout**. The codebase still uses `bindmaster` in many places — the CLI command (`bindmaster install`, `bindmaster configure`, `bindmaster evaluate`), several conda env names (`bindmaster_pxdesign`, `bindmaster_protein_hunter`, `bindmaster_rfd3`), file and directory names (`bindmaster_examples/`, `bindmaster.py`), and environment variables (`BINDMASTER_*`). These are equivalent to the new name and will be migrated incrementally; functional behavior is unchanged. The GitHub remote is now `damborik22/BinderScout` (the old `damborik22/BindMaster` URL redirects).
+> **Renamed from *BinderScout*.** This project was developed under the internal working name *BinderScout* and is now being released as **BinderScout**. The codebase still uses `binderscout` in many places — the CLI command (`binderscout install`, `binderscout configure`, `binderscout evaluate`), several conda env names (`binderscout_pxdesign`, `binderscout_protein_hunter`, `binderscout_rfd3`), file and directory names (`binderscout_examples/`, `binderscout.py`), and environment variables (`BINDERSCOUT_*`). These are equivalent to the new name and will be migrated incrementally; functional behavior is unchanged. The GitHub remote is now `damborik22/BinderScout` (the old `damborik22/BinderScout` URL redirects).
 
 ---
 
@@ -15,9 +15,9 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 | Component | What it does | Runs in |
 |---|---|---|
-| `bindmaster install` | Installs design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the default refold engine ESMFold2 and the SoluProt solubility screen; BindCraft 2 needs its source handed to `--bc2-source`, and AF3 is a separate `--tool` add (gated weights) | bash |
-| `bindmaster configure` | Interactive wizard: target → configs → run scripts | system Python |
-| `bindmaster evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by two-stage cross-engine iPTM, generate HTML report | conda env `binder-eval` |
+| `binderscout install` | Installs design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the default refold engine ESMFold2 and the SoluProt solubility screen; BindCraft 2 needs its source handed to `--bc2-source`, and AF3 is a separate `--tool` add (gated weights) | bash |
+| `binderscout configure` | Interactive wizard: target → configs → run scripts | system Python |
+| `binderscout evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by two-stage cross-engine iPTM, generate HTML report | conda env `binder-eval` |
 
 ### Installed tools
 
@@ -27,10 +27,10 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 | **BindCraft 2** | AF2 hallucination rewritten for JAX — no PyRosetta, no conda. A separate tool, not a newer BindCraft: the two coexist | uv venv `BindCraft2/.venv` (Python ≥3.12, installed editable) | x86_64 + aarch64 (opt-in there) |
 | **BoltzGen** | Boltz-1 diffusion structure generation | conda env `BoltzGen` (Python 3.12) | x86_64 + aarch64 |
 | **Mosaic** | JAX / Boltz-2 gradient hallucination | uv venv `Mosaic/.venv` (Python 3.12) | x86_64 |
-| **PXDesign** | Protenix-based de novo design (diffusion + MPNN + AF2 eval) | conda env `bindmaster_pxdesign` (Python 3.11) | x86_64 + aarch64 |
+| **PXDesign** | Protenix-based de novo design (diffusion + MPNN + AF2 eval) | conda env `binderscout_pxdesign` (Python 3.11) | x86_64 + aarch64 |
 | **Proteina-Complexa** | NVIDIA flow matching + inference-time optimisation (best-of-N, beam, MCTS) | uv venv `Proteina-Complexa/.venv` (Python 3.12) | x86_64 (aarch64 needs patches) |
-| **Protein-Hunter** | Boltz-2 / Chai-1 hallucination across 6 modalities (protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA) | conda env `bindmaster_protein_hunter` (Python 3.10) | x86_64 |
-| **RFD3** | RosettaCommons foundry diffusion (RFdiffusion3 + ProteinMPNN, BSD-3, commercial-use OK) | conda env `bindmaster_rfd3` (Python 3.12) | x86_64 + aarch64 |
+| **Protein-Hunter** | Boltz-2 / Chai-1 hallucination across 6 modalities (protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA) | conda env `binderscout_protein_hunter` (Python 3.10) | x86_64 |
+| **RFD3** | RosettaCommons foundry diffusion (RFdiffusion3 + ProteinMPNN, BSD-3, commercial-use OK) | conda env `binderscout_rfd3` (Python 3.12) | x86_64 + aarch64 |
 
 > Each tool runs in its own isolated environment. Environments must not be mixed.
 
@@ -39,7 +39,7 @@ but it is source-available under its own licence (BindCraft2 Source-Available,
 hosting-restricted), not this repository's MIT, so no file of it is vendored
 here. The installer stages it from whatever you point `--bc2-source` at,
 including that URL:
-`bindmaster install --tool bindcraft2 --bc2-source <zip|dir>`, or export
+`binderscout install --tool bindcraft2 --bc2-source <zip|dir>`, or export
 `$BINDCRAFT2_SOURCE` once for the machine.
 It installs **editable**, which makes `BindCraft2/` itself the installation:
 moving or deleting that directory breaks the `bindcraft` command inside its
@@ -57,7 +57,7 @@ against the other tools'. The integration is written up in
 
 ### Evaluator engines & filters
 
-The evaluator (`bindmaster evaluate` / `binder-compare`) runs on top of the design tools. Boltz-2 rides the Mosaic venv; ESMFold2 has its own env and is installed by default; AF3 is the canonical big-VRAM cross-check (separate install — gated weights). `evaluate.sh` auto-detects and runs whichever engine envs are present (`--skip-<engine>` to disable). SoluProt is a sequence-only solubility screen that runs **before** refolding so unsoluble designs can be dropped from the FASTA without burning GPU time.
+The evaluator (`binderscout evaluate` / `binder-compare`) runs on top of the design tools. Boltz-2 rides the Mosaic venv; ESMFold2 has its own env and is installed by default; AF3 is the canonical big-VRAM cross-check (separate install — gated weights). `evaluate.sh` auto-detects and runs whichever engine envs are present (`--skip-<engine>` to disable). SoluProt is a sequence-only solubility screen that runs **before** refolding so unsoluble designs can be dropped from the FASTA without burning GPU time.
 
 | Engine / filter | Role | Environment | Platform | Install |
 |---|---|---|---|---|
@@ -123,7 +123,7 @@ flowchart TB
     classDef cli fill:#e1bee7,stroke:#7b1fa2,color:#311b92
     classDef arti fill:#cfd8dc,stroke:#455a64,color:#212121
 
-    CLI["bindmaster\n(unified CLI, stdlib only)"]:::cli
+    CLI["binderscout\n(unified CLI, stdlib only)"]:::cli
 
     CLI -->|install| InstallSh["install.sh\n(x86) / install_aarch.sh\n(aarch64 / DGX Spark)"]
     CLI -->|configure| Configurator["configurator/\nconfigurator.py\n(interactive wizard)"]
@@ -134,10 +134,10 @@ flowchart TB
         EnvBC2["BindCraft2/.venv<br/>(uv, py3.12+, editable)"]:::gen
         EnvBG["BoltzGen<br/>(conda, py3.12)"]:::gen
         EnvMo["Mosaic/.venv<br/>(uv, py3.12)"]:::gen
-        EnvPX["bindmaster_pxdesign<br/>(conda, py3.11)"]:::gen
+        EnvPX["binderscout_pxdesign<br/>(conda, py3.11)"]:::gen
         EnvPC["Proteina-Complexa/.venv<br/>(uv, py3.12)"]:::gen
-        EnvPH["bindmaster_protein_hunter<br/>(conda, py3.10)"]:::gen
-        EnvRF["bindmaster_rfd3<br/>(conda, py3.12)"]:::gen
+        EnvPH["binderscout_protein_hunter<br/>(conda, py3.10)"]:::gen
+        EnvRF["binderscout_rfd3<br/>(conda, py3.12)"]:::gen
     end
 
     subgraph EvalEnvs["Evaluator-side environments"]
@@ -165,8 +165,8 @@ Solid blue boxes are the eight design tools' isolated environments; green / yell
 ## Repository structure
 
 ```
-BindMaster/
-├── bindmaster.py               ← unified CLI dispatcher (system Python, stdlib only)
+BinderScout/
+├── binderscout.py               ← unified CLI dispatcher (system Python, stdlib only)
 ├── tui/
 │   └── app.py                  ← interactive curses menu + numbered fallback
 ├── install/
@@ -182,11 +182,11 @@ BindMaster/
 │   ├── docs/                   ← pipeline reference, analysis notes
 │   └── envs/                   ← conda env specs (binder-eval, binder-eval-af3 [gated weights])
 ├── .claude/
-│   └── skills/                 ← Claude Code skills (bindmaster-orchestrator, bindmaster-worker)
+│   └── skills/                 ← Claude Code skills (binderscout-orchestrator, binderscout-worker)
 ├── scripts/                    ← helper install scripts (PXDesign)
 ├── tests/                      ← unit + integration tests
 ├── docs/                       ← development plans, completed plans, environments reference, scientific notes
-├── bindmaster_examples/        ← canonical run-script templates (Mosaic hallucination, RFD3, Protein-Hunter, BindCraft 2)
+├── binderscout_examples/        ← canonical run-script templates (Mosaic hallucination, RFD3, Protein-Hunter, BindCraft 2)
 ├── tools/
 │   └── aarch64/                ← pre-built ARM64 binaries (dssp, DAlphaBall)
 ├── conda/                      ← local Miniforge3 (standalone mode, gitignored)
@@ -194,7 +194,7 @@ BindMaster/
 └── runs/                       ← generated run folders (gitignored)
 ```
 
-Tool directories (`BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/`) are cloned by the installer and gitignored. `BindCraft2/` is gitignored too, but nothing clones it: the installer stages it from the source you supply and then installs into it editable, so the directory is the installation rather than a disposable checkout. RFD3 has no clone — it is pip-installed (`rc-foundry`) into `bindmaster_rfd3` and stores weights at `weights/foundry/`. AF3 v3.0.2 refolding runs in its own `binder-eval-af3` conda env on any CUDA host (measured ~4.4 GiB peak for 258-391 tokens, so a 24 GB card suffices; DGX Spark today; H200 / GH200 should also work); `refold_af3.py` is the canonical wrapper.
+Tool directories (`BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-Complexa/`, `Protein-Hunter/`) are cloned by the installer and gitignored. `BindCraft2/` is gitignored too, but nothing clones it: the installer stages it from the source you supply and then installs into it editable, so the directory is the installation rather than a disposable checkout. RFD3 has no clone — it is pip-installed (`rc-foundry`) into `binderscout_rfd3` and stores weights at `weights/foundry/`. AF3 v3.0.2 refolding runs in its own `binder-eval-af3` conda env on any CUDA host (measured ~4.4 GiB peak for 258-391 tokens, so a 24 GB card suffices; DGX Spark today; H200 / GH200 should also work); `refold_af3.py` is the canonical wrapper.
 
 ---
 
@@ -206,24 +206,24 @@ git clone https://github.com/damborik22/BinderScout.git ~/BinderScout
 cd ~/BinderScout
 
 # 2. Install tools
-bindmaster install             # interactive menu
-bindmaster install --tool all  # install everything
+binderscout install             # interactive menu
+binderscout install --tool all  # install everything
 
 # 3. Configure a run
-bindmaster configure
+binderscout configure
 
 # 4. Run (scripts generated by configure)
 bash runs/<name>/run_all.sh
 
-# 5. Evaluate results — `bindmaster evaluate` forwards to the binder-compare CLI
+# 5. Evaluate results — `binderscout evaluate` forwards to the binder-compare CLI
 #    (the configurator also writes runs/<name>/run_evaluate.sh, which drives Evaluator/evaluate.sh)
 bash runs/<name>/run_evaluate.sh
 # …or call the pipeline directly:
-bindmaster evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bindcraft \
+binderscout evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bindcraft \
                         --target-seq "<TARGET_SEQ>" -o runs/<name>/evaluate
 ```
 
-> **Prefer menus to flags?** Run `bindmaster` with no arguments for the interactive TUI —
+> **Prefer menus to flags?** Run `binderscout` with no arguments for the interactive TUI —
 > installer checkbox menu, configurator wizard, run launcher and status view.
 > **[docs/walkthrough_and_dataflow.html](docs/walkthrough_and_dataflow.html)** reproduces
 > every screen you will see, verbatim, and traces the full data flow: what each tool
@@ -233,19 +233,19 @@ bindmaster evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bind
 
 ---
 
-## `bindmaster` CLI reference
+## `binderscout` CLI reference
 
 ```
-bindmaster install   [--tool bindcraft|bindcraft2|boltzgen|mosaic|pxdesign|proteina-complexa|protein-hunter|rfd3|all]
+binderscout install   [--tool bindcraft|bindcraft2|boltzgen|mosaic|pxdesign|proteina-complexa|protein-hunter|rfd3|all]
                      [--bc2-source <zip|dir|git-url>]  # override BindCraft 2's source (default: upstream)
                      [--tool af3|soluprot]             # extra evaluator engines (esmfold2 ships in --tool all)
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
-bindmaster configure [options passed through to configurator.py]
-bindmaster evaluate  <binder-compare args>             # passthrough, e.g. run / extract / report / autosize
-bindmaster --help
+binderscout configure [options passed through to configurator.py]
+binderscout evaluate  <binder-compare args>             # passthrough, e.g. run / extract / report / autosize
+binderscout --help
 ```
 
-### `bindmaster install`
+### `binderscout install`
 
 Options:
 
@@ -262,7 +262,7 @@ Options:
 | `--uninstall` | Remove tool environments, directories, and shortcuts |
 | `--yes` / `-y` | Non-interactive mode (accept all defaults) |
 
-### `bindmaster configure`
+### `binderscout configure`
 
 Interactive wizard that:
 1. Asks for a target name, PDB file, chain(s), and hotspot residues
@@ -272,13 +272,13 @@ Interactive wizard that:
 5. Optionally runs the full pipeline immediately
 
 ```bash
-bindmaster configure                                     # interactive wizard
-bindmaster configure --status                            # all runs + completion state
-bindmaster configure --archive <run>                     # tar.gz a run directory
+binderscout configure                                     # interactive wizard
+binderscout configure --status                            # all runs + completion state
+binderscout configure --archive <run>                     # tar.gz a run directory
 
 # Headless: replay a saved config, no prompts at all
-bindmaster configure --config runs/<name>/config.json
-bindmaster configure --config my_run.json --run          # …and start the pipeline
+binderscout configure --config runs/<name>/config.json
+binderscout configure --config my_run.json --run          # …and start the pipeline
 ```
 
 Every wizard run writes its answers to `runs/<name>/config.json`, so a campaign is
@@ -326,7 +326,7 @@ runs/<name>/
 
 Each per-tool run script writes a `runs/<name>/<tool>/settings.json` capturing tool version, design parameters, target sequence, and GPU info before the design step begins — so a run is self-describing without grepping the parent script (which may have been edited since).
 
-### `bindmaster evaluate`
+### `binderscout evaluate`
 
 Parses design outputs from any combination of tools, refolds them with independent
 engines, ranks the pool, and writes a report. There is one ranking and no metric to
@@ -344,9 +344,9 @@ Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). Ther
 
 > Evaluation = Boltz-2 + AF3 + ESMFold2, exactly three independent engines. Each is auto-detected from its conda env and can be skipped with `--skip-<engine>`.
 
-#### Usage — `bindmaster evaluate` forwards to `binder-compare`
+#### Usage — `binderscout evaluate` forwards to `binder-compare`
 
-`bindmaster evaluate <args>` runs the `binder-compare` CLI in the `binder-eval` conda env. The full pipeline (extract → refold → two-stage report) is one command:
+`binderscout evaluate <args>` runs the `binder-compare` CLI in the `binder-eval` conda env. The full pipeline (extract → refold → two-stage report) is one command:
 
 ```bash
 binder-compare run --mosaic runs/PDL1/mosaic --bindcraft runs/PDL1/bindcraft \
@@ -393,7 +393,7 @@ step by hand. `bash Evaluator/evaluate.sh --help` prints the same list.
 
 #### All `binder-compare` subcommands
 
-Every one takes `--help`. `bindmaster evaluate <cmd> …` runs the same thing inside the
+Every one takes `--help`. `binderscout evaluate <cmd> …` runs the same thing inside the
 `binder-eval` conda env.
 
 | Subcommand | What it does |
@@ -456,11 +456,11 @@ Every one takes `--help`. `bindmaster evaluate <cmd> …` runs the same thing in
 ### What happens during install
 
 Each tool goes through:
-1. **Clone** — repo cloned at a pinned commit into `BindMaster/<Tool>/`
+1. **Clone** — repo cloned at a pinned commit into `BinderScout/<Tool>/`
 2. **Environment** — conda env or uv venv created (spinner + full log)
 3. **Smoke test** — minimal import or `--help` call
 4. **Example** (optional, skippable) — bundled example run
-5. **Shortcut** — launcher written to `BindMaster/bin/`
+5. **Shortcut** — launcher written to `BinderScout/bin/`
 
 ### Non-interactive options
 
@@ -492,21 +492,21 @@ bash install/install.sh --uninstall --tool all
 
 ### Server / HPC installation (no admin required)
 
-BindMaster works fully standalone — no system conda, no admin, no writes outside the project directory:
+BinderScout works fully standalone — no system conda, no admin, no writes outside the project directory:
 
 ```bash
 git clone https://github.com/damborik22/BinderScout.git
-cd BindMaster
-python3 bindmaster.py install --tool all --yes
+cd BinderScout
+python3 binderscout.py install --tool all --yes
 
 # Add to PATH:
 export PATH="$(pwd)/bin:$PATH"
-echo 'export PATH="/path/to/BindMaster/bin:$PATH"' >> ~/.bashrc
+echo 'export PATH="/path/to/BinderScout/bin:$PATH"' >> ~/.bashrc
 ```
 
 The installer auto-detects if system conda is unavailable or read-only and downloads
-Miniforge3 into `BindMaster/conda/`. All environments and shortcuts stay inside the
-project directory. To remove everything: `rm -rf BindMaster/`.
+Miniforge3 into `BinderScout/conda/`. All environments and shortcuts stay inside the
+project directory. To remove everything: `rm -rf BinderScout/`.
 
 ---
 
@@ -525,7 +525,7 @@ git clone https://github.com/damborik22/BinderScout.git
 git clone -b aarch64 https://github.com/damborik22/BinderScout.git
 ```
 
-Both branches: `bindmaster install` or `bash install/install.sh`.
+Both branches: `binderscout install` or `bash install/install.sh`.
 
 ### aarch64 notes
 
@@ -552,7 +552,7 @@ Both branches: `bindmaster install` or `bash install/install.sh`.
 >   hardware** — which is why it is not in `--tool all`. Please report results.
 > - **Protein-Hunter and Proteina-Complexa are refused** with an explicit reason
 >   (PyRosetta has no aarch64 wheels; PyG/torchtext may not either).
-> - `bindmaster install` now selects the installer for the host architecture
+> - `binderscout install` now selects the installer for the host architecture
 >   automatically, so you no longer need to invoke `install_aarch.sh` by hand — the
 >   TUI's "Install tools" does the same.
 - **AF3 refolding**: Live on aarch64 / DGX Spark via the `binder-eval-af3` conda env and `binder-compare refold-af3`. Not aarch64-exclusive — AF3 runs anywhere with a CUDA GPU — measured at ~4.4 GiB peak for 258-391 tokens, so a 24 GB card is enough (H200, GH200, RTX 3090 all work); DGX Spark is just our primary host because Spark is where the unified memory headroom lives.
@@ -561,10 +561,10 @@ Both branches: `bindmaster install` or `bash install/install.sh`.
 
 ## Shortcuts
 
-After installation, launchers are available in `BindMaster/bin/`:
+After installation, launchers are available in `BinderScout/bin/`:
 
 ```bash
-bindmaster         # unified CLI (install / configure / evaluate)
+binderscout         # unified CLI (install / configure / evaluate)
 bindcraft          # activates BindCraft conda env, cd to BindCraft dir
 bindcraft2         # runs `bindcraft design ...` from the BindCraft2 venv, or opens its shell
 boltzgen           # activates BoltzGen conda env, cd to BoltzGen dir
@@ -572,9 +572,9 @@ mosaic             # activates Mosaic uv venv, cd to Mosaic dir
 pxdesign           # activates PXDesign conda env
 complexa           # activates Proteina-Complexa venv
 protein-hunter     # activates Protein-Hunter conda env
-rfd3               # runs `rfd3 design ...` or opens the bindmaster_rfd3 env shell
+rfd3               # runs `rfd3 design ...` or opens the binderscout_rfd3 env shell
 evaluate           # runs Evaluator/run.sh wizard
-bindmaster-config  # runs configurator directly (legacy)
+binderscout-config  # runs configurator directly (legacy)
 ```
 
 ---
@@ -582,7 +582,7 @@ bindmaster-config  # runs configurator directly (legacy)
 ## Reinstalling a tool
 
 ```bash
-bindmaster install --tool bindcraft
+binderscout install --tool bindcraft
 ```
 
 Answer **Y** when prompted to remove the existing directory and conda environment.
@@ -592,8 +592,8 @@ Answer **Y** when prompted to remove the existing directory and conda environmen
 ## Monitoring installs
 
 ```bash
-tail -f ~/BindMaster/install.log         # x86_64
-tail -f ~/BindMaster/install_aarch.log   # aarch64
+tail -f ~/BinderScout/install.log         # x86_64
+tail -f ~/BinderScout/install_aarch.log   # aarch64
 ```
 
 ---
@@ -611,21 +611,21 @@ BoltzGen downloads Boltz-1 weights (~6 GB) on first use. Re-run — it resumes a
 source ~/.bashrc
 ```
 
-**`bindmaster evaluate` — Mosaic must be installed**
+**`binderscout evaluate` — Mosaic must be installed**
 ```bash
-bindmaster install --tool mosaic
+binderscout install --tool mosaic
 ```
 
 **A tool failed, others succeeded**
 ```bash
-bindmaster install --tool <toolname>
+binderscout install --tool <toolname>
 ```
 
 **Checking what's installed**
 ```bash
 conda env list                    # shows conda-managed envs
-ls BindMaster/bin/                # shows shortcuts
-ls BindMaster/conda/envs/         # shows local envs (standalone mode)
+ls BinderScout/bin/                # shows shortcuts
+ls BinderScout/conda/envs/         # shows local envs (standalone mode)
 ```
 
 ---
@@ -713,8 +713,8 @@ shellcheck --shell=bash --severity=warning install/install.sh install/install_aa
 ### Testing
 
 ```bash
-docker build -f Dockerfile.test --target base -t bindmaster-test .
-docker run --rm -it bindmaster-test bash
+docker build -f Dockerfile.test --target base -t binderscout-test .
+docker run --rm -it binderscout-test bash
 ./test_env.sh --dry-run     # non-interactive validation
 ./test_env.sh --gpu         # with GPU
 ```
@@ -723,7 +723,7 @@ docker run --rm -it bindmaster-test bash
 
 ## License
 
-[MIT](LICENSE) — covers BindMaster's own source (CLI, configurator, TUI,
+[MIT](LICENSE) — covers BinderScout's own source (CLI, configurator, TUI,
 installers, `binder-comparison`).
 
 It does **not** cover the third-party assets redistributed in this tree: the

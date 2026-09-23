@@ -12,8 +12,8 @@ name: binder-eval-af3
 #   2. Place the model parameters at ~/.alphafold3/models/ (or set AF3_MODEL_DIR).
 #
 # AF3 is NOT a real PyPI package (the "alphafold3" PyPI name is an unrelated stub) —
-# it is installed from the official repo (source build). The BindMaster installer
-# (`bindmaster install --tool af3`) does this. If installing manually:
+# it is installed from the official repo (source build). The BinderScout installer
+# (`binderscout install --tool af3`) does this. If installing manually:
 #   conda env create -f binder-eval-af3.yml
 #   git clone https://github.com/google-deepmind/alphafold3 <repo_root>/alphafold3
 #   conda run -n binder-eval-af3 pip install <repo_root>/alphafold3 gemmi   # jax 0.9.1 + C++ build

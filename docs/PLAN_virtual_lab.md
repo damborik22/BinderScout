@@ -6,7 +6,7 @@
 > approval before writing code.**
 >
 > **Anchoring facts verified 2026-07-26 (`master` @ `a600090`):**
-> - `.claude/skills/` ships **five** role-specialized agents — `bindmaster-target-analyst`,
+> - `.claude/skills/` ships **five** role-specialized agents — `binderscout-target-analyst`,
 >   `-orchestrator`, `-worker`, `-evaluator`, `-wetlab` — with explicit handoffs and
 >   `PROGRESS.md` as shared state. → **BinderScout is already a virtual agentic lab.**
 > - `grep -rniE 'critic|adversar|red.?team'` over `.claude/skills/` returns **no critic
@@ -35,7 +35,7 @@ evidence rather than in agent deliberation:
 
 | Virtual Lab | BinderScout equivalent |
 |---|---|
-| PI agent | main session running `bindmaster-orchestrator` |
+| PI agent | main session running `binderscout-orchestrator` |
 | Scientist agents (by expertise) | `target-analyst` / `worker` / `evaluator` / `wetlab` |
 | Team / individual meetings | `CLUSTER/<tool>_<machine>_SETTINGS.md` kickoff contracts |
 | Agenda + agenda rules | kickoff "Why this run" + settings table + kill criterion |
@@ -82,19 +82,19 @@ add a missing capability. That is the bar it must clear.
 
 | # | Task | Benefit | Cost | Campaign relevance | Do when |
 |---|---|---|---|---|---|
-| **Y** | `bindmaster-critic` skill — claims & report auditor | Catches the error class that reached published reports 6× in one review | ~1–2 days (docs only, no code) | Direct — wet-lab picks are made from these reports | **After Part X** |
+| **Y** | `binderscout-critic` skill — claims & report auditor | Catches the error class that reached published reports 6× in one review | ~1–2 days (docs only, no code) | Direct — wet-lab picks are made from these reports | **After Part X** |
 | **Z** | Multi-agent deliberation at the planning gate | Possible better campaign plans on genuinely open questions | ~days + token cost | Speculative — no current blocker | **On demand only** |
 
 ---
 
-## Part Y — `bindmaster-critic` skill *(the recommended work)*
+## Part Y — `binderscout-critic` skill *(the recommended work)*
 
 **Goal.** A **separately-invoked** adversarial reviewer whose only job is to find flaws in
 artifacts the other five skills produce. Scoped tightly to where the evidence says it pays.
 
 **Non-negotiable design constraint.** The critic must run as its **own agent invocation
-with its own context** — never as a section inside `bindmaster-orchestrator` or
-`bindmaster-evaluator`. Self-critique by the agent that produced the artifact is precisely
+with its own context** — never as a section inside `binderscout-orchestrator` or
+`binderscout-evaluator`. Self-critique by the agent that produced the artifact is precisely
 the failure mode being fixed, and is why the Virtual Lab makes the Critic a separate role.
 
 ### Y.1 Primary gate — report / shortlist audit *(highest value)*

@@ -604,7 +604,7 @@ def _write_pymol_script(top_df: pd.DataFrame, structures_dir: Path) -> None:
     Structures are aligned on the target chain for easy comparison.
     """
     pml_lines = [
-        "# BindMaster Evaluator — Top 20 refolded binder structures",
+        "# BinderScout Evaluator — Top 20 refolded binder structures",
         "# Open this file in PyMOL: pymol view_top20.pml",
         "#",
         "# Binder = chain A (coloured by tool), Target = chain B (grey)",

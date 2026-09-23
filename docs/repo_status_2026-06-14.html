@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BindMaster / BinderScout — Repository Status</title>
+<title>BinderScout / BinderScout — Repository Status</title>
 <style>
   :root{
     --bg:#0f1115; --card:#181b22; --ink:#e8eaed; --muted:#9aa0aa; --line:#272b34;
@@ -46,7 +46,7 @@
 <body>
 <div class="wrap">
 
-  <h1>BindMaster / BinderScout — Repository Status</h1>
+  <h1>BinderScout / BinderScout — Repository Status</h1>
   <p class="sub">Generated 2026-06-14 · branch <code>claude/exciting-wozniak-nbsy4z</code> ·
      GPU-accelerated protein-binder design toolkit (7 design tools + cross-engine evaluator)</p>
 
@@ -70,10 +70,10 @@
   <h2>1 · How it works now</h2>
 
   <div class="card">
-    <h3>Entry point — the <code>bindmaster</code> CLI (stdlib dispatcher)</h3>
+    <h3>Entry point — the <code>binderscout</code> CLI (stdlib dispatcher)</h3>
     <table>
       <tr><th>Command</th><th>Runs in</th><th>Does</th></tr>
-      <tr><td><code>bindmaster</code> (no args)</td><td>system python → curses</td><td>Interactive TUI menu (numbered fallback if no curses)</td></tr>
+      <tr><td><code>binderscout</code> (no args)</td><td>system python → curses</td><td>Interactive TUI menu (numbered fallback if no curses)</td></tr>
       <tr><td><code>install</code></td><td>bash</td><td><code>install/install.sh</code> — per-tool conda/venv envs (standalone Miniforge auto-detect)</td></tr>
       <tr><td><code>configure</code></td><td>system python</td><td>5-step wizard → run scripts + <code>settings.json</code> per run</td></tr>
       <tr><td><code>evaluate</code></td><td>conda <code>binder-eval</code></td><td><b>Passthrough to <code>binder-compare</code></b> (extract / refold / report / run / autosize)</td></tr>
@@ -128,14 +128,14 @@
   <h2>2 · What's working &amp; verified</h2>
   <div class="card">
     <ul>
-      <li><span class="dot d-ok"></span><b><code>bindmaster evaluate</code> restored</b> — was dispatching to a deleted <code>evaluator/</code> dir; now a passthrough to <code>binder-compare</code>.</li>
+      <li><span class="dot d-ok"></span><b><code>binderscout evaluate</code> restored</b> — was dispatching to a deleted <code>evaluator/</code> dir; now a passthrough to <code>binder-compare</code>.</li>
       <li><span class="dot d-ok"></span><b><code>binder-compare run</code> repaired</b> — added the missing <code>__main__.py</code> its nested steps need.</li>
       <li><span class="dot d-ok"></span><b>TUI fallback fixed</b> — <code>NameError</code> when curses was absent; the numbered-menu fallback now runs.</li>
       <li><span class="dot d-ok"></span><b>pytest collects &amp; runs in CI</b> — was uncollectable at repo root; CI was shellcheck/ruff/docker only.</li>
       <li><span class="dot d-ok"></span><b>Two-stage ranking</b> default, with the load-bearing "survivor outranks higher-mean non-survivor" property tested.</li>
       <li><span class="dot d-ok"></span><b><code>chain_iptm_interface</code> canonicalized</b> — one shared definition (report + autosize); formula verified.</li>
       <li><span class="dot d-ok"></span><b><code>autosize</code> verified end-to-end</b> — real subprocess loop reaches <code>complete</code>; backbone dedup confirmed.</li>
-      <li><span class="dot d-ok"></span><b>Dead code removed</b> — the unused <code>bindmaster/</code> package (BinderScore, ToolAdapter, FeatureFlags, empty scheduler).</li>
+      <li><span class="dot d-ok"></span><b>Dead code removed</b> — the unused <code>binderscout/</code> package (BinderScore, ToolAdapter, FeatureFlags, empty scheduler).</li>
     </ul>
   </div>
 

@@ -113,14 +113,14 @@
 <h2 id="entry">1 · The one command, and where it takes you</h2>
 
 <p>
-Run <code>bindmaster</code> with no arguments and you get a curses menu
-(<code>bindmaster.py:146–149</code> → <code>tui/app.py</code>). Every other interactive surface hangs off it.
+Run <code>binderscout</code> with no arguments and you get a curses menu
+(<code>binderscout.py:146–149</code> → <code>tui/app.py</code>). Every other interactive surface hangs off it.
 Arrow keys move, <kbd>Enter</kbd> selects.
 </p>
 
 <div class="term">
-  <div class="bar"><b>$ bindmaster</b><span class="d">— tui/app.py:179–185</span></div>
-<pre><span class="c b">BindMaster</span>
+  <div class="bar"><b>$ binderscout</b><span class="d">— tui/app.py:179–185</span></div>
+<pre><span class="c b">BinderScout</span>
 
   <span class="d">mosaic</span> <span class="g">✓</span>  <span class="d">boltzgen</span> <span class="g">✓</span>  <span class="d">bindcraft</span> <span class="r">✗</span>  <span class="d">pxdesign</span> <span class="g">✓</span>   <span class="d">← tool status bar</span>
 
@@ -139,7 +139,7 @@ Arrow keys move, <kbd>Enter</kbd> selects.
     <tr><td>Install tools</td><td><code>bash &lt;repo&gt;/install/install.sh</code> — no flags, so the checkbox menu appears</td><td class="n">tui/app.py:259, 418</td></tr>
     <tr><td>Configure run</td><td><code>&lt;python&gt; &lt;repo&gt;/configurator/configurator.py</code> — no flags, so the wizard runs</td><td class="n">tui/app.py:262, 420</td></tr>
     <tr><td>Run designs</td><td>lists <code>runs/*</code>, then <code>bash &lt;run&gt;/run_all.sh</code></td><td class="n">tui/app.py:285, 451</td></tr>
-    <tr><td>Evaluate results</td><td><code>&lt;python&gt; bindmaster.py evaluate</code> — with no sub-command <span class="no">this errors out</span>, see §5</td><td class="n">tui/app.py:290–294</td></tr>
+    <tr><td>Evaluate results</td><td><code>&lt;python&gt; binderscout.py evaluate</code> — with no sub-command <span class="no">this errors out</span>, see §5</td><td class="n">tui/app.py:290–294</td></tr>
     <tr><td>Run status</td><td>read-only table of <code>runs/</code></td><td class="n">tui/app.py:300–330</td></tr>
   </tbody>
 </table></div>
@@ -162,7 +162,7 @@ a digit to flip a tool, <kbd>a</kbd> for all, <kbd>n</kbd> for none, bare <kbd>E
 
 <div class="term">
   <div class="bar"><b>install.sh</b><span class="d">— :2602–2623</span></div>
-<pre>=== BindMaster Installer — Sun Jul 26 06:00:00 UTC 2026 ===
+<pre>=== BinderScout Installer — Sun Jul 26 06:00:00 UTC 2026 ===
 CUDA: 12.4 | Arch: x86_64 | Standalone: false | Skip examples: false
 
 <span class="g">✓</span> mamba 1.5.8 at: /home/user/miniforge3
@@ -374,7 +374,7 @@ offers to run. Three prompt shapes are used throughout
 <pre><span class="c b">▶ Step 5 — Tool selection</span>
   <span class="b">Mosaic</span>    [<span class="g">installed</span>]
 <span class="c">  Enable Mosaic?</span> [y/<span class="g">N</span>]: <span class="u">y</span>
-  <span class="b">BoltzGen</span>  [<span class="r">NOT installed — run: bindmaster install</span>]
+  <span class="b">BoltzGen</span>  [<span class="r">NOT installed — run: binderscout install</span>]
 <span class="c">  Enable BoltzGen?</span> [y/<span class="g">N</span>]: <span class="u"></span>
   <span class="b">BindCraft</span> [<span class="g">installed</span>]
 <span class="c">  Enable BindCraft?</span> [<span class="g">Y</span>/n]: <span class="u"></span>             <span class="d">← the ONLY tool on by default</span>
@@ -518,7 +518,7 @@ The TUI lists run directories and executes <code>run_all.sh</code> for the one y
 <h4>Door 1 — TUI → "Evaluate results" <span class="no">(errors)</span></h4>
 
 <p>
-The menu item runs <code>bindmaster.py evaluate</code> with no further arguments
+The menu item runs <code>binderscout.py evaluate</code> with no further arguments
 (<code>tui/app.py:290–294</code>), which becomes
 <code>conda run -n binder-eval binder-compare</code> — <code>binder-compare</code> with no sub-command. But
 <code>main.py</code> sets <code>subparsers.required = True</code>, so:
@@ -543,7 +543,7 @@ Press Enter to return to menu...
 <div class="term">
   <div class="bar"><b>$ evaluate</b><span class="d">— Evaluator/run.sh:37–94</span></div>
 <pre>==============================
-  BindMaster Evaluator
+  BinderScout Evaluator
 ==============================
 
 Binder sequences — paste directly or enter a file path.
@@ -594,11 +594,11 @@ The wrapper the configurator generates is the one that runs. It is not interacti
 [extract] Total: 57 unique binders
 [extract] Native metrics → runs/CALCA_helix/evaluate/sequences_native_metrics.csv
 
-=== BindMaster Evaluator ===
+=== BinderScout Evaluator ===
 Sequences : runs/CALCA_helix/evaluate/sequences.fasta
 Output    : runs/CALCA_helix/evaluate
 
-<span class="d">[note] conda env 'bindmaster_pxdesign' not found — Protenix refolding will be skipped.</span>
+<span class="d">[note] conda env 'binderscout_pxdesign' not found — Protenix refolding will be skipped.</span>
 [step 1/4] SoluProt solubility screen (binder-eval-soluprot)...
 [step 2/4] Boltz-2 refolding (Mosaic venv)...
 [step 3/4] AF3 refolding       (conda env: binder-eval-af3)...
@@ -630,7 +630,7 @@ Metrics: runs/CALCA_helix/evaluate/report/metrics.csv
                             dedup by sequence                soluprot_results.csv ┘                          metrics_zscore.csv
                             <span style="opacity:.6">← the join key is born here</span>                                                summary.json
 
-                                          shared target MSA:  ~/.cache/bindmaster/target_msa/target_&lt;sha256[:16]&gt;.a3m
+                                          shared target MSA:  ~/.cache/binderscout/target_msa/target_&lt;sha256[:16]&gt;.a3m
                                           written by AF3/ESMFold2 on miss · read by all engines · Boltz-2 read-only</div>
 
 <h3>6.1 Stage 1 → 2 · What each tool writes, and what the pipeline takes from it</h3>
@@ -669,7 +669,7 @@ column. If the filename or the column is not what the extractor expects, that to
       <td class="n"><code>mosaic_&lt;worker_id&gt;_&lt;rank&gt;</code></td>
     </tr>
     <tr>
-      <td><strong>PXDesign</strong></td><td class="n"><code>bindmaster_pxdesign</code><br><span class="fine">conda, py3.11</span></td>
+      <td><strong>PXDesign</strong></td><td class="n"><code>binderscout_pxdesign</code><br><span class="fine">conda, py3.11</span></td>
       <td class="n"><code>summary.csv</code><br><code>sequences.csv</code></td>
       <td class="n"><code>sequence</code></td>
       <td>invalid sequences only</td>
@@ -683,14 +683,14 @@ column. If the filename or the column is not what the extractor expects, that to
       <td class="n"><code>complexa_&lt;design_id|name&gt;</code></td>
     </tr>
     <tr>
-      <td><strong>Protein-Hunter</strong></td><td class="n"><code>bindmaster_protein_hunter</code><br><span class="fine">conda, py3.10</span></td>
+      <td><strong>Protein-Hunter</strong></td><td class="n"><code>binderscout_protein_hunter</code><br><span class="fine">conda, py3.10</span></td>
       <td class="n"><code>summary_high_iptm.csv</code> <span class="fine">(default)</span><br><code>summary_all_runs.csv</code> <span class="fine">(<code>--all-protein-hunter-designs</code>)</span></td>
       <td class="n"><code>sequence</code></td>
       <td>one row per run —<br><code>drop_duplicates("run_id")</code><br><span class="fine">cycles are snapshots of one trajectory</span></td>
       <td class="n"><code>protein_hunter_&lt;run_id&gt;_c&lt;cycle&gt;</code></td>
     </tr>
     <tr>
-      <td><strong>RFD3</strong></td><td class="n"><code>bindmaster_rfd3</code><br><span class="fine">conda, py3.12</span></td>
+      <td><strong>RFD3</strong></td><td class="n"><code>binderscout_rfd3</code><br><span class="fine">conda, py3.12</span></td>
       <td class="n"><code>sequences.csv</code>, <code>results.csv</code>,<br><code>designs.csv</code>, <code>rfd3_designs.csv</code>,<br><code>summary.csv</code><br><span class="fine">then a FASTA fallback over <code>mpnn/*.fa</code></span></td>
       <td class="n"><code>sequence</code>, <code>Sequence</code>,<br><code>designed_sequence</code>, <code>binder_sequence</code></td>
       <td>invalid sequences only</td>
@@ -802,7 +802,7 @@ each other's output. Three of the four share an almost identical schema:
     </tr>
     <tr>
       <td><strong>Protenix v0.5.0</strong><br><span class="fine">optional; fits 24 GB</span></td>
-      <td class="n"><code>bindmaster_pxdesign</code></td>
+      <td class="n"><code>binderscout_pxdesign</code></td>
       <td class="n"><code>protenix_results.csv</code></td>
       <td class="n">identical to AF3<br><span class="fine">PAE also <code>[target|binder]</code></span></td>
     </tr>
@@ -829,7 +829,7 @@ each other's output. Three of the four share an almost identical schema:
 <div class="flow">first engine to need it ─▶ POST api.colabfold.com/ticket/msa ─▶ poll ─▶ download tar.gz ─▶ extract uniref.a3m
                                                                                          │
                           cache key = sha256(target_seq).hexdigest()[:16]                ▼
-                          ~/.cache/bindmaster/target_msa/target_&lt;key&gt;.a3m   ($BINDMASTER_MSA_CACHE overrides)
+                          ~/.cache/binderscout/target_msa/target_&lt;key&gt;.a3m   ($BINDERSCOUT_MSA_CACHE overrides)
                                        │
         ┌──────────────────────────────┼──────────────────────────────┐
         ▼                              ▼                              ▼
@@ -962,12 +962,12 @@ pipeline by menu:
 <h3>Driving it entirely by menu — the practical recipe</h3>
 
 <ol>
-  <li><code>bindmaster</code> → <strong>Install tools</strong> → toggle what you want → <kbd>Enter</kbd> →
+  <li><code>binderscout</code> → <strong>Install tools</strong> → toggle what you want → <kbd>Enter</kbd> →
       <code>y</code>. Answer <strong>no</strong> to every "Remove and reclone?" if you already have a working
       install.<br>
       <span class="fine">Then, unavoidably by flag, for the default refold engine:
       <code>bash install/install.sh --tool esmfold2</code> — the menu cannot reach it.</span></li>
-  <li><code>bindmaster</code> → <strong>Configure run</strong> → walk the 7 steps. Prefer a <code>.pdb</code>
+  <li><code>binderscout</code> → <strong>Configure run</strong> → walk the 7 steps. Prefer a <code>.pdb</code>
       target over <code>.cif</code> (F1), and check the residue count on the
       <code>✓ Auto-extracted sequence</code> line.</li>
   <li>Answer <strong>no</strong> to "Run the pipeline now?" if you enabled RFD3 or Protein-Hunter, then run

@@ -1,7 +1,7 @@
 """
-BindMaster interactive TUI — curses menu with simple-input fallback.
+BinderScout interactive TUI — curses menu with simple-input fallback.
 
-stdlib only. Launched by ``bindmaster`` (no args).
+stdlib only. Launched by ``binderscout`` (no args).
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def _installer_for_host(repo: Path) -> Path:
     """The installer for THIS architecture.
 
     Both menu paths used to hardcode install.sh, so the TUI ran the x86_64 installer
-    on a DGX Spark. Mirrors bindmaster.py's dispatch.
+    on a DGX Spark. Mirrors binderscout.py's dispatch.
     """
     name = "install_aarch.sh" if platform.machine() == "aarch64" else "install.sh"
     return repo / "install" / name
@@ -230,7 +230,7 @@ def _curses_main(stdscr, repo: Path) -> None:  # type: ignore[type-arg]
         h, w = stdscr.getmaxyx()
 
         # Header
-        header = "BindMaster"
+        header = "BinderScout"
         stdscr.attron(curses.color_pair(1) | curses.A_BOLD)
         stdscr.addnstr(1, 2, header, w - 4)
         stdscr.attroff(curses.color_pair(1) | curses.A_BOLD)
@@ -327,7 +327,7 @@ def _curses_submenu_runs(stdscr, repo: Path) -> None:  # type: ignore[type-arg]
 def _curses_submenu_evaluate(stdscr, repo: Path) -> None:  # type: ignore[type-arg]
     """Show the evaluator's subcommands (binder-compare passthrough).
 
-    `--help` is the payload, not decoration: `bindmaster evaluate` with no arguments
+    `--help` is the payload, not decoration: `binderscout evaluate` with no arguments
     reaches argparse with a required subcommand missing, which prints one usage line
     and exits 2 — so this menu entry showed an error instead of the 22 subcommands it
     promised. Evaluation itself is not startable from a menu (it needs sequences, a
@@ -335,7 +335,7 @@ def _curses_submenu_evaluate(stdscr, repo: Path) -> None:  # type: ignore[type-a
     """
     _curses_run_subprocess(
         stdscr,
-        [sys.executable, str(repo / "bindmaster.py"), "evaluate", "--help"],
+        [sys.executable, str(repo / "binderscout.py"), "evaluate", "--help"],
         "Evaluate results — binder-compare subcommands",
     )
 
@@ -417,7 +417,7 @@ def _simple_menu_main(repo: Path) -> None:
 
     while True:
         tools = _detect_tools(repo)
-        print(f"\n{BOLD}{CYAN}BindMaster{RESET}\n")
+        print(f"\n{BOLD}{CYAN}BinderScout{RESET}\n")
 
         # Tool status
         parts = []
@@ -496,7 +496,7 @@ def _simple_submenu_runs(repo: Path) -> None:
 def _simple_submenu_evaluate(repo: Path) -> None:
     """Show the evaluator's subcommands (binder-compare passthrough). See the curses twin."""
     _run_subprocess(
-        [sys.executable, str(repo / "bindmaster.py"), "evaluate", "--help"],
+        [sys.executable, str(repo / "binderscout.py"), "evaluate", "--help"],
         "Evaluate results — binder-compare subcommands",
     )
 

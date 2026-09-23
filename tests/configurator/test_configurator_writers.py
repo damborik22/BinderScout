@@ -50,7 +50,7 @@ class TestWriteRunPxdesign:
         script = tmp_path / "run_pxdesign.sh"
         conf.write_run_pxdesign(script, base_cfg)
         content = script.read_text()
-        assert "bindmaster_pxdesign" in content
+        assert "binderscout_pxdesign" in content
         assert "--preset preview" in content
         assert "--N_sample 1000" in content
 
@@ -389,7 +389,7 @@ class TestRunAllIsolatesToolFailures:
         evaluator_block = content[content.index("=== Step: Evaluator ===") :]
         # Not guarded by a success condition — it reports on whatever completed.
         assert 'if ! "$RUN_DIR/run_evaluate.sh"; then' in evaluator_block
-        assert "BINDMASTER_ALLOW_EMPTY=1" in evaluator_block
+        assert "BINDERSCOUT_ALLOW_EMPTY=1" in evaluator_block
 
     def test_exits_non_zero_naming_the_failed_steps(self, base_cfg, tmp_path):
         content = self._content(base_cfg, tmp_path)
@@ -405,7 +405,7 @@ class TestRunEvaluateAllowsEmptyOnlyWhenToldTo:
     def test_extract_honours_the_env_var(self, base_cfg, tmp_path):
         script = tmp_path / "run_evaluate.sh"
         conf.write_run_evaluate(script, base_cfg, _ALL_TOOLS)
-        assert "${BINDMASTER_ALLOW_EMPTY:+--allow-empty}" in script.read_text()
+        assert "${BINDERSCOUT_ALLOW_EMPTY:+--allow-empty}" in script.read_text()
 
     def test_strict_by_default(self, base_cfg, tmp_path):
         """Unset means no flag: the guard stays on for a hand-run evaluation."""
@@ -575,7 +575,7 @@ class TestPreflightFailsBeforeWritingAnything:
         assert exc.value.code == 1
         out = capsys.readouterr().out
         assert "not installed" in out
-        assert "bindmaster install --tool bindcraft" in out, "the error must say how to fix it"
+        assert "binderscout install --tool bindcraft" in out, "the error must say how to fix it"
 
     def test_reports_every_problem_at_once(self, tmp_path, capsys, monkeypatch):
         """One run, one list — not a traceback per attempt."""

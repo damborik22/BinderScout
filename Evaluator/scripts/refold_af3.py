@@ -39,7 +39,7 @@ import numpy as np
 # that quietly ran single-sequence is systematically penalised (the MSA drives
 # target fold confidence and iPTM is an interface metric over both chains), so
 # it drags consensus_iptm_mean down and can demote a good design invisibly.
-# Default: abort.  Explicit opt-out: --allow-no-msa / BINDMASTER_ALLOW_NO_MSA=1.
+# Default: abort.  Explicit opt-out: --allow-no-msa / BINDERSCOUT_ALLOW_NO_MSA=1.
 try:
     from binder_comparison.refolding.target_msa import MissingTargetMSA, prepare_target_msa
 except Exception as _exc:  # binder_comparison unavailable in this env
@@ -49,12 +49,12 @@ except Exception as _exc:  # binder_comparison unavailable in this env
         pass
 
     def prepare_target_msa(target_seq, *, engine, cache_dir=None, out_dir=None, use_msa=True, allow_no_msa=False):
-        if use_msa and not (allow_no_msa or os.environ.get("BINDMASTER_ALLOW_NO_MSA", "").lower() in ("1", "true")):
+        if use_msa and not (allow_no_msa or os.environ.get("BINDERSCOUT_ALLOW_NO_MSA", "").lower() in ("1", "true")):
             raise MissingTargetMSA(
                 f"[{engine}] ABORTING: cannot reach the shared target-MSA cache — "
                 f"binder_comparison is not importable here ({_MSA_IMPORT_ERROR}). "
                 f"Install it in this environment (pip install -e Evaluator --no-deps), or re-run with "
-                f"--allow-no-msa (BINDMASTER_ALLOW_NO_MSA=1) to fold single-sequence with scores that are "
+                f"--allow-no-msa (BINDERSCOUT_ALLOW_NO_MSA=1) to fold single-sequence with scores that are "
                 f"NOT comparable to engines that used an MSA."
             )
         print(f"[{engine}] WARNING: no target MSA — scores not comparable to MSA-using engines", flush=True)
@@ -107,7 +107,7 @@ def refold_batch(
     # resuming instead of silently re-compiling at a smaller bucket.
     bucket = len(target_sequence) + max(len(s) for s in binder_sequences)
     jax_cache_dir = Path(
-        os.environ.get("AF3_JAX_CACHE_DIR") or Path.home() / ".cache" / "bindmaster" / "af3_jax_compile"
+        os.environ.get("AF3_JAX_CACHE_DIR") or Path.home() / ".cache" / "binderscout" / "af3_jax_compile"
     )
     jax_cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -315,7 +315,7 @@ def _run_single(
 
     # Invoke AF3 via run_alphafold.py (official Google DeepMind entry point).
     # The script lives in the cloned alphafold3 repo; resolve via AF3_REPO_DIR
-    # env var or default to <BindMaster>/alphafold3/.
+    # env var or default to <BinderScout>/alphafold3/.
     af3_script = _resolve_af3_script()
     cmd = [
         sys.executable,
@@ -619,18 +619,18 @@ def _resolve_af3_script() -> Path:
         if script.is_file():
             return script
 
-    # Default: <BindMaster>/alphafold3/run_alphafold.py
-    # scripts/ is inside Evaluator/, so BindMaster root is 2 levels up
-    bindmaster_root = Path(__file__).resolve().parent.parent.parent
-    script = bindmaster_root / "alphafold3" / "run_alphafold.py"
+    # Default: <BinderScout>/alphafold3/run_alphafold.py
+    # scripts/ is inside Evaluator/, so BinderScout root is 2 levels up
+    binderscout_root = Path(__file__).resolve().parent.parent.parent
+    script = binderscout_root / "alphafold3" / "run_alphafold.py"
     if script.is_file():
         return script
 
     raise FileNotFoundError(
-        "Cannot find run_alphafold.py. Install AF3 via `bindmaster install --tool af3`, "
-        "or clone it manually into <BindMaster>/alphafold3:\n"
-        "  git clone https://github.com/google-deepmind/alphafold3.git <BindMaster>/alphafold3\n"
-        "  git -C <BindMaster>/alphafold3 checkout fd39d2c5dcaadfc7333c3466951b27563fa7d6fa\n"
+        "Cannot find run_alphafold.py. Install AF3 via `binderscout install --tool af3`, "
+        "or clone it manually into <BinderScout>/alphafold3:\n"
+        "  git clone https://github.com/google-deepmind/alphafold3.git <BinderScout>/alphafold3\n"
+        "  git -C <BinderScout>/alphafold3 checkout fd39d2c5dcaadfc7333c3466951b27563fa7d6fa\n"
         "Or set AF3_REPO_DIR to the repo root."
     )
 

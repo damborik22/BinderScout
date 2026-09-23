@@ -12,7 +12,7 @@
 #   1. RSS was never measured before scaling  -> --measure runs ONE worker and
 #      reports peak RSS, so N is sized on evidence.
 #   2. A running job's memory floor was invisible -> declared floors are written
-#      to /tmp/bindmaster-floors/ and this script refuses to clear a launch that
+#      to /tmp/binderscout-floors/ and this script refuses to clear a launch that
 #      would breach one.
 #
 # Usage:
@@ -21,7 +21,7 @@
 #   preflight.sh declare <name> <floor_gb>     # register a floor while you run
 #   preflight.sh release <name>
 set -uo pipefail
-FLOORDIR=${BINDMASTER_FLOORDIR:-/tmp/bindmaster-floors}
+FLOORDIR=${BINDERSCOUT_FLOORDIR:-/tmp/binderscout-floors}
 MARGIN_GB=${MARGIN_GB:-15}          # never plan to leave less than this free
 mkdir -p "$FLOORDIR"
 

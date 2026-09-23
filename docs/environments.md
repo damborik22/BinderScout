@@ -1,9 +1,9 @@
-# BindMaster Conda Environments
+# BinderScout Conda Environments
 
 Environments are generated dynamically by the install scripts based on `uname -m`.
 Do not create static .yml files with hardcoded CUDA versions.
 
-## bindmaster_pxdesign
+## binderscout_pxdesign
 | Platform | PyTorch | CUDA | CUTLASS SM |
 |----------|---------|------|------------|
 | aarch64 (DGX Spark) | 2.5.* | 12.6 | SM100 (Blackwell) |

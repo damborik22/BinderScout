@@ -106,7 +106,7 @@ The existing CALCA evaluation (657 binders, `runs/CALCA_combined/evaluate/`) pro
 - **Independent architecture**: Different from both Boltz-2 (diffusion) and AF2 (evoformer + structure module). Gives truly independent cross-validation.
 - **Better for difficult targets**: AF3 was trained on a broader dataset including peptide–protein complexes, disordered regions, and multi-chain assemblies.
 - **3-way agreement**: With three engines, `agreement_count` becomes a much stronger signal. If all three agree `ipsae_min > 0.61`, confidence is high.
-- **Already installed**: Protenix is available in the Mosaic `.venv` and the `bindmaster_pxdesign` conda environment.
+- **Already installed**: Protenix is available in the Mosaic `.venv` and the `binderscout_pxdesign` conda environment.
 
 **Implementation plan:**
 1. `refold_protenix.py` — lightweight Python wrapper (like refold_boltz2.py / refold_af2.py)

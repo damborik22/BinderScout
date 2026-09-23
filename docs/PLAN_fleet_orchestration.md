@@ -114,7 +114,7 @@ after the first rides the established connection.
 ### 5.2 Fleet inventory cache
 
 `fleet.sh probe` writes `~/.claude/fleet/inventory.json` — per machine: arch,
-GPU name and VRAM, free RAM and disk, conda envs present, BindMaster git SHA and
+GPU name and VRAM, free RAM and disk, conda envs present, BinderScout git SHA and
 branch, muni-disk mount state, tmux version, reachability and timestamp.
 
 This exists so tool-to-machine assignment is a lookup against reality rather
@@ -272,7 +272,7 @@ accidental.
 
 1. `~/.ssh/config` fleet blocks + pinned `known_hosts` *(host keys already pinned)*
 2. `tools/fleet.sh` — `probe|status|launch|poll|fetch`
-3. `.claude/skills/bindmaster-orchestrator/references/lab-deploy.md` — playbook,
+3. `.claude/skills/binderscout-orchestrator/references/lab-deploy.md` — playbook,
    sibling to `clara-deploy.md`
 4. `CLAUDE.local.md` — add the fleet map and the Clara unlock procedure (§5.6).
    The existing VPN section is accurate and stays as-is; add a note that

@@ -1,4 +1,4 @@
-# BinderScout / BindMaster — Repo Diary
+# BinderScout / BinderScout — Repo Diary
 
 **Purpose:** Chronological record of architectural decisions, metric breakthroughs, and tool integration milestones from BinderScout's development (Feb–Jun 2026).
 
@@ -27,7 +27,7 @@
 
 **What changed:**
 - Initial commit wave (14 commits on one day) bringing together:
-  - Unified `bindmaster` CLI entry point dispatching `install`, `configure`, `evaluate`.
+  - Unified `binderscout` CLI entry point dispatching `install`, `configure`, `evaluate`.
   - Installers for BindCraft, BoltzGen, Mosaic design tools.
   - Interactive configurator wizard.
   - Evaluator with Boltz-2 + AF2 refolding pipeline.
@@ -35,7 +35,7 @@
   - Docker test environment (Dockerfile.test, docker-entrypoint.sh, test_env.sh).
 
 **Why it mattered:**
-- Establishes the unified BindMaster architecture; launches the project publicly.
+- Establishes the unified BinderScout architecture; launches the project publicly.
 
 **Outcome:**
 - v0.1.0 released; 3 tools + Evaluator functional; x86 + aarch64 paths open.
@@ -45,7 +45,7 @@
 ## 2026-02-28 — Parts A–E: monorepo merge → DunbrackLab ipSAE (all in one day)
 
 **What changed:**
-- **Part A**: Evaluator merged from separate `BindMaster-evaluator` repo (now archived) into `Evaluator/` directory.
+- **Part A**: Evaluator merged from separate `BinderScout-evaluator` repo (now archived) into `Evaluator/` directory.
 - **Part B (Batch 1 fixes)**: scatter plot crash on empty mask, radar chart z-score, CSV file-handle leaks, hardcoded `AF2_DATA_DIR` path.
 - **Part D (Installer robustness)**: Docker test environment (CUDA 12.4, Ubuntu 22.04), `--dry-run` for non-interactive validation, `--uninstall` flag for per-tool removal, retry logic in `run_logged()`, numbered progress summary, tool repo commits pinned for reproducible installs.
 - **Part E (Evaluator enhancements)**: DunbrackLab ipSAE formula implemented (`mean_j(1/(1+(PAE_ij/d0)²))`), `--resume` flag to skip completed designs, `binder-compare validate` subcommand for sequence sanity checks, per-binder PAE heatmap in HTML report.
@@ -90,7 +90,7 @@
 ## 2026-03-05 — Part H: Standalone installer; TUI menu; Mosaic `is_top=1` filter
 
 **What changed:**
-- **Part H (Standalone installer)**: When system conda is unwritable, installer downloads Miniforge3 into `BindMaster/conda/` instead of requiring system-level access. Shortcuts write to `BindMaster/bin/` instead of `~/.local/bin/`. `--standalone` flag to force local conda; `--system-conda` flag to opt out. All changes mirrored in `install_aarch.sh`.
+- **Part H (Standalone installer)**: When system conda is unwritable, installer downloads Miniforge3 into `BinderScout/conda/` instead of requiring system-level access. Shortcuts write to `BinderScout/bin/` instead of `~/.local/bin/`. `--standalone` flag to force local conda; `--system-conda` flag to opt out. All changes mirrored in `install_aarch.sh`.
 - Added interactive TUI curses menu (`tui/app.py`) for no-args invocation (numbered fallback when curses unavailable).
 - Mosaic evaluator now filters to refolded designs only (`is_top=1` from `designs.csv`); guards against the `"REPLACE_ME"` target-sequence placeholder.
 
@@ -98,7 +98,7 @@
 - Enables installation on HPC/shared servers with zero system permissions. TUI improves UX. Mosaic filter prevents nan propagation from template placeholders.
 
 **Outcome:**
-- `--standalone` and `--system-conda` flags; `BindMaster/conda/` and `BindMaster/bin/` paths; Mosaic template guard.
+- `--standalone` and `--system-conda` flags; `BinderScout/conda/` and `BinderScout/bin/` paths; Mosaic template guard.
 
 ---
 
@@ -186,10 +186,10 @@
 ## 2026-04-24 — Parts J/K/L/M: Protenix + AF3 + Protein-Hunter + RFD3 land in one PR (#5)
 
 **What changed:**
-- **Part J**: Protenix v0.5.0 added as 2nd refold engine (24 GB capable, rides `bindmaster_pxdesign` conda env).
+- **Part J**: Protenix v0.5.0 added as 2nd refold engine (24 GB capable, rides `binderscout_pxdesign` conda env).
 - **Part K**: AlphaFold 3 v3.0.2 added as canonical refold engine on big-VRAM hardware (aarch64/Spark-first; `binder-eval-af3` env; >100 GB requirement).
-- **Part L**: Protein-Hunter integrated (`bindmaster_protein_hunter` conda env, x86 only — PyRosetta no aarch64 wheels). New `ProteinHunterExtractor` reads `summary_high_iptm.csv`.
-- **Part M**: RFD3 (RosettaCommons/foundry) integrated (`bindmaster_rfd3` env, `rc-foundry[rfd3,mpnn]` from PyPI, x86 + aarch64, BSD-3, commercial-use OK). Weights at `BindMaster/weights/foundry/`. New `RFD3Extractor`.
+- **Part L**: Protein-Hunter integrated (`binderscout_protein_hunter` conda env, x86 only — PyRosetta no aarch64 wheels). New `ProteinHunterExtractor` reads `summary_high_iptm.csv`.
+- **Part M**: RFD3 (RosettaCommons/foundry) integrated (`binderscout_rfd3` env, `rc-foundry[rfd3,mpnn]` from PyPI, x86 + aarch64, BSD-3, commercial-use OK). Weights at `BinderScout/weights/foundry/`. New `RFD3Extractor`.
 - **RFAA deprecated** (not yet fully removed; deletion comes 2026-05-28).
 
 **Why it mattered:**
@@ -232,7 +232,7 @@
 
 **What changed:**
 - All run scripts write a `settings.json` into `runs/<name>/<tool>/` before the design step starts.
-- Required keys: `tool`, `started_at` (ISO-8601 UTC), `version` (BindMaster git SHA + tool git SHA or package version), `target` (name, sequence, length), `design_params` (all CLI flags), `env` (conda env, Python version, GPU ID, GPU name, GPU memory MiB).
+- Required keys: `tool`, `started_at` (ISO-8601 UTC), `version` (BinderScout git SHA + tool git SHA or package version), `target` (name, sequence, length), `design_params` (all CLI flags), `env` (conda env, Python version, GPU ID, GPU name, GPU memory MiB).
 - `run_rfd3.sh.template` and `run_protein_hunter.sh.template` are the canonical examples.
 
 **Why it mattered:**
@@ -341,7 +341,7 @@
 
 **What changed:**
 - CLAUDE.md and README updated to reflect Parts I–M status.
-- `bindmaster-orchestrator` and `bindmaster-worker` Claude Code skills published with comprehensive reference docs: 14 reference files across tool-specific guides, evaluation pipeline, troubleshooting, learnings from 2VDY/CALCA campaigns.
+- `binderscout-orchestrator` and `binderscout-worker` Claude Code skills published with comprehensive reference docs: 14 reference files across tool-specific guides, evaluation pipeline, troubleshooting, learnings from 2VDY/CALCA campaigns.
 
 **Why it mattered:**
 - Formalizes the agentic interface for binder-design campaign execution (AI-assisted orchestration and per-machine workflows).
@@ -369,7 +369,7 @@
 ## 2026-05-27 — 2VDY: Mosaic ColabFold rate-limit fixed (`binder use_msa=False`)
 
 **What changed:**
-- Bug: Mosaic's `hallucinate_bindmaster.py` template had `use_msa=True` for both target and de-novo binder chains.
+- Bug: Mosaic's `hallucinate_binderscout.py` template had `use_msa=True` for both target and de-novo binder chains.
 - Each hallucination step triggered a fresh MMseqs request for an evolving sequence (no cache hits), hitting ColabFold's rate limit over hours.
 - Fix: patch binder chain to `use_msa=False` at two code locations (Stage 1 design loop ~line 395, Stage 2 ranking eval ~line 513). Keep target `use_msa=True` for the MSA-on-known-targets quality benefit.
 
@@ -435,7 +435,7 @@
 - SoluProt 1.0 (Hon et al. 2021, *E. coli* sequence-only solubility predictor) wired as `--tool soluprot`, `binder-compare filter-soluprot`, and `evaluate.sh` Step 0.5 (runs before any GPU work).
 - `--soluprot-filter` drops sub-threshold designs from FASTA before refolding (no redundant GPU cycles on insoluble designs).
 - Dedicated `binder-eval-soluprot` conda env (Python 3.7, scikit-learn 0.20.1, x86 only; USEARCH dependency).
-- GitHub repo renamed from BindMaster → **BinderScout** (CLI/env names stay `bindmaster`, migrate incrementally).
+- GitHub repo renamed from BinderScout → **BinderScout** (CLI/env names stay `binderscout`, migrate incrementally).
 - Extractor column-name drift fixes for RFD3, PXDesign, Proteina-Complexa from real campaign runs.
 
 **Why it mattered:**
@@ -557,8 +557,8 @@
 - ESMFold2 added to `CALCA_eval_top50` and `CALCA_eval_top350` evaluation rounds, completing the 3-engine panel (Boltz-2 + AF3 + ESMFold2).
 - Canonical reports generated: `CALCA_top50_FINAL_report_3engine_iptm_mean/`, `CALCA_top350_FINAL_report_3engine_iptm_mean/` with two-stage ranking (`consensus_iptm_mean`).
 - Two-stage ranking (`max_screen → mean_rank`) made the default in `binder-compare report` (motivated by CALCA results confirming it as the production method).
-- `bindmaster evaluate` rewired as a passthrough to the `binder-compare` CLI in the `binder-eval` env (retiring the old direct dispatch path).
-- Unused `bindmaster/` Python package (~1 080 lines: BinderScore, PXDesignRunner, FeatureFlags — "World B") deleted; `Evaluator` is now the single scoring layer.
+- `binderscout evaluate` rewired as a passthrough to the `binder-compare` CLI in the `binder-eval` env (retiring the old direct dispatch path).
+- Unused `binderscout/` Python package (~1 080 lines: BinderScore, PXDesignRunner, FeatureFlags — "World B") deleted; `Evaluator` is now the single scoring layer.
 
 **Why it mattered:**
 - CALCA results validate the two-stage cross-engine ranking as the benchmark-proven method (precision@top-10% 0.92 vs 0.79 for max-only).
@@ -610,7 +610,7 @@
 - Completes the lifecycle infrastructure for closed-loop binder design campaigns (from target characterization through wet-lab handoff and maturation rounds).
 
 **Outcome:**
-- Five new `binder-compare` subcommands, five finalized Claude Code skills (`bindmaster-evaluator`, `bindmaster-wetlab`, `bindmaster-target-analyst`, `bindmaster-orchestrator`, `bindmaster-worker`).
+- Five new `binder-compare` subcommands, five finalized Claude Code skills (`binderscout-evaluator`, `binderscout-wetlab`, `binderscout-target-analyst`, `binderscout-orchestrator`, `binderscout-worker`).
 
 ---
 
@@ -759,7 +759,7 @@
 ## 2026-06-28 — SoluProt screen runs by default on BM5 (aarch64): env rename + dead-env cleanup
 
 **What changed:**
-- Cloned the validated `sklearn020-build` env → **`binder-eval-soluprot`** — the name `evaluate.sh` auto-detects and the configurator checks via `_env_exists`. So `bindmaster evaluate` / `evaluate.sh` now RUN the SoluProt screen by default on BM5 with NO extra flags (previously silently skipped: nothing on the box was named `binder-eval-soluprot`).
+- Cloned the validated `sklearn020-build` env → **`binder-eval-soluprot`** — the name `evaluate.sh` auto-detects and the configurator checks via `_env_exists`. So `binderscout evaluate` / `evaluate.sh` now RUN the SoluProt screen by default on BM5 with NO extra flags (previously silently skipped: nothing on the box was named `binder-eval-soluprot`).
 - **Deleted the broken `soluprot-py37` env** (had scikit-learn 0.21.3 → `'BinomialDeviance' has no attribute 'get_init_raw_predictions'` crash at `predict()` — a trap that loaded but never scored).
 - Resolved the USEARCH version ambiguity: the deployed `~/soluprot-dist/usearch` banner = `usearch v12.0`; the vendored repo copy + dist copy + source build all share BuildID `920b9334` (identical aarch64 v12 source builds). Removed a stray x86 leftover (`usearch12-src/tmp/usearch_linux_x86_12.0-beta`).
 
@@ -774,7 +774,7 @@
 ## 2026-06-29 — SoluProt 2.0 web UI (standalone) + x86 validation: full TMHMM model reproduces the public server
 
 **What changed:**
-- Built **SoluProt 2.0 UI** — a standalone local web app that reproduces the public SoluProt server (`loschmidt.chemi.muni.cz/soluprot/`): paste FASTA → the host computes the *E. coli* solubility score via `soluprot.py` → a color-graded results table + score-distribution histogram, with per-job persistence retrievable by Job ID. FastAPI (py3.10) serving env shells into the py3.7 `binder-eval-soluprot` model env via `$SOLUPROT_PYTHON`; vanilla-JS SPA (no external libs); keeps the original branding/affiliation banner. **This project lives OUTSIDE this repo** (`~/dev/SoluProt-2.0-UI/`, deliberately not under BinderScout) — it was the validation vehicle, not a BindMaster component. Diary records the *finding*, not the code.
+- Built **SoluProt 2.0 UI** — a standalone local web app that reproduces the public SoluProt server (`loschmidt.chemi.muni.cz/soluprot/`): paste FASTA → the host computes the *E. coli* solubility score via `soluprot.py` → a color-graded results table + score-distribution histogram, with per-job persistence retrievable by Job ID. FastAPI (py3.10) serving env shells into the py3.7 `binder-eval-soluprot` model env via `$SOLUPROT_PYTHON`; vanilla-JS SPA (no external libs); keeps the original branding/affiliation banner. **This project lives OUTSIDE this repo** (`~/dev/SoluProt-2.0-UI/`, deliberately not under BinderScout) — it was the validation vehicle, not a BinderScout component. Diary records the *finding*, not the code.
 - Used it to settle the open question: **does the aarch64/BM5 SoluProt screen differ from the public server because of a wrapper/USEARCH/sklearn bug, or solely the TMHMM-free model variant?** Staged the bundle + a `compare.py` validator + a Claude Code kickoff doc to MUNI; ran it on BM1 (x86) with the FULL native stack (TMHMM binary → 96-feature model, scikit-learn 0.20.1 wheel, x86 USEARCH).
 - Found + fixed a TMHMM x86 setup gotcha (folded into the standalone's `setup_tmhmm.sh`, also on MUNI): TMHMM 2.0's `tmhmm` wrapper AND `tmhmmformat.pl` BOTH ship `#!/usr/local/bin/perl`; the wrapper execs the formatter via its shebang, so rewriting only `tmhmm`'s shebang makes the formatter silently fail → empty `-short` output, exit 0 → SoluProt backfills every TMHMM feature with the training mean → WRONG scores for membrane sequences while passing an exit-code check. Fix: rewrite the perl shebang on BOTH files; smoke test must assert `PredHel=` on a membrane control, not just exit 0.
 
@@ -864,7 +864,7 @@ Target: ApoE4 N-terminal 4-helix bundle (6NCO chain A, 185-aa construct = His-ta
 - Upstream PC generates on Blackwell. **AF2-CPU reward is too slow for scale: measured ~6 min/structure (23:47 for 4 structures) → a 300-design best-of-N ≈ 10 days.** → pivoting the reward to **RF3 (RoseTTAFold3, torch-GPU, independent of our eval engines)** + our refold as the gate — in progress.
 
 **Propositions / TODOs (for the codebase + campaign):**
-- **Configurator:** bake `--temperature 0.25 --bias '{"ALA": -1.5}'` into `write_run_rfd3` + `bindmaster_examples/run_rfd3.sh.template` (currently emit `T=0.1`, no bias). Re-check 2VDY/CBG RFD3 outputs for the same collapse.
+- **Configurator:** bake `--temperature 0.25 --bias '{"ALA": -1.5}'` into `write_run_rfd3` + `binderscout_examples/run_rfd3.sh.template` (currently emit `T=0.1`, no bias). Re-check 2VDY/CBG RFD3 outputs for the same collapse.
 - **Installer:** add aarch64 install paths to `install_aarch.sh` for **RFD3** (cu130 torch) and **Proteina-Complexa** (the 5-blocker Blackwell recipe) — both currently fall to the x86 `install.sh` and die at cu121/cu126.
 - **Evaluator:** `refold-boltz2` defaults `--output-dir` to CWD-relative `./refold_boltz2`; combined with index-based `--resume` this silently emits a prior pool's CSV. Give it a per-run default or make `--resume` sequence-keyed (footgun in `evaluate.sh` for multi-pool runs).
 - **PC on Blackwell:** finish the RF3-GPU reward route (install `rc-foundry[all]` + RF3 ckpt into the PC venv, swap reward to `rf3_reward`), then run the proper PC v3 (hotspots + best-of-N + RF3 reward) → refold → head-to-head vs original-PC and port-PC.
@@ -1149,7 +1149,7 @@ which now reaches BM1/BM2/BM4 directly over the LAN (`tools/fleet.sh`) and Clara
    `api.colabfold.com` **once per design** — 2808 calls logged on BM1. BM4/BM5 on newer code fetch once
    and reuse the cached a3m: same MSA content, **~2× the throughput** (380/h vs 200/h on identical
    3090s) and no rate-limit exposure. Corollary: the a3m files pre-warmed into
-   `~/.cache/bindmaster/target_msa/` on BM1/BM2 were **inert** — that code never reads them.
+   `~/.cache/binderscout/target_msa/` on BM1/BM2 were **inert** — that code never reads them.
    Repos must not be hot-swapped under a running arm, since `cs_retry.sh` would relaunch onto the new
    code mid-run and change the MSA regime partway through; sync after each arm finishes.
 
@@ -1164,7 +1164,7 @@ which now reaches BM1/BM2/BM4 directly over the LAN (`tools/fleet.sh`) and Clara
 
 8. **Repos synced across the fleet, nothing clobbered.** Three machines held commits that existed
    nowhere else; all pushed to origin before any checkout — `fix/boltz2-skip-bad-design`,
-   `snapshot/bm1-nodes-gpu-check` (BM1's unpushed `bindmaster nodes` commit from May 18, functionally
+   `snapshot/bm1-nodes-gpu-check` (BM1's unpushed `binderscout nodes` commit from May 18, functionally
    superseded by `tools/fleet.sh` but the only copy), `snapshot/bm4-binderscout-improvements`.
    `master` left untouched.
 
@@ -1431,7 +1431,7 @@ reject ApoE3 (Cys112) and ApoE2 (Cys112+Cys158). Orchestrated from BM5 over the 
 - **`--resume` skips by positional `idx`, not by sequence** (`boltz2_runner.py:105`). Resuming
   against a *shard* silently skipped 70 designs with `rc=0` and no log line. **Never `--resume`
   against a CSV written from a different input file.** Proper fix: key on `sequence`.
-- **Syncing a machine's BindMaster repo breaks Boltz-2 until Mosaic is patched** — newer code passes
+- **Syncing a machine's BinderScout repo breaks Boltz-2 until Mosaic is patched** — newer code passes
   `msa_path=` to `TargetChain`. Unpatched, *every* design fails its feature build. The per-design
   skip fix then turned that into 512/512 silent skips, **exit 0**, logged as "SHARD COMPLETE".
   Guard added (`7befc46`): raise when `n_skipped == n_todo`.
@@ -1573,7 +1573,7 @@ argument parsing; the configurator turned an uninstalled-but-enabled tool into a
 `FileNotFoundError` over a half-written run directory; `--config` replay validated 3 keys
 while the generators read ~50, so a hand-edited config died with
 `KeyError: 'boltzgen_intermediate'`; and the TUI's "Evaluate results" entry ran
-`bindmaster evaluate` with no arguments — argparse exit 2 — while its comment promised it
+`binderscout evaluate` with no arguments — argparse exit 2 — while its comment promised it
 "shows available subcommands".
 
 Compounding the configurator ones: `config.json` was the **last** line of `generate()`,
@@ -1626,7 +1626,7 @@ injecting a `cfg["…"]` into a generator, and auto-deriving `MIN_ENGINES` each 
 test intended to catch them.
 
 **Also found, not fixed:** answering "is the README updated?" after the docs commit
-surfaced three more contradictions the first pass missed — the `bindmaster evaluate`
+surfaced three more contradictions the first pass missed — the `binderscout evaluate`
 section's engine table omitted ESMFold2 (the *default* engine) two lines above a note
 saying "Boltz-2 + AF3 + ESMFold2, exactly three independent engines"; the same section
 opened with "cross-ranks all designs by a configurable metric", false since Part U
@@ -2040,7 +2040,7 @@ WrongHotspot**. Nothing was wrong with the search; the bar was measuring the tar
 
 **Five concrete repo gaps, each verified in-tree:**
 
-1. **`bindmaster_examples/hallucinate_bindmaster.py:434` hardcodes `chains=[target_tc]`** — one
+1. **`binderscout_examples/hallucinate_binderscout.py:434` hardcodes `chains=[target_tc]`** — one
    `TargetChain`, template chain `"A"`. Against a homodimer that silently ignores chain B and
    reports success. (The Stage-1/Stage-2 refold sites at `:511` and `:637` are correctly two-chain;
    it is the design site that is single-chain.) Patched in the campaign copy only, with a hard-fail

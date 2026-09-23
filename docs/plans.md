@@ -1,4 +1,4 @@
-# BindMaster — Development Plans
+# BinderScout — Development Plans
 
 This document consolidates all active and future development plans.
 Completed plans are archived in [docs/completed_plans.md](completed_plans.md).
@@ -9,7 +9,7 @@ Completed plans are archived in [docs/completed_plans.md](completed_plans.md).
 
 > **Status:** Planned, not started. Depends on Part H (complete).
 >
-> **Goal:** Ship BindMaster as a single archive that requires zero installation, zero internet,
+> **Goal:** Ship BinderScout as a single archive that requires zero installation, zero internet,
 > and zero system permissions on the target server. Extract, set PATH, run.
 
 ### Overview
@@ -21,11 +21,11 @@ tar.gz. An `unpack.sh` script on the target machine extracts and patches paths.
 ```
 Build machine (full internet, GPU)         Target server (restricted, air-gapped OK)
 ─────────────────────────────────          ──────────────────────────────────────────
-bindmaster install --tool all              tar xzf bindmaster-standalone-*.tar.gz
-bindmaster pack --output FILE              cd BindMaster
+binderscout install --tool all              tar xzf binderscout-standalone-*.tar.gz
+binderscout pack --output FILE              cd BinderScout
                                            bash unpack.sh
    produces:                               export PATH="$(pwd)/bin:$PATH"
-   bindmaster-standalone-v0.8.0-           bindmaster configure
+   binderscout-standalone-v0.8.0-           binderscout configure
      x86_64-cuda124.tar.gz                 bash runs/myrun/run_all.sh
    (~10-20 GB compressed)
 ```
@@ -36,7 +36,7 @@ bindmaster pack --output FILE              cd BindMaster
 - [ ] I2. Create `pack/build_pack.sh` — build relocatable archive on dev machine
 - [ ] I3. Create `pack/unpack.sh` — extract + fix paths on target server
 - [ ] I4. Create `pack/manifest.py` — version/checksum metadata
-- [ ] I5. Add `bindmaster pack` subcommand to CLI
+- [ ] I5. Add `binderscout pack` subcommand to CLI
 - [ ] I6. Handle Mosaic uv venv relocation (shebang + pyvenv.cfg patching)
 - [ ] I7. BoltzGen weights optional inclusion (`--include-boltzgen-weights`)
 - [ ] I8. Platform build matrix (x86_64-cuda124, aarch64-cuda130)

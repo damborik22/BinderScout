@@ -1,6 +1,6 @@
 """RFD3 (foundry) sequence extractor.
 
-RFD3 (RosettaCommons/foundry, Butcher et al. 2025) is BindMaster's all-atom
+RFD3 (RosettaCommons/foundry, Butcher et al. 2025) is BinderScout's all-atom
 diffusion tool. The Hydra-driven `rfd3 design` CLI writes per-trajectory outputs beneath the out_dir,
 typically including PDB files and a results manifest.
 

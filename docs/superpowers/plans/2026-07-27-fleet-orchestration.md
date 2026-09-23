@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let BM5 dispatch, monitor and retrieve BindMaster design jobs on BM1/BM2/BM4 over direct SSH, replacing the muni-disk handoff-doc round trip.
+**Goal:** Let BM5 dispatch, monitor and retrieve BinderScout design jobs on BM1/BM2/BM4 over direct SSH, replacing the muni-disk handoff-doc round trip.
 
 **Architecture:** A single bash script (`tools/fleet.sh`) drives three LAN peers over multiplexed SSH. Jobs run inside `tmux` so they survive disconnects; an admission check refuses to launch onto a busy GPU rather than queueing. Results are pulled to BM5 by rsync, verified, and only then archived to muni-disk. No daemon, no root, no new services.
 
@@ -47,7 +47,7 @@ mkdir -p ~/.ssh/cm && chmod 700 ~/.ssh/cm
 - [ ] **Step 3: Append the fleet block to `~/.ssh/config`**
 
 ```
-# --- BindMaster LAN fleet (Loschmidt Lab, <LAB_SUBNET>) ---
+# --- BinderScout LAN fleet (Loschmidt Lab, <LAB_SUBNET>) ---
 Host bm1
     HostName <BM1_IP>
     User <BM1_USER>
@@ -136,7 +136,7 @@ Expected: FAIL — `tools/fleet.sh: No such file or directory`.
 
 ```bash
 #!/usr/bin/env bash
-# fleet.sh — drive the BindMaster LAN fleet (BM1/BM2/BM4) from BM5.
+# fleet.sh — drive the BinderScout LAN fleet (BM1/BM2/BM4) from BM5.
 # Design: docs/PLAN_fleet_orchestration.md
 set -euo pipefail
 
@@ -160,10 +160,10 @@ gpu=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null
 procs=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits 2>/dev/null \
         | awk '$1+0 > 512' | wc -l)
 envs=$(ls -1 "$HOME"/miniforge3/envs "$HOME"/miniconda3/envs "$HOME"/anaconda3/envs \
-             "$HOME"/dev/BindMaster/conda/envs 2>/dev/null \
+             "$HOME"/dev/BinderScout/conda/envs 2>/dev/null \
        | grep -vE '^$|:' | sort -u | paste -sd,)
-sha=$(git -C "$HOME/dev/BindMaster" rev-parse --short HEAD 2>/dev/null || echo none)
-br=$(git -C "$HOME/dev/BindMaster" rev-parse --abbrev-ref HEAD 2>/dev/null || echo none)
+sha=$(git -C "$HOME/dev/BinderScout" rev-parse --short HEAD 2>/dev/null || echo none)
+br=$(git -C "$HOME/dev/BinderScout" rev-parse --abbrev-ref HEAD 2>/dev/null || echo none)
 printf '{"host":"%s","arch":"%s","gpu":"%s","gpu_procs":%s,"ram_gb":%s,' \
     "$(hostname)" "$(uname -m)" "$gpu" "${procs:-0}" \
     "$(free -g | awk '/^Mem:/{print $2}')"
@@ -516,9 +516,9 @@ git commit -m "feat(fleet): poll running jobs and fetch verified results"
 
 **Files:**
 - Modify: `.github/workflows/ci.yml:18-25`
-- Create: `.claude/skills/bindmaster-orchestrator/references/lab-deploy.md`
+- Create: `.claude/skills/binderscout-orchestrator/references/lab-deploy.md`
 - Modify: `CLAUDE.local.md` (machine-local, gitignored)
-- Modify: `.claude/skills/bindmaster-orchestrator/SKILL.md`
+- Modify: `.claude/skills/binderscout-orchestrator/SKILL.md`
 
 **Interfaces:**
 - Consumes: the finished `tools/fleet.sh`.
@@ -597,8 +597,8 @@ unchanged; it is accurate.
 
 ```bash
 git add .github/workflows/ci.yml \
-        .claude/skills/bindmaster-orchestrator/references/lab-deploy.md \
-        .claude/skills/bindmaster-orchestrator/SKILL.md
+        .claude/skills/binderscout-orchestrator/references/lab-deploy.md \
+        .claude/skills/binderscout-orchestrator/SKILL.md
 git commit -m "docs(fleet): lab-deploy playbook, skill pointer, CI shellcheck entry"
 ```
 

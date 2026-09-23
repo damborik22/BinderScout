@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# BindMaster Evaluator — interactive launcher
+# BinderScout Evaluator — interactive launcher
 # Run this script to evaluate a set of binder sequences.
 
 set -euo pipefail
 
 # Initialise conda — prefer local standalone install, then system locations
-_BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_BINDERSCOUT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 for _conda_sh in \
-    "${_BINDMASTER_DIR}/conda/etc/profile.d/conda.sh" \
+    "${_BINDERSCOUT_DIR}/conda/etc/profile.d/conda.sh" \
     "${HOME}/miniforge3/etc/profile.d/conda.sh" \
     "${HOME}/mambaforge/etc/profile.d/conda.sh" \
     "${HOME}/miniconda3/etc/profile.d/conda.sh" \
@@ -35,7 +35,7 @@ _finish() {
 trap _finish EXIT
 
 echo "=============================="
-echo "  BindMaster Evaluator"
+echo "  BinderScout Evaluator"
 echo "=============================="
 echo ""
 

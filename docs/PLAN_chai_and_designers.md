@@ -3,7 +3,7 @@
 > Status: Draft. Continues alphabetical part numbering from Part N.
 >
 > Goal: Add a fourth refolding engine (Chai-1) and four new design tools
-> (RFantibody, PPIFlow, lifted HyperMPNN/FAMPNN, OriginFlow) to BindMaster.
+> (RFantibody, PPIFlow, lifted HyperMPNN/FAMPNN, OriginFlow) to BinderScout.
 > Largest functional gap addressed: RFantibody is the first antibody/nanobody
 > designer in the pipeline — every existing tool targets monomer binders / PPIs.
 
@@ -37,12 +37,12 @@
 
 ## Part P — RFantibody (antibody / nanobody design)
 
-> Goal: First antibody-specific designer in BindMaster. Fills the largest functional
+> Goal: First antibody-specific designer in BinderScout. Fills the largest functional
 > gap — every existing tool is monomer-binder/PPI. *Nature* Nov 2025.
 
 **Repo:** `RosettaCommons/RFantibody` · MIT · pinned commit + Baker-lab weights.
 
-- [ ] P1. `install/install.sh`: add `install_rfantibody()` — clone, conda env `bindmaster_rfantibody` (Python 3.10), download `rf_antibody.pt` + `rf2_ab.pt` weights
+- [ ] P1. `install/install.sh`: add `install_rfantibody()` — clone, conda env `binderscout_rfantibody` (Python 3.10), download `rf_antibody.pt` + `rf2_ab.pt` weights
 - [ ] P2. `install/install_aarch.sh`: aarch64 best-effort (likely fails on jaxlib like BindCraft — gate behind warning, don't block)
 - [ ] P3. Bundle aarch64 PyRosetta/DSSP shims (reuse `tools/aarch64/` pattern)
 - [ ] P4. Pin commit: `RFANTIBODY_COMMIT` constant
@@ -76,7 +76,7 @@
 - [ ] Q3. `install/install.sh`: clone + uv venv (`PPIFlow/.venv`) — pattern from Mosaic since likely PyTorch-heavy
 - [ ] Q4. Weights download script: handle Drive auth (use `gdown` or document manual download)
 - [ ] Q5. Pin commit: `PPIFLOW_COMMIT`
-- [ ] Q6. `bindmaster_examples/ppiflow_template.py` (mirrors `hallucinate_bindmaster.py`)
+- [ ] Q6. `binderscout_examples/ppiflow_template.py` (mirrors `hallucinate_binderscout.py`)
 - [ ] Q7. Configurator: Step 4 add PPIFlow toggle + maturation iterations slider (default: 0 = design only, recommend 5–10 for production)
 - [ ] Q8. Generated `run_ppiflow.sh` template
 - [ ] Q9. Extractor: `Evaluator/binder_comparison/extractors/ppiflow.py`
@@ -100,8 +100,8 @@ weights become unavailable, integration breaks.
 
 - [ ] R1. Audit ProteinDJ to extract HyperMPNN and FAMPNN as standalone Python modules (no Nextflow dep)
 - [ ] R2. Confirm licenses on each module independently — they may be third-party
-- [ ] R3. Add `bindmaster/mpnn/` directory with three backends: `proteinmpnn.py` (existing default), `hypermpnn.py`, `fampnn.py`
-- [ ] R4. Install: extend `bindmaster_rfaa` (or equivalent) env with their deps; check whether they fit in existing envs
+- [ ] R3. Add `binderscout/mpnn/` directory with three backends: `proteinmpnn.py` (existing default), `hypermpnn.py`, `fampnn.py`
+- [ ] R4. Install: extend `binderscout_rfaa` (or equivalent) env with their deps; check whether they fit in existing envs
 - [ ] R5. Add `--mpnn-backend {proteinmpnn,hypermpnn,fampnn}` flag to:
   - RFD3 run script
   - RFantibody run script (Part P)

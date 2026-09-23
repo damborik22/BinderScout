@@ -1,4 +1,4 @@
-# BindMaster Evaluator
+# BinderScout Evaluator
 
 **Sequences in → independent refolding → ranked interface metrics out.**
 
@@ -49,21 +49,21 @@ choice between models is unlikely to make a large practical difference.
 
 ## Installation
 
-The Evaluator is bundled inside the BindMaster repository. No separate clone needed.
+The Evaluator is bundled inside the BinderScout repository. No separate clone needed.
 
 ### 1. Install Mosaic (Boltz-2 environment)
 
 The Boltz-2 refolding step uses the **Mosaic** uv virtual environment:
 
 ```bash
-cd ~/BindMaster
-bindmaster install --tool mosaic
+cd ~/BinderScout
+binderscout install --tool mosaic
 ```
 
 ### 2. Install the evaluator environments
 
 ```bash
-cd ~/BindMaster/Evaluator
+cd ~/BinderScout/Evaluator
 bash install.sh
 ```
 
@@ -110,10 +110,10 @@ This runs all steps in the correct environments automatically and writes:
 - `results/report/metrics.csv` — all metrics, ranked
 - `results/report/summary.json` — per-tool aggregate statistics
 
-### Via the BindMaster CLI
+### Via the BinderScout CLI
 
 ```bash
-# `bindmaster evaluate` is a PASSTHROUGH to this CLI. There is no run-directory
+# `binderscout evaluate` is a PASSTHROUGH to this CLI. There is no run-directory
 # mode and no --refold / --target flags: the first argument must be a subcommand,
 # or argparse rejects it. The usual path is the script the configurator writes:
 bash runs/<name>/run_evaluate.sh
@@ -124,7 +124,7 @@ bash Evaluator/evaluate.sh --sequences seqs.fasta \
                           --output runs/<name>/evaluate
 
 # Or call any subcommand straight through:
-bindmaster evaluate run --mosaic runs/<name>/mosaic --target-seq "<TARGET_SEQ>" -o out/
+binderscout evaluate run --mosaic runs/<name>/mosaic --target-seq "<TARGET_SEQ>" -o out/
 ```
 
 ### Resume a partial run
@@ -257,7 +257,7 @@ screen, and the run warns saying so.
 
 ```bash
 conda env list | grep binder-eval        # which engine envs exist
-bindmaster install --tool esmfold2       # add the lightweight third engine
+binderscout install --tool esmfold2       # add the lightweight third engine
 ```
 
 ### 2. CUDA version mismatch

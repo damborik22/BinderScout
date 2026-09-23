@@ -28,7 +28,7 @@ but is not always identical to them — the commits are the record.
 | 4 | Unbreak the click path | F8, F9, F3, F15 | `configurator.py` | low | Documented commands fail as typed |
 | 5 | Ingestion coverage | F38, F40, F39, F42 | `cli/run.py`, `cli/extract.py`, `extractors/rfd3.py` | low | Tools silently absent from the report |
 | 6 | Installer safety | F11, F26, F18, F24 | `install.sh` | medium | `--yes` deletes 4 GB of weights |
-| 7 | aarch64 parity | F12, F13, F14, F16 | `install_aarch.sh`, `bindmaster.py` | medium | Needs Spark hardware to verify |
+| 7 | aarch64 parity | F12, F13, F14, F16 | `install_aarch.sh`, `binderscout.py` | medium | Needs Spark hardware to verify |
 | 8 | Headless configurator | non-agentic blocker | `configurator.py` | low | The one true no-LLM blocker |
 | 9 | Docs + notices | F4, F41, F17, F19, F30, F31 | docs, `.claude/skills` | none | Follows from decisions |
 | 10 | Tests | F29, F37 + regressions | `tests/` | none | Locks batches 1–5 in |
@@ -568,7 +568,7 @@ Needs a Spark/GH200 to verify, so it should land behind the others.
 - **F12** add the `rfd3|foundry` and `proteina-complexa` cases to the `--tool` parser; give
   Protein-Hunter an explicit "no aarch64 PyRosetta wheels" message instead of "Invalid `--tool` value".
 - **F13** add `DO_ESMFOLD2=true` to the aarch64 `all` case.
-- **F16** architecture dispatch in `bindmaster.py:105`:
+- **F16** architecture dispatch in `binderscout.py:105`:
 
 ```diff
 +    import platform
@@ -579,7 +579,7 @@ Needs a Spark/GH200 to verify, so it should land behind the others.
 +        script = REPO / "install" / name
 ```
 
-and have `tui/app.py:259, 418` call `bindmaster.py install` rather than hardcoding `install.sh`, so
+and have `tui/app.py:259, 418` call `binderscout.py install` rather than hardcoding `install.sh`, so
 there is one dispatch point instead of three.
 
 ---
@@ -637,9 +637,9 @@ Follows the decisions below.
   by omission, and the repo advertises RFD3's BSD-3 as "commercial-use OK" while shipping a
   Rosetta-derived binary.
 - **F31** move `INVESTIGATION_RANKING_DISCREPANCY.md` and `PLAN_chai_and_designers.md` out of the
-  repo root (the `docs/` copy of the former is byte-identical); fix `bindmaster.py:52`,
+  repo root (the `docs/` copy of the former is byte-identical); fix `binderscout.py:52`,
   `CLAUDE.md:424`, `CONTRIBUTING.md:16` clone URLs; move the `--help` side effect
-  (`bindmaster.py:142`) after the `--help` branch.
+  (`binderscout.py:142`) after the `--help` branch.
 
 ---
 
@@ -665,7 +665,7 @@ seven live extractors, the five refold runners, `merger.py`, `ensemble.py` or `s
 Four items are product calls, not defects I can settle from the code.
 
 **1 · F4 — is Protenix opt-in or opt-out?**
-`evaluate.sh:135–143` runs it whenever `bindmaster_pxdesign` exists; `CLAUDE.md` says three times it
+`evaluate.sh:135–143` runs it whenever `binderscout_pxdesign` exists; `CLAUDE.md` says three times it
 "runs only when explicitly enabled"; README's engine table matches the *code*. Two operators with
 identical designs get different rankings depending on whether they installed PXDesign, because
 `protenix_pae_iptm` enters `consensus_iptm`.
