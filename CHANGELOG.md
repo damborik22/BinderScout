@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.4] — 2026-09-23
+
+### Fixed
+
+- **A refold engine that exited 0 having written nothing was reported as
+  success.** On 2026-09-16 ESMFold2 died on Clara with a `TypeError` from an
+  unpinned model revision, wrote 0 rows, and `evaluate.sh` printed `REFOLD_DONE`
+  and exited 0. A whole engine contributed nothing to a `>=3`-engine gate,
+  invisibly — every design silently dropped to a 2-engine mean and failed the
+  gate. The AF3 empty-rows incident of 2026-08-21 is the same shape. Checking
+  the return code is not enough, so the CSV must now actually gain rows.
+  Guards both paths: the sequential one called the engines bare, and the
+  concurrent one caught a non-zero rc but never looked at the output. Backported
+  from the 1.1.x line (`e427ebe`); `master` stays the seven-tool line.
+
 ## [1.0.3] — 2026-09-22
 
 Two refold-engine fixes, both found by benchmarking the engines across every GPU we
