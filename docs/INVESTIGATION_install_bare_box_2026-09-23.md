@@ -318,6 +318,37 @@ summary line is therefore not a sufficient success check.
 > not that a checkpoint does. This is precisely the failure mode predicted
 > below, and it is the one a CI job or a wrapper keying on `$?` cannot see.
 
+> **B14 fired a SECOND time in the same run, on Proteina-Complexa** — different
+> tool, different root cause, identical outcome. `complexa download
+> --everything` died on a torch/torchaudio ABI mismatch:
+>
+> ```
+> OSError: …/Proteina-Complexa/.venv/lib/python3.12/site-packages/torchaudio/lib/
+>          _torchaudio.abi3.so: undefined symbol: torch_library_impl
+> ✗ Failed to download ESM2 weights
+> ✗ Downloading all models (complexa download --everything)
+> ▶ Installing foldseek
+> ✓ Proteina-Complexa installation complete
+> [9/12] Protein-Hunter
+> ```
+>
+> Measured afterwards:
+>
+> | weights | state |
+> |---|---|
+> | **Complexa** (its own core model) | **absent** |
+> | **ESM2** | 64 KB / 2 entries — effectively empty (expected ~2.5 GB) |
+> | ProteinMPNN | 45 MB ✓ |
+> | LigandMPNN | 120 MB ✓ |
+> | AF2 | 5.3 GB ✓ (symlinked to BindCraft's, `install.sh:1845-1852`) |
+>
+> The tool is missing **its own primary weights** and was reported complete.
+> Two firings, two unrelated causes (a DNS blip; a wheel ABI mismatch), one
+> install run — which makes this the installer's dominant failure mode rather
+> than an edge case. Note also that the retry logic worked as designed
+> (`attempt 1/2 failed, retrying…`) and still ended in a green line: retrying a
+> step whose failure is non-fatal does not make the result correct.
+
 **B14 — PXDesign, Protein-Hunter and RFD3 report success over broken installs.**
 Each `install_*` ends on `print_ok "... installation complete"`, which returns 0,
 so the `|| failed_tools+=(...)` guards at `3320-3323` never fire. The only hard
@@ -380,6 +411,23 @@ Four more hardcode a wheel index and ignore the flag entirely:
 which is a partial defence — but `1495` and `2294`/`2395`/`2638` are all **pip**
 wheel indexes, so the distinction is not what separates the two groups, and the
 banner announces one CUDA version for the whole run.
+
+**Observed live: three CUDA variants in one run.** The same install that
+printed `CUDA: 12.4` produced:
+
+| env | torch |
+|---|---|
+| `BoltzGen` | `2.5.1+cu121` |
+| `binderscout_pxdesign` | `2.6.0+cu124` |
+| `Proteina-Complexa/.venv` | `2.7.0+cu126` |
+
+The third is not even one of the hardcoded indexes above — it comes from
+Proteina-Complexa's own upstream resolution — and it is what produced B14's
+second firing: a `torchaudio` wheel built against a different torch than the
+`2.7.0+cu126` that landed, so `import torchaudio` raises `undefined symbol:
+torch_library_impl` and the weight download dies. A single declared CUDA
+version per run, honoured everywhere, would have made that mismatch
+impossible.
 
 **Why it matters beyond cosmetics.** cu121 wheels carry no `sm_120`/`sm_121`.
 That is precisely the failure class CLAUDE.md documents on GB10, where a wrong
