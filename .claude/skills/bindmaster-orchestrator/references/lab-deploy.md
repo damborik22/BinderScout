@@ -152,7 +152,14 @@ enforced by `fleet.sh`, they're judgment calls at assignment time:**
 
 ## 3. The deploy loop
 
-All commands run from BM5. `fleet.sh` prints in color (red=die, yellow=warn,
+All commands run from the orchestrator. **BM4 is the fleet orchestrator**;
+BM5 was the original one and either box can drive the other three — `fleet.sh`
+reads its machine list from `$FLEET_MACHINES`, so nothing is wired to a
+particular host. Prefer BM4: it is x86 with a *discrete* GPU, so an
+orchestrator's browser and desktop session cost it nothing. On BM5 those same
+processes come out of the GPU pool, because there the pool IS system RAM.
+
+`fleet.sh` prints in color (red=die, yellow=warn,
 green=ok) and every subcommand exits non-zero on failure — check exit codes if
 scripting around it.
 
@@ -465,7 +472,7 @@ kill -TERM -<PGID>; sleep 4; kill -KILL -<PGID>
 | GPU busy at launch | Refuse, report which PID(s) hold it. No silent queueing. |
 | BindCraft RSS > 50 GB | Poll-time check the operator makes by hand (`ssh <m> ps -o rss -p <pid>`) — `fleet.sh` does not enforce this. Kill and report if seen; threshold is lower on BM1 given its 31 GB RAM. |
 | RFD3 OOM | Prevented at launch — `fleet.sh` exports `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` for every job it starts (§3.3), not a manual step. |
-| Boltz-2 complex > ~820 tokens, launched on BM5 itself | Out of `fleet.sh`'s scope (BM5 is the orchestrator, not a fleet target) — refuse to launch locally per the standing Spark unified-memory-hang note; this hangs the whole box and needs a force-restart. |
+| Boltz-2 complex > ~820 tokens, launched on BM5 itself | Refuse to launch locally per the standing Spark unified-memory-hang note; this hangs the whole box and needs a force-restart. |
 | VPN down (Clara only) | `status` detects `ip link show ppp0` and reports `tunnel=DOWN` with a fix hint. LAN machines need no VPN — this row doesn't apply to bm1/bm2/bm4. |
 | Clara key not in agent | `status` detects via `ssh-add -l`; reports `key=locked` and the exact unlock command. Not applicable to the LAN key (left passphrase-less by design — see `docs/PLAN_fleet_orchestration.md` D8). |
 | rsync partial transfer | `--partial` resumes cleanly (`--append-verify` is deliberately NOT used — it skips a destination file whose size is already >= the source's, which would keep a stale result on re-fetch after a re-run); `fetch` verifies `.tar.gz` integrity with `tar -tzf` before declaring success — don't remove anything remote until that check passes. |
@@ -492,3 +499,44 @@ kill -TERM -<PGID>; sleep 4; kill -KILL -<PGID>
 For the design rationale behind every decision above (why tmux over Slurm,
 why the LAN key stays passphrase-less, why fetch-then-archive instead of
 push-to-muni), `docs/PLAN_fleet_orchestration.md` is authoritative.
+
+
+---
+
+## Dispatching GPU work to BM5 (GB10) — the sizing boundary
+
+BM5 is a DGX Spark: **the GPU pool IS system RAM** (`cudaMemGetInfo(total)` ==
+`MemTotal` == 121.69 GiB). Every *"fraction of device memory"* knob in JAX and
+PyTorch is therefore a fraction of the whole machine, and an uncapped job does
+not fail with OOM — it takes the box down. Recorded: 2026-08-18 AF3 at 0.8 →
+97.4 GiB → hard reboot; 2026-08-19 Boltz-2 at JAX's 0.75 default → 91.3 GiB.
+Neither ran out of memory. Both were told to take most of the computer.
+
+Three rules, in order.
+
+**1. Query the ceiling; never quote one.** Before sizing any GPU job for BM5:
+
+```bash
+ssh bm5 'bash -lc "~/dev/BindMaster/tools/gpurun --max"'
+```
+
+The admissible cap is `pool − unreclaimable(live) − watermark − 13 host − floor`
+and `unreclaimable` moves with whatever else is running — measured 92 GiB with a
+desktop up versus 90 on a quiet box. BM5's own `~/.claude/CLAUDE.md` says it
+plainly: *"`gpurun --max` is the ONLY trustworthy ceiling. Do not quote a fixed
+number — including any number in this file."* A number copied into a kickoff doc
+is stale the moment anything else starts.
+
+**2. Dispatch through the wrapper, not around it.** `bin/<tool>` and
+`tools/gpurun --cap` are what join MPS and get a **driver-enforced** ceiling. A
+cap written into a run script is advisory; a cap through `gpurun` is not. Jobs
+launched outside them do not join MPS at all — that isolation is deliberate, so
+`rustdesk` does not die with the MPS server.
+
+**3. Static policy comes from the repo, not over ssh.** The per-tool budget
+table is `tools/gb10-env.sh:gb10_budget` and the analysis is
+`docs/GB10_FREEZE_FAILSAFE.md` — both tracked, so the orchestrator already has
+them offline. Only the *live* ceiling needs the query in rule 1.
+
+JAX budgets are **reservations** (taken in full at import); PyTorch budgets are
+**ceilings**. Padding a JAX number is a bug, not caution.
