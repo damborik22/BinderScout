@@ -23,10 +23,9 @@ import argparse
 
 import pandas as pd
 import pytest
+import synthetic_pool
 from binder_comparison.cli import report as report_cli
 from binder_comparison.comparison import scoring
-
-import synthetic_pool
 
 
 def _run_report(tmp_path, **extra):
