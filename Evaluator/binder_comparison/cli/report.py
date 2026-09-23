@@ -45,6 +45,7 @@ from ..comparison.scoring import (
     compute_consensus_iptm,
     rank_designs,
 )
+from ..comparison.sequence_panel import annotate_composition, annotate_sequence_panel
 from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
 from ..visualization.report import generate_report
@@ -186,6 +187,16 @@ def run(args: argparse.Namespace) -> None:
     # next to the cross-validation refold metrics.
     if args.sequences:
         df = _attach_native_metrics_sidecar(df, args.sequences)
+
+    # Sequence-only panels (2.0 Part AA): the ProtParam biophysical panel and
+    # the per-sequence composition gate. Computed from the `sequence` column
+    # that is already in the frame — NOT joined — so they cannot multiply rows.
+    # The composition gate is SHADOW MODE: it emits would_exclude_composition
+    # and excludes nothing, per the plan's rule that a pre-GPU filter may only
+    # start excluding once it has removed zero confirmed binders on a
+    # calibration pool.
+    df = annotate_sequence_panel(df)
+    df = annotate_composition(df)
 
     # SoluProt: sequence-only solubility screen output. Left-joined onto df
     # by sequence — adds native_soluprot_score (0–1 probability) and
