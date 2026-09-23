@@ -1,10 +1,17 @@
 name: CI
 
 on:
+  # Release branches are where the work happens -- master is frozen and is not
+  # committed to directly -- so limiting CI to master meant none of it ran
+  # anywhere. v1.1.x developed and shipped 1.1.1 without a single CI run, and
+  # v2.0.x would have done the same, including the guards that exist precisely
+  # to be enforced automatically (the benchmark-label leak check, and the
+  # golden-pool ranking regression test 2.0 adds). 'v*.x' picks up the current
+  # and future release lines without another edit here.
   push:
-    branches: [master]
+    branches: [master, 'v*.x']
   pull_request:
-    branches: [master]
+    branches: [master, 'v*.x']
 
 jobs:
   shellcheck:
