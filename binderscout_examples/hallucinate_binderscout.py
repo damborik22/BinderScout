@@ -146,11 +146,16 @@ def _diversity_filter(candidates, min_hamming):
     """Greedy diversity filter: keep a candidate only if it is at least
     min_hamming away (Hamming distance) from every already-accepted candidate.
     Input list is assumed to be sorted best→worst (lower loss first).
+
+    Selects candidates; never reshapes them. A candidate is
+    (sequence, ranking_loss, generation_index) and this used to destructure and
+    rebuild a 2-tuple, which silently dropped anything added to the end.
     """
     accepted = []
-    for seq, loss_val in candidates:
-        if all(_hamming_distance(seq, acc_seq) >= min_hamming for acc_seq, _ in accepted):
-            accepted.append((seq, loss_val))
+    for cand in candidates:
+        seq = cand[0]
+        if all(_hamming_distance(seq, acc[0]) >= min_hamming for acc in accepted):
+            accepted.append(cand)
     return accepted
 
 
@@ -527,9 +532,17 @@ def design(
     if resume_from is not None:
         ckpt = _load_checkpoint(resume_from)
         candidates = ckpt["candidates"]
+        # Checkpoints written before generation_index existed hold 2-tuples.
+        # Widen them rather than crashing on unpack — but index them from the
+        # checkpoint's own order, which is post-sort and therefore quality
+        # order, so mark that by leaving the index None rather than inventing a
+        # generation order that was never recorded.
+        candidates = [tuple(c) if len(c) >= 3 else (c[0], c[1], None) for c in (tuple(x) for x in candidates)]
         print(f"  Loaded {len(candidates)} candidates from checkpoint: {resume_from}")
-        for i, (seq, lv) in enumerate(candidates[:5]):
-            print(f"    [{i + 1}] loss={lv:.4f}  seq={seq}")
+        if any(c[2] is None for c in candidates):
+            print("    [warn] checkpoint predates generation_index — discovery rank unavailable for this run")
+        for i, cand in enumerate(candidates[:5]):
+            print(f"    [{i + 1}] loss={cand[1]:.4f}  seq={cand[0]}")
         if len(candidates) > 5:
             print(f"    ... and {len(candidates) - 5} more")
     else:
@@ -542,7 +555,11 @@ def design(
             )
             for seq_str in _optimize_batch(this_batch):
                 seq_str, loss_value = _rank_seq(seq_str)
-                candidates.append((seq_str, loss_value))
+                # generation_index is captured HERE, before either sort below.
+                # `rank` in designs.csv is a quality order and carries no
+                # generation information, so 2.0 Part AD's discovery curve
+                # cannot be reconstructed from it after the fact.
+                candidates.append((seq_str, loss_value, len(candidates)))
                 print(f"  [{len(candidates)}/{n_designs}] ranking_loss={loss_value:.4f}  seq={seq_str}")
             n_done += this_batch
 
@@ -566,13 +583,13 @@ def design(
     candidates = sorted(candidates, key=lambda x: x[1])
 
     print(f"\n=== Design ranking ===")
-    for i, (seq, loss_val) in enumerate(candidates[: min(10, len(candidates))]):
-        print(f"  Rank {i + 1}: loss={loss_val:.4f}  seq={seq}")
+    for i, cand in enumerate(candidates[: min(10, len(candidates))]):
+        print(f"  Rank {i + 1}: loss={cand[1]:.4f}  gen={cand[2]}  seq={cand[0]}")
     if len(candidates) > 10:
         print(f"  ... and {len(candidates) - 10} more designs")
 
     if min_ranking_loss is not None:
-        candidates = [(s, lv) for s, lv in candidates if lv <= min_ranking_loss]
+        candidates = [c for c in candidates if c[1] <= min_ranking_loss]
         print(f"  Threshold gate (≤ {min_ranking_loss}): {len(candidates)} candidates pass")
         if not candidates:
             print("  No candidates passed the threshold gate — skipping Stage 2.")
@@ -592,7 +609,9 @@ def design(
     final_lines = []
     csv_rows = []
 
-    for rank, (seq_str, fast_loss) in enumerate(candidates):
+    for rank, cand in enumerate(candidates):
+        seq_str, fast_loss = cand[0], cand[1]
+        generation_index = cand[2]
         is_top = rank < top_k
 
         ranking_loss_value = float(fast_loss)
@@ -774,6 +793,7 @@ def design(
             {
                 "worker_id": worker_id,
                 "rank": rank + 1,
+                "generation_index": generation_index,
                 "is_top": int(is_top),
                 "sequence": seq_str,
                 "target_sequence": target_sequence,
@@ -820,6 +840,7 @@ def design(
     csv_columns = [
         "worker_id",
         "rank",
+        "generation_index",
         "is_top",
         "sequence",
         "target_sequence",
