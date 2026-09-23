@@ -1922,3 +1922,86 @@ tool fits 24 GB at this target size.**
 (range restriction — pool mean 0.568, almost nothing binder-competent) rather than because the
 metric is blind. Round 3 tests exactly that: if the epitope change lifts the pool mean, the metric
 should start separating. Also open: BM1/BM2/BM4/Clara are all still on Mosaic `0599248`, off the pin.
+
+---
+
+## 2026-09-17 → 09-22 — ApoE FL: 556 AF2 trajectories for 0 accepts, and the five repo gaps that campaign exposed
+
+**Campaign narrative lives on the share** (`ApoE FL/RESULTS/PROGRESS.md`), not here. What follows is
+only the part that is about *this repo*.
+
+**The headline, for calibration.** Two rounds — ApoE3 full-length (2L7B, 299 aa) and an ApoE4
+Boltz-2 homodimer (598 aa) — ran **556 AF2-family trajectories across five machines and accepted
+zero designs**. Round 1: 119 + 105 (BindCraft 1) + 66 (BindCraft 2) = 290, deprecated 2026-09-18.
+Round 2 on Clara h200: 200 (BindCraft 2, ran its budget out) + 78 (BindCraft 1, cancelled
+2026-09-22 20:20:34 with 12 h 40 m of wall left) = 278. Both rounds break at the same step — MPNN
+redesign loses the interface under independent AF2 scoring.
+
+**The finding that should change preset guidance: on a large multi-domain target, `pTM` and `i_pAE`
+are a target-conformation gate wearing an interface filter's clothes.** BindCraft 2's smoke run
+produced a design at **i_pTM 0.89, 30 interface residues, 1,663 Å² buried, binder pLDDT 0.88** — a
+real interface — and rejected it on **pTM 0.50** (needs ≥ 0.55) and **i_pAE 0.65** (needs ≤ 0.35).
+Look at what AF2 said about the *target* in the same rows: `Target_pLDDT` **0.49–0.61**,
+`Target_RMSD` **22–28 Å**. Both filters are whole-complex metrics, so on a 299 + 120 complex the
+299-residue target dominates them and they report AF2's uncertainty about ApoE's inter-domain hinge,
+not the binder. `default_filters` uses exactly that bar, so **every** AF2 arm inherits it. In round 2
+this reproduced at scale: of BindCraft 2's 430 MPNN candidates, **430/430 failed `i_pTM ≥ 0.70`**
+(max 0.530) and **310/430 had zero interface residues**; BindCraft 1's cumulative `failure_csv.csv`
+shows MPNN-stage rejections **i_pAE 580, i_pTM 533, pLDDT 184** with **0 Contacts and 0
+WrongHotspot**. Nothing was wrong with the search; the bar was measuring the target.
+
+**Five concrete repo gaps, each verified in-tree:**
+
+1. **`bindmaster_examples/hallucinate_bindmaster.py:434` hardcodes `chains=[target_tc]`** — one
+   `TargetChain`, template chain `"A"`. Against a homodimer that silently ignores chain B and
+   reports success. (The Stage-1/Stage-2 refold sites at `:511` and `:637` are correctly two-chain;
+   it is the design site that is single-chain.) Patched in the campaign copy only, with a hard-fail
+   if chain B is absent — **the shipped template is still single-chain.** Any multimeric target hits
+   this.
+2. **`binder-compare epitope` has no unguided-survey mode.** `--hotspots` is `required=True` and
+   `run()` exits if it parses empty (`cli/epitope.py:45-49`), because the command's purpose is an
+   *advisory* `epitope_match_fraction` against an **intended** pocket. An unguided round — which is
+   the whole point of an epitope survey — has no intended pocket to pass. The footprint machinery
+   itself (`--structures-dir`, "directory of refolded complex PDB/CIF files matched by `binder_id`")
+   is general and would work; only the CLI contract blocks it. Workaround is to pass the region of
+   interest as a proxy hotspot list. *(An earlier reading of this said "epitope-map cannot consume
+   trajectories, there is no code path" — that is too strong and was corrected on inspection.)*
+3. **BindCraft 2 writes no structures for its trajectories.** `1_Trajectories/` holds **199
+   `_losses.csv` files and zero `.cif`/`.pdb`**; its 860 structure files are all under `2_Refolded/`,
+   i.e. post-MPNN. So trajectory-keyed analysis is impossible for that tool *by construction*, and
+   any plan that pools "trajectory positions" across BindCraft 1 and BindCraft 2 is pooling two
+   different populations. Worth stating wherever we describe BC2's output layout.
+4. **The configurator's BindCraft run script never sets `LD_LIBRARY_PATH`/`LD_PRELOAD` for
+   DAlphaBall.** `configurator.py:1497` sets `NVIDIA_LIB` only. On Clara this surfaces as
+   `DAlphaBall.gcc: cannot open libgfortran.so.5` inside PyRosetta and kills the run. Known as
+   learnings §6 for hand-written scripts; the *generated* script has the same hole, so it bites any
+   BindCraft run there.
+5. **The target-MSA cache is per machine and is not part of `fleet.sh launch`.** Hit twice: BM4 in
+   round 1 and Clara in round 2, both times as a silent fallback to a single-sequence target MSA
+   (`Target MSA: no cached .a3m`, then Boltz's own "predictions will be suboptimal"). The cache is
+   keyed by sequence SHA-256 so the filename is identical everywhere — copying the `.a3m` fixes it.
+   Pushing it should be a launch step, not an operator habit. Candidate `fleet.sh` change.
+
+**Two operational rules worth keeping:**
+
+- **Cancelling Mosaic mid-length destroys the whole length.** `designs.csv` and
+  `structures_<len>aa_*/` are written only when a length *finishes*. One job was cancelled at
+  `[batch 44-44/100]` after **19 h 49 m** of H200 time and left zero files; the next job then
+  overwrote `designs.csv` in place. Stop Mosaic between lengths or not at all.
+- **Mosaic's 24 GB ceiling does depend on binder length.** On a 299-residue target the 120 aa run
+  OOM'd on a 3090 (~35 GB peak) while the 50 aa run optimised fine at 19.7 GB peak. Learnings §4's
+  "regardless of binder length" is too strong at this target size — length moves the line, just not
+  far enough to reach 120.
+
+**Method note, not a repo change.** The oligomer side-study (`ApoE4_oligomer_REPORT.md`) is a clean
+example of a negative control overturning a well-supported reading: WT ApoE4's C-domain compacts
+Rg 35.3 → 21.6 Å from monomer to tetramer, which looks like self-association confirmed, until the
+monomerising mutant compacts just as much (23.4 Å) and makes *more* inter-chain contacts (433 vs
+338). Inter-chain iPTM never exceeds 0.25 on any engine at any size. Conclusion: these engines do not
+model ApoE quaternary structure. Caveat now recorded on the share — the control is an ApoE3-background
+construct while WT is ApoE4, so those numbers confound isoform with oligomerisation state.
+
+**Open:** whether `default_filters` should carry a documented large-target caveat, or whether the
+right answer is a binder-local filter set (`i_pTM` + binder pLDDT + interface count, no whole-complex
+`pTM`/`i_pAE`) for targets above ~250 residues. 556 trajectories is enough evidence to ask the
+question; it is not yet enough to answer it, because no round has run the alternative bar.
