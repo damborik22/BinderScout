@@ -297,6 +297,27 @@ exits 0. That is a strict subset of `--tool all`, which also sets PXDesign,
 Proteina-Complexa, Protein-Hunter, ESMFold2, SoluProt and BindCraft 2. The
 summary line is therefore not a sufficient success check.
 
+> **B14 was reproduced live on 2026-09-23, on RFD3.** A transient DNS failure
+> (the operator dropped a VPN mid-run; `/etc/resolv.conf` carries a Tailscale
+> search domain) killed the weight download:
+>
+> ```
+> ✗ Failed to install rfd3: <urlopen error [Errno -3] Temporary failure in name resolution>
+> ✗ Downloading RFD3 weights (~few GB)
+> ⚠ RFD3 weight download failed — retry: conda run -n binderscout_rfd3 foundry install rfd3 …
+> ▶ Smoke test: RFD3 CLI check
+> ✓ RFD3 installation complete
+> [7/12] PXDesign
+> ```
+>
+> `weights/foundry/` is **empty** — `foundry install rfd3` fetches
+> `rfd3_latest.ckpt` (~2.5 GB) and nothing landed. RFD3 cannot run. Yet
+> `install_rfd3` returned 0, so `failed_tools` does not contain it, the run
+> continued, and the final summary will report success. The smoke test passed
+> because it is a **CLI check** — it verifies the `rfd3` console script exists,
+> not that a checkpoint does. This is precisely the failure mode predicted
+> below, and it is the one a CI job or a wrapper keying on `$?` cannot see.
+
 **B14 — PXDesign, Protein-Hunter and RFD3 report success over broken installs.**
 Each `install_*` ends on `print_ok "... installation complete"`, which returns 0,
 so the `|| failed_tools+=(...)` guards at `3320-3323` never fire. The only hard
