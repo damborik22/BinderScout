@@ -10,6 +10,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Two preflight tests passed only on machines where the tools were absent.**
+  `test_uninstalled_tool_exits_cleanly_instead_of_raising` and
+  `test_reports_every_problem_at_once` assert that `preflight` refuses a tool
+  that is not installed — but `_missing_tool_assets` asks the real filesystem
+  (`FILTERS_DIR/<preset>.json`, `MOSAIC_VENV.is_dir()`), so the assertion only
+  held where those happen to be missing. On any machine that had run the
+  installer they failed with `DID NOT RAISE SystemExit`. That is backwards: the
+  guard matters on the machines that generate runs, and those are exactly the
+  machines the test could not pass on. The second was worse than failing — it
+  *did* raise, but on the missing-cfg-key path, so it asserted the wrong
+  branch's output and would have kept passing even if the uninstalled-tool check
+  were deleted outright. CI never caught either, because it runs in a container
+  without the tools installed — the same blind spot. Both now simulate the
+  uninstalled state with `monkeypatch`; production code is unchanged, and the
+  fix is confirmed non-vacuous by mutation. Suite: 559 passed, 0 failed.
+
 - **Every tool's `settings.json` was malformed when generated on a GB10.** The
   provenance block writes `gpu_memory_mib` as its one unquoted value, from
   `GPU_MEM=$(nvidia-smi --query-gpu=memory.total ... || echo 0)`. That assumes a
