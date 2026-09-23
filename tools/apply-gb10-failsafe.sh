@@ -114,7 +114,7 @@ State after this run — check against `systemctl status`:
 Remaining by hand:
 
  1. Route ad-hoc GPU work through gpurun. The bin/ wrappers (bindcraft, bindcraft2, boltzgen,
-    mosaic, pxdesign, protein-hunter, rfaa) already apply their budget automatically, but
+    mosaic, pxdesign, protein-hunter) already apply their budget automatically, but
     anything you launch directly does not:
         tools/gpurun --cap 24 -- boltz predict ...
     A job launched outside gpurun is UNREGISTERED: the guard cannot tell whether it is
