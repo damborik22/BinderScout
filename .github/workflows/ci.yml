@@ -14,20 +14,24 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get install -y shellcheck
       - name: Run shellcheck
+        # Discovered, not hand-listed. The explicit list had drifted to 12 of the
+        # 20 eligible scripts: tools/preflight.sh and tools/gpu_mem_guard.sh were
+        # never linted -- despite evaluate.sh refusing to run without the latter --
+        # and the whole GB10 failsafe landed unlinted. A list edited by hand is how
+        # that happens, so derive it instead.
+        #
+        # Two exclusions, both real:
+        #   docs/data/**   archived benchmark captures; run fragments that do not
+        #                  parse standalone (SC1072/SC1073).
+        #   *.sh.template  carry the {placeholder} braces the configurator
+        #                  substitutes, which shellcheck reads as bad parameter
+        #                  expansion (SC1083).
+        # tools/gpurun is bash without a .sh suffix, so it is named explicitly.
         run: |
-          shellcheck --shell=bash --severity=warning \
-            install/install.sh \
-            install/install_aarch.sh \
-            Evaluator/evaluate.sh \
-            Evaluator/install.sh \
-            Evaluator/run.sh \
-            tools/fleet.sh \
-            tools/fleet-check/check_launch.sh \
-            tools/fleet-check/check_poll_fetch.sh \
-            tools/fleet-check/check_probe.sh \
-            tools/fleet-check/check_status.sh \
-            docker-entrypoint.sh \
-            test_env.sh
+          mapfile -t scripts < <(git ls-files '*.sh' | grep -v '^docs/data/')
+          scripts+=(tools/gpurun)
+          printf 'linting %d scripts\n' "${#scripts[@]}"
+          shellcheck --shell=bash --severity=warning "${scripts[@]}"
 
   ruff:
     runs-on: ubuntu-latest

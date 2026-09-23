@@ -82,7 +82,9 @@ gb10_apply () {
     # mode we want. PREALLOCATE=false removes the only ceiling. ALLOCATOR=platform bypasses BFC,
     # so the fraction would cap nothing. Both are dGPU habits and both are wrong here.
     export XLA_PYTHON_CLIENT_PREALLOCATE=true
-    export XLA_PYTHON_CLIENT_MEM_FRACTION="$(
+    # Assigned separately from the export so the export does not mask the
+    # substitution's exit status (SC2155).
+    XLA_PYTHON_CLIENT_MEM_FRACTION="$(
         python3 - "$cap" "$GB10_REPO/Evaluator" <<'PY' 2>/dev/null || awk -v c="$cap" -v p="$pool" -v m=40 \
           'BEGIN{f=c/p; ce=(p-m)/p; if(f>ce)f=ce; if(f<0.02)f=0.02; if(f>0.8)f=0.8; printf "%.3f", f}'
 import sys
@@ -91,6 +93,7 @@ from binder_comparison.refolding.memory_policy import resolve_mem_fraction
 print(resolve_mem_fraction(float(sys.argv[1]))[0])
 PY
     )"
+    export XLA_PYTHON_CLIENT_MEM_FRACTION
     unset XLA_PYTHON_CLIENT_ALLOCATOR
 
     # PyTorch does not preallocate; this is fragmentation control, not a ceiling. The ceiling for
