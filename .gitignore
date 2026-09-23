@@ -22,8 +22,11 @@ conda/
 # Local shortcuts (standalone mode)
 bin/
 
-# Installer logs — ephemeral, can be large
-install*.log
+# Installer logs — ephemeral, can be large.
+# NOT `install*.log`: that glob has no slash, so git matches it against the
+# basename, and `install*` requires the name to START with "install".
+# af3_install.log carries it in the middle and escaped for months.
+*install*.log
 
 # Claude Code internal files (settings, history, etc.) — but DO track .claude/skills/
 .claude/*

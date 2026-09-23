@@ -3,8 +3,8 @@
 __pycache__
 *.pyc
 runs/
-install.log
-install_aarch.log
+# Any installer log, wherever the word sits in the name (cf. .gitignore).
+*install*.log
 .claude/
 BindCraft/
 BindCraft2/
