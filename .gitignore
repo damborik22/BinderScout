@@ -84,3 +84,21 @@ Evaluator/tools/soluprot/usearch12-src/
 
 # superpowers SDD scratch workspace
 .superpowers/
+
+# Benchmark label registry (2.0 Part Y). The public repo carries everything
+# needed to AUDIT a result and nothing that gives away the answer key: the
+# per-pool MANIFEST.json (provenance, source DOI, row count, column schema,
+# SHA-256 of the label file) is tracked, while the label rows themselves live
+# in a private store that the loader resolves by checksum. These are our
+# benchmarks, and publishing them is irreversible on a public repo — so the
+# ignore is written BEFORE the directory exists, and it fails closed: every
+# data format is ignored and only the two metadata files are negated.
+Evaluator/benchmarks/**/*.csv
+Evaluator/benchmarks/**/*.tsv
+Evaluator/benchmarks/**/*.parquet
+Evaluator/benchmarks/**/*.npy
+Evaluator/benchmarks/**/*.npz
+Evaluator/benchmarks/**/*.pkl
+Evaluator/benchmarks/**/*.json
+!Evaluator/benchmarks/**/MANIFEST.json
+!Evaluator/benchmarks/SCHEMA.json
