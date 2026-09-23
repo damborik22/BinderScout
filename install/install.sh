@@ -2214,6 +2214,14 @@ install_bindcraft2() {
     if backend="$("${BINDCRAFT2_DIR}/.venv/bin/python" -c 'import jax; print(jax.default_backend())' 2>/dev/null)"; then
         if [[ "${backend}" == "gpu" ]]; then
             print_ok "Smoke test passed: jax backend is gpu"
+        elif ! nvidia-smi -L >/dev/null 2>&1; then
+            # This host has no usable GPU at all, so jax reporting cpu is the
+            # correct answer, not a broken install. Normal on a cluster login
+            # node: the install is staged on a shared filesystem and the
+            # campaign runs on an allocated GPU node. Failing here made every
+            # Clara install exit non-zero while being perfectly good.
+            print_warn "jax reports '${backend}': no GPU visible on this host (normal on a login node)."
+            print_warn "  The install is fine; verify the backend inside a GPU allocation before a campaign."
         elif [[ "${ARCH}" == "aarch64" ]]; then
             print_warn "jax fell back to '${backend}' on aarch64 — BindCraft 2 is unvalidated here; a campaign would run on the CPU"
         else
