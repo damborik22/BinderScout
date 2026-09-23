@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.5] — 2026-09-23
+
+### Fixed
+
+- **Every tool's `settings.json` was malformed when generated on a GB10.** The
+  provenance block writes `gpu_memory_mib` as its one unquoted value, from
+  `GPU_MEM=$(nvidia-smi --query-gpu=memory.total ... || echo 0)`. That assumes a
+  failing `nvidia-smi` is the only way not to get a number — but on GB10 (DGX
+  Spark) the query **succeeds** and returns the string `[N/A]`, so the fallback
+  never fires and the value lands bare as `"gpu_memory_mib": [N/A]`. The file
+  stops parsing, on the very machine that orchestrates the fleet. It went
+  unnoticed because the `settings.json` files in `runs/` were all produced on the
+  x86 boxes, where the query returns `24576`. Verified against BM5, which really
+  does return `[N/A]`. Fixes all seven writers. Backported from the 1.1.x line
+  (`376de95`); `master` stays the seven-tool line.
+
 ## [1.0.4] — 2026-09-23
 
 ### Fixed
