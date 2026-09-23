@@ -303,12 +303,22 @@ fi
 # designs produce different rankings.
 # Arithmetic ASSIGNMENT, not `(( n++ ))`: post-increment evaluates to the OLD value, so
 # the first increment from 0 returns 0 — false — and `set -e` kills the script here.
+# Per-engine result CSVs. Defined here, before the engine count below reads them, because
+# an engine that is skipped but already has its CSV on disk still counts toward the gate.
+BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
+AF3_CSV="$OUTPUT/af3_results.csv"
+ESMFOLD2_CSV="$OUTPUT/esmfold2_results.csv"
+
+# What matters for the gate is how many engines the REPORT will have, not how many run
+# this invocation: a skipped engine whose CSV is already on disk still counts.  Counting
+# only the running ones made a top-up run warn that every design would fail the gate when
+# all three engines were in fact present.
 _N_ENGINES=0
-[[ $SKIP_BOLTZ2   -eq 0 ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
-[[ $SKIP_AF3      -eq 0 ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
-[[ $SKIP_ESMFOLD2 -eq 0 ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+[[ $SKIP_BOLTZ2   -eq 0 || -f "$BOLTZ2_CSV"   ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+[[ $SKIP_AF3      -eq 0 || -f "$AF3_CSV"      ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+[[ $SKIP_ESMFOLD2 -eq 0 || -f "$ESMFOLD2_CSV" ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
 if [[ -z "$MIN_ENGINES" ]] && (( _N_ENGINES < 3 )); then
-    echo "[warn] ${_N_ENGINES} refold engine(s) will run, but the cross-engine gate defaults to 3."
+    echo "[warn] ${_N_ENGINES} refold engine(s) will reach the report, but the cross-engine gate defaults to 3."
     echo "       Every design will fail the gate and be ranked last, leaving no ranked shortlist."
     if (( _N_ENGINES >= 2 )); then
         echo "       To rank on the engines you have, re-run with:  --min-engines ${_N_ENGINES}"
@@ -332,9 +342,6 @@ conda run -n binder-eval binder-compare parse-seqs \
 SEQUENCES="$FASTA"
 
 # --- Step 1: Boltz-2 refolding ---------------------------------------------
-BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
-AF3_CSV="$OUTPUT/af3_results.csv"
-ESMFOLD2_CSV="$OUTPUT/esmfold2_results.csv"
 SOLUPROT_CSV="$OUTPUT/soluprot_results.csv"
 TMPROT_CSV="$OUTPUT/tmprot_results.csv"
 TMPROT_OK=0
@@ -635,10 +642,17 @@ REPORT_ARGS=(
     --sequences      "$SEQUENCES"
     -o               "$OUTPUT/report"
 )
-if [[ $SKIP_AF3 -eq 0 && -f "$AF3_CSV" ]]; then
+# Skipping an engine means "do not RUN it", never "discard results it already has".
+# Boltz-2 has always been passed unconditionally, but AF3 and ESMFold2 were gated on
+# their skip flag, so a top-up run — re-running one engine over a directory where the
+# others already succeeded — silently dropped those engines from the report and every
+# design failed the >=3-engine gate. That is the same silent-demotion failure the
+# ESMC-6B bug caused: a design must not be demoted for a bookkeeping reason and have
+# that read as a quality judgement. Include any engine whose CSV is present.
+if [[ -f "$AF3_CSV" ]]; then
     REPORT_ARGS+=(--af3-results "$AF3_CSV")
 fi
-if [[ $SKIP_ESMFOLD2 -eq 0 && -f "$ESMFOLD2_CSV" ]]; then
+if [[ -f "$ESMFOLD2_CSV" ]]; then
     REPORT_ARGS+=(--esmfold2-results "$ESMFOLD2_CSV")
 fi
 if [[ $SKIP_SOLUPROT -eq 0 && $SOLUPROT_OK -eq 1 && -f "$SOLUPROT_CSV" ]]; then
