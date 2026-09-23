@@ -57,6 +57,25 @@ _MODEL_REVISIONS: dict[str, str | None] = {
     "biohub/ESMFold2": os.environ.get("ESMFOLD2_REVISION") or "8fc3ff471022fdce52c77030685eb775de0c00a3",
 }
 
+# Pinning ESMFold2 alone is NOT enough: it nests a second, separately-fetched model.
+# `ESMFold2Model.from_pretrained()` ends with `model.load_esmc(model.config.esmc_id)`,
+# and `esmc_id` is the bare repo id `biohub/ESMC-6B` with no revision, so the 6B
+# language-model encoder always resolves at whatever upstream currently tags `main`.
+#
+# Upstream re-published ESMC-6B around 2026-09-17 with a Llama-style parameter layout
+# (`esmc.layers.N.self_attn.q_proj.weight`, config `EsmcForMaskedLM` + remote code,
+# transformers_version 5.16.0.dev0), replacing the layout the pinned transformers
+# 4.57.6 `ESMCModel` expects (`esmc.transformer.blocks.N.attn.layernorm_qkv.weight`).
+# Key overlap against the 802 parameters the module expects is 802/802 for 45b0fa5d
+# and 0/802 for the new main — so the ENTIRE encoder silently loads as random weights.
+# HF only warns; the degenerate structure-module frames then make `linalg.svd` fail on
+# every binder. That cost round-4 refold job 216521 (2026-09-18): 300/300 binders lost
+# and four days before anyone noticed.
+#
+# 45b0fa5d is the revision every validated result in this project was produced with.
+_ESMC_REPO = "biohub/ESMC-6B"
+_ESMC_REVISION = os.environ.get("ESMC_REVISION") or "45b0fa5d7fb06faefbd5e3b89bdcef35d564e79a"
+
 # --- shared target MSA: pre-warm + enforce (F21) -----------------------------
 # The target MSA is fetched ONCE per target into the shared on-disk cache, so
 # every engine folds the target with the same evolutionary context.  An engine
@@ -346,6 +365,43 @@ def refold_batch(
 # ---------------------------------------------------------------------------
 
 
+def _load_pinned_esmc(model: Any) -> None:
+    """Load the nested ESMC-6B encoder at a pinned revision, and prove it actually loaded.
+
+    ``ESMCModel.from_pretrained`` tolerates a 100% key miss with nothing but a warning,
+    so the failure this guards against is silent: a full encoder of random weights that
+    folds every binder into garbage.  Comparing the checkpoint's key set against the
+    instantiated module's is the cheap, deterministic check — it fails in seconds at load
+    time instead of after a 7.5-hour job has written a column of blanks.
+    """
+    import json
+
+    from huggingface_hub import snapshot_download
+
+    esmc_dir = snapshot_download(_ESMC_REPO, revision=_ESMC_REVISION)
+    print(f"  [esmfold2] {_ESMC_REPO} @ pinned revision {_ESMC_REVISION[:12]}")
+    model.load_esmc(esmc_dir)
+
+    index = Path(esmc_dir) / "model.safetensors.index.json"
+    if not index.exists():  # single-shard checkpoint — nothing to cross-check cheaply
+        return
+    ckpt_keys = set(json.loads(index.read_text())["weight_map"])
+    # Checkpoint keys are prefixed `esmc.`/`lm_head.`; the module's own keys are not.
+    ckpt_keys = {k[len("esmc.") :] for k in ckpt_keys if k.startswith("esmc.")}
+
+    expected = set(model._esmc.state_dict())
+    missing = expected - ckpt_keys
+    if missing:
+        raise RuntimeError(
+            f"ESMC-6B at revision {_ESMC_REVISION[:12]} does not match the {type(model._esmc).__name__} "
+            f"this transformers build expects: {len(missing)} of {len(expected)} parameters are absent "
+            f"from the checkpoint and would load as RANDOM weights (e.g. {sorted(missing)[:3]}). "
+            "Refusing to fold — this is the 2026-09-18 failure mode that silently voided 300 binders. "
+            "Either $ESMC_REVISION points at an incompatible layout, or transformers was upgraded "
+            "without re-pinning the encoder."
+        )
+
+
 def _load_model_and_builder(repo_id: str, *, target_msa=None):
     """Import ESMFold2, instantiate the model on CUDA, and return a fold callable.
 
@@ -392,7 +448,10 @@ def _load_model_and_builder(repo_id: str, *, target_msa=None):
         print(f"  [esmfold2] {repo_id} @ pinned revision {revision[:12]}")
     else:
         print(f"  [esmfold2] {repo_id} @ UNPINNED main — weights may differ between machines")
-    model = ESMFold2Model.from_pretrained(repo_id, **_kw).cuda().eval()
+    # Defer the nested ESMC load so we can pin its revision too (see _ESMC_REVISION).
+    # .cuda() must happen first: load_esmc() places the encoder on self.device.
+    model = ESMFold2Model.from_pretrained(repo_id, load_esmc=False, **_kw).cuda().eval()
+    _load_pinned_esmc(model)
     builder = ESMFold2InputBuilder()
 
     def _fold(
