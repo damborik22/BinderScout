@@ -41,7 +41,6 @@ gb10_budget () {
         pxdesign)       echo 32 ;;
         protein-hunter) echo 48 ;;   # ~26-30 GiB at N=400. NOTE: spawns a LigandMPNN child every cycle
                                      # which INHERITS the MPS limit, so the worst-case allowance is 2x.
-        rfaa)           echo 20 ;;
         *)              echo 20 ;;
     esac
 }
@@ -66,7 +65,7 @@ gb10_budget () {
 gb10_framework () {
     case "$1" in
         bindcraft|bindcraft2|mosaic)            echo jax ;;
-        boltzgen|pxdesign|protein-hunter|rfaa)  echo pytorch ;;
+        boltzgen|pxdesign|protein-hunter)       echo pytorch ;;
         *)                                      echo unknown ;;
     esac
 }
