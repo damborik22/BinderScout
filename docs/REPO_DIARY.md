@@ -1372,6 +1372,94 @@ fixed when `nres` draws it per sample.
 
 ---
 
+## 2026-07-29 → 07-30 — ApoE4-isoform campaign CLOSED: 7 pools → 63 AF3-selective → 7 Gold → 10 genes ordered
+
+Campaign: ApoE4 **isoform-selectivity** (P02649, 6NCO chain A NTD 24–164). Bind ApoE4 (**Arg112**),
+reject ApoE3 (Cys112) and ApoE2 (Cys112+Cys158). Orchestrated from BM5 over the LAN fleet
+(BM1/BM2/BM4) + Clara H200. Source of truth: `muni:/ApoE4-isoform/PROGRESS.md`; deliverable:
+`RESULTS/FINAL_REPORT_ApoE4_isoform.md`.
+
+**What changed:**
+
+1. **The funnel completed on all seven pools.** 17,533 designs gated → **6,310 survivors**
+   (`iptm ≥ 0.7`) → counter-screened vs E4/E3/E2 → **162 Boltz-2-selective** → AF3 on Clara →
+   **19 AF3-selective**. Joined to the 44 banked from earlier rounds (**verified disjoint by
+   sequence** — the two rounds drew from same-sized RFD3 pools and could easily have overlapped) =
+   **63 unique candidates**. ESMFold2 diagnostic (`--model full`) split them **7 GOLD / 56 SILVER**.
+
+2. **🎯 The campaign's central result — designing FOR selectivity beats screening for it.** A
+   *within-tool* comparison, same target/engines/criteria, only the objective changed:
+   Mosaic **hallucination 0/35** → Mosaic **multi-state 3/20**
+   (loss = `NoCys(E4) − w·NoCys(E3) − w·NoCys(E2)`). Multi-state Mosaic then took **2 of the 7
+   Golds** from 276 survivors vs RFD3's 1 from 1524. End-to-end: Mosaic **1.09 %**, PXDesign
+   **1.32 %**, everything affinity-first 0.21–0.39 %. The expensive part of this campaign was
+   counter-screening 6,310 designs to find 19; putting selectivity in the design loss is far cheaper.
+
+3. **E3 is the wall, as the biology predicts.** Of 167 AF3 designs: 61 cleared `af3_E4 ≥ 0.5`,
+   40 cleared `gap_E2 ≥ 0.10`, only **17 cleared `gap_E3 ≥ 0.15`**. E3 differs from E4 at one
+   *buried* residue; rejecting E2 (two substitutions) is much easier.
+
+4. **The relaxed tier carried 37 % of the yield.** `relaxed` = Boltz-2 `E4 ≥ 0.70` instead of 0.80,
+   *identical* selectivity criteria. **7 of 19** new AF3-selectives came only from that tier — and
+   for Proteina-Complexa **3 of 3** (its 25 strict designs returned zero). Submitting strict-only
+   would have written PC out of the campaign. Kept as a **column, not a filter** (user decision).
+
+5. **Pre-order screens: SoluProt + TmProt on all 63, monomer on the 10 — and the monomer check was
+   the one that mattered.** It had no existing code path (`refold-boltz2`/`refold-esmfold2` both
+   *require* `--target-seq`), so `fold_monomers.py` was written against the same Boltz-2 API
+   `refold_boltz2.py` uses. It flagged one design at **RMSD 7.49 Å** — a fold that only exists when
+   the target is present, plausibly explaining its apparently best-in-order selectivity margins.
+   **SoluProt flagged the same design (0.35) but that flag was correctly NOT acted on**: SoluProt's
+   validated performance is ROC-AUC **0.621** / MCC 0.157, too weak to discard a Gold. The monomer
+   RMSD is a direct structural measurement, so the swap was made on that. Final order: all 10 robust
+   (≤ 3.0 Å), median SoluProt 0.72, median Tm 80.5 °C, six methods.
+
+6. **Two small-sample calls were wrong, both corrected by the full board** — and one was mine, made
+   during this campaign: I predicted BoltzGen would contribute ~nothing from its prior 0/29; it
+   returned **4/64**, more than PXDesign, PC or PH. Likewise "PXDesign is potent but non-selective,
+   0/N" became **1/7 including the highest AF3 score in the campaign (0.92)**. **Tool ranking is not
+   stable at n≈30.** The one negative that holds: **BindCraft 0 of 154** across both rounds.
+
+**Infrastructure lessons (all now in `references/lab-deploy.md` §4bis):**
+
+- **`pgrep`/`pkill -f` over ssh matches the ssh command itself** → a completion monitor read
+  "running" forever and BM1/BM2 idled ~3 h after finishing. Bracket the first char (`[r]efold`).
+  Better: **monitor row counts, not processes** — progress files can't self-match, and a stall
+  detector catches silent deaths a process check misses.
+- **`ssh host "cmd &"` hangs** on inherited FDs even with `nohup`/`setsid` → a 4-machine deploy
+  stopped after the first launch and the 4th machine was never started. Use `ssh -n -f` + redirect.
+- **`--resume` skips by positional `idx`, not by sequence** (`boltz2_runner.py:105`). Resuming
+  against a *shard* silently skipped 70 designs with `rc=0` and no log line. **Never `--resume`
+  against a CSV written from a different input file.** Proper fix: key on `sequence`.
+- **Syncing a machine's BindMaster repo breaks Boltz-2 until Mosaic is patched** — newer code passes
+  `msa_path=` to `TargetChain`. Unpatched, *every* design fails its feature build. The per-design
+  skip fix then turned that into 512/512 silent skips, **exit 0**, logged as "SHARD COMPLETE".
+  Guard added (`7befc46`): raise when `n_skipped == n_todo`.
+
+**Why it mattered:** four of the failures this campaign were **silent-success** — a clean exit code
+and a plausible-looking output file. None were caught by exit codes; all were caught by checking
+that the *count of results* matched the count of inputs. That is the habit worth keeping.
+
+**Outcome:**
+- **10 genes ordered** (`RESULTS/ORDER_10_genes.fasta`, `ORDER_10_final.csv`), 6 methods,
+  all folds robust. 53 candidates held in reserve (`FINAL_tiered_63_screened.csv`).
+- Full raw data archived to MUNI (`/ApoE4-isoform/RESULTS/`, 3.3 GB + screens + report).
+- Next round deliberately **deferred until wet-lab results** — binding data will inform design
+  choices better than more in-silico scoring.
+
+**Propositions / TODOs:**
+- **Fix `--resume` to key on `sequence`** — the index bug will silently drop designs for anyone
+  sharding a resumed run.
+- **Fix `extractors/proteina_complexa.py`**: `aatype` decodes the *whole complex* (target+binder);
+  and `_find_csv` returns `matches[0]`, silently extracting one replicate from a parent dir.
+- **Make the monomer check standard pre-order**, and consider promoting `fold_monomers.py` into
+  `Evaluator/scripts/`.
+- If a future round wants more Golds: **scale multi-state Mosaic** (~3,800 designs ≈ 1 day
+  full-fleet at its 0.725 % survivor→Gold rate) rather than brute force (~54,000 designs ≈ 12 days).
+  Caveat: that rate rests on n=2, 95 % CI ≈ 0.09–2.6 %.
+
+---
+
 ## 2026-08-14 — AF3 fits a 24 GB GPU (the ">=100 GB" requirement was a preallocation artifact); compile cache + fixed bucket is 2.3x but moves the scores
 
 **What changed:**
