@@ -18,6 +18,7 @@ import datetime as _dt
 import json
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -684,6 +685,31 @@ def _write_pymol_script(top_df: pd.DataFrame, structures_dir: Path) -> None:
     script_path.write_text("\n".join(pml_lines))
 
 
+def _merge_by_sequence(df: pd.DataFrame, sub: pd.DataFrame, source: str) -> pd.DataFrame:
+    """Left-join `sub` onto `df` by sequence, one right-hand row per sequence.
+
+    A right-hand table holding the same sequence twice multiplies the metrics
+    rows, and `rank_designs()` runs downstream of every attach — so one design
+    then occupies several ranks and every design below it shifts down. That is
+    silent: pandas neither raises nor warns. Duplicate sequences arise normally
+    (two tools emitting the same binder, `extract --keep-duplicates`, or an
+    append-mode refold CSV rerun after a partial failure).
+
+    Same shape as `comparison/merger.py:129-139`, and `validate="m:1"` turns any
+    future regression here into an error instead of silent row inflation.
+    """
+    n_before = len(sub)
+    sub = sub.drop_duplicates("sequence", keep="first")
+    n_dupes = n_before - len(sub)
+    if n_dupes:
+        warnings.warn(
+            f"[report] {n_dupes} duplicate sequence(s) in {source} — keeping the first row "
+            "for each. The duplicates are dropped, not joined, so no design gains a rank.",
+            stacklevel=2,
+        )
+    return pd.merge(df, sub, on="sequence", how="left", validate="m:1")
+
+
 def _attach_native_metrics(df: pd.DataFrame, native_csv: str) -> pd.DataFrame:
     """Left-join BindCraft native metrics (dG, dSASA, etc.) onto df by sequence."""
     from ..extractors.bindcraft import _NATIVE_COL_MAP, _SEQUENCE_COL
@@ -700,7 +726,7 @@ def _attach_native_metrics(df: pd.DataFrame, native_csv: str) -> pd.DataFrame:
 
     native_sub = native_df[list(cols_to_join.keys())].rename(columns=cols_to_join)
     native_sub["sequence"] = native_sub["sequence"].str.strip().str.upper()
-    return pd.merge(df, native_sub, on="sequence", how="left")
+    return _merge_by_sequence(df, native_sub, Path(native_csv).name)
 
 
 def _attach_native_metrics_sidecar(df: pd.DataFrame, sequences_fasta: str) -> pd.DataFrame:
@@ -730,8 +756,7 @@ def _attach_native_metrics_sidecar(df: pd.DataFrame, sequences_fasta: str) -> pd
     native_sub = native_df[keep_cols].copy()
     native_sub["sequence"] = native_sub["sequence"].str.strip().str.upper()
     print(f"[report] Attaching {len(keep_cols) - 1} native metric column(s) from {sidecar.name}")
-    df = pd.merge(df, native_sub, on="sequence", how="left")
-    return df
+    return _merge_by_sequence(df, native_sub, sidecar.name)
 
 
 def _attach_soluprot_results(df: pd.DataFrame, soluprot_csv: str) -> pd.DataFrame:
@@ -761,7 +786,7 @@ def _attach_soluprot_results(df: pd.DataFrame, soluprot_csv: str) -> pd.DataFram
     sp_sub = sp_df[keep].rename(columns=rename).copy()
     sp_sub["sequence"] = sp_sub["sequence"].str.strip().str.upper()
     print(f"[report] Attaching SoluProt scores from {sp_path.name}")
-    return pd.merge(df, sp_sub, on="sequence", how="left")
+    return _merge_by_sequence(df, sp_sub, sp_path.name)
 
 
 def _attach_tmprot_results(df: pd.DataFrame, tmprot_csv: str) -> pd.DataFrame:
@@ -796,7 +821,7 @@ def _attach_tmprot_results(df: pd.DataFrame, tmprot_csv: str) -> pd.DataFrame:
     tp_sub["sequence"] = tp_sub["sequence"].str.strip().str.upper()
     tp_sub["native_tmprot_tm"] = pd.to_numeric(tp_sub["native_tmprot_tm"], errors="coerce")
     print(f"[report] Attaching TmProt Tm from {tp_path.name}")
-    return pd.merge(df, tp_sub, on="sequence", how="left")
+    return _merge_by_sequence(df, tp_sub, tp_path.name)
 
 
 # qc-annotate (interface_qc.py) panel columns to surface in the report.
