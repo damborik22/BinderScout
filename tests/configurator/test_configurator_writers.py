@@ -553,7 +553,22 @@ class TestPreflightFailsBeforeWritingAnything:
             "advanced_preset": "default_4stage_multimer",
         }
 
-    def test_uninstalled_tool_exits_cleanly_instead_of_raising(self, tmp_path, capsys):
+    def _uninstall(self, monkeypatch, tmp_path):
+        """Point the tool-asset probes at an empty tree.
+
+        `_missing_tool_assets` asks the real filesystem — FILTERS_DIR/<preset>.json,
+        MOSAIC_VENV.is_dir(). So these tests used to pass only on a machine where the
+        tools happen to be ABSENT, and failed on every machine that had run the
+        installer, i.e. exactly the machines the configurator runs on. Simulate the
+        uninstalled state instead of inheriting it.
+        """
+        empty = tmp_path / "not-installed"
+        monkeypatch.setattr(conf, "FILTERS_DIR", empty / "settings_filters")
+        monkeypatch.setattr(conf, "ADVANCED_DIR", empty / "settings_advanced")
+        monkeypatch.setattr(conf, "MOSAIC_VENV", empty / "Mosaic" / ".venv")
+
+    def test_uninstalled_tool_exits_cleanly_instead_of_raising(self, tmp_path, capsys, monkeypatch):
+        self._uninstall(monkeypatch, tmp_path)
         cfg = self._cfg(tmp_path)
         with pytest.raises(SystemExit) as exc:
             conf.preflight(cfg, {"bindcraft": True})
@@ -562,8 +577,9 @@ class TestPreflightFailsBeforeWritingAnything:
         assert "not installed" in out
         assert "bindmaster install --tool bindcraft" in out, "the error must say how to fix it"
 
-    def test_reports_every_problem_at_once(self, tmp_path, capsys):
+    def test_reports_every_problem_at_once(self, tmp_path, capsys, monkeypatch):
         """One run, one list — not a traceback per attempt."""
+        self._uninstall(monkeypatch, tmp_path)
         cfg = self._cfg(tmp_path)
         with pytest.raises(SystemExit):
             conf.preflight(cfg, {"bindcraft": True, "mosaic": True, "boltzgen": True})
