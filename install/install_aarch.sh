@@ -2166,6 +2166,7 @@ _write_bindcraft2_shortcut() {
         echo "# With no args: opens an interactive shell with the venv active."
         echo ""
         echo "BINDCRAFT2_DIR=\"${BINDCRAFT2_DIR}\""
+        echo "BINDMASTER_DIR=\"${BINDMASTER_DIR}\""
         echo "BINDCRAFT2_AF2_PARAMS=\"$(_bindcraft2_af2_params || true)\""
     } > "${SHORTCUTS_DIR}/bindcraft2"
     cat >> "${SHORTCUTS_DIR}/bindcraft2" << 'EOF'
@@ -2182,12 +2183,44 @@ fi
 # this variable overrides that keying wholesale. An executable is not portable
 # across cards, so the per-card layout is the one that works.
 
+# GB10 (DGX Spark): the GPU pool IS system RAM, so every "fraction of device
+# memory" knob is a fraction of the whole machine. JAX's default
+# (preallocate=true, MEM_FRACTION=0.75) reserves 91.3 GiB at import -- that is
+# the documented hard-reboot path, not an out-of-memory error. BindCraft 2 is
+# JAX, so its budget is a RESERVATION, not a ceiling.
+#
+# This is generated, not hand-applied. The guard used to be edited into this
+# file by hand, and a --force reinstall silently reverted it on 2026-09-22,
+# leaving BindCraft 2 uncapped on the one box where that reboots the machine.
+#
+# Two shapes, per tools/gb10-env.sh's header: an interactive env-shell exports
+# the framework ceilings with gb10_apply; a wrapper that execs a real job must
+# go through gpurun, which is what joins MPS and gets a driver-enforced cap.
+GB10_ENV="${BINDMASTER_DIR}/tools/gb10-env.sh"
+GB10_GPURUN="${BINDMASTER_DIR}/tools/gpurun"
+
 if [[ $# -eq 0 ]]; then
     echo "BindCraft 2 (${BINDCRAFT2_DIR})"
     echo "Examples:"
     echo "  bindcraft2 design campaign.json"
     echo "  bindcraft2 design --list-modalities"
+    if [[ -r "${GB10_ENV}" ]]; then
+        # shellcheck disable=SC1090
+        source "${GB10_ENV}"
+        gb10_apply bindcraft2
+    fi
     exec "${BINDCRAFT2_DIR}/.venv/bin/python" -c 'import subprocess,sys,os; os.execvp("bash",["bash"])'
+fi
+
+if [[ -r "${GB10_ENV}" && -x "${GB10_GPURUN}" ]]; then
+    # shellcheck disable=SC1090
+    GB10_CAP="$(source "${GB10_ENV}"; gb10_budget bindcraft2)"
+    if [[ "${GB10_CAP}" =~ ^[0-9]+$ ]]; then
+        exec "${GB10_GPURUN}" --cap "${GB10_CAP}" --name bindcraft2 -- \
+            "${BINDCRAFT2_DIR}/.venv/bin/bindcraft" "$@"
+    fi
+    echo "bindcraft2: WARNING -- no usable GB10 budget for bindcraft2; running uncapped." >&2
+    echo "            Check tools/gb10-env.sh:gb10_budget." >&2
 fi
 
 exec "${BINDCRAFT2_DIR}/.venv/bin/bindcraft" "$@"
