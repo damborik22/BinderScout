@@ -1216,6 +1216,7 @@ _write_bindcraft_shortcut() {
         echo ""
         echo "BINDCRAFT_DIR=\"${BINDCRAFT_DIR}\""
         echo "CONDA_BASE=\"${CONDA_BASE}\""
+        echo "BINDMASTER_DIR=\"${BINDMASTER_DIR}\""
     } > "${SHORTCUTS_DIR}/bindcraft"
     cat >> "${SHORTCUTS_DIR}/bindcraft" << 'EOF'
 
@@ -1231,6 +1232,19 @@ echo "    --settings './settings_target/<target>.json' \\"
 echo "    --filters './settings_filters/default_filters.json' \\"
 echo "    --advanced './settings_advanced/default_4stage_multimer.json'"
 echo ""
+
+
+# GB10 (DGX Spark): the GPU pool IS system RAM, so a framework's default
+# "fraction of device memory" is a fraction of the whole machine. This wrapper
+# opens an interactive shell, so it exports the ceilings with gb10_apply rather
+# than wrapping a command in gpurun -- see tools/gb10-env.sh's header for why
+# the two shapes differ. GENERATED: bin/ is gitignored, so a hand-applied guard
+# lives on one disk and any reinstall silently reverts it.
+if [[ -r "${BINDMASTER_DIR}/tools/gb10-env.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${BINDMASTER_DIR}/tools/gb10-env.sh"
+    gb10_apply bindcraft
+fi
 
 exec bash
 EOF
@@ -1401,6 +1415,7 @@ _write_boltzgen_shortcut() {
         echo ""
         echo "BOLTZGEN_DIR=\"${BOLTZGEN_DIR}\""
         echo "CONDA_BASE=\"${CONDA_BASE}\""
+        echo "BINDMASTER_DIR=\"${BINDMASTER_DIR}\""
     } > "${SHORTCUTS_DIR}/boltzgen"
     cat >> "${SHORTCUTS_DIR}/boltzgen" << 'EOF'
 
@@ -1413,6 +1428,19 @@ echo "Working directory: ${BOLTZGEN_DIR}"
 echo "To run BoltzGen:"
 echo "  boltzgen run <config.yaml> --output <output_dir> --protocol protein-anything --num_designs 2"
 echo ""
+
+
+# GB10 (DGX Spark): the GPU pool IS system RAM, so a framework's default
+# "fraction of device memory" is a fraction of the whole machine. This wrapper
+# opens an interactive shell, so it exports the ceilings with gb10_apply rather
+# than wrapping a command in gpurun -- see tools/gb10-env.sh's header for why
+# the two shapes differ. GENERATED: bin/ is gitignored, so a hand-applied guard
+# lives on one disk and any reinstall silently reverts it.
+if [[ -r "${BINDMASTER_DIR}/tools/gb10-env.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${BINDMASTER_DIR}/tools/gb10-env.sh"
+    gb10_apply boltzgen
+fi
 
 exec bash
 EOF
@@ -1547,6 +1575,7 @@ _write_mosaic_shortcut() {
         echo "# and opens an interactive shell in the Mosaic directory."
         echo ""
         echo "MOSAIC_DIR=\"${MOSAIC_DIR}\""
+        echo "BINDMASTER_DIR=\"${BINDMASTER_DIR}\""
     } > "${SHORTCUTS_DIR}/mosaic"
     cat >> "${SHORTCUTS_DIR}/mosaic" << 'EOF'
 
@@ -1558,6 +1587,19 @@ echo "Working directory: ${MOSAIC_DIR}"
 echo "To open the example notebook:"
 echo "  marimo edit examples/example_notebook.py"
 echo ""
+
+
+# GB10 (DGX Spark): the GPU pool IS system RAM, so a framework's default
+# "fraction of device memory" is a fraction of the whole machine. This wrapper
+# opens an interactive shell, so it exports the ceilings with gb10_apply rather
+# than wrapping a command in gpurun -- see tools/gb10-env.sh's header for why
+# the two shapes differ. GENERATED: bin/ is gitignored, so a hand-applied guard
+# lives on one disk and any reinstall silently reverts it.
+if [[ -r "${BINDMASTER_DIR}/tools/gb10-env.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${BINDMASTER_DIR}/tools/gb10-env.sh"
+    gb10_apply mosaic
+fi
 
 exec bash
 EOF
@@ -1900,6 +1942,14 @@ PATCHEOF
     cat > "${SHORTCUTS_DIR}/pxdesign" << PXDEOF
 #!/bin/bash
 # BindMaster PXDesign shortcut
+# GB10: export the framework ceilings before the shell starts. GENERATED --
+# bin/ is gitignored, so a hand-applied guard lives on one disk and any
+# reinstall reverts it. This heredoc is UNQUOTED, so paths expand here.
+if [[ -r "${BINDMASTER_DIR}/tools/gb10-env.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${BINDMASTER_DIR}/tools/gb10-env.sh"
+    gb10_apply pxdesign
+fi
 exec ${CONDA_CMD} run -n bindmaster_pxdesign bash
 PXDEOF
     chmod +x "${SHORTCUTS_DIR}/pxdesign"
@@ -2346,6 +2396,7 @@ _write_protein_hunter_shortcut() {
         echo ""
         echo "PROTEIN_HUNTER_DIR=\"${PROTEIN_HUNTER_DIR}\""
         echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "BINDMASTER_DIR=\"${BINDMASTER_DIR}\""
     } > "${SHORTCUTS_DIR}/protein-hunter"
     cat >> "${SHORTCUTS_DIR}/protein-hunter" << 'EOF'
 
@@ -2365,6 +2416,19 @@ echo "  --ligand_ccd CCD          small-molecule binder (CCD code)"
 echo "  --ligand_smiles 'SMILES'  small-molecule binder (SMILES)"
 echo "  --nucleic_seq SEQ --nucleic_type dna|rna    DNA / RNA binder"
 echo ""
+
+
+# GB10 (DGX Spark): the GPU pool IS system RAM, so a framework's default
+# "fraction of device memory" is a fraction of the whole machine. This wrapper
+# opens an interactive shell, so it exports the ceilings with gb10_apply rather
+# than wrapping a command in gpurun -- see tools/gb10-env.sh's header for why
+# the two shapes differ. GENERATED: bin/ is gitignored, so a hand-applied guard
+# lives on one disk and any reinstall silently reverts it.
+if [[ -r "${BINDMASTER_DIR}/tools/gb10-env.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${BINDMASTER_DIR}/tools/gb10-env.sh"
+    gb10_apply protein-hunter
+fi
 
 exec "${CONDA_CMD}" run --live-stream -n bindmaster_protein_hunter bash
 EOF
