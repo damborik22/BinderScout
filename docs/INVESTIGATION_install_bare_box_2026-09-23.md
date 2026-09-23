@@ -38,6 +38,7 @@ this document records only what was observed.
 | B12 | `--yes` without `--tool` installs a 5-tool subset and reports total success | code | **false success** |
 | B13 | Bare `install.sh </dev/null` exits **0** having installed nothing | code | **false success** |
 | B14 | No `set -e`/`-u`/`pipefail`; three tools report success over broken installs | code | **false success** |
+| B15 | `--cuda` is honoured by 3 of 7 torch installs; the banner claims it for all | code | wrong wheels |
 
 ---
 
@@ -325,6 +326,50 @@ RFD3's smoke tests from `print_warn` to `|| return 1`; and make the final
 summary exit non-zero when `failed_tools` or `FAILED_EXAMPLES` is non-empty. For
 B12/B13, refuse to proceed when `TOOL_SPECIFIED` is false and stdin is not a TTY
 (`[[ -t 0 ]]`), rather than falling through to menu defaults.
+
+## B15 — `--cuda` reaches 3 of 7 torch installs, but the banner claims all of them
+
+Found live: the run was started with `--cuda 12.4`, the banner printed
+
+```
+CUDA: 12.4 | Arch: x86_64 | Standalone: auto | Skip examples: true
+```
+
+and the very next torch install logged `✓ Installing PyTorch cu121 (x86_64)`.
+
+`CUDA_VERSION` (`install.sh:79`, set from `--cuda` at `157`) is interpolated in
+three places:
+
+| line | use |
+|---|---|
+| `946` | BindCraft — passes `--cuda "${CUDA_VERSION}"` to `install_bindcraft.sh` |
+| `1495-1497` | PXDesign — `--index-url .../cu${CUDA_VERSION//./}` |
+| `1664` | PXDesign — `nvidia/label/cuda-${CUDA_VERSION}.0` |
+
+Four more hardcode a wheel index and ignore the flag entirely:
+
+| line | value |
+|---|---|
+| `1116` | `torch==2.5.1+cu121` + `--index-url .../cu121` (BoltzGen) |
+| `2294` | `--index-url .../cu121` |
+| `2395` | `--index-url .../cu121` |
+| `2638` | `local _torch_index=".../cu124"` |
+
+`--help` describes `--cuda` as *"CUDA version for conda package resolution"*,
+which is a partial defence — but `1495` and `2294`/`2395`/`2638` are all **pip**
+wheel indexes, so the distinction is not what separates the two groups, and the
+banner announces one CUDA version for the whole run.
+
+**Why it matters beyond cosmetics.** cu121 wheels carry no `sm_120`/`sm_121`.
+That is precisely the failure class CLAUDE.md documents on GB10, where a wrong
+torch build is silently CPU-only or cannot lower bf16. On this box (sm_86,
+driver 13.3) cu121 is fine, so the defect is invisible here — which is exactly
+why it survives.
+
+**Proposed fix.** Derive every index from `CUDA_VERSION` (`cu${CUDA_VERSION//./}`)
+with a per-tool override only where a tool genuinely pins an older stack, and
+make that override explicit and logged. Failing that, print the *effective*
+CUDA per tool rather than one banner value.
 
 ## B10 — `~/.bashrc` is modified unprompted, from three copies
 
