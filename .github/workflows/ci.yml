@@ -26,10 +26,11 @@ jobs:
         #   *.sh.template  carry the {placeholder} braces the configurator
         #                  substitutes, which shellcheck reads as bad parameter
         #                  expansion (SC1083).
-        # tools/gpurun is bash without a .sh suffix, so it is named explicitly.
+        # tools/gpurun is bash without a .sh suffix, so it is named explicitly --
+        # guarded, since the 1.0.x line does not carry it.
         run: |
           mapfile -t scripts < <(git ls-files '*.sh' | grep -v '^docs/data/')
-          scripts+=(tools/gpurun)
+          [ -f tools/gpurun ] && scripts+=(tools/gpurun)
           printf 'linting %d scripts\n' "${#scripts[@]}"
           shellcheck --shell=bash --severity=warning "${scripts[@]}"
 
