@@ -24,6 +24,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..comparison.candidates import N_NATIVE_PER_TOOL, N_REFOLD, build_candidates_table
+from ..comparison.confidence_gate import annotate_confidence_gate
 from ..comparison.diversity import cluster_sequences_df
 from ..comparison.ensemble import compute_ensemble_metrics
 from ..comparison.epitope import epitope_match, extract_interface_residues, parse_hotspots
@@ -45,7 +46,6 @@ from ..comparison.scoring import (
     compute_consensus_iptm,
     rank_designs,
 )
-from ..comparison.confidence_gate import annotate_confidence_gate
 from ..comparison.sequence_panel import annotate_composition, annotate_sequence_panel
 from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
