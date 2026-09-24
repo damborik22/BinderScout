@@ -29,10 +29,13 @@ import pandas as pd
 
 from ..comparison.tool_classification import ExtractorMetadata
 from ..core.schema import ExtractedBinder, NativeMetrics
-from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
+from .base import SequenceExtractor, disambiguate_ids, read_generation_index, resolve_single_match
 
 _HIGH_IPTM_CSV = "summary_high_iptm.csv"
 _ALL_RUNS_CSV = "summary_all_runs.csv"
+# run_id = str(design_id) for design_id in range(num_designs) -- a contiguous,
+# monotonic design counter, and the only honest generation order here.
+_RUN_ID_COL = "run_id"
 
 # schema field name → Protein-Hunter CSV column name.
 # Column availability differs between the two summary CSVs:
@@ -162,12 +165,18 @@ class ProteinHunterExtractor(SequenceExtractor):
             if not self._validate_sequence(seq):
                 warnings.warn(f"Protein-Hunter row {idx}: invalid sequence — skipping")
                 continue
+            # run_id IS the generation counter: pipeline.py sets
+            # `run_id = str(design_id)` for `design_id in range(num_designs)`.
+            # Row position is NOT -- the collapse above sorts by iptm.
+            gen_index = read_generation_index(row, _RUN_ID_COL)
             results.append(
                 ExtractedBinder(
                     binder_id=self._make_id(row, int(idx)),
                     sequence=seq,
                     source_tool="protein_hunter",
                     native=self._extract_native(row),
+                    generation_index=gen_index,
+                    generation_index_source="explicit" if gen_index is not None else "unavailable",
                 )
             )
         return results
@@ -198,12 +207,15 @@ class ProteinHunterExtractor(SequenceExtractor):
             seq = str(row[seq_col]).strip().upper()
             if not self._validate_sequence(seq):
                 continue
+            gen_index = read_generation_index(row, _RUN_ID_COL)
             results.append(
                 ExtractedBinder(
                     binder_id=self._make_id(row, int(idx)),
                     sequence=seq,
                     source_tool="protein_hunter",
                     native=self._extract_native(row),
+                    generation_index=gen_index,
+                    generation_index_source="explicit" if gen_index is not None else "unavailable",
                 )
             )
         return results

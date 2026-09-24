@@ -39,6 +39,23 @@ def resolve_single_match(matches: list[Path], *, tool: str, what: str, input_dir
     )
 
 
+def read_generation_index(row, column: str) -> int | None:
+    """An integer generation counter from ``column``, or None if there isn't one.
+
+    Shared because the honest-vs-fabricated distinction must be identical across
+    tools: a missing column, a blank cell and a non-numeric value are all
+    "unavailable". **Never** substitute the row position. No extractor's input is
+    in generation order by the time it iterates -- several are sorted by quality,
+    and a quality-ordered index inverts the discovery metric this feeds.
+
+    Per-tool verdicts: docs/INVESTIGATION_generation_index_2026-09-24.md
+    """
+    import pandas as pd
+
+    value = pd.to_numeric(row.get(column), errors="coerce")
+    return None if pd.isna(value) else int(value)
+
+
 def disambiguate_ids(binders: list[ExtractedBinder], *, tool: str) -> None:
     """Make binder_ids unique, in place.
 
