@@ -45,6 +45,7 @@ from ..comparison.scoring import (
     compute_consensus_iptm,
     rank_designs,
 )
+from ..comparison.confidence_gate import annotate_confidence_gate
 from ..comparison.sequence_panel import annotate_composition, annotate_sequence_panel
 from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
@@ -197,6 +198,10 @@ def run(args: argparse.Namespace) -> None:
     # calibration pool.
     df = annotate_sequence_panel(df)
     df = annotate_composition(df)
+    # BindCraft's confidence filters on our refold columns (i_pAE <= 10.85 A,
+    # binder pLDDT >= 0.8, interface i_pTM >= 0.5). SHADOW MODE like the two
+    # above: annotates would_exclude_confidence and excludes nothing.
+    df = annotate_confidence_gate(df)
 
     # SoluProt: sequence-only solubility screen output. Left-joined onto df
     # by sequence — adds native_soluprot_score (0–1 probability) and
