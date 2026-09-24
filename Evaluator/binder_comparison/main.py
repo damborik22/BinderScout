@@ -38,6 +38,7 @@ from .cli import (
     refold_esmfold2,
     report,
     run,
+    screen_tmprot,
     validate,
     wetlab,
 )
@@ -61,6 +62,7 @@ def main(argv=None) -> None:
     refold_af3.add_parser(subparsers)
     refold_esmfold2.add_parser(subparsers)
     filter_soluprot.add_parser(subparsers)
+    screen_tmprot.add_parser(subparsers)
     prefilter.add_parser(subparsers)
     report.add_parser(subparsers)
     run.add_parser(subparsers)

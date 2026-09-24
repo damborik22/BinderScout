@@ -370,6 +370,7 @@ step by hand. `bash Evaluator/evaluate.sh --help` prints the same list.
 | `--af3-env` / `--esmfold2-env` / `--soluprot-env` / `--bindcraft-env` | Override the conda env name for that step |
 | `--esmfold2-model full\|fast` | ESMFold2 checkpoint (default `full`) |
 | `--skip-soluprot` / `--soluprot-threshold N` | Control the solubility screen (default threshold 0.5, the paper value) |
+| `--skip-tmprot` / `--tmprot-env ENV` / `--tmprot-threshold N` | Control the melting-temperature screen (default 60.0 °C, the cutoff TmProt's own AUC is reported against). Advisory only: unlike SoluProt it has no filter mode, and must not grow one |
 | `--soluprot-filter` | **Drop** sub-threshold designs from the FASTA before any refolding, saving GPU time. Off by default — the score lands in the report either way |
 | `--primary-engine boltz\|af3\|esmfold2` | Which engine's metrics are promoted as primary (default `boltz`) |
 | `--epitope-residues LIST` | Compute `epitope_match_fraction` inline against intended hotspots, e.g. `'15,18,232'`. Cheap, no extra pass |
@@ -409,6 +410,7 @@ Every one takes `--help`. `binderscout evaluate <cmd> …` runs the same thing i
 | `refold-esmfold2` | Refold with ESMFold2 (`binder-eval-esmfold2`) — the default engine |
 | **Screening before the GPU** | |
 | `filter-soluprot` | Sequence-only *E. coli* solubility score (`binder-eval-soluprot`, no GPU) |
+| `screen-tmprot` | Sequence-only melting-temperature prediction (`binder-eval-tmprot`, no GPU). **Advisory column only** — never ranks or drops a design |
 | `prefilter` | Rank designs by a Boltz-2 fold-back interface score, for tools with no native metric (e.g. RFD3) |
 | `autosize` | Decide whether enough independent designs cleared the ESMFold2 gate; size the next batch |
 | **Campaign planning** | |

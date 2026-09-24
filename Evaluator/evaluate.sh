@@ -25,6 +25,10 @@
 #   --skip-soluprot        skip SoluProt solubility screen (default: auto-detect binder-eval-soluprot env)
 #   --soluprot-env ENV     conda env for SoluProt (default: binder-eval-soluprot)
 #   --soluprot-threshold N pass threshold for soluprot_score (default: 0.5; paper value)
+#   --skip-tmprot          skip TmProt melting-temperature screen (default: auto-detect binder-eval-tmprot env)
+#   --tmprot-env ENV       conda env for TmProt (default: binder-eval-tmprot)
+#   --tmprot-threshold N   Tm (°C) at or above which a design is flagged thermostable
+#                          (default: 60.0). Advisory only -- never drops or re-ranks.
 #   --soluprot-filter      drop sequences scoring below the threshold from FASTA BEFORE
 #                          refolding — saves GPU time on designs we wouldn't pursue.
 #                          Off by default; the score still lands in the report either way.
@@ -115,6 +119,12 @@ SKIP_SOLUPROT=0
 SOLUPROT_ENV="binder-eval-soluprot"
 SOLUPROT_THRESHOLD=0.5
 SOLUPROT_FILTER=0
+# TmProt: sequence-only melting-temperature screen. Deliberately has NO filter
+# mode, unlike SoluProt -- Tm predictors are out of domain on hyperstable de
+# novo miniproteins, so the column is advisory and must never drop a design.
+SKIP_TMPROT=0
+TMPROT_ENV="binder-eval-tmprot"
+TMPROT_THRESHOLD=60.0
 PRIMARY_ENGINE="boltz"
 CONCURRENT=0
 STAGGER=${BINDERSCOUT_STAGGER_S:-30}
@@ -146,6 +156,9 @@ while [[ $# -gt 0 ]]; do
         --soluprot-env)      SOLUPROT_ENV="$2";        shift 2 ;;
         --soluprot-threshold) SOLUPROT_THRESHOLD="$2"; shift 2 ;;
         --soluprot-filter)   SOLUPROT_FILTER=1;        shift ;;
+        --skip-tmprot)       SKIP_TMPROT=1;            shift ;;
+        --tmprot-env)        TMPROT_ENV="$2";          shift 2 ;;
+        --tmprot-threshold)  TMPROT_THRESHOLD="$2";    shift 2 ;;
         --concurrent)         CONCURRENT=1;              shift ;;
         --stagger)            STAGGER="$2";              shift 2 ;;
         --gpu-cap-boltz2)     GPU_CAP_BOLTZ2="$2";       shift 2 ;;
@@ -244,9 +257,47 @@ if [[ $SKIP_SOLUPROT -eq 0 ]]; then
     fi
 fi
 
+# Auto-detect TmProt availability unless the user skipped it
+if [[ $SKIP_TMPROT -eq 0 ]]; then
+    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${TMPROT_ENV}"; then
+        echo "[note] conda env '${TMPROT_ENV}' not found — TmProt melting-temperature screen will be skipped."
+        echo "        (install with: binderscout install --tool tmprot)"
+        echo ""
+        SKIP_TMPROT=1
+    fi
+fi
+
+# --- Step 0.6: TmProt melting-temperature screen ---------------------------
+# Sequence-only, no GPU, and ADVISORY ONLY. Unlike SoluProt there is no filter
+# mode and there must not be one: Tm predictors are trained on natural proteins
+# and are out of domain on the hyperstable de novo miniproteins this pipeline
+# produces (2.0 assessment item D1 -- "proceed as a screen, never a ranking
+# term"). The column lands in the report; it never drops a design and never
+# enters rank_designs().
+#
+# binder-compare is installed inside ${TMPROT_ENV}, so this runs there directly
+# rather than shelling out the way SoluProt has to.
+if [[ $SKIP_TMPROT -eq 0 ]]; then
+    echo "[step ${STEP}/${N_STEPS}] TmProt screen       (env: ${TMPROT_ENV}, thermostable >= ${TMPROT_THRESHOLD} C)..."
+    if conda run -n "${TMPROT_ENV}" binder-compare screen-tmprot \
+            --sequences "$SEQUENCES" \
+            -o          "$TMPROT_CSV" \
+            --threshold "$TMPROT_THRESHOLD"; then
+        TMPROT_OK=1
+    else
+        TMPROT_OK=0
+        # Advisory screen: never take the evaluation down with it. There is no
+        # --tmprot-filter, so unlike SoluProt nothing about the refold pool
+        # changes when this fails -- only a report column goes missing.
+        echo "[tmprot] WARNING: screen failed - continuing WITHOUT the Tm column." >&2
+    fi
+    STEP=$(( STEP + 1 ))
+    echo ""
+fi
+
 # --- Cross-engine gate vs. the engines that will actually run ---------------
 # The ranking gates on how many INDEPENDENT engines refolded each design (default 3).
-# AF3 needs >100 GB of GPU memory, so on most hosts only Boltz-2 + ESMFold2 run and
+# AF3 is opt-in (its weights are gated), so on most hosts only Boltz-2 + ESMFold2 run and
 # every design fails a gate of 3 — ranked last, with an empty top of the list. The
 # report warns after the fact; by then the GPU time is already spent, so say it here.
 # Deliberately NOT auto-lowered: the gate is part of what the ranking means, and
@@ -287,10 +338,13 @@ BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
 AF3_CSV="$OUTPUT/af3_results.csv"
 ESMFOLD2_CSV="$OUTPUT/esmfold2_results.csv"
 SOLUPROT_CSV="$OUTPUT/soluprot_results.csv"
+TMPROT_CSV="$OUTPUT/tmprot_results.csv"
+TMPROT_OK=0
 SOLUPROT_OK=1   # cleared if the optional screen fails; see Step 0.5
 
-# Step counter: 1 (report) + 1 per engine not skipped + 1 if SoluProt ran
+# Step counter: 1 (report) + 1 per engine not skipped + 1 each if SoluProt / TmProt ran
 N_STEPS=1  # report
+[[ $SKIP_TMPROT -eq 0 ]] && (( N_STEPS++ ))
 if [[ $CONCURRENT -eq 1 ]]; then
     (( N_STEPS++ ))            # the engines run as a single concurrent step
 else
@@ -595,6 +649,9 @@ if [[ $SKIP_ESMFOLD2 -eq 0 && -f "$ESMFOLD2_CSV" ]]; then
 fi
 if [[ $SKIP_SOLUPROT -eq 0 && $SOLUPROT_OK -eq 1 && -f "$SOLUPROT_CSV" ]]; then
     REPORT_ARGS+=(--soluprot-results "$SOLUPROT_CSV")
+fi
+if [[ $SKIP_TMPROT -eq 0 && $TMPROT_OK -eq 1 && -f "$TMPROT_CSV" ]]; then
+    REPORT_ARGS+=(--tmprot-results "$TMPROT_CSV")
 fi
 REPORT_ARGS+=(--primary-engine "$PRIMARY_ENGINE")
 if [[ -n "$MIN_ENGINES" ]]; then

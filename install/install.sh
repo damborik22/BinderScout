@@ -49,6 +49,13 @@ FOUNDRY_WEIGHTS_DIR="${BINDERSCOUT_DIR}/weights/foundry"
 # official repo (pinned); refold_af3.py resolves run_alphafold.py at ${AF3_DIR}
 # by default (or $AF3_REPO_DIR). alphafold3/ is gitignored.
 AF3_REPO="https://github.com/google-deepmind/alphafold3"
+TMPROT_REPO="https://github.com/loschmidt/TmProt.git"
+# Upstream publishes no release tags and has no main/master branch -- its only
+# ref is `tmprot-development`. This pins a commit on that branch; re-check when
+# upstream tags a version.
+TMPROT_BRANCH="tmprot-development"
+TMPROT_COMMIT="02d4c12b39ffae8a6cde64a401210390ea9cb23f"
+TMPROT_DIR="${BINDERSCOUT_DIR}/TmProt"
 AF3_COMMIT="fd39d2c5dcaadfc7333c3466951b27563fa7d6fa"  # v3.0.3.dev, compatible with the v3.0.2 weights
 AF3_DIR="${BINDERSCOUT_DIR}/alphafold3"
 
@@ -101,6 +108,7 @@ DO_RFD3=false
 DO_AF3=false            # opt-in via --tool af3 (runs on 24 GB GPUs; gated weights not bundled)
 DO_ESMFOLD2=false       # default refold engine (included in --tool all; lightweight, no gated weights)
 DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen; needs a C/C++ toolchain for the USEARCH v12 source build)
+DO_TMPROT=false         # opt-in: sequence-only melting-temperature screen (GPL-3.0, not redistributed)
 
 # The one list. Every per-tool loop derives from this, in install order.
 #
@@ -131,6 +139,7 @@ TOOL_REGISTRY=(
     "DO_AF3|AF3|install_af3|false|AlphaFold 3 refold engine -- needs gated weights from DeepMind (conda)"
     "DO_ESMFOLD2|ESMFold2|install_esmfold2|true|DEFAULT refold engine -- the cross-engine gate needs 3 engines (conda)"
     "DO_SOLUPROT|SoluProt|install_soluprot|false|Sequence-only E. coli solubility screen, pre-refold (conda, Python 3.7)"
+    "DO_TMPROT|TmProt|install_tmprot|false|Sequence-only melting-temperature screen, advisory only (conda; GPL-3.0, not redistributed)"
 )
 
 # Note: legacy RFAA support was removed entirely (see CHANGELOG).
@@ -177,6 +186,9 @@ while [[ $# -gt 0 ]]; do
                     DO_AF3=true ;;
                 esmfold2|esm|esmfold)
                     DO_ESMFOLD2=true ;;
+                tmprot|tm|thermostability)
+                    DO_TMPROT=true
+                    ;;
                 soluprot|solu|solubility)
                     DO_SOLUPROT=true ;;
                 *)
@@ -858,7 +870,24 @@ select_tools_interactive() {
     local choice j any
     while true; do
         _print_menu
-        read -rp "  > " choice
+        if ! read -rp "  > " choice; then
+            # stdin is closed. Every further read returns immediately with an
+            # empty choice, so the "no tools selected" branch below would
+            # `continue` into an infinite loop -- which it did: piping
+            # `n` then EOF spun this menu forever, printing the same line.
+            # A human at a TTY never meets this; a script or CI job does.
+            any=false
+            for (( j = 0; j < n; j++ )); do [[ "${m_sel[$j]}" == true ]] && any=true; done
+            if [[ "${any}" == true ]]; then
+                echo ""
+                print_warn "stdin closed -- proceeding with the tools selected above."
+                break
+            fi
+            echo ""
+            print_fail "stdin closed with no tools selected -- nothing to install."
+            echo -e "  Pass ${BOLD}--tool <name>${RESET} (or ${BOLD}--tool all${RESET}) for a non-interactive install."
+            return 1
+        fi
         case "${choice,,}" in
             a) for (( j = 0; j < n; j++ )); do m_sel[$j]=true;  done ;;
             n) for (( j = 0; j < n; j++ )); do m_sel[$j]=false; done ;;
@@ -2829,6 +2858,83 @@ _build_usearch_v12() {
 }
 
 
+install_tmprot() {
+    print_step "Installing TmProt 1.0 melting-temperature screen (binder-eval-tmprot env)"
+
+    # TmProt is GPL-3.0 and this repository is MIT, so it is cloned and installed
+    # editable rather than vendored -- the same posture the GPLv3 USEARCH
+    # binaries were moved to. The ESM2-LoRA production weights ship inside the
+    # tmprot-1.0 package, so there is no gated download and no weights step.
+    if [[ ! -f "${EVALUATOR_DIR}/envs/binder-eval-tmprot.yml" ]]; then
+        print_fail "Env spec not found at ${EVALUATOR_DIR}/envs/binder-eval-tmprot.yml"
+        return 1
+    fi
+
+    if env_exists binder-eval-tmprot; then
+        print_warn "Conda environment 'binder-eval-tmprot' already exists -- reusing it."
+    else
+        run_logged --retries 3 "Creating binder-eval-tmprot conda env" \
+            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval-tmprot.yml" -y \
+            || { print_fail "Failed to create binder-eval-tmprot env"; return 1; }
+    fi
+
+    if [[ -d "${TMPROT_DIR}/.git" ]]; then
+        print_warn "TmProt repo already present at ${TMPROT_DIR} -- fetching + re-pinning to ${TMPROT_COMMIT}."
+        run_logged --retries 3 "Re-pinning TmProt to ${TMPROT_COMMIT}" \
+            bash -c "cd '${TMPROT_DIR}' && git fetch --quiet origin && git checkout --quiet '${TMPROT_COMMIT}'" \
+            || { print_fail "Failed to check out TmProt ${TMPROT_COMMIT}"; return 1; }
+    elif [[ -e "${TMPROT_DIR}" ]]; then
+        print_fail "${TMPROT_DIR} exists but is not a git repo -- remove it and retry."; return 1
+    else
+        # Upstream has no main/master branch, so the branch must be named.
+        run_logged --retries 3 "Cloning TmProt (${TMPROT_BRANCH})" \
+            git clone --quiet --branch "${TMPROT_BRANCH}" "${TMPROT_REPO}" "${TMPROT_DIR}" \
+            || { print_fail "Failed to clone ${TMPROT_REPO}"; return 1; }
+        run_logged "Pinning TmProt to ${TMPROT_COMMIT}" \
+            bash -c "cd '${TMPROT_DIR}' && git checkout --quiet '${TMPROT_COMMIT}'" \
+            || { print_fail "Failed to check out TmProt ${TMPROT_COMMIT}"; return 1; }
+    fi
+
+    # The standalone CLI package, which is what carries the bundled model.
+    local _pkg="${TMPROT_DIR}/tmprot-1.0"
+    [[ -d "${_pkg}" ]] || _pkg="${TMPROT_DIR}"
+    run_logged --retries 2 "Installing TmProt (editable) into binder-eval-tmprot" \
+        "${CONDA_CMD}" run -n binder-eval-tmprot pip install -q -e "${_pkg}" \
+        || { print_fail "Failed to install TmProt from ${_pkg}"; return 1; }
+
+    # binder-compare inside the env so `screen-tmprot` runs there directly.
+    run_logged --retries 2 "Installing binder-compare into binder-eval-tmprot" \
+        "${CONDA_CMD}" run -n binder-eval-tmprot pip install -q -e "${EVALUATOR_DIR}" \
+        || { print_fail "Failed to install binder-compare into binder-eval-tmprot"; return 1; }
+
+    # Verify the thing the screen actually needs: that tmprot imports and its
+    # console script exists. An entry point that merely answers --help is not
+    # evidence of an install -- see verify_tool().
+    smoke_test "TmProt import check" \
+        "${CONDA_CMD}" run -n binder-eval-tmprot python -c "import tmprot" \
+        || return 1
+
+    cat > "${SHORTCUTS_DIR}/tmprot" <<TMPROTEOF
+#!/usr/bin/env bash
+# BinderScout shortcut: TmProt melting-temperature screen.
+# With args -> binder-compare screen-tmprot; without -> a shell in the env.
+set -euo pipefail
+if [[ \$# -eq 0 ]]; then
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-tmprot bash
+else
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-tmprot binder-compare screen-tmprot "\$@"
+fi
+TMPROTEOF
+    chmod +x "${SHORTCUTS_DIR}/tmprot"
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/tmprot"
+
+    print_ok "TmProt installation complete"
+    print_warn "TmProt is a SCREEN, not a ranking term: native_tmprot_tm is advisory."
+    print_warn "  Tm predictors are trained on natural proteins and are out of domain on"
+    print_warn "  hyperstable de novo miniproteins. Use it to flag, never to rank or drop."
+    return 0
+}
+
 install_soluprot() {
     print_step "Installing SoluProt 1.0 solubility screen (binder-eval-soluprot env)"
     ensure_conda_in_path
@@ -3222,6 +3328,9 @@ verify_tool() {
         esmfold2)
             _env_python_ok binder-eval-esmfold2 "import esm" \
                 || VERIFY_REASON="the esm SDK does not import in binder-eval-esmfold2" ;;
+        tmprot)
+            _env_python_ok binder-eval-tmprot "import tmprot" \
+                || VERIFY_REASON="tmprot does not import in binder-eval-tmprot" ;;
         soluprot)
             if ! env_exists binder-eval-soluprot; then
                 VERIFY_REASON="binder-eval-soluprot env missing"
@@ -3381,7 +3490,10 @@ main() {
             print_fail "--uninstall requires --tool <tool|all>"
             exit 1
         fi
-        select_tools_interactive
+        # Honour the return: the menu refuses when stdin closes with nothing
+        # selected, and ignoring that let the run continue to a green summary
+        # having installed no tools at all.
+        select_tools_interactive || exit 1
     fi
 
     # --verify: report what is actually on disk and stop. Runs before preflight
@@ -3521,6 +3633,7 @@ main() {
     [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
     [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
     [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; install_soluprot || failed_tools+=("SoluProt"); }
+    [[ "${DO_TMPROT}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] TmProt 1.0${RESET}"; install_tmprot || failed_tools+=("TmProt"); }
 
     # Verify before summarising. Without this a tool whose install function
     # ended on print_ok -- RFD3 with an empty weights dir, Proteina-Complexa

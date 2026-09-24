@@ -14,6 +14,7 @@ These tests fail if a new tool is added to one place and not the others.
 """
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -107,3 +108,26 @@ def test_weight_downloads_are_retried(path):
         if "run_logged " in line and "--retries" not in line and re.search(r'"[^"]*[Dd]ownload', line)
     ]
     assert not unretried, "download steps without --retries:\n  " + "\n  ".join(unretried)
+
+
+@pytest.mark.parametrize("path", INSTALLERS, ids=lambda p: p.name)
+def test_menu_does_not_spin_when_stdin_closes(path):
+    """Piping `n` (select none) then EOF used to loop forever.
+
+    Every read after EOF returns immediately with an empty choice, which hit the
+    "no tools selected" branch and `continue`d straight back into the same read.
+    A human at a TTY never meets this; a script, a CI job or an agent does. The
+    timeout here IS the assertion -- if it trips, the loop is back.
+    """
+    if not path.exists():
+        pytest.skip(f"{path.name} not present")
+    proc = subprocess.run(
+        ["bash", str(path), "--verify", "--yes"],
+        input="n\n",
+        capture_output=True,
+        text=True,
+        timeout=180,
+        cwd=path.parent.parent,
+    )
+    assert proc.returncode != 0, "selecting no tools must not report success"
+    assert "no tools selected" in (proc.stdout + proc.stderr).lower()
