@@ -1,0 +1,41 @@
+name: binder-eval-tmprot
+# TmProt 1.0 — sequence-only melting-temperature (Tm) screen.
+#
+# LoRA-adapted ESM-2 predictor from Loschmidt Lab, Masaryk University — the
+# sister tool to SoluProt from the same group.
+#   code:  https://github.com/loschmidt/TmProt
+#   web:   https://loschmidt.chemi.muni.cz/tmprot/
+#   data:  https://zenodo.org/records/20067528
+#
+# Used for: binder-compare screen-tmprot
+# Platform: any. Sequence-only — no GPU required (ESM-2 inference runs on CPU
+#           for the short binders this pipeline produces; it will use a GPU if
+#           one is visible).
+#
+# NOT a refold engine, and NOT a ranking term. Item D1 of the 2.0 assessment:
+# "proceed as a screen, never a ranking term", because Tm predictors are trained
+# on natural proteins and are out of domain on hyperstable de novo miniproteins.
+# The reported AUC of 0.75–0.77 is for separating Tm >= 60 °C on heterogeneous
+# natural datasets. native_tmprot_tm is advisory and stays out of rank_designs().
+#
+# TmProt is GPL-3.0 and this repository is MIT, so it is NOT redistributed here.
+# `binderscout install --tool tmprot` clones it and installs it editable, the
+# same posture the GPLv3 USEARCH binaries were moved to.
+#
+# Pinning note: upstream publishes no release tags and has no main/master
+# branch — its only ref is `tmprot-development`. TMPROT_COMMIT in install.sh
+# therefore pins a development-branch commit rather than a release, which is
+# worth re-checking when upstream tags a version.
+#
+# The production ESM2-LoRA weights ship inside the tmprot-1.0 package, so there
+# is no gated download and no separate weights step.
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - git
+  # Everything else (torch, transformers, peft, the bundled model) is resolved
+  # by `pip install -e tmprot-1.0` against upstream's own pyproject, so this
+  # spec does not second-guess their pins.
