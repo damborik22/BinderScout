@@ -131,6 +131,17 @@ def run(args: argparse.Namespace) -> None:
             print(f"  {csv_path}")
 
     out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import openpyxl  # noqa: F401  (pandas imports it lazily inside ExcelWriter)
+    except ModuleNotFoundError as exc:  # pragma: no cover - guarded by a declared dep
+        raise SystemExit(
+            "binder-compare hits needs openpyxl to write the workbook, and it is not "
+            "installed in this environment.\n"
+            "    pip install 'openpyxl>=3.1'\n"
+            "It is a declared dependency of binder-comparison, so an environment "
+            "missing it was built before that was true -- reinstalling the package "
+            "(pip install -e Evaluator) fixes it permanently."
+        ) from exc
     with pd.ExcelWriter(out, engine="openpyxl") as xl:
         info = pd.DataFrame(
             [

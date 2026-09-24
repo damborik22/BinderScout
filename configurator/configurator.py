@@ -2454,7 +2454,7 @@ def write_run_rfd3(path: Path, cfg: dict):
     run_dir = cfg["run_dir"]
     target_pdb = Path(cfg["target_pdb"])
     primary_chain = cfg.get("chains", "A").split(",")[0].strip()
-    target_seq = cfg.get("target_sequence", "")
+    target_seq = cfg.get("target_sequence") or ""
     target_len = len(target_seq)
     if target_len == 0:
         # Fallback: count CA atoms on the primary chain.
@@ -2466,6 +2466,29 @@ def write_run_rfd3(path: Path, cfg: dict):
             )
         except OSError:
             target_len = 0
+
+    # Refuse rather than generate a campaign whose output is mislabelled.
+    #
+    # run_rfd3.sh recovers the binder by stripping the first `target_len`
+    # characters of each MPNN sequence, because RFD3's MPNN designs the whole
+    # complex. At 0 nothing is stripped and every "binder" delivered is the full
+    # target+binder concatenation -- after hours of GPU, and silently: the
+    # campaign exits 0, `extract --rfd3` ingests it, and even `validate` passes,
+    # because `binder_shorter_than_target` is true of a concatenation.
+    #
+    # Reaching 0 means the CA-atom fallback found nothing either, so the usual
+    # cause is a chain letter that matches no atoms -- which the wizard does not
+    # validate -- or an unreadable structure. Both are worth naming here, since
+    # the human is several steps downstream of the mistake by now.
+    if target_len == 0:
+        raise RuntimeError(
+            f"RFD3: cannot determine the target length for {target_pdb} chain {primary_chain!r}. "
+            f"cfg['target_sequence'] is empty and no CA atoms were found for that chain. "
+            f"run_rfd3.sh strips len(target) characters to recover each binder, so generating "
+            f"now would deliver the full target+binder chain as the binder, with no error at "
+            f"any later step. Set cfg['target_sequence'], or correct cfg['chains'] "
+            f"(currently {cfg.get('chains', 'A')!r})."
+        )
 
     min_len = cfg.get("rfd3_min_length", cfg.get("min_length", 60))
     max_len = cfg.get("rfd3_max_length", cfg.get("max_length", 150))
