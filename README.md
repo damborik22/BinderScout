@@ -436,7 +436,9 @@ Every one takes `--help`. `binderscout evaluate <cmd> …` runs the same thing i
 
 | Metric | Direction | Notes |
 |---|---|---|
-| `ipsae_min` | higher = better | **Primary metric.** min(bt, tb) iPSAE (DunbrackLab 2025) |
+| `consensus_iptm_mean` | higher = better | **THE ranking metric.** Mean ipTM across independent refold engines, after the cross-engine gate (Part U) |
+| `passes_engine_gate` | true is better | Whether the design cleared `--min-engines` (default 3). Failures are ranked **last, not dropped** |
+| `ipsae_min` | higher = better | min(bt, tb) iPSAE (DunbrackLab 2025). Diagnostic and quality tiers — **not** the ranking key |
 | `iptm` | higher = better | Interface pTM |
 | `bt_ipsae` | higher = better | Binder-to-target iPSAE |
 | `tb_ipsae` | higher = better | Target-to-binder iPSAE |

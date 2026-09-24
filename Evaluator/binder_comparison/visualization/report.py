@@ -2095,7 +2095,7 @@ def _slim_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float] | No
         (
             "Rank",
             "rank",
-            "Overall rank — Stage-1 mean-iPTM screen survival, then mean engine iPTM (the primary key).",
+            "Overall rank — cross-engine gate (--min-engines, default 3), then consensus_iptm_mean. Gate failures are ranked last, not dropped.",
         ),
         (
             "Length",
