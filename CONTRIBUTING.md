@@ -102,15 +102,36 @@ require `--gpus all` and a CUDA-capable host.
 
 ### Evaluator manual testing
 
+The quickest honest check is the integration suite — it builds a deterministic
+three-engine pool, runs a real `binder-compare report` against it, and also
+pins the ranking against a committed fixture from a real campaign. No GPU, no
+network, about ten seconds:
+
 ```bash
-cd Evaluator
-bash evaluate.sh \
-    --sequences example/sequences.fasta \
-    --target-pdb example/target.pdb \
-    --output ./test_results
+pytest tests/integration/
 ```
 
----
+To look at a report by hand, run both steps with the *environment's* Python.
+System `python3` will not do: the pool builder needs numpy, and `binder-compare`
+lives in the env. `$EVAL` below is your `binder-eval` env — under a standalone
+install that is `./conda/envs/binder-eval`, otherwise `conda env list` will say.
+
+```bash
+EVAL=./conda/envs/binder-eval        # adjust for a system conda
+
+"$EVAL/bin/python" -c "import sys; sys.path.insert(0, 'tests/integration'); \
+    from pathlib import Path; from synthetic_pool import build; build(Path('/tmp/pool'))"
+
+"$EVAL/bin/binder-compare" report \
+    --boltz2-results   /tmp/pool/boltz2/boltz2_results.csv \
+    --af3-results      /tmp/pool/af3/af3_results.csv \
+    --esmfold2-results /tmp/pool/esmfold2/esmfold2_results.csv \
+    --sequences        /tmp/pool/sequences.fasta \
+    --output           /tmp/report
+```
+
+Then open `/tmp/report/report.html`.
+
 
 ## Pull request conventions
 

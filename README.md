@@ -148,7 +148,7 @@ flowchart TB
     end
 
     subgraph Artifacts["Per-run artifacts"]
-        Runs["runs/&lt;name&gt;/\n├── target/\n├── &lt;tool&gt;/        # one per enabled tool\n│   └── settings.json\n├── evaluate/\n│   ├── sequences.fasta\n│   ├── sequences_native_metrics.csv\n│   ├── boltz2_results.csv\n│   ├── af3_results.csv           (opt)\n│   ├── esmfold2_results.csv      (opt)\n│   ├── soluprot_results.csv      (opt)\n│   └── report/\n│       ├── metrics.csv\n│       ├── top20_candidates.csv\n│       ├── top20_structures/\n│       └── report.html\n├── run_&lt;tool&gt;.sh\n├── run_evaluate.sh\n└── run_all.sh"]:::arti
+        Runs["runs/&lt;name&gt;/\n├── target/\n├── &lt;tool&gt;/        # one per enabled tool\n│   └── settings.json\n├── evaluate/\n│   ├── sequences.fasta\n│   ├── sequences_native_metrics.csv\n│   ├── boltz2_results.csv\n│   ├── af3_results.csv           (opt)\n│   ├── esmfold2_results.csv      (opt)\n│   ├── soluprot_results.csv      (opt)\n│   └── report/\n│       ├── metrics.csv\n│       ├── top30_candidates.csv\n│       ├── top20_structures/\n│       └── report.html\n├── run_&lt;tool&gt;.sh\n├── run_evaluate.sh\n└── run_all.sh"]:::arti
     end
 
     InstallSh -->|creates| GenEnvs
@@ -336,9 +336,9 @@ choose — see [Ranking metrics](#ranking-metrics) below.
 
 | Engine | CLI subcommand | Env | Where it runs |
 |---|---|---|---|
-| **Boltz-2** | `binder-compare refold-boltz2` | Mosaic `.venv` | Anywhere with a 24 GB GPU |
+| **Boltz-2** | `binder-compare refold-boltz2` | Mosaic `.venv` | **The memory-dominant engine.** 8.5 GB at 150 tokens, 16.7 at 300, **44 at 600, 140 at 900** — see the table below |
 | **ESMFold2** | `binder-compare refold-esmfold2` | `binder-eval-esmfold2` conda | Anywhere — lightweight, no gated weights. The default engine (`--tool all`), and the source of the `chain_iptm_interface` gate `autosize` uses. |
-| **AF3 v3.0.2** | `binder-compare refold-af3` | `binder-eval-af3` conda | Any CUDA host — measured at ~4.4 GiB peak for 258-391 tokens, so a 24 GB card is enough; DGX Spark (aarch64), H200, RTX 3090, etc. Full AF3 inference doesn't fit on consumer 24 GB GPUs. |
+| **AF3 v3.0.2** | `binder-compare refold-af3` | `binder-eval-af3` conda | **The cheapest engine we have**, and flat in size: 2.3–5.2 GB from 150 to 900 tokens. The gate is the **gated weights**, not VRAM |
 
 Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). There is **one ranking and no way to select another**: a cross-engine gate (`--min-engines`, default 3) then `consensus_iptm_mean`, emitted as a single `rank` column. `ipsae_min` (DunbrackLab 2025 formula) and `agreement_count` are diagnostic columns — `agreement_count` in particular is a flat null as a screen (macro-AUC 0.532), so do not gate on it. Part U removed the `--rank-by` / `--screen-metric` flags and the `two_stage_rank` / `adaptyv_rank` / `consensus_rank` / `active_rank` columns; see `docs/INVESTIGATION_partU_cao_benchmark.md`. AF3 and ESMFold2 produce token-order PAE which the evaluator transposes to match Boltz-2's `[binder|target]` order.
 
@@ -355,7 +355,7 @@ binder-compare run --mosaic runs/PDL1/mosaic --bindcraft runs/PDL1/bindcraft \
 
 The configurator-generated `runs/<name>/run_evaluate.sh` wraps `Evaluator/evaluate.sh`, which auto-detects the installed engines and drives the whole thing.
 
-Report output lands in `…/evaluate/report/` — `report.html`, `metrics.csv`, and `top20_candidates.csv`.
+Report output lands in `…/evaluate/report/` — `report.html`, `metrics.csv`, and `top30_candidates.csv`.
 
 #### `Evaluator/evaluate.sh` — the orchestrator's own flags
 
@@ -446,6 +446,33 @@ Every one takes `--help`. `binderscout evaluate <cmd> …` runs the same thing i
 | `plddt_binder_mean` | higher = better | Mean binder pLDDT |
 | `pae_bt_mean` | lower = better | Mean binder-to-target PAE |
 
+### GPU memory, measured
+
+From `docs/data/gpu_benchmark_2026-09-18/` — peak MiB, single-sequence (no MSA),
+so these are a **floor** against MSA-enabled production. Ranges span RTX 3090,
+L40S and H200; GB10 is excluded because its unified pool accounts differently
+(and needs roughly 1.5x for the same work).
+
+| engine | 150 tok | 300 tok | 600 tok | 900 tok |
+|---|---|---|---|---|
+| **AF3** | 2.3–4.9 GB | 2.6–4.9 GB | 3.7–4.9 GB | 5.0–5.2 GB |
+| **ESMFold2** | 14.2 GB | 15.6 GB | 21.3 GB | 28.8 GB |
+| **Boltz-2** | 4.0–8.5 GB | 8.1–16.7 GB | **43.5–45.0 GB** | **139.6 GB** |
+
+Three things follow, and the first two contradict what these docs used to say:
+
+- **Boltz-2 is the memory-dominant engine, not AF3.** The ">= 100 GB GPU"
+  requirement that sat in our docs was real, but attached to the wrong engine.
+  At 900 tokens Boltz-2 takes 97 % of an H200.
+- **AF3 is the cheapest and barely grows with size.** It never exceeded 5.3 GB
+  anywhere. What gates AF3 is the DeepMind-gated weights.
+- **ESMFold2 has a hard floor around 14 GB**, already at 150 tokens, so a 12 GB
+  card cannot run it at *any* size. It writes an empty row and exits 0 on CUDA
+  OOM, so an undersized box yields a complete-looking `metrics.csv` in which
+  designs were demoted for a hardware reason.
+
+A binder:target complex is typically 200–500 tokens.
+
 ---
 
 ## Installer details
@@ -454,7 +481,12 @@ Every one takes `--help`. `binderscout evaluate <cmd> …` runs the same thing i
 
 - Linux with an NVIDIA GPU (CUDA driver >= 12.1)
 - `git` and `curl` available in PATH
-- ~60 GB free disk space
+- **A C/C++ toolchain** (`gcc`, `g++`, `make`) — SoluProt builds USEARCH v12 from
+  source, and Proteina-Complexa's `cpdb-protein` needs one too. Ubuntu's minimal
+  rootfs (WSL, cloud images, `docker pull ubuntu:26.04`) ships none:
+  `sudo apt install build-essential`
+- **~85 GB free disk space** for `--tool all` — the installer's own preflight
+  computes ~83 GB, and ~89 GB with AF3
 - Conda/Miniforge is **not required** — the installer downloads Miniforge3 automatically if needed
 
 ### What happens during install

@@ -3383,7 +3383,19 @@ def _missing_tool_assets(cfg: dict, tools_enabled: dict) -> list[tuple[str, Path
 # with the writers by tests/configurator/test_configurator_writers.py, which re-derives
 # this map from the writer sources.
 REQUIRED_CFG_KEYS: dict[str, tuple[str, ...]] = {
-    "bindcraft": ("chains", "hotspots", "max_length", "min_length", "n_designs", "target_pdb"),
+    # advanced_preset and filter_preset are read unconditionally by generate()
+    # (cfg['filter_preset'], cfg['advanced_preset']), so omitting them let
+    # preflight pass and the writer then raise KeyError on a hand-written config.
+    "bindcraft": (
+        "advanced_preset",
+        "chains",
+        "filter_preset",
+        "hotspots",
+        "max_length",
+        "min_length",
+        "n_designs",
+        "target_pdb",
+    ),
     "boltzgen": (
         "boltzgen_intermediate",
         "chains",
@@ -3814,11 +3826,17 @@ def wizard():
         else:
             print(f"    Boltz-2: {RED}requires Mosaic install{RESET} — skipped")
         if installed.get("af3"):
-            engines_available.append(("af3", "AlphaFold 3 v3.0.2 (binder-eval-af3 env)", False))
+            engines_available.append(("af3", "AlphaFold 3 v3.0.2 (binder-eval-af3 env)", True))
         else:
             print(f"    AF3: {RED}requires binder-eval-af3 env{RESET} — skipped")
         if installed.get("esmfold2"):
-            engines_available.append(("esmfold2", "ESMFold2 (binder-eval-esmfold2 env)", False))
+            # Default ON. The ranking gates on >=3 independent engines
+            # (--min-engines, default 3), so an all-defaults run that offers
+            # only Boltz-2 produces a report where EVERY design fails the gate
+            # and is ranked last. These entries are already inside an
+            # `if installed.get(...)` guard, so the engine is only offered when
+            # its env exists.
+            engines_available.append(("esmfold2", "ESMFold2 (binder-eval-esmfold2 env)", True))
         else:
             print(f"    ESMFold2: {RED}requires binder-eval-esmfold2 env{RESET} — skipped")
         for key, label, default_on in engines_available:
@@ -4278,8 +4296,14 @@ def wizard():
     print(f"  {CYAN}Target file{RESET}:   {target_pdb_src}")
     print(f"  {CYAN}Chains{RESET}:        {chains}  |  {CYAN}Hotspots{RESET}: {hotspots or '(auto)'}")
     print(f"  {CYAN}Binder length{RESET}: {min_length}–{max_length}  |  {CYAN}Top designs{RESET}: {n_designs}")
-    enabled_list = [t for t, v in tools_enabled.items() if v]
-    print(f"  {CYAN}Tools{RESET}:         {', '.join(enabled_list)}")
+    # Via enabled_tools(), not the raw dict: tools_enabled also carries
+    # use_boltz / use_af3 / primary_engine / soluprot_* , so iterating it listed
+    # engine settings as if they were design tools on the last screen before a
+    # campaign is generated.
+    enabled_list = [label for _k, _s, label, _d in enabled_tools(tools_enabled)]
+    if tools_enabled.get("pxdesign_import"):
+        enabled_list.append("PXDesign (import)")
+    print(f"  {CYAN}Tools{RESET}:         {', '.join(enabled_list) if enabled_list else '(none)'}")
     if use_bindcraft:
         bc_min = cfg.get("bindcraft_min_length", min_length)
         bc_max = cfg.get("bindcraft_max_length", max_length)
@@ -4384,7 +4408,10 @@ def wizard():
     if use_evaluator:
         print_warn("Evaluator runs Boltz-2 refolding (GPU recommended, ~30 min per design).")
 
-    if ask_yn("Run the pipeline now?", default=True):
+    # Default NO. A blank Enter used to launch a real GPU design campaign with no
+    # cost warning; falling through instead prints the "To run later" list, which
+    # already names the exact `bash runs/<name>/run_<tool>.sh` commands.
+    if ask_yn("Run the pipeline now?", default=False):
         run_pipeline(cfg, tools_enabled)
     else:
         print()
@@ -4578,6 +4605,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):  # EOFError = Ctrl-D or a closed stdin
         print(f"\n\n  {YELLOW}Interrupted.{RESET} Some files may have been partially written.")
         sys.exit(1)

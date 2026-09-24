@@ -34,8 +34,15 @@ RESET = "\033[0m"
 # configurator.TOOL_SEQUENCE; adding a tool must not require editing four places.
 TOOL_SEQUENCE: list[tuple[str, str, str]] = [
     ("mosaic", "Mosaic", "Mosaic/.venv/bin/python"),
-    ("boltzgen", "BoltzGen", "BoltzGen/boltzgen/__init__.py"),
-    ("bindcraft", "BindCraft", "BindCraft/bindcraft_environment.yml"),
+    # `env:<name>` means "this conda env exists", which is how install.sh itself
+    # defines installed (clone AND env). The previous two markers were files
+    # that exist in NEITHER upstream checkout -- BoltzGen/boltzgen/__init__.py
+    # and BindCraft/bindcraft_environment.yml -- so this menu reported both as
+    # "not installed" on every machine, including ones where the installer's own
+    # --verify says they are usable. A path inside the clone would trade that for
+    # the opposite error: reporting a cloned-but-unbuilt tool as installed.
+    ("boltzgen", "BoltzGen", "env:BoltzGen"),
+    ("bindcraft", "BindCraft", "env:BindCraft"),
     # The console script, not the checkout: BindCraft 2 is staged from an archive
     # before its venv is built, so the directory exists before it is installable.
     ("bindcraft2", "BindCraft 2", "BindCraft2/.venv/bin/bindcraft"),
@@ -63,7 +70,14 @@ def _installer_for_host(repo: Path) -> Path:
 
 def _detect_tools(repo: Path) -> dict[str, bool]:
     """Lightweight check for installed design tools (no heavy imports)."""
-    return {label: (repo / marker).exists() for _subdir, label, marker in TOOL_SEQUENCE}
+    conda_base = _find_conda_base(repo)
+
+    def _present(marker: str) -> bool:
+        if marker.startswith("env:"):
+            return conda_base is not None and (conda_base / "envs" / marker[4:]).is_dir()
+        return (repo / marker).exists()
+
+    return {label: _present(marker) for _subdir, label, marker in TOOL_SEQUENCE}
 
 
 def _tool_outputs(run_dir: Path) -> list[str]:
