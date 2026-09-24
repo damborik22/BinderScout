@@ -112,20 +112,25 @@ DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen
 # so a menu-driven install produced an evaluator that could not satisfy its own
 # default 3-engine gate, and only said so at report time.
 #
-# Format: DO_ flag | display name | install function
+# Format: DO_ flag | display name | install function | menu default | description
+#
+# The menu default matters: ESMFold2 is ON because it is the DEFAULT refold
+# engine. AF3 is OFF because its weights are gated by DeepMind, and BindCraft 2
+# is OFF because its licence is hosting-restricted -- both are deliberate
+# opt-ins, not omissions.
 TOOL_REGISTRY=(
-    "DO_BINDCRAFT|BindCraft|install_bindcraft"
-    "DO_BINDCRAFT2|BindCraft 2|install_bindcraft2"
-    "DO_BOLTZGEN|BoltzGen|install_boltzgen"
-    "DO_MOSAIC|Mosaic|install_mosaic"
-    "DO_EVALUATOR|Evaluator|install_evaluator"
-    "DO_RFD3|RFD3|install_rfd3"
-    "DO_PXDESIGN|PXDesign|install_pxdesign"
-    "DO_PROTEINA_COMPLEXA|Proteina-Complexa|install_proteina_complexa"
-    "DO_PROTEIN_HUNTER|Protein-Hunter|install_protein_hunter"
-    "DO_AF3|AF3|install_af3"
-    "DO_ESMFOLD2|ESMFold2|install_esmfold2"
-    "DO_SOLUPROT|SoluProt|install_soluprot"
+    "DO_BINDCRAFT|BindCraft|install_bindcraft|true|Binder design via AlphaFold2 (conda, Python 3.10)"
+    "DO_BINDCRAFT2|BindCraft 2|install_bindcraft2|false|AF2 hallucination rewritten for JAX, no PyRosetta (uv venv; source-available licence)"
+    "DO_BOLTZGEN|BoltzGen|install_boltzgen|true|Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)"
+    "DO_MOSAIC|Mosaic|install_mosaic|true|JAX-based protein design with Marimo notebooks (uv venv)"
+    "DO_EVALUATOR|Evaluator|install_evaluator|true|Evaluate binders: refold, ranked report (requires Mosaic)"
+    "DO_RFD3|RFD3|install_rfd3|true|RFD3 / foundry -- all-atom diffusion for protein + ligand + NA binders (conda)"
+    "DO_PXDESIGN|PXDesign|install_pxdesign|false|Protenix-based de novo binder design (conda)"
+    "DO_PROTEINA_COMPLEXA|Proteina-Complexa|install_proteina_complexa|false|NVIDIA flow matching + test-time compute binder design (uv venv)"
+    "DO_PROTEIN_HUNTER|Protein-Hunter|install_protein_hunter|false|Boltz/Chai hallucination: protein/cyclic/ligand/DNA/RNA binders (conda)"
+    "DO_AF3|AF3|install_af3|false|AlphaFold 3 refold engine -- needs gated weights from DeepMind (conda)"
+    "DO_ESMFOLD2|ESMFold2|install_esmfold2|true|DEFAULT refold engine -- the cross-engine gate needs 3 engines (conda)"
+    "DO_SOLUPROT|SoluProt|install_soluprot|false|Sequence-only E. coli solubility screen, pre-refold (conda, Python 3.7)"
 )
 
 # Note: legacy RFAA support was removed entirely (see CHANGELOG).
@@ -791,7 +796,7 @@ print_tool_status() {
     # and were simply never called.
     local spec tool flag fn
     for spec in "${TOOL_REGISTRY[@]}"; do
-        IFS='|' read -r flag tool fn <<< "${spec}"
+        IFS='|' read -r flag tool fn _dflt _desc <<< "${spec}"
         if verify_tool "${tool}" 2>/dev/null; then
             printf "  %b  %-20s  %s\n" "${GREEN}✓${RESET}" "${tool}" "installed"
         else
@@ -806,116 +811,86 @@ print_tool_status() {
 # DO_BINDCRAFT / DO_BOLTZGEN / DO_MOSAIC based on user choices.
 
 select_tools_interactive() {
-    # Default: current-generation tools selected. AF3 is opt-in
-    # (--tool af3 on the CLI) because its weights are gated by DeepMind and
-    # must be requested separately — not because of a GPU-memory limit.
-    local sel_bc=true
-    local sel_bg=true
-    local sel_mo=true
-    local sel_ev=true
-    local sel_rfd3=true
-    local sel_pxd=false
-    local sel_pc=false
-    local sel_ph=false
+    # Driven entirely by TOOL_REGISTRY. This used to be thirteen hardcoded
+    # places all fixed at eight entries -- the sel_* scalars, three parallel
+    # arrays, a literal `for i in 0 1 2 3 4 5 6 7`, one case arm per tool, the
+    # select-all and select-none lines, the empty-selection guard, the DO_*
+    # handoff and the confirmation echo. Adding a tool meant editing all
+    # thirteen in sync, which is why four tools were never added: BindCraft 2,
+    # AF3, SoluProt and -- the damaging one -- ESMFold2, the DEFAULT refold
+    # engine. A menu-driven install therefore produced an evaluator that could
+    # not satisfy its own default three-engine gate.
+    local -a m_flag=() m_name=() m_desc=() m_sel=() m_state=()
+    local spec flag name fn dflt desc
+    for spec in "${TOOL_REGISTRY[@]}"; do
+        IFS='|' read -r flag name fn dflt desc <<< "${spec}"
+        m_flag+=("${flag}"); m_name+=("${name}"); m_desc+=("${desc}"); m_sel+=("${dflt}")
+    done
+    local n=${#m_flag[@]}
 
-    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "RFD3" "PXDesign" "Proteina-Complexa" "Protein-Hunter")
-    local descs=(
-        "Binder design via AlphaFold2 (conda, Python 3.10)"
-        "Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)"
-        "JAX-based protein design with Marimo notebooks (uv venv)"
-        "Evaluate binders: refold with Boltz-2 (+ AF3, ESMFold2 if installed), ranked report (requires Mosaic)"
-        "RFD3 / foundry — all-atom diffusion for protein + ligand + NA binders (conda)"
-        "Protenix-based de novo binder design (conda)"
-        "NVIDIA flow matching + test-time compute binder design (uv venv)"
-        "Protein-Hunter — Boltz/Chai hallucination: protein/cyclic/ligand/DNA/RNA binders (conda)"
-    )
+    # Probe install state ONCE -- the menu re-prints on every keystroke, and
+    # verify_tool starts a python interpreter per tool.
+    local i
+    for (( i = 0; i < n; i++ )); do
+        if verify_tool "${m_name[$i]}" 2>/dev/null; then
+            m_state+=("${GREEN}installed${RESET}")
+        else
+            m_state+=("${YELLOW}not installed${RESET}")
+        fi
+    done
 
-    # Check current install state once (avoid repeated conda calls in the loop)
-    local inst_bc inst_bg inst_mo inst_ev inst_rfd3 inst_pxd inst_pc inst_ph
-    is_bindcraft_installed && inst_bc="${GREEN}installed${RESET}" || inst_bc="${YELLOW}not installed${RESET}"
-    is_boltzgen_installed  && inst_bg="${GREEN}installed${RESET}" || inst_bg="${YELLOW}not installed${RESET}"
-    is_mosaic_installed    && inst_mo="${GREEN}installed${RESET}" || inst_mo="${YELLOW}not installed${RESET}"
-    is_evaluator_installed && inst_ev="${GREEN}installed${RESET}" || inst_ev="${YELLOW}not installed${RESET}"
-    is_rfd3_installed      && inst_rfd3="${GREEN}installed${RESET}" || inst_rfd3="${YELLOW}not installed${RESET}"
-    is_pxdesign_installed  && inst_pxd="${GREEN}installed${RESET}" || inst_pxd="${YELLOW}not installed${RESET}"
-    is_proteina_complexa_installed && inst_pc="${GREEN}installed${RESET}" || inst_pc="${YELLOW}not installed${RESET}"
-    is_protein_hunter_installed    && inst_ph="${GREEN}installed${RESET}" || inst_ph="${YELLOW}not installed${RESET}"
-    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev" "$inst_rfd3" "$inst_pxd" "$inst_pc" "$inst_ph")
-
-    # Helper: print current state
     _print_menu() {
         echo ""
         echo -e "${BOLD}${CYAN}  Select tools to install${RESET}"
         echo -e "  Type a number to toggle selection, then press Enter when done."
         echo ""
-        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_rfd3" "$sel_pxd" "$sel_pc" "$sel_ph")
-        for i in 0 1 2 3 4 5 6 7; do
-            local box
-            if [[ "${states[$i]}" == true ]]; then
-                box="${GREEN}[x]${RESET}"
-            else
-                box="${RED}[ ]${RESET}"
-            fi
-            printf "    %d)  %b  ${BOLD}%-20s${RESET}  %-35b  %s\n" \
-                $((i+1)) "$box" "${tools[$i]}" "${inst_states[$i]}" "${descs[$i]}"
+        local j box
+        for (( j = 0; j < n; j++ )); do
+            if [[ "${m_sel[$j]}" == true ]]; then box="${GREEN}[x]${RESET}"; else box="${RED}[ ]${RESET}"; fi
+            printf "    %2d)  %b  ${BOLD}%-20s${RESET}  %-35b  %s\n" \
+                $((j+1)) "${box}" "${m_name[$j]}" "${m_state[$j]}" "${m_desc[$j]}"
         done
         echo ""
         echo -e "  ${YELLOW}a${RESET}) Select all   ${YELLOW}n${RESET}) Select none   ${YELLOW}Enter${RESET} to confirm"
         echo ""
     }
 
+    local choice j any
     while true; do
-        # Re-print menu on each iteration (scroll-friendly, no tput)
         _print_menu
         read -rp "  > " choice
         case "${choice,,}" in
-            1) [[ "$sel_bc" == true ]] && sel_bc=false || sel_bc=true ;;
-            2) [[ "$sel_bg" == true ]] && sel_bg=false || sel_bg=true ;;
-            3) [[ "$sel_mo" == true ]] && sel_mo=false || sel_mo=true ;;
-            4) [[ "$sel_ev" == true ]] && sel_ev=false || sel_ev=true ;;
-            5) [[ "$sel_rfd3" == true ]] && sel_rfd3=false || sel_rfd3=true ;;
-            6) [[ "$sel_pxd" == true ]] && sel_pxd=false || sel_pxd=true ;;
-            7) [[ "$sel_pc" == true ]] && sel_pc=false || sel_pc=true ;;
-            8) [[ "$sel_ph" == true ]] && sel_ph=false || sel_ph=true ;;
-            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true;  sel_rfd3=true;  sel_pxd=true;  sel_pc=true;  sel_ph=true  ;;
-            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false; sel_rfd3=false; sel_pxd=false; sel_pc=false; sel_ph=false ;;
+            a) for (( j = 0; j < n; j++ )); do m_sel[$j]=true;  done ;;
+            n) for (( j = 0; j < n; j++ )); do m_sel[$j]=false; done ;;
             "")
-                # Confirm: at least one must be selected
-                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false && "$sel_rfd3" == false && "$sel_pxd" == false && "$sel_pc" == false && "$sel_ph" == false ]]; then
+                any=false
+                for (( j = 0; j < n; j++ )); do [[ "${m_sel[$j]}" == true ]] && any=true; done
+                if [[ "${any}" == false ]]; then
                     echo -e "  ${RED}No tools selected. Select at least one.${RESET}"
                     continue
                 fi
                 break
                 ;;
-            *) echo -e "  ${RED}Invalid input. Enter 1–8, a, n, or press Enter.${RESET}" ;;
+            *)
+                if [[ "${choice}" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= n )); then
+                    j=$((choice - 1))
+                    [[ "${m_sel[$j]}" == true ]] && m_sel[$j]=false || m_sel[$j]=true
+                else
+                    echo -e "  ${RED}Invalid input. Enter 1-${n}, a, n, or press Enter.${RESET}"
+                fi
+                ;;
         esac
     done
 
-    DO_BINDCRAFT="$sel_bc"
-    DO_BOLTZGEN="$sel_bg"
-    DO_MOSAIC="$sel_mo"
-    DO_EVALUATOR="$sel_ev"
-    DO_RFD3="$sel_rfd3"
-    DO_PXDESIGN="$sel_pxd"
-    DO_PROTEINA_COMPLEXA="$sel_pc"
-    DO_PROTEIN_HUNTER="$sel_ph"
+    for (( i = 0; i < n; i++ )); do
+        printf -v "${m_flag[$i]}" '%s' "${m_sel[$i]}"
+    done
 
     echo ""
     echo -e "  ${BOLD}Installing:${RESET}"
-    [[ "$DO_BINDCRAFT" == true ]] && echo -e "    ${GREEN}✓${RESET} BindCraft"
-    [[ "$DO_BOLTZGEN"  == true ]] && echo -e "    ${GREEN}✓${RESET} BoltzGen"
-    [[ "$DO_MOSAIC"    == true ]] && echo -e "    ${GREEN}✓${RESET} Mosaic"
-    [[ "$DO_EVALUATOR" == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
-    [[ "$DO_RFD3"      == true ]] && echo -e "    ${GREEN}✓${RESET} RFD3"
-    [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
-    [[ "$DO_PROTEINA_COMPLEXA" == true ]] && echo -e "    ${GREEN}✓${RESET} Proteina-Complexa"
-    [[ "$DO_PROTEIN_HUNTER" == true ]] && echo -e "    ${GREEN}✓${RESET} Protein-Hunter"
-    [[ "$DO_AF3" == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; gated weights required)${RESET}"
-    [[ "$DO_ESMFOLD2" == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (default refolder)"
-    [[ "$DO_SOLUPROT" == true ]] && echo -e "    ${GREEN}✓${RESET} SoluProt 1.0 (pre-refold solubility screen)"
-    echo ""
-
-    confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
+    for (( i = 0; i < n; i++ )); do
+        [[ "${m_sel[$i]}" == true ]] && echo -e "    ${GREEN}✓${RESET} ${m_name[$i]}"
+    done
 }
 
 # ─── BindCraft ────────────────────────────────────────────────────────────────
@@ -3270,7 +3245,7 @@ verify_selected_tools() {
     echo -e "${BOLD}=== Verifying installed tools ===${RESET}"
     local spec tool flag fn
     for spec in "${TOOL_REGISTRY[@]}"; do
-        IFS='|' read -r flag tool fn <<< "${spec}"
+        IFS='|' read -r flag tool fn _dflt _desc <<< "${spec}"
         [[ "${!flag}" == true ]] || continue
         if verify_tool "${tool}"; then
             printf "  %b  %-20s %s\n" "${GREEN}✓${RESET}" "${tool}" "usable"
@@ -3292,7 +3267,7 @@ repair_tools() {
     echo ""
     echo -e "${BOLD}=== Repairing ${#__rt_todo[@]} tool(s) ===${RESET}"
     for spec in "${TOOL_REGISTRY[@]}"; do
-        IFS='|' read -r flag tool fn <<< "${spec}"
+        IFS='|' read -r flag tool fn _dflt _desc <<< "${spec}"
         local wanted=false t
         for t in "${__rt_todo[@]}"; do [[ "${t}" == "${tool}" ]] && wanted=true; done
         [[ "${wanted}" == true ]] || continue
