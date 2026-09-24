@@ -38,25 +38,43 @@ gives **one timestamp for the entire pool**, not one per design. And BindCraft
 acceptance order rather than generation order.
 
 So the work is not plumbing, it is establishing **per tool** what generation
-order can honestly be recovered:
+order can honestly be recovered.
 
-1. For each of the eight extractors, determine whether the tool's output order
-   is generation order, already sorted by a native metric, or neither.
-   BindCraft 2 sorts on `i_pDAE`. The others are unknown and must be checked
-   against a real run, not assumed.
-2. Emit `generated_at_source` (`mtime` | `order` | `explicit` | `unavailable`)
-   alongside the value, and make `unavailable` a first-class answer. A tool
-   whose order is quality-sorted **cannot** contribute to a discovery-rank plot
-   without modelling the selection, and saying so is the useful output.
-3. Only then the schema fields and the `hits.py` holdout.
+### Done — the extraction half
 
-**Do not** let a tool with no honest generation order emit a plausible-looking
-index. The whole point of the metric is to measure discovery, and a
-quality-sorted index would invert the answer.
+The per-tool investigation is
+[INVESTIGATION_generation_index_2026-09-24.md](INVESTIGATION_generation_index_2026-09-24.md).
+`ExtractedBinder` now carries `generation_index` and `generation_index_source`,
+and the value reaches `metrics.csv` through the existing native-metrics sidecar.
 
-**Precedent:** Mosaic already does this correctly — see
-`binderscout_examples/hallucinate_binderscout.py`, where the index is captured
-at the candidate append, *before* two sorts.
+**Row position is not used for any tool** — not one. Where a file happens to be
+in generation order the extractor re-sorts before iterating; where it does not,
+the order is a quality sort.
+
+| source | tools |
+|---|---|
+| `explicit` (a counter the tool wrote) | Mosaic, Protein-Hunter |
+| `joined` (a counter in another of its tables) | BindCraft 2 — `trajectory`, joined on `hash` |
+| `parsed` (an ordinal inside an identifier) | BoltzGen, RFD3 |
+| `unavailable` | PXDesign, Proteina-Complexa, BindCraft 1 |
+
+`unavailable` is a real answer, and for Proteina-Complexa it is the *correct*
+one: under MCTS the pool is a flattened tree, so a scalar index has no
+consistent meaning. Those three are pinned by tests that no production code
+makes pass — the tempting "fix" for each is a fall-back to row position, which
+for all three is a quality sort.
+
+### Remaining — the metric itself
+
+`hits.py` holdout, and the decision below.
+
+**The pool-filtering problem is unresolved, and may matter more than ordering.**
+Most extractor inputs are already downstream of a quality filter, so a discovery
+rank computed on them is conditioned on survival — the denominator has been
+deleted. Protein-Hunter's default CSV is gated at iPTM 0.8, Mosaic's at the top
+~5%, BoltzGen's at roughly 700 rows of 10,000. Before the metric ships it needs
+to either refuse a pre-filtered pool or carry the fact; `pool_pre_filtered`
+already exists in `tool_classification.py` to say so.
 
 ---
 
