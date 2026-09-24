@@ -840,7 +840,6 @@ def design(
     csv_columns = [
         "worker_id",
         "rank",
-        "generation_index",
         "is_top",
         "sequence",
         "target_sequence",
@@ -875,6 +874,13 @@ def design(
         "pdb",
         "pae_file",
         "plddt_file",
+        # LAST, deliberately. designs.csv is appended across runs and the
+        # extractor reads it positionally against line 1's header, so a column
+        # inserted mid-list shifts every field after it in the rows written by
+        # the other vintage -- silently, since each row still parses. Appended
+        # here, a mixed file degrades to an unnamed trailing column instead.
+        # Guarded by tests/test_mosaic_csv_append_alignment.py.
+        "generation_index",
     ]
     write_header = (not os.path.exists(csv_path)) or os.path.getsize(csv_path) == 0
     with open(csv_path, "a", newline="") as f:
