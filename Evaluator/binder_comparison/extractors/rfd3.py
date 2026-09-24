@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import warnings
 from pathlib import Path
 
@@ -39,6 +40,38 @@ from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
 
 _CSV_CANDIDATES = ["sequences.csv", "results.csv", "designs.csv", "rfd3_designs.csv", "summary.csv"]
 _SEQUENCE_COLS = ("sequence", "Sequence", "designed_sequence", "binder_sequence")
+
+# rfd3 names each design `<prefix>_<batch_id>_model_<model_idx>`, and generation
+# order is those two integers ascending (engine.py iterates batch_id over
+# range(n_batches) under a SequentialSampler, model_idx ascending within a batch).
+# Anchored at the END because `prefix` is operator-chosen and routinely contains
+# both underscores and digits.
+_BATCH_MODEL_RE = re.compile(r"_(\d+)_model_(\d+)$")
+
+
+def _parse_batch_model(design_id: str) -> tuple[int, int] | None:
+    match = _BATCH_MODEL_RE.search(design_id.strip())
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def _assign_generation_ordinals(results: list[ExtractedBinder], order_keys: list[tuple[int, int] | None]) -> None:
+    """Turn parsed (batch_id, model_idx) pairs into a generation ordinal.
+
+    RFD3 records no counter, so the index is the design's RANK in numerically
+    sorted (batch_id, model_idx) order -- which is what a discovery rank needs
+    anyway. It must be computed here rather than taken from row position: the
+    run script that writes sequences.csv globs the .fa files with a plain
+    ``sorted()``, so `_10_model_0` sorts before `_2_model_0` and any run with
+    >=10 batches is out of order on disk. The shipped templates use 88.
+
+    A design whose id does not parse keeps the default "unavailable" -- it is
+    not given a position among the ones that did.
+    """
+    ranked = sorted((key, i) for i, key in enumerate(order_keys) if key is not None)
+    for ordinal, (_key, i) in enumerate(ranked):
+        results[i].generation_index = ordinal
+        results[i].generation_index_source = "parsed"
+
 
 _NATIVE_COL_MAP = {
     "rfd3_n_chainbreaks": ("n_chainbreaks",),
@@ -113,6 +146,7 @@ class RFD3Extractor(SequenceExtractor):
             return []
 
         results: list[ExtractedBinder] = []
+        order_keys: list[tuple[int, int] | None] = []
         for idx, row in df.iterrows():
             seq = str(row[seq_col]).strip().upper()
             if not self._validate_sequence(seq):
@@ -126,6 +160,9 @@ class RFD3Extractor(SequenceExtractor):
                     native=self._extract_native(row, sidecar),
                 )
             )
+            order_keys.append(_parse_batch_model(str(row.get("design_id", "")) or str(row.get("backbone", ""))))
+
+        _assign_generation_ordinals(results, order_keys)
         return results
 
     def _read_sidecar(self, csv_path: Path, row: pd.Series) -> dict:

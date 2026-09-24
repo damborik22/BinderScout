@@ -21,7 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..core.schema import ExtractedBinder, NativeMetrics
-from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
+from .base import SequenceExtractor, disambiguate_ids, parse_trailing_index, resolve_single_match
 
 # In order of preference
 _CSV_CANDIDATES = [
@@ -96,12 +96,19 @@ class BoltzGenExtractor(SequenceExtractor):
                 except (TypeError, ValueError):
                     pass
 
+            # BoltzGen's own global_idx, zero-padded into the id at write time
+            # ({stem}_{global_idx:0Nd}). The file itself is sorted by final_rank
+            # and is a budget/diversity subset, so row position means nothing.
+            gen_index = parse_trailing_index(str(row["id"])) if "id" in row.index and pd.notna(row["id"]) else None
+
             results.append(
                 ExtractedBinder(
                     binder_id=binder_id,
                     sequence=seq,
                     source_tool="boltzgen",
                     native=native,
+                    generation_index=gen_index,
+                    generation_index_source="parsed" if gen_index is not None else "unavailable",
                 )
             )
 
