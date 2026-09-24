@@ -145,3 +145,73 @@ unbuilt nor done: it is built and uncalibrated, which is the case the verdict
 ("proceed — calibrate the existing heuristic") actually describes. Whoever picks
 up AD should treat C2 as a calibration task against AD's own yield curve, not as
 a feature.
+
+---
+
+## Measurement — D1's gate PASSES on a real pool (2026-09-24)
+
+D1 said proceed *"when Tm spread on an archived pool exceeds predictor error."*
+That gate can now be closed: the 2VDY/CBG archive
+(`RESULTS and REPORTS/2VDY_combined_2026-07-22/`) carries `tmprot_fresh.csv`,
+439 designs already scored.
+
+| | |
+|---|---|
+| range | 48.53 – 83.68 °C (35.15 °C) |
+| mean ± sd | 66.93 ± **12.31** °C |
+| IQR | 54.52 – 79.56 (**25.05** °C wide) |
+| 5–95 pct | 51.46 – 83.21 (31.75 °C wide) |
+| below 60 °C | **189 / 439 (43.1 %)** |
+
+Sequence-based Tm predictors carry roughly 8–10 °C RMSE. A 12.3 °C standard
+deviation and a 25 °C interquartile width clear that comfortably, and the screen
+splits the pool rather than calling every de novo binder hyperstable — which was
+the specific worry behind *"out of domain on hyperstable de novo miniproteins"*.
+
+**Gate passes. TmProt is informative on real binder pools.**
+
+## Measurement — TmProt is NOT redundant with SoluProt
+
+The same archive has `soluprot_fresh.csv` for the same 439 designs, so the
+redundancy question the assessment raises for this whole family of Loschmidt
+screens can be answered directly. On 436 deduplicated designs:
+
+* Spearman ρ = **−0.090**
+* Pearson r = **−0.031**
+
+Essentially uncorrelated. The concern that these screens all restate one
+hydrophobicity/charge signal is **empirically false for TmProt**. It does not
+settle the same question for AggreProt (D3) — but it does mean the shared
+premise behind both verdicts should not be assumed, only measured.
+
+## Measurement — the rank bug was live in a shipped campaign, and escaped on luck
+
+`tmprot_fresh.csv` and `soluprot_fresh.csv` each contain **3 duplicated
+sequences** (439 rows, 436 distinct). An inner join on `sequence` inflates
+439 → **445 rows**. That is exactly the row multiplication that corrupted
+`rank` before `_merge_by_sequence` (commit `3d0c7a9`), in a real campaign that
+shipped a gene order.
+
+It did not damage that report: none of the 3 duplicated sequences survived into
+the 350 designs in `metrics.csv`, so the inflation had nothing to bite on. The
+join carried no guard either way — this campaign escaped on the composition of
+its pool, not on anything defensive. Two conclusions worth keeping:
+
+1. Duplicate sequences in real screen outputs are **normal**, not pathological.
+   Two tools emitting the same binder is the ordinary case.
+2. A defect that depends on pool composition will look absent for a long time
+   and then not be.
+
+## Note — what the OneDrive archive can and cannot unblock
+
+`RESULTS and REPORTS/` holds seven completed campaigns (2VDY/CBG and CALCA,
+including the Part U re-runs). Present: `metrics.csv`, `metrics_zscore.csv`,
+`candidates.csv`, per-tool native CSVs, the screen outputs, ~100 structures,
+and the HTML reports.
+
+**Absent: per-engine refold CSVs and PAE `.npy` — zero of each.** So this
+archive supports *measurement* work (AA's false-negative rate, D3's
+decorrelation, AB's structural work) but cannot rebuild a real-data golden
+fixture, which needs the report's inputs rather than its outputs. That fixture
+still needs a small fetch from a fleet machine; the synthetic pool in
+`tests/integration/` already covers the mutation guarantee in the meantime.
