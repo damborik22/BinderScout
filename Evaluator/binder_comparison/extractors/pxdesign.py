@@ -3,7 +3,8 @@
 PXDesign (protenix-server.com) output files:
   - summary.csv — one row per design, ranked by confidence
   - sequences.csv — the configurator's PXDesign collector aggregates every
-    per-length ``filtered_summary.csv`` into this one file
+    per-length ``summary.csv`` into this one file (it used to read
+    ``filtered_summary.csv``, which PXDesign deletes during its own run)
 
 Key columns:
   - 'sequence'   — binder amino acid sequence
@@ -39,7 +40,8 @@ _SEQUENCE_COL = "sequence"
 # Columns carrying a per-design NAME. A name survives a re-sort or a re-run of
 # the source CSV, so it is preferred over row position when building binder_id.
 # 'design_id' is what the configurator's PXDesign collector writes; 'name' is
-# PXDesign's own column in filtered_summary.csv / sample_level_output.csv.
+# PXDesign's own column in sample_level_output.csv. summary.csv has NEITHER,
+# so the collector synthesises design_id from task_name + rank.
 _ID_COL_CANDIDATES = ("design_id", "name")
 
 # Schema field name → PXDesign CSV column name(s). Multiple candidates per field
