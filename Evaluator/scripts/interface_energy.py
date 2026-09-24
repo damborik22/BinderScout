@@ -3,8 +3,15 @@
 Runs in the ``BindCraft`` conda env (PyRosetta is installed there on every platform we run
 BindCraft on — x86_64 AND aarch64 / DGX Spark — so this is intentionally not x86-gated).
 Emits one CSV row per PDB: design_id, interface_dG (REU), interface_dSASA (Å²). The
-evaluator's ``binder-compare affinity`` then folds these into the ``ipsae_min × |dG/dSASA|``
-affinity composite (Part N).
+evaluator's ``binder-compare affinity`` gates on ``ipsae_min`` and then ranks survivors
+by ``|dG/dSASA|`` (Part N).
+
+**Structures are RELAXED before scoring**, as BindCraft does, and this is not optional
+in practice. Scoring a predicted complex as-is measures clash energy, not interface
+energy: on one AF3 structure from the golden pool, dG is +213.8 REU unrelaxed and
+−89.5 REU after FastRelax — a 303 REU swing that flips the sign. BindCraft's own gate
+is dG ≤ 0, so an unrelaxed number is not comparable to any published threshold. Relax
+costs roughly a minute per structure; ``--no-relax`` skips it for debugging only.
 
 Usage (driven by `binder-compare affinity --run-rosetta`):
     conda run -n BindCraft python interface_energy.py \\
@@ -16,7 +23,29 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+import tempfile
 from pathlib import Path
+
+
+def _interface_analyzer(spec):
+    """An InterfaceAnalyzerMover with its interface set, across PyRosetta versions.
+
+    Recent PyRosetta replaced both the string constructor overload and the
+    string ``set_interface`` with a ``core.pose.DockingPartners`` object, so
+    ``InterfaceAnalyzerMover("B_A")`` raises TypeError. Older builds on the
+    fleet still take the string, so try the new form and fall back rather than
+    pinning either one.
+    """
+    from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
+
+    iam = InterfaceAnalyzerMover()
+    try:
+        from pyrosetta.rosetta.core.pose import DockingPartners
+
+        iam.set_interface(DockingPartners.docking_partners_from_string(spec))
+    except (ImportError, AttributeError, TypeError):
+        iam.set_interface(spec)  # older PyRosetta
+    return iam
 
 
 def main(argv=None) -> None:
@@ -27,13 +56,33 @@ def main(argv=None) -> None:
         default="B_A",
         help="Rosetta interface spec, <binder>_<target> chain ids (default B_A, RFD3 convention)",
     )
+    ap.add_argument(
+        "--bindcraft-dir",
+        default=str(Path(__file__).resolve().parents[2] / "BindCraft"),
+        help="BindCraft repo (for functions/pr_relax + DAlphaBall.gcc)",
+    )
+    ap.add_argument(
+        "--no-relax",
+        action="store_true",
+        help="Score the structures as-is. Interface dG is then dominated by clash energy and is "
+        "NOT comparable to any published threshold — see the module docstring.",
+    )
     ap.add_argument("--output", "-o", required=True, help="Output CSV path")
     args = ap.parse_args(argv)
 
-    import pyrosetta
-    from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
+    bc = Path(args.bindcraft_dir)
+    sys.path.insert(0, str(bc))
 
-    pyrosetta.init("-mute all")
+    import pyrosetta
+
+    pyrosetta.init(
+        f"-ignore_unrecognized_res -ignore_zero_occupancy -mute all "
+        f"-holes:dalphaball {bc / 'functions' / 'DAlphaBall.gcc'} "
+        f"-corrections::beta_nov16 true -relax:default_repeats 1"
+    )
+    pr_relax = None
+    if not args.no_relax:
+        from functions.pyrosetta_utils import pr_relax
 
     structures = sorted(Path(args.structures_dir).glob("*.pdb"))
     if not structures:
@@ -41,29 +90,49 @@ def main(argv=None) -> None:
         sys.exit(1)
 
     rows = []
-    for pdb in structures:
-        try:
-            pose = pyrosetta.pose_from_pdb(str(pdb))
-            iam = InterfaceAnalyzerMover(args.interface)
-            iam.set_compute_packstat(False)
-            iam.set_pack_separated(True)
-            iam.apply(pose)
-            rows.append(
-                {
-                    "design_id": pdb.stem,
-                    "interface_dG": round(iam.get_interface_dG(), 3),
-                    "interface_dSASA": round(iam.get_interface_delta_sasa(), 3),
-                }
-            )
-        except Exception as exc:  # one bad structure shouldn't sink the batch
-            print(f"[interface_energy] {pdb.name}: {exc}", file=sys.stderr)
-            rows.append({"design_id": pdb.stem, "interface_dG": "", "interface_dSASA": ""})
+    with tempfile.TemporaryDirectory() as td:
+        for pdb in structures:
+            try:
+                target = str(pdb)
+                if pr_relax is not None:
+                    target = str(Path(td) / f"{pdb.stem}_relaxed.pdb")
+                    pr_relax(str(pdb), target)
+                pose = pyrosetta.pose_from_pdb(target)
+                iam = _interface_analyzer(args.interface)
+                iam.set_compute_packstat(False)
+                iam.set_pack_separated(True)
+                iam.apply(pose)
+                rows.append(
+                    {
+                        "design_id": pdb.stem,
+                        "interface_dG": round(iam.get_interface_dG(), 3),
+                        "interface_dSASA": round(iam.get_interface_delta_sasa(), 3),
+                    }
+                )
+            except Exception as exc:  # one bad structure shouldn't sink the batch
+                print(f"[interface_energy] {pdb.name}: {exc}", file=sys.stderr)
+                rows.append({"design_id": pdb.stem, "interface_dG": "", "interface_dSASA": ""})
+
+    # Per-structure tolerance is for the occasional bad structure. When NOTHING
+    # scored, the cause is environmental (a PyRosetta API change, a missing
+    # shared library) and every row is empty — writing that file lets a caller
+    # spend hours joining nothing, which is exactly how the string-constructor
+    # TypeError stayed invisible.
+    n_scored = sum(1 for r in rows if r["interface_dG"] != "")
+    if rows and n_scored == 0:
+        print(
+            f"[interface_energy] ERROR: 0 of {len(rows)} structures scored. The errors above are "
+            "the cause — this is an environment or API problem, not bad structures. Refusing to "
+            "write an empty panel.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     with open(args.output, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["design_id", "interface_dG", "interface_dSASA"])
         w.writeheader()
         w.writerows(rows)
-    print(f"[interface_energy] wrote {len(rows)} rows → {args.output}")
+    print(f"[interface_energy] wrote {len(rows)} rows ({n_scored} scored) → {args.output}")
 
 
 if __name__ == "__main__":
