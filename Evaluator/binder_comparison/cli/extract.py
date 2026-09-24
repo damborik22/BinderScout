@@ -168,8 +168,13 @@ def run(args: argparse.Namespace) -> None:
 
 def _write_native_metrics_sidecar(binders: list[ExtractedBinder], fasta_path: Path) -> None:
     """Write a CSV next to the extracted FASTA with one row per binder containing
-    `sequence`, `source_tool`, `binder_id`, and every NativeMetrics field
-    (column-named `native_<field>` to match `MetricResult.to_flat_dict()`).
+    `sequence`, `source_tool`, `binder_id`, the generation-order provenance
+    (`generation_index`, `generation_index_source`), and every NativeMetrics
+    field (column-named `native_<field>` to match `MetricResult.to_flat_dict()`).
+
+    The generation columns are deliberately NOT `native_`-prefixed: that
+    namespace means "what the tool said about its own design", and an index of
+    when a design was produced is provenance rather than a score.
     """
     from dataclasses import asdict
 
@@ -182,11 +187,22 @@ def _write_native_metrics_sidecar(binders: list[ExtractedBinder], fasta_path: Pa
 
     with sidecar.open("w", newline="") as fh:
         writer = csv.writer(fh)
-        header = ["sequence", "source_tool", "binder_id"] + [f"native_{f}" for f in field_names]
+        # generation_index rides here unprefixed: it is provenance for the
+        # discovery-rank metric, not a design-time metric, and a native_ name
+        # would put it among the columns the report treats as tool scores.
+        header = ["sequence", "source_tool", "binder_id", "generation_index", "generation_index_source"] + [
+            f"native_{f}" for f in field_names
+        ]
         writer.writerow(header)
         for b in binders:
             native_d = asdict(b.native)
-            row = [b.sequence, b.source_tool, b.binder_id]
+            row = [
+                b.sequence,
+                b.source_tool,
+                b.binder_id,
+                "" if b.generation_index is None else b.generation_index,
+                b.generation_index_source,
+            ]
             for f in field_names:
                 v = native_d.get(f)
                 row.append("" if v is None else v)
