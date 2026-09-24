@@ -68,7 +68,7 @@ def test_the_conversion_constant_is_exact():
     centre, not ColabDesign's divisor."""
     assert PAE_NORMALISER == 31.0
     assert BINDCRAFT_IPAE_NORMALISED == 0.35
-    assert IPAE_MAX_ANGSTROM == pytest.approx(10.85)
+    assert pytest.approx(10.85) == IPAE_MAX_ANGSTROM
 
 
 def test_a_good_design_passes_every_check():
