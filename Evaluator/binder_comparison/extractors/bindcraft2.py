@@ -71,6 +71,17 @@ _SEQUENCE_COLS = ("Binder_Sequence", "Sequence")
 _DESIGN_COLS = ("design", "Design")
 _RANK_COLS = ("rank", "Rank")
 _TARGET_COLS = ("targets", "Targets")
+_HASH_COLS = ("hash", "Hash")
+_TRAJECTORY_COLS = ("trajectory", "Trajectory")
+
+# The ranked table is a descending sort on i_pDAE, rebuilt on every acceptance,
+# so it holds no generation order at all. The campaign does record one: a
+# lock-protected monotonic counter, written to 1_Trajectories/!_Trajectories.csv
+# as `trajectory`, in an append-only table that is never sorted. Both tables
+# carry `hash` (the design identity), and claim_recipe dedupes on it, so the
+# join is one-to-one.
+_TRAJECTORY_TABLE = ("1_Trajectories", "!_Trajectories.csv")
+
 
 # Native metrics whose spelling is the same in both schemas. Everything renamed
 # between them (the pre-1.0 `Binder_Helix%` family became `*_Fraction` on a 0–1
@@ -102,6 +113,38 @@ def _first_present(row_or_cols, candidates: tuple[str, ...]) -> str | None:
         if name in row_or_cols:
             return name
     return None
+
+
+def _load_trajectory_counters(table: Path) -> dict[str, int]:
+    """hash -> trajectory number, or {} when the table is out of reach.
+
+    Out of reach is the normal case for a pool delivered as a bare
+    ``3_Ranked/`` directory or a pre-1.0 flat export, and it must stay
+    "unavailable": degrading to the ranked table's own order would substitute a
+    quality sort for a generation order, exactly inverting the metric.
+    """
+    # The ranked table sits at <campaign>/3_Ranked/!_Ranked.csv, but the
+    # extractor also accepts being pointed straight at 3_Ranked/.
+    for base in (table.parent.parent, table.parent):
+        candidate = base.joinpath(*_TRAJECTORY_TABLE)
+        if not candidate.exists():
+            continue
+        try:
+            traj = pd.read_csv(candidate)
+        except (OSError, pd.errors.ParserError) as exc:
+            warnings.warn(f"BindCraft 2: could not read {candidate.name}: {exc}", stacklevel=2)
+            return {}
+        hash_col = _first_present(traj.columns, _HASH_COLS)
+        number_col = _first_present(traj.columns, _TRAJECTORY_COLS)
+        if hash_col is None or number_col is None:
+            return {}
+        counters: dict[str, int] = {}
+        for _, row in traj.iterrows():
+            number = pd.to_numeric(row[number_col], errors="coerce")
+            if pd.notna(row[hash_col]) and pd.notna(number):
+                counters.setdefault(str(row[hash_col]).strip(), int(number))
+        return counters
+    return {}
 
 
 class BindCraft2Extractor(SequenceExtractor):
@@ -152,6 +195,9 @@ class BindCraft2Extractor(SequenceExtractor):
                 stacklevel=2,
             )
 
+        trajectory_counters = _load_trajectory_counters(table)
+        hash_col = _first_present(df.columns, _HASH_COLS)
+
         results: list[ExtractedBinder] = []
         for _, row in df.iterrows():
             raw = row[seq_col]
@@ -174,12 +220,18 @@ class BindCraft2Extractor(SequenceExtractor):
             if not self._validate_sequence(seq):
                 continue
 
+            gen_index = None
+            if hash_col is not None and pd.notna(row[hash_col]):
+                gen_index = trajectory_counters.get(str(row[hash_col]).strip())
+
             results.append(
                 ExtractedBinder(
                     binder_id=f"bindcraft2_{row[design_col]}",
                     sequence=seq,
                     source_tool="bindcraft2",
                     native=self._native_metrics(row),
+                    generation_index=gen_index,
+                    generation_index_source="joined" if gen_index is not None else "unavailable",
                 )
             )
 

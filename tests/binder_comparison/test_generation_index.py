@@ -259,3 +259,147 @@ def test_rfd3_unparseable_design_id_is_unavailable(tmp_path: Path) -> None:
     binders = RFD3Extractor().extract(tmp_path)
     assert binders[0].generation_index is None
     assert binders[0].generation_index_source == "unavailable"
+
+
+# --------------------------------------------------------------------------
+# BindCraft 2: the ranked table is a descending sort on i_pDAE, rebuilt on
+# every acceptance. But the campaign records a real monotonic attempt counter
+# in 1_Trajectories/!_Trajectories.csv, and both tables carry `hash`.
+# --------------------------------------------------------------------------
+
+
+def _write_bc2_campaign(root: Path, ranked: list[dict], trajectories: list[dict] | None) -> None:
+    (root / "3_Ranked").mkdir(parents=True, exist_ok=True)
+    ranked_cols = ["rank", "design", "hash", "Binder_Sequence", "i_pDAE"]
+    with (root / "3_Ranked" / "!_Ranked.csv").open("w") as fh:
+        fh.write(",".join(ranked_cols) + "\n")
+        for row in ranked:
+            fh.write(",".join(str(row.get(c, "")) for c in ranked_cols) + "\n")
+    if trajectories is not None:
+        (root / "1_Trajectories").mkdir(parents=True, exist_ok=True)
+        traj_cols = ["design", "trajectory", "hash", "terminated"]
+        with (root / "1_Trajectories" / "!_Trajectories.csv").open("w") as fh:
+            fh.write(",".join(traj_cols) + "\n")
+            for row in trajectories:
+                fh.write(",".join(str(row.get(c, "")) for c in traj_cols) + "\n")
+
+
+def test_bindcraft2_joins_the_trajectory_counter_on_hash(tmp_path: Path) -> None:
+    from binder_comparison.extractors.bindcraft2 import BindCraft2Extractor
+
+    # rank 1 is the best i_pDAE but was attempt 42; rank 3 was attempt 1.
+    ranked = [
+        {"rank": 1, "design": "d_a", "hash": "aaa111", "Binder_Sequence": SEQS[0], "i_pDAE": 0.91},
+        {"rank": 2, "design": "d_b", "hash": "bbb222", "Binder_Sequence": SEQS[1], "i_pDAE": 0.88},
+        {"rank": 3, "design": "d_c", "hash": "ccc333", "Binder_Sequence": SEQS[2], "i_pDAE": 0.80},
+    ]
+    trajectories = [
+        {"design": "d_c", "trajectory": 1, "hash": "ccc333", "terminated": ""},
+        {"design": "d_b", "trajectory": 17, "hash": "bbb222", "terminated": ""},
+        {"design": "d_a", "trajectory": 42, "hash": "aaa111", "terminated": ""},
+    ]
+    _write_bc2_campaign(tmp_path, ranked, trajectories)
+
+    binders = BindCraft2Extractor().extract(tmp_path)
+    by_seq = {b.sequence: b for b in binders}
+
+    assert by_seq[SEQS[0]].generation_index == 42, (
+        "the top-ranked design was attempt 42; reading rank order would call it attempt 1"
+    )
+    assert by_seq[SEQS[1]].generation_index == 17
+    assert by_seq[SEQS[2]].generation_index == 1
+    assert all(b.generation_index_source == "joined" for b in binders)
+
+
+def test_bindcraft2_without_the_trajectories_table_is_unavailable(tmp_path: Path) -> None:
+    """Pointed straight at 3_Ranked/, or given a pre-1.0 export, the counter is
+    simply out of reach. That must not degrade to rank order."""
+    from binder_comparison.extractors.bindcraft2 import BindCraft2Extractor
+
+    ranked = [
+        {"rank": 1, "design": "d_a", "hash": "aaa111", "Binder_Sequence": SEQS[0], "i_pDAE": 0.91},
+        {"rank": 2, "design": "d_b", "hash": "bbb222", "Binder_Sequence": SEQS[1], "i_pDAE": 0.88},
+    ]
+    _write_bc2_campaign(tmp_path, ranked, trajectories=None)
+
+    binders = BindCraft2Extractor().extract(tmp_path)
+    assert all(b.generation_index is None for b in binders)
+    assert all(b.generation_index_source == "unavailable" for b in binders)
+
+
+# --------------------------------------------------------------------------
+# The three tools that cannot report one. No code makes these pass -- the
+# schema default does. They exist so that stays true: the tempting "fix" for
+# each is to fall back to row position, which for all three is a quality sort.
+# --------------------------------------------------------------------------
+
+
+def _csv(path: Path, columns: list[str], rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as fh:
+        fh.write(",".join(columns) + "\n")
+        for row in rows:
+            fh.write(",".join(str(row.get(c, "")) for c in columns) + "\n")
+
+
+def test_pxdesign_reports_unavailable(tmp_path: Path) -> None:
+    """PXDesign's `_sample_<i>` is a batch index, not a time index: all N
+    structures of a round are dumped in one loop after generation. The only
+    real temporal axis it has, run_idx, is deleted before we ever see it."""
+    from binder_comparison.extractors.pxdesign import PXDesignExtractor
+
+    _csv(
+        tmp_path / "sequences.csv",
+        ["sequence", "design_id", "af2_iptm"],
+        [
+            {"sequence": SEQS[0], "design_id": "pxdesign_task_sample_10", "af2_iptm": 0.71},
+            {"sequence": SEQS[1], "design_id": "pxdesign_task_sample_2", "af2_iptm": 0.85},
+        ],
+    )
+
+    binders = PXDesignExtractor().extract(tmp_path)
+    assert len(binders) == 2
+    assert all(b.generation_index is None for b in binders)
+    assert all(b.generation_index_source == "unavailable" for b in binders)
+
+
+def test_proteina_complexa_reports_unavailable(tmp_path: Path) -> None:
+    """Under MCTS the pool is a flattened tree: lookahead roll-outs mixed with
+    terminal states, ancestors deliberately revisited. A scalar index has no
+    consistent meaning, and the path this reads is random.shuffle'd."""
+    from binder_comparison.extractors.proteina_complexa import ProteinaComplexaExtractor
+
+    _csv(
+        tmp_path / "sequences.csv",
+        ["sequence", "design_id", "total_reward"],
+        [
+            {"sequence": SEQS[0], "design_id": "pc_job_0_n_60_id_3", "total_reward": 0.9},
+            {"sequence": SEQS[1], "design_id": "pc_job_0_n_60_id_1", "total_reward": 0.7},
+        ],
+    )
+
+    binders = ProteinaComplexaExtractor().extract(tmp_path)
+    assert binders, "fixture did not produce a pool"
+    assert all(b.generation_index is None for b in binders)
+    assert all(b.generation_index_source == "unavailable" for b in binders)
+
+
+def test_bindcraft1_reports_unavailable(tmp_path: Path) -> None:
+    """BindCraft 1 writes no attempt counter to any CSV -- its in-memory
+    trajectory_n never reaches disk -- and final_design_stats.csv is rebuilt
+    sorted by Average_i_pTM whenever a campaign fills its quota."""
+    from binder_comparison.extractors.bindcraft import BindCraftExtractor
+
+    _csv(
+        tmp_path / "final_design_stats.csv",
+        ["Design", "Sequence", "Rank", "Average_i_pTM"],
+        [
+            {"Design": "t_l60_s123", "Sequence": SEQS[0], "Rank": 1, "Average_i_pTM": 0.91},
+            {"Design": "t_l60_s456", "Sequence": SEQS[1], "Rank": 2, "Average_i_pTM": 0.84},
+        ],
+    )
+
+    binders = BindCraftExtractor().extract(tmp_path)
+    assert binders, "fixture did not produce a pool"
+    assert all(b.generation_index is None for b in binders)
+    assert all(b.generation_index_source == "unavailable" for b in binders)
