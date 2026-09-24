@@ -166,18 +166,39 @@ def _resolve_pae_path(
 
     Resolution order:
         1. As-is (absolute or relative to CWD).
-        2. Relative to *base_dir* (for CSVs whose paths are relative to an
-           output directory different from CWD).
+        2. Relative to *base_dir*.
+        3. Progressively shorter TAILS of the recorded path under *base_dir*,
+           longest first.
+
+    Step 3 exists because refold CSVs record absolute paths
+    (``/home/<user>/eval_workdir/<run>/af3_out/x_pae.npy``) and the normal
+    workflow is to refold on a fleet box and analyse the archive somewhere
+    else. For an absolute path step 2 is a no-op — ``Path(base) / "/abs/x"``
+    returns ``/abs/x`` — so a transplanted pool used to lose every PAE file
+    while they sat in *base_dir* under the same relative layout. That is not
+    cosmetic: without PAE there is no ``*_pae_iptm``, so nothing clears the
+    cross-engine gate and the ranking silently degrades.
+
+    Longest tail first, because engines reuse basenames: matching only the
+    basename could hand back a different engine's matrix, which is worse than
+    returning nothing.
     """
     if pae_path is None or (isinstance(pae_path, float) and np.isnan(pae_path)):
         return None
     p = Path(str(pae_path))
     if p.exists():
         return p
-    if base_dir is not None:
-        candidate = Path(base_dir) / p
-        if candidate.exists():
-            return candidate
+    if base_dir is None:
+        return None
+    base = Path(base_dir)
+    candidate = base / p
+    if candidate.exists():
+        return candidate
+    parts = p.parts[1:] if p.is_absolute() else p.parts
+    for start in range(len(parts)):
+        tail = base.joinpath(*parts[start:])
+        if tail.exists():
+            return tail
     return None
 
 
