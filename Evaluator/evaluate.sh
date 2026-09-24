@@ -297,7 +297,11 @@ fi
 
 # --- Cross-engine gate vs. the engines that will actually run ---------------
 # The ranking gates on how many INDEPENDENT engines refolded each design (default 3).
-# AF3 is opt-in (its weights are gated), so on most hosts only Boltz-2 + ESMFold2 run and
+# AF3 is opt-in because its weights are DeepMind-gated, not because it is large:
+# measured (docs/data/gpu_benchmark_2026-09-18/) it is the CHEAPEST engine here,
+# 2.3-5.2 GB flat from 150 to 900 tokens. Boltz-2 is the memory-dominant one
+# (44 GB at 600 tokens, 140 GB at 900), and ESMFold2 has a ~14 GB floor already
+# at 150 tokens. So on most hosts only Boltz-2 + ESMFold2 run and
 # every design fails a gate of 3 — ranked last, with an empty top of the list. The
 # report warns after the fact; by then the GPU time is already spent, so say it here.
 # Deliberately NOT auto-lowered: the gate is part of what the ranking means, and

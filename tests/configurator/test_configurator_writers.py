@@ -659,6 +659,17 @@ class TestRequiredCfgKeysStayInSyncWithTheWriters:
 
     # Read inside a `cfg.get(...)` guard, so absence is handled, not fatal.
     _GUARDED: ClassVar = {"pxdesign_output_dir"}
+    # Keys that generate() hard-indexes on a tool's behalf, outside any writer.
+    #
+    # The AST scan below only walks the per-tool writers, so it cannot see these
+    # and reported them as "stale" when they were added to REQUIRED_CFG_KEYS.
+    # That gap was not theoretical: generate() does cfg["filter_preset"] and
+    # cfg["advanced_preset"] directly, so a hand-written config without them
+    # passed preflight and then died with a KeyError several steps later.
+    # Listed explicitly rather than scanned, because generate() reads every
+    # tool's keys in one function and attributing them by branch needs more
+    # machinery than this guard is worth.
+    _READ_BY_GENERATE: ClassVar = {"bindcraft": {"filter_preset", "advanced_preset"}}
     # Provided by load_run_config's own validation, checked for every run.
     _ALWAYS_PRESENT: ClassVar = {"name", "run_dir", "target_pdb_src"}
 
@@ -698,6 +709,7 @@ class TestRequiredCfgKeysStayInSyncWithTheWriters:
         derived = set()
         for fn_name in self._WRITERS[tool]:
             derived |= self._hard_indexed(fn_name)
+        derived |= self._READ_BY_GENERATE.get(tool, set())
         derived -= self._ALWAYS_PRESENT | self._GUARDED
         assert set(conf.REQUIRED_CFG_KEYS[tool]) == derived, (
             f"REQUIRED_CFG_KEYS[{tool!r}] is out of sync with its writers: "
