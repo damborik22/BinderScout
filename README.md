@@ -380,6 +380,7 @@ step by hand. `bash Evaluator/evaluate.sh --help` prints the same list.
 | `--epitope-residues LIST` | Compute `epitope_match_fraction` inline against intended hotspots, e.g. `'15,18,232'`. Cheap, no extra pass |
 | `--with-affinity` | Opt-in: after the report, run the \|dG/dSASA\| affinity ranking (Rosetta, BindCraft env) on the top 20 and regenerate |
 | `--monomer-dir DIR` | Opt-in: binder-alone structures for the context-dependent-fold check (`fold_robust`) |
+| `--tool-root DIR` | Search DIR for each tool's OWN native CSV (metrics + sequence + rank) and hand what is found to the report as native tool tables. Repeatable; the generated `run_evaluate.sh` sets it to the run directory |
 | `--allow-no-msa` | Proceed when the shared target MSA cannot be fetched. Default is to abort: one engine folding single-sequence while the others use an MSA produces scores that are not comparable, and the ranking averages across engines |
 | `--resume` | Resume an interrupted run |
 | `--concurrent` | Run the three refold engines staggered-concurrently instead of one after another. Worth ~1.25x (19.8 % wall-clock, measured), but it costs ~54 % of the OS memory headroom — use it only when the box is dedicated |
