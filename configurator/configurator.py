@@ -1549,16 +1549,24 @@ cd "$PXDESIGN_DIR"
 def _pxdesign_sequence_collector(run_dir: str, top_per_length: int = 0) -> str:
     """Return shell snippet that extracts binder sequences from PXDesign pipeline outputs.
 
-    Preferred input: filtered_summary.csv from each per-length pipeline run.  This
-    file is already ranked by PXDesign's pre_filter_extended (or pre_filter_preview),
-    which assigns success buckets using both AF2 (af2_opt_success / af2_easy_success)
-    and Protenix (ptx_success / ptx_basic_success) signals, then breaks ties by
-    Protenix ipTM (extended) or AF2 unscaled_i_pAE (preview).  rank=1 is best.
+    Preferred input: summary.csv from each per-length pipeline run.  It is ranked
+    by PXDesign's pre_filter_extended (or pre_filter_preview), which buckets on both
+    AF2 (af2_opt_success / af2_easy_success) and Protenix (ptx_success /
+    ptx_basic_success) signals, then breaks ties by Protenix ipTM (extended) or AF2
+    unscaled_i_pAE (preview).  rank=1 is best.
+
+    NOT filtered_summary.csv, which this used to read: PXDesign's own
+    ``cleanup_outputs()`` unlinks it during the run, before this collector executes,
+    so that glob never matched once and every run silently took the unranked
+    fallback.  summary.csv holds the same rows and survives, because it is written
+    two levels below the directory cleanup empties.  Note its AF2 metrics are
+    RENAMED by ``trim_summary_df`` (i_pTM -> af2_iptm, and so on) and it carries no
+    per-design ``name`` column, both of which this snippet handles.
 
     If top_per_length > 0, only the top K rows (by rank) per length are kept.
 
     Falls back to per-seed sample_level_output.csv (unranked) and finally to CIF
-    parsing if neither summary CSV is present.
+    parsing if no summary CSV is present.
     """
     return f"""
 # ============================================================
@@ -1584,23 +1592,35 @@ def _row_from(r, slcsv, length_val):
     seq = r.get('sequence', '').strip()
     if not seq or set(seq) == {{'X'}}:
         return None
-    name = r.get('name', r.get('design_id', slcsv.stem))
+    rank = r.get('rank', '').strip()
+    # summary.csv carries no per-design 'name', so without this every row would
+    # get the id 'pxdesign_summary'. task_name is constant per file and rank is
+    # unique within it; the pair is the same id PXDesignExtractor._make_id
+    # builds, so the collector and a direct read agree on identity.
+    ident = '_'.join(p for p in (r.get('task_name', '').strip(), rank) if p)
+    name = r.get('name') or r.get('design_id') or ident or slcsv.stem
     return {{
         'design_id': f'pxdesign_{{name}}',
         'sequence': seq,
         'length': len(seq),
         'binder_length': length_val,
-        'pxdesign_rank': r.get('rank', '').strip(),
+        'pxdesign_rank': rank,
         'pxdesign_bucket': r.get('bucket', '').strip(),
-        'af2_iptm': r.get('i_pTM', r.get('af2_complex_ipTM', '')).strip('[]'),
-        'af2_plddt': r.get('pLDDT', r.get('af2_complex_pLDDT_binder', '')).strip('[]'),
-        'af2_ipae': r.get('unscaled_i_pAE', '').strip('[]'),
-        'ptx_iptm': r.get('ptx_iptm', r.get('ptx_mini_iptm', '')).strip('[]'),
+        # summary.csv RENAMES the AF2 metrics (trim_summary_df); the original
+        # spellings are what sample_level_output.csv still uses, so both are
+        # tried and this one function serves either strategy.
+        'af2_iptm': (r.get('af2_iptm') or r.get('i_pTM') or r.get('af2_complex_ipTM') or '').strip('[]'),
+        'af2_plddt': (r.get('af2_plddt') or r.get('pLDDT') or r.get('af2_complex_pLDDT_binder') or '').strip('[]'),
+        'af2_ipae': (r.get('af2_ipAE') or r.get('unscaled_i_pAE') or '').strip('[]'),
+        'ptx_iptm': (r.get('ptx_iptm') or r.get('ptx_mini_iptm') or '').strip('[]'),
         'source': 'pxdesign',
     }}
 
 # --- Strategy 1: PXDesign's own ranked output (preferred) ---
-for slcsv in sorted(pxd_dir.rglob('filtered_summary.csv')):
+# summary.csv, NOT filtered_summary.csv: PXDesign's cleanup_outputs() unlinks
+# filtered_summary.csv during its own run, so globbing for it never matched and
+# every run silently fell through to the unranked Strategy 2 below.
+for slcsv in sorted(pxd_dir.rglob('summary.csv')):
     length_m = re.search(r'outputs_len(\\d+)', str(slcsv))
     length_val = length_m.group(1) if length_m else '?'
     per_length = []
@@ -1619,9 +1639,26 @@ for slcsv in sorted(pxd_dir.rglob('filtered_summary.csv')):
     else:
         rows.extend(per_length)
 
-# --- Strategy 2: per-seed sample_level_output.csv (only if no filtered_summary) ---
+# summary.csv is PXDesign's pre-filter SELECTION, capped at --max_success_return.
+# The pxdesign CLI currently sets that cap to --N_sample, so the whole pool comes
+# through. If that ever stops holding the pool would shrink silently — which is
+# the same failure class this strategy exists to fix. So check it rather than
+# assume it.
+if rows:
+    n_samples = 0
+    for scsv in pxd_dir.rglob('sample_level_output.csv'):
+        with open(scsv) as f:
+            n_samples += sum(1 for _ in csv.DictReader(f))
+    if n_samples and len(rows) * 2 <= n_samples:
+        print(
+            f'  WARNING: summary.csv yielded {{len(rows)}} designs but sample_level_output.csv '
+            f'holds {{n_samples}}. PXDesign pre-filtered the pool — check --max_success_return.',
+            file=sys.stderr,
+        )
+
+# --- Strategy 2: per-seed sample_level_output.csv (only if no summary.csv) ---
 if not rows:
-    print('  No filtered_summary.csv found — falling back to unranked sample CSVs')
+    print('  No summary.csv found — falling back to unranked sample CSVs')
     for slcsv in sorted(pxd_dir.rglob('sample_level_output.csv')):
         length_m = re.search(r'outputs_len(\\d+)', str(slcsv))
         length_val = length_m.group(1) if length_m else '?'
