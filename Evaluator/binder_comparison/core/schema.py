@@ -229,6 +229,24 @@ class ExtractedBinder:
     source_tool: SourceTool
     native: NativeMetrics = field(default_factory=NativeMetrics)
 
+    # Where this design fell in its campaign's generation order, for the
+    # discovery-rank metric (item AD). NOT a quality metric, which is why it
+    # lives here rather than in NativeMetrics.
+    #
+    # It is never the row position: no tool's extractor input is in generation
+    # order once the extractor has finished with it, and several are sorted by
+    # quality. The value must come from something the tool itself recorded, and
+    # two tools record nothing usable -- so None/"unavailable" is a real answer,
+    # not a gap. A quality-sorted index would invert the metric it feeds.
+    # Per-tool verdicts: docs/INVESTIGATION_generation_index_2026-09-24.md
+    #
+    # source: "explicit"    -- a counter the tool wrote (Mosaic, Protein-Hunter)
+    #         "joined"      -- a counter from another of the tool's tables (BindCraft 2)
+    #         "parsed"      -- an ordinal embedded in an identifier (BoltzGen, RFD3)
+    #         "unavailable" -- nothing honest is recoverable
+    generation_index: int | None = None
+    generation_index_source: str = "unavailable"
+
 
 @dataclass
 class MetricResult:

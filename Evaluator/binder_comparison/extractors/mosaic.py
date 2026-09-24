@@ -20,7 +20,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..core.schema import ExtractedBinder, NativeMetrics
-from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
+from .base import SequenceExtractor, disambiguate_ids, read_generation_index, resolve_single_match
 
 _CSV_CANDIDATES = [
     "designs.csv",
@@ -29,6 +29,10 @@ _CSV_CANDIDATES = [
 
 _SEQUENCE_COL = "sequence"
 _IS_TOP_COL = "is_top"
+# Mosaic's own counter, captured at candidate append and so written BEFORE the
+# template's two quality sorts. Absent on a designs.csv predating the column,
+# blank on a row whose checkpoint predates it -- both are "unavailable".
+_GENERATION_INDEX_COL = "generation_index"
 
 _NATIVE_COL_MAP = {
     "mosaic_ranking_loss": "ranking_loss",
@@ -113,6 +117,7 @@ class MosaicExtractor(SequenceExtractor):
 
             binder_id = self._make_id(row, idx)
             native = self._extract_native(row)
+            gen_index = read_generation_index(row, _GENERATION_INDEX_COL)
 
             results.append(
                 ExtractedBinder(
@@ -120,6 +125,8 @@ class MosaicExtractor(SequenceExtractor):
                     sequence=seq,
                     source_tool="mosaic",
                     native=native,
+                    generation_index=gen_index,
+                    generation_index_source="explicit" if gen_index is not None else "unavailable",
                 )
             )
 
