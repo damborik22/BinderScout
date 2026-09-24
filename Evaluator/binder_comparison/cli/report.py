@@ -760,13 +760,20 @@ def _attach_native_metrics_sidecar(df: pd.DataFrame, sequences_fasta: str) -> pd
     # downstream report from listing 25 mostly-NaN columns when only 3 tools
     # were used.
     native_cols = [c for c in native_df.columns if c.startswith("native_")]
-    keep_cols = ["sequence"] + [c for c in native_cols if native_df[c].notna().any()]
+    # generation_index is provenance, not a tool score, so it is unprefixed and
+    # would be dropped by the native_ filter -- and it is kept even when every
+    # value is empty, because generation_index_source then records WHY (which
+    # tools could not report one) rather than leaving the reader to guess.
+    generation_cols = [c for c in ("generation_index", "generation_index_source") if c in native_df.columns]
+    keep_cols = ["sequence"] + generation_cols + [c for c in native_cols if native_df[c].notna().any()]
     if len(keep_cols) <= 1:
         return df  # nothing to add
 
     native_sub = native_df[keep_cols].copy()
     native_sub["sequence"] = native_sub["sequence"].str.strip().str.upper()
-    print(f"[report] Attaching {len(keep_cols) - 1} native metric column(s) from {sidecar.name}")
+    n_native = len(keep_cols) - 1 - len(generation_cols)
+    generation_note = f" + {len(generation_cols)} generation column(s)" if generation_cols else ""
+    print(f"[report] Attaching {n_native} native metric column(s){generation_note} from {sidecar.name}")
     return _merge_by_sequence(df, native_sub, sidecar.name)
 
 
