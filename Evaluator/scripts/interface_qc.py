@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -32,6 +33,56 @@ PANEL = [
 ]
 
 
+def _ensure_dalphaball_can_link() -> None:
+    """Put the active conda env's lib dir on LD_LIBRARY_PATH.
+
+    Rosetta shells out to ``DAlphaBall.gcc`` for packstat and the buried-unsat
+    H-bond count, and that binary links ``libgfortran.so.5``. The library is
+    installed in the env, but the subprocess does not search there by default,
+    so it fails with "error while loading shared libraries" -- and Rosetta then
+    reports ``DALPHABALL output nan`` and aborts scoring for that structure.
+
+    The cost of getting this wrong is an all-empty panel row, which is
+    indistinguishable from a structure that could not be scored.
+    """
+    lib = Path(sys.prefix) / "lib"
+    if not (lib / "libgfortran.so.5").exists():
+        return
+    current = os.environ.get("LD_LIBRARY_PATH", "")
+    if str(lib) not in current.split(os.pathsep):
+        os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(p for p in (str(lib), current) if p)
+
+
+def _patch_set_interface_for_strings() -> None:
+    """Let BindCraft's ``score_interface`` keep passing a string.
+
+    Recent PyRosetta made ``InterfaceAnalyzerMover.set_interface`` take a
+    ``core.pose.DockingPartners`` instead of a string, and BindCraft's
+    ``functions/pyrosetta_utils.py`` calls ``iam.set_interface("A_B")``. That
+    raises TypeError, which the per-structure ``except`` below turned into an
+    empty row for every design -- so the panel produced nothing at all.
+
+    BindCraft is a gitignored upstream checkout, so this wraps the method here
+    rather than editing it there. On an older PyRosetta the string still works
+    and this is a no-op.
+    """
+    from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
+
+    try:
+        from pyrosetta.rosetta.core.pose import DockingPartners
+    except ImportError:
+        return  # older PyRosetta: the string form is native
+
+    original = InterfaceAnalyzerMover.set_interface
+
+    def set_interface(self, interface):
+        if isinstance(interface, str):
+            interface = DockingPartners.docking_partners_from_string(interface)
+        return original(self, interface)
+
+    InterfaceAnalyzerMover.set_interface = set_interface
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="Relax + BindCraft interface panel for QC gating")
     ap.add_argument("--structures-dir", required=True, help="Directory of complex PDBs")
@@ -48,12 +99,15 @@ def main(argv: list[str] | None = None) -> None:
     dalphaball = bc / "functions" / "DAlphaBall.gcc"
     sys.path.insert(0, str(bc))
 
+    _ensure_dalphaball_can_link()
+
     import pyrosetta as pr
 
     pr.init(
         f"-ignore_unrecognized_res -ignore_zero_occupancy -mute all "
         f"-holes:dalphaball {dalphaball} -corrections::beta_nov16 true -relax:default_repeats 1"
     )
+    _patch_set_interface_for_strings()
     from functions.pyrosetta_utils import pr_relax, score_interface
 
     pdbs = sorted(Path(args.structures_dir).glob("*.pdb"))
