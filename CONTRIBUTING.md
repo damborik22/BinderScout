@@ -35,8 +35,13 @@ binderscout install --tool all
 | Mosaic `.venv` (uv) | Mosaic hallucination + Boltz-2 refolding | 3.12 |
 | `binderscout_pxdesign` | PXDesign (Protenix) | 3.11 |
 | Proteina-Complexa `.venv` (uv) | Flow matching binder design | 3.12 |
+| `binderscout_protein_hunter` | Protein-Hunter (Boltz-2 / Chai-1 hallucination) | 3.10 |
+| `binderscout_rfd3` | RFD3 / foundry diffusion + ProteinMPNN | 3.12 |
 | `binder-eval` | Evaluator extract + report | 3.10 |
-| `binder-eval-af2` | Evaluator AF2 refolding | 3.10 |
+| `binder-eval-af3` | AlphaFold 3 refolding (opt-in; gated weights) | 3.12 |
+| `binder-eval-esmfold2` | ESMFold2 refolding — the default engine | 3.10 |
+| `binder-eval-soluprot` | SoluProt solubility screen (sequence-only, no GPU) | 3.7 |
+| `binder-eval-tmprot` | TmProt melting-temperature screen (sequence-only, no GPU) | 3.11 |
 
 > Each tool/environment is isolated. Never mix packages across environments.
 
