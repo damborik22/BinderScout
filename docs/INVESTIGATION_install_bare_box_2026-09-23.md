@@ -269,10 +269,12 @@ provides — gcc 15.2 here. Unverified until the build runs.
 
 ---
 
-## B12 / B13 / B14 — the exit code lies in three different ways
+## B12 / B13 / B14 — success is reported for installs that are not complete
 
 None of these is WSL- or bare-box-specific. They matter most to CI, to a wrapper
-script, or to an agent — anything that keys on `$?` rather than reading the log.
+script, or to an agent. Note that `install.sh:3370` *does* exit 1 when
+`failed_tools` is non-empty — the defect is not the exit statement, it is that
+two of these three paths never populate that array.
 
 Foundational fact: **there is no `set -e`, `set -u` or `set -o pipefail`
 anywhere in the 3,373 lines** (`grep -cE '^[[:space:]]*set -[eu]|pipefail'` → `0`).
@@ -315,8 +317,21 @@ summary line is therefore not a sufficient success check.
 > `install_rfd3` returned 0, so `failed_tools` does not contain it, the run
 > continued, and the final summary will report success. The smoke test passed
 > because it is a **CLI check** — it verifies the `rfd3` console script exists,
-> not that a checkpoint does. This is precisely the failure mode predicted
-> below, and it is the one a CI job or a wrapper keying on `$?` cannot see.
+> not that a checkpoint does.
+>
+> **Correction (2026-09-24).** An earlier revision of this entry said the exit
+> code hid the failure. It does not: `install.sh:3370` is
+> `[[ ${#failed_tools[@]} -gt 0 ]] && exit 1 || exit 0`, and the completed run
+> exited **1**. The mistake came from reading a wrapper's trailing `echo`
+> instead of the installer's own status.
+>
+> The real defect is narrower and still serious: the exit code faithfully
+> reports `failed_tools`, but **`failed_tools` is incomplete**. This run exited
+> 1 only because AF3 and ESMFold2 failed *loudly*. RFD3 and Proteina-Complexa
+> were equally broken and never entered the array, so had those two been the
+> only failures the run would have exited **0** under
+> `All selected tools installed successfully.` The exit code is exactly as
+> trustworthy as the detection behind it, and the detection is what is broken.
 
 > **B14 fired a SECOND time in the same run, on Proteina-Complexa** — different
 > tool, different root cause, identical outcome. `complexa download
@@ -467,7 +482,7 @@ recorded here — that ratio is the reason each surviving entry carries its own
 
 ## Proposed fix order
 
-1. **B14 + B12 + B13** — the exit code lying is the worst class here: every
+1. **B14 + B12 + B13** — false-reported success is the worst class here: every
    other defect is discoverable by reading the log, these three defeat any
    automated check. Non-zero exit on `failed_tools`, real smoke tests, and
    refuse a non-TTY run with no `--tool`.
