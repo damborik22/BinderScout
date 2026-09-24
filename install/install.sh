@@ -2693,8 +2693,18 @@ install_esmfold2() {
         || { print_fail "Failed to install transformers/gemmi/safetensors into binder-eval-esmfold2"; return 1; }
     # biohub/esm: ESMFold2InputBuilder + chain dataclasses. Pinned commit per the HF model
     # card (no PyPI release yet). If this 404s/changes upstream, update the ref in the yml header too.
-    run_logged "Installing biohub esm SDK into binder-eval-esmfold2" \
-        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'esm @ git+https://github.com/Biohub/esm.git@c94ed8d' \
+    #
+    # --no-deps is load-bearing, not an optimisation. Biohub/esm itself resolves
+    # fine, but its pyproject depends on git+https://github.com/biohub/transformers,
+    # which now returns 404 -- so pip hands the clone to git, git prompts for a
+    # username, finds no TTY, and the whole install dies with
+    # "could not read Username for 'https://github.com'". That took out the
+    # DEFAULT refold engine on 2026-09-23. The step immediately above already
+    # installs transformers, gemmi and safetensors from PyPI, so nothing is lost
+    # by declining to resolve that dependency tree; verify_tool() checks that
+    # `import esm` works afterwards.
+    run_logged --retries 3 "Installing biohub esm SDK into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q --no-deps 'esm @ git+https://github.com/Biohub/esm.git@c94ed8d' \
         || { print_fail "Failed to install biohub esm SDK (check network / git access)"; return 1; }
 
     # Install binder-compare into the env so 'binder-compare refold-esmfold2' works
