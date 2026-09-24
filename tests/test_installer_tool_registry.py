@@ -23,10 +23,18 @@ INSTALLERS = [
 ]
 
 
-def _registry(src: str) -> list[tuple[str, str, str]]:
+def _registry(src: str) -> list[tuple[str, str, str, str, str]]:
+    """Rows are: DO_ flag | display name | install fn | menu default | description."""
     block = re.search(r"TOOL_REGISTRY=\((.*?)\n\)", src, re.S)
     assert block, "TOOL_REGISTRY not found"
-    rows = re.findall(r'"([^"|]+)\|([^"|]+)\|([^"|]+)"', block.group(1))
+    rows = []
+    for line in block.group(1).splitlines():
+        m = re.search(r'"([^"]+)"', line)
+        if not m:
+            continue
+        parts = m.group(1).split("|")
+        assert len(parts) == 5, f"registry row has {len(parts)} fields, expected 5: {m.group(1)}"
+        rows.append(tuple(parts))
     assert rows, "TOOL_REGISTRY is empty"
     return rows
 
@@ -38,7 +46,7 @@ def test_registry_covers_every_do_flag(path):
         pytest.skip(f"{path.name} not present")
     src = path.read_text()
     declared = set(re.findall(r"^(DO_[A-Z0-9_]+)=false", src, re.M))
-    registered = {flag for flag, _, _ in _registry(src)}
+    registered = {row[0] for row in _registry(src)}
     missing = declared - registered
     assert not missing, f"declared but not in TOOL_REGISTRY: {sorted(missing)}"
 
@@ -48,7 +56,7 @@ def test_every_registry_entry_names_a_real_install_function(path):
     if not path.exists():
         pytest.skip(f"{path.name} not present")
     src = path.read_text()
-    for flag, tool, fn in _registry(src):
+    for _flag, tool, fn, _d, _desc in _registry(src):
         assert re.search(rf"^{re.escape(fn)}\(\)", src, re.M), (
             f"TOOL_REGISTRY entry '{tool}' names {fn}(), which is not defined"
         )
@@ -63,7 +71,7 @@ def test_every_registry_entry_has_a_verifier(path):
     body = re.search(r"^verify_tool\(\).*?\n}", src, re.S | re.M)
     assert body, "verify_tool() not found"
     arms = body.group(0)
-    for _flag, tool, _fn in _registry(src):
+    for _flag, tool, *_rest in _registry(src):
         needle = tool.lower()
         assert needle in arms.lower(), f"verify_tool() has no arm for '{tool}'"
 
