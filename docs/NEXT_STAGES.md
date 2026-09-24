@@ -135,6 +135,36 @@ like `tools_enabled` keys in every wizard-written config but are read from
 
 ---
 
+## Stage 6 — the GPU-memory pass, and it goes LAST
+
+A pass over every pipeline step to optimise GPU memory consumption. It is the
+final step of 2.0 by decision (2026-09-24), not an opportunistic thing to do
+while implementing the stages above: a reading taken against an unfinished
+pipeline is stale by the time it ships.
+
+Memory, not speed, is what decides whether a step runs at all on a given card,
+and the measured profile is very uneven. From the 2.0 benchmark:
+
+| engine | peak | shape |
+|---|---|---|
+| Boltz-2 | ~139.6 GB @ 900 tokens | memory-dominant, scales hard |
+| ESMFold2 | ~14 GB floor @ 150 tokens | a floor, not a slope — why a 12 GB card cannot run it at any size |
+| AF3 | ~5.2 GB | nearly flat across our size regime |
+
+Two traps this repo has already paid for, both of which look like "needs a
+bigger card" and are not:
+
+- `XLA_PYTHON_CLIENT_PREALLOCATE` reserves a fraction of the pool *regardless
+  of the working set*. The false ">=100 GB AF3" requirement came from exactly
+  this — a 4.4 GB working set reserving ~22 GB on a 3090.
+- PyTorch fragmentation, which needs
+  `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` rather than more VRAM.
+
+On BM5 (GB10) the GPU pool *is* system RAM, so an uncapped job reboots the box
+rather than raising OOM. Measure there through `tools/gpurun --cap`.
+
+---
+
 ## Blocked on someone else
 
 | | needs |
