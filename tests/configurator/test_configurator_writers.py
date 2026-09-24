@@ -716,3 +716,34 @@ class TestRequiredCfgKeysStayInSyncWithTheWriters:
             f"missing {sorted(derived - set(conf.REQUIRED_CFG_KEYS[tool]))}, "
             f"stale {sorted(set(conf.REQUIRED_CFG_KEYS[tool]) - derived)}"
         )
+
+
+class TestRunEvaluateKeepsOriginalToolOutput:
+    """Each tool's own CSV (metrics + sequence + rank) and each design's own
+    structure must reach the report.
+
+    Both mechanisms already existed and neither was wired: `binder-compare
+    report --tool-csv NAME=PATH` ingests a tool's raw native CSV,
+    `extract --collect-structures DIR` gathers the structures, and
+    Evaluator/scripts/discover_tool_csvs.py finds the CSVs for all eight tools.
+    The generated pipeline passed none of them, so a default run kept neither
+    the originals nor the structures -- only the refold-derived numbers.
+    """
+
+    def test_extract_collects_original_structures(self, base_cfg, tmp_path):
+        script = tmp_path / "run_evaluate.sh"
+        conf.write_run_evaluate(script, base_cfg, _ALL_TOOLS)
+        content = script.read_text()
+        extract_block = content[content.index("binder-compare extract") : content.index("# Step 2")]
+        assert "--collect-structures" in extract_block, (
+            "the run keeps no original design structures -- only refolded ones"
+        )
+
+    def test_evaluate_is_given_a_tool_root_to_discover_native_csvs(self, base_cfg, tmp_path):
+        script = tmp_path / "run_evaluate.sh"
+        conf.write_run_evaluate(script, base_cfg, _ALL_TOOLS)
+        content = script.read_text()
+        eval_block = content[content.index("# Step 2") :]
+        assert "--tool-root" in eval_block, (
+            "evaluate.sh is never told where the tool outputs are, so no native CSV is discovered"
+        )

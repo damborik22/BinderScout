@@ -64,6 +64,9 @@
 #   --monomer-dir DIR      opt-in: directory of binder-ALONE refolded structures (named by binder_id).
 #                          Runs the context-dependent-fold check vs the in-complex structures and
 #                          re-generates the report with the fold_robust column. Off by default.
+#   --tool-root DIR        search DIR for each tool's OWN native CSV (metrics +
+#                          sequence + rank) and pass what is found to the report
+#                          as --tool-csv. Repeatable.
 #   --resume               resume interrupted run
 
 set -euo pipefail
@@ -138,6 +141,10 @@ WITH_AFFINITY=0
 BINDCRAFT_ENV="BindCraft"
 MONOMER_DIR=""
 RESUME=0
+# Directories to search for each tool's OWN native CSV (metrics + sequence +
+# rank). Whatever is found is handed to the report as --tool-csv, so the report
+# can show what a tool said about its own designs beside the refold numbers.
+TOOL_ROOTS=()
 
 # --- parse arguments -------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -184,6 +191,7 @@ while [[ $# -gt 0 ]]; do
         --with-affinity)    WITH_AFFINITY=1;        shift ;;
         --bindcraft-env)    BINDCRAFT_ENV="$2";     shift 2 ;;
         --monomer-dir)      MONOMER_DIR="$2";       shift 2 ;;
+        --tool-root)      TOOL_ROOTS+=("$2"); shift 2 ;;
         --resume)         RESUME=1;          shift ;;
         -h|--help)
             sed -n '2,/^set /p' "$0" | grep '^#' | sed 's/^# \?//'
@@ -656,6 +664,24 @@ if [[ $SKIP_SOLUPROT -eq 0 && $SOLUPROT_OK -eq 1 && -f "$SOLUPROT_CSV" ]]; then
 fi
 if [[ $SKIP_TMPROT -eq 0 && $TMPROT_OK -eq 1 && -f "$TMPROT_CSV" ]]; then
     REPORT_ARGS+=(--tmprot-results "$TMPROT_CSV")
+fi
+# Each tool's OWN native CSV, auto-discovered under --tool-root. discover_tool_csvs.py
+# knows the output layout of all eight tools and prints ready-made flags, one token
+# per line ("--tool-csv" then "name=path"). Without this the report has only the
+# refold-derived numbers, and a tool's own metrics and rank never appear.
+if (( ${#TOOL_ROOTS[@]} )); then
+    _discover="$SCRIPT_DIR/scripts/discover_tool_csvs.py"
+    if [[ -f "$_discover" ]]; then
+        _n_tool_csv=0
+        while IFS= read -r _line; do
+            [[ -n "$_line" ]] || continue
+            REPORT_ARGS+=("$_line")
+            [[ "$_line" == "--tool-csv" ]] || _n_tool_csv=$((_n_tool_csv + 1))
+        done < <(conda run -n binder-eval python "$_discover" "${TOOL_ROOTS[@]}" 2>/dev/null)
+        echo "  native tool CSVs discovered: ${_n_tool_csv}"
+    else
+        echo "  [note] discover_tool_csvs.py not found at $_discover — no native tool CSVs attached."
+    fi
 fi
 REPORT_ARGS+=(--primary-engine "$PRIMARY_ENGINE")
 if [[ -n "$MIN_ENGINES" ]]; then

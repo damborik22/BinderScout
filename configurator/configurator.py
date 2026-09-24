@@ -3189,6 +3189,9 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         "",
         f'EVAL_SCRIPT="{eval_sh}"',
         f'OUTPUT_DIR="{eval_dir}"',
+        # The tool outputs themselves, so evaluate.sh can discover each tool's
+        # OWN native CSV (metrics + sequence + rank) and pass it to the report.
+        f'RUN_DIR="{run_dir}"',
         "",
         'if [[ ! -f "$EVAL_SCRIPT" ]]; then',
         '    echo "ERROR: Evaluator not found at $EVAL_SCRIPT" >&2',
@@ -3215,6 +3218,10 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
             # padding, so the extractor needs the same target evaluate.sh gets below.
             f'        --target-seq "{target_seq}" \\',
             '        --output "$SEQUENCES" \\',
+            # Each design's ORIGINAL structure, as its tool produced it. Without
+            # this the run keeps only refolded structures, so there is nothing to
+            # compare a refold against.
+            '        --collect-structures "$OUTPUT_DIR/design_structures" \\',
             # Set by run_all.sh when a design tool failed, so the tools that DID finish
             # still get evaluated. Unset (the standalone case) keeps extract strict: a
             # requested directory that yields nothing is an error, not a shrug.
@@ -3230,6 +3237,10 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         '    --sequences "$SEQUENCES" \\',
         f'    --target-seq "{target_seq}" \\',
         '    --output "$OUTPUT_DIR" \\',
+        # Discover each tool's own native CSV under here and hand it to the
+        # report as --tool-csv, so the report shows what the tool said about its
+        # own designs next to the cross-engine refold numbers.
+        '    --tool-root "$RUN_DIR" \\',
     ]
 
     # Engine selection flags (skip flags omit engines NOT selected)
