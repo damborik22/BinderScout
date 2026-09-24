@@ -1,0 +1,49 @@
+{
+  "config_version": 1,
+  "_comment": "BinderScout smoke test - the smallest campaign that still exercises every design tool end to end. Replay with: binderscout configure --config examples/CALCA/smoke.json",
+  "tools_enabled": {
+    "bindcraft": true,
+    "bindcraft2": true,
+    "boltzgen": true,
+    "mosaic": true,
+    "pxdesign_local": true,
+    "proteina_complexa": true,
+    "rfd3": true,
+    "protein_hunter": true,
+    "evaluator": true
+  },
+  "cfg": {
+    "name": "CALCA_smoke",
+    "run_dir": "runs/CALCA_smoke",
+    "target_pdb_src": "examples/CALCA/target.pdb",
+    "target_sequence": "EDEARLLLAALVQDYVQMKASELEQEQEREGS",
+    "chains": "A",
+    "hotspots": null,
+
+    "min_length": 20,
+    "max_length": 30,
+    "n_designs": 1,
+
+    "filter_preset": "no_filters",
+    "advanced_preset": "default_4stage_multimer",
+
+    "bindcraft_n_designs": 1,
+    "boltzgen_n_designs": 1,
+    "boltzgen_intermediate": false,
+    "mosaic_n_designs": 1,
+    "pxdesign_binder_length": 25,
+    "rfd3_n_designs": 1,
+    "rfd3_batch_size": 1,
+    "rfd3_diffusion_steps": 20,
+    "rfd3_mpnn_samples": 1,
+    "protein_hunter_n_designs": 1,
+    "protein_hunter_num_cycles": 1,
+
+    "use_boltz": true,
+    "use_af3": true,
+    "use_esmfold2": true,
+    "primary_engine": "boltz",
+    "use_soluprot": true,
+    "soluprot_filter": false
+  }
+}

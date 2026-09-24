@@ -209,6 +209,10 @@ cd ~/BinderScout
 binderscout install             # interactive menu
 binderscout install --tool all  # install everything
 
+# 3a. Or start from the shipped example — every tool, one design each
+#     (see examples/README.md)
+binderscout configure --config examples/CALCA/smoke.json
+
 # 3. Configure a run
 binderscout configure
 
