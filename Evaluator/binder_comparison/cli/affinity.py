@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,9 @@ from ..comparison.affinity import DEFAULT_AFFINITY_GATE, add_affinity_ranking
 from ..io.read import read_csv_safe
 
 _ID_COLS = ("binder_id", "design_id", "id")
+
+# report.py:533 exports the top-N structures as rank{NN}_{binder_id}.pdb.
+_RANK_PREFIX = re.compile(r"^rank\d+_")
 _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "interface_energy.py"
 
 
@@ -47,12 +51,32 @@ def run(args: argparse.Namespace) -> None:
         print("Error: need an id column in metrics and 'design_id' in the energy CSV to join.", file=sys.stderr)
         sys.exit(1)
 
+    # interface_energy.py keys rows by the structure filename stem, and the
+    # structures this is pointed at are the report's rank{NN}_{binder_id}.pdb
+    # export — so the id carries a rank prefix the metrics table does not have.
+    energy = energy.copy()
+    energy["_join_id"] = energy["design_id"].astype(str).str.replace(_RANK_PREFIX, "", regex=True).str.strip()
+
     merged = metrics.merge(
-        energy[["design_id", "interface_dG", "interface_dSASA"]],
+        energy[["_join_id", "interface_dG", "interface_dSASA"]],
         left_on=metrics_id,
-        right_on="design_id",
+        right_on="_join_id",
         how="left",
     )
+
+    # Matching nothing is a keying bug, not "these designs have no energy". Left
+    # unchecked it silently degrades the Part N ranking to the ipsae gate alone
+    # while reporting "0/N designs scored" and exiting 0.
+    if len(energy) and not merged["_join_id"].notna().any():
+        print(
+            f"Error: the energy CSV has {len(energy)} row(s) but none of its design_id values "
+            f"match '{metrics_id}' in the metrics table.\n"
+            f"  energy design_id e.g.: {energy['design_id'].iloc[0]!r}\n"
+            f"  metrics {metrics_id} e.g.: {metrics[metrics_id].iloc[0]!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    merged = merged.drop(columns=["_join_id"])
     merged = add_affinity_ranking(
         merged,
         ipsae_col=args.ipsae_col,

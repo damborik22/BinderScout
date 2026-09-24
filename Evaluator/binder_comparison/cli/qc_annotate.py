@@ -37,6 +37,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,10 @@ from pathlib import Path
 from ..io.read import read_csv_safe
 
 _ID_COLS = ("binder_id", "design_id", "id")
+
+# report.py:533 exports the top-N structures as rank{NN}_{binder_id}.pdb,
+# and evaluate.sh points the panel at that directory.
+_RANK_PREFIX = re.compile(r"^rank\d+_")
 _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "interface_qc.py"
 
 # BindCraft default interface filters (settings_filters/default_filters.json)
@@ -109,7 +114,31 @@ def run(args: argparse.Namespace) -> None:
         print("Error: panel CSV needs a 'design_id' column to join.", file=sys.stderr)
         sys.exit(1)
 
-    merged = metrics.merge(panel, left_on=metrics_id, right_on="design_id", how="left", suffixes=("", "_panel"))
+    # The panel is keyed by the structure FILENAME stem (interface_qc.py writes
+    # design_id = pdb.stem). In the real pipeline those structures are the
+    # report's export, named rank{NN}_{binder_id}.pdb, so the id carries a rank
+    # prefix the metrics table does not have. Strip it before joining.
+    panel = panel.copy()
+    panel["_join_id"] = panel["design_id"].astype(str).str.replace(_RANK_PREFIX, "", regex=True).str.strip()
+
+    merged = metrics.merge(panel, left_on=metrics_id, right_on="_join_id", how="left", suffixes=("", "_panel"))
+
+    # A non-empty panel that matches NOTHING is a keying bug, not a measurement
+    # outcome. Without this it reported itself as "N NOT covered by the panel"
+    # and exited 0 — indistinguishable from the legitimate absence-of-evidence
+    # case this command exists to model, which is why the mismatch survived.
+    if len(panel) and not merged["_join_id"].notna().any():
+        print(
+            f"Error: the panel has {len(panel)} row(s) but none of its design_id values match "
+            f"'{metrics_id}' in {metrics_path}.\n"
+            f"  panel design_id e.g.: {panel['design_id'].iloc[0]!r}\n"
+            f"  metrics {metrics_id} e.g.: {metrics[metrics_id].iloc[0]!r}\n"
+            "The panel must be scored on structures named after the designs — the report's "
+            "top20_structures/ export (rank{NN}_{binder_id}.pdb) is the supported layout.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    merged = merged.drop(columns=["_join_id"])
     th = {
         "dg_max": args.dg_max,
         "sc_min": args.sc_min,
