@@ -131,3 +131,28 @@ def test_menu_does_not_spin_when_stdin_closes(path):
     )
     assert proc.returncode != 0, "selecting no tools must not report success"
     assert "no tools selected" in (proc.stdout + proc.stderr).lower()
+
+
+@pytest.mark.parametrize("path", INSTALLERS, ids=lambda p: p.name)
+def test_shortcuts_are_generated_against_an_interpreter_that_supports_their_flags(path):
+    """Generated shortcuts use `conda run --live-stream`, and mamba has no such
+    flag while detect_conda PREFERS mamba.
+
+    Three shipped shortcuts therefore failed on every argument with
+    "exec: --: invalid option" -- including the usage printed in their own
+    banner. Dropping the flag is not the fix either: without it `conda run`
+    buffers all output until the command exits, which is unusable for a design
+    run that prints progress for hours. So shortcuts resolve conda explicitly
+    via shortcut_conda().
+    """
+    if not path.exists():
+        pytest.skip(f"{path.name} not present")
+    src = path.read_text()
+    if "--live-stream" not in src:
+        pytest.skip("no shortcut uses --live-stream")
+    bare = re.findall(r'echo "CONDA_CMD=\\"\$\{CONDA_CMD\}\\""', src)
+    assert not bare, (
+        f"{len(bare)} shortcut preamble(s) bake in ${{CONDA_CMD}}, which may be mamba. "
+        "Use $(shortcut_conda) so --live-stream is valid."
+    )
+    assert "shortcut_conda()" in src, "shortcut_conda() helper is gone but --live-stream is still emitted"

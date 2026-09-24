@@ -573,6 +573,23 @@ _stage_bindcraft2_source() {
 # Returns 0 if conda env exists in OUR conda, 1 otherwise.
 # Uses filesystem check (not conda registry) to avoid stale entries
 # from unwritable system conda installations.
+# The interpreter shortcuts are generated against.
+#
+# detect_conda PREFERS mamba for solving, which is right -- it is far faster.
+# But `mamba run` has no --live-stream, and every generated shortcut uses it, so
+# each one died on any argument with "exec: --: invalid option" -- including the
+# exact usage printed in its own banner. Dropping the flag is not free either:
+# without it `conda run` buffers all output until the command exits, which is
+# unusable for a design run that prints progress for hours.
+#
+# Miniforge ships conda alongside mamba, so shortcuts use conda and keep
+# streaming. Falls back to CONDA_CMD if no conda sits beside it.
+shortcut_conda() {
+    local sibling
+    sibling="$(dirname "${CONDA_CMD}")/conda"
+    if [[ -x "${sibling}" ]]; then printf '%s' "${sibling}"; else printf '%s' "${CONDA_CMD}"; fi
+}
+
 env_exists() {
     [[ -d "${CONDA_BASE}/envs/$1" ]]
 }
@@ -920,6 +937,15 @@ select_tools_interactive() {
     for (( i = 0; i < n; i++ )); do
         [[ "${m_sel[$i]}" == true ]] && echo -e "    ${GREEN}✓${RESET} ${m_name[$i]}"
     done
+
+    # Explicit, and load-bearing. Without it the function's exit status is that
+    # of the last `[[ ... ]] && echo`, which is 1 whenever the LAST tool in the
+    # registry is unselected -- the default, since SoluProt is opt-in. The old
+    # menu had the same shape and it never mattered, because nobody checked the
+    # return. Adding `select_tools_interactive || exit 1` at the call site (to
+    # honour the EOF refusal below) turned that latent quirk into "the
+    # interactive installer always exits 1 and installs nothing".
+    return 0
 }
 
 # ─── BindCraft ────────────────────────────────────────────────────────────────
@@ -2388,7 +2414,7 @@ _write_rfd3_shortcut() {
         echo "# RFD3 shortcut — runs 'rfd3 design ...' in the binderscout_rfd3 env."
         echo "# With no args: opens an interactive env shell."
         echo ""
-        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "CONDA_CMD=\"$(shortcut_conda)\""
         echo "FOUNDRY_WEIGHTS_DIR=\"${FOUNDRY_WEIGHTS_DIR}\""
     } > "${SHORTCUTS_DIR}/rfd3"
     cat >> "${SHORTCUTS_DIR}/rfd3" << 'EOF'
@@ -2499,7 +2525,7 @@ _write_protein_hunter_shortcut() {
         echo "# and opens an interactive shell in the Protein-Hunter directory."
         echo ""
         echo "PROTEIN_HUNTER_DIR=\"${PROTEIN_HUNTER_DIR}\""
-        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "CONDA_CMD=\"$(shortcut_conda)\""
     } > "${SHORTCUTS_DIR}/protein-hunter"
     cat >> "${SHORTCUTS_DIR}/protein-hunter" << 'EOF'
 
@@ -2638,7 +2664,7 @@ _write_af3_shortcut() {
         echo "# BinderScout AF3 shortcut — runs 'binder-compare refold-af3 ...' in the"
         echo "# binder-eval-af3 env. With no args: opens an interactive env shell."
         echo ""
-        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "CONDA_CMD=\"$(shortcut_conda)\""
     } > "${SHORTCUTS_DIR}/af3"
     cat >> "${SHORTCUTS_DIR}/af3" << 'AF3EOF'
 
@@ -2742,7 +2768,7 @@ _write_esmfold2_shortcut() {
         echo "# BinderScout ESMFold2 shortcut — runs 'binder-compare refold-esmfold2 ...' in the"
         echo "# binder-eval-esmfold2 env. With no args: opens an interactive env shell."
         echo ""
-        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "CONDA_CMD=\"$(shortcut_conda)\""
     } > "${SHORTCUTS_DIR}/esmfold2"
     cat >> "${SHORTCUTS_DIR}/esmfold2" << 'ESMFOLD2EOF'
 
@@ -3080,7 +3106,7 @@ _write_soluprot_shortcut() {
         echo "# binder-eval env (Python 3.10+), shelling out to the Python 3.7 binder-eval-soluprot"
         echo "# env for SoluProt itself. With no args: opens a shell in the SoluProt env."
         echo ""
-        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "CONDA_CMD=\"$(shortcut_conda)\""
         echo "export SOLUPROT_HOME=\"${SOLUPROT_DIR}\""
     } > "${SHORTCUTS_DIR}/soluprot"
     cat >> "${SHORTCUTS_DIR}/soluprot" << 'SOLUPROTEOF'
@@ -3314,8 +3340,8 @@ verify_tool() {
         proteina-complexa)
             if [[ ! -x "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" ]]; then
                 VERIFY_REASON="no venv at ${PROTEINA_COMPLEXA_DIR}/.venv"
-            elif [[ -z "$(find "${PROTEINA_COMPLEXA_DIR}" -maxdepth 5 -type d -name Complexa 2>/dev/null | head -1)" ]]; then
-                VERIFY_REASON="Complexa checkpoints absent — run: complexa download --everything"
+            elif (( $(_count_glob "${PROTEINA_COMPLEXA_DIR}"/ckpts/*.ckpt) < 1 )); then
+                VERIFY_REASON="no .ckpt in ${PROTEINA_COMPLEXA_DIR}/ckpts — run: complexa download --everything"
             fi ;;
         protein-hunter)
             _env_python_ok binderscout_protein_hunter "import pyrosetta" \
