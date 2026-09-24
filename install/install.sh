@@ -82,6 +82,8 @@ AUTO_YES=false
 SKIP_PREFLIGHT=false
 FORCE=false      # --force: allow --yes to accept DESTRUCTIVE prompts (reclone / env re-create)
 UNINSTALL_MODE=false
+VERIFY_ONLY=false        # --verify: audit what is on disk, install nothing
+REPAIR_MODE=false        # --repair: audit, then re-install only what is broken
 TOOL_SPECIFIED=false
 TOOL_ALL=false         # --tool all was given; uninstall widens this to every optional add-on   # set to true when --tool is passed on CLI
 STANDALONE="auto"      # auto | true | false — controls local Miniforge install
@@ -99,6 +101,32 @@ DO_RFD3=false
 DO_AF3=false            # opt-in via --tool af3 (runs on 24 GB GPUs; gated weights not bundled)
 DO_ESMFOLD2=false       # default refold engine (included in --tool all; lightweight, no gated weights)
 DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen; needs a C/C++ toolchain for the USEARCH v12 source build)
+
+# The one list. Every per-tool loop derives from this, in install order.
+#
+# There used to be five hardcoded tool lists that had drifted apart:
+# print_tool_status carried 6 entries, select_tools_interactive 8, `--tool all`
+# 11 and the dispatch and uninstall blocks 12. Only the 11 was deliberate (AF3
+# is opt-in). The 8 was the damaging one: a user who ran the interactive menu
+# could not select ESMFold2 at all, and ESMFold2 is the DEFAULT refold engine —
+# so a menu-driven install produced an evaluator that could not satisfy its own
+# default 3-engine gate, and only said so at report time.
+#
+# Format: DO_ flag | display name | install function
+TOOL_REGISTRY=(
+    "DO_BINDCRAFT|BindCraft|install_bindcraft"
+    "DO_BINDCRAFT2|BindCraft 2|install_bindcraft2"
+    "DO_BOLTZGEN|BoltzGen|install_boltzgen"
+    "DO_MOSAIC|Mosaic|install_mosaic"
+    "DO_EVALUATOR|Evaluator|install_evaluator"
+    "DO_RFD3|RFD3|install_rfd3"
+    "DO_PXDESIGN|PXDesign|install_pxdesign"
+    "DO_PROTEINA_COMPLEXA|Proteina-Complexa|install_proteina_complexa"
+    "DO_PROTEIN_HUNTER|Protein-Hunter|install_protein_hunter"
+    "DO_AF3|AF3|install_af3"
+    "DO_ESMFOLD2|ESMFold2|install_esmfold2"
+    "DO_SOLUPROT|SoluProt|install_soluprot"
+)
 
 # Note: legacy RFAA support was removed entirely (see CHANGELOG).
 # Use RFD3 (--tool rfd3) for all-atom diffusion-based binder design.
@@ -179,6 +207,14 @@ while [[ $# -gt 0 ]]; do
             SKIP_PREFLIGHT=true
             shift
             ;;
+        --verify)
+            VERIFY_ONLY=true
+            shift
+            ;;
+        --repair)
+            REPAIR_MODE=true
+            shift
+            ;;
         --standalone)
             STANDALONE=true
             shift
@@ -241,6 +277,15 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes] [--force]
                 auto-answered NO, so a repeat install keeps existing files and
                 downloaded weights. Pair with --force to replace them.
   --skip-preflight  Skip the disk/GPU/network checks run before downloading.
+  --verify      Check what is actually on disk for the selected tools and exit.
+                Verifies the artifact each tool needs to RUN (weights, env,
+                venv) rather than that its entry point exists: an rfd3 CLI that
+                answers while its weights dir is empty is not an install.
+                Exits non-zero if anything is unusable. Installs nothing.
+  --repair      Same audit, then re-install only the tools that failed it, and
+                verify again. Use after a network drop or a partial run; it is
+                far cheaper than --force, which rebuilds everything including
+                ~4 GB of AF2 weights.
   --force       Let --yes accept the destructive prompts too. Re-clones tool
                 repos and re-creates conda envs, DELETING what is there —
                 including BindCraft/params/*.npz (~4 GB of AF2 weights).
@@ -739,16 +784,19 @@ is_proteina_complexa_installed() {
 print_tool_status() {
     echo ""
     echo -e "${BOLD}=== Installed Tools ===${RESET}"
-    local _status _icon
-    for _tool in BindCraft BoltzGen Mosaic Evaluator PXDesign Proteina_Complexa; do
-        local _fn="is_${_tool,,}_installed"
-        if "${_fn}" 2>/dev/null; then
-            _icon="${GREEN}✓${RESET}"; _status="installed"
+    # Driven by TOOL_REGISTRY, and reporting USABLE rather than merely present.
+    # The old version hardcoded six names, so Protein-Hunter, RFD3, BindCraft 2,
+    # AF3, ESMFold2 and SoluProt never appeared under a heading that claims to
+    # list installed tools -- and detectors for three of them already existed
+    # and were simply never called.
+    local spec tool flag fn
+    for spec in "${TOOL_REGISTRY[@]}"; do
+        IFS='|' read -r flag tool fn <<< "${spec}"
+        if verify_tool "${tool}" 2>/dev/null; then
+            printf "  %b  %-20s  %s\n" "${GREEN}✓${RESET}" "${tool}" "installed"
         else
-            _icon="${RED}✗${RESET}"; _status="not installed"
+            printf "  %b  %-20s  %s\n" "${RED}✗${RESET}" "${tool}" "not installed"
         fi
-        local _display="${_tool//_/-}"
-        printf "  %b  %-20s  %s\n" "${_icon}" "${_display}" "${_status}"
     done
     echo ""
 }
@@ -942,7 +990,7 @@ install_bindcraft() {
     if ! env_exists BindCraft; then
         print_step "Running BindCraft install script (conda env + AlphaFold2 weights)"
         print_warn "This will take 45-90 min — full output in install.log"
-        run_logged "Installing BindCraft (conda packages + AlphaFold2 weights)" \
+        run_logged --retries 3 "Installing BindCraft (conda packages + AlphaFold2 weights)" \
             bash -c "export PATH='${CONDA_BASE}/bin:${PATH}'; cd '${BINDCRAFT_DIR}' && bash install_bindcraft.sh --cuda '${CUDA_VERSION}' --pkg_manager conda" \
             || { print_fail "BindCraft install script failed"; return 1; }
     fi
@@ -1356,7 +1404,7 @@ install_evaluator() {
         || print_warn "fair-esm install failed — Mosaic will run without the ESM2 prior"
     # Pre-cache the ESM2-150M weights (~566 MB) so offline compute nodes need no
     # download at design time (cached under ~/.cache/torch/hub/checkpoints). Non-fatal.
-    run_logged "pre-fetch ESM2-150M weights" \
+    run_logged --retries 3 "pre-fetch ESM2-150M weights" \
         "${MOSAIC_VENV}/bin/python" -c "import esm; esm.pretrained.esm2_t30_150M_UR50D()" \
         || print_warn "ESM2-150M weight prefetch failed — provision it offline or design runs without the prior"
 
@@ -1667,7 +1715,7 @@ LNEOF
 
     # Download weights if script exists
     if [[ -f "${PXDESIGN_DIR}/download_tool_weights.sh" ]]; then
-        run_logged "Downloading PXDesign weights" \
+        run_logged --retries 3 "Downloading PXDesign weights" \
             bash -c "cd '${PXDESIGN_DIR}' && bash download_tool_weights.sh" \
             || print_warn "PXDesign weights download failed — download manually later"
     else
@@ -2311,7 +2359,7 @@ install_rfd3() {
     if [[ -n "$(ls -A "${FOUNDRY_WEIGHTS_DIR}" 2>/dev/null)" ]]; then
         print_ok "Foundry weights dir already populated at ${FOUNDRY_WEIGHTS_DIR}"
     else
-        run_logged "Downloading RFD3 weights (~few GB)" \
+        run_logged --retries 3 "Downloading RFD3 weights (~few GB)" \
             "${CONDA_CMD}" run -n binderscout_rfd3 \
             foundry install rfd3 --checkpoint-dir "${FOUNDRY_WEIGHTS_DIR}" \
             || print_warn "RFD3 weight download failed — retry: conda run -n binderscout_rfd3 foundry install rfd3 --checkpoint-dir ${FOUNDRY_WEIGHTS_DIR}"
@@ -2417,7 +2465,7 @@ install_protein_hunter() {
     # Protein-Hunter vendors LigandMPNN source in-repo and downloads weights into model_params/.
     local ph_mpnn_dir="${PROTEIN_HUNTER_DIR}/LigandMPNN/model_params"
     if [[ ! -d "${ph_mpnn_dir}" ]] && [[ -f "${PROTEIN_HUNTER_DIR}/LigandMPNN/get_model_params.sh" ]]; then
-        run_logged "Downloading LigandMPNN weights (Protein-Hunter)" \
+        run_logged --retries 3 "Downloading LigandMPNN weights (Protein-Hunter)" \
             bash -c "cd '${PROTEIN_HUNTER_DIR}/LigandMPNN' && bash get_model_params.sh ./model_params" \
             || print_warn "LigandMPNN weights download failed — download manually"
     fi
@@ -2839,7 +2887,7 @@ install_soluprot() {
         print_ok "SoluProt distribution already present at ${SOLUPROT_DIR}"
     else
         print_step "Downloading SoluProt 1.0 from ${SOLUPROT_ZIP_URL}"
-        if ! run_logged "Downloading soluprot.zip" \
+        if ! run_logged --retries 3 "Downloading soluprot.zip" \
             curl -fsSL -o "${zip_path}" "${SOLUPROT_ZIP_URL}"; then
             print_fail "Failed to download SoluProt from Loschmidt Lab."
             print_warn "  Manual download:  https://loschmidt.chemi.muni.cz/soluprot/?page=download"
@@ -3109,6 +3157,142 @@ uninstall_tool() {
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
+# ── Post-install verification ────────────────────────────────────────────────
+# A tool counts as installed when the artifact it needs to RUN is on disk — not
+# when its entry point exists.
+#
+# This exists because both halves of that distinction bit us in one run
+# (2026-09-23, docs/INVESTIGATION_install_bare_box_2026-09-23.md):
+#
+#   * RFD3's smoke test ran `rfd3 --help`, which passed while
+#     weights/foundry/ was EMPTY — a transient DNS failure had killed
+#     `foundry install rfd3` and the campaign would have died at first use.
+#   * Proteina-Complexa printed "installation complete" with no Complexa
+#     checkpoint at all, because `complexa download --everything` died on a
+#     torchaudio ABI mismatch and that step was not fatal.
+#
+# Both install functions end on print_ok, which returns 0, so neither ever
+# reached failed_tools. The exit status was honest about the array; the array
+# was wrong.
+#
+# VERIFY_REASON carries the explanation for the caller to print.
+VERIFY_REASON=""
+
+# Run python inside a conda env from a neutral CWD. Running from the repo root
+# lets a cloned SOURCE directory shadow the installed package: `import
+# alphafold3` succeeded against ./alphafold3/ with __file__ = None while the
+# wheel build had in fact failed. A verifier that can be fooled that way is
+# worse than none, because it reports green.
+_env_python_ok() {
+    local env="$1" code="$2"
+    env_exists "${env}" || return 1
+    ( cd / && "${CONDA_BASE}/envs/${env}/bin/python" -c "${code}" ) >/dev/null 2>&1
+}
+
+_count_glob() {
+    # shellcheck disable=SC2012  # count only; names are not parsed
+    ls "$@" 2>/dev/null | wc -l
+}
+
+verify_tool() {
+    local tool="$1"
+    VERIFY_REASON=""
+    case "${tool,,}" in
+        bindcraft)
+            (( $(_count_glob "${BINDCRAFT_DIR}"/params/*.npz) >= 5 )) \
+                || VERIFY_REASON="no AF2 .npz parameters under ${BINDCRAFT_DIR}/params" ;;
+        "bindcraft 2"|bindcraft2)
+            [[ -x "${BINDCRAFT2_DIR}/.venv/bin/python" ]] \
+                || VERIFY_REASON="no venv at ${BINDCRAFT2_DIR}/.venv" ;;
+        boltzgen)
+            _env_python_ok BoltzGen "import torch" \
+                || VERIFY_REASON="torch does not import in the BoltzGen env" ;;
+        mosaic)
+            [[ -x "${MOSAIC_DIR}/.venv/bin/python" ]] \
+                || VERIFY_REASON="no venv at ${MOSAIC_DIR}/.venv" ;;
+        evaluator)
+            _env_python_ok binder-eval "import binder_comparison" \
+                || VERIFY_REASON="binder_comparison does not import in binder-eval" ;;
+        rfd3)
+            # The check that RFD3's own smoke test was missing.
+            (( $(_count_glob "${FOUNDRY_WEIGHTS_DIR}"/*.ckpt) >= 1 )) \
+                || VERIFY_REASON="no .ckpt in ${FOUNDRY_WEIGHTS_DIR} — run: foundry install rfd3" ;;
+        pxdesign)
+            _env_python_ok binderscout_pxdesign "import torch" \
+                || VERIFY_REASON="torch does not import in binderscout_pxdesign" ;;
+        proteina-complexa)
+            if [[ ! -x "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" ]]; then
+                VERIFY_REASON="no venv at ${PROTEINA_COMPLEXA_DIR}/.venv"
+            elif [[ -z "$(find "${PROTEINA_COMPLEXA_DIR}" -maxdepth 5 -type d -name Complexa 2>/dev/null | head -1)" ]]; then
+                VERIFY_REASON="Complexa checkpoints absent — run: complexa download --everything"
+            fi ;;
+        protein-hunter)
+            _env_python_ok binderscout_protein_hunter "import pyrosetta" \
+                || VERIFY_REASON="pyrosetta does not import in binderscout_protein_hunter" ;;
+        af3)
+            # __file__ is None for a namespace-package shadow, so assert it.
+            _env_python_ok binder-eval-af3 \
+                "import alphafold3, sys; sys.exit(0 if alphafold3.__file__ else 1)" \
+                || VERIFY_REASON="alphafold3 not installed in binder-eval-af3 (wheel build failed?)" ;;
+        esmfold2)
+            _env_python_ok binder-eval-esmfold2 "import esm" \
+                || VERIFY_REASON="the esm SDK does not import in binder-eval-esmfold2" ;;
+        soluprot)
+            if ! env_exists binder-eval-soluprot; then
+                VERIFY_REASON="binder-eval-soluprot env missing"
+            elif [[ -z "$(_resolve_usearch)" ]]; then
+                VERIFY_REASON="no USEARCH binary for the identity feature"
+            fi ;;
+        *)  VERIFY_REASON="no verifier for '${tool}'"; return 1 ;;
+    esac
+    [[ -z "${VERIFY_REASON}" ]]
+}
+
+# Verify every selected tool. Appends broken ones to the named array.
+# Returns 1 if anything is broken, so callers can gate on it.
+verify_selected_tools() {
+    # The nameref parameter must not share a name with any caller's variable or
+    # bash refuses with "circular name reference" and silently leaves the array
+    # empty -- which looked exactly like "nothing was broken".
+    local -n __vst_out="$1"
+    local any=false
+    echo ""
+    echo -e "${BOLD}=== Verifying installed tools ===${RESET}"
+    local spec tool flag fn
+    for spec in "${TOOL_REGISTRY[@]}"; do
+        IFS='|' read -r flag tool fn <<< "${spec}"
+        [[ "${!flag}" == true ]] || continue
+        if verify_tool "${tool}"; then
+            printf "  %b  %-20s %s\n" "${GREEN}✓${RESET}" "${tool}" "usable"
+        else
+            printf "  %b  %-20s %s\n" "${RED}✗${RESET}" "${tool}" "${VERIFY_REASON}"
+            __vst_out+=("${tool}")
+            any=true
+        fi
+    done
+    [[ "${any}" == false ]]
+}
+
+# Re-install only the tools that failed verification, then verify again.
+# Far cheaper than --force, which rebuilds everything including ~4 GB of AF2
+# weights; the common case is one tool that lost a download to a network blip.
+repair_tools() {
+    local -n __rt_todo="$1"   # see the nameref note in verify_selected_tools
+    local spec tool flag fn repaired=()
+    echo ""
+    echo -e "${BOLD}=== Repairing ${#__rt_todo[@]} tool(s) ===${RESET}"
+    for spec in "${TOOL_REGISTRY[@]}"; do
+        IFS='|' read -r flag tool fn <<< "${spec}"
+        local wanted=false t
+        for t in "${__rt_todo[@]}"; do [[ "${t}" == "${tool}" ]] && wanted=true; done
+        [[ "${wanted}" == true ]] || continue
+        echo -e "\n${BOLD}Repairing ${tool}${RESET}"
+        if "${fn}"; then repaired+=("${tool}"); else print_warn "${tool}: repair attempt failed"; fi
+    done
+    (( ${#repaired[@]} )) && print_ok "Re-ran: ${repaired[*]}"
+    return 0
+}
+
 # preflight
 # Cheap sanity checks BEFORE the installer starts downloading tens of GB. Without
 # this, a host with too little free space failed an hour in with an opaque tar/pip
@@ -3215,10 +3399,38 @@ main() {
         select_tools_interactive
     fi
 
+    # --verify: report what is actually on disk and stop. Runs before preflight
+    # because auditing needs no disk headroom and no network.
+    if [[ "${VERIFY_ONLY}" == true ]]; then
+        local _broken=()
+        verify_selected_tools _broken && { echo ""; print_ok "All selected tools verified usable."; exit 0; }
+        echo ""
+        print_fail "Unusable: ${_broken[*]}"
+        echo -e "  Re-run with ${BOLD}--repair${RESET} to re-install just these."
+        exit 1
+    fi
+
     # Preflight runs after tool selection (so the disk estimate matches the choice)
     # and before any download. Uninstall skips it — it frees space, not consumes it.
     if [[ "${UNINSTALL_MODE}" != true ]]; then
         preflight || exit 1
+    fi
+
+    # ── Repair mode ──────────────────────────────────────────────────────────
+    if [[ "${REPAIR_MODE}" == true ]]; then
+        local _broken=()
+        if verify_selected_tools _broken; then
+            echo ""; print_ok "Nothing to repair — all selected tools verified usable."; exit 0
+        fi
+        repair_tools _broken
+        local _still=()
+        if verify_selected_tools _still; then
+            echo ""; print_ok "Repair complete — all selected tools verified usable."; exit 0
+        fi
+        echo ""
+        print_fail "Still unusable after repair: ${_still[*]}"
+        echo -e "  Full log: ${LOG_FILE}"
+        exit 1
     fi
 
     # ── Uninstall mode ───────────────────────────────────────────────────────
@@ -3324,6 +3536,22 @@ main() {
     [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
     [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
     [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; install_soluprot || failed_tools+=("SoluProt"); }
+
+    # Verify before summarising. Without this a tool whose install function
+    # ended on print_ok -- RFD3 with an empty weights dir, Proteina-Complexa
+    # with no checkpoints -- is reported as installed and never reaches
+    # failed_tools, so the exit status is honest about an array that is wrong.
+    local _unusable=()
+    if ! verify_selected_tools _unusable; then
+        local _u
+        for _u in "${_unusable[@]}"; do
+            local _seen=false _f
+            for _f in "${failed_tools[@]}"; do [[ "${_f}" == "${_u}" ]] && _seen=true; done
+            [[ "${_seen}" == false ]] && failed_tools+=("${_u}")
+        done
+        echo ""
+        print_warn "Re-run with ${BOLD}--repair${RESET} to re-install just the tools above."
+    fi
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"
