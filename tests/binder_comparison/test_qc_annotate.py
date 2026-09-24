@@ -147,9 +147,20 @@ def test_drop_failures_drops_only_measured_failures(tmp_path):
 
 
 def test_drop_failures_keeps_a_wholly_uncovered_frame(tmp_path):
-    """Panel covered nothing at all -> --drop-failures must not empty the shortlist."""
+    """Panel covered nothing at all -> --drop-failures must not empty the shortlist.
+
+    The panel here JOINS to both designs but produced no metric values — the
+    Rosetta panel ran and could not score them. That is the real
+    absence-of-evidence case, and it must be kept.
+
+    It used to be written with a panel keyed ``zzz``, i.e. matching neither
+    design. That shape now errors, because a panel that matches NOTHING is a
+    keying bug rather than a measurement outcome — which is exactly how the
+    metrics/panel id mismatch stayed invisible. The distinction is the point:
+    joined-but-NaN is uncovered; never-joined is broken.
+    """
     metrics = pd.DataFrame({"binder_id": ["a", "b"], "consensus_iptm_mean": [0.9, 0.8]})
-    panel = pd.DataFrame([{"design_id": "zzz", **_GOOD}])
+    panel = pd.DataFrame([{"design_id": d, **{k: None for k in _GOOD}} for d in ("a", "b")])
     df = _run(tmp_path, metrics, panel, drop_failures=True, tag="_none")
     assert df.index.tolist() == ["a", "b"]
     assert df["qc_pass"].isna().all()
@@ -161,3 +172,71 @@ def test_qc_pass_true_semantics_unchanged(tmp_path):
     exactly what visualization/report.py::_qc_rules_html tells the report's reader."""
     df = _mixed(tmp_path, drop_failures=False)
     assert [i for i in df.index if _state(df.loc[i, "qc_pass"]) is True] == ["good"]
+
+
+class TestPanelJoinActuallyMatches:
+    """The panel and the metrics table were keyed in different namespaces, so the
+    join silently matched nothing.
+
+    ``interface_qc.py:71`` writes ``design_id = pdb.stem``. The structures it is
+    pointed at in the real pipeline are the report's export, named
+    ``rank{NN}_{binder_id}.pdb`` (``report.py:533``, fed in by
+    ``evaluate.sh:700``). So design_id is binder_id with a ``rank01_`` prefix, and
+    the left join produced NaN for every row.
+
+    Worse, the NaN was indistinguishable from the legitimate case this command
+    exists to model -- a structure the panel genuinely could not score -- so a
+    100% join failure reported itself as "N NOT covered by the panel" and exited
+    0. The Rosetta panel has therefore never attached a single row.
+    """
+
+    def _panel(self, design_ids):
+        return pd.DataFrame(
+            [
+                {
+                    "design_id": d,
+                    "interface_dG": -12.0,
+                    "interface_sc": 0.70,
+                    "interface_interface_hbonds": 5,
+                    "interface_delta_unsat_hbonds": 2,
+                    "interface_nres": 12,
+                }
+                for d in design_ids
+            ]
+        )
+
+    def _metrics(self, binder_ids):
+        return pd.DataFrame([{"binder_id": b, "rank": i + 1} for i, b in enumerate(binder_ids)])
+
+    def test_rank_prefixed_panel_ids_join(self, tmp_path):
+        """The real pipeline's shape: panel keyed rank01_<binder_id>."""
+        ids = ["bindcraft2_CALCA_b_l99_4796f2fbca3e328c_seq3", "rfd3_helix_binder_2_model_0"]
+        out = _run(
+            tmp_path,
+            self._metrics(ids),
+            self._panel([f"rank{i + 1:02d}_{b}" for i, b in enumerate(ids)]),
+            drop_failures=False,
+            tag="_rankpfx",
+        )
+        assert out["qc_covered"].all(), (
+            "the rank-prefixed panel did not join -- every row is NA, which is exactly the silent failure this pins"
+        )
+        assert (out["qc_pass"] == True).all()  # noqa: E712
+
+    def test_exact_ids_still_join(self, tmp_path):
+        """A panel already keyed by binder_id must keep working."""
+        ids = ["design_alpha", "design_beta"]
+        out = _run(tmp_path, self._metrics(ids), self._panel(ids), drop_failures=False, tag="_exact")
+        assert out["qc_covered"].all()
+
+    def test_a_panel_matching_nothing_is_an_error_not_absence_of_evidence(self, tmp_path):
+        """A non-empty panel that joins to ZERO rows is a keying bug, not a
+        measurement outcome, and must not exit 0 pretending otherwise."""
+        with pytest.raises(SystemExit):
+            _run(
+                tmp_path,
+                self._metrics(["design_alpha", "design_beta"]),
+                self._panel(["af3_0007", "af3_0011"]),  # refold filenames — a different namespace
+                drop_failures=False,
+                tag="_nomatch",
+            )
