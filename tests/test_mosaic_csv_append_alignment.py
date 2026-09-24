@@ -54,7 +54,7 @@ def test_generation_index_is_the_last_column() -> None:
     assert cols[-1] == "generation_index", (
         f"generation_index must be the LAST column so appended files degrade safely; "
         f"it is at index {cols.index('generation_index')} of {len(cols)}, followed by "
-        f"{cols[cols.index('generation_index') + 1:]}"
+        f"{cols[cols.index('generation_index') + 1 :]}"
     )
 
 
