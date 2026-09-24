@@ -708,6 +708,42 @@ def extract_sequence_from_structure(path: str, chain_id: str) -> str | None:
     return extract_sequence_from_pdb(str(p), chain_id)
 
 
+def available_chains(path: str) -> list[str]:
+    """Chain identifiers present in a PDB or mmCIF file, in first-seen order.
+
+    Exists so a wrong chain letter can be answered with the chains that ARE
+    there. The wizard previously printed nothing at all on a miss, which left
+    target_sequence empty and fed the RFD3 mislabelling that write_run_rfd3 now
+    refuses outright.
+
+    CIF is routed through the existing converter rather than parsed twice, so
+    both formats agree with extract_sequence_from_structure by construction.
+    """
+    p = Path(path).expanduser()
+    if p.suffix.lower() in (".cif", ".mmcif"):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".pdb", delete=False) as tmp:
+            converted = Path(tmp.name)
+        try:
+            if not cif_to_pdb_atoms(str(p), str(converted)):
+                return []
+            return available_chains(str(converted))
+        finally:
+            converted.unlink(missing_ok=True)
+    try:
+        text = p.read_text(errors="replace")
+    except OSError:
+        return []
+    seen: list[str] = []
+    for line in text.splitlines():
+        if line.startswith(("ATOM", "HETATM")) and len(line) > 21:
+            c = line[21].strip()
+            if c and c not in seen:
+                seen.append(c)
+    return seen
+
+
 def cif_to_pdb_atoms(cif_path: str, pdb_path: str) -> bool:
     """Convert mmCIF to a minimal PDB file using _atom_site records.
 
@@ -3253,7 +3289,12 @@ def load_run_config(path: Path) -> tuple[dict, dict]:
 
     for key in ("run_dir", "target_pdb", "target_pdb_src"):
         if cfg.get(key):
-            cfg[key] = Path(str(cfg[key])).expanduser()
+            # .resolve() as well as .expanduser(): generated run scripts bake
+            # absolute paths derived from run_dir, so a relative value produced
+            # a run folder the configurator reported ready and that could not
+            # execute from anywhere else. A config downloaded from a front-end
+            # is exactly the thing most likely to carry one.
+            cfg[key] = Path(str(cfg[key])).expanduser().resolve()
 
     missing = [k for k in ("name", "run_dir", "target_pdb_src") if not cfg.get(k)]
     if missing:
@@ -3704,6 +3745,18 @@ def wizard():
     if target_sequence:
         preview = target_sequence[:50] + ("..." if len(target_sequence) > 50 else "")
         print_ok(f"Auto-extracted sequence for chain {primary_chain}: {preview} ({len(target_sequence)} aa)")
+    else:
+        # Previously silent. A wrong chain letter produced no output at all, and
+        # the wizard carried on with target_sequence empty -- which is what fed
+        # the RFD3 mislabelling. Name the chains that ARE present so the mistake
+        # is fixable without leaving the wizard.
+        present = available_chains(target_pdb_src)
+        print_warn(f"No residues found for chain {primary_chain!r} in {Path(target_pdb_src).name}.")
+        if present:
+            print(f"  Chains present: {', '.join(present)}")
+        else:
+            print("  No chains could be parsed from that file.")
+        print("  Tools that need the target sequence will refuse to generate until this is fixed.")
 
     # ── Step 4: Binder settings ───────────────────────────────────────────────
     print_step("Step 4 — Binder settings (global defaults)")
