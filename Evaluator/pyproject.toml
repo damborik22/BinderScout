@@ -11,6 +11,12 @@ dependencies = [
     "numpy>=1.24",
     "pandas>=2.0",
     "matplotlib>=3.7",
+    # cli/hits.py writes the wet-lab workbook via pd.ExcelWriter(engine="openpyxl").
+    # `hits` is a documented core command and its --output XLSX is required=True,
+    # so the workbook is not optional and neither is this. It was undeclared, so
+    # a fully installed binder-eval env could not run the last step before genes
+    # are ordered.
+    "openpyxl>=3.1",
     # refolding/target_msa.py imports requests at MODULE level (not lazily), and
     # every engine now calls prepare_target_msa() up front, so it is a hard runtime
     # dependency. biopython and gemmi are deliberately NOT here: both are imported
