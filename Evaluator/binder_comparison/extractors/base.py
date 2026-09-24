@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import warnings
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -54,6 +55,19 @@ def read_generation_index(row, column: str) -> int | None:
 
     value = pd.to_numeric(row.get(column), errors="coerce")
     return None if pd.isna(value) else int(value)
+
+
+def parse_trailing_index(text: str) -> int | None:
+    """The trailing integer of an identifier, or None.
+
+    Several tools embed their generation counter in the design id rather than a
+    column -- BoltzGen writes ``{stem}_{global_idx:0Nd}``, so ``config_2416``
+    carries 2416. Anchored at the END so a prefix containing digits (a run tag,
+    a target name) cannot be mistaken for the index, and zero-padding is dropped
+    by the int conversion.
+    """
+    match = re.search(r"(\d+)$", text.strip())
+    return int(match.group(1)) if match else None
 
 
 def disambiguate_ids(binders: list[ExtractedBinder], *, tool: str) -> None:

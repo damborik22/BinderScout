@@ -166,3 +166,96 @@ def test_protein_hunter_reads_run_id_not_row_position(tmp_path: Path) -> None:
     assert by_seq[SEQS[0]].generation_index == 0
     assert by_seq[SEQS[1]].generation_index == 3
     assert all(b.generation_index_source == "explicit" for b in binders)
+
+
+# --------------------------------------------------------------------------
+# BoltzGen: the pool it reads is a budget-and-diversity selection sorted by
+# final_rank, but the `id` column's trailing integer is BoltzGen's own
+# global_idx (sample_idx * n_samples + n), zero-padded at write time.
+# --------------------------------------------------------------------------
+
+BG_COLUMNS = ["id", "designed_chain_sequence", "final_rank"]
+
+
+def test_boltzgen_parses_global_idx_from_id(tmp_path: Path) -> None:
+    from binder_comparison.extractors.boltzgen import BoltzGenExtractor
+
+    path = tmp_path / "final_designs_metrics_100.csv"
+    with path.open("w") as fh:
+        fh.write(",".join(BG_COLUMNS) + "\n")
+        # final_rank order is the file's order and is pure quality -- the
+        # generation indices deliberately run the other way.
+        fh.write(f"config_2416,{SEQS[0]},1\n")
+        fh.write(f"config_0007,{SEQS[1]},2\n")
+        fh.write(f"config_6401,{SEQS[2]},3\n")
+
+    binders = BoltzGenExtractor().extract(tmp_path)
+    by_seq = {b.sequence: b for b in binders}
+
+    assert by_seq[SEQS[0]].generation_index == 2416
+    assert by_seq[SEQS[1]].generation_index == 7, "zero-padding must not survive into the value"
+    assert by_seq[SEQS[2]].generation_index == 6401
+    assert all(b.generation_index_source == "parsed" for b in binders)
+
+
+def test_boltzgen_id_without_a_trailing_integer_is_unavailable(tmp_path: Path) -> None:
+    from binder_comparison.extractors.boltzgen import BoltzGenExtractor
+
+    path = tmp_path / "final_designs_metrics_100.csv"
+    with path.open("w") as fh:
+        fh.write(",".join(BG_COLUMNS) + "\n")
+        fh.write(f"some_design_name,{SEQS[0]},1\n")
+
+    binders = BoltzGenExtractor().extract(tmp_path)
+    assert binders[0].generation_index is None
+    assert binders[0].generation_index_source == "unavailable"
+
+
+# --------------------------------------------------------------------------
+# RFD3: no column. The true order is (batch_id, model_idx) from the filename,
+# and OUR OWN run script sorts those lexicographically -- so `_10_` lands
+# before `_2_` for any run with >=10 batches. The templates use 88.
+# --------------------------------------------------------------------------
+
+RFD3_COLUMNS = ["design_id", "sequence", "length", "backbone", "source"]
+
+
+def test_rfd3_orders_numerically_not_lexicographically(tmp_path: Path) -> None:
+    from binder_comparison.extractors.rfd3 import RFD3Extractor
+
+    path = tmp_path / "sequences.csv"
+    rows = [
+        # written in the lexicographic order our run script produces
+        ("rfd3_helix_binder_10_model_0", SEQS[0]),
+        ("rfd3_helix_binder_2_model_0", SEQS[1]),
+        ("rfd3_helix_binder_2_model_1", SEQS[2]),
+    ]
+    with path.open("w") as fh:
+        fh.write(",".join(RFD3_COLUMNS) + "\n")
+        for design_id, seq in rows:
+            fh.write(f"{design_id},{seq},{len(seq)},{design_id.removeprefix('rfd3_')},rfd3\n")
+
+    binders = RFD3Extractor().extract(tmp_path)
+    by_seq = {b.sequence: b for b in binders}
+
+    # batch 2 precedes batch 10, whatever the file order said.
+    assert by_seq[SEQS[1]].generation_index < by_seq[SEQS[0]].generation_index, (
+        "batch 2 must precede batch 10 -- lexicographic order puts _10_ first"
+    )
+    assert by_seq[SEQS[1]].generation_index < by_seq[SEQS[2]].generation_index, (
+        "within a batch, model_0 precedes model_1"
+    )
+    assert all(b.generation_index_source == "parsed" for b in binders)
+
+
+def test_rfd3_unparseable_design_id_is_unavailable(tmp_path: Path) -> None:
+    from binder_comparison.extractors.rfd3 import RFD3Extractor
+
+    path = tmp_path / "sequences.csv"
+    with path.open("w") as fh:
+        fh.write(",".join(RFD3_COLUMNS) + "\n")
+        fh.write(f"rfd3_handwritten_name,{SEQS[0]},{len(SEQS[0])},handwritten_name,rfd3\n")
+
+    binders = RFD3Extractor().extract(tmp_path)
+    assert binders[0].generation_index is None
+    assert binders[0].generation_index_source == "unavailable"
