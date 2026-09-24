@@ -40,6 +40,13 @@ _SLIM = [
     ("Tool", "source_tool", "s"),
     ("Length", "binder_length", "n"),
     ("Mean ipTM", "consensus_iptm_mean", "n"),
+    # The gate belongs next to the metric it qualifies. Without it this table --
+    # and top30_slim.csv, which a picker opens in Excel -- showed a design's mean
+    # ipTM with no indication that it came from ONE engine and was ranked last
+    # for that reason. `agreement_count` below is NOT that signal: Part U retired
+    # it as a ranking input (macro-AUC 0.532, 87.2% of designs tied at zero) and
+    # it survives here only as a diagnostic.
+    ("Gate", "passes_engine_gate", "s"),
     ("Agreement", "agreement_count", "n"),
     ("ipSAE_min", "ipsae_min", "n"),
     ("Epitope", "epitope_match_fraction", "n"),
