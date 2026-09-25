@@ -123,9 +123,7 @@ def annotate_confidence_gate(df: pd.DataFrame) -> pd.DataFrame:
             # Collected positionally, NOT written with .loc[row.name] -- that
             # writes to every row sharing an index label, so duplicate labels
             # silently give all of them the last row's value.
-            ipae_cols.setdefault(f"{engine}_ipae_ang", []).append(
-                None if ipae is None else round(ipae, 3)
-            )
+            ipae_cols.setdefault(f"{engine}_ipae_ang", []).append(None if ipae is None else round(ipae, 3))
 
             if iptm is None and plddt is None and ipae is None:
                 continue
