@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BinderScout config builder</title>
+<style>
+:root { --bg:#fff; --fg:#111; --mut:#666; --line:#ddd; --accent:#0b5; --warn:#a40; --code:#f5f5f5; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg:#14161a; --fg:#e8e8e8; --mut:#9aa; --line:#333; --accent:#3d8; --warn:#f96; --code:#1d2026; } }
+:root[data-theme="dark"] { --bg:#14161a; --fg:#e8e8e8; --mut:#9aa; --line:#333; --accent:#3d8; --warn:#f96; --code:#1d2026; }
+* { box-sizing:border-box; }
+body { background:var(--bg); color:var(--fg); margin:0; padding:16px;
+  font:15px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+.wrap { max-width:900px; margin:0 auto; }
+h1 { font-size:1.5rem; margin:0 0 .25rem; }
+p.sub { color:var(--mut); margin:0 0 1.5rem; }
+h2 { font-size:1.05rem; margin:1.75rem 0 .5rem; padding-bottom:.3rem; border-bottom:1px solid var(--line); }
+code { background:var(--code); padding:.1em .35em; border-radius:3px; font-size:.9em; }
+.tool { display:flex; align-items:center; gap:.5rem; padding:.35rem 0; }
+.tool span { flex:1; }
+.field { margin:.9rem 0; }
+.field label { display:block; margin-bottom:.2rem; }
+.field input[type=text], .field input[type=number] {
+  width:100%; padding:.45rem .6rem; border:1px solid var(--line); border-radius:4px;
+  background:var(--bg); color:var(--fg); font:inherit; }
+.help { color:var(--mut); font-size:.85em; margin:.25rem 0 0; }
+pre { background:var(--code); padding:1rem; border-radius:6px; overflow:auto; max-height:420px; }
+button { font:inherit; padding:.5rem .9rem; border:1px solid var(--line); border-radius:5px;
+  background:var(--accent); color:#04120a; cursor:pointer; margin-right:.5rem; }
+.note { border-left:3px solid var(--warn); padding:.6rem .9rem; margin:1rem 0; color:var(--mut); }
+.err { color:var(--warn); font-weight:600; }
+</style></head><body><div class="wrap">
+
+<h1>BinderScout config builder</h1>
+<p class="sub">Fills in a <code>config.json</code> for
+<code>binderscout configure --config &lt;file&gt;</code>. Nothing is uploaded; the page
+runs entirely in your browser.</p>
+
+<div class="note"><strong>This page is generated</strong> from
+<code>configurator.py</code> by <code>tools/make_config_builder.py</code>. Do not edit it
+by hand — a test fails when the two disagree, which is how a second list of tools and
+flags is kept from drifting out of step with the real one.</div>
+
+<h2>Tools</h2>
+<label class="tool"><input type="checkbox" data-tool="bindcraft" checked> <span>BindCraft (AF2 hallucination + MPNN + PyRosetta)</span> <code>"bindcraft"</code></label>
+<label class="tool"><input type="checkbox" data-tool="bindcraft2" checked> <span>BindCraft 2 (AF2 hallucination + MPNN, JAX only)</span> <code>"bindcraft2"</code></label>
+<label class="tool"><input type="checkbox" data-tool="boltzgen" checked> <span>BoltzGen (Boltz-1 diffusion)</span> <code>"boltzgen"</code></label>
+<label class="tool"><input type="checkbox" data-tool="mosaic" checked> <span>Mosaic (Boltz-2 gradient hallucination)</span> <code>"mosaic"</code></label>
+<label class="tool"><input type="checkbox" data-tool="pxdesign_local" checked> <span>PXDesign (Protenix + MPNN + AF2 eval)</span> <code>"pxdesign_local"</code></label>
+<label class="tool"><input type="checkbox" data-tool="proteina_complexa" checked> <span>Proteina-Complexa (flow matching + MCTS)</span> <code>"proteina_complexa"</code></label>
+<label class="tool"><input type="checkbox" data-tool="rfd3" checked> <span>RFD3 (RosettaCommons diffusion + ProteinMPNN)</span> <code>"rfd3"</code></label>
+<label class="tool"><input type="checkbox" data-tool="protein_hunter" checked> <span>Protein-Hunter (Boltz-2 / Chai-1 hallucination)</span> <code>"protein_hunter"</code></label>
+<label class="tool"><input type="checkbox" data-tool="evaluator" checked> <span>Evaluator (cross-engine refold + ranking)</span> <code>"evaluator"</code></label>
+
+<h2>Settings</h2>
+<div class="field"><label for="f_name"><code>name</code></label><input type="text" id="f_name" data-key="name" data-type="str" value="CALCA_smoke"><p class='help'>Run name. Becomes the run directory&#x27;s name.</p></div>
+<div class="field"><label for="f_run_dir"><code>run_dir</code></label><input type="text" id="f_run_dir" data-key="run_dir" data-type="str" value="runs/CALCA_smoke"><p class='help'>Where the run lives. RELATIVE to the repo root — an absolute path from another machine will not resolve.</p></div>
+<div class="field"><label for="f_target_pdb_src"><code>target_pdb_src</code></label><input type="text" id="f_target_pdb_src" data-key="target_pdb_src" data-type="str" value="examples/CALCA/target.pdb"><p class='help'>Target structure (.pdb / .mmcif), relative to the repo root.</p></div>
+<div class="field"><label for="f_target_sequence"><code>target_sequence</code></label><input type="text" id="f_target_sequence" data-key="target_sequence" data-type="str" value="EDEARLLLAALVQDYVQMKASELEQEQEREGS"><p class='help'>Target sequence. Must match the chain named below, or RFD3 refuses the contig.</p></div>
+<div class="field"><label for="f_chains"><code>chains</code></label><input type="text" id="f_chains" data-key="chains" data-type="str" value="A"><p class='help'>Target chain id(s) in the structure, e.g. A.</p></div>
+<div class="field"><label for="f_hotspots"><code>hotspots</code></label><input type="text" id="f_hotspots" data-key="hotspots" data-type="str" value=""><p class='help'>Optional. Epitope residues to aim at, e.g. A15,A18,A22. Leave blank for none.</p></div>
+<div class="field"><label for="f_min_length"><code>min_length</code></label><input type="number" id="f_min_length" data-key="min_length" data-type="int" value="20"><p class='help'>Shortest binder to design (aa).</p></div>
+<div class="field"><label for="f_max_length"><code>max_length</code></label><input type="number" id="f_max_length" data-key="max_length" data-type="int" value="30"><p class='help'>Longest binder to design (aa).</p></div>
+<div class="field"><label for="f_n_designs"><code>n_designs</code></label><input type="number" id="f_n_designs" data-key="n_designs" data-type="int" value="1"><p class='help'>Designs per tool, unless a per-tool override below says otherwise.</p></div>
+<div class="field"><label for="f_filter_preset"><code>filter_preset</code></label><input type="text" id="f_filter_preset" data-key="filter_preset" data-type="str" value="no_filters"><p class='help'>BindCraft filter set. no_filters keeps everything — right for a smoke run, wrong for a campaign.</p></div>
+<div class="field"><label for="f_advanced_preset"><code>advanced_preset</code></label><input type="text" id="f_advanced_preset" data-key="advanced_preset" data-type="str" value="default_4stage_multimer"><p class='help'>BindCraft advanced settings preset.</p></div>
+<div class="field"><label for="f_bindcraft_n_designs"><code>bindcraft_n_designs</code></label><input type="number" id="f_bindcraft_n_designs" data-key="bindcraft_n_designs" data-type="int" value="1"><p class='help'></p></div>
+<div class="field"><label for="f_boltzgen_n_designs"><code>boltzgen_n_designs</code></label><input type="number" id="f_boltzgen_n_designs" data-key="boltzgen_n_designs" data-type="int" value="1"><p class='help'></p></div>
+<div class="field"><label for="f_boltzgen_intermediate"><code>boltzgen_intermediate</code></label><input type="checkbox" id="f_boltzgen_intermediate" data-key="boltzgen_intermediate" data-type="bool"><p class='help'>BoltzGen generates this many candidates before its own ranked selection.</p></div>
+<div class="field"><label for="f_mosaic_n_designs"><code>mosaic_n_designs</code></label><input type="number" id="f_mosaic_n_designs" data-key="mosaic_n_designs" data-type="int" value="1"><p class='help'></p></div>
+<div class="field"><label for="f_pxdesign_binder_length"><code>pxdesign_binder_length</code></label><input type="number" id="f_pxdesign_binder_length" data-key="pxdesign_binder_length" data-type="int" value="25"><p class='help'>PXDesign designs one fixed binder length.</p></div>
+<div class="field"><label for="f_rfd3_n_designs"><code>rfd3_n_designs</code></label><input type="number" id="f_rfd3_n_designs" data-key="rfd3_n_designs" data-type="int" value="1"><p class='help'></p></div>
+<div class="field"><label for="f_rfd3_batch_size"><code>rfd3_batch_size</code></label><input type="number" id="f_rfd3_batch_size" data-key="rfd3_batch_size" data-type="int" value="1"><p class='help'></p></div>
+<div class="field"><label for="f_rfd3_diffusion_steps"><code>rfd3_diffusion_steps</code></label><input type="number" id="f_rfd3_diffusion_steps" data-key="rfd3_diffusion_steps" data-type="int" value="20"><p class='help'>RFD3 denoising steps. 200 for a campaign; 20 only for a smoke test.</p></div>
+<div class="field"><label for="f_rfd3_mpnn_samples"><code>rfd3_mpnn_samples</code></label><input type="number" id="f_rfd3_mpnn_samples" data-key="rfd3_mpnn_samples" data-type="int" value="1"><p class='help'></p></div>
+<div class="field"><label for="f_protein_hunter_n_designs"><code>protein_hunter_n_designs</code></label><input type="number" id="f_protein_hunter_n_designs" data-key="protein_hunter_n_designs" data-type="int" value="1"><p class='help'></p></div>
+<div class="field"><label for="f_protein_hunter_num_cycles"><code>protein_hunter_num_cycles</code></label><input type="number" id="f_protein_hunter_num_cycles" data-key="protein_hunter_num_cycles" data-type="int" value="1"><p class='help'></p></div>
+<div class="field"><label for="f_use_boltz"><code>use_boltz</code></label><input type="checkbox" id="f_use_boltz" data-key="use_boltz" data-type="bool" checked><p class='help'>Refold with Boltz-2.</p></div>
+<div class="field"><label for="f_use_af3"><code>use_af3</code></label><input type="checkbox" id="f_use_af3" data-key="use_af3" data-type="bool" checked><p class='help'>Refold with AlphaFold 3. Cheapest engine here (~5 GB), despite its reputation.</p></div>
+<div class="field"><label for="f_use_esmfold2"><code>use_esmfold2</code></label><input type="checkbox" id="f_use_esmfold2" data-key="use_esmfold2" data-type="bool" checked><p class='help'>Refold with ESMFold2. Needs ~14 GB even for small complexes — it cannot run on a 12 GB card.</p></div>
+<div class="field"><label for="f_primary_engine"><code>primary_engine</code></label><input type="text" id="f_primary_engine" data-key="primary_engine" data-type="str" value="boltz"><p class='help'>Which engine&#x27;s structures the report shows. Ranking is always cross-engine.</p></div>
+<div class="field"><label for="f_use_soluprot"><code>use_soluprot</code></label><input type="checkbox" id="f_use_soluprot" data-key="use_soluprot" data-type="bool" checked><p class='help'>Run the sequence-only solubility screen before any GPU work.</p></div>
+<div class="field"><label for="f_soluprot_filter"><code>soluprot_filter</code></label><input type="checkbox" id="f_soluprot_filter" data-key="soluprot_filter" data-type="bool"><p class='help'>Drop sub-threshold designs from the FASTA before refolding. Off = score only.</p></div>
+
+<h2>config.json</h2>
+<p id="status"></p>
+<button id="dl">Download config.json</button>
+<button id="copy">Copy</button>
+<pre id="out"></pre>
+
+<div class="note">Then: <code>binderscout configure --config config.json</code>, and
+<code>bash runs/&lt;name&gt;/run_all.sh</code>. Add <code>--run</code> to start immediately.</div>
+
+<script>
+const REQUIRED = {
+  "bindcraft": [
+    "advanced_preset",
+    "chains",
+    "filter_preset",
+    "hotspots",
+    "max_length",
+    "min_length",
+    "n_designs",
+    "target_pdb"
+  ],
+  "bindcraft2": [
+    "target_pdb"
+  ],
+  "boltzgen": [
+    "boltzgen_intermediate",
+    "chains",
+    "hotspots",
+    "max_length",
+    "min_length",
+    "n_designs",
+    "target_pdb"
+  ],
+  "mosaic": [
+    "max_length",
+    "min_length",
+    "n_designs",
+    "target_sequence"
+  ],
+  "pxdesign_local": [
+    "pxdesign_binder_length",
+    "target_pdb"
+  ],
+  "proteina_complexa": [
+    "target_pdb"
+  ],
+  "rfd3": [
+    "target_pdb"
+  ],
+  "protein_hunter": [],
+  "evaluator": []
+};
+const DEFAULTS = {
+  "name": "CALCA_smoke",
+  "run_dir": "runs/CALCA_smoke",
+  "target_pdb_src": "examples/CALCA/target.pdb",
+  "target_sequence": "EDEARLLLAALVQDYVQMKASELEQEQEREGS",
+  "chains": "A",
+  "hotspots": null,
+  "min_length": 20,
+  "max_length": 30,
+  "n_designs": 1,
+  "filter_preset": "no_filters",
+  "advanced_preset": "default_4stage_multimer",
+  "bindcraft_n_designs": 1,
+  "boltzgen_n_designs": 1,
+  "boltzgen_intermediate": false,
+  "mosaic_n_designs": 1,
+  "pxdesign_binder_length": 25,
+  "rfd3_n_designs": 1,
+  "rfd3_batch_size": 1,
+  "rfd3_diffusion_steps": 20,
+  "rfd3_mpnn_samples": 1,
+  "protein_hunter_n_designs": 1,
+  "protein_hunter_num_cycles": 1,
+  "use_boltz": true,
+  "use_af3": true,
+  "use_esmfold2": true,
+  "primary_engine": "boltz",
+  "use_soluprot": true,
+  "soluprot_filter": false
+};
+
+function collect() {
+  const tools = {};
+  document.querySelectorAll('[data-tool]').forEach(el => { tools[el.dataset.tool] = el.checked; });
+  const cfg = {};
+  document.querySelectorAll('[data-key]').forEach(el => {
+    const k = el.dataset.key, t = el.dataset.type;
+    if (t === 'bool') cfg[k] = el.checked;
+    else if (t === 'int') cfg[k] = el.value === '' ? null : parseInt(el.value, 10);
+    else cfg[k] = el.value === '' ? null : el.value;
+  });
+  return { config_version: 1, tools_enabled: tools, cfg: cfg };
+}
+
+function problems(doc) {
+  const out = [];
+  for (const [tool, keys] of Object.entries(REQUIRED)) {
+    if (!doc.tools_enabled[tool]) continue;
+    for (const k of keys) {
+      if (k === 'target_pdb' && doc.cfg.target_pdb_src) continue;
+      const v = doc.cfg[k];
+      if (v === undefined || v === null || v === '') out.push(tool + ' needs ' + k);
+    }
+  }
+  if (doc.cfg.run_dir && /^([/]|[A-Za-z]:)/.test(doc.cfg.run_dir))
+    out.push('run_dir should be relative, not absolute');
+  return out;
+}
+
+function render() {
+  const doc = collect();
+  document.getElementById('out').textContent = JSON.stringify(doc, null, 2);
+  const errs = problems(doc);
+  const s = document.getElementById('status');
+  s.className = errs.length ? 'err' : '';
+  s.textContent = errs.length ? errs.join(' · ') : 'Looks complete.';
+}
+
+document.addEventListener('input', render);
+document.addEventListener('change', render);
+document.getElementById('dl').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(collect(), null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'config.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+document.getElementById('copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(JSON.stringify(collect(), null, 2)); } catch (e) {}
+});
+render();
+</script>
+</div></body></html>
