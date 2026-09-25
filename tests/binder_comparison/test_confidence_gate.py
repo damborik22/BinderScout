@@ -189,3 +189,19 @@ def test_a_blank_numeric_cell_does_not_crash():
     row = {"sequence": "AAA", "boltz_iptm": "", "boltz_plddt_binder_mean": "0.9"}
     out = annotate_confidence_gate(pd.DataFrame([row]))
     assert out.loc[0, "confidence_n_engines"] == 1
+
+
+def test_a_duplicate_index_does_not_smear_values_across_rows():
+    """Latent, and exactly this codebase's characteristic failure: `.loc[row.name]`
+    writes to EVERY row sharing a label, so two rows with index 0 both got the
+    last one's value. Not reachable through the report today (the merge yields a
+    RangeIndex) but one refactor away, and silent when it happens."""
+    df = pd.DataFrame(
+        [
+            {"sequence": "A", "boltz_pae_bt_mean": 4.0, "boltz_pae_tb_mean": 6.0, "boltz_iptm": 0.9},
+            {"sequence": "B", "boltz_pae_bt_mean": 20.0, "boltz_pae_tb_mean": 20.0, "boltz_iptm": 0.2},
+        ],
+        index=[0, 0],
+    )
+    out = annotate_confidence_gate(df)
+    assert list(out["boltz_ipae_ang"]) == [5.0, 20.0], "the two rows must keep their own i_pAE"
