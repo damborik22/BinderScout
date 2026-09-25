@@ -3,8 +3,12 @@
 Wraps scripts/refold_boltz2.refold_batch() to evaluate a batch of
 binder sequences against a target using the Boltz2 JAX model.
 
-Must be run in the 'binder-eval-boltz2' conda environment:
-    conda run -n binder-eval-boltz2 binder-compare refold-boltz2 ...
+Must be run in the **Mosaic venv**, which holds the JAX/Boltz-2 stack -- there is
+no `binder-eval-boltz2` conda env and there never has been:
+    Mosaic/.venv/bin/binder-compare refold-boltz2 ...
+
+That is what `evaluate.sh` does (`$MOSAIC_VENV/bin/binder-compare`). The conda
+instruction this docstring used to give fails with "env not found".
 
 Output CSV columns (from refold_boltz2):
     run_id, idx, sequence, target_sequence, binder_length,
