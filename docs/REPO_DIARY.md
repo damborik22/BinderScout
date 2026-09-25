@@ -2255,3 +2255,61 @@ time the gate exists to protect.
 still needs a decision rather than an implementation; and the self-consistency
 RMSD axis, which every published gate couples with interface confidence, is still
 uncomputed.
+
+---
+
+## 2026-09-25 — Stage 2: the self-consistency axis, and a crash shipped by the previous stage's fix
+
+**We had one of the field's two gate axes.** Every published RFdiffusion-family
+pipeline couples an interface-confidence term with a design-vs-refold RMSD —
+RFD3's own gate is target-aligned binder Cα-RMSD < 2.5 Å, Bennett 2023 uses
+`af2_complex_rmsd < 5`. We computed nothing like it.
+
+**The alignment is the whole metric, and choosing wrong is silent.** Superposing
+the binder onto itself measures its FOLD; superposing on the target — the one
+molecule common to both structures — measures its PLACE. A binder that folds
+perfectly but docks on the wrong face scores ~0 Å the first way. Two paired
+tests pin the difference: the same wrongly-docked binder must fail the gate
+target-aligned *and* come back ~0.0 from `kabsch_rmsd`, so a refactor cannot
+quietly substitute one for the other.
+
+Not ported: BindCraft's 3.5 Å binder-RMSD. It is computed without superposition
+on trajectory-frame sub-poses, so it sits on no scale we can reproduce. RFD3's
+2.5 Å is target-aligned and transfers — though the preprint says it is itself
+borrowed ("cutoffs from [ref]"), which the constant records so nobody cites it
+as RFD3-validated.
+
+**A crash shipped by the previous stage.** Wiring `--collect-structures`
+yesterday broke `extract`: `structures.py` imported gemmi unguarded, extract runs
+in `binder-eval`, and gemmi is deliberately absent there. `pyproject.toml` states
+that contract outright — *"imported inside functions, behind guards that keep
+their modules importable without them"* — and that one file did not hold it.
+Every generated run would have extracted its sequences successfully and then died
+with `ModuleNotFoundError`. Found by executing the path, not by reading it. The
+narrow lesson: wiring a capability into a **different environment** than the one
+it was written for is its own risk, and this repo maintains four conda envs
+precisely because that matters.
+
+Following the thread further: gemmi is needed only to *convert* mmCIF, yet its
+absence was skipping collection entirely — including for plain `.pdb` files that
+never needed it. Now only the mmCIF tools lose out, and they say so.
+
+**Three gaps between the maths and a usable column**, each a quiet source of
+wrong numbers. Chain resolution is done **by sequence**, not by letter, because
+Boltz-2 puts the binder in A while AF3 and ESMFold2 use B and a design tool uses
+whatever it wrote — a mismatch CLAUDE.md already lists as a bug source. Every
+non-binder chain is target, so a multi-chain target is not truncated to one.
+And collected structures are named by position in the input list, so a manifest
+now maps them back by sequence, as everything else in this pipeline joins.
+
+**The verification that mattered.** Run through the full report on the golden
+pool, using its own AF3 structures as stand-in design models: the AF3 column
+reads **0.000 for all six** — the control proving alignment and chain resolution
+are correct — while Boltz-2 reads 1.0–3.0 Å and ESMFold2 0.56–5.10 Å. Those
+cross-engine numbers are only obtainable if the resolver handled AF3's
+binder-in-B against Boltz-2's binder-in-A. ESMFold2 shows the widest spread
+again, matching what the confidence gate found.
+
+**Open:** unchanged — the pool-filtering decision for AD's discovery metric, and
+whether the confidence and self-consistency shadow columns should ever become a
+real gate, which needs outcome labels rather than more code.
