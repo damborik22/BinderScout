@@ -62,6 +62,11 @@ def target_aligned_rmsd(
         return float("nan")
     if len(design_target) != len(refold_target) or len(design_binder) != len(refold_binder):
         return float("nan")
+    # Three non-collinear points are the minimum that determines a rigid
+    # superposition. Fewer gives a number from a rank-deficient fit, which reads
+    # as a small RMSD rather than as no answer.
+    if len(design_target) < 3:
+        return float("nan")
 
     rot, mobile_c, ref_c = _kabsch_transform(np.asarray(refold_target, float), np.asarray(design_target, float))
     moved = (np.asarray(refold_binder, float) - mobile_c) @ rot + ref_c
@@ -121,12 +126,23 @@ def split_target_binder(pdb_text: str, binder_sequence: str) -> tuple[np.ndarray
     want = "".join(binder_sequence.split()).upper()
     chains = _chains_from_pdb(pdb_text)
 
-    binder_id = next((c for c, (seq, _) in chains.items() if seq == want), None)
-    if binder_id is None:
-        # Modelled residues can be a subset of the designed sequence.
-        binder_id = next((c for c, (seq, _) in chains.items() if seq and (seq in want or want in seq)), None)
-    if binder_id is None:
+    # AMBIGUITY IS REFUSED, not resolved by file order. When two chains carry the
+    # binder's sequence -- a self-binder, a homo-oligomeric target, a binder
+    # derived from the target's own partner chain -- there is nothing to
+    # distinguish them, and picking the first meant returning the TARGET's
+    # coordinates as the binder. Their lengths necessarily agree, so no
+    # downstream check could have caught it: it produces a plausible RMSD.
+    exact = [c for c, (seq, _) in chains.items() if seq == want]
+    if len(exact) == 1:
+        binder_id = exact[0]
+    elif exact:
         return np.zeros((0, 3)), np.zeros((0, 3))
+    else:
+        # Modelled residues can be a subset of the designed sequence.
+        partial = [c for c, (seq, _) in chains.items() if seq and (seq in want or want in seq)]
+        if len(partial) != 1:
+            return np.zeros((0, 3)), np.zeros((0, 3))
+        binder_id = partial[0]
 
     binder = np.asarray(chains[binder_id][1], dtype=float)
     target_xyz = [xyz for c, (_seq, coords) in chains.items() if c != binder_id for xyz in coords]

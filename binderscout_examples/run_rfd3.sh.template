@@ -170,9 +170,22 @@ if [[ -f "$GATE" ]]; then
     echo ""
     echo "=== Geometry gate (before MPNN) ==="
     GATE_FAIL=0
+    GATE_UNVERIFIED=0
     # Quoted: rfd3_gate.py globs the pattern itself.
-    python3 "$GATE" origin   "$DIFF_DIR/*.json"   || GATE_FAIL=1
-    python3 "$GATE" geometry "$DIFF_DIR/*.cif.gz" || GATE_FAIL=1
+    # Exit 2 means the check could NOT RUN (a renamed metric, a binder chain
+    # that is not B) -- which is not the same as the backbones being bad, and
+    # must not abort a campaign with a confident wrong diagnosis.
+    python3 "$GATE" origin   "$DIFF_DIR/*.json"
+    case $? in 0) ;; 2) GATE_UNVERIFIED=1 ;; *) GATE_FAIL=1 ;; esac
+    python3 "$GATE" geometry "$DIFF_DIR/*.cif.gz"
+    case $? in 0) ;; 2) GATE_UNVERIFIED=1 ;; *) GATE_FAIL=1 ;; esac
+    if [[ $GATE_FAIL -eq 0 && $GATE_UNVERIFIED -ne 0 ]]; then
+        echo ""
+        echo "  [warn] The geometry gate could not verify these backbones -- it found no"
+        echo "  fixed_com in the sidecars, or no chain-B CA atoms. That usually means rfd3"
+        echo "  changed a metric name or the binder chain id, NOT that the designs are bad."
+        echo "  Continuing; check a sidecar .json by hand if this is a new rfd3 version."
+    fi
     if [[ $GATE_FAIL -ne 0 ]]; then
         echo ""
         echo "  These backbones look like coils, not binders. Running ProteinMPNN on"

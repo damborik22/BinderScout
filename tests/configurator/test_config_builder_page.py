@@ -53,7 +53,11 @@ def test_every_tool_the_configurator_knows_appears():
 
     page = PAGE.read_text()
     for tool in conf.REQUIRED_CFG_KEYS:
-        assert f'"{tool}"' in page, f"{tool} is missing from the builder page"
+        # Must be a CHECKBOX, not merely a key in the embedded REQUIRED blob --
+        # that blob lists every tool whatever the form shows, so `'"rfd3"' in
+        # page` stayed true with RFD3 dropped from the form, and the page would
+        # then emit a config carrying no rfd3 key at all.
+        assert f'data-tool="{tool}"' in page, f"{tool} has no checkbox in the builder form"
 
 
 def test_it_uses_pxdesign_local_not_pxdesign():
@@ -76,7 +80,10 @@ def test_the_page_is_self_contained():
     network, which is the situation it exists for."""
     page = PAGE.read_text()
     assert "<script" in page
-    for remote in ("http://", "https://cdn", 'src="//'):
+    # Any scheme-ful or protocol-relative reference. The previous list checked
+    # "http://" and "https://cdn", so a fonts.googleapis.com stylesheet and an
+    # unpkg script both passed.
+    for remote in ("http://", "https://", 'src="//', 'href="//'):
         assert remote not in page, f"the page references {remote} — it must be self-contained"
 
 

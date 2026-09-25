@@ -25,13 +25,23 @@ def _chain_sequences(path: Path) -> dict[str, str]:
     try:
         import gemmi  # local import — keeps the module importable without gemmi
     except ImportError:
-        # PDB never needed gemmi to read. Falling back keeps design-structure
-        # matching working in binder-eval, where gemmi is deliberately absent;
-        # only mmCIF genuinely requires it.
-        if path.suffix.lower() == ".pdb":
+        # PDB never needed gemmi to read, gzipped or not -- only mmCIF genuinely
+        # requires it. Testing `suffix == ".pdb"` was wrong for d.pdb.gz, whose
+        # suffix is ".gz", while _STRUCT_GLOBS matches *.pdb.gz: those designs
+        # silently indexed to nothing in binder-eval.
+        name = path.name.lower()
+        if name.endswith(".pdb") or name.endswith(".pdb.gz"):
+            import gzip
+
             from .comparison.self_consistency import _chains_from_pdb
 
-            return {c: seq for c, (seq, _xyz) in _chains_from_pdb(path.read_text()).items()}
+            opener = gzip.open if name.endswith(".gz") else open
+            try:
+                with opener(path, "rt", errors="replace") as fh:
+                    text = fh.read()
+            except OSError:
+                return {}
+            return {c: seq for c, (seq, _xyz) in _chains_from_pdb(text).items()}
         return {}
 
     try:

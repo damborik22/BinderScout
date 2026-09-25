@@ -42,6 +42,10 @@ REAL_ENVS = {
 # Names that appear as placeholders/defaults rather than real instructions.
 IGNORE = {"base", "ENV", "NAME", "X", "$ENV", "${ENV}"}
 
+# English that can follow "conda activate"/"conda run -n" in prose. Kept
+# explicit so a real env name can never be excused by a pattern.
+PROSE_WORDS = {"for", "the", "a", "an", "and", "in", "to", "it", "this", "that", "your", "each"}
+
 PATTERNS = [
     re.compile(r"conda run -n ([A-Za-z0-9_.\-]+)"),
     re.compile(r"conda activate ([A-Za-z0-9_.\-]+)"),
@@ -73,11 +77,13 @@ def test_every_referenced_conda_env_is_one_we_build():
             for name in pat.findall(text):
                 if name in REAL_ENVS or name in IGNORE or name.startswith(("$", "{", "%")):
                     continue
-                # Every env this project builds carries a hyphen, an underscore
-                # or a capital. A bare lowercase word is prose that happened to
-                # follow the phrase -- e.g. "around conda activate for envs
-                # using cuda-nvcc hooks".
-                if name.islower() and name.isalpha():
+                # An explicit stoplist, NOT a lowercase heuristic. The earlier
+                # rule ("a bare lowercase word is prose") let `conda activate
+                # mosaic` through -- which is the single highest-value case
+                # here, since Mosaic is a uv VENV and not a conda env at all --
+                # and `boltzgen`, one character-class away from the real
+                # BoltzGen.
+                if name in PROSE_WORDS:
                     continue
                 offenders.setdefault(rel, set()).add(name)
 

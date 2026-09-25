@@ -20,24 +20,41 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 CLAUDE = REPO / "CLAUDE.md"
-INSTALLER = REPO / "install" / "install.sh"
+# BOTH installers: CLAUDE.md documents `install_aarch.sh --tool ...` invocations
+# too, and the aarch64 one was never parsed.
+INSTALLERS = (REPO / "install" / "install.sh", REPO / "install" / "install_aarch.sh")
 
 
 def _accepted_tool_names() -> set[str]:
-    """The labels of the installer's `--tool` case block."""
-    text = INSTALLER.read_text()
+    """The labels of every installer's `--tool` case block."""
     marker = 'case "${2,,}" in'
-    assert marker in text, "install.sh no longer parses --tool with that case block — update this test"
-    block = text.split(marker, 1)[1].split("esac", 1)[0]
     names: set[str] = set()
-    for m in re.finditer(r"^\s*([a-z0-9|_-]+)\)", block, re.M):
-        names.update(part.strip() for part in m.group(1).split("|"))
-    assert names, "parsed no tool names out of install.sh"
+    for installer in INSTALLERS:
+        if not installer.is_file():
+            continue
+        text = installer.read_text()
+        assert marker in text, f"{installer.name} no longer parses --tool with that case block"
+        block = text.split(marker, 1)[1].split("esac", 1)[0]
+        for m in re.finditer(r"^\s*([a-z0-9|_-]+)\)", block, re.M):
+            names.update(part.strip() for part in m.group(1).split("|"))
+    assert names, "parsed no tool names out of the installers"
     return names
 
 
 def _documented_tool_names() -> set[str]:
-    return set(re.findall(r"binderscout install --tool ([a-z0-9_-]+)", CLAUDE.read_text()))
+    """Every `--tool NAME` CLAUDE.md shows, whatever precedes it.
+
+    The old pattern required `binderscout install --tool` adjacently, so it
+    missed both `binderscout install --uninstall --tool X` (a form CLAUDE.md
+    documents) and every `bash install/install_aarch.sh --tool X`.
+    """
+    text = CLAUDE.read_text()
+    names: set[str] = set()
+    for line in text.splitlines():
+        if not re.search(r"(binderscout install|install(_aarch)?\.sh)", line):
+            continue
+        names.update(re.findall(r"--tool +([a-z0-9_-]+)", line))
+    return names
 
 
 def test_every_documented_tool_name_is_accepted():

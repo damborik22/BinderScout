@@ -118,12 +118,24 @@ def main(argv=None) -> None:
     # shared library) and every row is empty — writing that file lets a caller
     # spend hours joining nothing, which is exactly how the string-constructor
     # TypeError stayed invisible.
-    n_scored = sum(1 for r in rows if r["interface_dG"] != "")
+    # A row counts as scored only if an interface was actually FOUND. A wrong
+    # --interface spec does not raise -- PyRosetta returns dG 0.0 and dSASA 0.0
+    # for chains that do not exist -- so counting non-empty cells let a full
+    # panel of zeros pass this guard. Measured on a real 2-chain pose: B_A gives
+    # dSASA 4469, a bogus Z_Q gives 0.0 with no exception.
+    def _scored(r) -> bool:
+        try:
+            return r["interface_dG"] != "" and float(r["interface_dSASA"]) > 0.0
+        except (TypeError, ValueError):
+            return False
+
+    n_scored = sum(1 for r in rows if _scored(r))
     if rows and n_scored == 0:
         print(
-            f"[interface_energy] ERROR: 0 of {len(rows)} structures scored. The errors above are "
-            "the cause — this is an environment or API problem, not bad structures. Refusing to "
-            "write an empty panel.",
+            f"[interface_energy] ERROR: 0 of {len(rows)} structures yielded an interface "
+            f"(every dSASA is 0). Either --interface {args.interface!r} names chains these "
+            "structures do not have, or this is an environment/API problem. Refusing to write "
+            "a panel of zeros.",
             file=sys.stderr,
         )
         sys.exit(1)

@@ -82,8 +82,8 @@ def check_origin(pattern, limit=40):
         if m.get("radius_of_gyration"):
             rgs.append(m["radius_of_gyration"])
     if not mags:
-        print("  ORIGIN GATE: no fixed_com in sidecars — cannot verify")
-        return False
+        print("  ORIGIN GATE: no fixed_com in sidecars — CANNOT VERIFY (not a failure)")
+        return None
     mm = st.mean(mags)
     print(f"  sidecars checked  {len(mags)}")
     print(f"  |fixed_com|       {mm:.2f} A   (want >5; round-1 was 23.05, BROKEN round-3 was 0.008)")
@@ -101,8 +101,8 @@ def check_geometry(pattern, limit=40):
         if len(c) >= 25:
             rows.append(geom(c))
     if not rows:
-        print("  GEOMETRY GATE: no chain-B CA atoms found — cannot verify")
-        return False
+        print("  GEOMETRY GATE: no chain-B CA atoms found — CANNOT VERIFY (not a failure)")
+        return None
     rgr = st.mean(r[0] for r in rows)
     lr = st.mean(r[1] for r in rows)
     hx = st.mean(r[2] for r in rows)
@@ -146,12 +146,24 @@ def check_composition(seqs):
     return ok
 
 
+def _exit(verdict):
+    """0 = pass, 1 = measured failure, 2 = could not verify.
+
+    The third code matters: "no fixed_com in the sidecars" and "no chain-B CA
+    atoms" mean the check could not run -- an rc-foundry that renames a metric,
+    or labels the binder chain something other than B. Collapsing those into 1
+    made the caller abort a campaign, after the entire diffusion cost, with a
+    confident and wrong diagnosis ("these backbones look like coils").
+    """
+    sys.exit(0 if verdict else (2 if verdict is None else 1))
+
+
 if __name__ == "__main__":
     mode = sys.argv[1]
     if mode == "origin":
-        sys.exit(0 if check_origin(sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 40) else 1)
+        _exit(check_origin(sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 40))
     if mode == "geometry":
-        sys.exit(0 if check_geometry(sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 40) else 1)
+        _exit(check_geometry(sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 40))
     seqs, tl = [], int(sys.argv[3])
     for fa in glob.glob(sys.argv[2]):
         for line in open(fa):

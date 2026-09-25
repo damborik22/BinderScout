@@ -65,15 +65,28 @@ _PAE_BT_COL = "{engine}_pae_bt_mean"
 _PAE_TB_COL = "{engine}_pae_tb_mean"
 
 
+def _num(row: pd.Series, col: str) -> float | None:
+    """A float from one cell, or None.
+
+    ``pd.notna("")`` is True, so a blank object cell used to reach ``float()``
+    and raise. Anything non-numeric is absent, not an error.
+    """
+    if col not in row.index:
+        return None
+    value = pd.to_numeric(row[col], errors="coerce")
+    return None if pd.isna(value) else float(value)
+
+
 def _first_present(row: pd.Series, candidates: tuple[str, ...]) -> float | None:
     for col in candidates:
-        if col in row.index and pd.notna(row[col]):
-            return float(row[col])
+        value = _num(row, col)
+        if value is not None:
+            return value
     return None
 
 
 def _get(row: pd.Series, col: str) -> float | None:
-    return float(row[col]) if col in row.index and pd.notna(row[col]) else None
+    return _num(row, col)
 
 
 def annotate_confidence_gate(df: pd.DataFrame) -> pd.DataFrame:
@@ -87,10 +100,12 @@ def annotate_confidence_gate(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     passes: list[bool | None] = []
     reasons: list[str] = []
+    missing: list[str] = []
     n_engines: list[int] = []
 
     for _, row in out.iterrows():
         failures: list[str] = []
+        unchecked: list[str] = []
         measured = 0
         for engine in _IPTM_COLS:
             iptm = _first_present(row, _IPTM_COLS[engine])
@@ -110,21 +125,41 @@ def annotate_confidence_gate(df: pd.DataFrame) -> pd.DataFrame:
             if iptm is None and plddt is None and ipae is None:
                 continue
             measured += 1
-            if iptm is not None and iptm < IPTM_MIN:
+            # A threshold we could not evaluate is NOT a pass. Recording it
+            # separately keeps "measured and good" distinct from "never checked":
+            # esmfold2_iptm_pair is NaN whenever the model returns no
+            # pair_chains_iptm, and an interface iPTM of 0.12 used to sail
+            # through a 0.5 gate with nothing written down.
+            if iptm is None:
+                unchecked.append(f"{engine}_iptm")
+            elif iptm < IPTM_MIN:
                 failures.append(f"{engine}_iptm<{IPTM_MIN}")
-            if plddt is not None and plddt < PLDDT_MIN:
+            if plddt is None:
+                unchecked.append(f"{engine}_plddt")
+            elif plddt < PLDDT_MIN:
                 failures.append(f"{engine}_plddt<{PLDDT_MIN}")
-            if ipae is not None and ipae > IPAE_MAX_ANGSTROM:
+            if ipae is None:
+                unchecked.append(f"{engine}_ipae")
+            elif ipae > IPAE_MAX_ANGSTROM:
                 failures.append(f"{engine}_ipae>{IPAE_MAX_ANGSTROM:g}A")
 
         n_engines.append(measured)
         # No engine measured this design: absence of evidence, not a failure.
-        passes.append(None if measured == 0 else not failures)
+        # A measured failure is False. Otherwise a clean True requires that every
+        # threshold was actually evaluated -- a skipped check yields NA.
+        if measured == 0:
+            passes.append(None)
+        elif failures:
+            passes.append(False)
+        else:
+            passes.append(None if unchecked else True)
         reasons.append(";".join(failures))
+        missing.append(";".join(unchecked))
 
     out["confidence_n_engines"] = n_engines
     out["passes_confidence_gate"] = pd.array(passes, dtype="boolean")
     out["confidence_fail_reasons"] = reasons
+    out["confidence_missing"] = missing
     # Shadow mode: what a hard gate WOULD drop. An unmeasured design is never
     # excluded, so this is strictly "measured and failed".
     out["would_exclude_confidence"] = [p is False for p in passes]

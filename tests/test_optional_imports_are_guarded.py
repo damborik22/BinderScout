@@ -26,9 +26,21 @@ import pytest
 
 PACKAGE = Path(__file__).resolve().parents[1] / "Evaluator" / "binder_comparison"
 
-# Packages that are NOT declared dependencies (see pyproject) and so may be
-# absent at runtime in any of the four environments.
-OPTIONAL = {"gemmi", "Bio", "scipy", "sklearn", "torch", "jax", "matplotlib"}
+# Import names worth checking. A name is OPTIONAL only when pyproject does not
+# declare it -- derived below rather than hand-listed, so adding a dependency
+# automatically stops it being treated as optional (matplotlib IS declared, and
+# was wrongly listed here at first).
+_CANDIDATES = {
+    "gemmi": "gemmi",
+    "Bio": "biopython",
+    "scipy": "scipy",
+    "sklearn": "scikit-learn",
+    "torch": "torch",
+    "jax": "jax",
+    "matplotlib": "matplotlib",
+}
+_PYPROJECT = (Path(__file__).resolve().parents[1] / "Evaluator" / "pyproject.toml").read_text()
+OPTIONAL = {imp for imp, dist in _CANDIDATES.items() if f'"{dist}' not in _PYPROJECT}
 
 # Sites that may raise, with the reason each is acceptable.
 _ALLOWED = {
@@ -77,11 +89,13 @@ def _optional_imports() -> list[tuple[str, str, int, str]]:
             pkgs = OPTIONAL.intersection(names)
             if not pkgs:
                 continue
-            fn = _enclosing_function(tree, node)
-            if fn is None:  # module-level: a different problem, not this test's
-                continue
             if _guarded(tree, node):
                 continue
+            # A module-level optional import is WORSE, not exempt: it breaks the
+            # module for every caller, not just the one code path. Skipping it
+            # left the guard blind in structures.py -- the very file whose
+            # breakage this test's docstring cites.
+            fn = _enclosing_function(tree, node) or "<module level>"
             found.append((rel, fn, node.lineno, sorted(pkgs)[0]))
     return found
 
