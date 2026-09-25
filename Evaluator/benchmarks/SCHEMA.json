@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "purpose": "Public, auditable description of a labelled design pool. The label rows themselves live in a private store outside this repository, located by $BINDERSCOUT_BENCHMARK_STORE and verified against labels.sha256 below. This repo is public; publishing outcome labels would be irreversible.",
+  "manifest_required_fields": [
+    "name",
+    "n_designs",
+    "label_column",
+    "labels"
+  ],
+  "manifest_fields": {
+    "name": "Pool identifier; must equal the containing directory name.",
+    "description": "One line: what the designs are.",
+    "source": "Provenance \u2014 paper, campaign, or assay run that produced the labels.",
+    "n_designs": "Row count of the label file. Checked on load; a mismatch is an error.",
+    "label_column": "Column in the label file holding the outcome.",
+    "label_meaning": "What the values mean, in words. E.g. '1 = measured binder, 0 = measured non-binder'.",
+    "labels": {
+      "filename": "File name inside <store>/<name>/.",
+      "sha256": "SHA-256 of that file. A mismatch is an error, not a warning: the rows would not be the ones this manifest describes."
+    },
+    "caveats": "Optional. Known label-quality problems. For Cao 2022, 73.4% of binder labels are one-sided-Kd and are experimentally indistinguishable from non-binders on Cao's own binary assay."
+  },
+  "notes": [
+    "A manifest missing any required field is refused rather than half-trusted.",
+    "list_benchmarks() must work on a machine with no private data \u2014 every CI run and every fresh clone."
+  ],
+  "example_manifest": {
+    "_comment": "Copy into Evaluator/benchmarks/<name>/MANIFEST.json and edit. A separate template FILE would be gitignored by the **/*.json rule, so the example lives here.",
+    "name": "cao2022",
+    "description": "Cao 2022 Rosetta minibinders, 12 targets",
+    "source": "Cao et al. 2022, Nature 605:551-560",
+    "n_designs": 4442,
+    "label_column": "binds",
+    "label_meaning": "1 = measured binder, 0 = measured non-binder",
+    "labels": {
+      "filename": "labels.csv",
+      "sha256": "<sha256sum of that file>"
+    },
+    "caveats": "73.4% of binder labels are one-sided-Kd and are experimentally indistinguishable from non-binders on Cao's own binary assay; macro-AUC rises from 0.56 to 0.73 once they are excluded."
+  },
+  "how_to_add_a_pool": [
+    "1. Put the label rows in $BINDERSCOUT_BENCHMARK_STORE/<name>/labels.csv -- OUTSIDE this repo.",
+    "2. sha256sum that file.",
+    "3. Create Evaluator/benchmarks/<name>/MANIFEST.json from example_manifest above.",
+    "4. Check: python -c \"from binder_comparison import benchmarks as b; print(len(b.load_labels('<name>')))\""
+  ]
+}
