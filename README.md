@@ -285,6 +285,13 @@ binderscout configure --config runs/<name>/config.json
 binderscout configure --config my_run.json --run          # …and start the pipeline
 ```
 
+**Prefer a form to eighty prompts?** Open `docs/config-builder.html` in a browser
+— no server, no network, nothing uploaded. Tick the tools, fill the fields, and it
+writes the same `config.json` the wizard would, validating the required keys per
+tool as you go. The page is generated from the configurator's own
+`REQUIRED_CFG_KEYS`, and a test fails if the two ever disagree, so it cannot drift
+into a second answer about which flags exist.
+
 Every wizard run writes its answers to `runs/<name>/config.json`, so a campaign is
 reproducible without re-typing the interview: copy the file, edit what you want to
 change (binder lengths, design counts, which tools), and replay it. Generation is
