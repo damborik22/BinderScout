@@ -112,6 +112,21 @@ a special trip.
 
 ---
 
+## Blocked on DATA, not on you
+
+Noting these so they are not mistaken for decisions.
+
+- **Stage 4 (Z, staged cheap-filter) cannot be validated on this box.** Its gate
+  needs two archived pools carrying all three engine CSVs, to measure recall at
+  the chosen keep-fraction. This machine has none — only the 6-design golden
+  fixture, which is far too small. The code could be written blind; the number
+  that says whether it is safe could not be computed.
+- **Stage 1's remaining gate needs a real campaign.** Its stated criterion is
+  "holdout passes a KS test vs the pool", which needs a pool with a real
+  generation order. Same missing ingredient.
+
+---
+
 ## Also worth knowing
 
 - **CLAUDE.md said "Scrubbed from tree and history 2026-09-22" and that was
