@@ -42,6 +42,10 @@ BINDCRAFT2_REPO="https://github.com/PacesaLab/BindCraft2.git"
 BINDCRAFT2_SOURCE="${BINDCRAFT2_SOURCE:-$BINDCRAFT2_REPO}"   # --bc2-source, env, or upstream
 BINDCRAFT2_COMMIT="${BINDCRAFT2_COMMIT:-v1.0.1}"   # only consulted for a git source
 
+PROTEINA_COMPLEXA_REPO="${PROTEINA_COMPLEXA_REPO:-https://github.com/NVIDIA-Digital-Bio/proteina-complexa.git}"
+PROTEINA_COMPLEXA_COMMIT="${PROTEINA_COMPLEXA_COMMIT:-HEAD}"
+PROTEINA_COMPLEXA_DIR="${BINDERSCOUT_DIR}/Proteina-Complexa"
+
 # aarch64: VALIDATED on GB10/sm_121 — jax-cuda13 0.11.1 takes the GPU, biotraj
 # (the only source build in the tree) compiles, and a campaign runs to completion
 # with the two guard settings run_bindcraft2.sh injects. Out of --tool all for
@@ -102,6 +106,13 @@ DO_PROTEIN_HUNTER=false # opt-in via --tool protein-hunter. PyRosetta comes from
                         # aarch64 hardware, so it is kept out of --tool all.
 DO_RFD3=false           # opt-in via --tool rfd3. Should work (pip-only, no DGL) but is
                         # UNVALIDATED on aarch64 hardware, so it is kept out of --tool all.
+DO_PROTEINA_COMPLEXA=false  # opt-in via --tool proteina-complexa. Deprecated here until
+                        # 2026-09-26: the original reason ("no CUDA jaxlib for aarch64") was
+                        # disproved, and the real blocker -- jax 0.4.x cannot compile an
+                        # AF2-class graph for sm_121 -- is fixed by jax 0.6.2, which BindCraft 1
+                        # already uses on this hardware. UNVALIDATED end to end, so not in
+                        # --tool all: the throughput question that drove the deprecation
+                        # (3300 AF2 calls per replicate) is only answerable by running it.
 DO_ESMFOLD2=false       # in --tool all (default refold engine) (lightweight 4th refold engine; no gated weights)
 DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen; source-builds scikit-learn 0.20.4 + USEARCH v12, uses the --no_tmhmm model)
 
@@ -140,18 +151,13 @@ while [[ $# -gt 0 ]]; do
                 protein-hunter|protein_hunter|phunter)
                     DO_PROTEIN_HUNTER=true ;;
                 proteina-complexa|proteina_complexa|complexa)
-                    # DEPRECATED 2026-07-29 — a throughput verdict, not an install failure.
-                    # Upstream complexa DOES install and generate on Spark. But there is no CUDA
-                    # jaxlib for aarch64, so the AF2 reward — the only reward in the composite —
-                    # runs on CPU at ~320 s/call vs <=2.46 s on an H200. The production MCTS recipe
-                    # costs 3300 AF2 calls per 100-design replicate, i.e. 12.2 days here vs 2.25 h.
-                    # See docs/plans.md "Proteina-Complexa on aarch64 (DGX Spark) — NOT VIABLE".
-                    echo -e "${RED}Proteina-Complexa is deprecated on aarch64 (DGX Spark): not viable, not broken.${RESET}"
-                    echo -e "${YELLOW}  No CUDA jaxlib for aarch64 → the AF2 reward runs on CPU (~320 s/call vs 2.5 s on H200).${RESET}"
-                    echo -e "${YELLOW}  The production MCTS recipe needs 3300 AF2 calls per 100-design replicate:${RESET}"
-                    echo -e "${YELLOW}    12.2 days here vs 2.25 h on one H200. Run Proteina-Complexa on x86 (Clara / BM1-BM4).${RESET}"
-                    echo -e "${YELLOW}  Details + what would reopen it: docs/plans.md.${RESET}"
-                    exit 1 ;;
+                    # The 2026-07-29 deprecation reason ("no CUDA jaxlib for aarch64") was
+                    # disproved on 09-18; the real blocker was that jax 0.4.x cannot compile an
+                    # AF2-class graph for sm_121. That is fixed twice over on this hardware now
+                    # (BindCraft 1 on jax[cuda12]==0.6.2, BindCraft 2 on jax-cuda13 0.11.1), and
+                    # PC's AF2 reward is the same ColabDesign, so it inherits the fix.
+                    # Opt-in, NOT in --tool all: unvalidated end to end here.
+                    DO_PROTEINA_COMPLEXA=true ;;
                 af3|alphafold3|alphafold)
                     DO_AF3=true ;;
                 esmfold2|esm|esmfold)
@@ -877,6 +883,7 @@ select_tools_interactive() {
     [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
     [[ "$DO_AF3"       == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; weights required)${RESET}"
     [[ "$DO_RFD3"      == true ]] && echo -e "    ${GREEN}✓${RESET} RFD3 (opt-in; unvalidated on aarch64)"
+    [[ "$DO_PROTEINA_COMPLEXA" == true ]] && echo -e "    ${GREEN}✓${RESET} Proteina-Complexa (opt-in; jax 0.6.2 GPU path, unvalidated end-to-end)"
     [[ "$DO_ESMFOLD2"  == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (default refolder)"
     [[ "$DO_SOLUPROT"  == true ]] && echo -e "    ${GREEN}✓${RESET} SoluProt (opt-in solubility screen; aarch64 via source build)"
     echo ""
@@ -2887,6 +2894,167 @@ _build_usearch_v12() {
     return 1
 }
 
+install_proteina_complexa() {
+    print_step "Installing Proteina-Complexa — aarch64 (GB10 / sm_121)"
+
+    # WHY THIS EXISTS, AND WHAT IS AND IS NOT PROVEN.
+    #
+    # PC was deprecated here on 2026-07-29 with the reason "no CUDA jaxlib for
+    # aarch64". That reason was disproved on 2026-09-18 (96a1f02): the CUDA
+    # plugin does exist and gives `backend: gpu` on jax 0.4.29. The REAL blocker
+    # was identified there instead -- jax 0.4.x cannot compile an AF2-class graph
+    # for sm_121, aborting with `LLVM ERROR: Unsupported rounding mode for
+    # conversion`.
+    #
+    # That blocker is now gone, twice over on this hardware: BindCraft 1 runs AF2
+    # on the GPU here on jax[cuda12]==0.6.2 (9c29729), and BindCraft 2 runs on
+    # jax-cuda13 0.11.1. PC's AF2 reward IS ColabDesign -- the same library -- so
+    # it inherits the same fix. Hence jax 0.6.2 below instead of the jax[cpu]
+    # 0.4.29 the manual Blackwell port used.
+    #
+    # NOT PROVEN: nobody has run this. It is assembled from the documented
+    # five-blocker recipe plus the jax that works, and the smoke test at the end
+    # is written to FAIL rather than flatter -- it runs a real AF2 forward pass,
+    # because this repo has already once declared aarch64 support on the strength
+    # of `jax reports gpu` plus a successful import, and been wrong.
+    if ! command -v uv &>/dev/null && [[ ! -x "${HOME}/.local/bin/uv" ]]; then
+        run_logged "Installing uv" bash -c "curl -fsSL https://astral.sh/uv/install.sh | sh" \
+            || { print_fail "uv install failed"; return 1; }
+    fi
+    local UV="${HOME}/.local/bin/uv"
+    command -v uv &>/dev/null && UV="$(command -v uv)"
+
+    if [[ ! -d "${PROTEINA_COMPLEXA_DIR}" ]]; then
+        run_logged "Cloning Proteina-Complexa" \
+            git clone --depth 50 "${PROTEINA_COMPLEXA_REPO}" "${PROTEINA_COMPLEXA_DIR}" \
+            || { print_fail "Clone failed"; return 1; }
+        if [[ "${PROTEINA_COMPLEXA_COMMIT}" != "HEAD" ]]; then
+            git -C "${PROTEINA_COMPLEXA_DIR}" checkout "${PROTEINA_COMPLEXA_COMMIT}" --quiet \
+                || print_warn "Could not pin to ${PROTEINA_COMPLEXA_COMMIT} — using latest"
+        fi
+    fi
+
+    # Upstream env/build_uv_env.sh is x86/cu126-pinned, so the venv is built here.
+    run_logged "Creating uv venv (python 3.12)" \
+        bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && '${UV}' venv --python 3.12 .venv" \
+        || { print_fail "uv venv failed"; return 1; }
+
+    local PCPIP=("${UV}" pip install --python "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" -q)
+
+    # Blocker 1: torch. cu126 has no aarch64 build; cu130 is what this box runs.
+    run_logged "Installing PyTorch (cu130, aarch64)" \
+        "${PCPIP[@]}" torch torchvision --index-url https://download.pytorch.org/whl/cu130 \
+        || { print_fail "PyTorch install failed"; return 1; }
+
+    run_logged "Installing Proteina-Complexa (editable)" \
+        bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && '${UV}' pip install --python .venv/bin/python -q -e ." \
+        || { print_fail "PC editable install failed"; return 1; }
+
+    # Blocker 2: torch_scatter has no aarch64 wheel and needs no compile here --
+    # PC's only use is scatter_mean, which torch itself can do. A 2 KB shim beats
+    # a source build of the whole package.
+    local SHIM="${PROTEINA_COMPLEXA_DIR}/.venv/lib/python3.12/site-packages/torch_scatter.py"
+    if [[ ! -f "${SHIM}" ]]; then
+        cat > "${SHIM}" <<'SHIMPY'
+"""Minimal torch_scatter stand-in — scatter_mean only.
+
+Proteina-Complexa's sole torch_scatter reference is scatter_mean, and the real
+package has no aarch64 wheel. torch's own scatter_add_ expresses it exactly, so
+this avoids a source build of a CUDA extension for one function.
+"""
+
+import torch
+
+
+def scatter_mean(src, index, dim=0, out=None, dim_size=None):
+    if dim_size is None:
+        dim_size = int(index.max()) + 1 if index.numel() else 0
+    shape = list(src.shape)
+    shape[dim] = dim_size
+    total = torch.zeros(shape, dtype=src.dtype, device=src.device)
+    count = torch.zeros(dim_size, dtype=src.dtype, device=src.device)
+    idx = index
+    while idx.dim() < src.dim():
+        idx = idx.unsqueeze(-1)
+    total.scatter_add_(dim, idx.expand_as(src), src)
+    count.scatter_add_(0, index, torch.ones_like(index, dtype=src.dtype))
+    count = count.clamp(min=1)
+    while count.dim() < total.dim():
+        count = count.unsqueeze(-1)
+    result = total / count
+    return result if out is None else out.copy_(result)
+SHIMPY
+        print_ok "torch_scatter shim written (scatter_mean only)"
+    fi
+
+    # Blocker 3, and the whole point of this function: the AF2 reward's JAX.
+    # jax[cpu]==0.4.29 was the manual port's answer because 0.4.x cannot compile
+    # AF2 for sm_121 at all. 0.6.2 can, and is the version BindCraft 1 uses here.
+    run_logged "Installing jax[cuda12]==0.6.2 + colabdesign (AF2 reward)" \
+        "${PCPIP[@]}" "jax[cuda12]==0.6.2" git+https://github.com/sokrypton/ColabDesign.git \
+        || { print_fail "jax/colabdesign install failed"; return 1; }
+
+    # Blocker 4/5 and the rest of the manual recipe.
+    run_logged "Installing biotite 1.6.0 + graphein + atomworks" \
+        "${PCPIP[@]}" "biotite==1.6.0" graphein atomworks \
+        || print_warn "biotite/graphein/atomworks install failed — some PC paths may not import"
+
+    # THE SMOKE TEST, and it is deliberately narrow.
+    #
+    # `jax.devices("gpu")` succeeding proves nothing -- that check plus a clean
+    # import is exactly what made this repo claim BindCraft ran on aarch64 when it
+    # did not. What actually failed on jax 0.4.x was XLA's LOWERING of a bf16
+    # conversion for sm_121 ("Unsupported conversion from bf16 to f16" /
+    # "Unsupported rounding mode for conversion"), and ColabDesign runs AF2 in
+    # bf16 by default. So this compiles and runs a jitted bf16 graph, which
+    # exercises that path without needing the ~4 GB of AF2 parameters.
+    #
+    # It does NOT prove a full AF2 pass, let alone throughput. Both remain to be
+    # confirmed on the box -- see the closing note.
+    print_step "Smoke test: compiling a jitted bf16 graph on this GPU"
+    if "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" - <<'SMOKE'
+import sys
+
+import jax
+import jax.numpy as jnp
+
+print(f"  jax {jax.__version__} | backend {jax.default_backend()}")
+if jax.default_backend() != "gpu":
+    print("  FAIL: jax has no GPU backend", file=sys.stderr)
+    sys.exit(1)
+print(f"  device: {jax.devices()[0]}")
+
+
+@jax.jit
+def _bf16_graph(x):
+    # A convert + matmul + reduction in bf16 -- the lowering that aborted on 0.4.x.
+    y = x.astype(jnp.bfloat16)
+    z = jnp.einsum("ij,jk->ik", y, y.T)
+    return jax.nn.softmax(z.astype(jnp.float32), axis=-1).sum()
+
+out = float(_bf16_graph(jnp.ones((128, 128), dtype=jnp.float32)))
+print(f"  bf16 graph compiled and ran: {out:.3f}")
+
+try:
+    import colabdesign  # noqa: F401
+
+    print("  colabdesign imports")
+except Exception as exc:  # pragma: no cover
+    print(f"  FAIL: colabdesign does not import: {exc}", file=sys.stderr)
+    sys.exit(1)
+SMOKE
+    then
+        print_ok "bf16 lowering works on this GPU — the jax 0.4.x blocker is gone"
+    else
+        print_fail "The bf16 graph FAILED to compile — the XLA/LLVM blocker is NOT resolved here."
+        print_warn "Do NOT treat PC as operable. Capture the error and reopen docs/plans.md."
+        return 1
+    fi
+
+    print_ok "Proteina-Complexa installed (aarch64) — UNVALIDATED end-to-end; run a short MCTS to confirm throughput"
+}
+
+
 install_soluprot() {
     print_step "Installing SoluProt 1.0 solubility screen (aarch64 — binder-eval-soluprot env)"
     ensure_conda_in_path
@@ -3206,6 +3374,7 @@ main() {
     [[ "${DO_EVALUATOR}" == true ]] && (( total++ ))
     [[ "${DO_PXDESIGN}"  == true ]] && (( total++ ))
     [[ "${DO_RFD3}"      == true ]] && (( total++ ))
+    [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && (( total++ ))
     [[ "${DO_BINDCRAFT2}" == true ]] && (( total++ ))
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && (( total++ ))
     [[ "${DO_AF3}"       == true ]] && (( total++ ))
@@ -3221,6 +3390,7 @@ main() {
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
     [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
     [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}"; install_rfd3 || failed_tools+=("RFD3"); }
+    [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
     # Opt-in on this platform, so an unresolvable source is always a hard failure:
     # nothing reaches this line without an explicit --tool bindcraft2.
     [[ "${DO_BINDCRAFT2}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft 2${RESET}"; install_bindcraft2 || failed_tools+=("BindCraft 2"); }

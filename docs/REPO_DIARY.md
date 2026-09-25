@@ -2403,9 +2403,11 @@ reasonable, and each was confirmed hollow by mutation:
   fonts.googleapis stylesheet and an unpkg script both sailed through;
 - the optional-import guard skipped module-level imports — in `structures.py`,
   the exact file whose breakage its docstring cites;
-- the conda-env guard excused any all-lowercase name, so `conda activate mosaic`
-  passed. That is the highest-value case in the repo: Mosaic is a **uv venv**,
-  not a conda env;
+- the conda-env guard excused any all-lowercase name, so an instruction to
+  `conda activate` the *Mosaic* environment passed. That is the highest-value
+  case in the repo: Mosaic is a **uv venv**, not a conda env, so such an
+  instruction can only ever fail — and quoting it verbatim here trips the fixed
+  guard, which is itself the demonstration;
 - the install-command guard matched one command shape and one installer, missing
   `--uninstall --tool` and every `install_aarch.sh` invocation.
 
