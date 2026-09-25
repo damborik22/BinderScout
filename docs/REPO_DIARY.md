@@ -2196,3 +2196,62 @@ extractor inputs are already downstream of a quality filter, so a discovery rank
 them is conditioned on survival); `tools/rfd3_gate.py` and `binder-compare prefilter`
 both written and neither wired; and the self-consistency RMSD axis, which every
 published gate couples with interface confidence and we do not compute at all.
+
+---
+
+## 2026-09-25 — Stage 1: the RFD3 gate and the fold-back rank were both written and neither was connected
+
+Two capabilities already in the repo, neither reachable from a generated run.
+That is now three instances of the same defect class in this release line — the
+tool CSVs, the design structures, and these — which is enough to call it a
+pattern rather than an accident: **this repo's characteristic failure is
+building the thing and not wiring it.**
+
+**The geometry gate now runs between diffusion and ProteinMPNN**, which is where
+CLAUDE.md has said it belongs since the round-3 post-mortem. The history is the
+argument: 304 backbones shipped as extended coils because
+`infer_ori_strategy: hotspots` was missing, and nothing caught it — the
+structures still report `n_chainbreaks=0`, so every downstream guard passed. It
+cost an MPNN pass, a refold, and a wrong conclusion about the epitope, and the
+ApoE4 run shipped a gene order with the same defect. The detector is arithmetic
+on data rfd3 already writes: `|fixed_com|` is ~23 Å with the key and ~0 without.
+
+It **stops** rather than annotates, which is a deliberate departure from the 2.0
+shadow-mode rule, and the distinction is worth stating: shadow mode governs
+*design-quality* filters whose false-negative rate is unvalidated. This is a
+*config-correctness* check — it says the run is broken, not that the designs are
+weak. `RFD3_IGNORE_GATE=1` overrides. Wired into both the template and the
+configurator, which mirrors the template rather than generating from it; a
+hand-written script copied from that template is precisely how the original
+omission propagated.
+
+**The fold-back ranking gives RFD3 a native rank it otherwise lacks.** A
+diffusion model scores nothing, so the fallback was `mpnn_sequence_recovery` — a
+sequence proxy with no binding signal. Running `prefilter` on the Boltz-2
+results the pipeline *already produced* costs no extra GPU, and matches the
+field-standard recipe the literature pass established: diffusion gives geometry,
+the fold-back gives the rank.
+
+**Wiring it exposed a real gap, and this is the part worth remembering.**
+`prefilter`'s documented recipe assumes an RFD3-only FASTA. The pipeline's FASTA
+is every tool, and `report --tool-csv <tool>=<file>` takes the whole file as that
+tool's ranked list *without consulting the `tool` column it contains*. So an
+unfiltered selection would have filed every tool's designs under RFD3's name,
+ranked by Boltz-2 — a plausible-looking native block that was mostly other
+tools' work. Hence `--only-tool`, applied before `--top` so a top-N means N of
+that tool. A tool absent from the pool now yields 0 rows rather than everything,
+which is the failure mode that would have been hardest to notice.
+
+Verified on the golden pool: six real designs ranked 0.712 → 0.479. The order
+differs slightly from the report's own ranking, which is the point — `prefilter`
+ranks on single-engine Boltz-2 `ipsae_min` while the report ranks on cross-engine
+`consensus_iptm_mean`.
+
+**Small guard added:** `bash -n` on the generated RFD3 script. The gate block is
+real shell, and a quoting slip would kill the run at launch — after the diffusion
+time the gate exists to protect.
+
+**Open:** the pool-filtering question for AD's discovery metric is unchanged and
+still needs a decision rather than an implementation; and the self-consistency
+RMSD axis, which every published gate couples with interface confidence, is still
+uncomputed.
