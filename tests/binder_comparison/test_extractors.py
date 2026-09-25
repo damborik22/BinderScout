@@ -652,3 +652,35 @@ class TestSequenceHygieneAcrossExtractors:
             got = extractor.extract(d)
             assert got, f"{expected}: extracted nothing"
             assert got[0].source_tool == expected
+
+
+def test_collect_structures_without_gemmi_warns_instead_of_crashing(tmp_path, monkeypatch):
+    """Structure collection is an enhancement; losing it must not lose the pool.
+
+    ``pyproject.toml`` states the contract: gemmi is deliberately not a
+    dependency because it is "imported inside functions, behind guards that keep
+    their modules importable without them". ``structures.py`` did not guard, so
+    ``extract --collect-structures`` -- which runs in ``binder-eval``, where
+    gemmi is absent -- died with ModuleNotFoundError and took the whole
+    extraction with it.
+    """
+    import builtins
+
+    from binder_comparison.structures import collect_design_structures
+
+    real_import = builtins.__import__
+
+    def no_gemmi(name, *a, **kw):
+        if name == "gemmi":
+            raise ModuleNotFoundError("No module named 'gemmi'")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", no_gemmi)
+
+    src = tmp_path / "designs"
+    src.mkdir()
+    (src / "d1.pdb").write_text("ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00\n")
+
+    with pytest.warns(UserWarning, match="gemmi"):
+        n = collect_design_structures(src, ["MKTAYIAK"], tmp_path / "out")
+    assert n == 0, "nothing collected, but the caller survives"

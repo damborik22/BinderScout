@@ -22,7 +22,10 @@ def _clean(seq: str) -> str:
 
 def _chain_sequences(path: Path) -> dict[str, str]:
     """Return {chain_id: cleaned 1-letter sequence} via gemmi (handles pdb/cif/.gz)."""
-    import gemmi
+    try:
+        import gemmi  # local import — keeps the module importable without gemmi
+    except ImportError:
+        return {}
 
     try:
         st = gemmi.read_structure(str(path))
@@ -76,7 +79,19 @@ def collect_design_structures(
     backbones) simply match nothing → 0 collected → the report falls back to the
     refold structure for them, which is correct.
     """
-    import gemmi
+    try:
+        import gemmi  # local import — keeps the module importable without gemmi
+    except ImportError:
+        # Structure collection is an enhancement; the sequences are the product.
+        # Without this guard `extract --collect-structures` died with
+        # ModuleNotFoundError in binder-eval (where gemmi is deliberately absent,
+        # see pyproject) and took the whole extraction with it.
+        warnings.warn(
+            "gemmi is not installed — skipping --collect-structures. The design sequences are "
+            "unaffected; the report will fall back to refolded structures.",
+            stacklevel=2,
+        )
+        return 0
 
     out_dir = Path(out_dir)
     index = seq_to_structure_index(input_dir, max_files=max_files)
