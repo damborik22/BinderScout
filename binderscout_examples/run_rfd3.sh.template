@@ -153,6 +153,39 @@ rfd3 design \
 # Chain IDs in the cif are letters (A/B); the label_entity_id column shows
 # 0/1 but those are entity IDs, NOT chain IDs.
 
+# ── Geometry gate: run BEFORE MPNN, on what diffusion just wrote ───────────
+# Round 3 shipped 304 backbones that were extended coils because
+# `infer_ori_strategy: hotspots` was missing, and nothing caught it — the
+# structures still report n_chainbreaks=0, so every downstream guard passed. It
+# cost a full MPNN + refold cycle and a wrong epitope conclusion, and the ApoE4
+# RFD3 run shipped a gene order with the same defect.
+#
+# The detector is arithmetic on data rfd3 already writes into every sidecar:
+# |fixed_com| is ~23 A with the key and ~0 without. This is a CONFIG-CORRECTNESS
+# check, not a design-quality filter — it says "this run is broken", not "these
+# designs are weak" — so it stops rather than annotates. Set RFD3_IGNORE_GATE=1
+# to proceed anyway.
+GATE="$BMDIR/tools/rfd3_gate.py"
+if [[ -f "$GATE" ]]; then
+    echo ""
+    echo "=== Geometry gate (before MPNN) ==="
+    GATE_FAIL=0
+    # Quoted: rfd3_gate.py globs the pattern itself.
+    python3 "$GATE" origin   "$DIFF_DIR/*.json"   || GATE_FAIL=1
+    python3 "$GATE" geometry "$DIFF_DIR/*.cif.gz" || GATE_FAIL=1
+    if [[ $GATE_FAIL -ne 0 ]]; then
+        echo ""
+        echo "  These backbones look like coils, not binders. Running ProteinMPNN on"
+        echo "  them wastes the MPNN pass and every refold after it."
+        echo "  Check 'infer_ori_strategy: hotspots' is in the input YAML above."
+        echo "  Set RFD3_IGNORE_GATE=1 to continue anyway."
+        [[ -n "${RFD3_IGNORE_GATE:-}" ]] || exit 1
+        echo "  RFD3_IGNORE_GATE set — continuing against the gate's advice."
+    fi
+else
+    echo "[warn] $GATE not found — skipping the pre-MPNN geometry gate."
+fi
+
 # ── Stage 2: ensure ProteinMPNN weights are installed ──────────────────────
 PROTEINMPNN_CKPT="$WEIGHTS_DIR/proteinmpnn_v_48_020.pt"
 if [[ ! -f "$PROTEINMPNN_CKPT" ]]; then

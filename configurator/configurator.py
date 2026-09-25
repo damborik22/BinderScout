@@ -147,6 +147,8 @@ PROTEINA_COMPLEXA_DIR = BINDERSCOUT_DIR / "Proteina-Complexa"
 PROTEINA_COMPLEXA_VENV = PROTEINA_COMPLEXA_DIR / ".venv"
 PROTEIN_HUNTER_DIR = BINDERSCOUT_DIR / "Protein-Hunter"
 FOUNDRY_WEIGHTS_DIR = BINDERSCOUT_DIR / "weights" / "foundry"
+# Pre-MPNN backbone-geometry gate (config-correctness check, not a quality filter).
+RFD3_GATE = BINDERSCOUT_DIR / "tools" / "rfd3_gate.py"
 # BindCraft 2 installs EDITABLE into a venv beside its own checkout, so the
 # directory is the installation: both halves must exist for it to be usable.
 BINDCRAFT2_DIR = BINDERSCOUT_DIR / "BindCraft2"
@@ -2725,6 +2727,37 @@ echo ""
 
 # Output: <design>.cif.gz (compressed mmCIF, chain A=target, chain B=binder, UNK)
 #         <design>.json   (sidecar metrics: helix_fraction, n_clashing, ...)
+
+# ── Geometry gate: run BEFORE MPNN, on what diffusion just wrote ───────────
+# Round 3 shipped 304 backbones that were extended coils because
+# `infer_ori_strategy: hotspots` was missing, and nothing caught it -- the
+# structures still report n_chainbreaks=0, so every downstream guard passed. It
+# cost a full MPNN + refold cycle and a wrong epitope conclusion, and the ApoE4
+# RFD3 run shipped a gene order with the same defect.
+#
+# This is a CONFIG-CORRECTNESS check, not a design-quality filter -- it says
+# "this run is broken", not "these designs are weak" -- so it stops rather than
+# annotates. Set RFD3_IGNORE_GATE=1 to proceed anyway.
+GATE="{RFD3_GATE}"
+if [[ -f "$GATE" ]]; then
+    echo ""
+    echo "=== Geometry gate (before MPNN) ==="
+    GATE_FAIL=0
+    # Quoted: rfd3_gate.py globs the pattern itself.
+    python3 "$GATE" origin   "$DIFF_DIR/*.json"   || GATE_FAIL=1
+    python3 "$GATE" geometry "$DIFF_DIR/*.cif.gz" || GATE_FAIL=1
+    if [[ $GATE_FAIL -ne 0 ]]; then
+        echo ""
+        echo "  These backbones look like coils, not binders. Running ProteinMPNN on"
+        echo "  them wastes the MPNN pass and every refold after it."
+        echo "  Check 'infer_ori_strategy: hotspots' is in the input YAML above."
+        echo "  Set RFD3_IGNORE_GATE=1 to continue anyway."
+        [[ -n "${{RFD3_IGNORE_GATE:-}}" ]] || exit 1
+        echo "  RFD3_IGNORE_GATE set -- continuing against the gate's advice."
+    fi
+else
+    echo "[warn] $GATE not found -- skipping the pre-MPNN geometry gate."
+fi
 
 # ── Stage 2: ensure ProteinMPNN weights are installed ──────────────────────
 # rfd3's `foundry install rfd3` only fetches rfd3_latest.ckpt — proteinmpnn is separate.
