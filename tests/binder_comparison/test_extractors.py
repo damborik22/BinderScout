@@ -751,3 +751,30 @@ def test_collect_structures_writes_a_sequence_manifest(tmp_path):
     assert set(rows) == {"MK", "AG"}
     for seq, rel in rows.items():
         assert (out / rel).exists(), f"{seq} points at a missing file"
+
+
+def test_chain_sequences_reads_gzipped_pdb_without_gemmi(tmp_path, monkeypatch):
+    """DEFECT 4. The no-gemmi fallback tested `suffix == '.pdb'`, which is
+    '.gz' for d.pdb.gz — yet _STRUCT_GLOBS matches *.pdb.gz, so a gzipped PDB
+    design silently indexed to nothing in binder-eval. gzip needs no gemmi."""
+    import builtins
+    import gzip
+
+    from binder_comparison.structures import _chain_sequences
+
+    real_import = builtins.__import__
+
+    def no_gemmi(name, *a, **kw):
+        if name == "gemmi":
+            raise ModuleNotFoundError("No module named 'gemmi'")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", no_gemmi)
+
+    path = tmp_path / "d.pdb.gz"
+    with gzip.open(path, "wt") as fh:
+        fh.write(
+            "ATOM      1  CA  MET A   1       0.000   0.000   0.000  1.00  0.00\n"
+            "ATOM      2  CA  LYS A   2       3.800   0.000   0.000  1.00  0.00\n"
+        )
+    assert _chain_sequences(path) == {"A": "MK"}

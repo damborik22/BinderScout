@@ -233,3 +233,36 @@ def test_a_wrongly_docked_design_is_flagged(tmp_path):
     assert out.loc[0, "self_consistency_rmsd"] > SELF_CONSISTENCY_RMSD_MAX
     assert bool(out.loc[0, "passes_self_consistency"]) is False
     assert bool(out.loc[0, "would_exclude_self_consistency"]) is True
+
+
+def test_ambiguous_chains_refuse_rather_than_guess():
+    """DEFECT 2a. When a target chain carries the same sequence as the binder --
+    a self-binder, a homo-oligomeric target, a binder derived from the target's
+    own partner -- there is no way to tell them apart by sequence. `next()` took
+    the first chain in file order, so with target-first input it returned the
+    TARGET's coordinates as the binder and produced a plausible RMSD.
+
+    Lengths necessarily agree in that case, so nothing downstream could flag it.
+    Refuse instead.
+    """
+    text = _pdb({"A": (_BINDER_SEQ, TARGET[:3]), "B": (_BINDER_SEQ, BINDER)})
+    tgt, bnd = split_target_binder(text, "AGV")
+    assert len(tgt) == 0 and len(bnd) == 0, "two chains match the binder sequence — this is not resolvable"
+
+
+def test_ambiguous_substring_match_refuses_too():
+    """DEFECT 2b. The `seq in want or want in seq` fallback also took the first
+    chain in file order, and could pick a 5-residue target over the 2-residue
+    binder it was looking for."""
+    text = _pdb({"A": ("MK", TARGET[:2]), "B": ("AG", BINDER[:2])})
+    # both "MK" and "AG" are unrelated to "AGVXX"; only AG is a subsequence
+    tgt, bnd = split_target_binder(text, "AGVMK")
+    # AG is a subsequence of AGVMK and MK is too -> ambiguous, refuse
+    assert len(tgt) == 0 and len(bnd) == 0
+
+
+def test_a_rank_deficient_target_is_not_a_number():
+    """A 1- or 2-atom target cannot determine a rigid superposition, so the
+    'RMSD' from one is meaningless rather than small."""
+    two = np.array([[0.0, 0.0, 0.0], [3.8, 0.0, 0.0]])
+    assert np.isnan(target_aligned_rmsd(two, BINDER, two, BINDER))

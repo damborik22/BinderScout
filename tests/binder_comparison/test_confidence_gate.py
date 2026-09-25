@@ -157,3 +157,35 @@ def test_it_does_not_touch_the_ranking():
     annotated = annotate_confidence_gate(df.copy())
     after = scoring.rank_designs(annotated.drop(columns=["rank"], errors="ignore")).sort_values("rank")
     assert after["binder_id"].tolist() == before
+
+
+def test_a_missing_interface_iptm_is_not_a_silent_pass():
+    """DEFECT 1. esmfold2_iptm_pair is NaN whenever the model returns no
+    pair_chains_iptm, and `esmfold2_chain_iptm_interface` does not exist yet when
+    the gate runs (report.py builds it later). So the iPTM test was skipped
+    entirely while the engine still counted as measured -- an interface iPTM of
+    0.12 passed a 0.5 gate with no reason recorded.
+
+    An engine that contributed pLDDT and PAE but no interface iPTM has NOT been
+    checked against the iPTM threshold, and must not report a clean pass.
+    """
+    row = {
+        "sequence": "AAA",
+        "esmfold2_iptm": 0.12,  # the diluted scalar — deliberately not consulted
+        "esmfold2_plddt_binder_mean": 0.91,
+        "esmfold2_pae_bt_mean": 4.0,
+        "esmfold2_pae_tb_mean": 4.0,
+    }
+    out = annotate_confidence_gate(pd.DataFrame([row]))
+    assert out.loc[0, "confidence_missing"] != "", "the un-checked iPTM must be recorded"
+    assert "iptm" in str(out.loc[0, "confidence_missing"]).lower()
+    assert out.loc[0, "passes_confidence_gate"] is not True, (
+        "a design whose interface iPTM was never measured must not report a clean pass"
+    )
+
+
+def test_a_blank_numeric_cell_does_not_crash():
+    """DEFECT 3. pd.notna("") is True, so an empty string reached float()."""
+    row = {"sequence": "AAA", "boltz_iptm": "", "boltz_plddt_binder_mean": "0.9"}
+    out = annotate_confidence_gate(pd.DataFrame([row]))
+    assert out.loc[0, "confidence_n_engines"] == 1
