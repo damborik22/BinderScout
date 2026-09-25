@@ -130,3 +130,25 @@ def test_required_keys_for_each_tool_are_present_in_the_default(tool):
         if key == "target_pdb" and cfg.get("target_pdb_src"):
             continue
         assert key in cfg, f"{tool} needs {key}, which the default config omits"
+
+
+def test_the_data_embedded_in_the_page_matches_the_configurator():
+    """Stronger than the byte-comparison above, which would still pass if the
+    GENERATOR embedded the wrong thing consistently. This checks the page's own
+    REQUIRED/DEFAULTS against the real source of truth."""
+    import re
+
+    sys.path.insert(0, str(REPO / "configurator"))
+    import configurator as conf
+
+    js = re.search(r"<script>(.*?)</script>", PAGE.read_text(), re.S).group(1)
+    embedded_required = json.loads(re.search(r"const REQUIRED = (\{.*?\n\});", js, re.S).group(1))
+    embedded_defaults = json.loads(re.search(r"const DEFAULTS = (\{.*?\n\});", js, re.S).group(1))
+
+    for tool, keys in conf.REQUIRED_CFG_KEYS.items():
+        assert embedded_required.get(tool) == list(keys), (
+            f"the page's required keys for {tool} disagree with REQUIRED_CFG_KEYS"
+        )
+
+    example = json.loads((REPO / "examples" / "CALCA" / "smoke.json").read_text())["cfg"]
+    assert embedded_defaults == example, "the page's defaults have drifted from examples/CALCA/smoke.json"
