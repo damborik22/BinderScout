@@ -2383,3 +2383,65 @@ machine by the tool beside it.
 
 **Open:** unchanged, plus the two decisions in
 [MORNING_DECISIONS.md](MORNING_DECISIONS.md).
+
+---
+
+## 2026-09-25 (night, cont.) — an adversarial review of the night's own work found eleven defects
+
+Worth its own entry, because the pattern in what it found is more useful than
+the list. An independent agent reviewed the fourteen commits above, verifying
+every finding by *running* something rather than reading.
+
+**Five were guards that could not catch the case they were written for.** That
+is the uncomfortable one. Each had been added the same night, each looked
+reasonable, and each was confirmed hollow by mutation:
+
+- the config-builder's "every tool appears" check was satisfied by the embedded
+  `REQUIRED` JSON blob, so all twelve tests passed with RFD3 **deleted from the
+  form** — the page would have emitted a config with no `rfd3` key at all;
+- its self-contained check tested `"http://"` and `"https://cdn"`, so a
+  fonts.googleapis stylesheet and an unpkg script both sailed through;
+- the optional-import guard skipped module-level imports — in `structures.py`,
+  the exact file whose breakage its docstring cites;
+- the conda-env guard excused any all-lowercase name, so `conda activate mosaic`
+  passed. That is the highest-value case in the repo: Mosaic is a **uv venv**,
+  not a conda env;
+- the install-command guard matched one command shape and one installer, missing
+  `--uninstall --tool` and every `install_aarch.sh` invocation.
+
+The lesson is narrow and it is not "write more tests". It is that **a guard
+written alongside the fix inherits the author's blind spot**, and the only thing
+that establishes it works is watching it fail on the case it targets. I had
+mutation-tested three guards that night and they held; the five I did not are
+the five that were hollow.
+
+**Three were silent wrong numbers**, this codebase's signature failure.
+`confidence_gate` skipped the iPTM check whenever `esmfold2_iptm_pair` was NaN
+while still counting the engine as measured — an interface iPTM of **0.12**
+passed a 0.5 gate with no reason recorded, indistinguishable from a real pass.
+`split_target_binder` resolved an ambiguous chain by file order, so a target
+chain carrying the binder's sequence returned the **target's** coordinates as
+the binder; lengths necessarily agree there, so nothing downstream could have
+flagged the plausible RMSD. And `interface_energy`'s new "refusing to write an
+empty panel" guard counted a row as scored if dG was non-empty — but a wrong
+`--interface` returns dG 0.0 / dSASA 0.0 *without raising*, so a full panel of
+zeros passed it. Measured on a real pose: `B_A` gives dSASA 4469, a bogus `Z_Q`
+gives 0.0 in silence.
+
+**One was a confidently wrong diagnosis.** `rfd3_gate` returned False for "no
+`fixed_com` in the sidecars" and "no chain-B CA atoms" — conditions meaning the
+check *could not run*. The run script reports that as "these backbones look like
+coils… check `infer_ori_strategy`". So an rc-foundry release that renames a
+metric or relabels the binder chain would abort every campaign, **after the full
+diffusion cost**, with a diagnosis that is not merely unhelpful but wrong. Now
+exit 2 means could-not-verify, distinct from 1 for a measured failure.
+
+**And one found while fixing another.** The config-builder patch silently did
+not apply: the script asserted both edits then wrote once, an earlier assert
+raised, and nothing was written. I only noticed because the mutation test for
+that fix still passed. Two lessons for the price of one — patch scripts should
+write per-edit, and a fix you have not watched work has not been made.
+
+**Also of note**, three times this session a lint failure reached a commit
+because `ruff check . | tail -1` and `ruff format --check . ; echo $?` both take
+their status from the wrong command. Same slip each time.
