@@ -2313,3 +2313,73 @@ again, matching what the confidence gate found.
 **Open:** unchanged — the pool-filtering decision for AD's discovery metric, and
 whether the confidence and self-consistency shadow columns should ever become a
 real gate, which needs outcome labels rather than more code.
+
+---
+
+## 2026-09-25 (night) — Stages Y and 5, and two documented facts that were not facts
+
+Four pieces, and the through-line is that **two of the four were corrections to
+this repo's own written record.** That is worth naming: the diary and CLAUDE.md
+are load-bearing, and a confident false sentence in them costs more than a gap.
+
+**Part Y — the private label registry.** Three shadow-mode columns now ship
+(`would_exclude_composition`, `would_exclude_confidence`,
+`would_exclude_self_consistency`) and not one can leave shadow mode without
+knowing which designs expressed and bound. Y is how a labelled pool is named,
+audited and loaded without its labels entering a public repo: the tree carries
+`MANIFEST.json` per pool — enough to *audit* a result — while the rows live in a
+private store located by `$BINDERSCOUT_BENCHMARK_STORE` and verified against the
+checksum the manifest records.
+
+The failure behaviour is the substance, because every way this goes wrong yields
+a **wrong number under a right-looking name**. So each is an exception, never a
+warning or an empty frame: no store configured names the env var and the pool; a
+checksum mismatch is an error, because the rows are then not the ones the
+manifest describes; and zero rows is an error, because a validation run over an
+empty pool reports cleanly and means nothing.
+
+One detail worth keeping: the worked example lives *inside* `SCHEMA.json`,
+because `.gitignore`'s `benchmarks/**/*.json` rule negates only `MANIFEST.json`
+— a separate `EXAMPLE_MANIFEST.json` would have been silently ignored. The leak
+guard was re-verified with real files present rather than the hypothetical paths
+the existing test asserts.
+
+**Stage 5 — the config-builder page, generated so it cannot drift.** A form that
+emits `config.json` is a second door into a pipeline whose wizard is ~4,600 lines
+and eighty prompts. The hazard is the one this repo keeps paying for: a second
+surface listing tools and flags drifting from the first. So the page is
+*generated* from `REQUIRED_CFG_KEYS`, and a test fails when the committed HTML
+stops matching the generator — mutation-tested by adding a tool to
+`configurator.py` and watching both guards fail. Drift is a red CI run rather
+than a config that silently enables nothing.
+
+**"Scrubbed from tree and history 2026-09-22" was false.** Six tracked files
+still carried an absolute `/home/<username>` path three days later — a CHANGELOG
+entry, two investigation write-ups, a plan, a notebook and a test fixture. None
+of them shell scripts, which is exactly why `test_script_hygiene.py` never saw
+them: it checks scripts, not the tree. The tree is clean now, and the real fix is
+the tree-wide guard that did not exist, which is why the claim could sit there
+false. Two things a tree scrub does not fix, now stated rather than implied: the
+history still carries them and is already published, and `tools/aarch64/dssp` has
+a build path baked in by its compiler. The guard earned itself immediately by
+failing on the CLAUDE.md edit that documented the problem and quoted the path
+verbatim.
+
+**Proteina-Complexa's aarch64 deprecation rests on a premise its sibling
+disproved.** CLAUDE.md records that jax 0.6.x put BindCraft's AF2 on the GPU on
+sm_121, then asserts the same reasoning "does NOT rescue Proteina-Complexa — its
+blocker is the CPU-bound AF2 reward, a different problem". That is circular, and
+checking it shows why: **PC's AF2 reward *is* ColabDesign**, the same library, so
+the CPU-bound reward is not a different problem but this one. The difference is
+only the pin — BindCraft runs colabdesign 1.1.3 on jax 0.6.0, PC runs colabdesign
+1.1.1.1 on **jax 0.4.29**, which predates sm_121 exactly as 0.4.34 did.
+
+This does **not** mean PC is rescued, and the note says so: the upgrade is
+untested against PC's own uv-managed venv with a different ColabDesign version,
+and trying it needs Spark. What is established is narrower and still
+consequential — a "1.7 years" throughput figure and a "reopens only if a CUDA
+jaxlib appears" condition both rest on something already disproved on the same
+machine by the tool beside it.
+
+**Open:** unchanged, plus the two decisions in
+[MORNING_DECISIONS.md](MORNING_DECISIONS.md).
