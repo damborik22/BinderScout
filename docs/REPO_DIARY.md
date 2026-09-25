@@ -2093,3 +2093,106 @@ construct while WT is ApoE4, so those numbers confound isoform with oligomerisat
 right answer is a binder-local filter set (`i_pTM` + binder pLDDT + interface count, no whole-complex
 `pTM`/`i_pAE`) for targets above ~250 residues. 556 trajectories is enough evidence to ask the
 question; it is not yet enough to answer it, because no round has run the alternative bar.
+
+---
+
+# Part 2.0 — the 2.0 release line
+
+Everything below is `v2.0.x` work. One entry per stage as it lands, newest at the
+bottom, in the same register as the chapters above: what changed, what it cost,
+and what turned out to be wrong.
+
+---
+
+## 2026-09-23 → 09-25 — Stage 0: the pipeline kept no original output, and three shipped commands had never produced a number
+
+Five threads, and the connecting theme is that every defect below was **silent** —
+each had a legitimate-looking state it could hide inside, and several masked each
+other.
+
+**`rank` was corruptible by a duplicate sequence.** Four unguarded left joins in
+`report.py` multiplied rows when two designs shared a sequence. Confirmed live in a
+shipped 2VDY campaign — 3 duplicate sequences turned 439 designs into 445 rows —
+which escaped only because none reached the reported top 350. All four now route
+through one guarded merge that drops duplicates and warns.
+
+**Stage 1 (item AD) rested on a premise that was wrong.** The plan called
+`generation_index` "one line per extractor", assuming each globs per-design files so
+`stat()` gives a generation time. Seven of eight instead read ONE aggregate CSV.
+The investigation (`INVESTIGATION_generation_index_2026-09-24.md`) established per
+tool what can honestly be recovered, and the answer is that **row position is usable
+for no tool at all** — where a file is in generation order the extractor re-sorts
+before iterating, and where it is not, the order is quality. Five tools can report an
+index, by four different routes: an explicit counter (Mosaic, Protein-Hunter), a join
+on design hash to another table (BindCraft 2's `trajectory`), or a parsed identifier
+(BoltzGen, RFD3). Three cannot, and for Proteina-Complexa that is **structural rather
+than missing**: under MCTS the pool is a flattened tree mixing lookahead roll-outs with
+terminal states, so a scalar index has no consistent meaning, and its `sequences.csv`
+path is `random.shuffle`d outright. `unavailable` is therefore a first-class value,
+pinned by tests that no production code makes pass.
+
+**A regression introduced and caught inside the same session.** Adding
+`generation_index` to the Mosaic template put it *between* `rank` and `is_top`.
+`designs.csv` is append-mode across runs and the extractor reads it positionally, so
+a file holding both vintages read the newer rows one position out and `sequence`
+picked up `is_top` — the reproduction reads a sequence as `'1'`. Appended last
+instead, a mixed file degrades to an unnamed trailing column. The lesson is narrow
+and worth keeping: in a positionally-read append-mode file, new columns go at the
+end, never in the middle.
+
+**The PXDesign collector's preferred path was dead code.** It globbed
+`filtered_summary.csv`, which PXDesign's own `cleanup_outputs()` unlinks during the
+run — so it never matched once, every run silently took the unranked fallback, and
+`pxdesign_rank` shipped empty. `summary.csv` holds the same rows and survives. Two
+traps made it more than a filename swap, both silent: `trim_summary_df` **renames**
+the AF2 metrics, so swapping only the glob would recover `rank` and blank three
+metrics; and `summary.csv` has no per-design `name`, so every id would have collapsed
+to `pxdesign_summary`.
+
+**The pipeline preserved neither original CSVs nor structures.** `--tool-csv`,
+`--collect-structures` and a per-tool discovery script all existed; the generated
+`run_evaluate.sh` passed none of them. So a run kept only refold-derived numbers and
+discarded what each tool said about its own designs. Now wired, with `--tool-root` on
+`evaluate.sh`.
+
+**The Rosetta interface panel had never emitted a value.** Three stacked failures:
+PyRosetta replaced the string interface spec with a `DockingPartners` object (and each
+call site's per-structure `except` turned the `TypeError` into an empty row per
+design); DAlphaBall could not load `libgfortran.so.5`, present in the env but not on
+the subprocess search path; and the id namespaces never overlapped, so both left joins
+attached nothing. Each masked the next — nobody reached bug 3 because bug 1 killed it
+first. Verified fixed on a real golden-pool structure: `sc 0.77, dG −84.23, nres 32,
+hbonds 4, unsat 2.0`, carried through `qc-annotate` to `1 covered, 1 qc_pass=True`.
+
+**And a fourth, found by measuring rather than reading.** `interface_energy.py` never
+relaxed, while `completed_plans.md` claimed it did "relax-before-score as BindCraft
+does". On one AF3 structure: **dG +213.8 REU unrelaxed, −89.5 after FastRelax** — a
+303 REU swing that flips the sign, against a gate of dG ≤ 0. Part N's `|dG/dSASA|`
+ranking had been ranking clash energy.
+
+**A literature pass corrected our reading of the field.** RFD3 emits no quality score
+*by design* — the preprint names no selection metric, foundry's FAQ disclaims the one
+score in its output, and the packages ship no filter module. The field's answer is
+uniform: don't rank backbones, fold them back and rank the fold. Crucially the
+canonical threshold does **not** transfer: `pae_interaction < 10` is an AF2
+*initial-guess* number, measuring whether a predictor **holds** a pose it was handed
+rather than **finds** it, and none of our three engines is AF2-IG. What does transfer
+is BindCraft's confidence half, now ported in shadow mode with the conversion nailed
+exactly — ColabDesign divides PAE by **31.0**, so 0.35 → **10.85 Å** (not 31.75, the
+last bin *centre*). One trap caught by measurement: ESMFold2's scalar `iptm` is
+chain-averaged and runs **+0.137 to +0.239** above the interface value on all six
+golden-pool designs.
+
+**Process notes.** Adversarial verification earned its keep twice and was itself
+wrong once — a refutation of the PXDesign fix claimed a 100× pool collapse from
+argparse defaults, missing that `cli.py` overrides them; and a literature synthesis
+contained **six fabricated or misattributed citations**, including a PMID/PMCID pair
+that does not exist. Verify the verifier. Separately, `ruff check . | tail -1` takes
+its exit code from `tail`, so a failing lint passed an `&&` chain and shipped — the
+second exit-code-masking mistake of the session.
+
+**Open at the end of Stage 0:** the pool-filtering question for AD's metric (most
+extractor inputs are already downstream of a quality filter, so a discovery rank over
+them is conditioned on survival); `tools/rfd3_gate.py` and `binder-compare prefilter`
+both written and neither wired; and the self-consistency RMSD axis, which every
+published gate couples with interface confidence and we do not compute at all.

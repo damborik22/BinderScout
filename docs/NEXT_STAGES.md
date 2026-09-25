@@ -17,8 +17,12 @@ its facts were wrong).
 | **AA core** | ProtParam panel (D7) · per-sequence composition gate in shadow mode (D8) · **TmProt end to end** (D1) |
 | **Scoped** | D4 foldability · D3 AggreProt — both were "scope first", not build orders |
 | **Infrastructure** | Installer `--verify` / `--repair` / retries · one tool registry · 12-tool menu · a worked example |
+| **Stage 1** | Extraction half: `generation_index` + provenance across five tools, `unavailable` pinned for the three that cannot report |
+| **Provenance** | PXDesign collector reads the CSV that exists · every run keeps each tool's native CSV **and** the design structures |
+| **Rosetta panel** | Three stacked silent bugs fixed — it had never emitted a value |
+| **Confidence gate** | BindCraft's no-Rosetta filters ported (i_pAE ≤ 10.85 Å, pLDDT ≥ 0.8, interface i_pTM ≥ 0.5), shadow mode |
 
-Everything above is on `v2.0.x`, 728 tests, ruff and shellcheck clean.
+Everything above is on `v2.0.x`, 769 tests, ruff and shellcheck clean.
 
 ---
 
