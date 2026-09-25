@@ -6,6 +6,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — 2.0 evaluation and provenance
+
+- **Per-design `generation_index`, with its provenance.** `ExtractedBinder`
+  records where a design fell in its campaign's generation order, for the
+  discovery-rank metric. Five of eight tools can report one — from a counter the
+  tool wrote (Mosaic, Protein-Hunter), a join on design hash (BindCraft 2's
+  `trajectory`), or a parsed identifier (BoltzGen, RFD3). **Row position is used
+  for none of them**: where a file happens to be in generation order the
+  extractor re-sorts before iterating, and where it is not, the order is a
+  quality sort. PXDesign, Proteina-Complexa and BindCraft 1 report
+  `unavailable`, which is a first-class answer — for Proteina-Complexa it is the
+  *correct* one, since under MCTS the pool is a flattened tree and a scalar index
+  has no consistent meaning.
+- **Self-consistency RMSD** (`self_consistency.py`) — the second axis every
+  published RFdiffusion-family gate couples with interface confidence, and which
+  this pipeline lacked. Target-aligned: superposing on the binder would measure
+  its fold, superposing on the target measures its placement, and a binder that
+  folds perfectly while docking on the wrong face scores ~0 Å the first way.
+- **BindCraft's confidence filters, ported** (`confidence_gate.py`): i_pAE
+  ≤ 10.85 Å, binder pLDDT ≥ 0.8, interface i_pTM ≥ 0.5. The conversion is exact
+  — ColabDesign divides PAE by 31.0, so BindCraft's normalised 0.35 is 10.85 Å,
+  not 31.75 (the last PAE bin *centre*, not the divisor).
+- **Private label registry** (`benchmarks.py`, Part Y). The repo carries
+  `MANIFEST.json` per pool — enough to audit a result; the label rows live in a
+  private store resolved by checksum. Every failure mode raises rather than
+  degrading, because each yields a wrong number under a right-looking name.
+- **A static config-builder page** (`docs/config-builder.html`), generated from
+  `REQUIRED_CFG_KEYS` so it cannot drift, with a test that fails when it does.
+- **RFD3's geometry gate runs before ProteinMPNN**, and its designs now get a
+  native rank from a Boltz-2 fold-back instead of sequence recovery.
+- Original tool CSVs and design structures are kept by every run
+  (`--tool-root`, `--collect-structures`), which previously they were not.
+
+### Fixed — 2.0
+
+- **`rank` could be corrupted by a duplicate sequence.** Four unguarded left
+  joins in `report.py` multiplied rows when two designs shared a sequence —
+  confirmed live in a shipped 2VDY campaign, where 3 duplicates turned 439
+  designs into 445 rows.
+- **The Rosetta interface panel had never emitted a value.** Three stacked
+  silent failures: PyRosetta replaced the string interface spec with a
+  `DockingPartners` object; DAlphaBall could not load `libgfortran.so.5`; and the
+  id namespaces never overlapped so both joins attached nothing.
+- **Part N's affinity ranking was ranking clash energy.** `interface_energy.py`
+  never relaxed while the docs said it did: on one AF3 structure, dG is +213.8
+  REU unrelaxed and −89.5 after FastRelax — a sign flip against a gate of dG ≤ 0.
+- **The PXDesign collector's preferred path was dead code**, globbing a file
+  PXDesign deletes during its own run, so every run silently took an unranked
+  fallback and shipped `pxdesign_rank` empty.
+- **`extract --collect-structures` crashed in `binder-eval`**, where gemmi is
+  deliberately absent — after successfully extracting every sequence.
+- **Two CLAUDE.md claims were false**: usernames were not "scrubbed from tree and
+  history", and Proteina-Complexa's aarch64 deprecation blamed "a different
+  problem" when its AF2 reward is the same ColabDesign BindCraft runs on the GPU,
+  pinned to a jax that predates sm_121.
+- **Two docstrings named a conda env that has never existed**
+  (`binder-eval-boltz2`); Boltz-2 refolding runs in the Mosaic venv.
+
 ### Changed
 
 - **BindMaster is now BinderScout, everywhere.** The repository had been
