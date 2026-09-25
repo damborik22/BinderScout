@@ -1,10 +1,12 @@
 """CLI subcommand: binder-compare refold-boltz2
 
 Refold sequences from a FASTA file using Boltz2.
-Run this in the 'binder-eval-boltz2' conda environment.
+Run this in the **Mosaic venv** -- it holds the JAX/Boltz-2 stack, and there is no
+`binder-eval-boltz2` conda env (the previous instruction here named one, and it
+fails with "env not found"). `evaluate.sh` uses the venv directly.
 
 Usage:
-    conda run -n binder-eval-boltz2 binder-compare refold-boltz2 \\
+    Mosaic/.venv/bin/binder-compare refold-boltz2 \\
         --sequences sequences.fasta \\
         --target-seq "MKTAYIAKQRQ..." \\
         --output boltz2_results.csv \\

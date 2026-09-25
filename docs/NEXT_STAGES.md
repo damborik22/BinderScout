@@ -21,8 +21,15 @@ its facts were wrong).
 | **Provenance** | PXDesign collector reads the CSV that exists · every run keeps each tool's native CSV **and** the design structures |
 | **Rosetta panel** | Three stacked silent bugs fixed — it had never emitted a value |
 | **Confidence gate** | BindCraft's no-Rosetta filters ported (i_pAE ≤ 10.85 Å, pLDDT ≥ 0.8, interface i_pTM ≥ 0.5), shadow mode |
+| **Self-consistency** | Target-aligned design-vs-refold RMSD — the field's universal second axis, shadow mode |
+| **RFD3 wiring** | Geometry gate before MPNN · fold-back ranking via `prefilter --only-tool` |
+| **Stage 2 (Y)** | Private label registry: public MANIFEST, private rows resolved by checksum |
+| **Stage 5** | Static config-builder page, generated from `REQUIRED_CFG_KEYS` so it cannot drift |
+| **Hygiene** | Usernames scrubbed tree-wide + enforced · optional-import guard · two false CLAUDE.md claims corrected |
 
-Everything above is on `v2.0.x`, 769 tests, ruff and shellcheck clean.
+Everything above is on `v2.0.x`, 826 tests, ruff and shellcheck clean.
+
+**Blocked on a decision, not on code:** see [MORNING_DECISIONS.md](MORNING_DECISIONS.md).
 
 ---
 
