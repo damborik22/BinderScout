@@ -747,3 +747,61 @@ class TestRunEvaluateKeepsOriginalToolOutput:
         assert "--tool-root" in eval_block, (
             "evaluate.sh is never told where the tool outputs are, so no native CSV is discovered"
         )
+
+
+class TestRfd3GeometryGateRuns:
+    """The geometry gate exists (tools/rfd3_gate.py) and nothing invoked it.
+
+    Round 3 shipped 304 backbones that were extended coils because
+    ``infer_ori_strategy: hotspots`` was missing, and NOTHING caught it: the
+    structures still report n_chainbreaks=0, so every downstream guard passed.
+    It cost a full MPNN + refold cycle and a wrong conclusion about the epitope,
+    and the ApoE4 RFD3 run shipped a gene order with the same defect.
+
+    The detector is one line of arithmetic on data rfd3 already writes into every
+    sidecar (``|fixed_com|`` ~23 A with the key, ~0 without). CLAUDE.md's
+    instruction is explicit -- gate on geometry BEFORE spending MPNN time -- so
+    the gate belongs between diffusion and ProteinMPNN, in both the generated
+    script and the shipped template.
+    """
+
+    TEMPLATE = (
+        __import__("pathlib").Path(__file__).resolve().parents[2] / "binderscout_examples" / "run_rfd3.sh.template"
+    )
+
+    def _generated(self, base_cfg, tmp_path):
+        script = tmp_path / "run_rfd3.sh"
+        conf.write_run_rfd3(script, base_cfg)
+        return script.read_text()
+
+    def test_generated_script_runs_the_gate(self, base_cfg, tmp_path):
+        assert "rfd3_gate.py" in self._generated(base_cfg, tmp_path)
+
+    def test_generated_gate_runs_before_mpnn(self, base_cfg, tmp_path):
+        content = self._generated(base_cfg, tmp_path)
+        assert content.index("rfd3_gate.py") < content.index("--is_legacy_weights"), (
+            "the gate must run BEFORE ProteinMPNN — running it after spends the MPNN time it exists to save"
+        )
+
+    def test_generated_script_checks_both_origin_and_geometry(self, base_cfg, tmp_path):
+        content = self._generated(base_cfg, tmp_path)
+        assert "origin" in content and "geometry" in content
+
+    def test_template_runs_the_gate_too(self):
+        """The configurator MIRRORS this template rather than generating from it,
+        so a hand-written script copied from the template must not miss the gate —
+        which is exactly how the infer_ori_strategy omission propagated."""
+        content = self.TEMPLATE.read_text()
+        assert "rfd3_gate.py" in content
+        assert content.index("rfd3_gate.py") < content.index("--is_legacy_weights")
+
+
+def test_generated_rfd3_script_is_valid_bash(base_cfg, tmp_path):
+    """The gate block is real shell, so a quoting slip would ship a script that
+    dies at launch — after the diffusion time it exists to protect."""
+    import subprocess
+
+    script = tmp_path / "run_rfd3.sh"
+    conf.write_run_rfd3(script, base_cfg)
+    proc = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr

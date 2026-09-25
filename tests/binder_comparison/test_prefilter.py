@@ -62,3 +62,55 @@ def test_fasta_metadata_parses_source_tag(tmp_path):
     meta = _fasta_metadata(str(fa))
     assert meta["AAAA"] == {"binder_id": "rfd3_d1", "source_tool": "rfd3"}
     assert meta["BBBB"]["binder_id"] == "rfd3_d2"
+
+
+# --------------------------------------------------------------------------
+# Restricting the selection to one tool.
+#
+# prefilter's docstring recipe assumes an RFD3-ONLY FASTA. In the real pipeline
+# the Boltz-2 results cover every tool's designs, and `report --tool-csv
+# rfd3=<file>` takes the WHOLE file as RFD3's list -- it does not filter on the
+# `tool` column. So handing it an unfiltered selection would put every tool's
+# designs into RFD3's native block, ranked by Boltz-2, under RFD3's name.
+# --------------------------------------------------------------------------
+
+
+def _mixed_df():
+    return pd.DataFrame(
+        {
+            "run_id": ["r1", "m1", "r2"],
+            "sequence": ["AAAA", "CCCC", "BBBB"],
+            "binder_length": [40, 50, 60],
+            "boltz_pae_ipsae_min": [0.30, 0.90, 0.50],
+        }
+    )
+
+
+_MIXED_META = {
+    "AAAA": {"binder_id": "rfd3_a", "source_tool": "rfd3"},
+    "CCCC": {"binder_id": "mosaic_c", "source_tool": "mosaic"},
+    "BBBB": {"binder_id": "rfd3_b", "source_tool": "rfd3"},
+}
+
+
+def test_only_tool_keeps_just_that_tools_designs():
+    out = build_selection(_mixed_df(), "boltz_pae_ipsae_min", _MIXED_META, tool="rfd3", top=None, only_tool="rfd3")
+    assert list(out["sequence"]) == ["BBBB", "AAAA"], "the mosaic design scores best and must still be excluded"
+    assert (out["tool"] == "rfd3").all()
+
+
+def test_without_only_tool_everything_is_kept():
+    """Unchanged default — the flag is opt-in, not a behaviour change."""
+    out = build_selection(_mixed_df(), "boltz_pae_ipsae_min", _MIXED_META, tool="rfd3", top=None)
+    assert list(out["sequence"]) == ["CCCC", "BBBB", "AAAA"]
+
+
+def test_only_tool_applies_before_top_n():
+    """Otherwise --top would be spent on designs that are about to be dropped."""
+    out = build_selection(_mixed_df(), "boltz_pae_ipsae_min", _MIXED_META, tool="rfd3", top=1, only_tool="rfd3")
+    assert list(out["sequence"]) == ["BBBB"], "top-1 of RFD3, not top-1 of the pool then filtered"
+
+
+def test_only_tool_with_no_matching_designs_is_empty_not_everything():
+    out = build_selection(_mixed_df(), "boltz_pae_ipsae_min", _MIXED_META, tool="x", top=None, only_tool="bindcraft")
+    assert len(out) == 0

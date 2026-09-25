@@ -60,22 +60,36 @@ def _fasta_metadata(fasta_path: str | Path) -> dict[str, dict]:
 
 
 def build_selection(
-    df: pd.DataFrame, metric_col: str, fasta_meta: dict[str, dict] | None, tool: str, top: int | None
+    df: pd.DataFrame,
+    metric_col: str,
+    fasta_meta: dict[str, dict] | None,
+    tool: str,
+    top: int | None,
+    only_tool: str | None = None,
 ) -> pd.DataFrame:
     """Sort designs best-first by ``metric_col``, de-dupe by sequence, format output.
 
     Pure (no I/O); ``df`` must already carry ``metric_col`` + ``sequence`` (and
     ``binder_length``). Returns a select-style frame ranked best-first.
+
+    ``only_tool`` restricts the selection to designs whose FASTA metadata says
+    they came from that tool. It matters whenever the Boltz-2 results cover a
+    mixed pool: ``report --tool-csv <tool>=<file>`` takes the WHOLE file as that
+    tool's own ranked list and does not filter on the ``tool`` column, so an
+    unfiltered selection would file every tool's designs under one tool's name.
+    The filter is applied BEFORE ``top``, so ``--top N`` means N of that tool.
     """
+    fasta_meta = fasta_meta or {}
+
     work = df.copy()
     work["_metric"] = pd.to_numeric(work.get(metric_col), errors="coerce")
     work["_seqkey"] = work.get("sequence", "").astype(str).str.strip().str.upper()
+    if only_tool:
+        work = work[work["_seqkey"].map(lambda k: (fasta_meta.get(k, {}).get("source_tool")) == only_tool)]
     work = work.sort_values("_metric", ascending=False, na_position="last")
     work = work[~work["_seqkey"].duplicated(keep="first")].reset_index(drop=True)
     if top is not None:
         work = work.head(top)
-
-    fasta_meta = fasta_meta or {}
 
     def _bid(r):
         m = fasta_meta.get(r["_seqkey"], {})
@@ -131,14 +145,17 @@ def run(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     fasta_meta = _fasta_metadata(args.sequences) if args.sequences else None
-    out = build_selection(df, metric_col, fasta_meta, args.tool, args.top)
+    out = build_selection(df, metric_col, fasta_meta, args.tool, args.top, getattr(args, "only_tool", None))
     write_csv(out, args.output)
 
     n_nonzero = int((pd.to_numeric(out["native_value"], errors="coerce") > 0).sum())
     top_val = out["native_value"].iloc[0] if len(out) else "n/a"
     print(f"[prefilter] ranked {len(out)} design(s) by Boltz-2 fold-back '{metric_col}' (best first)")
     print(f"[prefilter]   {n_nonzero}/{len(out)} form an interface (>0); top score = {top_val}")
-    print(f"[prefilter]   wrote {args.output} — use as: report --tool-csv {args.tool}={args.output}")
+    # Name the tool the selection actually contains, not the default tag --
+    # telling an operator to file bindcraft2 designs under rfd3 is worse than silence.
+    hint_tool = getattr(args, "only_tool", None) or args.tool
+    print(f"[prefilter]   wrote {args.output} — use as: report --tool-csv {hint_tool}={args.output}")
 
 
 def add_parser(subparsers) -> None:
@@ -163,6 +180,13 @@ def add_parser(subparsers) -> None:
     )
     p.add_argument(
         "--tool", default="rfd3", metavar="NAME", help="Tool tag for the output 'tool' column (default: rfd3)"
+    )
+    p.add_argument(
+        "--only-tool",
+        metavar="NAME",
+        help="Keep only designs whose FASTA source tag is NAME. Needed when --boltz2-results covers a "
+        "MIXED pool: 'report --tool-csv <tool>=<file>' treats the whole file as that tool's own ranked "
+        "list, so an unfiltered selection files every tool's designs under one name. Applied before --top.",
     )
     p.add_argument("--top", type=int, default=None, metavar="N", help="Keep only the top N (default: keep all, ranked)")
     p.add_argument("--output", "-o", required=True, metavar="CSV", help="Output selection CSV (ranked best-first)")
