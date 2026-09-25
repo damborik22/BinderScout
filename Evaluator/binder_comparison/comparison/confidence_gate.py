@@ -98,6 +98,7 @@ def annotate_confidence_gate(df: pd.DataFrame) -> pd.DataFrame:
     ``would_exclude_confidence``.
     """
     out = df.copy()
+    ipae_cols: dict[str, list[float | None]] = {}
     passes: list[bool | None] = []
     reasons: list[str] = []
     missing: list[str] = []
@@ -119,8 +120,12 @@ def annotate_confidence_gate(df: pd.DataFrame) -> pd.DataFrame:
             elif bt is not None or tb is not None:
                 # One direction only: still a real measurement of that side.
                 ipae = bt if bt is not None else tb
-            if ipae is not None:
-                out.loc[row.name, f"{engine}_ipae_ang"] = round(ipae, 3)
+            # Collected positionally, NOT written with .loc[row.name] -- that
+            # writes to every row sharing an index label, so duplicate labels
+            # silently give all of them the last row's value.
+            ipae_cols.setdefault(f"{engine}_ipae_ang", []).append(
+                None if ipae is None else round(ipae, 3)
+            )
 
             if iptm is None and plddt is None and ipae is None:
                 continue
@@ -156,6 +161,9 @@ def annotate_confidence_gate(df: pd.DataFrame) -> pd.DataFrame:
         reasons.append(";".join(failures))
         missing.append(";".join(unchecked))
 
+    for col, values in ipae_cols.items():
+        if any(v is not None for v in values):
+            out[col] = values
     out["confidence_n_engines"] = n_engines
     out["passes_confidence_gate"] = pd.array(passes, dtype="boolean")
     out["confidence_fail_reasons"] = reasons

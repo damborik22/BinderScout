@@ -145,6 +145,16 @@ def run(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     fasta_meta = _fasta_metadata(args.sequences) if args.sequences else None
+    # --only-tool reads the source tag from the FASTA, so without --sequences it
+    # matches nothing and writes a header-only CSV, exit 0. The pipeline always
+    # passes --sequences; a hand-run would not notice.
+    if getattr(args, "only_tool", None) and fasta_meta is None:
+        print(
+            f"[prefilter] ERROR: --only-tool {args.only_tool} needs --sequences — the tool tag "
+            "comes from the FASTA headers. Without it nothing matches and the output would be empty.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     out = build_selection(df, metric_col, fasta_meta, args.tool, args.top, getattr(args, "only_tool", None))
     write_csv(out, args.output)
 

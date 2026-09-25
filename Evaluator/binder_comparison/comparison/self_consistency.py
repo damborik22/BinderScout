@@ -206,6 +206,7 @@ def annotate_self_consistency(df, design_root, base_dir, threshold: float = SELF
     comparison was possible) and ``would_exclude_self_consistency``.
     """
     out = df.copy()
+    engine_cols: dict[str, list[float | None]] = {}
     index = _design_index(design_root)
 
     best: list[float] = []
@@ -232,14 +233,21 @@ def annotate_self_consistency(df, design_root, base_dir, threshold: float = SELF
                         rmsd = target_aligned_rmsd(d_t, d_b, r_t, r_b)
                     except OSError:
                         rmsd = float("nan")
+            # Positional, not .loc[row.name]: a duplicate index label would
+            # otherwise give every row sharing it the last row's value.
+            engine_cols.setdefault(f"{engine}_self_consistency_rmsd", []).append(
+                None if np.isnan(rmsd) else round(rmsd, 3)
+            )
             if not np.isnan(rmsd):
-                out.loc[row.name, f"{engine}_self_consistency_rmsd"] = round(rmsd, 3)
                 per_engine.append(rmsd)
 
         overall = min(per_engine) if per_engine else float("nan")
         best.append(round(overall, 3) if per_engine else float("nan"))
         verdicts.append(passes_self_consistency(overall, threshold))
 
+    for col, values in engine_cols.items():
+        if any(v is not None for v in values):
+            out[col] = values
     out["self_consistency_rmsd"] = best
     out["passes_self_consistency"] = pd_array_boolean(verdicts)
     # Shadow mode: a design nothing could compare is never excluded.
