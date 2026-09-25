@@ -60,7 +60,7 @@ All analysis lives in `notebooks/_analysis.py` (a single Python script that emit
 ### Caveats
 
 - The on-disk native CSVs for Mosaic, PXDesign and Proteina-Complexa are from later re-runs (post-evaluation). For those tools, native ranking metrics cannot be back-joined to the run1_free designs (see § 2.3, 2.4, 2.5).
-- PAE arrays referenced in metrics.csv use BM4 paths (`/home/david/...`) and are not present on Spark. We rely entirely on pre-computed `*_ipsae_min` columns. The PAE-ordering audit (§ 2.7) was therefore done by reading the original `refold_boltz2.py` / `refold_af2.py` scripts and the historical `scoring.py` at the commit that produced this metrics.csv, not by reloading PAE files.
+- PAE arrays referenced in metrics.csv use BM4 paths (`/home/<user>/...`) and are not present on Spark. We rely entirely on pre-computed `*_ipsae_min` columns. The PAE-ordering audit (§ 2.7) was therefore done by reading the original `refold_boltz2.py` / `refold_af2.py` scripts and the historical `scoring.py` at the commit that produced this metrics.csv, not by reloading PAE files.
 
 ---
 
@@ -122,7 +122,7 @@ Picked at random: `boltzgen_config_2416_r1` (90 aa), `mosaic_54f7cdb8_r1` (20 aa
 
 Per CLAUDE.md, target = 32 aa for CALCA; binder is variable. Expected PAE shape: `(binder_length + 32, binder_length + 32)`.
 
-- `boltzgen_config_2416_r1`: cached `boltz_pae_ipsae_min=0.758`, `ipsae_min_aux=0.819`. PAE file at `/home/david/.../refold_boltz2/structures/refold1263_6896bf74_pae.npy` is not present on Spark, so we cannot reload to confirm shape. The agreement between `boltz_pae_ipsae_min` (DunbrackLab formula, computed by Evaluator) and `ipsae_min_aux` (Mosaic-style formula, computed by Boltz-2 at refold time and copied into metrics.csv) confirms the binder/target split was internally consistent: if binder/target had been swapped, the two metrics would have diverged because they aggregate over different axes.
+- `boltzgen_config_2416_r1`: cached `boltz_pae_ipsae_min=0.758`, `ipsae_min_aux=0.819`. PAE file at `/home/<user>/.../refold_boltz2/structures/refold1263_6896bf74_pae.npy` is not present on Spark, so we cannot reload to confirm shape. The agreement between `boltz_pae_ipsae_min` (DunbrackLab formula, computed by Evaluator) and `ipsae_min_aux` (Mosaic-style formula, computed by Boltz-2 at refold time and copied into metrics.csv) confirms the binder/target split was internally consistent: if binder/target had been swapped, the two metrics would have diverged because they aggregate over different axes.
 - For `mosaic_54f7cdb8_r1`: similarly `boltz_pae_ipsae_min=0.880` vs `ipsae_min_aux=0.872` — consistent.
 - For `bindcraft_default_CALCA_helix_l45_s427158_mpnn1`: `boltz_pae_ipsae_min=0.683` vs `ipsae_min_aux=0.741` — consistent.
 

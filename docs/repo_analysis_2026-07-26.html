@@ -700,7 +700,7 @@ exit=127          # "REACHED-AFTER-GPU_NAME" never prints</code></pre>
   <tr><td class="n">F25</td><td class="sev c-med">Med</td>
     <td>A stale helper script destroys the live PXDesign env and carries another user's absolute paths</td>
     <td><code>scripts/install_pxdesign.sh:83</code> <code>conda env create --force</code>, plus
-        hardcoded <code>/home/david</code> paths</td>
+        hardcoded <code>/home/<user></code> paths</td>
     <td>It looks like the way to install PXDesign, but <code>--force</code> deletes the existing
         <code>binderscout_pxdesign</code> env — the env that also hosts the Protenix refolder plus the
         CPATH/CUTLASS <code>activate.d</code> hooks written by <code>install.sh</code>. <em>Fix:</em> delete

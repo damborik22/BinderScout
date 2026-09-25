@@ -1,8 +1,8 @@
 """Repo-hygiene tests for the shell scripts under ``scripts/`` and ``install/``.
 
 Regression guard for audit finding F25: ``scripts/install_pxdesign.sh`` shipped
-another user's absolute paths (``/home/david/tools/PXDesign``,
-``/home/david/cutlass``, ``/home/david/BinderScout/tests/...``) and ran
+another user's absolute paths (``/home/olduser/tools/PXDesign``,
+``/home/olduser/cutlass``, ``/home/olduser/BinderScout/tests/...``) and ran
 ``conda env create --force``, which silently deletes and recreates the live
 ``binderscout_pxdesign`` env — the env that carries the CPATH/CUTLASS
 ``activate.d`` hooks written by ``install/install.sh``.
@@ -119,15 +119,15 @@ def test_detectors_catch_the_original_f25_patterns():
     """Self-test: the detectors above must flag exactly what F25 reported."""
     original = (
         "#!/usr/bin/env bash\n"
-        'PXDESIGN_DIR="${1:-/home/david/tools/PXDesign}"\n'
-        'CUTLASS_DIR="${CUTLASS_PATH:-/home/david/cutlass}"\n'
+        'PXDESIGN_DIR="${1:-/home/olduser/tools/PXDesign}"\n'
+        'CUTLASS_DIR="${CUTLASS_PATH:-/home/olduser/cutlass}"\n'
         'conda env create -f "$ENV_YAML" --force\n'
-        'echo "  python -m pytest /home/david/BinderScout/tests/tools/pxdesign/ -v"\n'
+        'echo "  python -m pytest /home/olduser/BinderScout/tests/tools/pxdesign/ -v"\n'
     )
     assert [m for _, m in find_user_home_paths(original)] == [
-        "/home/david",
-        "/home/david",
-        "/home/david",
+        "/home/olduser",
+        "/home/olduser",
+        "/home/olduser",
     ]
     assert len(find_forced_conda_creates(original)) == 1
 

@@ -371,7 +371,7 @@ def refold_batch_protenix(
 - [ ] **Step 6: Test with 1 binder sequence to verify the pipeline works**
 
 ```bash
-cd /home/david/BinderScout
+cd /home/<user>/BinderScout
 Mosaic/.venv/bin/python Evaluator/scripts/refold_protenix.py \
     --sequences <(echo -e ">test\nPAELSERERRIIEDVWYPVVHSGKRYIEEFKPTEWEKRFWEEVAEEVREMLEDYFRWSRS") \
     --target-seq "APFRSALESSPADPATLSEDEARLLLAALVQDYVQMKASELEQEQEREGSSLDSPRSKRCGNLSTCMLGTYTQDFNKFHTFPQTAIGVGAPGKKRDMSSDLERDHRPHVSMPQNAN" \
@@ -680,7 +680,7 @@ CSV columns: `run_id, idx, sequence, target_sequence, binder_length, iptm, ptm, 
 - [ ] **Step 6: Test with 1 binder**
 
 ```bash
-cd /home/david/BinderScout
+cd /home/<user>/BinderScout
 Mosaic/.venv/bin/python Evaluator/scripts/refold_boltz2_cli.py \
     --sequences <(echo -e ">test\nPAELSERERRIIEDVWYPVVHSGKRYIEEFKPTEWEKRFWEEVAEEVREMLEDYFRWSRS") \
     --target-seq "APFRSALESSPADPATLSEDEARLLLAALVQDYVQMKASELEQEQEREGSSLDSPRSKRCGNLSTCMLGTYTQDFNKFHTFPQTAIGVGAPGKKRDMSSDLERDHRPHVSMPQNAN" \

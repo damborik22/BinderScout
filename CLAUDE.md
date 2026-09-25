@@ -297,7 +297,25 @@ the parameter sweep.
   DNS hostnames, Unix usernames, absolute `/home/<user>` paths, cluster account names or SSH
   host-key fingerprints. Use the `~/.ssh/config` aliases (`bm1`/`bm2`/`bm4`/`bm5`, `clara`),
   `$HOME`, and repo-relative paths. Real values live in machine-local, gitignored files
-  (`CLAUDE.local.md`, `docs/local/`). Scrubbed from tree and history 2026-09-22.
+  (`CLAUDE.local.md`, `docs/local/`).
+
+  **Scrub status — the previous "scrubbed from tree and history 2026-09-22" was not true.**
+  Six tracked files still carried an absolute `/home/<username>` path on 2026-09-25
+  (`CHANGELOG.md`, two `docs/` files, a plan under `Evaluator/docs/plans/`, a notebook and
+  a test fixture). They are gone from the tree now, replaced by `/home/<user>` in prose and
+  by a generic name in the one test that needs a *detectable* path. Two things remain true
+  and neither is fixed by that:
+  - **History still has them**, and they are already on `origin/master` and `origin/v1.1.x`.
+    A tree scrub does not unpublish anything.
+  - **`tools/aarch64/dssp` has a build-time home path baked into the binary** (a
+    `/home/<account>` naming one of our own boxes) by whatever compiled it. Removing it
+    needs an aarch64 rebuild, so it is recorded rather than patched — and pinned by
+    `tests/test_no_user_home_paths_in_tree.py`, which fails if a *new* binary joins it or
+    if that one is ever rebuilt clean and the exemption is left behind.
+
+  `tests/test_script_hygiene.py` detects this class in shell scripts. Nothing enforces it
+  across the tree, which is why the claim above could be false for three days without
+  anyone noticing.
 
 ---
 
