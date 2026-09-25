@@ -80,3 +80,159 @@ def passes_self_consistency(rmsd: float, threshold: float = SELF_CONSISTENCY_RMS
     if rmsd is None or np.isnan(rmsd):
         return None
     return bool(rmsd <= threshold)
+
+
+def _chains_from_pdb(pdb_text: str) -> dict[str, tuple[str, list[list[float]]]]:
+    """{chain_id: (1-letter sequence, [Cα xyz, ...])} from PDB text.
+
+    Pure text on purpose: gemmi is deliberately not a ``binder-eval`` dependency
+    (see Evaluator/pyproject.toml), and this runs in the report path.
+    """
+    from .target_analysis import _THREE_TO_ONE
+
+    chains: dict[str, tuple[list[str], list[list[float]]]] = {}
+    for line in pdb_text.splitlines():
+        if not line.startswith("ATOM") or line[12:16].strip() != "CA":
+            continue
+        aa = _THREE_TO_ONE.get(line[17:20].strip().upper())
+        if aa is None:
+            continue
+        cid = line[21:22].strip()
+        seq, xyz = chains.setdefault(cid, ([], []))
+        seq.append(aa)
+        try:
+            xyz.append([float(line[30:38]), float(line[38:46]), float(line[46:54])])
+        except ValueError:
+            seq.pop()
+    return {c: ("".join(s), x) for c, (s, x) in chains.items()}
+
+
+def split_target_binder(pdb_text: str, binder_sequence: str) -> tuple[np.ndarray, np.ndarray]:
+    """Return (target Cα, binder Cα), finding the binder BY SEQUENCE.
+
+    Chain letters differ by producer -- Boltz-2 puts the binder in A,
+    AF3/ESMFold2 in B, and a design tool uses whatever it wrote -- and CLAUDE.md
+    lists that mismatch as a live bug source. Matching on the sequence removes
+    the convention entirely. Every chain that is not the binder is target, so a
+    multi-chain target is not silently truncated to one chain.
+
+    Returns two empty arrays when no chain carries the binder sequence.
+    """
+    want = "".join(binder_sequence.split()).upper()
+    chains = _chains_from_pdb(pdb_text)
+
+    binder_id = next((c for c, (seq, _) in chains.items() if seq == want), None)
+    if binder_id is None:
+        # Modelled residues can be a subset of the designed sequence.
+        binder_id = next((c for c, (seq, _) in chains.items() if seq and (seq in want or want in seq)), None)
+    if binder_id is None:
+        return np.zeros((0, 3)), np.zeros((0, 3))
+
+    binder = np.asarray(chains[binder_id][1], dtype=float)
+    target_xyz = [xyz for c, (_seq, coords) in chains.items() if c != binder_id for xyz in coords]
+    return np.asarray(target_xyz, dtype=float).reshape(-1, 3), binder
+
+
+_ENGINE_PDB_COLS = {"boltz": "boltz_pdb", "af3": "af3_pdb", "esmfold2": "esmfold2_pdb"}
+
+
+def _resolve(path: str, base_dir):
+    """Find a recorded structure path, tolerating a transplanted pool.
+
+    Refold CSVs record paths from the machine that produced them, so match on
+    progressively shorter tails under base_dir -- the same approach the PAE
+    loader uses.
+    """
+    from pathlib import Path
+
+    if not path or (isinstance(path, float) and np.isnan(path)):
+        return None
+    p = Path(str(path))
+    if p.is_absolute() and p.exists():
+        return p
+    base = Path(base_dir)
+    parts = p.parts[1:] if p.is_absolute() else p.parts
+    for start in range(len(parts)):
+        candidate = base.joinpath(*parts[start:])
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _design_index(design_root) -> dict[str, object]:
+    """{sequence: path} from the manifests collect_design_structures writes."""
+    import csv
+    from pathlib import Path
+
+    root = Path(design_root)
+    index: dict[str, object] = {}
+    if not root.is_dir():
+        return index
+    for manifest in sorted(root.rglob("manifest.csv")):
+        try:
+            with manifest.open(newline="") as fh:
+                for row in csv.DictReader(fh):
+                    seq = (row.get("sequence") or "").strip().upper()
+                    rel = (row.get("path") or "").strip()
+                    if seq and rel:
+                        index.setdefault(seq, manifest.parent / rel)
+        except OSError:
+            continue
+    return index
+
+
+def annotate_self_consistency(df, design_root, base_dir, threshold: float = SELF_CONSISTENCY_RMSD_MAX):
+    """Add target-aligned design-vs-refold RMSD columns. Advisory: never drops.
+
+    Per engine, ``<engine>_self_consistency_rmsd``; overall
+    ``self_consistency_rmsd`` (the BEST agreement across engines, matching the
+    field's best-of-N convention), ``passes_self_consistency`` (NA when no
+    comparison was possible) and ``would_exclude_self_consistency``.
+    """
+    out = df.copy()
+    index = _design_index(design_root)
+
+    best: list[float] = []
+    verdicts: list[bool | None] = []
+    for _, row in out.iterrows():
+        seq = str(row.get("sequence", "")).strip().upper()
+        design_path = index.get(seq)
+        design_text = None
+        if design_path is not None:
+            try:
+                design_text = design_path.read_text()
+            except OSError:
+                design_text = None
+
+        per_engine: list[float] = []
+        for engine, col in _ENGINE_PDB_COLS.items():
+            rmsd = float("nan")
+            if design_text is not None and col in row.index:
+                refold_path = _resolve(row.get(col), base_dir)
+                if refold_path is not None:
+                    try:
+                        d_t, d_b = split_target_binder(design_text, seq)
+                        r_t, r_b = split_target_binder(refold_path.read_text(), seq)
+                        rmsd = target_aligned_rmsd(d_t, d_b, r_t, r_b)
+                    except OSError:
+                        rmsd = float("nan")
+            if not np.isnan(rmsd):
+                out.loc[row.name, f"{engine}_self_consistency_rmsd"] = round(rmsd, 3)
+                per_engine.append(rmsd)
+
+        overall = min(per_engine) if per_engine else float("nan")
+        best.append(round(overall, 3) if per_engine else float("nan"))
+        verdicts.append(passes_self_consistency(overall, threshold))
+
+    out["self_consistency_rmsd"] = best
+    out["passes_self_consistency"] = pd_array_boolean(verdicts)
+    # Shadow mode: a design nothing could compare is never excluded.
+    out["would_exclude_self_consistency"] = [v is False for v in verdicts]
+    return out
+
+
+def pd_array_boolean(values):
+    """Nullable boolean column — True / False / NA kept distinct."""
+    import pandas as pd
+
+    return pd.array(values, dtype="boolean")

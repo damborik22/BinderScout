@@ -654,7 +654,7 @@ class TestSequenceHygieneAcrossExtractors:
             assert got[0].source_tool == expected
 
 
-def test_collect_structures_without_gemmi_warns_instead_of_crashing(tmp_path, monkeypatch):
+def test_collect_structures_without_gemmi_still_collects_pdb(tmp_path, monkeypatch):
     """Structure collection is an enhancement; losing it must not lose the pool.
 
     ``pyproject.toml`` states the contract: gemmi is deliberately not a
@@ -663,6 +663,9 @@ def test_collect_structures_without_gemmi_warns_instead_of_crashing(tmp_path, mo
     ``extract --collect-structures`` -- which runs in ``binder-eval``, where
     gemmi is absent -- died with ModuleNotFoundError and took the whole
     extraction with it.
+
+    And gemmi is only needed to CONVERT mmCIF: a .pdb hit is copied verbatim, so
+    its absence must cost the mmCIF tools (RFD3 writes .cif.gz), not every tool.
     """
     import builtins
 
@@ -679,8 +682,72 @@ def test_collect_structures_without_gemmi_warns_instead_of_crashing(tmp_path, mo
 
     src = tmp_path / "designs"
     src.mkdir()
-    (src / "d1.pdb").write_text("ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00\n")
+    (src / "d1.pdb").write_text(
+        "ATOM      1  CA  MET A   1       0.000   0.000   0.000  1.00  0.00\n"
+        "ATOM      2  CA  LYS A   2       3.800   0.000   0.000  1.00  0.00\n"
+    )
 
-    with pytest.warns(UserWarning, match="gemmi"):
-        n = collect_design_structures(src, ["MKTAYIAK"], tmp_path / "out")
-    assert n == 0, "nothing collected, but the caller survives"
+    n = collect_design_structures(src, ["MK"], tmp_path / "out")
+    assert n == 1, "a plain .pdb design never needed gemmi and must still be collected"
+
+
+def test_chain_sequences_reads_plain_pdb_without_gemmi(tmp_path, monkeypatch):
+    """Design-structure collection matches designs by chain sequence. Without
+    gemmi that returned {} for everything, so collection silently found nothing
+    even for plain .pdb inputs it never needed gemmi to read.
+
+    mmCIF still needs gemmi; PDB does not, and PDB is what most tools write.
+    """
+    import builtins
+
+    from binder_comparison.structures import _chain_sequences
+
+    real_import = builtins.__import__
+
+    def no_gemmi(name, *a, **kw):
+        if name == "gemmi":
+            raise ModuleNotFoundError("No module named 'gemmi'")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", no_gemmi)
+
+    pdb = tmp_path / "d.pdb"
+    pdb.write_text(
+        "ATOM      1  CA  MET A   1       0.000   0.000   0.000  1.00  0.00\n"
+        "ATOM      2  CA  LYS A   2       3.800   0.000   0.000  1.00  0.00\n"
+        "ATOM      3  CA  ALA B   1       0.000   6.000   0.000  1.00  0.00\n"
+        "ATOM      4  CA  GLY B   2       3.800   6.000   0.000  1.00  0.00\n"
+    )
+    assert _chain_sequences(pdb) == {"A": "MK", "B": "AG"}
+
+
+def test_collect_structures_writes_a_sequence_manifest(tmp_path):
+    """Collected files are named design_NNNN.pdb by position in the input list,
+    so nothing downstream could map a structure back to its design. Everything
+    else in this pipeline joins by sequence; the manifest lets this do the same.
+    """
+    import csv as _csv
+
+    from binder_comparison.structures import collect_design_structures
+
+    src = tmp_path / "designs"
+    src.mkdir()
+    (src / "a.pdb").write_text(
+        "ATOM      1  CA  MET A   1       0.000   0.000   0.000  1.00  0.00\n"
+        "ATOM      2  CA  LYS A   2       3.800   0.000   0.000  1.00  0.00\n"
+    )
+    (src / "b.pdb").write_text(
+        "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00\n"
+        "ATOM      2  CA  GLY A   2       3.800   0.000   0.000  1.00  0.00\n"
+    )
+
+    out = tmp_path / "out"
+    n = collect_design_structures(src, ["MK", "AG"], out)
+    assert n == 2
+
+    manifest = out / "manifest.csv"
+    assert manifest.exists(), "no manifest — the structures cannot be joined back to designs"
+    rows = {r["sequence"]: r["path"] for r in _csv.DictReader(manifest.open())}
+    assert set(rows) == {"MK", "AG"}
+    for seq, rel in rows.items():
+        assert (out / rel).exists(), f"{seq} points at a missing file"

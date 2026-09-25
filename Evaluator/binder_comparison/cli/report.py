@@ -46,6 +46,7 @@ from ..comparison.scoring import (
     compute_consensus_iptm,
     rank_designs,
 )
+from ..comparison.self_consistency import annotate_self_consistency
 from ..comparison.sequence_panel import annotate_composition, annotate_sequence_panel
 from ..comparison.statistics import compute_statistics
 from ..io.write import write_csv, write_json
@@ -202,6 +203,16 @@ def run(args: argparse.Namespace) -> None:
     # binder pLDDT >= 0.8, interface i_pTM >= 0.5). SHADOW MODE like the two
     # above: annotates would_exclude_confidence and excludes nothing.
     df = annotate_confidence_gate(df)
+
+    # Self-consistency: did the refold put the binder where the design did?
+    # The field's universal second axis, and target-aligned -- superposing on
+    # the binder would measure its fold, not its placement. Needs the design
+    # structures `extract --collect-structures` gathers beside the FASTA; where
+    # they are absent the columns are NA, which is not a failure. Advisory.
+    if args.sequences:
+        _design_root = Path(args.sequences).resolve().parent / "design_structures"
+        _struct_base = Path(args.boltz2_results).resolve().parent if args.boltz2_results else _design_root
+        df = annotate_self_consistency(df, design_root=_design_root, base_dir=_struct_base)
 
     # SoluProt: sequence-only solubility screen output. Left-joined onto df
     # by sequence — adds native_soluprot_score (0–1 probability) and
