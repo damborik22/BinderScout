@@ -805,3 +805,37 @@ def test_generated_rfd3_script_is_valid_bash(base_cfg, tmp_path):
     conf.write_run_rfd3(script, base_cfg)
     proc = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
+
+
+class TestTmProtIsControllable:
+    """TmProt runs but the configurator could not say anything about it.
+
+    `evaluate.sh` defaults SKIP_TMPROT=0 and auto-detects the env, so an
+    installed TmProt runs on every evaluation. That is the right default. What
+    was missing is the other direction: the wizard never asked about it, `cfg`
+    had no `use_tmprot`, and the generated run_evaluate.sh passed neither
+    --skip-tmprot nor --tmprot-threshold. So the only way to turn it off or move
+    its threshold was to hand-edit a generated script -- for a screen whose own
+    docs call it advisory and out of domain on hyperstable de novo miniproteins,
+    which is exactly when an operator wants to change the threshold.
+    """
+
+    def test_disabled_emits_skip_tmprot(self, base_cfg, tmp_path):
+        script = tmp_path / "run_evaluate.sh"
+        conf.write_run_evaluate(script, {**base_cfg, "use_tmprot": False}, _ALL_TOOLS)
+        assert "--skip-tmprot" in script.read_text()
+
+    def test_enabled_passes_the_threshold_and_does_not_skip(self, base_cfg, tmp_path):
+        script = tmp_path / "run_evaluate.sh"
+        conf.write_run_evaluate(script, {**base_cfg, "use_tmprot": True, "tmprot_threshold": 55.0}, _ALL_TOOLS)
+        content = script.read_text()
+        assert "--skip-tmprot" not in content
+        assert "--tmprot-threshold 55.0" in content
+
+    def test_absent_key_defaults_to_skipping(self, base_cfg, tmp_path):
+        """TmProt is opt-in to INSTALL (GPL-3.0, not redistributed), so a config
+        that says nothing must not silently enable a screen the operator never
+        chose."""
+        script = tmp_path / "run_evaluate.sh"
+        conf.write_run_evaluate(script, base_cfg, _ALL_TOOLS)
+        assert "--skip-tmprot" in script.read_text()

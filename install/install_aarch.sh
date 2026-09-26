@@ -46,6 +46,11 @@ PROTEINA_COMPLEXA_REPO="${PROTEINA_COMPLEXA_REPO:-https://github.com/NVIDIA-Digi
 PROTEINA_COMPLEXA_COMMIT="${PROTEINA_COMPLEXA_COMMIT:-HEAD}"
 PROTEINA_COMPLEXA_DIR="${BINDERSCOUT_DIR}/Proteina-Complexa"
 
+TMPROT_REPO="https://github.com/loschmidt/TmProt.git"
+TMPROT_BRANCH="tmprot-development"
+TMPROT_COMMIT="02d4c12b39ffae8a6cde64a401210390ea9cb23f"
+TMPROT_DIR="${BINDERSCOUT_DIR}/TmProt"
+
 # aarch64: VALIDATED on GB10/sm_121 — jax-cuda13 0.11.1 takes the GPU, biotraj
 # (the only source build in the tree) compiles, and a campaign runs to completion
 # with the two guard settings run_bindcraft2.sh injects. Out of --tool all for
@@ -115,6 +120,10 @@ DO_PROTEINA_COMPLEXA=false  # opt-in via --tool proteina-complexa. Deprecated he
                         # (3300 AF2 calls per replicate) is only answerable by running it.
 DO_ESMFOLD2=false       # in --tool all (default refold engine) (lightweight 4th refold engine; no gated weights)
 DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen; source-builds scikit-learn 0.20.4 + USEARCH v12, uses the --no_tmhmm model)
+DO_TMPROT=false         # opt-in: sequence-only melting-temperature screen. GPL-3.0, so cloned
+                        # and installed editable rather than vendored. Advisory only -- it has
+                        # no filter mode, because Tm predictors are out of domain on hyperstable
+                        # de novo miniproteins.
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -164,6 +173,8 @@ while [[ $# -gt 0 ]]; do
                     DO_ESMFOLD2=true ;;
                 soluprot|solu|solubility)
                     DO_SOLUPROT=true ;;
+                tmprot|tm|thermostability)
+                    DO_TMPROT=true ;;
                 *)
                     echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, bindcraft2, boltzgen, mosaic, evaluator, pxdesign, protein-hunter, rfd3, af3, esmfold2, soluprot${RESET}"
                     exit 1
@@ -886,6 +897,7 @@ select_tools_interactive() {
     [[ "$DO_PROTEINA_COMPLEXA" == true ]] && echo -e "    ${GREEN}✓${RESET} Proteina-Complexa (opt-in; jax 0.6.2 GPU path, unvalidated end-to-end)"
     [[ "$DO_ESMFOLD2"  == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (default refolder)"
     [[ "$DO_SOLUPROT"  == true ]] && echo -e "    ${GREEN}✓${RESET} SoluProt (opt-in solubility screen; aarch64 via source build)"
+    [[ "$DO_TMPROT"    == true ]] && echo -e "    ${GREEN}✓${RESET} TmProt (opt-in Tm screen, advisory; GPL-3.0, cloned not vendored)"
     echo ""
 
     confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
@@ -3055,6 +3067,94 @@ SMOKE
 }
 
 
+install_tmprot() {
+    print_step "Installing TmProt 1.0 melting-temperature screen (binder-eval-tmprot env) — aarch64"
+
+    # PORTED FROM install.sh VERBATIM, and it needs no aarch64 deltas -- which is
+    # why its absence here was an oversight rather than a decision. The env spec
+    # says "Platform: any. Sequence-only -- no GPU required", and torch comes from
+    # upstream's own pyproject via pip.
+    #
+    # The usual aarch64 trap does NOT bite: plain PyPI torch is CPU-only here, and
+    # for TmProt that is fine. It is the opposite of the BoltzGen case, where CPU
+    # torch was a silent regression -- this screen is CPU-capable by design, and
+    # advisory besides.
+
+    # TmProt is GPL-3.0 and this repository is MIT, so it is cloned and installed
+    # editable rather than vendored -- the same posture the GPLv3 USEARCH
+    # binaries were moved to. The ESM2-LoRA production weights ship inside the
+    # tmprot-1.0 package, so there is no gated download and no weights step.
+    if [[ ! -f "${EVALUATOR_DIR}/envs/binder-eval-tmprot.yml" ]]; then
+        print_fail "Env spec not found at ${EVALUATOR_DIR}/envs/binder-eval-tmprot.yml"
+        return 1
+    fi
+
+    if env_exists binder-eval-tmprot; then
+        print_warn "Conda environment 'binder-eval-tmprot' already exists -- reusing it."
+    else
+        run_logged --retries 3 "Creating binder-eval-tmprot conda env" \
+            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval-tmprot.yml" -y \
+            || { print_fail "Failed to create binder-eval-tmprot env"; return 1; }
+    fi
+
+    if [[ -d "${TMPROT_DIR}/.git" ]]; then
+        print_warn "TmProt repo already present at ${TMPROT_DIR} -- fetching + re-pinning to ${TMPROT_COMMIT}."
+        run_logged --retries 3 "Re-pinning TmProt to ${TMPROT_COMMIT}" \
+            bash -c "cd '${TMPROT_DIR}' && git fetch --quiet origin && git checkout --quiet '${TMPROT_COMMIT}'" \
+            || { print_fail "Failed to check out TmProt ${TMPROT_COMMIT}"; return 1; }
+    elif [[ -e "${TMPROT_DIR}" ]]; then
+        print_fail "${TMPROT_DIR} exists but is not a git repo -- remove it and retry."; return 1
+    else
+        # Upstream has no main/master branch, so the branch must be named.
+        run_logged --retries 3 "Cloning TmProt (${TMPROT_BRANCH})" \
+            git clone --quiet --branch "${TMPROT_BRANCH}" "${TMPROT_REPO}" "${TMPROT_DIR}" \
+            || { print_fail "Failed to clone ${TMPROT_REPO}"; return 1; }
+        run_logged "Pinning TmProt to ${TMPROT_COMMIT}" \
+            bash -c "cd '${TMPROT_DIR}' && git checkout --quiet '${TMPROT_COMMIT}'" \
+            || { print_fail "Failed to check out TmProt ${TMPROT_COMMIT}"; return 1; }
+    fi
+
+    # The standalone CLI package, which is what carries the bundled model.
+    local _pkg="${TMPROT_DIR}/tmprot-1.0"
+    [[ -d "${_pkg}" ]] || _pkg="${TMPROT_DIR}"
+    run_logged --retries 2 "Installing TmProt (editable) into binder-eval-tmprot" \
+        "${CONDA_CMD}" run -n binder-eval-tmprot pip install -q -e "${_pkg}" \
+        || { print_fail "Failed to install TmProt from ${_pkg}"; return 1; }
+
+    # binder-compare inside the env so `screen-tmprot` runs there directly.
+    run_logged --retries 2 "Installing binder-compare into binder-eval-tmprot" \
+        "${CONDA_CMD}" run -n binder-eval-tmprot pip install -q -e "${EVALUATOR_DIR}" \
+        || { print_fail "Failed to install binder-compare into binder-eval-tmprot"; return 1; }
+
+    # Verify the thing the screen actually needs: that tmprot imports and its
+    # console script exists. An entry point that merely answers --help is not
+    # evidence of an install -- see verify_tool().
+    smoke_test "TmProt import check" \
+        "${CONDA_CMD}" run -n binder-eval-tmprot python -c "import tmprot" \
+        || return 1
+
+    cat > "${SHORTCUTS_DIR}/tmprot" <<TMPROTEOF
+#!/usr/bin/env bash
+# BinderScout shortcut: TmProt melting-temperature screen.
+# With args -> binder-compare screen-tmprot; without -> a shell in the env.
+set -euo pipefail
+if [[ \$# -eq 0 ]]; then
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-tmprot bash
+else
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-tmprot binder-compare screen-tmprot "\$@"
+fi
+TMPROTEOF
+    chmod +x "${SHORTCUTS_DIR}/tmprot"
+    print_ok "Shortcut installed at ${SHORTCUTS_DIR}/tmprot"
+
+    print_ok "TmProt installation complete"
+    print_warn "TmProt is a SCREEN, not a ranking term: native_tmprot_tm is advisory."
+    print_warn "  Tm predictors are trained on natural proteins and are out of domain on"
+    print_warn "  hyperstable de novo miniproteins. Use it to flag, never to rank or drop."
+    return 0
+}
+
+
 install_soluprot() {
     print_step "Installing SoluProt 1.0 solubility screen (aarch64 — binder-eval-soluprot env)"
     ensure_conda_in_path
@@ -3380,6 +3480,7 @@ main() {
     [[ "${DO_AF3}"       == true ]] && (( total++ ))
     [[ "${DO_ESMFOLD2}"  == true ]] && (( total++ ))
     [[ "${DO_SOLUPROT}"  == true ]] && (( total++ ))
+    [[ "${DO_TMPROT}"    == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
@@ -3398,6 +3499,7 @@ main() {
     [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
     [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
     [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; install_soluprot || failed_tools+=("SoluProt"); }
+    [[ "${DO_TMPROT}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] TmProt 1.0${RESET}"; install_tmprot || failed_tools+=("TmProt"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"
