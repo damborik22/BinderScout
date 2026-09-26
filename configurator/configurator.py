@@ -300,6 +300,7 @@ def detect_installs() -> dict:
         "af3": _env_exists("binder-eval-af3"),
         "esmfold2": _env_exists("binder-eval-esmfold2"),
         "soluprot": _env_exists("binder-eval-soluprot"),
+        "tmprot": _env_exists("binder-eval-tmprot"),
     }
 
 
@@ -3308,6 +3309,17 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         if cfg.get("soluprot_filter", False):
             lines.append("    --soluprot-filter \\")
 
+    # TmProt: advisory ONLY -- it has no filter mode, deliberately. Tm predictors
+    # are out of domain on hyperstable de novo miniproteins, so the column must
+    # never drop a design. evaluate.sh defaults it ON when the env exists, which
+    # is right; what belongs here is the ability to turn it OFF and to move the
+    # threshold, since "advisory and out of domain" is exactly when an operator
+    # wants a different number.
+    if not cfg.get("use_tmprot", False):
+        lines.append("    --skip-tmprot \\")
+    else:
+        lines.append(f"    --tmprot-threshold {cfg.get('tmprot_threshold', 60.0)} \\")
+
     primary = cfg.get("primary_engine", "boltz")
     lines += [
         f"    --primary-engine {primary} \\",
@@ -3987,6 +3999,23 @@ def wizard():
                 default=True,
             )
 
+    # ── TmProt melting-temperature screen (advisory, never filters) ──
+    use_tmprot = False
+    tmprot_threshold = 60.0
+    if use_evaluator and installed.get("tmprot"):
+        print(f"  {BOLD}TmProt melting-temperature screen{RESET} (sequence-only, no GPU, advisory)")
+        print("    Unlike SoluProt this NEVER drops a design: Tm predictors are out of")
+        print("    domain on hyperstable de novo miniproteins, so the column is advisory.")
+        use_tmprot = ask_yn("    Score predicted Tm?", default=True)
+        if use_tmprot:
+            tmprot_threshold = float(
+                ask(
+                    "    Flag designs below this Tm (°C)",
+                    default=60.0,
+                    validator=lambda v: True if 0.0 <= float(v) <= 150.0 else "must be 0-150",
+                )
+            )
+
     tools_enabled = {
         "mosaic": use_mosaic,
         "boltzgen": use_boltzgen,
@@ -4006,6 +4035,8 @@ def wizard():
         "use_soluprot": use_soluprot,
         "soluprot_threshold": soluprot_threshold,
         "soluprot_filter": soluprot_filter,
+        "use_tmprot": use_tmprot,
+        "tmprot_threshold": tmprot_threshold,
     }
 
     # Evaluator is post-processing — don't count it as the sole tool
@@ -4018,6 +4049,8 @@ def wizard():
         "use_soluprot",
         "soluprot_threshold",
         "soluprot_filter",
+        "use_tmprot",
+        "tmprot_threshold",
     }
     design_tools = {k: v for k, v in tools_enabled.items() if k not in _meta_keys}
     if not any(design_tools.values()) and not use_evaluator:
