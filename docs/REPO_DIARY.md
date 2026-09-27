@@ -2830,8 +2830,19 @@ back as the default and that the two installers agree with each other. Static be
 alternative needs ~10 GB of weights and a card this box does not have: the newer
 snapshot's shards passed 11 GB while still downloading, which on a 12 GB card leaves
 nothing for activations and independently corroborates the ~14 GB floor already recorded
-in `docs/NEXT_STAGES.md`. **What is verified is the load-time contract, from the configs —
-not a completed fold.** Someone should confirm one fold on a card that can hold it.
+in `docs/NEXT_STAGES.md`.
+
+**Then the download finished, and the run settled both halves separately.** With the newer
+revision on transformers 5.17.0 the weight load produced **zero MISMATCH lines** — the
+load-time contract is fixed, not merely argued from the configs. It then died one step
+later, in `t.cuda(device)`, with `CUDA error: out of memory`: the model cannot be moved
+onto a 12 GB card at all. So the two failures were genuinely independent, and the ~14 GB
+floor is now corroborated on this hardware rather than quoted from a note.
+
+It failed **loudly** — `EXIT=1`, no CSV written, no empty rows — so the 1.0.3 fix for
+ESMFold2's silent-empty-row behaviour holds, and `evaluate.sh`'s `check_engine_rows` would
+refuse to report a partial pool on that rc. Still outstanding: a completed ESMFold2 *fold*,
+which needs a card this box does not have.
 
 Note what settled this: not a guess about which side to pin, but reading the two
 `config.json` files sitting in the HF cache. Every blocker today yielded to looking at
