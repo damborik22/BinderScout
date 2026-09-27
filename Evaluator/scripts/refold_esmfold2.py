@@ -363,13 +363,30 @@ def _load_model_and_builder(repo_id: str, *, target_msa=None):
             "(use the wheel index matching your CUDA)."
         ) from exc
 
-    try:
-        from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model
-    except ImportError as exc:
+    # transformers RENAMED this class: `ESMFold2Model` in the 4.x series,
+    # `EsmFold2Model` from 5.x (5.17.0 measured 2026-09-27), matching the
+    # Esm* casing used by the rest of that module. The installer pins only
+    # `transformers>=4.50`, so a fresh install lands on 5.x and the old name is
+    # gone -- which took out the DEFAULT refold engine while the env otherwise
+    # verified clean. The old message told the operator to install ESMFold2
+    # support that was already there, and Python's own "Did you mean:
+    # 'EsmFold2Model'?" hint was buried under a re-raised RuntimeError.
+    ESMFold2Model = None
+    for _cls_name in ("EsmFold2Model", "ESMFold2Model"):
+        try:
+            _mod = __import__("transformers.models.esmfold2.modeling_esmfold2", fromlist=[_cls_name])
+            ESMFold2Model = getattr(_mod, _cls_name)
+            break
+        except (ImportError, AttributeError):
+            continue
+    if ESMFold2Model is None:
         raise RuntimeError(
-            "ESMFold2Model not available in transformers — install a version "
-            "that ships ESMFold2 support (`pip install 'transformers>=4.50'`)."
-        ) from exc
+            "transformers has no ESMFold2 model class under either name "
+            "(EsmFold2Model, 5.x; ESMFold2Model, 4.x). Check the installed version: "
+            '`conda run -n binder-eval-esmfold2 python -c "import transformers; '
+            'print(transformers.__version__)"`, then reinstall the env with '
+            "`binderscout install --tool esmfold2`."
+        )
 
     try:
         from esm.models.esmfold2 import (
