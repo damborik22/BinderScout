@@ -414,7 +414,32 @@ def _default_mem_fraction() -> str:
             if rt.cudaMemGetInfo(ctypes.byref(free), ctypes.byref(total)) == 0 and total.value:
                 pool_gib = total.value / (1024**3)
                 break
-        if pool_gib <= 0:  # no CUDA runtime reachable -- fall back to system RAM
+        # nvidia-smi before the RAM fallback. The ctypes probe above loads libcudart by
+        # BARE NAME, which fails whenever CUDA came from pip wheels (the libs live inside
+        # nvidia/*/lib package directories, not on the loader path) -- i.e. in this very
+        # env. Measured 2026-09-27: all three names failed, so pool_gib fell through to
+        # system RAM on a 12 GB discrete card, and every design OOM'd. nvidia-smi reports
+        # the true pool and is present wherever there is a GPU to query.
+        pool_from_gpu = pool_gib > 0
+        if not pool_from_gpu:
+            try:
+                out = (
+                    subprocess.run(
+                        ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=True,
+                    )
+                    .stdout.split("\n")[0]
+                    .strip()
+                )
+                if out:
+                    pool_gib = float(out) / 1024.0
+                    pool_from_gpu = pool_gib > 0
+            except (OSError, subprocess.SubprocessError, ValueError):
+                pass
+        if pool_gib <= 0:  # no GPU reachable at all -- fall back to system RAM
             pool_gib = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**3)
         if pool_gib <= 0:
             return "0.8"
@@ -425,7 +450,14 @@ def _default_mem_fraction() -> str:
         # applying the OS floor to a 24 GB card would drive the fraction to 0.02
         # (0.5 GB), below the ~4.4 GB working set, OOM-ing every design.
         ram_gib = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**3)
-        unified = ram_gib > 0 and abs(pool_gib - ram_gib) / ram_gib < 0.2
+        # `pool_from_gpu` is load-bearing. The heuristic asks "is the GPU pool the same
+        # size as system RAM?", so it is only meaningful when pool_gib actually CAME from
+        # the GPU. When it came from the RAM fallback, pool_gib IS ram_gib, the difference
+        # is exactly 0, and every host is declared unified -- which then drives
+        # (pool - 40)/pool negative on anything smaller than 40 GiB, clamps the fraction to
+        # the 0.02 floor, and OOMs every design on a 54 MiB allocation. That is precisely
+        # the outcome the comment above warns about, reached by a path it did not consider.
+        unified = pool_from_gpu and ram_gib > 0 and abs(pool_gib - ram_gib) / ram_gib < 0.2
 
         frac = _AF3_TARGET_RESERVE_GIB / pool_gib
         if unified:
