@@ -20,7 +20,30 @@ corrupted ``rank`` (see ``cli/report.py::_merge_by_sequence``).
 and excludes nothing. Per the 2.0 plan a pre-GPU filter may only begin excluding
 once it has been shown to remove zero confirmed binders on a calibration pool,
 and the number that decides is the false-negative rate on confirmed binders, not
-accuracy. No such pool exists yet, so this stays mark-only.
+accuracy.
+
+**These thresholds must NOT be promoted as they stand.** Measured 2026-09-27 on
+``tests/integration/golden_pool`` — six real BindCraft 2 designs against CALCA,
+refolded by all three engines — the gate flags **6 of 6**, including the rank-1
+design at ``consensus_iptm_mean`` 0.918. Two of the five thresholds are the
+cause, and both are the ones carried over from RFD3:
+
+===================== ========= ===================== ==============
+threshold             value     observed on that pool  verdict
+===================== ========= ===================== ==============
+min_hydrophobic_frac  >= 0.40   0.320 - 0.410         floor sits ABOVE the pool mean (0.363)
+max_glu_arg_frac      <= 0.36   0.222 - 0.411         ceiling sits AT the pool mean (0.347)
+max_ala_frac          <= 0.20   0.038 - 0.111         transfers fine
+max_pro_gly_frac      <= 0.12   0.028 - 0.087         transfers fine
+===================== ========= ===================== ==============
+
+The reason is that the numbers were calibrated against RFD3 backbones, whose
+failure mode is a Pro/Gly coil, while BindCraft 2 hallucinates against AF2 and so
+produces charged, helical, comparatively hydrophobic-poor sequences by
+construction. ``max_ala_frac`` and ``max_pro_gly_frac`` survive the move; the
+hydrophobic floor and the Glu+Arg ceiling do not. A per-tool calibration is what
+this needs, not a single global pair -- so the gate stays mark-only, and
+``test_composition_gate_stays_advisory.py`` holds the measurement.
 """
 
 from __future__ import annotations

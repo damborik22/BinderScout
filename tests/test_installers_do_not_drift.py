@@ -108,3 +108,92 @@ def test_a_dispatched_tool_is_actually_called():
             if total - definitions < 1:
                 problems.append(f"{path.name}: {fn} is defined but never called")
     assert not problems, "\n".join(problems)
+
+
+# The primary spelling of every tool either installer can install. Aliases
+# (bc2, complexa, phunter, esm, tm, ...) are deliberately excluded: the message
+# is there to teach a user the name to type, not to enumerate every synonym.
+_CANONICAL_TOOLS = (
+    "all",
+    "bindcraft",
+    "bindcraft2",
+    "boltzgen",
+    "mosaic",
+    "evaluator",
+    "pxdesign",
+    "proteina-complexa",
+    "protein-hunter",
+    "rfd3",
+    "af3",
+    "esmfold2",
+    "soluprot",
+    "tmprot",
+)
+
+
+def _advertised_tool_names(path: Path) -> set[str]:
+    """The names the `--tool` rejection message tells the user to use."""
+    m = re.search(r"Must be one of: ([^$\"]+)", path.read_text())
+    assert m, f"{path.name} no longer prints a 'Must be one of:' list for --tool"
+    return {p.strip() for p in m.group(1).split(",") if p.strip()}
+
+
+@pytest.mark.parametrize("path", [X86, ARM], ids=lambda p: p.name)
+def test_the_rejection_message_lists_every_tool(path):
+    """A tool the installer accepts but never advertises is undiscoverable.
+
+    Measured 2026-09-27: `tmprot` was missing from both messages and
+    `proteina-complexa` from the aarch64 one, so a user who mistyped was told
+    those tools did not exist — months after both were added.
+    """
+    missing = sorted(set(_CANONICAL_TOOLS) - _advertised_tool_names(path))
+    assert not missing, (
+        f"{path.name} accepts {missing} but its --tool rejection message never names them. "
+        "Add them to the 'Must be one of:' list."
+    )
+
+
+@pytest.mark.parametrize("path", [X86, ARM], ids=lambda p: p.name)
+def test_the_rejection_message_invents_nothing(path):
+    """The mirror check: a name in the message that the parser rejects sends the
+    user straight back to the same error."""
+    unknown = sorted(_advertised_tool_names(path) - _tool_names(path))
+    assert not unknown, f"{path.name} advertises {unknown}, which its own --tool parser rejects."
+
+
+# Checks whose bodies must be IDENTICAL in both installers. Unlike the install_*
+# functions -- which genuinely differ (cu121 vs cu130 indexes, conda vs pip
+# PyRosetta, source builds) -- a verifier only reads paths and env names that both
+# files define identically, so there is nothing to fork. Forking one anyway is how
+# the aarch64 copy of a check rots, and `install_aarch.sh` had no verifier at all
+# until 2026-09-27: `--verify` dispatches there on aarch64 and exited 1 with
+# "Unknown option", leaving Spark as the only platform that could not be audited.
+_SHARED_VERIFY_FUNCTIONS = ("_env_python_ok", "_env_refold_cli_ok", "_af3_ccd_built", "_count_glob", "verify_tool")
+
+
+def _function_body(path: Path, name: str) -> str:
+    m = re.search(rf"^{re.escape(name)}\(\) \{{\n(.*?)^\}}\n", path.read_text(), re.S | re.M)
+    assert m, f"{path.name} does not define {name}()"
+    return m.group(1)
+
+
+@pytest.mark.parametrize("fn", _SHARED_VERIFY_FUNCTIONS)
+def test_the_verify_checks_are_identical_in_both_installers(fn):
+    x86, arm = _function_body(X86, fn), _function_body(ARM, fn)
+    assert x86 == arm, (
+        f"{fn}() has drifted between install.sh and install_aarch.sh.\n"
+        "These are meant to be byte-identical copies: they only read paths and conda "
+        "env names that both files define the same way. Port the change to both, or "
+        "if a platform genuinely needs a different check, split it out explicitly "
+        "rather than editing one copy."
+    )
+
+
+@pytest.mark.parametrize("path", [X86, ARM], ids=lambda p: p.name)
+def test_both_installers_accept_verify(path):
+    """`binderscout install --verify` dispatches by platform, so an installer
+    without the flag makes the documented audit impossible on that hardware."""
+    text = path.read_text()
+    assert "VERIFY_ONLY=false" in text, f"{path.name} has no --verify mode flag"
+    assert re.search(r"^\s+--verify\)", text, re.M), f"{path.name} does not parse --verify"
+    assert "verify_selected_tools" in text, f"{path.name} never runs the verification"

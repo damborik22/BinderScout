@@ -378,9 +378,23 @@ def _load_model_and_builder(repo_id: str, *, target_msa=None):
             StructurePredictionInput,
         )
     except ImportError as exc:
+        # ModuleNotFoundError is an ImportError, so a missing *transitive* dep of
+        # esm lands here too and the old message sent the reader to reinstall an
+        # SDK that was already installed. The installer deliberately installs esm
+        # with --no-deps (its pyproject pins a 404 git transformers), so this is
+        # the expected shape of that failure -- name the module pip is missing.
+        _missing = getattr(exc, "name", None)
+        _hint = (
+            f"its dependency '{_missing}' is not installed in this env"
+            if _missing and not str(_missing).startswith("esm")
+            else "the SDK itself is not installed"
+        )
         raise RuntimeError(
-            "biohub esm SDK not available — install with `pip install "
-            "'esm @ git+https://github.com/Biohub/esm.git@c94ed8d'`."
+            f"biohub esm SDK is present but unusable: {_hint} ({exc}). The env installs "
+            "esm with --no-deps, so its runtime deps are installed explicitly — see "
+            "install_esmfold2() in install/install.sh. Re-run "
+            "`binderscout install --tool esmfold2`, or `binderscout install --tool esmfold2 "
+            "--verify` to confirm the env."
         ) from exc
 
     if not torch.cuda.is_available():

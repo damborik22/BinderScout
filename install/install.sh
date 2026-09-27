@@ -192,7 +192,7 @@ while [[ $# -gt 0 ]]; do
                 soluprot|solu|solubility)
                     DO_SOLUPROT=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, bindcraft2, boltzgen, mosaic, evaluator, rfd3, pxdesign, proteina-complexa, protein-hunter, af3, esmfold2, soluprot${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, bindcraft2, boltzgen, mosaic, evaluator, pxdesign, proteina-complexa, protein-hunter, rfd3, af3, esmfold2, soluprot, tmprot${RESET}"
                     exit 1
                     ;;
             esac
@@ -2737,6 +2737,19 @@ install_esmfold2() {
         "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q --no-deps 'esm @ git+https://github.com/Biohub/esm.git@c94ed8d' \
         || { print_fail "Failed to install biohub esm SDK (check network / git access)"; return 1; }
 
+    # The transitive deps --no-deps just skipped. `import esm` succeeds without
+    # them -- the package's top level is thin -- but the two modules
+    # refold_esmfold2.py actually imports (esm.models.esmfold2 and
+    # esm.utils.msa.msa) do not, so ESMFold2 failed at model-load time while
+    # `--verify` reported the env usable. Measured 2026-09-27 by walking the
+    # ModuleNotFoundError chain to exhaustion; this is the complete set, and it
+    # deliberately excludes esm's own `transformers` pin, which is the 404 git URL
+    # that --no-deps exists to avoid. verify_tool() now imports
+    # esm.models.esmfold2 rather than bare `esm`, so a gap here fails --verify.
+    run_logged "Installing biohub esm runtime deps into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q biopython attrs scipy zstd cloudpathlib biotite brotli einops msgpack-numpy \
+        || { print_fail "Failed to install biohub esm runtime deps into binder-eval-esmfold2"; return 1; }
+
     # Install binder-compare into the env so 'binder-compare refold-esmfold2' works
     run_logged "Installing binder-compare into binder-eval-esmfold2" \
         "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q -e "${EVALUATOR_DIR}[report]" \
@@ -3306,6 +3319,32 @@ _env_python_ok() {
     ( cd / && "${CONDA_BASE}/envs/${env}/bin/python" -c "${code}" ) >/dev/null 2>&1
 }
 
+# The refold envs are driven through the `binder-compare` console script
+# (Evaluator/evaluate.sh:527,534), NOT through `python -c`, so `import <engine>`
+# verifies the wrong thing. Measured 2026-09-27 on a full `--tool all` install:
+# binder-eval-af3 imported alphafold3 and passed `--verify`, while having no
+# binder-compare at all -- the refold step would have died with "command not
+# found" on first use. Running the subcommand's own --help exercises the whole
+# import chain, which is also what catches a partial Evaluator install:
+# cli/__init__ imports every subcommand, so report.py's module-level matplotlib
+# import is mandatory even for a refold, and `pip install -e Evaluator
+# --no-deps` therefore leaves the CLI unable to start.
+_env_refold_cli_ok() {
+    local env="$1" sub="$2"
+    env_exists "${env}" || return 1
+    ( cd / && "${CONDA_BASE}/envs/${env}/bin/binder-compare" "${sub}" --help ) >/dev/null 2>&1
+}
+
+# build_data's output. `import alphafold3` succeeds without it and AF3 then
+# aborts at run time importing alphafold3.constants.chemical_component_sets,
+# so the import check alone cannot see this.
+_af3_ccd_built() {
+    local sp
+    sp=$( cd / && "${CONDA_BASE}/envs/binder-eval-af3/bin/python" -c \
+        "import alphafold3, os; print(os.path.dirname(alphafold3.__file__))" 2>/dev/null ) || return 1
+    [[ -n "${sp}" && -f "${sp}/constants/converters/chemical_component_sets.pickle" ]]
+}
+
 _count_glob() {
     # shellcheck disable=SC2012  # count only; names are not parsed
     ls "$@" 2>/dev/null | wc -l
@@ -3328,8 +3367,11 @@ verify_tool() {
             [[ -x "${MOSAIC_DIR}/.venv/bin/python" ]] \
                 || VERIFY_REASON="no venv at ${MOSAIC_DIR}/.venv" ;;
         evaluator)
-            _env_python_ok binder-eval "import binder_comparison" \
-                || VERIFY_REASON="binder_comparison does not import in binder-eval" ;;
+            if ! _env_python_ok binder-eval "import binder_comparison"; then
+                VERIFY_REASON="binder_comparison does not import in binder-eval"
+            elif ! _env_refold_cli_ok binder-eval report; then
+                VERIFY_REASON="binder-compare does not run in binder-eval (evaluate.sh drives every step through it)"
+            fi ;;
         rfd3)
             # The check that RFD3's own smoke test was missing.
             (( $(_count_glob "${FOUNDRY_WEIGHTS_DIR}"/*.ckpt) >= 1 )) \
@@ -3348,15 +3390,31 @@ verify_tool() {
                 || VERIFY_REASON="pyrosetta does not import in binderscout_protein_hunter" ;;
         af3)
             # __file__ is None for a namespace-package shadow, so assert it.
-            _env_python_ok binder-eval-af3 \
-                "import alphafold3, sys; sys.exit(0 if alphafold3.__file__ else 1)" \
-                || VERIFY_REASON="alphafold3 not installed in binder-eval-af3 (wheel build failed?)" ;;
+            if ! _env_python_ok binder-eval-af3 \
+                    "import alphafold3, sys; sys.exit(0 if alphafold3.__file__ else 1)"; then
+                VERIFY_REASON="alphafold3 not installed in binder-eval-af3 (wheel build failed?)"
+            elif ! _af3_ccd_built; then
+                VERIFY_REASON="AF3 CCD data missing in binder-eval-af3 — run: ${CONDA_CMD} run -n binder-eval-af3 build_data"
+            elif ! _env_refold_cli_ok binder-eval-af3 refold-af3; then
+                VERIFY_REASON="binder-compare refold-af3 does not run in binder-eval-af3 (evaluate.sh calls it there)"
+            fi ;;
         esmfold2)
-            _env_python_ok binder-eval-esmfold2 "import esm" \
-                || VERIFY_REASON="the esm SDK does not import in binder-eval-esmfold2" ;;
+            # `import esm` is NOT enough: the package top level is thin and imports
+            # with none of its deps present, while refold_esmfold2.py imports
+            # esm.models.esmfold2 and esm.utils.msa.msa at model-load time. Measured
+            # 2026-09-27: bare `import esm` passed while both of those raised
+            # ModuleNotFoundError, so --verify called the DEFAULT engine usable.
+            if ! _env_python_ok binder-eval-esmfold2 "import esm.models.esmfold2, esm.utils.msa.msa"; then
+                VERIFY_REASON="the esm SDK is installed but unusable in binder-eval-esmfold2 (esm.models.esmfold2 does not import — missing runtime deps?)"
+            elif ! _env_refold_cli_ok binder-eval-esmfold2 refold-esmfold2; then
+                VERIFY_REASON="binder-compare refold-esmfold2 does not run in binder-eval-esmfold2 (evaluate.sh calls it there)"
+            fi ;;
         tmprot)
-            _env_python_ok binder-eval-tmprot "import tmprot" \
-                || VERIFY_REASON="tmprot does not import in binder-eval-tmprot" ;;
+            if ! _env_python_ok binder-eval-tmprot "import tmprot"; then
+                VERIFY_REASON="tmprot does not import in binder-eval-tmprot"
+            elif ! _env_refold_cli_ok binder-eval-tmprot screen-tmprot; then
+                VERIFY_REASON="binder-compare screen-tmprot does not run in binder-eval-tmprot (evaluate.sh calls it there)"
+            fi ;;
         soluprot)
             if ! env_exists binder-eval-soluprot; then
                 VERIFY_REASON="binder-eval-soluprot env missing"
