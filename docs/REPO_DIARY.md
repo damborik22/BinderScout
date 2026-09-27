@@ -2522,3 +2522,137 @@ engines, so registering them is bookkeeping rather than compute. The reason to b
 careful is that **73.4% of Cao's binder labels are one-sided Kd**, and excluding
 them moves macro-AUC from 0.53 to 0.73 — so which subset gets registered changes
 every number computed from it.
+
+## 2026-09-27 — The whole pipeline, end to end: five verifiers passed envs that could not run, and a pre-GPU gate would have deleted a validated pool
+
+Ran the pipeline the way an operator would, in order — `install --verify`,
+`configure`, a simulated run for all eight tools, `extract`, refold, `evaluate`,
+`report` — and checked the data flow at each junction rather than the unit tests.
+The plumbing turned out to be in good shape. The **audit** of the plumbing was
+not: five separate checks reported green on things that cannot work.
+
+### What the pipeline does correctly
+
+Worth writing down, because most of it had never been demonstrated end to end:
+
+* **Extract, 8/8 tools, provenance correct on all five routes.** BindCraft 2
+  `joined` through the trajectory hash (23), BoltzGen `parsed` (42, zero-padding
+  stripped), Mosaic `explicit` (7), RFD3 `parsed`, Protein-Hunter `explicit` (4),
+  and the three tools that genuinely cannot report an index say `unavailable`
+  rather than inventing one. `generation_index` reaches `metrics.csv` and
+  `top30_slim.html` when `--native-metrics` is passed.
+* **The MSA cache claim holds.** Cold target → one ColabFold fetch → 150
+  sequences cached under the key the code predicts; second call `mode=cached`,
+  no network. All three engines read that one file.
+* **The cross-engine gate is real, and parameterised.** Built a pool where
+  PXDesign has by far the BEST `consensus_iptm_mean` (0.9646) but only two
+  engines: it was ranked **8 of 8, last, and not dropped** — exactly as
+  documented — while `--min-engines 2` promoted it straight to rank 1.
+* **Self-consistency measures what it claims.** Design == refold → 0.000;
+  the whole complex rotated 0.4 rad and translated → **0.000**, which is the
+  load-bearing proof that the superposition is *target*-aligned (a naive RMSD
+  would have said ~8 Å); the binder alone displaced 10 Å → **10.000**, recovering
+  the displacement exactly.
+* **Failures are loud.** AF3 OOM'd on this 12 GB card (~4 GB free, the rest held
+  by the host compositor) and the runner raised `RuntimeError: ... This is an
+  environment fault, not bad input` instead of writing empty rows — the guard
+  written for the 2026-08-20 `JAX_PLATFORMS=cpu` incident, firing correctly for a
+  different cause.
+
+### Five verifiers that passed unusable environments
+
+The pattern is identical each time: **the check tested a proxy, and the proxy was
+satisfied by something that cannot run.**
+
+| checked | what it missed |
+|---|---|
+| `import alphafold3` | the env had **no `binder-compare` at all**, and `evaluate.sh:527` invokes exactly that |
+| `import alphafold3` | `build_data`'s CCD pickle absent → AF3 aborts later, on `alphafold3.constants.chemical_component_sets` |
+| `import esm` | `esm.models.esmfold2` and `esm.utils.msa.msa` — the two modules the refold actually imports — both `ModuleNotFoundError` |
+| `--verify` on aarch64 | there was **no verifier in that file at all** (0 references vs 21), and a comment already pointed readers at a `verify_tool()` that did not exist there |
+| "kept in sync with install.sh" | `install_aarch.sh` lacked `--no-deps` on the esm install — the precise failure that took out the default engine on x86 on 2026-09-23 |
+
+The ESMFold2 one is the worst of them: `esm` is installed `--no-deps` on purpose
+(its pyproject pins a git URL that 404s), and **nothing then installed its
+runtime dependencies**. So the *default* refold engine was non-functional in an
+environment `--verify` called usable. Walking the `ModuleNotFoundError` chain to
+exhaustion gave the complete set — biopython, attrs, scipy, zstd, cloudpathlib,
+biotite, brotli, einops, msgpack-numpy — and the verifier now imports the real
+modules, so a future gap goes red instead of silent.
+
+The lesson is narrow enough to be useful: **verify the interface the pipeline
+uses, not a proxy for it.** `evaluate.sh` drives every step through
+`binder-compare`, so the verifier now runs `binder-compare <subcommand> --help`,
+which exercises the whole import chain. That is also what exposed the corollary —
+`cli/__init__` imports every subcommand, so `report.py`'s module-level matplotlib
+import is mandatory even for a refold, which means CLAUDE.md's documented repair
+recipe (`pip install -e Evaluator --no-deps`) **could never have worked** on an
+env missing deps. Corrected to the `[report]` extra.
+
+The env list for that test is parsed out of `evaluate.sh` rather than hardcoded,
+so a new `binder-compare` step in a new env fails until its verifier follows.
+
+### The composition gate would have deleted a validated pool
+
+The most consequential finding, and it came from running the report on real data
+rather than from reading anything. The shadow-mode composition gate flags **6 of
+6 real BindCraft 2 designs** in the golden pool — including the rank-1 design at
+`consensus_iptm_mean` 0.918.
+
+| threshold | value | observed on that pool | verdict |
+|---|---|---|---|
+| `min_hydrophobic_frac` | ≥ 0.40 | 0.320 – 0.410 | floor is **above** the pool mean (0.363) |
+| `max_glu_arg_frac` | ≤ 0.36 | 0.222 – 0.411 | ceiling sits **at** the pool mean (0.347) |
+| `max_ala_frac` | ≤ 0.20 | 0.038 – 0.111 | transfers fine |
+| `max_pro_gly_frac` | ≤ 0.12 | 0.028 – 0.087 | transfers fine |
+
+The two that fail are the two carried over from `tools/rfd3_gate.py`, and the
+reason is a tool mismatch, not a bad constant: RFD3's failure mode is a Pro/Gly
+coil, so the thresholds that catch it are a hydrophobic floor and a charge
+ceiling — and BindCraft 2 hallucinates against AF2, producing charged, helical,
+comparatively hydrophobic-poor sequences *by construction*. What this needs is
+per-tool calibration, not a nudged global pair.
+
+This is shadow mode earning its keep. The design rule — a pre-GPU filter may only
+start excluding once it removes zero confirmed binders on a calibration pool —
+had been justified by the *absence* of a pool. It is now justified by a
+measurement, pinned in a test that fails if anyone quietly relaxes a threshold to
+make the pool pass. If a future recalibration genuinely fixes it, that test is
+*supposed* to fail; the instruction is to re-measure, not to delete it.
+
+### A demotion nobody could explain
+
+`rank_designs` puts gate failures last regardless of score, which makes the gate
+the only criterion in the report that actually reorders the table — and it was
+the one thing missing from the operator-facing `Notes` column. The PXDesign
+design with the pool's best mean sat at rank 8 with an **empty** Notes cell while
+all seven designs that *passed* the gate carried reasons. Anyone reading that
+table would conclude the best design was inexplicably last. It now reads
+`cross-engine gate FAILED (only 2 engine(s)) — ranked last`.
+
+### Two things that were my fixture's fault, not the code's
+
+Recorded because I nearly reported both as defects: constant `*_ipae_ang` across
+designs (I copied one golden row as a template and never varied its `ipae`), and
+the doubled prefix in `rfd3_rfd3_helix_binder_3_model_1` (my synthetic
+`design_id` already began with `rfd3_`; a real run's does not). The extractor
+prefixes unconditionally, which I left alone — I could not show a real RFD3 run
+produces a prefixed id, and changing code on a guess is how the last round of
+hollow guards got written.
+
+### Also
+
+`--tool all` installs **two** refold engines, not three: AF3's weights are gated
+behind a Google DeepMind request, so it cannot be in `all`. Against the report's
+default `--min-engines 3` that means every design fails the gate on a fresh
+install. The report says so loudly and names the shortfall, which is the right
+behaviour, but nothing documented it — now in CLAUDE.md. The AF3
+all-binders-failed message also named neither cause seen here (insufficient VRAM,
+missing `build_data`) and now leads with both.
+
+**867 tests (+23).** Every new guard mutation-tested. One of those mutations was
+itself broken — I inserted the "promote out of shadow mode" line *between* the two
+column assignments, so the function raised instead of dropping rows, and the test
+written to catch dropping stayed green for the wrong reason. I only noticed
+because the *other* test failed and that one didn't. Asserting that the mutation
+applied is not optional; this is the second time in three days.
