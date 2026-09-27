@@ -73,6 +73,20 @@ def run_boltz2_refold(
     # Resolve target_pdb to absolute path before chdir changes CWD
     target_pdb_abs = str(Path(target_pdb).resolve()) if target_pdb else None
 
+    # Publish whatever is ALREADY on disk before folding anything.
+    #
+    # refold_batch writes each completed design to refold_designs.csv immediately, but
+    # the copy to the caller's --output path happens only once refold_batch RETURNS. A
+    # fatal abort inside it therefore strands finished work under a filename the
+    # pipeline does not read. Observed 2026-09-27 on a 12 GB card: all 8 designs folded
+    # and were written, then XLA died in allocator teardown with
+    # `bfc_allocator.cc: Check failed: central_gap_ == kInvalidChunkHandle`, and the
+    # requested CSV was never created. `--resume` did not help -- it correctly skipped
+    # all 8 and then hit the same CHECK, 2 runs out of 2 -- and a try/finally cannot
+    # help either, because a C++ CHECK raises SIGABRT which Python never sees.
+    # Publishing first makes a re-run recover the earlier work even if it aborts again.
+    _publish_csv(output_dir / "refold_designs.csv", output_csv, output_dir)
+
     # refold_boltz2.refold_batch writes refold_designs.csv relative to CWD.
     # Change to output_dir so the CSV lands there.
     old_cwd = os.getcwd()
@@ -93,17 +107,28 @@ def run_boltz2_refold(
     finally:
         os.chdir(old_cwd)
 
-    # Move the CSV to the requested output path
+    # Publish again, now including anything this run added.
     generated_csv = output_dir / "refold_designs.csv"
-    if generated_csv.exists():
-        output_csv.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(str(generated_csv), str(output_csv))
-        # refold_boltz2.py writes paths relative to output_dir (which was CWD).
-        # Rewrite them as absolute so downstream tools can find the files.
-        _absolutize_csv_paths(output_csv, output_dir, ["pdb", "pae_file", "plddt_file"])
+    if _publish_csv(generated_csv, output_csv, output_dir):
         print(f"[boltz2] Results → {output_csv}")
     else:
         raise FileNotFoundError(f"Expected refold_boltz2 to write {generated_csv} but it was not found.")
+
+
+def _publish_csv(generated_csv: Path, output_csv: Path, output_dir: Path) -> bool:
+    """Copy refold_designs.csv to the caller's path, absolutising structure paths.
+
+    Returns False when there is nothing to publish yet, which is the normal state on a
+    first run. Called both before and after folding -- see the note at the call site.
+    """
+    if not generated_csv.exists():
+        return False
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(str(generated_csv), str(output_csv))
+    # refold_boltz2.py writes paths relative to output_dir (which was CWD).
+    # Rewrite them as absolute so downstream tools can find the files.
+    _absolutize_csv_paths(output_csv, output_dir, ["pdb", "pae_file", "plddt_file"])
+    return True
 
 
 def _load_completed_indices(csv_path: Path) -> set[int]:

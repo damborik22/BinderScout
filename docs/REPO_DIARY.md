@@ -2656,3 +2656,168 @@ column assignments, so the function raised instead of dropping rows, and the tes
 written to catch dropping stayed green for the wrong reason. I only noticed
 because the *other* test failed and that one didn't. Asserting that the mutation
 applied is not optional; this is the second time in three days.
+
+## 2026-09-27 (cont.) — The refold half: four engines, four different reasons it could not run, and only one of them was hardware
+
+The morning's pipeline test stopped at the GPU because this box had ~4 GB free. The
+user freed memory and asked me to try again. What followed was not one blocker but a
+chain of four, each hiding the next, and only the third was a real hardware limit.
+The pattern that made them expensive is the same one from the morning, one layer in:
+**a check that covers most of an interface still passes on a broken one.**
+
+### 1. AF3's memory fraction was 2%, and the guard against that had a blind path
+
+AF3 died on a **54 MiB** allocation with 8.9 GB free. The fraction it chose was
+**0.020** — about 246 MiB.
+
+`_default_mem_fraction` decides whether memory is UNIFIED (so that over-reserving
+would starve the OS) by asking *is the GPU pool the same size as system RAM?* Two
+things made that question answer itself:
+
+* the ctypes probe loads `libcudart` **by bare name**, which fails whenever CUDA came
+  from pip wheels — the libs live in `nvidia/*/lib`, off the loader path. All three
+  names failed in `binder-eval-af3`, so this was every run, not an edge case;
+* `pool_gib` then fell back to **system RAM**, making `pool == ram` exactly. The
+  difference is 0, so every host was declared unified, `(pool − 40)/pool` went
+  negative on anything under 40 GiB, and the fraction hit the 0.02 floor.
+
+The function's own comment says applying the OS floor to a small card "would drive the
+fraction to 0.02 (0.5 GB), below the ~4.4 GB working set, OOM-ing every design." It was
+right. It just could not see this route to it. Fixed by querying `nvidia-smi` when the
+ctypes probe fails, and by making the unified verdict conditional on the pool size
+having actually come from the GPU. **0.020 → 0.500**, and if both probes fail the
+fallback is now benign in both directions instead of fatal in one.
+
+Worth noting: `refold_boltz2.py` has its own copy of this logic and got it right —
+it printed `discrete 12.0 GiB device (host RAM is separate; runaway is recoverable)`.
+AF3's was the broken sibling.
+
+### 2. AF3 cannot run on consumer Ampere/Ada at all, and this is not about VRAM
+
+With the fraction fixed, every design failed differently:
+
+```
+RESOURCE_EXHAUSTED: Shared memory size limit exceeded: requested 110592, available: 101376
+```
+
+That is **shared memory per block** — a per-SM architectural limit. AF3 v3.0.2 runs
+attention and gated-linear-unit layers as **tokamax Pallas/Triton** kernels
+(`PallasTritonFlashAttention`, `PallasTritonGatedLinearUnit`, visible autotuning on the
+card), and one needs 108 KB. sm_86/sm_89 expose 99 KB; A100 164 KB; H100/GB10 228 KB.
+
+Four things left it completely unchanged: `--flash_attention_implementation=xla` (AF3
+documents it as "portable across GPU devices"), `--xla_gpu_enable_triton_gemm=false`,
+a cold compile cache, and the memory fraction. So it is a wall, not a knob.
+
+**This puts a documented claim in doubt.** CLAUDE.md says AF3 "runs fleet-wide
+(BM1/BM2/BM4)" on the strength of a 2026-08-14 measurement on BM2 — **an RTX 3090,
+which is also sm_86 with the same 101,376-byte limit.** That result cannot be
+reproducible on a commit using these kernels. The likely explanation is that
+`AF3_COMMIT` has moved since (tokamax is new in AF3 3.0.x), which would leave the
+4.4 GB VRAM finding true and the *card list* stale. Both measurements are kept and the
+claim is marked IN DOUBT; it needs one re-run on BM2 recording which commit was used.
+Deleting either number would lose information.
+
+The operator-facing failure said only "environment fault" plus 4,000 characters of
+traceback, which sends the reader after a memory cap that cannot help. It now names the
+limit, says what does *not* fix it, and gives the alternative.
+
+### 3. `~/.boltz` was a broken download, and the downloader cannot see that
+
+Boltz-2 failed inside pytorch_lightning with `PytorchStreamReader failed reading zip
+archive: failed finding central directory`. The cache had been interrupted three days
+earlier and held **three** separate broken artifacts:
+
+| artifact | found | expected |
+|---|---|---|
+| `boltz2_conf.ckpt` | **0.21 GB**, not a valid zip | ~2.3 GB |
+| `boltz2_aff.ckpt` | absent | ~2.1 GB |
+| `mols/` | 2,949 entries, **ALA/GLY/SER/LYS missing, GLU present** | 45,227 |
+| `mols.tar` | 114 MB, truncated, no canonical residues | — |
+
+`boltz.main.download_boltz2` decides what to fetch **by whether a path exists** — not
+size, not integrity. So re-running the documented bootstrap printed its normal
+"Downloading …" banner, skipped every incomplete artifact and reported `DONE` while
+fixing nothing. It took three rounds because each fault only surfaced once the previous
+one was cleared: the tar, then the directory (existence again), then the checkpoint.
+
+`refold_boltz2` now refuses a cache like that before loading the model, reports every
+fault in one message, and gives the deletion step — since re-running the downloader
+alone genuinely cannot repair it. It probes **all six** canonical residues, because the
+partial extraction kept GLU and dropped ALA, so any single spot-check would have passed
+this cache. An absent cache stays silent; that is the normal first-run path.
+
+### Boltz-2 then folded, and the report was exercised on real data at last
+
+Eight CALCA designs, 28 aa binders against the 32 aa target (a 60-token complex):
+
+| ipTM | 0.8243 | 0.8498 | 0.9007 | 0.5593 | 0.8870 | 0.4855 | 0.8870 | 0.8559 |
+|---|---|---|---|---|---|---|---|---|
+| `ipsae_min` | 0.5310 | 0.6388 | 0.6492 | 0.4538 | 0.6696 | 0.5366 | 0.5680 | 0.6575 |
+
+36 columns, schema byte-identical to the golden pool, and the report on it behaved as
+documented: all eight tools attributed, `generation_index` provenance intact, eight real
+PDBs in `top20_structures/`, and the cross-engine gate **named the shortfall** —
+`no design was refolded by 3+ engines (best coverage in this pool: 1) … lower the gate
+with --min-engines 2` — rather than quietly reporting that nothing was good enough. A
+second warning correctly recorded that `agreement_count` could not be assessed with one
+engine and so was not applied to `wetlab_recommended`.
+
+**A postscript on that run.** It ended with a fatal XLA CHECK at teardown —
+`bfc_allocator.cc:1065 Check failed: central_gap_ == kInvalidChunkHandle … spatial
+partitioning expects one central gap` — *after* all eight folds were written. Because
+`boltz2_runner` copies `refold_designs.csv` to the requested `-o` path only once
+`refold_batch` returns, the completed work was stranded under the inner filename. I first
+wrote here that `--resume` recovers this. **Then I tested it, and it does not.** The
+resume invocation read `refold_designs.csv`, correctly reported `skipping 8
+already-completed binders` — and died at the *same* CHECK, 2 runs out of 2, before
+`refold_batch` returned. The abort is in allocator teardown, so it happens whether or not
+anything is folded, and a Python `finally` cannot catch a SIGABRT raised by a C++ CHECK.
+On this box the `-o` CSV can therefore **never** be produced, while eight correct folds
+sit on disk permanently out of reach.
+
+`evaluate.sh` handles the consequence correctly — `check_engine_rows` refuses to report a
+partial pool and aborts loudly on a non-zero rc — so nothing silently ships short. But the
+work is unrecoverable, and that is a real defect rather than a hardware one: the publish
+step is gated behind a return that never happens. Fixed by publishing
+`refold_designs.csv` to the requested path **before** folding as well as after, so a
+re-run recovers prior work even if it later aborts. Writing that claim before testing it
+is precisely the habit this diary exists to catch; the only reason it did not ship is
+that I checked it.
+
+### 4. ESMFold2 — the DEFAULT engine — could not load a model, for two reasons
+
+First, transformers **renamed the class**: `ESMFold2Model` in 4.x, `EsmFold2Model` from
+5.x. `refold_esmfold2` imported the old name, and its `except ImportError` branch told
+the operator to "install a version that ships ESMFold2 support" — which was already
+installed — while Python's own `Did you mean: 'EsmFold2Model'?` sat buried under the
+re-raised RuntimeError. It now tries both names.
+
+Second, and this is the part that stings: **the verifier I added this morning checked
+two of that script's three imports.** It covered both `esm` SDK modules and not the
+transformers model class, so ESMFold2 verified *usable* with a model class that does
+not exist. The morning's lesson was "verify the real interface, not a proxy"; the
+refinement is that the real interface means **all** of it. Mutation-verified by renaming
+the class in site-packages.
+
+Then a deeper one. The installer pins `transformers>=4.50` **with no upper bound**, and
+that pin is wrong in both directions:
+
+* **4.57.6 has no `transformers.models.esmfold2` module at all** — ESMFold2 support is
+  5.x-only, so the `>=4.50` floor never described anything real;
+* **5.17.0 changed the distogram head from 64 to 128 bins**, so the model revision
+  pinned in 1.0.2 (`8fc3ff47`) now fails to load:
+  `distogram_head.weight: ckpt torch.Size([64, 256]) vs model torch.Size([128, 256])`.
+
+A pinned checkpoint with an unpinned loader was always going to drift apart; 1.0.2
+pinned one side of a two-sided contract. Which side to pin is being measured rather
+than guessed — that is the whole lesson of the last two days.
+
+### What this session says about the documentation
+
+Three claims did not survive contact with the hardware: AF3 "runs fleet-wide", the
+`--no-deps` repair recipe (which could never have worked), and a comment asserting two
+installer functions were "kept in sync" while one lacked a load-bearing flag. None were
+lies; each was true when written and nothing re-checked it. The countermeasure that
+actually works is the one the drift test demonstrated today — it caught me editing
+`verify_tool` in one installer within minutes, which is faster than any amount of care.
