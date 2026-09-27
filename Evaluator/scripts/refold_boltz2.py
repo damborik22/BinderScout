@@ -287,6 +287,62 @@ def _read_target_sequence() -> str:
 # ============================
 
 
+def _check_boltz_cache(cache_dir: str | None = None) -> None:
+    """Refuse a HALF-DOWNLOADED ~/.boltz cache with a readable message.
+
+    ``boltz.main.download_boltz2`` decides what to fetch by whether a path EXISTS.
+    It checks neither size nor integrity, so an interrupted download is permanently
+    sticky: it prints its normal "Downloading ..." banner, skips every incomplete
+    artifact and reports success. Measured 2026-09-27 on a cache interrupted three
+    days earlier -- ``boltz2_conf.ckpt`` was 0.21 GB of an expected ~2.3 GB and not a
+    valid zip, ``boltz2_aff.ckpt`` was absent, and ``mols/`` held 2,949 of 45,227
+    entries with ALA, GLY, SER and LYS all missing while GLU was present. Re-running
+    the documented bootstrap fixed nothing; each broken path had to be deleted first.
+
+    The failures it produces point nowhere near the cause: a truncated checkpoint
+    surfaces as ``PytorchStreamReader failed reading zip archive: failed finding
+    central directory`` from inside pytorch_lightning, and missing canonical residues
+    as ``ValueError: CCD component ALA not found!`` from the tokenizer.
+
+    This only complains about paths that EXIST and are broken. A cache that is simply
+    absent is normal -- Boltz downloads it on first use.
+    """
+    import zipfile
+    from pathlib import Path
+
+    root = Path(cache_dir) if cache_dir else Path(os.environ.get("BOLTZ_CACHE", Path.home() / ".boltz"))
+    if not root.is_dir():
+        return  # nothing cached yet: Boltz will fetch it
+
+    problems: list[str] = []
+    ckpt = root / "boltz2_conf.ckpt"
+    if ckpt.is_file() and not zipfile.is_zipfile(ckpt):
+        problems.append(f"{ckpt} is not a valid checkpoint ({ckpt.stat().st_size / 2**30:.2f} GB, expected ~2.3 GB)")
+
+    mols = root / "mols"
+    if mols.is_dir():
+        # Probing every canonical residue is the point: the partial extraction kept GLU
+        # and dropped ALA, so a single spot-check can pass on a broken cache.
+        missing = [r for r in ("ALA", "GLY", "SER", "LYS", "GLU", "TRP") if not (mols / f"{r}.pkl").is_file()]
+        if missing:
+            problems.append(
+                f"{mols} is missing canonical residues {', '.join(missing)} "
+                f"({len(list(mols.glob('*.pkl')))} of ~45,227 entries present)"
+            )
+
+    if problems:
+        detail = "\n  - ".join(problems)
+        raise RuntimeError(
+            "The Boltz-2 cache is incomplete, and re-running the downloader will NOT repair it "
+            "(download_boltz2 skips anything that already exists):\n  - "
+            + detail
+            + f"\n\nDelete the broken paths and re-fetch:\n"
+            f"  rm -rf {root}/boltz2_conf.ckpt {root}/mols {root}/mols.tar\n"
+            '  <mosaic-venv>/bin/python -c "from boltz.main import download_boltz2; from pathlib '
+            "import Path; download_boltz2(cache=Path.home()/'.boltz')\""
+        )
+
+
 def refold_batch(
     binder_sequences: list[str],
     target_sequence: str,
@@ -373,6 +429,7 @@ def refold_batch(
             else "Target MSA: none — online co-fold"
         )
 
+    _check_boltz_cache()
     folder = Boltz2()
 
     # Fetch the target MSA exactly ONCE for the whole batch. Boltz's
