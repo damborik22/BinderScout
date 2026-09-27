@@ -2447,3 +2447,78 @@ write per-edit, and a fix you have not watched work has not been made.
 **Also of note**, three times this session a lint failure reached a commit
 because `ruff check . | tail -1` and `ruff format --check . ; echo $?` both take
 their status from the wrong command. Same slip each time.
+
+---
+
+## 2026-09-26 → 09-27 — Proteina-Complexa was already possible on Spark, and the installers had silently diverged
+
+Two entries' worth of work, joined by one theme: **this repo's own records were
+the obstacle, twice.**
+
+**Proteina-Complexa on aarch64 was never actually blocked — the stated reason was
+wrong twice over.** Deprecated 2026-07-29 for "no CUDA `jaxlib` exists for
+aarch64". That was disproved on 09-18 (`96a1f02`): the CUDA plugin does exist and
+gives `backend: gpu` on jax 0.4.29. The same commit found the real blocker — jax
+0.4.x cannot compile an AF2-class graph for sm_121, aborting with `LLVM ERROR:
+Unsupported rounding mode for conversion`, reproduced in two environments.
+
+And that blocker was *already fixed on this hardware, twice*: BindCraft 1 runs
+AF2 on the GPU there on `jax[cuda12]==0.6.2` (`9c29729`), BindCraft 2 on
+`jax-cuda13 0.11.1`. PC's AF2 reward **is** ColabDesign — the same library — so it
+inherits the fix. Nobody had connected those three facts, and the installer still
+answered `--tool proteina-complexa` with `exit 1`.
+
+I reached the same conclusion from the wrong direction: I "discovered" the jaxlib
+claim was false without checking whether that had already been established, and
+had to be told the capability existed. The lesson is cheap and I keep relearning
+it — **read the history before reasoning from the docs**, because a stale doc and
+an open question look identical from inside.
+
+`install_aarch.sh` now installs PC with the documented five-blocker Blackwell
+recipe (cu130 torch, a `torch_scatter` shim for the one `scatter_mean` it uses,
+biotite 1.6.0 + graphein + atomworks) and 0.6.2 in place of the manual port's
+`jax[cpu]==0.4.29`. No CPU-fallback patch: the original `jax.devices("gpu")` is
+now correct code.
+
+**The smoke test is the part worth copying.** It compiles a jitted **bf16** graph
+— the exact lowering that aborted — and refuses rather than reporting success if
+that fails. It claims nothing more, because this repo has already once declared
+aarch64 support on the strength of `jax` reporting `gpu` plus a clean import, and
+had to retract it. What is still unproven is the deprecation's actual content:
+**throughput**. 3,300 AF2 calls per 100-design replicate meant 12.2 days with a
+CPU reward; with the reward on the GPU nobody has measured the replacement.
+
+**Then a standing rule arrived — check every new thing across installer,
+configurator, evaluator and report generator — and found two gaps immediately.**
+TmProt was wired in three of five places: 59 references in `install.sh` and
+**zero** in `install_aarch.sh`, so it could not be installed on Spark at all, and
+zero in the configurator, so there was no wizard question, no `cfg` key and no
+generated flags. I had built its runner earlier in the same week and checked
+neither installer.
+
+**The root cause is that one entry point is not one implementation.**
+`binderscout install` *does* dispatch by platform, and `install.sh` now refuses on
+aarch64 rather than warning. But `install_aarch.sh` is a separate ~3,000-line
+script with its own `install_*` functions, so every tool is written twice and the
+second copy is the one that gets forgotten — PC had no function there either.
+
+So the comparison is a test now, on three surfaces: the `--tool` vocabulary, the
+`install_*` functions, the `DO_*` flags. Deliberately not the bodies, which
+genuinely differ (cu121 vs cu130, conda vs pip PyRosetta, source builds) — a tool
+present on one platform and absent on the other is the defect; implementing it
+differently is the point. Parity after the port: 25 tool names, 14 functions, 13
+flags. Mutation-tested on the actual historical bug, and my first threshold was
+off by one and passed everything, which the mutation caught.
+
+**Also decided:** P5 is not built. Four shadow-mode columns already ship and none
+can be promoted without labels, and Part U measured that hunting for extra
+metrics scored *worse* than `consensus_iptm_mean` alone (0.5170 vs 0.5552). A
+fifth unvalidated screen would have repeated that. SoluProt and TmProt stand.
+
+**Open:** the discovery metric's pre-filtered-pool question, and which labelled
+pools to register — deferred. Four exist (Cao 4,442 / Adaptyv ~2,517 / de novo
+BindCraft 110 / our own CBG+CALCA SPOC), all already refolded through our
+engines, so registering them is bookkeeping rather than compute. The reason to be
+careful is that **73.4% of Cao's binder labels are one-sided Kd**, and excluding
+them moves macro-AUC from 0.53 to 0.73 — so which subset gets registered changes
+every number computed from it.

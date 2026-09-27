@@ -1,5 +1,15 @@
 # Decisions waiting on you
 
+Written 2026-09-25 overnight; decision state updated 2026-09-27.
+
+| # | decision | state |
+|---|---|---|
+| 1 | discovery metric vs a pre-filtered pool | **OPEN** |
+| 2 | re-test Proteina-Complexa on aarch64 | **CLOSED — do it.** Installable as of 09-26; needs a run on BM5 |
+| 3 | which labelled pools to register | **DEFERRED** (09-27) |
+| 4 | P5: ESM-2 or Cambrian | **CLOSED — neither.** SoluProt + TmProt are enough for now |
+| 5 | the aarch64 `dssp` build path | **OPEN** (minor) |
+
 Written 2026-09-25 overnight. Everything below is blocked on a judgement call,
 not on implementation. Each has my recommendation, but they are yours.
 
@@ -42,7 +52,11 @@ Mosaic and Protein-Hunter (c) is one CLI flag each. BoltzGen and PC can stay at
 
 ---
 
-## 2. Is Proteina-Complexa's aarch64 deprecation worth re-testing?
+## 2. Is Proteina-Complexa's aarch64 deprecation worth re-testing? — **CLOSED: yes**
+
+Decided 2026-09-26, and the answer was that it is already possible. `install_aarch.sh --tool proteina-complexa` now installs it with `jax[cuda12]==0.6.2`. What remains is a **run on BM5** — the open question is throughput, not capability.
+
+### The original question, for the record
 
 **Blocks:** nothing. Reopening a closed decision.
 
@@ -62,7 +76,7 @@ experiment. If the resolver fights, stop.
 
 ---
 
-## 3. Which pools go into the label registry first?
+## 3. Which pools go into the label registry first? — **DEFERRED 2026-09-27**
 
 **Blocks:** promoting any shadow-mode column out of shadow mode.
 
@@ -81,7 +95,11 @@ subset gets registered changes every number computed from it.
 
 ---
 
-## 4. P5: which model, ESM-2 or ESM Cambrian?
+## 4. P5: which model, ESM-2 or ESM Cambrian? — **CLOSED: neither**
+
+Decided 2026-09-27: SoluProt and TmProt are sufficient for now, so P5 is not built. The reasoning that supported this is worth keeping — four shadow-mode columns already ship and none can be promoted without labels, and Part U measured that hunting for extra metrics scored *worse* than `consensus_iptm_mean` alone. Adding a fifth unvalidated screen would have repeated that.
+
+### The original question, for the record
 
 **Blocks:** starting P5.
 
