@@ -2810,8 +2810,32 @@ that pin is wrong in both directions:
   `distogram_head.weight: ckpt torch.Size([64, 256]) vs model torch.Size([128, 256])`.
 
 A pinned checkpoint with an unpinned loader was always going to drift apart; 1.0.2
-pinned one side of a two-sided contract. Which side to pin is being measured rather
-than guessed — that is the whole lesson of the last two days.
+pinned one side of a two-sided contract.
+
+**Resolved from the two checkpoint configs, which say exactly what happened:**
+
+| revision | `transformers_version` | `structure_head` |
+|---|---|---|
+| pinned `8fc3ff471022` | 4.57.6 | `distogram_bins: 64` **only** |
+| current `69869f737bef` | 5.16.0.dev0 | `num_distogram_bins: 64` **and** `distogram_bins: 64` |
+
+The config **key was renamed**. transformers 5.x reads `num_distogram_bins`; the pinned
+config has only the old spelling, so the head is built from the class default of 128 over
+64-bin weights. The newer snapshot carries both names precisely to survive this. So the
+fix is to move *both* halves: revision to `69869f737bef`, and the loader floor to
+`transformers>=5.16` — in both installers, since they are separate implementations.
+
+Six static tests pin the invariant, including that the unloadable revision can never come
+back as the default and that the two installers agree with each other. Static because the
+alternative needs ~10 GB of weights and a card this box does not have: the newer
+snapshot's shards passed 11 GB while still downloading, which on a 12 GB card leaves
+nothing for activations and independently corroborates the ~14 GB floor already recorded
+in `docs/NEXT_STAGES.md`. **What is verified is the load-time contract, from the configs —
+not a completed fold.** Someone should confirm one fold on a card that can hold it.
+
+Note what settled this: not a guess about which side to pin, but reading the two
+`config.json` files sitting in the HF cache. Every blocker today yielded to looking at
+the artifact rather than reasoning about it.
 
 ### What this session says about the documentation
 
