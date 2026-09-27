@@ -354,7 +354,8 @@ TMPROT_CSV="$OUTPUT/tmprot_results.csv"
 TMPROT_OK=0
 SOLUPROT_OK=1   # cleared if the optional screen fails; see Step 0.5
 
-# Step counter: 1 (report) + 1 per engine not skipped + 1 each if SoluProt / TmProt ran
+# Step counter: 1 (report) + 1 per engine not skipped + 1 if TmProt ran.
+# (SoluProt prints no step line, so it is deliberately not counted here.)
 N_STEPS=1  # report
 [[ $SKIP_TMPROT -eq 0 ]] && (( N_STEPS++ ))
 if [[ $CONCURRENT -eq 1 ]]; then
@@ -626,12 +627,16 @@ if [[ $CONCURRENT -eq 1 ]]; then
     (( STEP++ ))
 else
     if [[ $SKIP_BOLTZ2 -eq 1 ]]; then
-        echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
+        # No step prefix and no increment: N_STEPS does not count a skipped engine, so
+        # numbering one produced "[step 2/1]" for the report. AF3 and ESMFold2 below
+        # print nothing when skipped; this branch keeps its message because "using the
+        # existing CSV" is worth saying, but it is a note, not a step.
+        echo "  Boltz-2 refolding — skipped (using existing $BOLTZ2_CSV)"
     else
         echo "[step ${STEP}/${N_STEPS}] Boltz-2 refolding  (Mosaic venv, cap ${GPU_CAP_BOLTZ2})..."
         run_engine_checked "Boltz-2" engine_boltz2 "$BOLTZ2_CSV"
+        (( STEP++ ))
     fi
-    (( STEP++ ))
 
     if [[ $SKIP_AF3 -eq 0 ]]; then
         echo "[step ${STEP}/${N_STEPS}] AF3 refolding       (conda env: ${AF3_ENV}, cap ${GPU_CAP_AF3})..."
