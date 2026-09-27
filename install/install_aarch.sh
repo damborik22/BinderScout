@@ -3488,6 +3488,16 @@ verify_tool() {
             # ModuleNotFoundError, so --verify called the DEFAULT engine usable.
             if ! _env_python_ok binder-eval-esmfold2 "import esm.models.esmfold2, esm.utils.msa.msa"; then
                 VERIFY_REASON="the esm SDK is installed but unusable in binder-eval-esmfold2 (esm.models.esmfold2 does not import — missing runtime deps?)"
+            # The THIRD import refold_esmfold2.py makes, and the one the check above
+            # still missed: transformers' ESMFold2 model class. transformers renamed it
+            # (ESMFold2Model in 4.x, EsmFold2Model from 5.x) and the installer pins only
+            # >=4.50, so a fresh install lands on 5.x where the old name is gone. Measured
+            # 2026-09-27 on transformers 5.17.0: the esm checks above both passed and the
+            # DEFAULT refold engine still could not load a model. Accept either name --
+            # asserting one would re-break the other direction.
+            elif ! _env_python_ok binder-eval-esmfold2 \
+                    "import importlib, sys; m = importlib.import_module('transformers.models.esmfold2.modeling_esmfold2'); sys.exit(0 if (hasattr(m, 'EsmFold2Model') or hasattr(m, 'ESMFold2Model')) else 1)"; then
+                VERIFY_REASON="transformers in binder-eval-esmfold2 has no ESMFold2 model class (looked for EsmFold2Model and ESMFold2Model)"
             elif ! _env_refold_cli_ok binder-eval-esmfold2 refold-esmfold2; then
                 VERIFY_REASON="binder-compare refold-esmfold2 does not run in binder-eval-esmfold2 (evaluate.sh calls it there)"
             fi ;;
