@@ -360,6 +360,28 @@ def _run_single(
         # exactly where the cause lives. The JAX "Unknown backend: 'gpu'" failure was
         # unreadable for that reason -- the log showed a severed path fragment.
         print(f"  [af3] STDERR: {result.stderr[-4000:]}" if result.stderr else "  [af3] No stderr")
+        # Name the GPU-architecture failure explicitly. AF3 v3.0.2 runs its attention and
+        # gated-linear-unit layers as tokamax Pallas/Triton kernels, and one of those asks
+        # for 110,592 bytes of SHARED memory per block. That is not VRAM and no memory
+        # fraction affects it -- it is a per-SM limit fixed by the architecture: sm_86/sm_89
+        # (RTX 3060/3090/4090) expose 101,376 bytes, A100 164 KB, H100/GB10 228 KB. So the
+        # kernel cannot launch on consumer Ampere/Ada at all. Measured 2026-09-27 on an
+        # RTX 3060, where it survived neither --flash_attention_implementation=xla, nor
+        # --xla_gpu_enable_triton_gemm=false, nor a cold compile cache. Without this branch
+        # the operator reads "environment fault" plus 4,000 characters of traceback and
+        # goes looking for a memory cap that cannot help.
+        if "Shared memory size limit exceeded" in (result.stderr or ""):
+            raise RuntimeError(
+                "AF3 cannot run on this GPU: its Pallas/Triton kernels need more SHARED "
+                "memory per block than this architecture provides (see the "
+                "'Shared memory size limit exceeded' line above). This is a per-SM "
+                "architectural limit, NOT VRAM -- AF3_XLA_MEM_FRACTION, a bigger card of "
+                "the same generation, and --flash_attention_implementation=xla all leave it "
+                "unchanged. Consumer Ampere/Ada (sm_86/sm_89: RTX 3060/3090/4090) provide "
+                "101,376 bytes; A100/H100/GB10 provide 164-228 KB and are fine. Refold with "
+                "Boltz-2 and ESMFold2 on this host and pass --min-engines 2, or run AF3 on a "
+                "datacentre card."
+            )
         raise RuntimeError(f"AF3 exited with code {result.returncode}")
 
     # Find the top-ranked output
