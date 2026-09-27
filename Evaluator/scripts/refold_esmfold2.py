@@ -54,7 +54,19 @@ _MODEL_IDS: dict[str, str] = {
 # adopted — and re-validate before trusting cross-run comparisons.
 _MODEL_REVISIONS: dict[str, str | None] = {
     "biohub/ESMFold2-Fast": os.environ.get("ESMFOLD2_REVISION") or None,
-    "biohub/ESMFold2": os.environ.get("ESMFOLD2_REVISION") or "8fc3ff471022fdce52c77030685eb775de0c00a3",
+    # Moved forward from 8fc3ff471022 on 2026-09-27: that snapshot cannot be
+    # loaded by any installable transformers. A pinned checkpoint with an UNPINNED
+    # loader is only half a contract, and the two halves drifted apart via a renamed
+    # config key. Measured from the two configs:
+    #   8fc3ff471022  transformers_version 4.57.6, structure_head.distogram_bins = 64
+    #   69869f737bef  transformers_version 5.16.0.dev0, structure_head carries BOTH
+    #                 num_distogram_bins = 64 and distogram_bins = 64
+    # transformers 5.x reads `num_distogram_bins`; the old config has only the old key,
+    # so the head is built from the CLASS DEFAULT of 128 over 64-bin weights and the
+    # load fails with `distogram_head.weight: ckpt torch.Size([64, 256]) vs model
+    # torch.Size([128, 256])`. The newer snapshot carries both names for exactly this
+    # reason. Override with $ESMFOLD2_REVISION.
+    "biohub/ESMFold2": os.environ.get("ESMFOLD2_REVISION") or "69869f737beffec5294845ede23db5fc0b4f509e",
 }
 
 # --- shared target MSA: pre-warm + enforce (F21) -----------------------------
