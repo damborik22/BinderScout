@@ -247,12 +247,21 @@ def refold_batch(
     # because every design then looks like a 2-engine design.
     # Observed 2026-08-20: JAX_PLATFORMS=cpu was exported by evaluate.sh on
     # aarch64, so run_alphafold.py could not see the GPU and all 6/6 binders died.
+    # Observed 2026-09-27 on a 12 GB card with ~4 GB free (the rest held by the
+    # host compositor): a 60-token complex died on a 54 MiB allocation. The guard
+    # fired correctly, but the advice named neither cause, so the message now
+    # leads with VRAM and the build_data artifact.
     if jobs and n_failed == len(jobs):
         raise RuntimeError(
             f"All {len(jobs)} binder(s) failed — AF3 produced no usable output. "
             f"This is an environment fault, not bad input. First error: {first_exc}. "
-            "Common cause: JAX cannot see the GPU (check JAX_PLATFORMS is not set to "
-            "'cpu'), or the AF3 model weights / run_alphafold.py are missing."
+            "Common causes: not enough free VRAM (AF3 needs ~4.4 GB for our 200-400 "
+            "token regime, and a RESOURCE_EXHAUSTED/'ran out of memory' line above "
+            "means exactly that -- check nvidia-smi free memory, not card size); "
+            "build_data was never run, so alphafold3.constants.chemical_component_sets "
+            "aborts on a missing CCD pickle; JAX cannot see the GPU (check "
+            "JAX_PLATFORMS is not set to 'cpu'); or the AF3 model weights / "
+            "run_alphafold.py are missing."
         )
 
 

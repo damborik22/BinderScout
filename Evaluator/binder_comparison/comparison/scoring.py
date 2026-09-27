@@ -1020,6 +1020,32 @@ def annotate_wetlab_recommended(
             if val is False:
                 reasons[out.index.get_loc(idx)].append("SoluProt FAIL")
 
+    # Failing the cross-engine gate is the ONLY criterion here that moves a
+    # design's rank -- rank_designs() puts gate failures last regardless of score --
+    # so omitting it left the single most consequential fact about a row out of the
+    # operator-facing notes. Measured 2026-09-27: the design with the pool's BEST
+    # consensus_iptm_mean (0.965) was ranked 8/8 with an EMPTY Notes cell, while
+    # every design that passed the gate carried a reason. The threshold itself is
+    # not in scope here, and does not need to be: the engine count is the
+    # actionable number, and NaN means "not assessed", which never blames a design.
+    if "passes_engine_gate" in out.columns:
+        # A bool column with NaNs is object dtype, and .fillna().astype(bool) on that
+        # raises a pandas FutureWarning about silent downcasting. Comparing to False
+        # gives the same answer -- NaN == False is False, so unassessed rows are not
+        # blamed -- without the deprecated path.
+        gate_failed = out["passes_engine_gate"] == False  # noqa: E712
+        have = (
+            pd.to_numeric(out["consensus_iptm_n"], errors="coerce")
+            if "consensus_iptm_n" in out.columns
+            else pd.Series([float("nan")] * len(out), index=out.index)
+        )
+        for i, failed in enumerate(gate_failed):
+            if not failed:
+                continue
+            n = have.iloc[i]
+            detail = f"only {int(n)} engine(s)" if pd.notna(n) else "too few engines"
+            reasons[i].append(f"cross-engine gate FAILED ({detail}) — ranked last")
+
     if "agreement_count" in out.columns:
         agreement = pd.to_numeric(out["agreement_count"], errors="coerce")
         # agreement_count cannot exceed the number of engines that actually ran, and a

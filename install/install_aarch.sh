@@ -92,6 +92,7 @@ AUTO_YES=false
 SKIP_PREFLIGHT=false
 FORCE=false      # --force: allow --yes to accept DESTRUCTIVE prompts (reclone / env re-create)
 UNINSTALL_MODE=false
+VERIFY_ONLY=false        # --verify: audit what is on disk, install nothing
 TOOL_SPECIFIED=false
 TOOL_ALL=false         # --tool all was given; uninstall widens this to every optional add-on   # set to true when --tool is passed on CLI
 STANDALONE="auto"      # auto | true | false — controls local Miniforge install
@@ -176,7 +177,7 @@ while [[ $# -gt 0 ]]; do
                 tmprot|tm|thermostability)
                     DO_TMPROT=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, bindcraft2, boltzgen, mosaic, evaluator, pxdesign, protein-hunter, rfd3, af3, esmfold2, soluprot${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, bindcraft2, boltzgen, mosaic, evaluator, pxdesign, proteina-complexa, protein-hunter, rfd3, af3, esmfold2, soluprot, tmprot${RESET}"
                     exit 1
                     ;;
             esac
@@ -210,6 +211,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-preflight)
             SKIP_PREFLIGHT=true
+            shift
+            ;;
+        --verify)
+            VERIFY_ONLY=true
             shift
             ;;
         --standalone)
@@ -287,6 +292,7 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
   --force       Let --yes accept the destructive prompts too. Re-clones tool
                 repos and re-creates conda envs, DELETING what is there —
                 including BindCraft/params/*.npz (~4 GB of AF2 weights).
+  --verify      Check what is actually on disk for the selected tools and exit.
   --standalone  Force local Miniforge3 install into BinderScout/conda/ (server-friendly).
                 All envs and shortcuts stay inside the project directory.
   --system-conda
@@ -2588,10 +2594,31 @@ install_esmfold2() {
         "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'transformers>=4.50' gemmi safetensors \
         || { print_fail "Failed to install transformers/gemmi/safetensors into binder-eval-esmfold2"; return 1; }
     # biohub/esm: pinned commit per the HuggingFace model card (no PyPI release yet).
-    run_logged "Installing biohub esm SDK into binder-eval-esmfold2" \
+    #
+    # --no-deps is load-bearing, not an optimisation, and this file was missing it:
+    # biohub/esm's pyproject depends on git+https://github.com/biohub/transformers,
+    # which 404s, so pip hands the clone to git, git prompts for a username, finds
+    # no TTY, and the install dies with "could not read Username for
+    # 'https://github.com'". That took out the DEFAULT refold engine on x86 on
+    # 2026-09-23 and was fixed there; the comment below claimed this function was
+    # "kept in sync with install.sh" while the flag was absent here (2026-09-27).
+    run_logged --retries 3 "Installing biohub esm SDK into binder-eval-esmfold2" \
         "${CONDA_CMD}" run -n binder-eval-esmfold2 \
-        pip install -q 'esm @ git+https://github.com/Biohub/esm.git@c94ed8d' \
+        pip install -q --no-deps 'esm @ git+https://github.com/Biohub/esm.git@c94ed8d' \
         || { print_fail "Failed to install biohub esm SDK (check network / git access)"; return 1; }
+
+    # The transitive deps --no-deps just skipped. `import esm` succeeds without
+    # them -- the package's top level is thin -- but the two modules
+    # refold_esmfold2.py actually imports (esm.models.esmfold2 and
+    # esm.utils.msa.msa) do not, so ESMFold2 failed at model-load time while
+    # `--verify` reported the env usable. Measured 2026-09-27 by walking the
+    # ModuleNotFoundError chain to exhaustion; this is the complete set, and it
+    # deliberately excludes esm's own `transformers` pin, which is the 404 git URL
+    # that --no-deps exists to avoid. verify_tool() now imports
+    # esm.models.esmfold2 rather than bare `esm`, so a gap here fails --verify.
+    run_logged "Installing biohub esm runtime deps into binder-eval-esmfold2" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q biopython attrs scipy zstd cloudpathlib biotite brotli einops msgpack-numpy \
+        || { print_fail "Failed to install biohub esm runtime deps into binder-eval-esmfold2"; return 1; }
 
     run_logged "Installing binder-compare into binder-eval-esmfold2" \
         "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q -e "${EVALUATOR_DIR}[report]" \
@@ -3365,6 +3392,159 @@ preflight() {
     return 0
 }
 
+# ── Verification (ported from install.sh) ────────────────────────────────────
+# This file had NO --verify at all until 2026-09-27: `binderscout install --tool
+# all --verify` dispatches here on aarch64 (binderscout.py:124) and died with
+# "Unknown option: --verify", so Spark -- the platform where installs are most
+# fragile -- was the one platform with no way to audit an install. A comment
+# further up already pointed the reader at verify_tool() that did not exist here.
+#
+# The functions below are byte-identical copies of install.sh's, and
+# tests/test_installers_do_not_drift.py asserts they stay identical. Every path
+# they touch (BINDCRAFT_DIR, MOSAIC_DIR, FOUNDRY_WEIGHTS_DIR, the conda env
+# names) is already defined in this file with the same meaning, so there is
+# nothing platform-specific to fork -- and forking them is exactly how the
+# aarch64 copy of a check rots, which is the defect this file keeps producing.
+#
+# NOTE: unvalidated on aarch64 hardware. It installs nothing and is opt-in, so
+# the risk is a wrong verdict, not a broken install.
+#
+# VERIFY_REASON carries the explanation for the caller to print.
+VERIFY_REASON=""
+
+_env_python_ok() {
+    local env="$1" code="$2"
+    env_exists "${env}" || return 1
+    ( cd / && "${CONDA_BASE}/envs/${env}/bin/python" -c "${code}" ) >/dev/null 2>&1
+}
+_env_refold_cli_ok() {
+    local env="$1" sub="$2"
+    env_exists "${env}" || return 1
+    ( cd / && "${CONDA_BASE}/envs/${env}/bin/binder-compare" "${sub}" --help ) >/dev/null 2>&1
+}
+_af3_ccd_built() {
+    local sp
+    sp=$( cd / && "${CONDA_BASE}/envs/binder-eval-af3/bin/python" -c \
+        "import alphafold3, os; print(os.path.dirname(alphafold3.__file__))" 2>/dev/null ) || return 1
+    [[ -n "${sp}" && -f "${sp}/constants/converters/chemical_component_sets.pickle" ]]
+}
+_count_glob() {
+    # shellcheck disable=SC2012  # count only; names are not parsed
+    ls "$@" 2>/dev/null | wc -l
+}
+verify_tool() {
+    local tool="$1"
+    VERIFY_REASON=""
+    case "${tool,,}" in
+        bindcraft)
+            (( $(_count_glob "${BINDCRAFT_DIR}"/params/*.npz) >= 5 )) \
+                || VERIFY_REASON="no AF2 .npz parameters under ${BINDCRAFT_DIR}/params" ;;
+        "bindcraft 2"|bindcraft2)
+            [[ -x "${BINDCRAFT2_DIR}/.venv/bin/python" ]] \
+                || VERIFY_REASON="no venv at ${BINDCRAFT2_DIR}/.venv" ;;
+        boltzgen)
+            _env_python_ok BoltzGen "import torch" \
+                || VERIFY_REASON="torch does not import in the BoltzGen env" ;;
+        mosaic)
+            [[ -x "${MOSAIC_DIR}/.venv/bin/python" ]] \
+                || VERIFY_REASON="no venv at ${MOSAIC_DIR}/.venv" ;;
+        evaluator)
+            if ! _env_python_ok binder-eval "import binder_comparison"; then
+                VERIFY_REASON="binder_comparison does not import in binder-eval"
+            elif ! _env_refold_cli_ok binder-eval report; then
+                VERIFY_REASON="binder-compare does not run in binder-eval (evaluate.sh drives every step through it)"
+            fi ;;
+        rfd3)
+            # The check that RFD3's own smoke test was missing.
+            (( $(_count_glob "${FOUNDRY_WEIGHTS_DIR}"/*.ckpt) >= 1 )) \
+                || VERIFY_REASON="no .ckpt in ${FOUNDRY_WEIGHTS_DIR} — run: foundry install rfd3" ;;
+        pxdesign)
+            _env_python_ok binderscout_pxdesign "import torch" \
+                || VERIFY_REASON="torch does not import in binderscout_pxdesign" ;;
+        proteina-complexa)
+            if [[ ! -x "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" ]]; then
+                VERIFY_REASON="no venv at ${PROTEINA_COMPLEXA_DIR}/.venv"
+            elif (( $(_count_glob "${PROTEINA_COMPLEXA_DIR}"/ckpts/*.ckpt) < 1 )); then
+                VERIFY_REASON="no .ckpt in ${PROTEINA_COMPLEXA_DIR}/ckpts — run: complexa download --everything"
+            fi ;;
+        protein-hunter)
+            _env_python_ok binderscout_protein_hunter "import pyrosetta" \
+                || VERIFY_REASON="pyrosetta does not import in binderscout_protein_hunter" ;;
+        af3)
+            # __file__ is None for a namespace-package shadow, so assert it.
+            if ! _env_python_ok binder-eval-af3 \
+                    "import alphafold3, sys; sys.exit(0 if alphafold3.__file__ else 1)"; then
+                VERIFY_REASON="alphafold3 not installed in binder-eval-af3 (wheel build failed?)"
+            elif ! _af3_ccd_built; then
+                VERIFY_REASON="AF3 CCD data missing in binder-eval-af3 — run: ${CONDA_CMD} run -n binder-eval-af3 build_data"
+            elif ! _env_refold_cli_ok binder-eval-af3 refold-af3; then
+                VERIFY_REASON="binder-compare refold-af3 does not run in binder-eval-af3 (evaluate.sh calls it there)"
+            fi ;;
+        esmfold2)
+            # `import esm` is NOT enough: the package top level is thin and imports
+            # with none of its deps present, while refold_esmfold2.py imports
+            # esm.models.esmfold2 and esm.utils.msa.msa at model-load time. Measured
+            # 2026-09-27: bare `import esm` passed while both of those raised
+            # ModuleNotFoundError, so --verify called the DEFAULT engine usable.
+            if ! _env_python_ok binder-eval-esmfold2 "import esm.models.esmfold2, esm.utils.msa.msa"; then
+                VERIFY_REASON="the esm SDK is installed but unusable in binder-eval-esmfold2 (esm.models.esmfold2 does not import — missing runtime deps?)"
+            elif ! _env_refold_cli_ok binder-eval-esmfold2 refold-esmfold2; then
+                VERIFY_REASON="binder-compare refold-esmfold2 does not run in binder-eval-esmfold2 (evaluate.sh calls it there)"
+            fi ;;
+        tmprot)
+            if ! _env_python_ok binder-eval-tmprot "import tmprot"; then
+                VERIFY_REASON="tmprot does not import in binder-eval-tmprot"
+            elif ! _env_refold_cli_ok binder-eval-tmprot screen-tmprot; then
+                VERIFY_REASON="binder-compare screen-tmprot does not run in binder-eval-tmprot (evaluate.sh calls it there)"
+            fi ;;
+        soluprot)
+            if ! env_exists binder-eval-soluprot; then
+                VERIFY_REASON="binder-eval-soluprot env missing"
+            elif [[ -z "$(_resolve_usearch)" ]]; then
+                VERIFY_REASON="no USEARCH binary for the identity feature"
+            fi ;;
+        *)  VERIFY_REASON="no verifier for '${tool}'"; return 1 ;;
+    esac
+    [[ -z "${VERIFY_REASON}" ]]
+}
+
+# aarch64 has no TOOL_REGISTRY (install.sh's drives its interactive menu), so the
+# flag/label pairs are listed here. Keep in step with print_tool_status.
+verify_selected_tools() {
+    local -n __vst_out="$1"   # a nameref sharing a caller's variable name makes
+                              # bash refuse with "circular name reference"
+    local any=false
+    echo ""
+    echo -e "${BOLD}=== Verifying installed tools ===${RESET}"
+    local spec flag tool
+    for spec in \
+        "DO_BINDCRAFT|BindCraft" \
+        "DO_BINDCRAFT2|BindCraft 2" \
+        "DO_BOLTZGEN|BoltzGen" \
+        "DO_MOSAIC|Mosaic" \
+        "DO_EVALUATOR|Evaluator" \
+        "DO_PXDESIGN|PXDesign" \
+        "DO_PROTEINA_COMPLEXA|Proteina-Complexa" \
+        "DO_PROTEIN_HUNTER|Protein-Hunter" \
+        "DO_RFD3|RFD3" \
+        "DO_AF3|AF3" \
+        "DO_ESMFOLD2|ESMFold2" \
+        "DO_SOLUPROT|SoluProt" \
+        "DO_TMPROT|TmProt"
+    do
+        IFS='|' read -r flag tool <<< "${spec}"
+        [[ "${!flag}" == true ]] || continue
+        if verify_tool "${tool}"; then
+            printf "  %b  %-20s %s\n" "${GREEN}✓${RESET}" "${tool}" "usable"
+        else
+            printf "  %b  %-20s %s\n" "${RED}✗${RESET}" "${tool}" "${VERIFY_REASON}"
+            __vst_out+=("${tool}")
+            any=true
+        fi
+    done
+    [[ "${any}" == false ]]
+}
+
 main() {
     echo ""
     echo -e "${BOLD}=== BinderScout Installer — DGX Spark (aarch64) — $(date) ===${RESET}"
@@ -3388,6 +3568,17 @@ main() {
             exit 1
         fi
         select_tools_interactive
+    fi
+
+    # --verify: report what is actually on disk and stop. Runs before preflight
+    # because auditing needs no disk headroom and no network.
+    if [[ "${VERIFY_ONLY}" == true ]]; then
+        local _broken=()
+        verify_selected_tools _broken && { echo ""; print_ok "All selected tools verified usable."; exit 0; }
+        echo ""
+        print_fail "Unusable: ${_broken[*]}"
+        echo -e "  Re-run the installer for just these tools to repair them."
+        exit 1
     fi
 
     # Preflight runs after tool selection (so the disk estimate matches the choice)
