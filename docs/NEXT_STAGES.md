@@ -26,8 +26,10 @@ its facts were wrong).
 | **Stage 2 (Y)** | Private label registry: public MANIFEST, private rows resolved by checksum |
 | **Stage 5** | Static config-builder page, generated from `REQUIRED_CFG_KEYS` so it cannot drift |
 | **Hygiene** | Usernames scrubbed tree-wide + enforced · optional-import guard · two false CLAUDE.md claims corrected |
+| **PC on aarch64** | Installable again (`jax 0.6.2`); needs a throughput run on BM5 |
+| **Installer parity** | TmProt ported to aarch64 · TmProt wired into the configurator · drift guarded by test |
 
-Everything above is on `v2.0.x`, 826 tests, ruff and shellcheck clean.
+Everything above is on `v2.0.x`, 844 tests, ruff and shellcheck clean.
 
 **Blocked on a decision, not on code:** see [MORNING_DECISIONS.md](MORNING_DECISIONS.md).
 
@@ -111,7 +113,7 @@ Unblocks AG and AH, which cannot begin without it.
 
 | item | state |
 |---|---|
-| **P5** ESM Cambrian plausibility | **Buildable now.** ESM-2 650M fits this box (2–5 GB). Shadow mode, like every pre-GPU filter |
+| ~~**P5** ESM plausibility~~ | **CLOSED 2026-09-27 — not built.** SoluProt + TmProt suffice; four shadow columns already ship unvalidated, and Part U measured that extra metrics score worse than `consensus_iptm_mean` alone |
 | **A1** BindPred | Needs the model. Build the runner **once** — AH consumes the same one |
 | **D3** AggreProt | Reduction + decorrelation harness are **built and validated**; needs the model or one real per-residue export |
 | **promotion** out of shadow mode | Needs outcome labels (which designs expressed and bound), not more refolds |
