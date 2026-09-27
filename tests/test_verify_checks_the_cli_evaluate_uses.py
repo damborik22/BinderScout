@@ -48,7 +48,7 @@ def _envs_driven_through_binder_compare() -> dict[str, set[str]]:
         else:
             env = env_ref
         found.setdefault(env, set()).add(sub)
-    assert found, "parsed no `conda run -n ... binder-compare` calls out of evaluate.sh"
+    assert found, "parsed no conda-run/binder-compare invocations out of evaluate.sh"
     return found
 
 

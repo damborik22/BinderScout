@@ -56,8 +56,23 @@ SEARCH_SUFFIXES = {".py", ".md", ".sh", ".template"}
 
 
 def _tracked() -> list[str]:
-    out = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True)
-    return out.stdout.split()
+    """Tracked files, plus files that are new but not ignored.
+
+    `git ls-files` alone cannot see a file that has not been committed yet, so a
+    violation in a brand-new file was invisible locally and first appeared in CI
+    after the commit -- which happened on 2026-09-27 with a new test whose
+    assertion message contained a literal `conda run -n ...`. Adding
+    --others --exclude-standard means a full local run sees the same tree CI will.
+    """
+    tracked = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True).stdout.split()
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    return tracked + untracked
 
 
 def test_every_referenced_conda_env_is_one_we_build():
