@@ -2718,8 +2718,14 @@ install_esmfold2() {
     run_logged "Installing torch (${_torch_index##*/}) into binder-eval-esmfold2" \
         "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q --index-url "$_torch_index" torch \
         || { print_fail "Failed to install torch into binder-eval-esmfold2"; return 1; }
+    # transformers>=5.16, not >=4.50: the 4.x series has NO
+    # transformers.models.esmfold2 module at all (checked on 4.57.6), so the old floor
+    # described nothing real, and it left the upper end open -- which is how a pinned
+    # checkpoint ended up unloadable by the version pip actually installs. 5.16 is where
+    # the pinned snapshot's config comes from (transformers_version 5.16.0.dev0); keep
+    # this floor and refold_esmfold2._MODEL_REVISIONS in step.
     run_logged "Installing transformers + gemmi + safetensors into binder-eval-esmfold2" \
-        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'transformers>=4.50' gemmi safetensors \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'transformers>=5.16' gemmi safetensors \
         || { print_fail "Failed to install transformers/gemmi/safetensors into binder-eval-esmfold2"; return 1; }
     # biohub/esm: ESMFold2InputBuilder + chain dataclasses. Pinned commit per the HF model
     # card (no PyPI release yet). If this 404s/changes upstream, update the ref in the yml header too.
