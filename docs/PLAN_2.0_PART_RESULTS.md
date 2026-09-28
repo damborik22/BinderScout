@@ -20,7 +20,7 @@ state). As of `v2.0.x`, 893 tests, ruff + shellcheck clean.
 | **AA** | cheap pre-GPU screens | **3 of 6 shipped.** Two need models, one closed, promotion needs labels |
 | **AB** | diversity | **Not built — but now measured, and the measurement says build it** |
 | **AC** | seed aggregation | **DONE.** The hazard was live; fixed and guarded |
-| **Z** | staged cheap-filter | **Not started.** Buildable; not validatable here |
+| **Z** | staged cheap-filter | **Measured — do not build on SoluProt.** Gate and GPU saving are mutually exclusive; `prefilter` is the remaining candidate |
 | **AE** | tool racing | **Verdict: defer.** Needs the fleet; no evidence it is the bottleneck |
 | **AF** | fourth engine (Chai-1) | **Reopen as an ADDITION.** Source analysis says no sm_86 wall, favourable memory design, outputs match our schema. Unverified by execution |
 | **AG** | fleet/Clara benchmark consumer | **Not started, now unblocked.** Naming settled; only GPU-hours remain |
@@ -154,7 +154,59 @@ helices. **This needs per-tool calibration, not a nudged global pair.** Pinned b
 
 ---
 
-## Z — staged cheap-filter · **not started, buildable**
+## Z — staged cheap-filter · **measured; do not build on SoluProt**
+
+**Result, 2026-09-28.** Z's contribution is *timing, not signal*, so the question is
+purely whether a cheap pre-GPU cut keeps the designs that matter. Its stated gate is
+"loses ≤1 of the full run's top 30 and 0 of the top 10".
+
+**Nothing needed building to test it** — two cascades already exist: `--soluprot-filter`
+(drops sub-threshold sequences before any refold engine) and `binder-compare prefilter`
+(cheap Boltz-2 fold-back → rank by interface score → top-N to the expensive engines).
+The first was measured against our own experimental results on two targets.
+
+**It fails the gate, and no threshold fixes it.** Sweeping the threshold, the only value
+that passes is 0.0 — which filters nothing and saves nothing. The gate and any GPU saving
+are mutually exclusive with SoluProt as stage 1. At the shipped 0.5 default it discarded
+several of the tightest measured binders and lost designs from the full run's own top-10
+on both targets. This is not a tuning problem: solubility and affinity are close to
+orthogonal on these pools, so a design can be poorly soluble and still be the tightest
+binder — several were.
+
+That is consistent with SoluProt being *good at its actual job*: in the same run it was
+the best available predictor of whether a design yielded a measurement at all, which is
+expression/solubility, not binding.
+
+**The transferable lesson.** A cascade validated only against our own ranking would have
+looked far safer than it is: the CALCA cut lost just 1 of the full run's top-10 but
+**four** of the ten genuinely tightest binders. **Z's gate must be stated against
+measured affinity, not only against the full run's ranking.**
+
+**What is NOT condemned:** `prefilter`. It ranks by the actual interface score — the same
+property the expensive engines measure — so its recall should be far better, and it is
+already written. Measuring it needs per-engine CSVs from an archived pool, which this box
+does not have. **That is the next step for Z.**
+
+**Also restate the gate.** The plan's version — "`rank` byte-identical with and without
+`--stage1-results`" — tests the wrong thing: that flag only attaches advisory columns,
+while the ranking change comes from the *missing refolds*. A staged run and a full run
+cannot have identical `rank`.
+
+Numbers in the internal `Claude outputs/partZ_cheap_filter_cascade_2026-09-28/` folder.
+
+### A live hazard found on the way, and fixed
+
+`evaluate.sh` defaults `SOLUPROT_FILTER=0`, correctly — but the **configurator**, which is
+the documented path, asked *"Drop sub-threshold designs BEFORE refolding (saves GPU)?"*
+with **`default=True`**. Pressing Enter through the wizard enabled it. A drop there is
+**unrecoverable**: the design leaves the FASTA before any engine runs and cannot return
+via re-ranking. Now `default=False`, with the permanence stated in the prompt and in a
+printed note, and the same warning in `evaluate.sh`'s help. Pinned by
+`tests/test_soluprot_filter_is_not_default.py`.
+
+---
+
+## Z — original entry · **superseded by the above**
 
 AA's one load-bearing prerequisite (the ESMFold2 full/fast default) is already
 closed in code. **Its real prerequisite is two archived pools carrying all three
