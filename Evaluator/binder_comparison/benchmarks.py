@@ -53,8 +53,25 @@ def list_benchmarks() -> list[str]:
     return sorted(p.parent.name for p in BENCHMARKS_DIR.glob("*/MANIFEST.json"))
 
 
+def _check_id(name: str) -> None:
+    """A pool id becomes a directory name, so it must be one path component.
+
+    `load_manifest` and `labels_path` both interpolate the id straight into a path, and
+    the label store is private and holds other pools. An id of `..` would read outside
+    the pool the caller named. Ids come from our own code, so this is cheap insurance
+    rather than a live exploit -- but it is one line, and this repo is public.
+    """
+    if not name or name in {".", ".."} or "/" in name or "\\" in name or Path(name).name != name:
+        raise ValueError(
+            f"Invalid benchmark pool id {name!r}. An id is a single directory name — "
+            "no separators, no '.' or '..' — because it is used as a path component "
+            "under both the public manifest directory and the private label store."
+        )
+
+
 def load_manifest(name: str) -> dict:
     """The public, auditable description of one pool."""
+    _check_id(name)
     path = BENCHMARKS_DIR / name / "MANIFEST.json"
     if not path.is_file():
         available = list_benchmarks()
@@ -107,6 +124,27 @@ def load_labels(name: str):
         raise FileNotFoundError(
             f"Labels for {name!r} not found at {path}. "
             f"{STORE_ENV} is set to {store_root()}; the pool directory or file is missing."
+        )
+
+    # One pool registered under two ids is two pools as far as every path here is
+    # concerned, and nothing else compares checksums ACROSS pools. A cross-pool
+    # aggregate would then double-count the same rows, and a citation of one id would
+    # silently mean the other. Plan item 9 records the real case: the Overath pool has
+    # two ids and two doc filenames. Refused rather than resolved by guessing which id
+    # was meant -- the labels decide every number computed from them.
+    expected_sha = manifest["labels"]["sha256"]
+    aliases = sorted(
+        other
+        for other in list_benchmarks()
+        if other != name and load_manifest(other)["labels"]["sha256"] == expected_sha
+    )
+    if aliases:
+        raise ValueError(
+            f"Benchmark pool {name!r} declares the same label checksum as "
+            f"{', '.join(repr(a) for a in aliases)} — these ids are aliases for one pool. "
+            "Merge or delete the duplicate manifest(s) before computing anything: two ids "
+            "for one pool double-count in any cross-pool aggregate, and a result citing "
+            "one of them is indistinguishable from a result citing the other."
         )
 
     raw = path.read_bytes()
