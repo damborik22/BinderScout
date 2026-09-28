@@ -200,13 +200,17 @@ Protenix, AF3". Two things happened since:
   of designs tied at zero (Part U). CLAUDE.md now forbids gating or stratifying on
   it. So "raises the agreement denominator" is not a benefit.
 
-**A stronger rationale is now live, and it did not exist when that doc was
-written.** Measured 2026-09-27: **AF3 cannot run on consumer Ampere/Ada at all** —
-its tokamax Pallas/Triton kernels need 110,592 bytes of shared memory per block
-against the 101,376 that sm_86/sm_89 expose. That is architectural, not VRAM. So
-on a large part of the fleet the canonical 3-engine gate is unreachable, and the
-default `--min-engines 3` fails every design. **A fourth engine that runs on
-consumer cards would restore the gate where AF3 cannot.**
+**A second rationale looked live on 2026-09-27 and is now in doubt.** AF3 failed
+on an RTX 3060 with a 110,592-vs-101,376-byte shared-memory error, and I concluded
+AF3 "cannot run on consumer Ampere/Ada at all". **That conclusion was wrong** — see
+the AF3 correction in CLAUDE.md. AF3 demonstrably ran on BM2, an RTX 3090 (sm_86),
+in August, with the same `tokamax==0.0.11` already present; the variable that
+differed was the **token bucket** (60 vs 258), which our own code sets with no
+lower bound while AF3's stock buckets start at 256.
+
+So AF should be justified on its own merits — an independent fourth opinion, and
+an engine with no custom-kernel dependency at all — **not** on AF3 being
+unavailable, until that hypothesis is tested.
 
 **Re-scope AF around *portability*, not consensus width** — and as an **addition**,
 not a substitution: the three current engines are verified and none is being
@@ -278,8 +282,7 @@ Because it is an addition, two things downstream change and neither is automatic
 **Entirely from source. No Chai-1 fold was executed** — the GPU was in use, and
 this box is a 12 GB RTX 3060 kept for development. The prediction to test on a
 3090 or GB10 is: Chai-1 loads and folds without an architectural error, at a peak
-well under the sum of its components. **Note the 3090 will not also rescue AF3 —
-it is sm_86 too, the same 101,376-byte limit. Only GB10 clears that.**
+well under the sum of its components. **Correction, 2026-09-28: AF3 is probably not blocked on sm_86 at all — see below.**
 
 ---
 
