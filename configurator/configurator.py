@@ -3994,9 +3994,21 @@ def wizard():
                     validator=lambda v: True if 0.0 <= float(v) <= 1.0 else "must be 0.0–1.0",
                 )
             )
+            # default=False, changed 2026-09-28 after measuring it. A drop here is
+            # UNRECOVERABLE -- the design leaves the FASTA before any engine runs, so it
+            # cannot come back via re-ranking. Measured against our own experimental
+            # results on two targets: at this same 0.5 threshold the filter discarded
+            # several of the tightest measured binders and lost designs from the full
+            # run's own top-10. Sweeping the threshold, no value above 0.0 met Part Z's
+            # recall gate on either target -- passing it requires keeping everything.
+            # SoluProt stays valuable as a SCREEN; its score reaches the report either
+            # way. What is no longer the default is letting it delete designs unseen.
+            print("    NOTE: dropping is unrecoverable — a dropped design never reaches")
+            print("          the report. Measured on two targets, the 0.5 threshold lost")
+            print("          several of the tightest binders. Recommended: No (score only).")
             soluprot_filter = ask_yn(
-                "    Drop sub-threshold designs BEFORE refolding (saves GPU)?",
-                default=True,
+                "    Drop sub-threshold designs BEFORE refolding (saves GPU, but discards them)?",
+                default=False,
             )
 
     # ── TmProt melting-temperature screen (advisory, never filters) ──
