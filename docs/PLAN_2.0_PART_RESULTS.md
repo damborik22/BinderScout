@@ -22,7 +22,7 @@ state). As of `v2.0.x`, 893 tests, ruff + shellcheck clean.
 | **AC** | seed aggregation | **DONE.** The hazard was live; fixed and guarded |
 | **Z** | staged cheap-filter | **Not started.** Buildable; not validatable here |
 | **AE** | tool racing | **Verdict: defer.** Needs the fleet; no evidence it is the bottleneck |
-| **AF** | fourth engine (Chai-1) | **Verdict: reopen — its original rationale is dead, a stronger new one is live** |
+| **AF** | fourth engine (Chai-1) | **Reopen as an ADDITION.** Source analysis says no sm_86 wall, favourable memory design, outputs match our schema. Unverified by execution |
 | **AG** | fleet/Clara benchmark consumer | **Not started.** Blocked on Y's naming + GPU-hours |
 | **AH** | BindPred | **Not started.** Needs the model; shares one runner with AA's A1 |
 | **AI** | tune Mosaic's design loss | **Verdict: defer**, and it conflicts with a measured result |
@@ -208,9 +208,78 @@ on a large part of the fleet the canonical 3-engine gate is unreachable, and the
 default `--min-engines 3` fails every design. **A fourth engine that runs on
 consumer cards would restore the gate where AF3 cannot.**
 
-**Recommendation:** re-scope AF around *portability*, not consensus width. The
-question to answer first is cheap: does Chai-1 run on sm_86 within 12 GB? If yes,
-AF becomes the highest-value unstarted part on this list.
+**Re-scope AF around *portability*, not consensus width** — and as an **addition**,
+not a substitution: the three current engines are verified and none is being
+replaced.
+
+### Source analysis, 2026-09-28 (no fold was run — see the limit at the end)
+
+**1. No sm_86 architectural wall.** This is the decisive difference from AF3.
+`chai_lab` 0.6.1 contains **no** `triton`, `pallas`, `flash_attn`, `xformers`,
+`deepspeed` or `cutlass` anywhere in its 101 source files. It is TorchScript JIT
+modules plus PyTorch SDPA — its ESM embedder is literally
+`traced_sdpa_esm2_t36_3B_UR50D_fp16.pt`. SDPA selects among backends and falls
+back automatically, so there is no fixed >99 KB shared-memory request of the kind
+that aborts AF3 on sm_86. **Nothing in the source predicts an architectural
+refusal on either a 3090 (sm_86) or GB10 (sm_121).**
+
+**2. The memory design is unusually favourable.** `chai1.py:153-165`
+(`_component_moved_to`) caches each JIT component in **host RAM** and moves it to
+the GPU only for the duration of its use, then straight back:
+
+```python
+component.jit_module.to(device)
+yield component
+component.jit_module.to("cpu")          # returned, not retained
+```
+
+So **peak VRAM ≈ largest single component + activations, not the sum of the
+trunk.** `low_memory=True` (the default) separately returns intermediates on CPU
+(`return_on_cpu=low_memory`). I had assumed the opposite before reading it.
+
+**3. The one large optional cost** is `use_esm_embeddings=True` (default), which
+pulls ESM2-3B in fp16 — roughly **6 GB of weights**. It is a flag, so it can be
+disabled, but it is a real input feature and turning it off is an accuracy change,
+not a free saving.
+
+**4. Its outputs match `StandardisedMetrics` cleanly** — this is what makes
+integration cheap rather than speculative:
+
+| Chai-1 provides | our need |
+|---|---|
+| `PTMScores.interface_ptm` | iPTM — the ranking input |
+| `PTMScores.per_chain_pair_iptm` | binder↔target iPTM specifically |
+| `complex_ptm`, `per_chain_ptm` | pTM columns |
+| `PLDDTScores` complex / per-chain / per-atom | pLDDT columns |
+| `pae_logits [... n n bins]` + `pae_bin_centers` | the PAE matrix, by expectation over bins |
+
+**5. Two risks the source does not settle.**
+
+- **Throughput.** Moving components CPU↔GPU on every call is PCIe-bound. That is
+  the price of the low peak in (2), and over a pool of hundreds of designs it
+  could dominate wall-clock. **Must be measured before adopting.**
+- **Packaging.** `chai_lab` currently lives inside `binderscout_protein_hunter`
+  (a *design* tool's env, torch 2.5.1+cu121). A refold engine needs its own env,
+  as `binder-eval-af3` and `binder-eval-esmfold2` do.
+
+### What adding a fourth engine costs elsewhere
+
+Because it is an addition, two things downstream change and neither is automatic:
+
+- **`--min-engines 3` stops meaning "all three" and starts meaning "3 of 4".**
+  That is a different gate, and on sm_86 hardware it becomes satisfiable
+  (Boltz-2 + ESMFold2 + Chai-1) where today it is not.
+- **`consensus_iptm_mean` was validated on three engines** (Part U). A mean over
+  four is not automatically the same metric and needs re-checking against the
+  labelled pools, not assumed.
+
+### Limit of this result
+
+**Entirely from source. No Chai-1 fold was executed** — the GPU was in use, and
+this box is a 12 GB RTX 3060 kept for development. The prediction to test on a
+3090 or GB10 is: Chai-1 loads and folds without an architectural error, at a peak
+well under the sum of its components. **Note the 3090 will not also rescue AF3 —
+it is sm_86 too, the same 101,376-byte limit. Only GB10 clears that.**
 
 ---
 
