@@ -29,7 +29,7 @@ import pytest
 
 pytest.importorskip("pandas")
 
-from binder_comparison import benchmarks  # noqa: E402
+from binder_comparison import benchmarks
 
 _ROWS_A = "design_id,is_binder\nd1,1\nd2,0\n"
 _ROWS_B = "design_id,is_binder\nd9,1\nd8,0\n"
@@ -70,7 +70,7 @@ def test_distinct_pools_load_normally(tmp_path, monkeypatch):
 def test_the_same_rows_under_two_ids_is_refused(tmp_path, monkeypatch):
     """The Overath hazard: one pool, two ids, identical checksums."""
     _register(tmp_path, monkeypatch, {"overath": _ROWS_A, "overath2025": _ROWS_A})
-    with pytest.raises(ValueError, match="(?i)same|alias|duplicate"):
+    with pytest.raises(ValueError, match=r"(?i)same|alias|duplicate"):
         benchmarks.load_labels("overath")
 
 
