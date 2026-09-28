@@ -22,20 +22,28 @@ Self-contained. What was done, what is left and why, the three open decisions,
 the findings that cost real time, the platform reality, and what needs a machine
 this one is not. If you read one file, read this.
 
-### 2. The decisions that are waiting on a human
+### 2. What happened to each of the twelve parts
+**[`docs/PLAN_2.0_PART_RESULTS.md`](../docs/PLAN_2.0_PART_RESULTS.md)**
+
+One row per lettered part (Y, Z, AA–AJ) with the result — "done", "blocked, here
+is the evidence", or a verdict. The four the plan admits were never investigated
+(AE, AF, AI, AJ) have verdicts here rather than silence. Read it with the
+conclusion; neither covers what the other does.
+
+### 3. The decisions that are waiting on a human
 **[`docs/MORNING_DECISIONS.md`](../docs/MORNING_DECISIONS.md)**
 
 Three live ones, each with the options and a standing recommendation. §1
 (pre-filtered pools) blocks finishing Stage 1 and is the only one that blocks
 code.
 
-### 3. Per-stage detail
+### 4. Per-stage detail
 **[`docs/NEXT_STAGES.md`](../docs/NEXT_STAGES.md)**
 
 What the conclusion compresses. Note it predates the 2026-09-27 refold session,
 so a few lines in it are stale — the conclusion doc lists which.
 
-### 4. Before touching code
+### 5. Before touching code
 **[`CLAUDE.md`](../CLAUDE.md)**
 
 The project's canonical self-description: environment isolation (never mix
@@ -46,7 +54,7 @@ per-tool runtime gotchas that each cost a campaign to learn.
 > marked **in doubt** in place, with the measurement and the reason. It will not
 > mislead you, but it is the one knowingly-uncertain statement in that file.
 
-### 5. How the findings were reached
+### 6. How the findings were reached
 **[`DIARY_2.0.md`](DIARY_2.0.md)** *(in this folder)*
 
 The 2.0 chapter of the repo diary — 8 entries, 771 lines. Records the wrong
