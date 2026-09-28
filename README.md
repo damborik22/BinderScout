@@ -5,6 +5,24 @@
 
 # BinderScout
 
+> ## ⚠️ `v2.0.x` — DEVELOPMENT IN PROGRESS. DO NOT USE.
+>
+> **You are on the `v2.0.x` branch. It is unfinished, unreleased and not tagged.
+> We strongly recommend you do not use it for anything real.**
+>
+> 2.0 is actively being built: parts of the plan are complete, others are
+> untouched, and several shipped columns are deliberately advisory-only and not
+> yet validated. Interfaces, CSV schemas and defaults change without notice, and
+> results produced here should not be relied on or published.
+>
+> **For actual work use a released tag instead** — `master` is frozen at
+> **1.0.3**, the validated seven-tool pipeline. `v1.1.x` (1.1.1) adds BindCraft 2
+> as the eighth tool.
+>
+> Status and what remains: [`docs/PLAN_2.0_CONCLUSION.md`](docs/PLAN_2.0_CONCLUSION.md)
+> and [`2.0/README.md`](2.0/README.md).
+
+
 A unified toolkit for GPU-accelerated protein binder design — installer, configurator, and evaluator in one repository.
 
 > **Renamed from *BinderScout*.** This project was developed under the internal working name *BinderScout* and is now being released as **BinderScout**. The codebase still uses `binderscout` in many places — the CLI command (`binderscout install`, `binderscout configure`, `binderscout evaluate`), several conda env names (`binderscout_pxdesign`, `binderscout_protein_hunter`, `binderscout_rfd3`), file and directory names (`binderscout_examples/`, `binderscout.py`), and environment variables (`BINDERSCOUT_*`). These are equivalent to the new name and will be migrated incrementally; functional behavior is unchanged. The GitHub remote is now `damborik22/BinderScout` (the old `damborik22/BinderScout` URL redirects).
