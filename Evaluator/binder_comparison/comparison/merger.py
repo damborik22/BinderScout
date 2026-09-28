@@ -60,7 +60,9 @@ def merge_refold_results(
         if merged is None:
             merged = df.copy()
         else:
-            merged = pd.merge(merged, df, on="sequence", how="outer", suffixes=("", f"_{name}_dup"))
+            # validate="1:1" turns any future regression into an error rather than
+            # silent row inflation -- the same guard cli/report.py:729 uses.
+            merged = pd.merge(merged, df, on="sequence", how="outer", suffixes=("", f"_{name}_dup"), validate="1:1")
             # Drop accidental duplicate passthrough columns (prefer the first engine's values)
             for col in list(merged.columns):
                 if col.endswith(f"_{name}_dup"):
@@ -91,6 +93,31 @@ def _load_engine(path: str | Path, prefix: str) -> pd.DataFrame:
     if df.empty:
         warnings.warn(f"[merger] {prefix} CSV is empty: {path}")
         return df
+    # Collapse repeated sequences BEFORE the join. The engine frames are merged with
+    # `on="sequence", how="outer"`, which is many-to-many: K duplicate rows for one
+    # sequence in each of N engines produce K**N rows for that single design.
+    # Measured 2026-09-28 on the 6-design golden pool -- 3 duplicate rows in all three
+    # engines gave that design 27 rows and a 32-row pool, while the banner below
+    # reported "32 unique sequences". Everything downstream is pool-relative
+    # (percentiles, top-N, per-tool means, z-scores, `rank`), so the inflation is not
+    # cosmetic. This is Part AC's seed hazard; `:129` already guarded the FASTA
+    # metadata join and this one was missed.
+    # Reachable via the documented append path: refold_boltz2.py appends to its CSV, so
+    # a re-run without --resume repeats rows. (`extract` deduplicates by sequence and
+    # AF3 collapses its seeds, so neither of those can trigger it.)
+    if "sequence" in df.columns:
+        n_before = len(df)
+        df = df.drop_duplicates("sequence", keep="first")
+        n_dropped = n_before - len(df)
+        if n_dropped:
+            warnings.warn(
+                f"[merger] {prefix}: dropped {n_dropped} duplicate row(s) sharing a sequence "
+                f"with an earlier row, keeping the first of each ({n_before} -> {len(df)}). "
+                "Left in, the outer join would have multiplied those designs across every "
+                "engine. Usual cause: a refold re-run without --resume appending to an "
+                f"existing CSV -- check {path}.",
+                stacklevel=2,
+            )
     rename = {col: f"{prefix}_{col}" for col in df.columns if col not in _PASSTHROUGH_COLS}
     return df.rename(columns=rename)
 
