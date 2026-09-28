@@ -16,14 +16,14 @@ state). As of `v2.0.x`, 893 tests, ruff + shellcheck clean.
 | part | subject | result |
 |---|---|---|
 | **AD** | discovery rank / `generation_index` | **Half shipped.** Extraction + provenance done across 5 tools; the metric is blocked on a decision |
-| **Y** | private label registry | **Shipped as a library.** One naming collision to settle before anything consumes it |
+| **Y** | private label registry | **Shipped as a library**, and its naming collision with AG is now settled |
 | **AA** | cheap pre-GPU screens | **3 of 6 shipped.** Two need models, one closed, promotion needs labels |
 | **AB** | diversity | **Not built — but now measured, and the measurement says build it** |
 | **AC** | seed aggregation | **DONE.** The hazard was live; fixed and guarded |
 | **Z** | staged cheap-filter | **Not started.** Buildable; not validatable here |
 | **AE** | tool racing | **Verdict: defer.** Needs the fleet; no evidence it is the bottleneck |
 | **AF** | fourth engine (Chai-1) | **Reopen as an ADDITION.** Source analysis says no sm_86 wall, favourable memory design, outputs match our schema. Unverified by execution |
-| **AG** | fleet/Clara benchmark consumer | **Not started.** Blocked on Y's naming + GPU-hours |
+| **AG** | fleet/Clara benchmark consumer | **Not started, now unblocked.** Naming settled; only GPU-hours remain |
 | **AH** | BindPred | **Not started.** Needs the model; shares one runner with AA's A1 |
 | **AI** | tune Mosaic's design loss | **Verdict: defer**, and it conflicts with a measured result |
 | **AJ** | MD reverse check | **Verdict: do not build now.** No tooling, and the premise is weak |
@@ -123,7 +123,10 @@ Public `MANIFEST.json`, private rows resolved by checksum; the `.gitignore` leak
 guard landed on Day 0, so the irreversible half is done. Imported by nothing that
 ships.
 
-**One thing to settle first:** Y specifies `binder_comparison/benchmarks.py` while
+**The naming question is settled (2026-09-28) — see AG below.** Y's
+`benchmarks.py` is the sole registry; AG imports it and puts its scoring in
+`label_scoring.py`. Guarded by `tests/test_one_benchmark_registry.py`. Original
+wording of the conflict: Y specifies `binder_comparison/benchmarks.py` while
 AG additionally specifies `comparison/benchmark.py`. **One module, decided before
 either starts** — this blocks AG and AH.
 
@@ -234,7 +237,7 @@ the GPU only for the duration of its use, then straight back:
 ```python
 component.jit_module.to(device)
 yield component
-component.jit_module.to("cpu")          # returned, not retained
+component.jit_module.to("cpu")  # returned, not retained
 ```
 
 So **peak VRAM ≈ largest single component + activations, not the sum of the
@@ -286,11 +289,33 @@ well under the sum of its components. **Correction, 2026-09-28: AF3 is probably 
 
 ---
 
-## AG — fleet/Clara benchmark consumer · **not started**
+## AG — fleet/Clara benchmark consumer · **not started, but unblocked**
 
 Consumes Y's registry. ~6 days plus ~50–95 GPU-hours; not runnable here.
-**Blocked on Y's module-naming decision** — AG and Y currently specify different
-module paths for the same thing.
+
+**The module-naming blocker is settled, 2026-09-28.** Reading what each part
+actually needs narrowed the conflict the plan recorded (§159-160):
+
+* Only **`benchmarks.py` was ever duplicated**, and Y shipped it — so precedence
+  decides that one. AG **imports** it rather than recreating it, and
+  `load_labels()` already returns a checksum-verified DataFrame, which is exactly
+  the shape AG needs to join a ranking against.
+* AG's `comparison/benchmark.py` is **not a duplicate at all.** There is no
+  label-based scoring anywhere in the shipped tree — no `roc_auc`, no `macro_auc`,
+  no precision-at-k over labels — so Part U's numbers came from analysis that never
+  landed as library code. AG writing the first of it is genuinely new work.
+
+So the rule is **one registry**, not one module: keep `benchmarks.py` as the sole
+source of truth for which pools exist, and give the scoring a name that cannot be
+mistaken for it. `comparison/benchmark.py` is refused purely on that ground — one
+character and one directory from `benchmarks.py` is how a reader imports the wrong
+one. Use `label_scoring.py`.
+
+Pinned by `tests/test_one_benchmark_registry.py`, which fails if the confusable
+name appears, if any second module re-declares the registry's surface, or if the
+registry loses a function AG and AH depend on. Three mutations verified.
+
+**Remaining blocker is only the GPU-hours.**
 
 ---
 
