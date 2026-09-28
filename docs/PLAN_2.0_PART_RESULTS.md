@@ -371,13 +371,41 @@ alone.
 
 `ipsae_min` **did not track affinity on that pool**, and was *below* chance at
 separating designs with a measured affinity from those without — while `Mean_ipTM` was
-positive and useful, and plain **binder length matched `Mean_ipTM`**. Yet `ipsae_min` is
+positive and useful. **Binder length is a strong baseline** that rivals `Mean_ipTM` on
+the raw correlation — though controlling for length, `Mean_ipTM` keeps real residual
+signal, so it is not a length proxy (an earlier wording of this said it was; corrected).
+Yet `ipsae_min` is
 the basis of `passes_affinity_gate` (`ipsae_min ≥ 0.61`) and of all four quality tiers
 (High/Medium/Low/Reject). On a short-helix target those tiers may be sorting noise.
-**This deserves its own investigation** — it is our own gate, not a third-party model.
+**Investigated 2026-09-28, and it is worse than a correlation problem.** On *both*
+targets we hold experimental results for, the shipped gate `passes_affinity_gate`
+(`ipsae_min ≥ 0.61`) keeps the **weaker** binders: the designs it rejects bind several
+times more tightly than the ones it passes, with no better binder rate. The four quality
+tiers do not order by affinity either — on one target the tier ranked "Low" binds
+tighter than "Medium", and on the other the **"Reject"** tier holds the majority of
+confirmed binders and the tightest median. The **"High"** tier fires 0 and 2 times
+across the two pools, with **zero** binders — `ipsae_min` never reaches its threshold on
+a short-helix target, so the top tier is effectively unreachable.
 
-One caveat on that: one target, and an unusually small/hard one. It is a reason to
-investigate, not yet a reason to change the gate.
+The stated explanation in CLAUDE.md — *"longer binders tend to score lower on
+`ipsae_min` (r ≈ −0.78)"* — **does not reproduce** on either pool (near zero, and
+positive). So the gate is not a disguised length filter; `ipsae_min` simply carries no
+affinity information there, and removing length changes nothing. It is also highly
+redundant with `Mean_ipTM` (ρ > 0.7 on both) while being the weaker of the two.
+
+**Recommendation: demote `ipsae_min` to a diagnostic column — keep computing it, stop
+gating and tiering on it** — which is exactly how `agreement_count` was handled after
+Part U. Re-basing the gate on `Mean_ipTM` is the more ambitious option but needs a
+second well-powered target first, because ipTM's own sign flips on the weaker pool.
+
+Caveats: two targets, only one well-powered, and CALCA is a 32-aa helix — precisely the
+regime the 2026-05-16 diary entry already flagged as mis-calibrating ipSAE. That entry
+recorded the problem for AF2 ipSAE; it evidently survives into the merged metric. A
+large structured target is the obvious next test.
+
+Full numbers in the internal `Claude outputs/ipsae_min_gate_investigation_2026-09-28/`
+folder. **Not yet changed in code** — this is a shipped default with a public gate, and
+it should be changed deliberately rather than mid-investigation.
 
 ---
 
