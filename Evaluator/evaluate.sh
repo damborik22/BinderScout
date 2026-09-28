@@ -30,8 +30,13 @@
 #   --tmprot-threshold N   Tm (°C) at or above which a design is flagged thermostable
 #                          (default: 60.0). Advisory only -- never drops or re-ranks.
 #   --soluprot-filter      drop sequences scoring below the threshold from FASTA BEFORE
-#                          refolding — saves GPU time on designs we wouldn't pursue.
-#                          Off by default; the score still lands in the report either way.
+#                          refolding. Off by default, and NOT RECOMMENDED: the drop is
+#                          unrecoverable (the design never reaches the report), and
+#                          measured against our own experimental results on two targets
+#                          the default 0.5 threshold discarded several of the tightest
+#                          binders and lost designs from the full run's own top-10. No
+#                          threshold above 0.0 met Part Z's recall gate. Use SoluProt as
+#                          a screen -- the score lands in the report without this flag.
 #   --concurrent           run the refold engines SIMULTANEOUSLY instead of one after
 #                          another, with staggered starts. Requires the CUDA MPS ceiling
 #                          (tools/gpu_mem_guard.sh) and refuses to run without it, because
