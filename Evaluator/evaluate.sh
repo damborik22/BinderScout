@@ -126,7 +126,7 @@ ESMFOLD2_MODEL="full"
 SKIP_SOLUPROT=0
 SOLUPROT_ENV="binder-eval-soluprot"
 SOLUPROT_THRESHOLD=0.5
-SOLUPROT_FILTER=0
+SOLUPROT_FILTER=0   # always 0 now; --soluprot-filter is refused (see below)
 # TmProt: sequence-only melting-temperature screen. Deliberately has NO filter
 # mode, unlike SoluProt -- Tm predictors are out of domain on hyperstable de
 # novo miniproteins, so the column is advisory and must never drop a design.
@@ -167,7 +167,19 @@ while [[ $# -gt 0 ]]; do
         --skip-soluprot)     SKIP_SOLUPROT=1;          shift ;;
         --soluprot-env)      SOLUPROT_ENV="$2";        shift 2 ;;
         --soluprot-threshold) SOLUPROT_THRESHOLD="$2"; shift 2 ;;
-        --soluprot-filter)   SOLUPROT_FILTER=1;        shift ;;
+        --soluprot-filter)
+            # REMOVED 2026-09-28. SoluProt is a label, not a filter. Measured against our
+            # own experimental results on two targets, this flag at its own default
+            # threshold discarded several of the tightest measured binders and lost
+            # designs from the full run's top-10; no threshold above 0.0 met Part Z's
+            # recall gate. Refused rather than silently ignored -- a caller who scripted
+            # it must find out, instead of quietly receiving different data.
+            echo "Error: --soluprot-filter has been removed. SoluProt is a label, not a filter." >&2
+            echo "       A pre-refold drop is unrecoverable, and measured on two targets it" >&2
+            echo "       discarded several of the tightest binders. Remove the flag: the score" >&2
+            echo "       still reaches the report as native_soluprot_score either way." >&2
+            exit 1
+            ;;
         --skip-tmprot)       SKIP_TMPROT=1;            shift ;;
         --tmprot-env)        TMPROT_ENV="$2";          shift 2 ;;
         --tmprot-threshold)  TMPROT_THRESHOLD="$2";    shift 2 ;;

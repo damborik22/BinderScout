@@ -3306,8 +3306,9 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     else:
         threshold = cfg.get("soluprot_threshold", 0.5)
         lines.append(f"    --soluprot-threshold {threshold} \\")
-        if cfg.get("soluprot_filter", False):
-            lines.append("    --soluprot-filter \\")
+        # --soluprot-filter is refused by evaluate.sh and never emitted: SoluProt is a
+        # label. An old config.json carrying soluprot_filter=true is ignored rather than
+        # honoured, so replaying it cannot resurrect a run that deletes top binders.
 
     # TmProt: advisory ONLY -- it has no filter mode, deliberately. Tm predictors
     # are out of domain on hyperstable de novo miniproteins, so the column must
@@ -3982,6 +3983,9 @@ def wizard():
     # in ranking.
     use_soluprot = False
     soluprot_threshold = 0.5
+    # SoluProt is a LABEL, not a filter (2026-09-28): it never drops a design, so
+    # there is nothing to ask. Kept as a constant because write_run_evaluate and
+    # the cfg schema still reference the key.
     soluprot_filter = False
     if use_evaluator and installed.get("soluprot"):
         print(f"  {BOLD}SoluProt solubility screen{RESET} (sequence-only filter, no GPU)")
@@ -3993,22 +3997,6 @@ def wizard():
                     default=0.5,
                     validator=lambda v: True if 0.0 <= float(v) <= 1.0 else "must be 0.0–1.0",
                 )
-            )
-            # default=False, changed 2026-09-28 after measuring it. A drop here is
-            # UNRECOVERABLE -- the design leaves the FASTA before any engine runs, so it
-            # cannot come back via re-ranking. Measured against our own experimental
-            # results on two targets: at this same 0.5 threshold the filter discarded
-            # several of the tightest measured binders and lost designs from the full
-            # run's own top-10. Sweeping the threshold, no value above 0.0 met Part Z's
-            # recall gate on either target -- passing it requires keeping everything.
-            # SoluProt stays valuable as a SCREEN; its score reaches the report either
-            # way. What is no longer the default is letting it delete designs unseen.
-            print("    NOTE: dropping is unrecoverable — a dropped design never reaches")
-            print("          the report. Measured on two targets, the 0.5 threshold lost")
-            print("          several of the tightest binders. Recommended: No (score only).")
-            soluprot_filter = ask_yn(
-                "    Drop sub-threshold designs BEFORE refolding (saves GPU, but discards them)?",
-                default=False,
             )
 
     # ── TmProt melting-temperature screen (advisory, never filters) ──
