@@ -24,7 +24,7 @@ state). As of `v2.0.x`, 893 tests, ruff + shellcheck clean.
 | **AE** | tool racing | **Verdict: defer.** Needs the fleet; no evidence it is the bottleneck |
 | **AF** | fourth engine (Chai-1) | **Reopen as an ADDITION.** Source analysis says no sm_86 wall, favourable memory design, outputs match our schema. Unverified by execution |
 | **AG** | fleet/Clara benchmark consumer | **Not started, now unblocked.** Naming settled; only GPU-hours remain |
-| **AH** | BindPred | **Not started.** Needs the model; shares one runner with AA's A1 |
+| **AH** | BindPred | **Obtained and REJECTED** — benchmarked blind on our SPOC data, ranks backwards |
 | **AI** | tune Mosaic's design loss | **Verdict: defer**, and it conflicts with a measured result |
 | **AJ** | MD reverse check | **Verdict: do not build now.** No tooling, and the premise is weak |
 
@@ -139,7 +139,7 @@ either starts** — this blocks AG and AH.
 | **D7** ProtParam panel | Shipped |
 | **D8** composition gate | Shipped, **shadow mode** |
 | **D1** TmProt | Shipped end to end, both platforms |
-| **A1** BindPred | Needs the model. Build the runner **once** — AH consumes the same one |
+| **A1** BindPred | **REJECTED 2026-09-28** — obtained and benchmarked blind; see the AH section |
 | **D3** AggreProt | Reduction + decorrelation harness built and validated; needs the model or one real per-residue export |
 | **P5** ESM plausibility | **CLOSED — deliberately not built** |
 
@@ -319,7 +319,69 @@ registry loses a function AG and AH depend on. Three mutations verified.
 
 ---
 
-## AH — BindPred · **not started**
+## A1 / AH — BindPred · **obtained, benchmarked blind, REJECTED**
+
+**Result, 2026-09-28: do not integrate, not even as a shadow column.**
+
+The model was located and obtained: [`hbp5181/BindPred`](https://huggingface.co/hbp5181/BindPred),
+MIT, [Bioinformatics 2026](https://doi.org/10.1093/bioinformatics/btag309). It lives in
+the gitignored `weights/bindpred/`. So "needs the model" is no longer the blocker — the
+blocker is that it does not work for us.
+
+**Interface (resolved from its source, since the model card omits it).** Sequence-only,
+no structure: 2560 features = `[ligand_emb(1280) ‖ receptor_emb(1280)]`, mean-pooled
+`facebook/esm2_t33_650M_UR50D` layer 33, ordering per `train.py:38`. Output is
+**log10(Kd) in molar** (`train.py:52`), lower = tighter. The shipped `.cbm` is the
+embeddings-only variant — no PyRosetta or BindCraft features, despite the repo shipping
+those embedding sets too. Runs on **CPU** in minutes for ~125 designs.
+
+Because it needs no structure it would have belonged in the **pre-GPU screen panel**
+alongside SoluProt/TmProt, not in the ranking path.
+
+**Why rejected.** Benchmarked blind against our internal SPOC results — predictions
+written by one script that never reads the affinity column, scored by another, with both
+input orderings reported so the ordering could not be chosen after seeing the scores.
+**It ranks our designs in the wrong direction**, in both orderings, so it is not an
+ordering artifact. The mechanism is under-dispersion: its predicted range is far
+narrower than the measured spread, which is gradient-boosted-tree regression toward the
+training mean applied off-distribution. Its top-10 selection is worse than not ranking
+at all.
+
+This is **consistent with BindPred's own shipped evidence**, not contrary to it: as a
+cross-target *discriminator* it works (macro-AUC 0.651 vs 0.512 for a BindCraft energy
+baseline on its own 212-design set), but its affinity evidence rests on 20 measured Kd
+values with one target at n ≥ 4, and that one is negative. The paper's headline r = 0.86
+is a between-complex spread over 11,919 diverse complexes — a different problem from
+ranking designs against one fixed target, which it does not claim to solve.
+
+**Part N is confirmed, not overturned.**
+
+**If revisited**, the route is recalibration on our own regime (isotonic/linear fit on
+one campaign, tested on another) — which addresses the observed failure directly — or
+use as a discriminator only. Do **not** add it as another ranking column; Part U
+measured that searching over more metrics scored *worse* than `consensus_iptm_mean`
+alone.
+
+> Numbers, per-design predictions and the reproduction scripts are deliberately **not in
+> this repository** — it is public and the SPOC results are unpublished. They are in the
+> internal `Claude outputs/BindPred_blind_benchmark_2026-09-28/` folder
+> (`CONCLUSION.md` + `BindPred_blind_benchmark_REPORT.md`).
+
+### The finding worth acting on, which came out of the same run
+
+`ipsae_min` **did not track affinity on that pool**, and was *below* chance at
+separating designs with a measured affinity from those without — while `Mean_ipTM` was
+positive and useful, and plain **binder length matched `Mean_ipTM`**. Yet `ipsae_min` is
+the basis of `passes_affinity_gate` (`ipsae_min ≥ 0.61`) and of all four quality tiers
+(High/Medium/Low/Reject). On a short-helix target those tiers may be sorting noise.
+**This deserves its own investigation** — it is our own gate, not a third-party model.
+
+One caveat on that: one target, and an unusually small/hard one. It is a reason to
+investigate, not yet a reason to change the gate.
+
+---
+
+## AH — original entry · **superseded by the above**
 
 Needs the model. **AA's A1 and AH both create the BindPred runner, CLI and env** —
 the plan says "build it once", and that remains right. Whoever starts either one
