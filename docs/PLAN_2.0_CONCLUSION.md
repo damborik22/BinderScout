@@ -87,6 +87,12 @@ refold data. What is now demonstrated rather than assumed:
 
 ## 3. Remaining work
 
+> **Per-part results — all twelve lettered parts — are in
+> [PLAN_2.0_PART_RESULTS.md](PLAN_2.0_PART_RESULTS.md).** This section is
+> organised by Stage 1–6, which covers only about half of them; AB, AC, AE, AF,
+> AI and AJ appear only in that file.
+
+
 ### Stage 1 (AD) — the metric itself
 `hits.py` holdout. **Blocked on decision §5.1** (pre-filtered pools) and, for
 its stated gate ("holdout passes a KS test vs the pool"), on a real campaign
