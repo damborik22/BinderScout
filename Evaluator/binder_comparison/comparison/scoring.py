@@ -1008,6 +1008,12 @@ def annotate_wetlab_recommended(
     """
     out = df.copy()
     reasons: list[list[str]] = [[] for _ in range(len(out))]
+    # Informational notes: reported to the operator but they do NOT withhold the
+    # recommendation. SoluProt lives here as of 2026-09-28 -- measured against our own
+    # experimental results, at the paper threshold of 0.5 it failed four of the ten
+    # tightest binders on one target, so letting it block would withhold the
+    # recommendation from designs that bind best. It is a label, not a gate.
+    notes: list[list[str]] = [[] for _ in range(len(out))]
 
     if soluprot_passes_col in out.columns:
         sp = out[soluprot_passes_col]
@@ -1018,7 +1024,7 @@ def annotate_wetlab_recommended(
             sp_bool = pd.Series([None] * len(out), index=out.index)
         for idx, val in zip(out.index, sp_bool):
             if val is False:
-                reasons[out.index.get_loc(idx)].append("SoluProt FAIL")
+                notes[out.index.get_loc(idx)].append("SoluProt below threshold (note only)")
 
     # Failing the cross-engine gate is the ONLY criterion here that moves a
     # design's rank -- rank_designs() puts gate failures last regardless of score --
@@ -1098,8 +1104,9 @@ def annotate_wetlab_recommended(
                 if tool_name in failed_tools:
                     reasons[i].append(f"tool failed run ({failed_tools[tool_name]})")
 
+    # Only `reasons` decides the recommendation; `notes` are reported alongside.
     out["wetlab_recommended"] = [len(r) == 0 for r in reasons]
-    out["wetlab_reason"] = ["; ".join(r) if r else "" for r in reasons]
+    out["wetlab_reason"] = ["; ".join(r + n) if (r or n) else "" for r, n in zip(reasons, notes)]
     return out
 
 
