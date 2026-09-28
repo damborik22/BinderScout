@@ -18,7 +18,7 @@ state). As of `v2.0.x`, 893 tests, ruff + shellcheck clean.
 | **AD** | discovery rank / `generation_index` | **Half shipped.** Extraction + provenance done across 5 tools; the metric is blocked on a decision |
 | **Y** | private label registry | **Shipped as a library**, and its naming collision with AG is now settled |
 | **AA** | cheap pre-GPU screens | **3 of 6 shipped.** Two need models, one closed, promotion needs labels |
-| **AB** | diversity | **Not built — but now measured, and the measurement says build it** |
+| **AB** | diversity | **Not built.** Measured properly: ~13% of design pairs are same-fold but sequence-unrelated — real, modest |
 | **AC** | seed aggregation | **DONE.** The hazard was live; fixed and guarded |
 | **Z** | staged cheap-filter | **Measured — do not build on SoluProt.** Gate and GPU saving are mutually exclusive; `prefilter` is the remaining candidate |
 | **AE** | tool racing | **Verdict: defer.** Needs the fleet; no evidence it is the bottleneck |
@@ -78,26 +78,72 @@ Two corrections to the plan, both confirmed:
    `Proteina-Complexa/.venv/bin/`, x86 only. `mkdssp` is absent entirely on this
    box; `beta_intercalation.py` already degrades to `(-1, -1, 0)` without it.
 
-**The new measurement.** On the same 6 real BindCraft 2 designs:
+**The measurement — corrected 2026-09-28, my first version was inverted.**
 
-| | result |
+I first reported "sequence clustering finds 6 families, Foldseek finds 1" and took that
+as strong evidence for AB. **That was wrong, and the error is instructive:** I clustered
+whole *complexes*. In these structures chain A is the 105-aa **binder** and chain B is
+the shared 32-aa **target** — I had them the other way round. So Foldseek's single
+6-member cluster was the six *identical targets* grouping correctly, and the six
+singletons were the binders. Structure and sequence actually *agreed*.
+
+The methodological point generalises: **clustering complexes cannot measure design
+diversity when every complex shares a target.** The shared chain guarantees similarity.
+AB must cluster the binder chain alone.
+
+Redone on binder-only chains (chain A extracted), all-vs-all Foldseek TM-score:
+
+| | value |
 |---|---|
-| Sequence clustering (`cluster_sequences_df`, threshold 0.7, k=4) | **6 families, every one a singleton** (`family_size=1`) |
-| Structural clustering (Foldseek `easy-cluster --min-seq-id 0 -c 0.8`) | **1 family** — all 6 binders |
+| TM-score across the 15 pairs | min 0.190 · **median 0.315** · max 0.581 |
+| sequence identity | min 0.103 · median 0.201 · max 0.244 |
+| pairs at TM ≥ 0.5 (the usual same-fold line) | **2 of 15 (13%)** |
+| pairs at TM ≥ 0.7 | 0 of 15 |
 
-Sequence diversity calls these designs maximally diverse; structurally they are
-one fold. **That is the exact failure AB exists to fix, and it appears within a
-single tool** — AB's stated gate ("a cross-tool pair in different `family_id`,
-same structural family") is a stronger form of a problem already present in the
-weaker case.
+**AB's premise holds, but modestly — not overwhelmingly.** The designs are mostly
+genuinely distinct (median TM 0.315, well under the same-fold line). But two pairs *do*
+share a fold while being sequence-unrelated:
 
-**Caveats, stated because the number is small:** 6 designs, one tool, one target,
-one threshold pair. The target chains unexpectedly stayed singleton under the same
-Foldseek call, which suggests the invocation is not yet the right one and should be
-re-derived before the number is quoted.
+| pair | TM | sequence identity |
+|---|---|---|
+| refold35 ↔ refold8 | **0.581** | 0.226 |
+| refold11 ↔ refold35 | **0.573** | 0.142 |
 
-**Gate status: cannot be evaluated on this box.** It needs a cross-tool pool with
-structures; the only structured pool here is 6 designs from one tool.
+Both sit far below the 0.7 sequence-identity threshold `cluster_sequences_df` uses, so
+**sequence clustering can never group them** — it reports 6 singleton families where
+structure sees 4 distinct folds plus one redundant group. That is exactly the failure AB
+exists to fix, demonstrated within a single tool.
+
+So: real, reproducible, and worth fixing — but the honest size is "~13% of pairs are
+structurally redundant while sequence-distinct", not "sequence diversity is meaningless".
+A claim that AB is urgent should not lean on my original number.
+
+**Gate status: the mechanism is demonstrated, the stated gate is not.** AB's gate wants
+a *cross-tool* pair in different `family_id` but the same structural family; the only
+structured pool here is one tool, so the cross-tool form still needs a cross-tool pool
+with structures. What is now shown is the underlying failure in its within-tool form,
+which is the harder case to dismiss.
+
+### What AB should do, concretely
+
+1. **Cluster the binder chain only.** Extract the designed chain before any structural
+   comparison. Clustering complexes against a shared target is meaningless — that is the
+   error above, and it silently produces the *opposite* of the right answer.
+2. **Use TM ≥ 0.5 as the fold line**, and report the TM distribution, not just cluster
+   counts. With 6 structures the matrix is more informative than a clustering, and it is
+   what shows the effect size.
+3. **Keep sequence families as well.** They are not wrong, just incomplete: they caught
+   0 of the 2 redundant pairs here because both sit near 0.2 identity, far below the 0.7
+   threshold. Structural families are an *addition*, not a replacement.
+4. **Tooling note:** `foldseek` and `mmseqs` exist only inside
+   `Proteina-Complexa/.venv/bin/`, x86 only. A refold-adjacent feature depending on a
+   *design* tool's venv is the same packaging smell as `chai_lab` living in
+   Protein-Hunter's env; AB needs its own path to these binaries.
+
+**On process:** my original write-up carried the caveat "the target chains unexpectedly
+stayed singleton, which suggests the invocation is not yet the right one". That caveat
+was the thing that led to the correction. Recording what looked *off* about a result,
+and not only the result, is what made this recoverable.
 
 ---
 
