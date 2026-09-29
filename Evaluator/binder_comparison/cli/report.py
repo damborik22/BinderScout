@@ -25,6 +25,10 @@ import pandas as pd
 
 from ..comparison.candidates import N_NATIVE_PER_TOOL, N_REFOLD, build_candidates_table
 from ..comparison.confidence_gate import annotate_confidence_gate
+from ..comparison.design_families import (
+    annotate_sequence_families,
+    annotate_structural_families,
+)
 from ..comparison.diversity import cluster_sequences_df
 from ..comparison.ensemble import compute_ensemble_metrics
 from ..comparison.epitope import epitope_match, extract_interface_residues, parse_hotspots
@@ -214,6 +218,44 @@ def run(args: argparse.Namespace) -> None:
         _struct_base = Path(args.boltz2_results).resolve().parent if args.boltz2_results else _design_root
         df = annotate_self_consistency(df, design_root=_design_root, base_dir=_struct_base)
 
+    # Design families, two independent axes. Both DIAGNOSTIC -- neither ranks, filters
+    # nor gates, the same rule agreement_count follows after Part U.
+    #
+    #   seq_family_*    did the pipeline repeat itself? Measured across two campaigns,
+    #                   every near-duplicate pair came from a SINGLE tool (RFD3 up to
+    #                   k-mer Jaccard 0.938, BindCraft 0.17-0.30), so this reads as
+    #                   "MPNN emitted near-identical sequences", not as diversity.
+    #   struct_family_* do two designs share a fold? The only axis on which de novo
+    #                   designs are comparable: over 114 designs the maximum pairwise
+    #                   sequence similarity was 0.298, below the 0.70 that
+    #                   cluster_sequences_df ships with, so sequence methods provably
+    #                   cannot group two distinct designs.
+    #
+    # The structural half needs foldseek (x86 only, currently inside another tool's
+    # venv) and resolvable refold PDBs. Missing either leaves the columns NA -- an
+    # uncomputable diagnostic must never fail a report.
+    df = annotate_sequence_families(df)
+    _tm_lookup = None
+    if getattr(args, "structural_families", True):
+        try:
+            from ..comparison.foldseek import build_tm_lookup
+
+            _fs_base = Path(args.boltz2_results).resolve().parent if args.boltz2_results else Path.cwd()
+            _tm_lookup = build_tm_lookup(df, base_dir=_fs_base)
+        except Exception as exc:  # never let a diagnostic sink the report
+            warnings.warn(f"[families] structural grouping unavailable: {exc}", stacklevel=2)
+            _tm_lookup = None
+    df = annotate_structural_families(df, tm_lookup=_tm_lookup)
+    if _tm_lookup is None:
+        print("[report] Structural families: skipped (no foldseek, or no resolvable refold PDBs)")
+    else:
+        _nf = df["struct_family_id"].nunique()
+        _nr = int(df["struct_family_is_redundant"].sum())
+        print(
+            f"[report] Structural families: {_nf} distinct folds over {len(df)} designs; "
+            f"{_nr} design(s) share a fold with another"
+        )
+
     # SoluProt: sequence-only solubility screen output. Left-joined onto df
     # by sequence — adds native_soluprot_score (0–1 probability) and
     # native_soluprot_passes (bool, score >= threshold used at scoring time).
@@ -368,6 +410,35 @@ def run(args: argparse.Namespace) -> None:
     df = compute_consensus_ipsae(df)
     min_engines = getattr(args, "min_engines", None) or MIN_ENGINES_DEFAULT
     df = rank_designs(df, min_engines=min_engines)
+    # The actionable form. Picking N designs for synthesis, two slots on one fold is
+    # a wasted slot -- so name the swap rather than leaving the reader to find it.
+    # A SUGGESTION: nothing here re-ranks or rewrites the selection, because fold
+    # redundancy has not been validated against any experimental outcome.
+    # Runs AFTER rank_designs: `rank` does not exist during the annotate passes.
+    if "rank" in df.columns and "struct_family_id" in df.columns:
+        from ..comparison.design_families import suggest_swaps
+
+        _n_pick = int(getattr(args, "swap_top_n", 12) or 12)
+        _swaps = suggest_swaps(df, top_n=_n_pick)
+        if _swaps:
+            print(f"[report] Fold coverage of the top {_n_pick} — suggested swaps (advisory; nothing was changed):")
+            for _s in _swaps:
+                print(
+                    f"           drop {_s['drop']} (fold {_s['duplicate_fold']} already covered) "
+                    f"-> add {_s['add']} (new fold {_s['new_fold']})"
+                )
+        else:
+            # suggest_swaps returns [] for two different reasons, and conflating them
+            # reads as "your selection is fine" when it may not be.
+            _sel = df.nsmallest(_n_pick, "rank") if "rank" in df.columns else df.head(_n_pick)
+            _dupes = int(_sel["struct_family_id"].duplicated().sum())
+            if _dupes:
+                print(
+                    f"[report] Fold coverage of the top {_n_pick}: {_dupes} design(s) repeat a fold, "
+                    "but no unused fold is available to swap in (the selection covers the pool)"
+                )
+            else:
+                print(f"[report] Fold coverage of the top {_n_pick}: all distinct folds")
     print(f"[report] Ranking by consensus_iptm_mean (cross-engine gate: min {min_engines} engines)")
 
     # Item 9: wet-lab-ready badge (SoluProt-passes + agreement_count >= 2 +

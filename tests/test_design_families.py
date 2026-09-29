@@ -162,16 +162,12 @@ def test_suggested_swap_names_a_concrete_replacement():
 
 
 def test_no_swap_is_suggested_when_the_selection_is_already_diverse():
-    d = pd.DataFrame(
-        {"binder_id": ["a", "b"], "rank": [1, 2], "struct_family_id": ["F1", "F2"]}
-    )
+    d = pd.DataFrame({"binder_id": ["a", "b"], "rank": [1, 2], "struct_family_id": ["F1", "F2"]})
     assert suggest_swaps(d, top_n=2) == []
 
 
 def test_swaps_are_not_suggested_from_unknown_folds():
     """An NA structural family means 'not measured', which must never be treated as
     'same fold as something else'."""
-    d = pd.DataFrame(
-        {"binder_id": ["a", "b", "c"], "rank": [1, 2, 3], "struct_family_id": [None, None, "F1"]}
-    )
+    d = pd.DataFrame({"binder_id": ["a", "b", "c"], "rank": [1, 2, 3], "struct_family_id": [None, None, "F1"]})
     assert suggest_swaps(d, top_n=2) == []
