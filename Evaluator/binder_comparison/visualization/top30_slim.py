@@ -53,6 +53,12 @@ _SLIM = [
     ("Mode", "binding_mode", "n"),
     ("Solubility", "native_soluprot_score", "n"),
     ("Tm", "native_tmprot_tm", "n"),
+    # Fold: which structural family this design belongs to, and whether a
+    # higher-ranked design in the table already occupies it. The actionable form --
+    # picking N designs for synthesis, the question is not "are these the N best
+    # scores" but "how many distinct folds am I buying". "—" means the fold is
+    # unknown (no foldseek, or no resolvable refold PDB), which is NOT "same as".
+    ("Fold", "struct_family_id", "s"),
     ("Notes", "wetlab_reason", "s"),
 ]
 
@@ -112,6 +118,9 @@ def _slim_cols(df: pd.DataFrame):
 def _slim_table(df: pd.DataFrame, cols, table_id: str) -> str:
     heads = "".join(f'<th data-t="{kind}">{_html.escape(lbl)}</th>' for lbl, _, kind in cols)
     rows = []
+    # Folds already used by a higher-ranked row. The table is rendered in rank order,
+    # so "seen" means "a better design already covers this fold".
+    _seen_folds: set[str] = set()
     for _, r in df[[c for _, c, _ in cols]].iterrows():
         d = dict(zip([lbl for lbl, _, _ in cols], r))
         cells = []
@@ -153,6 +162,19 @@ def _slim_table(df: pd.DataFrame, cols, table_id: str) -> str:
                 cells.append(
                     f'<td class="num"><span class="{cls}">{"—" if pd.isna(v) else f"{float(v):.0f}"}</span></td>'
                 )
+            elif lbl == "Fold":
+                if pd.isna(v) or not str(v).strip():
+                    cells.append('<td class="num">—</td>')
+                else:
+                    fam = str(v)
+                    dup = fam in _seen_folds
+                    _seen_folds.add(fam)
+                    mark = (
+                        ' <span class="dup" title="a higher-ranked design already covers this fold">dup</span>'
+                        if dup
+                        else ""
+                    )
+                    cells.append(f'<td class="num">{_html.escape(fam)}{mark}</td>')
             elif lbl == "Notes":
                 note = "" if pd.isna(v) or not str(v).strip() else str(v).strip()
                 cells.append(f'<td class="note">{_html.escape(note)}</td>')
@@ -226,6 +248,7 @@ SLIM_REPORT_CSS = """
 .slimreport .ag0{background:color-mix(in srgb,var(--low) 18%,transparent);color:var(--low)}
 .slimreport .tm-hi{color:var(--high);font-weight:600}.slimreport .tm-lo{color:var(--mut)}
 .slimreport .note{white-space:normal;max-width:280px;font-size:0.9em;color:var(--mut)}
+.dup{color:#b45309;font-weight:600;font-size:11px;margin-left:4px}
 """
 
 
