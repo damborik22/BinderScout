@@ -221,10 +221,15 @@ Per part, the load-bearing corrections. Full detail in the per-part sections.
 | **Z** — staged filter | develop only | ~4-5 d | Loses ≤1 of the full run's top 30 and **0 of the top 10** |
 | **AC / AG / AH** | develop only | AC ~5 d + 1 GPU-day · AG ~6 d + ~50-95 GPU-h · AH 1 d–2 wk | Shared: `rank` byte-identical on a pinned pool |
 
-**Not investigated — 4 of 12 parts have no coverage:** AE (tool racing), AF
+**Not investigated at the time this plan was written — AE (tool racing), AF
 (fourth engine / Chai-1), AI (tune Mosaic's design loss), AJ (MD reverse
-check), plus AH-prime. That is 8 assessment rows (S1b, S4, S5, A2, A5b, C1, C6,
-C7, C8) with zero investigation.
+check), plus AH-prime: 8 assessment rows (S1b, S4, S5, A2, A5b, C1, C6, C7, C8)
+with zero investigation.**
+
+> **SUPERSEDED — see `docs/PLAN_2.0_PART_RESULTS.md`.** All four now have
+> verdicts rather than silence. AI's in particular was recorded as conflicting
+> with Part U; that was wrong (Part U is about *evaluation*, AI about
+> *generation*) and was corrected on 2026-09-29 — AI is deferred on VRAM alone.
 
 **BM3 reality:** everything above marked "develop + run" is sequence-only or
 CPU. This box **cannot refold** — ESMFold2 peaks at 14,248 MiB at 150 tokens,

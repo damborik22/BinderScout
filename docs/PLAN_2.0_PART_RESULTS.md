@@ -25,7 +25,7 @@ state). As of `v2.0.x`, 893 tests, ruff + shellcheck clean.
 | **AF** | fourth engine (Chai-1) | **Reopen as an ADDITION.** Source analysis says no sm_86 wall, favourable memory design, outputs match our schema. Unverified by execution |
 | **AG** | fleet/Clara benchmark consumer | **Not started, now unblocked.** Naming settled; only GPU-hours remain |
 | **AH** | BindPred | **Obtained and REJECTED** — benchmarked blind on our SPOC data, ranks backwards |
-| **AI** | tune Mosaic's design loss | **Verdict: defer**, and it conflicts with a measured result |
+| **AI** | tune Mosaic's design loss | **Verdict: defer on HARDWARE only.** The earlier "conflicts with Part U" reason was wrong — corrected 2026-09-29 |
 | **AJ** | MD reverse check | **Verdict: do not build now.** No tooling, and the premise is weak |
 
 **2½ of 12 complete.** Four (AE, AF, AI, AJ) had *zero* prior coverage; they now
@@ -556,20 +556,40 @@ builds the shared runner.
 
 ---
 
-## AI — tune Mosaic's design loss · **verdict: defer, and it conflicts with a measured result**
+## AI — tune Mosaic's design loss · **verdict: defer on hardware**
 
-Needs Mosaic GPU runs, so not startable here.
+Needs Mosaic GPU runs, so not startable here. That is the whole reason.
 
-**More importantly, it runs against Part U.** Mosaic *is* Boltz-2 gradient
-hallucination, so tuning its design loss tunes it against the same model the
-Evaluator refolds with. CLAUDE.md is explicit that Mosaic games `boltz_iptm` by
-construction and that its native metric ≈ Boltz-2 self-confidence ≈ Boltz-2 refold
-confidence is "a tautology". **Tuning the loss to improve a Boltz-2-measured score
-optimises the tautology, not the designs.**
+> **CORRECTED 2026-09-29.** This entry previously read "verdict: defer, and it
+> conflicts with a measured result", and argued that AI "runs against Part U".
+> **That was wrong, and it conflated two different things.** Part U is a finding about
+> **evaluation** — which engine's score may be trusted when *ranking* designs. AI is
+> about **generation** — the objective Mosaic optimises while producing them. Part U
+> says do not score a design with the engine that designed it; it says nothing against
+> improving the designer.
+>
+> If anything Part U *supports* AI. The reason `consensus_iptm_mean` exists is that we
+> hold independent engines, and Mosaic today optimises Boltz-2 confidence directly —
+> so tuning its loss toward terms that generalise is the direct remedy for the
+> same-model bias Part U identified, not a violation of it.
 
-**Recommendation:** if AI is attempted, its success criterion must be measured on
-an engine Mosaic did *not* design against — AF3 or ESMFold2 — never on Boltz-2.
-Without that constraint the part will report a win that means nothing.
+**What Part U does contribute is a measurement constraint, and it is binding:** AI's
+success must be measured on an engine Mosaic did *not* design against — AF3 or
+ESMFold2 — never on Boltz-2, whose confidence the loss is optimising by construction.
+This costs nothing to satisfy: the `af3_*` and `esmfold2_*` columns already exist, so
+the criterion is computable the moment the GPU-hours are available.
+
+**A second, weaker transfer from Part U, on AI's design rather than its premise.** U
+found that searching over 72 ranking metrics scored *worse* than `consensus_iptm_mean`
+alone (0.5170 vs 0.5552) — selection on few targets overfits. A loss-weight sweep is a
+search too, so hold out **targets** as well as engines. That is a constraint on how to
+run AI, not a reason not to.
+
+**Real blockers:** (1) VRAM — this box is 12 GB against the template's own
+`MOSAIC_TARGET_GIB = 64` default and a recorded 24.61 GiB single-tensor allocation, so
+a sweep needs BM5/GB10 or an H200-class card, several arms deep. (2) Priority — the
+measured bottleneck for 2.0 is outcome *labels*, which block promoting four
+already-shipped shadow columns.
 
 ---
 
