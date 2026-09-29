@@ -1,7 +1,6 @@
 import csv
 import json
 import os
-import re
 import signal
 import sys
 import uuid
@@ -53,6 +52,20 @@ from mosaic.structure_prediction import TargetChain
 # ============================
 
 OUTPUT_DIR = "refold_structures"
+
+# Saved structures are named after the design's binder_id.  Guarded separately from the
+# MSA import above: if binder_comparison is not importable here the fold must still run,
+# just under the legacy index-based names.
+try:
+    from binder_comparison.io.design_ids import parse_fasta_pairs, structure_stems
+except Exception:  # pragma: no cover - only when binder_comparison is missing
+
+    def structure_stems(binder_ids, fallbacks):
+        return list(fallbacks)
+
+    def parse_fasta_pairs(text):
+        return [(None, ln.strip()) for ln in text.splitlines() if ln.strip() and not ln.startswith(">")]
+
 
 _interrupt_state = {
     "results": [],
@@ -222,31 +235,13 @@ def _install_signal_handler(get_results_fn, checkpoint_path_fn):
 # ============================
 
 
-def _parse_fasta_like(lines: list[str]) -> list[str]:
-    sequences = []
-    current = []
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith(">"):
-            if current:
-                sequences.append("".join(current))
-                current = []
-            continue
-        current.append(line)
-    if current:
-        sequences.append("".join(current))
-    return sequences
+def _parse_batch_input(text: str) -> list[tuple[str | None, str]]:
+    """(binder_id, sequence) pairs; the id is None for headerless input.
 
-
-def _parse_batch_input(text: str) -> list[str]:
-    lines = text.splitlines()
-    has_header = any(line.strip().startswith(">") for line in lines)
-    if has_header:
-        return _parse_fasta_like(lines)
-    tokens = re.split(r"[;,\s]+", text.strip())
-    return [token for token in tokens if token]
+    One shared parser, because the id is what the saved structure is named after and a
+    second implementation that splits the header differently silently renames files.
+    """
+    return parse_fasta_pairs(text)
 
 
 def _read_binder_batch() -> list[str]:
@@ -353,6 +348,7 @@ def refold_batch(
     recycling_steps: int = 3,
     checkpoint_path: str | None = None,
     skip_indices: set[int] | None = None,
+    binder_ids: list[str] | None = None,
     use_msa: bool = True,
     msa_cache_dir: str | None = None,
     allow_no_msa: bool = False,
@@ -372,6 +368,9 @@ def refold_batch(
         recycling_steps: Number of recycling steps (default: 3).
         skip_indices:    Set of 1-based binder indices to skip (already completed).
                          When resuming, pass indices read from existing CSV.
+        binder_ids:      One id per binder, positionally aligned with
+                         *binder_sequences*; saved structures are named after it.
+                         None keeps the legacy index-based names.
         use_msa:         False = the operator explicitly asked for single-sequence
                          mode; no abort, the state is recorded.
         msa_cache_dir:   Override the shared target-MSA cache directory.
@@ -382,6 +381,11 @@ def refold_batch(
         skip_indices = set()
     run_id = str(uuid.uuid4())[:8]
     os.makedirs(output_dir, exist_ok=True)
+
+    # One filename stem per design, from its binder_id where we have one. Computed for
+    # the whole batch up front so a length mismatch is refused before any GPU work --
+    # an off-by-one here would name every structure after a different design.
+    stems = structure_stems(binder_ids, [f"refold{i}_{run_id}" for i in range(1, len(binder_sequences) + 1)])
 
     if checkpoint_path is None:
         checkpoint_path = f"checkpoint_refold_{run_id}.json"
@@ -691,9 +695,10 @@ def refold_batch(
             # Change 1: ipae derived metric
             ipae = (pae_bt_mean + pae_tb_mean) / 2.0
 
-            pdb_path = f"{output_dir}/refold{idx}_{run_id}.pdb"
-            pae_file = f"{output_dir}/refold{idx}_{run_id}_pae.npy"
-            plddt_file = f"{output_dir}/refold{idx}_{run_id}_plddt.csv"
+            stem = stems[idx - 1]
+            pdb_path = f"{output_dir}/{stem}.pdb"
+            pae_file = f"{output_dir}/{stem}_pae.npy"
+            plddt_file = f"{output_dir}/{stem}_plddt.csv"
 
             with open(pdb_path, "w") as f:
                 f.write(prediction.st.make_pdb_string())
@@ -769,7 +774,7 @@ def refold_batch(
 
             # Enriched FASTA header
             header = (
-                f">refold{idx}_{run_id}"
+                f">{stem}"
                 f"  binder_length={binder_length}"
                 f"  iptm={iptm:.4f}"
                 f"  bt_ipsae={bt_ipsae:.4f}"
@@ -816,9 +821,9 @@ def refold_batch(
     if n_skipped:
         print(f"Skipped  {n_skipped} binder(s) on feature-build failure.")
     print(f"Results  → {txt_path}, {csv_path}")
-    print(f"PDB      → {output_dir}/refold*_{run_id}.pdb")
-    print(f"PAE      → {output_dir}/refold*_{run_id}_pae.npy")
-    print(f"pLDDT    → {output_dir}/refold*_{run_id}_plddt.csv")
+    print(f"PDB      → {output_dir}/<binder_id>.pdb")
+    print(f"PAE      → {output_dir}/<binder_id>_pae.npy")
+    print(f"pLDDT    → {output_dir}/<binder_id>_plddt.csv")
     print(f"Run ID: {run_id} (for tracking this session)")
 
     # Skipping a malformed design is expected; skipping *every* design is an
@@ -893,12 +898,17 @@ def main():
         print("\nNo binder sequences provided — exiting.")
         return
 
+    # Ids are filtered in lockstep with the sequences.  A dropped invalid sequence that
+    # did not also drop its id would shift every later structure onto the wrong binder_id.
     binder_sequences = []
-    for idx, seq in enumerate(binder_candidates, start=1):
+    binder_ids: list[str | None] = []
+    for idx, (binder_id, seq) in enumerate(binder_candidates, start=1):
         try:
             binder_sequences.append(_validate_sequence(seq, f"Binder#{idx}"))
         except ValueError as e:
             print(f"  ✗ {e} — skipping binder #{idx}.")
+        else:
+            binder_ids.append(binder_id)
 
     if not binder_sequences:
         print("\nNo valid binder sequences — exiting.")
@@ -917,6 +927,7 @@ def main():
             target_pdb=args.target_pdb,
             num_samples=args.num_samples,
             recycling_steps=args.recycling_steps,
+            binder_ids=binder_ids,
             use_msa=not args.no_msa,
             msa_cache_dir=args.msa_cache_dir,
             allow_no_msa=args.allow_no_msa,

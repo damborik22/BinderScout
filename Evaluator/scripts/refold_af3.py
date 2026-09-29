@@ -61,6 +61,20 @@ except Exception as _exc:  # binder_comparison unavailable in this env
         return "", "single_sequence"
 
 
+# Saved structures are named after the design's binder_id.  Guarded separately from the
+# MSA import above: if binder_comparison is not importable here the fold must still run,
+# just under the legacy index-based names.
+try:
+    from binder_comparison.io.design_ids import parse_fasta_pairs, structure_stems
+except Exception:  # pragma: no cover - only when binder_comparison is missing
+
+    def structure_stems(binder_ids, fallbacks):
+        return list(fallbacks)
+
+    def parse_fasta_pairs(text):
+        return [(None, ln.strip()) for ln in text.splitlines() if ln.strip() and not ln.startswith(">")]
+
+
 def refold_batch(
     binder_sequences: list[str],
     target_sequence: str,
@@ -71,6 +85,7 @@ def refold_batch(
     num_samples: int = 5,
     model_dir: str | None = None,
     skip_indices: set[int] | None = None,
+    binder_ids: list[str] | None = None,
     use_msa: bool = True,
     msa_cache_dir: str | os.PathLike | None = None,
     allow_no_msa: bool = False,
@@ -131,6 +146,13 @@ def refold_batch(
     )
     print(f"[af3] Bucket pinned to {bucket} tokens (pool max); JAX compile cache at {jax_cache_dir}")
 
+    # One filename stem per design, from its binder_id where we have one.  Computed for
+    # the whole batch up front so a length mismatch is refused before any GPU work.
+    # AF3's own job_name / prediction directory is deliberately left index-based: that
+    # layout belongs to AF3 and _load_top_sample globs it.  What we export -- the PDB and
+    # the PAE -- is what carries the binder_id.
+    stems = structure_stems(binder_ids, [f"af3_{i:04d}" for i in range(1, len(binder_sequences) + 1)])
+
     # Process one binder at a time so partial results are saved incrementally.
     fieldnames = _csv_fieldnames()
     csv_path = Path(output_csv).resolve()
@@ -185,7 +207,8 @@ def refold_batch(
 
             # PAE matrix: [num_tokens, num_tokens] — already residue-level for proteins
             pae = np.asarray(confidences["pae"], dtype=np.float32)
-            pae_file = out_dir / f"af3_{idx:04d}_pae.npy"
+            stem = stems[idx - 1]
+            pae_file = out_dir / f"{stem}_pae.npy"
             np.save(pae_file, pae)
 
             # pLDDT: per-atom (0-100), extract CA atoms via gemmi, normalise to 0-1
@@ -205,7 +228,7 @@ def refold_batch(
             ranking_score = summary.get("ranking_score", float("nan"))
 
             # Convert CIF to PDB via gemmi
-            pdb_path = out_dir / f"af3_{idx:04d}.pdb"
+            pdb_path = out_dir / f"{stem}.pdb"
             _cif_to_pdb(cif_path, pdb_path)
 
             row = {
@@ -808,12 +831,11 @@ if __name__ == "__main__":
     parser.add_argument("--msa-cache-dir", default=None, help="Override MSA cache directory")
     args = parser.parse_args()
 
-    seqs: list[str] = []
-    for line in Path(args.sequences).read_text().splitlines():
-        s = line.strip()
-        if not s or s.startswith(">"):
-            continue
-        seqs.append(s)
+    # The header's first token is the binder_id, as 'extract' writes it; saved
+    # structures are named after it.
+    pairs = parse_fasta_pairs(Path(args.sequences).read_text())
+    seqs: list[str] = [seq for _, seq in pairs]
+    ids: list[str | None] = [binder_id for binder_id, _ in pairs]
 
     skip: set[int] = set()
     if args.resume and Path(args.output).exists():
@@ -833,6 +855,7 @@ if __name__ == "__main__":
     try:
         refold_batch(
             binder_sequences=seqs,
+            binder_ids=ids,
             target_sequence=args.target_seq,
             output_dir=args.output_dir,
             output_csv=args.output,

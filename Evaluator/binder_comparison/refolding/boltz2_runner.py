@@ -41,11 +41,15 @@ def run_boltz2_refold(
     recycling_steps: int = 3,
     scripts_path: str | Path | None = None,
     resume: bool = False,
+    binder_ids: list[str] | None = None,
 ) -> None:
     """Refold *sequences* against *target_sequence* using Boltz2.
 
     Args:
         sequences:       List of binder amino acid strings.
+        binder_ids:      One id per sequence, positionally aligned with *sequences*;
+                         saved structures are named after it. None keeps the legacy
+                         index-based names.
         target_sequence: Target protein sequence.
         output_dir:      Directory where structure files (PDB/NPY/CSV) are written.
         output_csv:      Path for the output CSV of metrics.
@@ -97,6 +101,7 @@ def run_boltz2_refold(
 
         refold_batch(
             binder_sequences=sequences,
+            binder_ids=binder_ids,
             target_sequence=target_sequence,
             output_dir="structures",
             target_pdb=target_pdb_abs,
