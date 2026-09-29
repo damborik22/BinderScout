@@ -13,11 +13,15 @@ on:
   pull_request:
     branches: [master, 'v*.x']
 
-# Every job pins 'ubuntu-24.04' rather than 'ubuntu-latest'. That label migrates to
-# Ubuntu 26 from 2026-10-19, which would change the toolchain under every job on a
-# date nobody chose, with no commit to bisect. 24.04 is what 'ubuntu-latest'
-# resolves to today, so the pin changes nothing now and makes the move to 26 a
-# deliberate edit that can be reverted if it breaks. Revisit once 26 has settled.
+# Every job pins 'ubuntu-24.04' rather than 'ubuntu-latest'. Ubuntu 26.04 went GA on
+# 2026-09-17 and 'ubuntu-latest' migrates to it GRADUALLY between 2026-10-19 and
+# 2026-11-19 -- so an unpinned job's toolchain changes on a date nobody chose, and
+# somewhere inside a month-long window, with no commit to bisect. 24.04 is what
+# 'ubuntu-latest' resolves to today, so the pin changes nothing now and makes the move
+# to 26 a deliberate edit that can be reverted if it breaks.
+#
+# The pin alone would be a silent deferral, so the ubuntu-26-canary job below runs the
+# OS-sensitive checks on 26.04 today.
 #
 # Repeated in each job on purpose: `runs-on` accepts only the github, needs,
 # strategy, matrix, vars and inputs contexts, so a workflow-level `env:` var here
@@ -90,3 +94,79 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build base image
         run: docker build -f Dockerfile.test --target base -t binderscout-test-base .
+
+  # Early warning for the ubuntu-latest migration above. Runs the checks whose result
+  # can actually DIFFER on Ubuntu 26, and only those:
+  #
+  #   shellcheck     apt 0.9.0-1 (24.04) -> 0.11.0-2 (26.04), and CI never pins it, so a
+  #                  newly promoted check turns the real job red with no repo change.
+  #   system python  3.12.3 -> 3.14.4. binderscout.py is deliberately stdlib-only and runs
+  #                  under whatever python3 the host provides -- this is the only check
+  #                  here that tests something the 24.04 jobs structurally cannot.
+  #   docker         engine 28.0.4 -> 29.4.2 (29 raised the minimum Engine API to v1.44).
+  #                  The largest OS-level delta that this repo actually exercises;
+  #                  Dockerfile.test pins its base image, so the engine is cleanly
+  #                  isolated as the variable. The image's compose also jumps 2.x -> 5.x
+  #                  but nothing here invokes compose, so that is not why this runs.
+  #
+  # ruff and pytest are deliberately NOT here: both run the same static binary / the same
+  # manylinux wheels on the same hostedtoolcache 3.10.21 on either image, so they cannot
+  # produce an Ubuntu-26-specific result -- and 'pip install ruff' is unpinned, so a
+  # canary running it would go red for reasons that have nothing to do with the OS.
+  #
+  # No `shell:` key on any step, deliberately: the explicit `shell: bash` form is
+  # `bash -eo pipefail`, while the real jobs above get the Linux default `bash -e`. A
+  # canary that runs under stricter flags than the job it watches reports its own
+  # strictness as a migration failure, which is the one thing it must never do.
+  #
+  # The job EXITS 0 on purpose and does not use continue-on-error. That keyword makes the
+  # run conclusion success but leaves the job with a red X and a PR reading "Some checks
+  # were not successful" -- which reads as a failure, not a warning. Each step here is
+  # non-fatal and emits a ::warning:: annotation instead, so the run stays green and the
+  # annotation is the signal. Every step also carries `if: !cancelled()`, so one step
+  # going wrong in a way the `||` guard does not catch still cannot stop the others -- a
+  # canary that reports only its first problem is most of the way to useless. Not
+  # `always()`, which would also keep pulling the CUDA image after a cancel.
+  ubuntu-26-canary:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck on Ubuntu 26
+        if: ${{ !cancelled() }}
+        run: |
+          # Mirrors the real job's install step; both are no-ops on an image that ships
+          # shellcheck, but relying on it being preinstalled would report a missing
+          # install as a migration failure. `|| true` on every probe: a diagnostic must
+          # not be the thing that turns the canary red.
+          sudo apt-get install -y shellcheck || true
+          shellcheck --version || true
+          mapfile -t scripts < <(git ls-files '*.sh' | grep -v '^docs/data/')
+          [ -f tools/gpurun ] && scripts+=(tools/gpurun)
+          printf 'linting %d scripts\n' "${#scripts[@]}"
+          shellcheck --shell=bash --severity=warning "${scripts[@]}" \
+            || echo "::warning title=ubuntu-26 canary::shellcheck failed here (apt 0.11.x vs 0.9.x). Check the ubuntu-24.04 shellcheck job FIRST: if it is red too, the cause is the scripts, not the OS."
+      - name: stdlib-only modules under the image's own python3
+        if: ${{ !cancelled() }}
+        # `binderscout.py --help` would be a NO-OP here: main() prints USAGE and exits at
+        # binderscout.py:167 before any import, so the only modules on that path are
+        # os/platform/sys/pathlib and nothing can fail on any interpreter. Import the
+        # actual stdlib-only surface instead -- the 3.7k-line configurator and the curses
+        # TUI -- which is what a system-python jump can really break.
+        run: |
+          python3 --version || true
+          python3 binderscout.py --version > /dev/null || true
+          python3 -c "
+          import importlib.util
+          spec = importlib.util.spec_from_file_location('cfg', 'configurator/configurator.py')
+          m = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(m)
+          from tui.app import launch_tui
+          print('configurator + tui import OK')
+          " \
+            || echo "::warning title=ubuntu-26 canary::configurator.py or tui/app.py fails to import under Ubuntu 26's system python3 (3.14.x vs 3.12.x). Both are stdlib-only and run on the host interpreter, so this affects install and configure."
+      - name: docker build on Ubuntu 26
+        if: ${{ !cancelled() }}
+        run: |
+          docker --version || true
+          docker build -f Dockerfile.test --target base -t binderscout-test-base . \
+            || echo "::warning title=ubuntu-26 canary::docker build failed here (engine 29.x vs 28.x). Check the ubuntu-24.04 docker-build job FIRST: if it is red too, the cause is the Dockerfile, not the OS."
