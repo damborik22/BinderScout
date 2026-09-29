@@ -43,7 +43,6 @@
     "use_af3": true,
     "use_esmfold2": true,
     "primary_engine": "boltz",
-    "use_soluprot": true,
-    "soluprot_filter": false
+    "use_soluprot": true
   }
 }

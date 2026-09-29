@@ -239,7 +239,7 @@ helices. **This needs per-tool calibration, not a nudged global pair.** Pinned b
 purely whether a cheap pre-GPU cut keeps the designs that matter. Its stated gate is
 "loses ≤1 of the full run's top 30 and 0 of the top 10".
 
-**Nothing needed building to test it** — two cascades already exist: `--soluprot-filter`
+**Nothing needed building to test it** — two cascades existed at the time: `--soluprot-filter`
 (drops sub-threshold sequences before any refold engine) and `binder-compare prefilter`
 (cheap Boltz-2 fold-back → rank by interface score → top-N to the expensive engines).
 The first was measured against our own experimental results on two targets.
@@ -282,6 +282,14 @@ with **`default=True`**. Pressing Enter through the wizard enabled it. A drop th
 via re-ranking. Now `default=False`, with the permanence stated in the prompt and in a
 printed note, and the same warning in `evaluate.sh`'s help. Pinned by
 `tests/test_soluprot_filter_is_not_default.py`.
+
+> **Superseded 2026-09-29.** The `default=False` mitigation described above was an
+> intermediate step: the wizard still *offered* the filter. It was removed outright on
+> 2026-09-28 — `evaluate.sh` now exits 1 on `--soluprot-filter`, the configurator asks
+> nothing and writes no `soluprot_filter` key, and the unreachable implementation was
+> deleted from `evaluate.sh` on 2026-09-29. The guard is
+> `tests/test_soluprot_is_a_label_only.py` (the file named in the passage above was
+> never created). The narrative above is left as written — it records what was true then.
 
 ---
 

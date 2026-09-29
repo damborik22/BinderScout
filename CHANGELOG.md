@@ -6,6 +6,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **TmProt never ran from a generated run script.** `write_run_evaluate` reads
+  `cfg.get("use_tmprot")` and `cfg.get("tmprot_threshold")`, but the wizard
+  wrote those keys only into `tools_enabled`, never into `cfg`. The lookups
+  fell through to their defaults, so **every** generated `run_evaluate.sh`
+  carried `--skip-tmprot` regardless of how the wizard was answered, and the
+  Tm column was silently absent from every report. Found by a new AST test
+  that checks the cfg keys the wizard writes against the ones the writer
+  reads — no behavioural test could see it, because both existing ones
+  hand-build their own `cfg`.
+
+- **`evaluate.sh` aborted before step 0 on any host with the
+  `binder-eval-tmprot` env.** The TmProt block sat ~90 lines above the
+  initialisation block that owns `STEP`, `N_STEPS` and `TMPROT_CSV`, so under
+  `set -u` (line 74) the run died with `STEP: unbound variable` before the
+  SoluProt screen and before any refold engine. The env is auto-detected, so
+  no flag was needed to trigger it. Past that, `TMPROT_OK` was reset to 0
+  *below* the block that sets it, so the report could never have received
+  `--tmprot-results` either. The block is now below the initialisation.
+
+  These two masked each other: the configurator always passed `--skip-tmprot`,
+  so the crash could not fire through the documented path. Fixing either alone
+  would have been wrong — the first turns a silent no-op into a hard abort.
+
+### Removed
+
+- **`--soluprot-filter` — SoluProt is a label, not a filter.** The flag dropped
+  sub-threshold designs from the FASTA before any refold engine ran. Measured
+  against experimental results on two targets, at its own default 0.5 threshold
+  it discarded several of the tightest measured binders and lost designs from
+  the full run's own top-10; no threshold above 0.0 met Part Z's recall gate,
+  because solubility and affinity are close to orthogonal on these pools. A drop
+  at that point is unrecoverable — the design never reaches the report.
+
+  `evaluate.sh` now **exits 1** with an explanation rather than ignoring the
+  flag, so anything that scripted it finds out instead of quietly receiving a
+  different pool. The score is unaffected and still reaches the report as
+  `native_soluprot_score` / `soluprot_passes`. The configurator no longer asks,
+  no longer writes a `soluprot_filter` key, and **warns** when replaying an older
+  `config.json` that sets it true, then **drops the key** so it does not round-trip
+  into the regenerated config. (Warning alone was not enough: the key was written
+  straight back out, so it was never retired and the warning fired forever on every
+  later replay.) That replay produces a *larger* pool than the original run, and a
+  config file exists to prevent exactly that kind of silent difference. The now-unreachable implementation is deleted from `evaluate.sh`
+  (59 lines), along with the `soluprot_filter` checkbox in
+  `docs/config-builder.html` that had been emitting a key nothing honoured.
+
+  Note the names that remain and do **not** mean filtering: the CLI verb
+  `binder-compare filter-soluprot` and `refolding.run_soluprot_filter` only
+  *score*. They are kept because they are public API.
+
 ### Added — 2.0 evaluation and provenance
 
 - **Per-design `generation_index`, with its provenance.** `ExtractedBinder`

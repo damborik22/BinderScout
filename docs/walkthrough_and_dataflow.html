@@ -396,10 +396,9 @@ offers to run. Three prompt shapes are used throughout
 <span class="c">    Use ESMFold2 (binder-eval-esmfold2 env)?</span> [y/<span class="g">N</span>]: <span class="u">y</span>
 <span class="b">    Primary engine for ranking</span>   <span class="g">[1]</span> boltz <span class="y">(default)</span>  <span class="c">[2]</span> af3  <span class="c">[3]</span> esmfold2
 
-  <span class="b">SoluProt solubility screen</span> (sequence-only filter, no GPU)   <span class="d">only if env present</span>
+  <span class="b">SoluProt solubility screen</span> (sequence-only label, no GPU — never drops a design)   <span class="d">only if env present</span>
 <span class="c">    Use SoluProt to score solubility?</span> [<span class="g">Y</span>/n]: <span class="u"></span>
 <span class="c">    Pass threshold (paper default 0.5; lower for short binders)</span> <span class="y">[0.5]</span>: <span class="u"></span>
-<span class="c">    Drop sub-threshold designs BEFORE refolding (saves GPU)?</span> [<span class="g">Y</span>/n]: <span class="u"></span>
 </pre>
 </div>
 
@@ -811,9 +810,8 @@ each other's output. Three of the four share an almost identical schema:
       <td class="n"><code>binder-eval-soluprot</code><br><span class="fine">py3.7, scikit-learn 0.20.x</span></td>
       <td class="n"><code>soluprot_results.csv</code></td>
       <td class="n"><code>soluprot_score</code> and pass/fail against the threshold<br>
-        <span class="fine">sequence-only, no GPU, runs <em>before</em> refolding; with
-        <code>--soluprot-filter</code> it writes <code>sequences.soluble.fasta</code> and the refolds use that
-        instead</span></td>
+        <span class="fine">sequence-only, no GPU, runs <em>before</em> refolding.
+        It never drops a design — the score is a label that lands in the report</span></td>
     </tr>
   </tbody>
 </table></div>
@@ -882,7 +880,7 @@ sequences.fasta ─────────────────┤  left-joi
       <td>Collapses near-duplicate variants of one backbone: Protein-Hunter <code>_c&lt;cycle&gt;</code> and BindCraft <code>_mpnn&lt;N&gt;</code> are stripped so one trajectory counts once.</td></tr>
     <tr><td class="n"><code>annotate_wetlab_recommended</code></td>
       <td class="n"><code>wetlab_recommended</code><br><code>wetlab_reason</code></td>
-      <td>SoluProt pass + <code>agreement_count ≥ 2</code> + binder pLDDT ≥ 0.50. <span class="fine">Always false on a single-engine install — F34.</span></td></tr>
+      <td><code>agreement_count ≥ 2</code> + binder pLDDT ≥ 0.50. <span class="fine">SoluProt is reported as a note, not a gate — it cannot withhold the recommendation (2026-09-28).</span> <span class="fine">Always false on a single-engine install — F34.</span></td></tr>
     <tr><td class="n"><code>add_chain_iptm_interface</code></td>
       <td class="n"><code>chain_iptm_interface</code></td>
       <td>From ESMFold2's <code>iptm_pair</code>; the gate the autosize loop counts passers against.</td></tr>
@@ -897,7 +895,6 @@ sequences.fasta ─────────────────┤  left-joi
 <div class="flow">runs/&lt;name&gt;/evaluate/
 ├── sequences.fasta                  ← extract      (the join key is defined here)
 ├── sequences_native_metrics.csv     ← extract      (per-tool self-scores)
-├── sequences.soluble.fasta          ← soluprot     (only with --soluprot-filter)
 ├── soluprot_results.csv             ← soluprot
 ├── boltz2_results.csv               ← refold-boltz2
 ├── af3_results.csv                  ← refold-af3
