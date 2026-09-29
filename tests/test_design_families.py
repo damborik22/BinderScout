@@ -102,3 +102,76 @@ def test_an_empty_or_missing_column_is_survivable():
     assert annotate_sequence_families(pd.DataFrame()).empty
     d = pd.DataFrame({"binder_id": ["a"]})
     assert "seq_family_id" not in annotate_sequence_families(d).columns
+
+
+# ─── axis 2: structural families ─────────────────────────────────────────────
+
+from binder_comparison.comparison.design_families import (  # noqa: E402
+    STRUCT_FAMILY_TM,
+    annotate_structural_families,
+    suggest_swaps,
+)
+
+
+def test_structural_threshold_is_the_standard_same_fold_line():
+    assert STRUCT_FAMILY_TM == 0.5, "TM >= 0.5 is the conventional same-fold boundary"
+
+
+def test_structures_that_share_a_fold_are_grouped(monkeypatch):
+    """TM is supplied by a stub so the test does not need foldseek installed."""
+    d = _pool(["AAAA", "CCCC", "GGGG"])
+    d["boltz_pdb"] = ["a.pdb", "b.pdb", "c.pdb"]
+    # d0 and d1 share a fold (0.58), d2 is unrelated
+    tm = {("d0", "d1"): 0.58, ("d0", "d2"): 0.21, ("d1", "d2"): 0.19}
+    out = annotate_structural_families(d, tm_lookup=lambda a, b: tm.get((a, b)) or tm.get((b, a)) or 0.0)
+    assert out.loc[0, "struct_family_id"] == out.loc[1, "struct_family_id"]
+    assert out.loc[0, "struct_family_id"] != out.loc[2, "struct_family_id"]
+    assert list(out["struct_family_size"]) == [2, 2, 1]
+
+
+def test_a_pair_below_the_line_is_not_grouped():
+    d = _pool(["AAAA", "CCCC"])
+    d["boltz_pdb"] = ["a.pdb", "b.pdb"]
+    out = annotate_structural_families(d, tm_lookup=lambda a, b: 0.49)
+    assert out.loc[0, "struct_family_id"] != out.loc[1, "struct_family_id"]
+
+
+def test_missing_structures_degrade_to_NA_rather_than_failing():
+    """No foldseek (aarch64) or no collected structures must not break the report."""
+    d = _pool(["AAAA", "CCCC"])
+    out = annotate_structural_families(d, tm_lookup=None)
+    assert "struct_family_id" in out.columns
+    assert out["struct_family_id"].isna().all()
+    assert len(out) == 2, "a diagnostic that cannot be computed annotates NA, it does not drop rows"
+
+
+def test_suggested_swap_names_a_concrete_replacement():
+    """The swap is the actionable output: design X duplicates a fold already picked, and
+    design Y is the next-ranked design bringing a NEW fold."""
+    d = pd.DataFrame(
+        {
+            "binder_id": ["a", "b", "c", "d"],
+            "rank": [1, 2, 3, 4],
+            "struct_family_id": ["F1", "F1", "F2", "F3"],
+        }
+    )
+    sw = suggest_swaps(d, top_n=2)
+    assert len(sw) == 1, "exactly one of the top 2 is redundant"
+    assert sw[0]["drop"] == "b", "the LOWER-ranked member of the duplicated fold is the one to drop"
+    assert sw[0]["add"] == "c", "the replacement is the next-ranked design with an unused fold"
+
+
+def test_no_swap_is_suggested_when_the_selection_is_already_diverse():
+    d = pd.DataFrame(
+        {"binder_id": ["a", "b"], "rank": [1, 2], "struct_family_id": ["F1", "F2"]}
+    )
+    assert suggest_swaps(d, top_n=2) == []
+
+
+def test_swaps_are_not_suggested_from_unknown_folds():
+    """An NA structural family means 'not measured', which must never be treated as
+    'same fold as something else'."""
+    d = pd.DataFrame(
+        {"binder_id": ["a", "b", "c"], "rank": [1, 2, 3], "struct_family_id": [None, None, "F1"]}
+    )
+    assert suggest_swaps(d, top_n=2) == []
