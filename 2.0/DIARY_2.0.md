@@ -869,3 +869,188 @@ Not done, deliberately: no `binder_id` column was added to the engine CSVs. The 
 already attaches one from the FASTA, and a second `binder_id` arriving through the
 prefixing and the outer join is how you get `binder_id_x` / `binder_id_y`. The filename
 was the ask; the column would have been scope.
+
+---
+
+## A CI pin, a half-removed flag, and two bugs that were hiding each other
+
+**2026-09-29 (cont.)** Started as two lines of housekeeping — bump the GitHub Actions,
+add a canary — and turned into the largest correctness haul of the session. Almost none
+of it was in the request. What follows is mostly how each thing surfaced, because in
+every case the *route* was the transferable part.
+
+### The pin was an answer that never gets checked
+
+CI was warning that `actions/checkout@v4` and `setup-python@v5` were being forced onto
+Node 24, and `ubuntu-latest` was about to migrate. Bumping to v7 was trivial. Pinning
+`runs-on: ubuntu-24.04` was trivial too — and wrong on its own, in a way worth naming:
+**a pin converts a scheduled surprise into an indefinite unknown.** Nothing would ever
+tell us the migration breaks us, because nothing would ever try it.
+
+So the pin got a companion: a job that runs the OS-sensitive checks on `ubuntu-26.04`
+today. Deciding *which* checks was the whole design. My first draft ran ruff and pytest,
+which was the instinct to "run CI, but on the new thing" rather than to ask what can
+actually differ. Both run the same static binary and the same manylinux wheels on the
+same hostedtoolcache 3.10.21 on either image, so neither can produce an Ubuntu-26 result
+— and `pip install ruff` is unpinned, so that canary would periodically go red for
+reasons that have nothing to do with the OS. A canary that cries wolf is worse than none.
+
+What survived: shellcheck (apt 0.9 → 0.11, unpinned by CI), the system `python3`
+(3.12 → 3.14, which is what the stdlib-only `binderscout.py` and configurator actually
+run under), and docker (engine 28 → 29). The first run answered the question the pin
+never could: **shellcheck 0.11.0 is clean on all 20 scripts, the configurator and TUI
+import under 3.14.4, docker 29.4.2 builds.** Zero annotations. We are already Ubuntu-26
+clean, and now we will hear about it the week that stops being true.
+
+### Three things I had asserted the day before, all wrong
+
+Worth recording as a set, because they came from the same habit.
+
+**"ubuntu-26.04 is in preview."** It is GA, since 2026-09-17. I had fetched the
+runner-images README through a summariser, which attached Xcode 27's preview badge to
+the Ubuntu row. Reading the table markup directly took one command and settled it.
+
+**"migrates from 2026-10-19."** It is a gradual rollout *between* October 19 and
+November 19. A window, not a date — which changes what "prepare for it" means.
+
+**"`continue-on-error` gives a warning."** It does not. The docs say exactly what it
+does — *"Prevents a workflow run from failing when a job fails"* — and that is the run
+*conclusion* only. The job keeps a red X and a PR still reads "Some checks were not
+successful". The yellow rendering I was picturing is an unimplemented feature request.
+The fix was to stop depending on the keyword: every step is non-fatal, the job exits 0,
+and a `::warning::` annotation *is* the signal.
+
+The pattern in all three: I reported a summariser's paraphrase, or my own recollection,
+in the register I use for things I checked. The corrective is not "be more careful" but
+**go to the markup**.
+
+### Two bugs I wrote into the canary, caught by running it
+
+**The python probe was a no-op.** `python3 binderscout.py --help` looked like a system-
+python smoke test. It is not: `main()` prints `USAGE` and exits at `binderscout.py:167`
+*before any import*, so the only modules on that path are `os`/`sys`/`pathlib` and
+nothing there can fail on any interpreter. It would have stayed green through any 3.14
+breakage. It now imports the 3.7k-line configurator and the curses TUI — the actual
+stdlib-only surface — verified locally on 3.14.4, the same version the image ships.
+
+**`shell: bash` made the canary stricter than the job it watches.** The explicit form is
+`bash -eo pipefail`; the real jobs get the Linux default `bash -e`. A canary running
+under stricter flags reports *its own strictness* as a migration failure. Removing it
+also removed a real SIGPIPE race (`yes | head -2` exits 141 under pipefail).
+
+And the comment I wrote justifying that removal contained a false claim —
+`mapfile -t x < <(a | b)` discards the process substitution's status, so pipefail could
+never have failed that step. I had reasoned it instead of running it. One command
+(`rc=0`, empty array) showed it. **A comment asserting a mechanism is a claim, and it
+should be measured to the same standard as code.**
+
+### The flag had been half-removed for a day, and `--help` was still selling it
+
+`--soluprot-filter` was removed on 2026-09-28: `evaluate.sh` exits 1 on it. The
+implementation behind it was unreachable, so deleting it should have been a tidy-up.
+An audit found **21 places still advertising the flag**, and the live ones were the
+problem:
+
+- `evaluate.sh --help` prints its own usage block by `sed`-ing the file's comments — so
+  `--help` documented, in full, a flag the parser refuses.
+- `binder-compare screen-tmprot --help` is `description=__doc__`, and that docstring
+  said SoluProt "has a `--soluprot-filter` mode that drops sub-threshold designs".
+- `docs/config-builder.html` — which README tells people to open — had a **checkbox**
+  emitting a config key the configurator silently ignores.
+- The orchestrator skill named the flag as a knob. An agent following it gets exit 1
+  mid-campaign.
+- `CLAUDE.md:98` and `:173`. I had edited CLAUDE.md that same morning and missed both.
+- `soluprot_runner.py`'s docstring still *prescribed* "drop the bottom of the
+  distribution" — the exact use Part Z measured and rejected.
+
+The lesson is about what "removed" means. Making the flag fail loudly was the safety
+fix and it was right. But a refusal plus a dozen documents describing the feature is a
+repo that argues with itself, and the loudest voices are the ones that execute: help
+text, generated forms, agent instructions. **Retiring a feature means retiring every
+surface that offers it, and the executable surfaces first.**
+
+One more, found by checking what the warning actually did rather than that it fired:
+`load_run_config` warned about a stale `soluprot_filter` key and then left it in `cfg`,
+so the regenerated `config.json` wrote it straight back out. The key was never retired
+— it propagated, and the warning would have fired forever on every later replay. It is
+dropped now.
+
+### My replacement tests were hollow too, which is the fourth time this session
+
+I had rewritten one grep-based test into a behavioural one and felt done. Adversarial
+review mutated all of them:
+
+- the stale-config test asserted `"soluprot_filter" in output` — and the config being
+  loaded *contains that key by construction*, so deleting the warning entirely still
+  passed;
+- it also could not distinguish a conditional warning from `if True:`, i.e. a warning
+  that fires on every load;
+- the emission test pinned one cfg key name, so re-adding the emission behind a renamed
+  key survived it.
+
+Each is the same error in a new costume: **asserting that a string is present, when the
+property is about behaviour under a condition.** The fix that generalises is to test the
+negative case too — a clean config must stay *silent* — because that is what separates
+"the code ran" from "the code discriminated".
+
+### The test that paid for itself immediately
+
+Both behavioural tests hand-build their own `cfg`, so neither touches what the wizard
+actually writes. That gap is invisible to any amount of behavioural testing, so I added
+an AST test comparing the cfg keys the wizard **writes** against the keys
+`write_run_evaluate` **reads**.
+
+It failed on the first run, on untouched code:
+
+> `write_run_evaluate reads cfg keys the wizard never writes: ['tmprot_threshold', 'use_tmprot']`
+
+**TmProt had never run from a generated run script.** The wizard wrote those keys only
+into `tools_enabled`; `cfg.get("use_tmprot", False)` fell through every time, so every
+`run_evaluate.sh` ever generated carried `--skip-tmprot` no matter how the wizard was
+answered, and the Tm column was silently missing from every report.
+
+Then the shell audit found the other half: the TmProt block sat ~90 lines *above* the
+initialisation block that owns `STEP`, `N_STEPS` and `TMPROT_CSV`. Under `set -u` that
+is `STEP: unbound variable` — a hard abort of the entire evaluation before step 0 and
+before any engine, on any host where the `binder-eval-tmprot` env exists. The env is
+auto-detected, so no flag was needed to trigger it. And past that, `TMPROT_OK` was reset
+to 0 *below* the block that sets it, so the report could never have received
+`--tmprot-results` anyway.
+
+**The two bugs were hiding each other.** The configurator always passed `--skip-tmprot`,
+so the crash could not fire through the documented path; and because it never ran,
+nobody noticed the column was missing. Fixing either alone would have been actively
+harmful — repairing the configurator would have turned a silent no-op into a hard abort
+for every user with the env installed. They went in together.
+
+This is the sharpest instance yet of the standing rule about checking all four modules.
+Installer, configurator, evaluator, report were each *individually* fine here. The
+defect lived in the contract *between* two of them, where neither side's tests look.
+
+### A hazard in the tooling: the review agents mutate the working tree
+
+The adversarial verification ran mutation tests to check my tests had teeth. One of them
+**did not restore its mutation** — `configurator.py` was left with `if True:` in place
+of the stale-config guard.
+
+I caught it only because the behaviour did not match what I had just written. And my own
+edit had concealed it: I used a single `assert s != o` for a two-part replacement, so the
+half that silently failed to match was masked by the half that succeeded. That is the
+same "assert the mutation was applied" discipline I enforce on mutation scripts, not
+applied to my own edits. Every replacement now asserts its own result.
+
+Two takeaways. Review agents that mutation-test share your working tree, so **diff the
+tree against what you believe you wrote** before committing after one runs. And a
+compound edit needs a compound assertion.
+
+### What shipped
+
+Three commits: the actions bump and runner pin with the corrected facts; the Ubuntu 26
+canary; and the SoluProt completion carrying the two TmProt fixes. 962 tests, 8
+mutations applied and caught, ruff and shellcheck clean, and the canary green on
+Ubuntu 26 with no annotations.
+
+Noted and deliberately not touched: `binder-compare filter-soluprot` and
+`refolding.run_soluprot_filter` only *score* despite their names — public API, so
+documented rather than renamed — and a pre-existing `if True:` at
+`visualization/report.py:1530`.
