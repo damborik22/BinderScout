@@ -60,7 +60,7 @@ try:
     from binder_comparison.io.design_ids import parse_fasta_pairs, structure_stems
 except Exception:  # pragma: no cover - only when binder_comparison is missing
 
-    def structure_stems(binder_ids, fallbacks):
+    def structure_stems(binder_ids, fallbacks, *, engine=None):
         return list(fallbacks)
 
     def parse_fasta_pairs(text):
@@ -385,7 +385,9 @@ def refold_batch(
     # One filename stem per design, from its binder_id where we have one. Computed for
     # the whole batch up front so a length mismatch is refused before any GPU work --
     # an off-by-one here would name every structure after a different design.
-    stems = structure_stems(binder_ids, [f"refold{i}_{run_id}" for i in range(1, len(binder_sequences) + 1)])
+    stems = structure_stems(
+        binder_ids, [f"refold{i}_{run_id}" for i in range(1, len(binder_sequences) + 1)], engine="boltz2"
+    )
 
     if checkpoint_path is None:
         checkpoint_path = f"checkpoint_refold_{run_id}.json"

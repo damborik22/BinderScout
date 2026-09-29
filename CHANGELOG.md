@@ -71,8 +71,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `af3_0007.pdb`, `esmfold2_0007.pdb` — three different names for one design,
   none of them the design's own id, and the index meaningful only relative to
   the FASTA that produced it. Finding a design's structures meant joining the
-  refold CSV on sequence first. They are now `<binder_id>.pdb`,
-  `<binder_id>_pae.npy`, `<binder_id>_plddt.csv` / `<binder_id>_model.cif`.
+  refold CSV on sequence first. They are now `<binder_id>_<engine>.pdb`, with
+  `_pae.npy` and `_plddt.csv` / `_model.cif` beside them. The engine is in the
+  name and not only in the directory, because the three directories get pooled —
+  that is the normal way to hand over "all the PDBs", and without the suffix a
+  design's three structures are three files of the same name.
   The id comes from the FASTA header `extract` already writes, so `evaluate.sh`,
   `binder-compare run` and the configurator needed no change; a design with no
   usable id keeps the old index-based name. The mapping lives in

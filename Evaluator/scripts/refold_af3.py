@@ -68,7 +68,7 @@ try:
     from binder_comparison.io.design_ids import parse_fasta_pairs, structure_stems
 except Exception:  # pragma: no cover - only when binder_comparison is missing
 
-    def structure_stems(binder_ids, fallbacks):
+    def structure_stems(binder_ids, fallbacks, *, engine=None):
         return list(fallbacks)
 
     def parse_fasta_pairs(text):
@@ -151,7 +151,7 @@ def refold_batch(
     # AF3's own job_name / prediction directory is deliberately left index-based: that
     # layout belongs to AF3 and _load_top_sample globs it.  What we export -- the PDB and
     # the PAE -- is what carries the binder_id.
-    stems = structure_stems(binder_ids, [f"af3_{i:04d}" for i in range(1, len(binder_sequences) + 1)])
+    stems = structure_stems(binder_ids, [f"af3_{i:04d}" for i in range(1, len(binder_sequences) + 1)], engine="af3")
 
     # Process one binder at a time so partial results are saved incrementally.
     fieldnames = _csv_fieldnames()

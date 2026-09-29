@@ -30,15 +30,21 @@ def safe_stem(binder_id) -> str:
     return "".join(c if (c.isalnum() or c in _SAFE_EXTRA) else "_" for c in str(binder_id))
 
 
-def structure_stems(binder_ids, fallbacks) -> list[str]:
-    """One unique, filesystem-safe stem per design, preferring the binder id.
+def structure_stems(binder_ids, fallbacks, *, engine: str | None = None) -> list[str]:
+    """One unique, filesystem-safe stem per design: ``<binder_id>_<engine>``.
 
     Args:
         binder_ids: One id per design, positionally aligned with *fallbacks*. ``None``
             (no ids available at all -- e.g. sequences pasted interactively) keeps the
             engine's legacy index-based names unchanged.
         fallbacks: The engine's legacy stem for each design, used wherever an id is
-            missing or sanitises away to nothing.
+            missing or sanitises away to nothing. These already name their engine
+            (``af3_0007``), so they are never suffixed again.
+        engine: Appended to the id, e.g. ``rfd3_b7_boltz2``. Each engine writes into its
+            own directory, so this is not needed to avoid a collision there -- it is
+            needed the moment the three directories are pooled, which is the normal way
+            to hand someone "all the PDBs". Without it, one design's three structures
+            are three identically-named files.
 
     Raises:
         ValueError: if the two lists differ in length. This is the failure mode worth
@@ -66,7 +72,9 @@ def structure_stems(binder_ids, fallbacks) -> list[str]:
     for binder_id, fallback in zip(binder_ids, fallbacks, strict=True):
         stem = safe_stem(binder_id) if binder_id is not None else ""
         if not stem.strip("_"):
-            stem = fallback
+            stem = fallback  # already engine-named; suffixing would give af3_0007_af3
+        elif engine:
+            stem = f"{stem}_{safe_stem(engine)}"
         base, n = stem, 2
         while stem in used:
             stem = f"{base}__{n}"

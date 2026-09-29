@@ -25,6 +25,37 @@ def test_the_binder_id_becomes_the_stem():
     assert structure_stems(["bindcraft_t_l28_s101"], ["refold1_abcd"]) == ["bindcraft_t_l28_s101"]
 
 
+def test_the_engine_is_part_of_the_name():
+    assert structure_stems(["bc_l28_s3"], ["refold1_abcd"], engine="boltz2") == ["bc_l28_s3_boltz2"]
+
+
+def test_pooling_the_three_engines_cannot_collide():
+    """The reason the engine is in the name at all.
+
+    Each engine writes into its own directory, so nothing collides there. Copy all
+    three into one folder -- the normal way to hand someone "all the PDBs" -- and
+    without the engine suffix one design's three structures are three files of the
+    same name, two of which vanish.
+    """
+    ids = ["rfd3_b7", "bc_l28_s3"]
+    pooled = [
+        f"{stem}.pdb"
+        for engine, legacy in (
+            ("boltz2", ["refold1_uu", "refold2_uu"]),
+            ("af3", ["af3_0001", "af3_0002"]),
+            ("esmfold2", ["esmfold2_0001", "esmfold2_0002"]),
+        )
+        for stem in structure_stems(ids, legacy, engine=engine)
+    ]
+    assert len(set(pooled)) == len(pooled) == 6, f"pooled names collide: {sorted(pooled)}"
+    assert "rfd3_b7_af3.pdb" in pooled
+
+
+def test_a_fallback_name_is_not_suffixed_twice():
+    # The legacy names already say which engine wrote them.
+    assert structure_stems([None], ["af3_0007"], engine="af3") == ["af3_0007"]
+
+
 def test_path_separators_and_traversal_cannot_survive():
     stems = structure_stems(["../../etc/passwd", "a/b", ".."], ["f1", "f2", "f3"])
     for stem in stems:
@@ -80,18 +111,29 @@ def test_foldseek_uses_the_same_sanitiser_so_the_join_holds():
 
 
 @pytest.mark.parametrize(
-    ("script", "legacy"),
+    ("script", "legacy", "engine"),
     [
-        ("refold_boltz2.py", r"refold\{idx\}_\{run_id\}"),
-        ("refold_af3.py", r"af3_\{idx:04d\}\.pdb"),
-        ("refold_esmfold2.py", r"esmfold2_\{idx:04d\}\.pdb"),
+        ("refold_boltz2.py", r"refold\{idx\}_\{run_id\}", "boltz2"),
+        ("refold_af3.py", r"af3_\{idx:04d\}\.pdb", "af3"),
+        ("refold_esmfold2.py", r"esmfold2_\{idx:04d\}\.pdb", "esmfold2"),
     ],
 )
-def test_each_engine_names_structures_from_the_shared_helper(script, legacy):
+def test_each_engine_names_structures_from_the_shared_helper(script, legacy, engine):
+    import ast
+
     src = (SCRIPTS / script).read_text()
-    assert "structure_stems" in src, f"{script} does not name structures by binder_id"
     assert "binder_ids" in src, f"{script} has no way to receive the ids"
     assert not re.search(legacy, src), f"{script} still builds a structure path from the loop index"
+
+    # ...and tells the helper which engine it is, or all three write the same names.
+    declared = {
+        kw.value.value
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "structure_stems"
+        for kw in node.keywords
+        if kw.arg == "engine" and isinstance(kw.value, ast.Constant)
+    }
+    assert declared == {engine}, f"{script} names structures without identifying itself: {declared or 'no engine'}"
 
 
 @pytest.mark.parametrize("script", ["refold_boltz2.py", "refold_af3.py", "refold_esmfold2.py"])
