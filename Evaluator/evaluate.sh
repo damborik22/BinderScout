@@ -29,14 +29,11 @@
 #   --tmprot-env ENV       conda env for TmProt (default: binder-eval-tmprot)
 #   --tmprot-threshold N   Tm (°C) at or above which a design is flagged thermostable
 #                          (default: 60.0). Advisory only -- never drops or re-ranks.
-#   --soluprot-filter      drop sequences scoring below the threshold from FASTA BEFORE
-#                          refolding. Off by default, and NOT RECOMMENDED: the drop is
-#                          unrecoverable (the design never reaches the report), and
-#                          measured against our own experimental results on two targets
-#                          the default 0.5 threshold discarded several of the tightest
-#                          binders and lost designs from the full run's own top-10. No
-#                          threshold above 0.0 met Part Z's recall gate. Use SoluProt as
-#                          a screen -- the score lands in the report without this flag.
+#   --soluprot-filter      REMOVED 2026-09-28 -- now exits 1. SoluProt is a label, not a
+#                          filter: measured against our own experimental results on two
+#                          targets, dropping at the 0.5 threshold discarded several of
+#                          the tightest binders, and no threshold above 0.0 met Part Z's
+#                          recall gate. The score reaches the report either way.
 #   --concurrent           run the refold engines SIMULTANEOUSLY instead of one after
 #                          another, with staggered starts. Requires the CUDA MPS ceiling
 #                          (tools/gpu_mem_guard.sh) and refuses to run without it, because
@@ -126,10 +123,10 @@ ESMFOLD2_MODEL="full"
 SKIP_SOLUPROT=0
 SOLUPROT_ENV="binder-eval-soluprot"
 SOLUPROT_THRESHOLD=0.5
-SOLUPROT_FILTER=0   # always 0 now; --soluprot-filter is refused (see below)
 # TmProt: sequence-only melting-temperature screen. Deliberately has NO filter
-# mode, unlike SoluProt -- Tm predictors are out of domain on hyperstable de
-# novo miniproteins, so the column is advisory and must never drop a design.
+# mode -- and since 2026-09-28 neither has SoluProt. Tm predictors are out of
+# domain on hyperstable de novo miniproteins, so the column is advisory and must
+# never drop a design.
 SKIP_TMPROT=0
 TMPROT_ENV="binder-eval-tmprot"
 TMPROT_THRESHOLD=60.0
@@ -292,34 +289,6 @@ if [[ $SKIP_TMPROT -eq 0 ]]; then
     fi
 fi
 
-# --- Step 0.6: TmProt melting-temperature screen ---------------------------
-# Sequence-only, no GPU, and ADVISORY ONLY. Unlike SoluProt there is no filter
-# mode and there must not be one: Tm predictors are trained on natural proteins
-# and are out of domain on the hyperstable de novo miniproteins this pipeline
-# produces (2.0 assessment item D1 -- "proceed as a screen, never a ranking
-# term"). The column lands in the report; it never drops a design and never
-# enters rank_designs().
-#
-# binder-compare is installed inside ${TMPROT_ENV}, so this runs there directly
-# rather than shelling out the way SoluProt has to.
-if [[ $SKIP_TMPROT -eq 0 ]]; then
-    echo "[step ${STEP}/${N_STEPS}] TmProt screen       (env: ${TMPROT_ENV}, thermostable >= ${TMPROT_THRESHOLD} C)..."
-    if conda run -n "${TMPROT_ENV}" binder-compare screen-tmprot \
-            --sequences "$SEQUENCES" \
-            -o          "$TMPROT_CSV" \
-            --threshold "$TMPROT_THRESHOLD"; then
-        TMPROT_OK=1
-    else
-        TMPROT_OK=0
-        # Advisory screen: never take the evaluation down with it. There is no
-        # --tmprot-filter, so unlike SoluProt nothing about the refold pool
-        # changes when this fails -- only a report column goes missing.
-        echo "[tmprot] WARNING: screen failed - continuing WITHOUT the Tm column." >&2
-    fi
-    STEP=$(( STEP + 1 ))
-    echo ""
-fi
-
 # --- Cross-engine gate vs. the engines that will actually run ---------------
 # The ranking gates on how many INDEPENDENT engines refolded each design (default 3).
 # AF3 is opt-in because its weights are DeepMind-gated, not because it is large:
@@ -372,7 +341,7 @@ TMPROT_OK=0
 SOLUPROT_OK=1   # cleared if the optional screen fails; see Step 0.5
 
 # Step counter: 1 (report) + 1 per engine not skipped + 1 if TmProt ran.
-# (SoluProt prints no step line, so it is deliberately not counted here.)
+# (SoluProt and TmProt each print a step line and are each counted below.)
 N_STEPS=1  # report
 [[ $SKIP_TMPROT -eq 0 ]] && (( N_STEPS++ ))
 if [[ $CONCURRENT -eq 1 ]]; then
@@ -386,8 +355,9 @@ fi
 STEP=1
 
 # --- Step 0.5: SoluProt solubility screen (optional, runs before refolding) ─
-# Runs before any refold engine so --soluprot-filter can drop sub-threshold
-# sequences and save GPU time. The score lands in the report either way.
+# Runs before the refold engines because it is cheap and CPU-only, so its column is
+# already on every design by the time the report is written. It NEVER drops a design --
+# the score is a label (see the --soluprot-filter note in the usage block above).
 if [[ $SKIP_SOLUPROT -eq 0 ]]; then
     echo "[step ${STEP}/${N_STEPS}] SoluProt screen     (soluprot env: ${SOLUPROT_ENV}, threshold: ${SOLUPROT_THRESHOLD})..."
     # binder-compare runs in binder-eval (py3.10); SoluProt's soluprot.py runs in
@@ -398,9 +368,9 @@ if [[ $SKIP_SOLUPROT -eq 0 ]]; then
     export SOLUPROT_PYTHON
     # SoluProt is an OPTIONAL pre-screen, so a failure must not take the whole
     # evaluation down with it (it did: a missing USEARCH binary aborted the run
-    # before any refold engine started).  The one exception is --soluprot-filter:
-    # that flag changes WHICH sequences get refolded, so silently continuing
-    # would produce a different pool than was asked for.
+    # before any refold engine started).  There is no longer any exception: the
+    # screen only labels, so continuing without it cannot change which designs
+    # get refolded.
     if conda run -n binder-eval binder-compare filter-soluprot \
             --sequences "$SEQUENCES" \
             -o          "$SOLUPROT_CSV" \
@@ -408,58 +378,48 @@ if [[ $SKIP_SOLUPROT -eq 0 ]]; then
         SOLUPROT_OK=1
     else
         SOLUPROT_OK=0
-        if [[ $SOLUPROT_FILTER -eq 1 ]]; then
-            echo "Error: --soluprot-filter was requested but the SoluProt screen failed." >&2
-            echo "       Continuing would refold a DIFFERENT pool than you asked for." >&2
-            exit 1
-        fi
         echo "[soluprot] WARNING: screen failed — continuing WITHOUT the solubility" >&2
         echo "[soluprot]          column. Refolding is unaffected. See the error above." >&2
     fi
-
-    if [[ $SOLUPROT_FILTER -eq 1 ]]; then
-        # Hard filter: rewrite the FASTA, keeping only sequences whose
-        # soluprot_passes==1 row in the CSV. Saves refold time downstream.
-        FILTERED_FASTA="$OUTPUT/sequences.soluble.fasta"
-        conda run -n binder-eval python - "$SOLUPROT_CSV" "$SEQUENCES" "$FILTERED_FASTA" <<'PY'
-import csv, sys
-csv_path, fasta_in, fasta_out = sys.argv[1], sys.argv[2], sys.argv[3]
-soluble: set[str] = set()
-with open(csv_path) as fh:
-    for row in csv.DictReader(fh):
-        if row.get("soluprot_passes") in ("1", "True", "true"):
-            seq = (row.get("sequence") or "").strip().upper()
-            if seq:
-                soluble.add(seq)
-n_in = n_kept = 0
-header, body = None, []
-def flush(out):
-    global n_in, n_kept
-    if header is None:
-        return
-    n_in += 1
-    seq = "".join(body).strip().upper()
-    if seq in soluble:
-        out.write(header)
-        for line in body:
-            out.write(line)
-        n_kept += 1
-with open(fasta_in) as fh_in, open(fasta_out, "w") as fh_out:
-    for line in fh_in:
-        if line.startswith(">"):
-            flush(fh_out)
-            header = line
-            body = []
-        else:
-            body.append(line)
-    flush(fh_out)
-print(f"[soluprot-filter] kept {n_kept} of {n_in} sequences (threshold {soluble and 'configured' or 'n/a'})", file=sys.stderr)
-PY
-        SEQUENCES="$FILTERED_FASTA"
-        echo "[soluprot-filter] downstream refolding will run on $SEQUENCES"
-    fi
     (( STEP++ ))
 fi
+
+# --- Step 0.6: TmProt melting-temperature screen ---------------------------
+# MUST stay below the initialisation block. It reads STEP, N_STEPS and TMPROT_CSV
+# and sets TMPROT_OK, all of which that block owns. It used to sit ~90 lines
+# ABOVE it, so on any host where the binder-eval-tmprot env exists (auto-detected,
+# so no flag needed) `set -u` killed the entire evaluation with
+# "STEP: unbound variable" before step 0 and before any refold engine ran -- and
+# even past that, TMPROT_OK was reset to 0 underneath it, so the report could
+# never have received --tmprot-results. Fixed 2026-09-29.
+#
+# Sequence-only, no GPU, and ADVISORY ONLY. Like SoluProt it is a label and there
+# must be no filter mode: Tm predictors are trained on natural proteins
+# and are out of domain on the hyperstable de novo miniproteins this pipeline
+# produces (2.0 assessment item D1 -- "proceed as a screen, never a ranking
+# term"). The column lands in the report; it never drops a design and never
+# enters rank_designs().
+#
+# binder-compare is installed inside ${TMPROT_ENV}, so this runs there directly
+# rather than shelling out the way SoluProt has to.
+if [[ $SKIP_TMPROT -eq 0 ]]; then
+    echo "[step ${STEP}/${N_STEPS}] TmProt screen       (env: ${TMPROT_ENV}, thermostable >= ${TMPROT_THRESHOLD} C)..."
+    if conda run -n "${TMPROT_ENV}" binder-compare screen-tmprot \
+            --sequences "$SEQUENCES" \
+            -o          "$TMPROT_CSV" \
+            --threshold "$TMPROT_THRESHOLD"; then
+        TMPROT_OK=1
+    else
+        TMPROT_OK=0
+        # Advisory screen: never take the evaluation down with it. Nothing about
+        # the refold pool changes when this fails -- only a report column goes
+        # missing. Same for SoluProt above, since 2026-09-28.
+        echo "[tmprot] WARNING: screen failed - continuing WITHOUT the Tm column." >&2
+    fi
+    STEP=$(( STEP + 1 ))
+    echo ""
+fi
+
 
 # --- Step 0.9: pre-warm the shared target MSA ──────────────────────────────
 # Fetch ONCE, before any engine loads a model, so all three read the same cached

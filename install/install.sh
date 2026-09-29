@@ -158,9 +158,12 @@ while [[ $# -gt 0 ]]; do
                     # Attempted, but skipped with a warning when no source was
                     # supplied -- see the dispatch block.
                     DO_BINDCRAFT2=true
-                    # SoluProt is a first-class part of the pipeline: it screens the
-                    # pool BEFORE any GPU refolding, so leaving it out of `all` means
-                    # the documented full install cannot run the documented workflow.
+                    # SoluProt is a first-class part of the pipeline: it labels every
+                    # design with a solubility score that the report shows beside the
+                    # refold numbers, so an `all` install without it produces a report
+                    # missing a documented column. (It used to gate GPU work as well;
+                    # that filter mode was removed 2026-09-28 -- it never drops a design
+                    # now, but the column is reason enough to install it.)
                     # Costs a Python 3.7 env and a USEARCH source build (needs a
                     # C/C++ toolchain) -- see the preflight footprint table.
                     DO_SOLUPROT=true ;;

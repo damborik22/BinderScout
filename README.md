@@ -400,7 +400,7 @@ step by hand. `bash Evaluator/evaluate.sh --help` prints the same list.
 | `--af3-env` / `--esmfold2-env` / `--soluprot-env` / `--bindcraft-env` | Override the conda env name for that step |
 | `--esmfold2-model full\|fast` | ESMFold2 checkpoint (default `full`) |
 | `--skip-soluprot` / `--soluprot-threshold N` | Control the solubility screen (default threshold 0.5, the paper value) |
-| `--skip-tmprot` / `--tmprot-env ENV` / `--tmprot-threshold N` | Control the melting-temperature screen (default 60.0 °C, the cutoff TmProt's own AUC is reported against). Advisory only: unlike SoluProt it has no filter mode, and must not grow one |
+| `--skip-tmprot` / `--tmprot-env ENV` / `--tmprot-threshold N` | Control the melting-temperature screen (default 60.0 °C, the cutoff TmProt's own AUC is reported against). Advisory only: it has no filter mode and must not grow one — and since 2026-09-28 neither has SoluProt |
 | ~~`--soluprot-filter`~~ | **Removed — now exits with an error.** SoluProt is a label, not a filter (see above). The score still reaches the report either way |
 | `--primary-engine boltz\|af3\|esmfold2` | Which engine's metrics are promoted as primary (default `boltz`) |
 | `--epitope-residues LIST` | Compute `epitope_match_fraction` inline against intended hotspots, e.g. `'15,18,232'`. Cheap, no extra pass |

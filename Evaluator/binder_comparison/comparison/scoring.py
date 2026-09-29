@@ -1001,10 +1001,14 @@ def annotate_wetlab_recommended(
     do NOT block recommendation (we don't penalise an unknown).
 
     Rule (all required for recommend=True):
-      - SoluProt pass (when known): native_soluprot_passes is True or NaN.
       - Cross-engine agreement: agreement_count >= ``agreement_min`` (when known).
       - Binder fold confidence: plddt_binder_min >= ``min_plddt_binder`` (when known).
       - No FAILED RUN convergence flag from the per-tool classification.
+
+    SoluProt is deliberately NOT in that list. It was until 2026-09-28; measured
+    against our own experimental results it withheld the recommendation from designs
+    that turned out to be among the tightest binders, so it now lands in
+    ``wetlab_reason`` as an informational note that cannot block.
     """
     out = df.copy()
     reasons: list[list[str]] = [[] for _ in range(len(out))]

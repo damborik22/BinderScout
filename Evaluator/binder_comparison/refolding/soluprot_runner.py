@@ -12,10 +12,21 @@ under ``refolding/`` for convenience: the call shape (sequences in,
 CSV out) matches the other engines, and the orchestration in
 ``evaluate.sh`` treats it as another optional step.
 
+SoluProt is a LABEL: neither a ranking term nor a filter.
+
 Performance reality check (Hon et al. 2021): the reported AUC on the
-balanced independent test set is 0.62 (MCC 0.17). The right use is
-*screening* (drop the bottom of the distribution), not *re-ranking*
-(small differences in the 0.4–0.6 band are noise).
+balanced independent test set is 0.62 (MCC 0.17), so small differences
+in the 0.4–0.6 band are noise and it must never re-rank.
+
+This docstring used to say the right use was *screening* — "drop the
+bottom of the distribution". That was measured on 2026-09-28 against
+our own experimental results on two targets and it is wrong: at the
+paper's 0.5 threshold the drop discarded several of the tightest
+measured binders, and no threshold above 0.0 met the recall gate.
+Solubility and affinity are close to orthogonal on these pools, so a
+solubility cut loses tight binders at a rate no threshold controls.
+``--soluprot-filter`` was removed; the score is reported and nothing
+is dropped.
 """
 
 from __future__ import annotations
@@ -75,6 +86,13 @@ def run_soluprot_filter(
     Output schema (one row per sequence):
         ``binder_id (optional), sequence, soluprot_score,
         soluprot_passes, soluprot_threshold``
+
+    .. note:: **The name is a leftover and it lies.** This function -- and the
+       ``binder-compare filter-soluprot`` verb that calls it -- only *scores*: it runs
+       SoluProt over the FASTA and writes a CSV. It has never removed a sequence. The
+       pre-refold drop lived in ``evaluate.sh`` behind ``--soluprot-filter`` and was
+       removed on 2026-09-28. The names are kept because they are the public CLI verb
+       and a re-export, but do not read them as evidence that filtering exists.
     """
     output_csv = Path(output_csv).resolve()
     output_csv.parent.mkdir(parents=True, exist_ok=True)

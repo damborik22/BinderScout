@@ -5,9 +5,12 @@ Predict a melting temperature for every binder in a FASTA with TmProt 1.0
 Sequence-only: no GPU, no refolding. Run inside the ``binder-eval-tmprot``
 conda env.
 
-It is called *screen*-tmprot rather than *filter*-tmprot on purpose. SoluProt
-has a ``--soluprot-filter`` mode that drops sub-threshold designs before any GPU
-work; TmProt has no equivalent and should not grow one. Item D1 of the 2.0
+It is called *screen*-tmprot rather than *filter*-tmprot on purpose, and the
+history is the argument. SoluProt once had a ``--soluprot-filter`` mode that
+dropped sub-threshold designs before any GPU work; it was removed on 2026-09-28
+because, measured against experimental results on two targets, it discarded
+several of the tightest binders. Both screens are labels now, and TmProt should
+not grow a filter either. Item D1 of the 2.0
 assessment: "proceed as a screen, never a ranking term", because Tm predictors
 are trained on natural proteins and are out of domain on the hyperstable de novo
 miniproteins this pipeline produces. Every input sequence gets a row.

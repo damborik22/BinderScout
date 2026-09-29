@@ -3298,9 +3298,8 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     if not cfg.get("use_esmfold2", False):
         lines.append("    --skip-esmfold2 \\")
 
-    # SoluProt is a screen, not an engine. When enabled it runs before the
-    # refold steps; --soluprot-filter drops sub-threshold designs from the
-    # FASTA so the refold engines never see them.
+    # SoluProt is a label, not an engine. When enabled it runs before the refold
+    # steps and scores every design; it never removes one.
     if not cfg.get("use_soluprot", False):
         lines.append("    --skip-soluprot \\")
     else:
@@ -3393,6 +3392,23 @@ def load_run_config(path: Path) -> tuple[dict, dict]:
 
     cfg = dict(payload["cfg"])
     tools_enabled = dict(payload["tools_enabled"])
+
+    # Configs written before 2026-09-28 can carry soluprot_filter=true. The flag was
+    # removed (SoluProt is a label; the drop discarded several of the tightest measured
+    # binders), so replaying such a config produces a DIFFERENT pool than it first ran
+    # with -- larger, because nothing is dropped. Say so; a silent difference between a
+    # config and its replay is the thing a config file exists to prevent.
+    if cfg.get("soluprot_filter") or tools_enabled.get("soluprot_filter"):
+        print_warn(
+            "this config sets soluprot_filter=true, which no longer does anything. "
+            "SoluProt is a label now: every design is refolded and scored. The replayed "
+            "pool will be LARGER than the original run's."
+        )
+    # Dropped, not merely warned about. Leaving it in cfg meant the regenerated
+    # config.json carried it straight back out, so the key was never retired and the
+    # warning fired on every subsequent replay forever.
+    cfg.pop("soluprot_filter", None)
+    tools_enabled.pop("soluprot_filter", None)
 
     for key in ("run_dir", "target_pdb", "target_pdb_src"):
         if cfg.get(key):
@@ -3976,19 +3992,14 @@ def wizard():
             else:
                 primary_engine = selected[0]
 
-    # ── SoluProt solubility screen (filter, not engine) ──
-    # Sits before the refold engines — when --soluprot-filter is on, designs
-    # below the threshold are dropped from the FASTA so the refold engines
-    # never spend GPU on them. SoluProt is a screen; it does NOT participate
-    # in ranking.
+    # ── SoluProt solubility screen (label, not engine, not filter) ──
+    # Sits before the refold engines because it is cheap and CPU-only, so the column
+    # is on every design by the time the report is written. It NEVER drops a design
+    # and does NOT participate in ranking.
     use_soluprot = False
     soluprot_threshold = 0.5
-    # SoluProt is a LABEL, not a filter (2026-09-28): it never drops a design, so
-    # there is nothing to ask. Kept as a constant because write_run_evaluate and
-    # the cfg schema still reference the key.
-    soluprot_filter = False
     if use_evaluator and installed.get("soluprot"):
-        print(f"  {BOLD}SoluProt solubility screen{RESET} (sequence-only filter, no GPU)")
+        print(f"  {BOLD}SoluProt solubility screen{RESET} (sequence-only label, no GPU — never drops a design)")
         use_soluprot = ask_yn("    Use SoluProt to score solubility?", default=True)
         if use_soluprot:
             soluprot_threshold = float(
@@ -4034,7 +4045,6 @@ def wizard():
         "primary_engine": primary_engine,
         "use_soluprot": use_soluprot,
         "soluprot_threshold": soluprot_threshold,
-        "soluprot_filter": soluprot_filter,
         "use_tmprot": use_tmprot,
         "tmprot_threshold": tmprot_threshold,
     }
@@ -4048,7 +4058,6 @@ def wizard():
         "primary_engine",
         "use_soluprot",
         "soluprot_threshold",
-        "soluprot_filter",
         "use_tmprot",
         "tmprot_threshold",
     }
@@ -4079,7 +4088,12 @@ def wizard():
         "primary_engine": primary_engine,
         "use_soluprot": use_soluprot,
         "soluprot_threshold": soluprot_threshold,
-        "soluprot_filter": soluprot_filter,
+        # write_run_evaluate reads these off cfg, not off tools_enabled. They were only
+        # ever written to tools_enabled, so cfg.get("use_tmprot", False) was always
+        # False and EVERY generated run_evaluate.sh carried --skip-tmprot -- TmProt
+        # never ran, however the wizard was answered.
+        "use_tmprot": use_tmprot,
+        "tmprot_threshold": tmprot_threshold,
     }
 
     if use_bindcraft:

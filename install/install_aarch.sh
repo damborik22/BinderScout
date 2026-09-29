@@ -136,11 +136,13 @@ while [[ $# -gt 0 ]]; do
                     TOOL_ALL=true
                     # ESMFold2 is the DEFAULT refold engine, so `all` must include it —
                     # otherwise evaluate.sh skips it and consensus_iptm is built from
-                    # fewer engines than the two-stage ranking assumes.
+                    # fewer engines than the cross-engine gate assumes.
                     DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true
                     DO_ESMFOLD2=true      # RFD3 is opt-in here: --tool rfd3 (see the note on DO_RFD3)
-                    # SoluProt screens the pool BEFORE any GPU refolding, so a full
-                    # install without it cannot run the documented workflow. On this
+                    # SoluProt labels every design with a solubility score that the
+                    # report shows beside the refold numbers, so a full install without
+                    # it produces a report missing a documented column. (It used to gate
+                    # GPU work too; that filter mode was removed 2026-09-28.) On this
                     # platform it also source-builds scikit-learn 0.20.4 and USEARCH
                     # v12, so `all` now requires a C/C++ toolchain.
                     DO_SOLUPROT=true ;;

@@ -51,8 +51,7 @@ FIELD_HELP: dict[str, str] = {
     "use_af3": "Refold with AlphaFold 3. Cheapest engine here (~5 GB), despite its reputation.",
     "use_esmfold2": "Refold with ESMFold2. Needs ~14 GB even for small complexes — it cannot run on a 12 GB card.",
     "primary_engine": "Which engine's structures the report shows. Ranking is always cross-engine.",
-    "use_soluprot": "Run the sequence-only solubility screen before any GPU work.",
-    "soluprot_filter": "Drop sub-threshold designs from the FASTA before refolding. Off = score only.",
+    "use_soluprot": "Run the sequence-only solubility screen. It labels every design with a solubility score; it never drops one.",
 }
 
 TOOL_LABELS = {

@@ -78,8 +78,7 @@ flags is kept from drifting out of step with the real one.</div>
 <div class="field"><label for="f_use_af3"><code>use_af3</code></label><input type="checkbox" id="f_use_af3" data-key="use_af3" data-type="bool" checked><p class='help'>Refold with AlphaFold 3. Cheapest engine here (~5 GB), despite its reputation.</p></div>
 <div class="field"><label for="f_use_esmfold2"><code>use_esmfold2</code></label><input type="checkbox" id="f_use_esmfold2" data-key="use_esmfold2" data-type="bool" checked><p class='help'>Refold with ESMFold2. Needs ~14 GB even for small complexes — it cannot run on a 12 GB card.</p></div>
 <div class="field"><label for="f_primary_engine"><code>primary_engine</code></label><input type="text" id="f_primary_engine" data-key="primary_engine" data-type="str" value="boltz"><p class='help'>Which engine&#x27;s structures the report shows. Ranking is always cross-engine.</p></div>
-<div class="field"><label for="f_use_soluprot"><code>use_soluprot</code></label><input type="checkbox" id="f_use_soluprot" data-key="use_soluprot" data-type="bool" checked><p class='help'>Run the sequence-only solubility screen before any GPU work.</p></div>
-<div class="field"><label for="f_soluprot_filter"><code>soluprot_filter</code></label><input type="checkbox" id="f_soluprot_filter" data-key="soluprot_filter" data-type="bool"><p class='help'>Drop sub-threshold designs from the FASTA before refolding. Off = score only.</p></div>
+<div class="field"><label for="f_use_soluprot"><code>use_soluprot</code></label><input type="checkbox" id="f_use_soluprot" data-key="use_soluprot" data-type="bool" checked><p class='help'>Run the sequence-only solubility screen. It labels every design with a solubility score; it never drops one.</p></div>
 
 <h2>config.json</h2>
 <p id="status"></p>
@@ -160,8 +159,7 @@ const DEFAULTS = {
   "use_af3": true,
   "use_esmfold2": true,
   "primary_engine": "boltz",
-  "use_soluprot": true,
-  "soluprot_filter": false
+  "use_soluprot": true
 };
 
 function collect() {

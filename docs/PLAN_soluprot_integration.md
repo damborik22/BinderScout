@@ -1,5 +1,24 @@
 # PLAN — SoluProt as an evaluator solubility filter
 
+> **SUPERSEDED IN PART, 2026-09-28 — the filter half of this plan was removed.**
+> This document still specifies `--soluprot-filter` (a pre-refold hard drop) as the
+> shipped design, in four places including an acceptance criterion. That flag no longer
+> exists: `Evaluator/evaluate.sh` refuses it with exit 1, the configurator does not ask
+> for it, and the implementation was deleted on 2026-09-29.
+>
+> **Why:** measured against our own experimental results on two targets, dropping at the
+> paper's 0.5 threshold discarded several of the tightest measured binders and lost
+> designs from the full run's own top-10; no threshold above 0.0 met Part Z's recall
+> gate, because solubility and affinity are close to orthogonal on these pools. A drop
+> before refolding is unrecoverable — the design never reaches the report.
+>
+> **What still holds, and why README links here:** everything about the *screen* — the
+> `binder-eval-soluprot` py3.7 env, the scikit-learn 0.20.x pin, the aarch64 source
+> builds and the `--no_tmhmm` model. SoluProt scores every design and the score reaches
+> the report as `soluprot_score` / `soluprot_passes`. It is a label; it drops nothing.
+>
+> Read the filtering sections below as history, not as the shipped design.
+
 ## Why
 
 Every refold engine we run (Boltz-2, Protenix, AF3, ESMFold2) tells us
@@ -7,8 +26,8 @@ whether a designed binder is *predicted to fold and bind*. None of them
 tells us whether the binder will actually *express solubly* when we hand
 the sequence to a wet lab. SoluProt closes that gap: a fast,
 sequence-only solubility predictor that adds a `soluprot_score` to every
-binder so designs that won't express get dropped before they consume
-experimental time.
+binder, so a design that is unlikely to express is visible before it consumes
+experimental time. (As shipped it only *labels* — see the banner above.)
 
 This sits naturally on the evaluator side of the architecture (alongside
 Boltz-2 / Protenix / AF3 / ESMFold2) but is meaningfully different from
