@@ -35,7 +35,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 |---|---|---|
 | `binderscout install` | Installs design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the default refold engine ESMFold2 and the SoluProt solubility screen; BindCraft 2 needs its source handed to `--bc2-source`, and AF3 is a separate `--tool` add (gated weights) | bash |
 | `binderscout configure` | Interactive wizard: target → configs → run scripts | system Python |
-| `binderscout evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by two-stage cross-engine iPTM, generate HTML report | conda env `binder-eval` |
+| `binderscout evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by cross-engine iPTM, generate HTML report | conda env `binder-eval` |
 
 ### Installed tools
 
@@ -75,14 +75,14 @@ against the other tools'. The integration is written up in
 
 ### Evaluator engines & filters
 
-The evaluator (`binderscout evaluate` / `binder-compare`) runs on top of the design tools. Boltz-2 rides the Mosaic venv; ESMFold2 has its own env and is installed by default; AF3 is the canonical big-VRAM cross-check (separate install — gated weights). `evaluate.sh` auto-detects and runs whichever engine envs are present (`--skip-<engine>` to disable). SoluProt is a sequence-only solubility screen that runs **before** refolding so unsoluble designs can be dropped from the FASTA without burning GPU time.
+The evaluator (`binderscout evaluate` / `binder-compare`) runs on top of the design tools. Boltz-2 rides the Mosaic venv; ESMFold2 has its own env and is installed by default; AF3 is the canonical big-VRAM cross-check (separate install — gated weights). `evaluate.sh` auto-detects and runs whichever engine envs are present (`--skip-<engine>` to disable). SoluProt is a sequence-only solubility screen that runs **before** refolding, so its score is on every design by the time the report is written. It labels; it never drops — see the note under the architecture diagram.
 
 | Engine / filter | Role | Environment | Platform | Install |
 |---|---|---|---|---|
 | **Boltz-2** | Primary refold engine; ranking reference | `Mosaic/.venv` (rides Mosaic install) | x86_64 + aarch64 | default (with Mosaic) |
 | **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.10) | x86_64 + aarch64 | default (in `--tool all`) |
 | **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.10, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | `--tool af3` (gated weights) |
-| **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model — see [docs/PLAN_soluprot_integration.md](docs/PLAN_soluprot_integration.md) | in `--tool all` |
+| **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); **label only** — neither filters nor re-ranks | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model — see [docs/PLAN_soluprot_integration.md](docs/PLAN_soluprot_integration.md) | in `--tool all` |
 
 ### Architecture
 
@@ -106,21 +106,18 @@ flowchart LR
 
     SoluProt["SoluProt 1.0\n(sequence-only solubility screen,\nbinder-eval-soluprot env;\nx86 + aarch64, in --tool all)"]
 
-    Drop[("Drop\nbelow threshold\n(--soluprot-filter)")]
-
     subgraph Refold["Refolding engines (evaluator domain — independent cross-validation)"]
         Boltz2["Boltz-2\n(Mosaic venv;\nprimary engine)"]
         AF3["AF3 v3.0.2\n(binder-eval-af3;\ngated weights)"]
         ESMFold2["ESMFold2\n(binder-eval-esmfold2;\nlightweight, no gated weights)"]
     end
 
-    Report["Report generator\nranked HTML + CSV\n(two-stage: max-screen →\nmean consensus iPTM;\nnative_* columns from extract)"]
+    Report["Report generator\nranked HTML + CSV\n(cross-engine gate →\nconsensus_iptm_mean;\nnative_* columns from extract)"]
 
     Input --> Config
     Config --> Design
     Design -->|tool-specific outputs| Extract
     Extract -->|FASTA of binders| SoluProt
-    SoluProt -->|"filtered FASTA — only with --soluprot-filter"| Drop
     SoluProt -->|FASTA + soluprot_results.csv| Boltz2
     SoluProt --> AF3
     SoluProt --> ESMFold2
@@ -129,7 +126,9 @@ flowchart LR
     ESMFold2 --> Report
 ```
 
-ESMFold2 and SoluProt are in `--tool all`; AF3 is an explicit `--tool af3` install (gated weights). All three refold engines are then auto-detected by `evaluate.sh` from their conda envs. SoluProt acts as a filter, never as a re-ranker — it only drops designs with `--soluprot-filter` — its `soluprot_score` and `soluprot_passes` columns show up in `metrics.csv` alongside the refold scores so users can sort on them if they want.
+ESMFold2 and SoluProt are in `--tool all`; AF3 is an explicit `--tool af3` install (gated weights). All three refold engines are then auto-detected by `evaluate.sh` from their conda envs.
+
+**SoluProt is a label, not a filter, and no longer has a filter mode.** Its `soluprot_score` / `soluprot_passes` columns land in `metrics.csv` beside the refold scores, and a sub-threshold design is annotated in the report rather than removed. The old `--soluprot-filter` dropped designs from the FASTA before any engine ran; measured against experimental results on two targets it discarded several of the tightest measured binders, and no threshold above 0.0 met the recall bar. The flag is now **refused with an error** rather than ignored, so anything that scripted it finds out instead of quietly receiving different data.
 
 ### Components at a glance
 
@@ -166,7 +165,7 @@ flowchart TB
     end
 
     subgraph Artifacts["Per-run artifacts"]
-        Runs["runs/&lt;name&gt;/\n├── target/\n├── &lt;tool&gt;/        # one per enabled tool\n│   └── settings.json\n├── evaluate/\n│   ├── sequences.fasta\n│   ├── sequences_native_metrics.csv\n│   ├── boltz2_results.csv\n│   ├── af3_results.csv           (opt)\n│   ├── esmfold2_results.csv      (opt)\n│   ├── soluprot_results.csv      (opt)\n│   └── report/\n│       ├── metrics.csv\n│       ├── top30_candidates.csv\n│       ├── top20_structures/\n│       └── report.html\n├── run_&lt;tool&gt;.sh\n├── run_evaluate.sh\n└── run_all.sh"]:::arti
+        Runs["runs/&lt;name&gt;/\n├── target/\n├── &lt;tool&gt;/        # one per enabled tool\n│   └── settings.json\n├── evaluate/\n│   ├── sequences.fasta\n│   ├── sequences_native_metrics.csv\n│   ├── boltz2_results.csv\n│   ├── af3_results.csv           (opt)\n│   ├── esmfold2_results.csv      (opt)\n│   ├── soluprot_results.csv      (opt)\n│   ├── refold_boltz2/            # &lt;binder_id&gt;_boltz2.pdb …\n│   ├── refold_af3/               # &lt;binder_id&gt;_af3.pdb …\n│   ├── refold_esmfold2/          # &lt;binder_id&gt;_esmfold2.pdb …\n│   └── report/\n│       ├── metrics.csv\n│       ├── top30_candidates.csv\n│       ├── top20_structures/\n│       └── report.html\n├── run_&lt;tool&gt;.sh\n├── run_evaluate.sh\n└── run_all.sh"]:::arti
     end
 
     InstallSh -->|creates| GenEnvs
@@ -375,7 +374,7 @@ Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). Ther
 
 #### Usage — `binderscout evaluate` forwards to `binder-compare`
 
-`binderscout evaluate <args>` runs the `binder-compare` CLI in the `binder-eval` conda env. The full pipeline (extract → refold → two-stage report) is one command:
+`binderscout evaluate <args>` runs the `binder-compare` CLI in the `binder-eval` conda env. The full pipeline (extract → refold → report) is one command:
 
 ```bash
 binder-compare run --mosaic runs/PDL1/mosaic --bindcraft runs/PDL1/bindcraft \
@@ -385,6 +384,8 @@ binder-compare run --mosaic runs/PDL1/mosaic --bindcraft runs/PDL1/bindcraft \
 The configurator-generated `runs/<name>/run_evaluate.sh` wraps `Evaluator/evaluate.sh`, which auto-detects the installed engines and drives the whole thing.
 
 Report output lands in `…/evaluate/report/` — `report.html`, `metrics.csv`, and `top30_candidates.csv`.
+
+**Refold structures** land in one directory per engine (`…/evaluate/refold_boltz2/`, `refold_af3/`, `refold_esmfold2/`), named **`<binder_id>_<engine>`** — `rfd3_b0007_mpnn2_af3.pdb`, and beside it `_pae.npy` plus `_plddt.csv` (Boltz-2) or `_model.cif` (AF3, ESMFold2). The id is the one in `metrics.csv`, so a design's structures are found by name without joining on its sequence first. The engine is in the *name* and not only in the directory because the usual way to hand over "all the PDBs" is to pool the three directories, and without it a design's three structures are three identically-named files. A design whose id is missing keeps the engine's legacy index name (`af3_0007`); two designs sharing an id get `__2`. Re-running an engine into the same directory **overwrites** that design's structure.
 
 #### `Evaluator/evaluate.sh` — the orchestrator's own flags
 
@@ -400,7 +401,7 @@ step by hand. `bash Evaluator/evaluate.sh --help` prints the same list.
 | `--esmfold2-model full\|fast` | ESMFold2 checkpoint (default `full`) |
 | `--skip-soluprot` / `--soluprot-threshold N` | Control the solubility screen (default threshold 0.5, the paper value) |
 | `--skip-tmprot` / `--tmprot-env ENV` / `--tmprot-threshold N` | Control the melting-temperature screen (default 60.0 °C, the cutoff TmProt's own AUC is reported against). Advisory only: unlike SoluProt it has no filter mode, and must not grow one |
-| `--soluprot-filter` | **Drop** sub-threshold designs from the FASTA before any refolding, saving GPU time. Off by default — the score lands in the report either way |
+| ~~`--soluprot-filter`~~ | **Removed — now exits with an error.** SoluProt is a label, not a filter (see above). The score still reaches the report either way |
 | `--primary-engine boltz\|af3\|esmfold2` | Which engine's metrics are promoted as primary (default `boltz`) |
 | `--epitope-residues LIST` | Compute `epitope_match_fraction` inline against intended hotspots, e.g. `'15,18,232'`. Cheap, no extra pass |
 | `--with-affinity` | Opt-in: after the report, run the \|dG/dSASA\| affinity ranking (Rosetta, BindCraft env) on the top 20 and regenerate |
@@ -468,13 +469,32 @@ Every one takes `--help`. `binderscout evaluate <cmd> …` runs the same thing i
 |---|---|---|
 | `consensus_iptm_mean` | higher = better | **THE ranking metric.** Mean ipTM across independent refold engines, after the cross-engine gate (Part U) |
 | `passes_engine_gate` | true is better | Whether the design cleared `--min-engines` (default 3). Failures are ranked **last, not dropped** |
-| `ipsae_min` | higher = better | min(bt, tb) iPSAE (DunbrackLab 2025). Diagnostic and quality tiers — **not** the ranking key |
+| `ipsae_min` | higher = better | min(bt, tb) iPSAE (DunbrackLab 2025). Diagnostic and quality tiers — **not** the ranking key, and see the caveat below: the tiers did not hold up against experimental results |
 | `iptm` | higher = better | Interface pTM |
 | `bt_ipsae` | higher = better | Binder-to-target iPSAE |
 | `tb_ipsae` | higher = better | Target-to-binder iPSAE |
 | `ranking_loss` | lower = better | Mosaic design-stage ranking loss |
 | `plddt_binder_mean` | higher = better | Mean binder pLDDT |
 | `pae_bt_mean` | lower = better | Mean binder-to-target PAE |
+
+#### Diagnostic columns — these never rank, filter or gate
+
+2.0 adds several analyses that report and do not decide. That separation is the rule
+Part U established for `agreement_count` and it is deliberate: a column that silently
+removed a design would be unrecoverable, and none of these has been validated against
+experimental results well enough to earn that power.
+
+| Column(s) | What it tells you |
+|---|---|
+| `seq_family_id` · `_size` · `_is_redundant` · `_tools` | Near-duplicate **sequences** (k-mer Jaccard ≥ 0.20, single linkage). In two real campaigns every near-duplicate pair came from one tool — MPNN re-emitting near-identical sequences across different backbones. A family naming several tools is a different and more interesting event |
+| `struct_family_id` · `_size` · `_is_redundant` | Designs sharing a **fold** (Foldseek TM ≥ 0.5 over the binder chain alone). The only axis on which de novo designs are comparable: across 114 designs the maximum pairwise sequence Jaccard was 0.298, so shared folds are invisible to every sequence method. NA when Foldseek or the structures are absent — Foldseek ships only inside `Proteina-Complexa/.venv` on x86 |
+| Suggested swap | Printed by `report`: which fold-duplicate in the top-N to drop, and which unused fold to take instead. A suggestion; nothing is re-ranked |
+| `self_consistency_rmsd` · `passes_self_consistency` | Target-aligned RMSD between refolds — the second axis RFdiffusion-family gates couple with interface confidence. Target-aligned on purpose: superposing on the binder measures its fold, not its placement, and a binder that folds perfectly on the wrong face scores ~0 Å that way |
+| `passes_confidence_gate` · `confidence_fail_reasons` · `confidence_n_engines` | BindCraft's own filters, ported exactly (i_pAE ≤ 10.85 Å, binder pLDDT ≥ 0.8, interface i_pTM ≥ 0.5) |
+| `would_exclude_*` | What each gate *would* have removed, had it been allowed to |
+| `generation_index` · `_source` | Where a design fell in its campaign's generation order, and how that was determined. Five of eight tools can report one; `unavailable` is a first-class answer — for Proteina-Complexa it is the correct one, since under MCTS the pool is a flattened tree |
+| `agreement_count` | Kept as a diagnostic **only**. As a screen it is a flat null — macro-AUC 0.532 with 87.2 % of designs tied at zero (Part U) |
+| `soluprot_score` · `soluprot_passes` · `tmprot_*` | Sequence-only solubility and melting-temperature labels |
 
 ### GPU memory, measured
 
@@ -742,6 +762,17 @@ Not defects — behaviour that will surprise you if you have not met it.
   not found`, then `[rank] NO engine ipTM was available` — and the resulting `rank`
   column carries no cross-engine signal. Move the whole `evaluate/` directory, not just
   the CSVs.
+- **The `ipsae_min` affinity gate and the four quality tiers are not validated — treat
+  them as diagnostics.** Checked against experimental binding results on two internal
+  targets (2026-09-28), they did not select better binders: on both targets the designs
+  the gate *rejected* bound tighter on average than the ones it kept, and the "High"
+  tier fired rarely and on no confirmed binder. The thresholds are absolute numbers
+  carried over from elsewhere and do not appear to transfer to a short-helix target.
+  Nothing has been changed in code yet — `passes_affinity_gate` and the tiers are still
+  computed and still shipped — so **do not present a tier as evidence that a design will
+  bind**. Two targets is thin evidence, and one of them has few measured binders; the
+  point is that the tiers have not earned the confidence their names imply.
+
 - **The ranking is a triage filter, not a decision procedure.** On a realistic
   same-target, same-tool pool (Cao 2022: 4,442 designs, 12 targets) the top decile is
   worth roughly 1.5–2× enrichment, and it beats a random ordering on only 6 of 12

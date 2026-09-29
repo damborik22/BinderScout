@@ -386,10 +386,25 @@ the parameter sweep.
 
 | Tier | Threshold | Meaning |
 |---|---|---|
-| High | > 0.80 | Strong candidate for experimental testing |
+| High | > 0.80 | *Nominally* the strongest candidates — but see the warning below: on our two targets this tier fired 0 and 2 times, with zero confirmed binders |
 | Medium | 0.61 – 0.80 | Promising, may need optimization |
 | Low | 0.40 – 0.61 | Weak binding prediction |
 | Reject | ≤ 0.40 | Unlikely to bind |
+
+> **These tiers and the `ipsae_min ≥ 0.61` affinity gate did NOT hold up against our own
+> experimental results (checked 2026-09-28, two targets with measured Kd).** On both, the
+> designs the gate *rejected* bound tighter than the ones it kept, and on one target the
+> "Reject" tier contained most of the confirmed binders while "High" was empty. The
+> thresholds are absolute values calibrated elsewhere and do not transfer to a short-helix
+> target — consistent with the 2026-05-16 note that ipSAE is mis-calibrated on short
+> targets. **Nothing has been changed in code**: `passes_affinity_gate` and the tiers are
+> still computed and shipped, so the recommendation is to read them as diagnostics and
+> never to present a tier as evidence a design will bind. Options, in order of preference:
+> re-base on `Mean_ipTM` (which retained real signal after controlling for length), demote
+> `ipsae_min` to a plain diagnostic as `agreement_count` already is, or re-derive the
+> thresholds per target class. Caveat: two targets, one of them with few binders.
+> Full numbers are NOT in this repo — they are unpublished experimental results and live
+> in the local benchmark folder.
 
 ### Critical domain facts
 

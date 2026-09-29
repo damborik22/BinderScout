@@ -13,11 +13,21 @@ on:
   pull_request:
     branches: [master, 'v*.x']
 
+# Every job pins 'ubuntu-24.04' rather than 'ubuntu-latest'. That label migrates to
+# Ubuntu 26 from 2026-10-19, which would change the toolchain under every job on a
+# date nobody chose, with no commit to bisect. 24.04 is what 'ubuntu-latest'
+# resolves to today, so the pin changes nothing now and makes the move to 26 a
+# deliberate edit that can be reverted if it breaks. Revisit once 26 has settled.
+#
+# Repeated in each job on purpose: `runs-on` accepts only the github, needs,
+# strategy, matrix, vars and inputs contexts, so a workflow-level `env:` var here
+# resolves to empty and every job fails to find a runner.
+
 jobs:
   shellcheck:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install shellcheck
         run: sudo apt-get install -y shellcheck
       - name: Run shellcheck
@@ -42,10 +52,10 @@ jobs:
           shellcheck --shell=bash --severity=warning "${scripts[@]}"
 
   ruff:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.10"
       - name: Install ruff
@@ -56,10 +66,10 @@ jobs:
         run: ruff format --check .
 
   pytest:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.10"
       - name: Install test deps
@@ -75,8 +85,8 @@ jobs:
         run: python -m pytest -q
 
   docker-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build base image
         run: docker build -f Dockerfile.test --target base -t binderscout-test-base .
