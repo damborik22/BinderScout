@@ -75,6 +75,12 @@ except Exception:  # pragma: no cover - only when binder_comparison is missing
         return [(None, ln.strip()) for ln in text.splitlines() if ln.strip() and not ln.startswith(">")]
 
 
+#: Smallest bucket AF3 is built to compile -- the first rung of its own stock ladder
+#: (``run_alphafold.py`` ``_BUCKETS`` defaults to ['256','512','768',...]). Never ask for
+#: less; see the measurement in refold_batch.
+AF3_MIN_BUCKET = 256
+
+
 def refold_batch(
     binder_sequences: list[str],
     target_sequence: str,
@@ -120,7 +126,26 @@ def refold_batch(
     # makes the cache hit.  Deliberately computed over ALL binder_sequences and
     # not over `jobs`, so a --resume run keeps the same shape as the run it is
     # resuming instead of silently re-compiling at a smaller bucket.
-    bucket = len(target_sequence) + max(len(s) for s in binder_sequences)
+    #
+    # FLOORED AT AF3'S OWN MINIMUM, and this is load-bearing. AF3's stock ladder is
+    # ['256','512','768',...] -- 256 is the smallest shape it is built to compile. Asking
+    # for less is asking for a shape upstream never supports, and it does not fail
+    # gracefully: its tokamax Pallas/Triton attention and gated-linear-unit kernels pick
+    # tile configs per shape, and below 256 they request 110,592 bytes of SHARED memory
+    # per block against the 101,376 that sm_86/sm_89 expose.
+    #
+    # MEASURED on an RTX 3090 (sm_86), 2026-09-29, one input.json reused byte-identically
+    # across both arms with a cold shared compile cache, only the bucket digits differing:
+    #   --buckets=60   rc=1 in 43s, "RESOURCE_EXHAUSTED: Shared memory size limit
+    #                  exceeded: requested 110592, available: 101376", no structure
+    #   --buckets=256  rc=0 in 69s, no shared-memory error, 2 structures, iptm 0.52
+    # So AF3 is NOT blocked on consumer Ampere -- that conclusion was ours and it was
+    # wrong. The same card had already completed pools at buckets 493, 512 and 568.
+    #
+    # The floor costs nothing relative to AF3's documented behaviour: left to its own
+    # ladder AF3 would pad a 60-token complex to 256 anyway. We were not saving compute
+    # by asking for 60, we were requesting a shape that cannot run.
+    bucket = max(AF3_MIN_BUCKET, len(target_sequence) + max(len(s) for s in binder_sequences))
     jax_cache_dir = Path(
         os.environ.get("AF3_JAX_CACHE_DIR") or Path.home() / ".cache" / "binderscout" / "af3_jax_compile"
     )

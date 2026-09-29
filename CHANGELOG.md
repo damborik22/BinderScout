@@ -8,6 +8,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **AF3 aborted on every small pool, and the cause was ours.** `refold_af3.py`
+  computed `bucket = len(target) + max(len(binder))` with **no lower bound**, so a
+  60-token pool (CALCA's 32-aa target + a 28-aa binder) asked AF3 for
+  `--buckets=60` — a shape AF3's own stock ladder never produces, since that ladder
+  starts at 256. Below 256 its tokamax Pallas/Triton attention and gated-linear-unit
+  kernels select a tile config requesting 110,592 bytes of shared memory per block
+  against the 101,376 that sm_86/sm_89 expose, and the refold died with
+  `RESOURCE_EXHAUSTED: Shared memory size limit exceeded`.
+
+  This had been recorded as "AF3 cannot run on consumer Ampere". **It can.** Measured
+  on an RTX 3090 (sm_86), one `input.json` reused byte-identically across two arms
+  with a cold shared compile cache, only the bucket digits differing:
+  `--buckets=60` → rc=1 in 43 s with the abort and no structure; `--buckets=256` →
+  rc=0 in 69 s, no error, 2 structures, iptm 0.52. The same card had already
+  completed pools at buckets 493, 512 and 568.
+
+  Fixed with `AF3_MIN_BUCKET = 256`, pinned by
+  `tests/test_af3_bucket_has_a_floor.py` (3 mutations, all caught). The floor costs
+  nothing against AF3's documented behaviour — stock AF3 pads a 60-token complex to
+  256 regardless; we were requesting an impossible shape, not saving compute. A pool
+  already above 256 is untouched.
+
+  Two doc corrections fall out of the same investigation. The identical 4,430 MiB
+  peak recorded at 258 **and** 391 tokens was read as evidence AF3's memory barely
+  grows with size; it is one compiled shape measured twice, because neither run
+  passed `--buckets` at all (the flag landed four weeks later) and both padded to
+  512. And "no completed ESMFold2 fold has ever been observed" was false — a 50/50
+  pool plus two single folds are on record on a 24 GB card; ESMC-6B loads bf16 at
+  ~11.8 GiB resident, so the 12 GB dev box was the constraint, not the engine.
+
 - **TmProt never ran from a generated run script.** `write_run_evaluate` reads
   `cfg.get("use_tmprot")` and `cfg.get("tmprot_threshold")`, but the wizard
   wrote those keys only into `tools_enabled`, never into `cfg`. The lookups
