@@ -171,6 +171,32 @@ def refine_families_by_structure(
     This is the second-pass refinement and is strictly optional — many use
     cases just want the sequence-only clustering. Requires extracting Cα
     coords from refolded PDBs (cheap; see :func:`comparison.epitope._parse_pdb_cas`).
+
+    .. warning::
+
+       **Not called by anything, and it does NOT solve Part AB.** Three things to know
+       before wiring it up:
+
+       1. It only ever **splits**. It iterates ``groupby("family_id")`` and emits
+          ``fid_a`` / ``fid_b``, so it subdivides families that sequence clustering
+          already grouped. It **cannot merge** two sequence-distinct designs that share a
+          fold — and that is the failure AB exists to fix. Measured 2026-09-28 on the
+          golden pool: 2 of 15 binder pairs are the same fold (TM 0.57–0.58) at 0.14–0.23
+          sequence identity, i.e. far below the 0.7 threshold
+          :func:`cluster_sequences_df` uses, so they land in different families and
+          nothing here can bring them together.
+       2. The RMSD comparison assumes **residue-by-residue correspondence from the
+          N-terminus** — ``n = min(len(a), len(b))`` then compares ``a[:n]`` to ``b[:n]``.
+          That holds for two poses of the same design; it does not hold for two
+          independent designs of different length, which is the case AB cares about.
+          A length-normalised, alignment-based score (TM-score) is the right measure
+          there.
+       3. Consequently it is safe for its stated purpose (splitting one family whose
+          members are genuinely the same sequence family) and unsafe as a general
+          design-diversity tool.
+
+       Kept because the splitting behaviour may still be wanted; documented so nobody
+       connects it expecting structural de-duplication.
     """
     if "family_id" not in df.columns or df.empty:
         return df

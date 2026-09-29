@@ -124,7 +124,40 @@ structured pool here is one tool, so the cross-tool form still needs a cross-too
 with structures. What is now shown is the underlying failure in its within-tool form,
 which is the harder case to dismiss.
 
-### What AB should do, concretely
+### Decision on implementing it now: **no**
+
+Asked directly (2026-09-29) whether to build the Foldseek path. **Not yet**, for reasons
+that only became clear after looking at what already exists:
+
+`comparison/diversity.py:refine_families_by_structure` is already there, and it has
+three problems:
+
+1. **It is dead code** — nothing calls it.
+2. **It points the wrong way.** It iterates `groupby("family_id")` and emits `fid_a` /
+   `fid_b`, so it only ever *splits* families sequence clustering already grouped. It
+   **cannot merge** two sequence-distinct designs that share a fold — which is exactly
+   the failure measured above. Wiring it would not address AB.
+3. **Its comparison is unsound for different designs.** It truncates to the shorter
+   chain and compares residue *i* to residue *i*, which assumes N-terminal
+   correspondence — true for two poses of one design, false for two independent designs
+   of different length. TM-score is length-normalised and alignment-based; RMSD-by-index
+   is not the right measure here.
+
+So the structural machinery that exists solves the opposite problem, unsoundly, and is
+not connected. And the case for building the *right* thing rests on 2 of 15 pairs from
+six designs of one tool against one target — too thin to add an input that influences
+decisions, which is precisely what Part U measured as making the ranking worse.
+
+**What was done instead:** the function now carries a warning documenting all three
+points, so nobody connects it expecting structural de-duplication. That is the whole
+change; the code is otherwise untouched (it remains valid for its stated splitting use).
+
+**What would change the decision:** a multi-tool pool *with structures* — which is also
+what AB's own gate requires. On such a pool, measure how many wet-lab picks are
+structurally redundant. If a top-12 selection contains same-fold pairs at a material
+rate, the case is made on wet-lab economics rather than on a correlation.
+
+### When it is built, do it like this
 
 1. **Cluster the binder chain only.** Extract the designed chain before any structural
    comparison. Clustering complexes against a shared target is meaningless — that is the
