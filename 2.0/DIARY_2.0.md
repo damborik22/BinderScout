@@ -842,6 +842,22 @@ Configurator and `evaluate.sh`: nothing, and that is the point — both drive
 knowing. Evaluator: the three CLIs, three runners, three engines. Report: the Foldseek
 join now shares the sanitiser.
 
+### The follow-up: `<binder_id>_<engine>`, and why the directory was not enough
+
+The first cut named a structure after the binder id alone, on the reasoning that each
+engine owns its own output directory so nothing can collide. That reasoning is correct
+and beside the point. The whole request was "we need **all** the PDBs" — and the way
+anyone acts on that is to copy the three directories into one folder. At that moment a
+design's three structures become three files called `rfd3_b7.pdb`, two of which are
+overwritten on the way in, and the survivor does not say which engine produced it.
+
+So the engine belongs in the *name*, not only in the path: `rfd3_b7_boltz2.pdb`,
+`rfd3_b7_af3.pdb`, `rfd3_b7_esmfold2.pdb`. The legacy fallback names are left alone —
+they already say `af3_0007` — and a test pins that they are not suffixed into
+`af3_0007_af3`. A second test pools all three engines over the same id list and asserts
+six distinct filenames, which is the property that actually matters and which the
+per-engine directory never gave us.
+
 ### The one behaviour change to know about
 
 A re-run into the same output directory now **overwrites** a design's structure. The old
