@@ -39,6 +39,7 @@ def run_af3_refold(
     model_dir: str | Path | None = None,
     scripts_path: str | Path | None = None,
     resume: bool = False,
+    binder_ids: list[str] | None = None,
     use_msa: bool = True,
     msa_cache_dir: str | Path | None = None,
     allow_no_msa: bool = False,
@@ -47,6 +48,9 @@ def run_af3_refold(
 
     Args:
         sequences:       Binder amino acid strings.
+        binder_ids:      One id per sequence, positionally aligned with *sequences*;
+                         saved structures are named after it. None keeps the legacy
+                         index-based names.
         target_sequence: Target protein sequence.
         output_dir:      Directory where AF3 output (predictions/, *.npy)
                          is written.
@@ -86,6 +90,7 @@ def run_af3_refold(
 
         refold_batch(
             binder_sequences=sequences,
+            binder_ids=binder_ids,
             target_sequence=target_sequence,
             output_dir=output_dir,
             output_csv=output_csv,

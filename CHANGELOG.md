@@ -66,6 +66,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Refold structures are saved under the design's `binder_id`.** All three
+  engines named every artifact after the loop index — `refold7_a1b2c3d4.pdb`,
+  `af3_0007.pdb`, `esmfold2_0007.pdb` — three different names for one design,
+  none of them the design's own id, and the index meaningful only relative to
+  the FASTA that produced it. Finding a design's structures meant joining the
+  refold CSV on sequence first. They are now `<binder_id>.pdb`,
+  `<binder_id>_pae.npy`, `<binder_id>_plddt.csv` / `<binder_id>_model.cif`.
+  The id comes from the FASTA header `extract` already writes, so `evaluate.sh`,
+  `binder-compare run` and the configurator needed no change; a design with no
+  usable id keeps the old index-based name. The mapping lives in
+  `binder_comparison/io/design_ids.py` and is shared with the Foldseek join, so
+  a structure on disk and a row in the report agree on the name. Two designs
+  claiming one id get `__2`, `__3` rather than one silently overwriting the
+  other, and a mismatch between the id and sequence counts is refused before any
+  GPU work — that off-by-one would name every structure after a different
+  design while leaving every path resolvable.
+  AF3's own prediction directory stays index-based: that layout belongs to AF3
+  and `_load_top_sample` globs it. What we export carries the id.
+  **Re-running an engine into the same output directory now overwrites a
+  design's structure instead of accumulating a new uuid-stamped copy.**
+
 - **BindMaster is now BinderScout, everywhere.** The repository had been
   `BinderScout` on GitHub while the CLI, the Python package, the conda
   environments and ~3,000 references stayed `bindmaster`. 2.0 closes that:

@@ -97,6 +97,20 @@ except Exception as _exc:  # binder_comparison unavailable in this env
         return "", "single_sequence"
 
 
+# Saved structures are named after the design's binder_id.  Guarded separately from the
+# MSA import above: if binder_comparison is not importable here the fold must still run,
+# just under the legacy index-based names.
+try:
+    from binder_comparison.io.design_ids import parse_fasta_pairs, structure_stems
+except Exception:  # pragma: no cover - only when binder_comparison is missing
+
+    def structure_stems(binder_ids, fallbacks):
+        return list(fallbacks)
+
+    def parse_fasta_pairs(text):
+        return [(None, ln.strip()) for ln in text.splitlines() if ln.strip() and not ln.startswith(">")]
+
+
 def refold_batch(
     binder_sequences: list[str],
     target_sequence: str,
@@ -109,6 +123,7 @@ def refold_batch(
     num_diffusion_samples: int = 1,
     seed: int = 0,
     skip_indices: set[int] | None = None,
+    binder_ids: list[str] | None = None,
     use_msa: bool = True,
     msa_cache_dir: str | os.PathLike | None = None,
     allow_no_msa: bool = False,
@@ -178,6 +193,10 @@ def refold_batch(
             target_msa_obj = None
 
     model, build_fn = _load_model_and_builder(repo_id, target_msa=target_msa_obj)
+
+    # One filename stem per design, from its binder_id where we have one.  Computed for
+    # the whole batch up front so a length mismatch is refused before any GPU work.
+    stems = structure_stems(binder_ids, [f"esmfold2_{i:04d}" for i in range(1, len(binder_sequences) + 1)])
 
     fieldnames = _csv_fieldnames()
     csv_path = Path(output_csv).resolve()
@@ -287,9 +306,10 @@ def refold_batch(
 
             plddt_per_res = _normalise_plddt(plddt)
 
-            cif_path = out_dir / f"esmfold2_{idx:04d}_model.cif"
-            pdb_path = out_dir / f"esmfold2_{idx:04d}.pdb"
-            pae_path = out_dir / f"esmfold2_{idx:04d}_pae.npy"
+            stem = stems[idx - 1]
+            cif_path = out_dir / f"{stem}_model.cif"
+            pdb_path = out_dir / f"{stem}.pdb"
+            pae_path = out_dir / f"{stem}_pae.npy"
             np.save(pae_path, pae.astype(np.float32, copy=False))
 
             if cif_str:
@@ -660,12 +680,11 @@ if __name__ == "__main__":
     parser.add_argument("--msa-cache-dir", default=None, help="Override MSA cache directory")
     args = parser.parse_args()
 
-    seqs: list[str] = []
-    for line in Path(args.sequences).read_text().splitlines():
-        s = line.strip()
-        if not s or s.startswith(">"):
-            continue
-        seqs.append(s)
+    # The header's first token is the binder_id, as 'extract' writes it; saved
+    # structures are named after it.
+    pairs = parse_fasta_pairs(Path(args.sequences).read_text())
+    seqs: list[str] = [seq for _, seq in pairs]
+    ids: list[str | None] = [binder_id for binder_id, _ in pairs]
 
     if not seqs:
         print(f"[esmfold2] No sequences found in {args.sequences}", file=sys.stderr)
@@ -687,6 +706,7 @@ if __name__ == "__main__":
     try:
         refold_batch(
             binder_sequences=seqs,
+            binder_ids=ids,
             target_sequence=args.target_seq,
             output_dir=args.output_dir,
             output_csv=args.output,

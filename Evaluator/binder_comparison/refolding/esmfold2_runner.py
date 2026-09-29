@@ -40,6 +40,7 @@ def run_esmfold2_refold(
     seed: int = 0,
     scripts_path: str | Path | None = None,
     resume: bool = False,
+    binder_ids: list[str] | None = None,
     use_msa: bool = True,
     msa_cache_dir: str | Path | None = None,
     allow_no_msa: bool = False,
@@ -48,6 +49,9 @@ def run_esmfold2_refold(
 
     Args:
         sequences:             Binder amino acid strings.
+        binder_ids:      One id per sequence, positionally aligned with *sequences*;
+                         saved structures are named after it. None keeps the legacy
+                         index-based names.
         target_sequence:       Target protein sequence.
         output_dir:            Directory for structures + PAE files.
         output_csv:            Path for the metrics CSV.
@@ -83,6 +87,7 @@ def run_esmfold2_refold(
 
         refold_batch(
             binder_sequences=sequences,
+            binder_ids=binder_ids,
             target_sequence=target_sequence,
             output_dir=output_dir,
             output_csv=output_csv,

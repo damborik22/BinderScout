@@ -769,3 +769,87 @@ installer functions were "kept in sync" while one lacked a load-bearing flag. No
 lies; each was true when written and nothing re-checked it. The countermeasure that
 actually works is the one the drift test demonstrated today — it caught me editing
 `verify_tool` in one installer within minutes, which is faster than any amount of care.
+
+---
+
+## Structures under the binder id — and the four tests that were lying about it
+
+**2026-09-29.** The ask was small: *"We need all PDBs. When we are refolding, save them
+as raw results under the binder ID."* The first thing worth recording is that the
+premise turned out to be half right in a way that changed the work.
+
+**All three engines already saved every structure.** Boltz-2 wrote a PDB, a PAE `.npy`
+and a pLDDT CSV; AF3 wrote a PDB and converted the CIF; ESMFold2 wrote a CIF, a PDB and
+a PAE. Nothing was being discarded. So "we need all PDBs" was not a gap in *what* was
+saved — it was a gap in *finding* them, and the cause was the name:
+
+    refold7_a1b2c3d4.pdb     af3_0007.pdb     esmfold2_0007.pdb
+
+Three names for one design, none of them the design's own id, and `7` meaningful only
+relative to the FASTA that produced it. Retrieving a design's structures meant joining
+the refold CSV on its *sequence* first. That is why this is worth having: the id is
+already the join key everywhere else in the report.
+
+**The id was there the whole time, and three separate places threw it away.** The
+`extract` FASTA header's first token *is* the `binder_id` — `merger._attach_fasta_metadata`
+reads it back that way. But `cli/refold_af3.py` did `sequences = [seq for _, seq in entries]`,
+discarding the header it had just parsed; and the standalone scripts skipped any line
+starting with `>`. So the plumbing was three one-line losses, not a missing capability.
+
+**The hazard that shaped the design.** `refold_boltz2.py`'s `main()` *filters* invalid
+sequences out of the batch. Carry ids alongside without filtering them in lockstep and
+every structure after the first rejection is written under a different design's id —
+every file exists, every path resolves, every downstream join succeeds, and the report is
+silently wrong about which structure belongs to which design. That failure mode is the
+reason `structure_stems` refuses a length mismatch before any GPU work rather than
+zipping to the shorter list. Same reasoning for duplicate ids: `__2` is ugly, losing a
+structure to a silent clobber is worse.
+
+One sanitiser, not two. The Foldseek family join built its filename stems with an inline
+comprehension — a second copy of the same logic, and if the two ever disagreed by one
+character a structure simply could not be found by its id. It now imports `safe_stem`,
+and a test fails if that comprehension comes back.
+
+### What actually went wrong today
+
+**Four of my twelve mutations survived, and all four were the same mistake.** The CLI
+tests asserted `"binder_ids" in src`. Mutating the CLI to compute the ids and then *not
+pass them* left that substring in the file, so the test passed on broken code. The
+script test had a nastier version of it: the guarded-import fallback **defines**
+`parse_fasta_pairs`, so the name is in the file even when the entry point has stopped
+calling it.
+
+The fixes were different in kind, and the difference is the lesson:
+
+* the CLIs are importable in `binder-eval`, so the test now *calls* `run()` with the
+  runner monkeypatched and asserts `binder_ids == ["rfd3_b7", "bc_l28_s3"]`;
+* the refold scripts are **not** importable there (they need `gemmi`, `equinox` — they
+  belong to other envs), so that test parses the AST and checks the *entry point*
+  reaches the parser, following one level of local helpers. Scoping is what makes it
+  sharp; a whole-file search is what made it hollow.
+
+Fifteen mutations now, all caught. This is the fourth time this session that a test
+matched text that survived the mutation it was supposed to detect. The pattern is
+consistent enough to state plainly: **a test that greps the file it is testing is
+presumed hollow until a mutation proves otherwise**, and "assert the mutation was
+actually applied" is what turns that presumption into evidence.
+
+### Wired in all four modules
+
+Installer: nothing — the module ships with the package and adds no dependency.
+Configurator and `evaluate.sh`: nothing, and that is the point — both drive
+`binder-compare refold-*`, which parses the FASTA, so the ids flow without either
+knowing. Evaluator: the three CLIs, three runners, three engines. Report: the Foldseek
+join now shares the sanitiser.
+
+### The one behaviour change to know about
+
+A re-run into the same output directory now **overwrites** a design's structure. The old
+names carried a per-run uuid and accumulated instead. For `--resume` this is strictly
+better — the completed files are already under their final names — but it is a real
+change and it is in CHANGELOG and CLAUDE.md rather than left to be discovered.
+
+Not done, deliberately: no `binder_id` column was added to the engine CSVs. The merger
+already attaches one from the FASTA, and a second `binder_id` arriving through the
+prefixing and the outer join is how you get `binder_id_x` / `binder_id_y`. The filename
+was the ask; the column would have been scope.

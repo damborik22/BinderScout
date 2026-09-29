@@ -29,6 +29,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from ..io.design_ids import safe_stem
+
 #: Where to look for the binary, in order. ``$FOLDSEEK_BIN`` wins, then anything on
 #: PATH, then Proteina-Complexa's venv -- a *design* tool's environment, which is the
 #: wrong home for a shared utility and is used only as a last resort.
@@ -128,9 +130,9 @@ def build_tm_lookup(
         if only is None:
             continue
         # The file stem is the join key, so it must survive a round trip through
-        # foldseek's output unchanged.
-        safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in str(row[id_col]))
-        (pdb_dir / f"{safe}.pdb").write_text(only)
+        # foldseek's output unchanged. Shared with the refold engines, which name their
+        # saved structures with the same function.
+        (pdb_dir / f"{safe_stem(row[id_col])}.pdb").write_text(only)
         written += 1
 
     if written < 2:
@@ -186,8 +188,7 @@ def build_tm_lookup(
         return None
 
     def lookup(a: str, b: str) -> float:
-        sa = "".join(c if (c.isalnum() or c in "-_") else "_" for c in str(a))
-        sb = "".join(c if (c.isalnum() or c in "-_") else "_" for c in str(b))
+        sa, sb = safe_stem(a), safe_stem(b)
         return scores.get((sa, sb) if sa < sb else (sb, sa), 0.0)
 
     return lookup
