@@ -88,6 +88,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `binder-compare filter-soluprot` and `refolding.run_soluprot_filter` only
   *score*. They are kept because they are public API.
 
+### Added
+
+- **`tools/loss_screen.py` — a CPU screen for candidate design-loss terms.** A Mosaic
+  loss arm costs a hallucination campaign (>24 GB VRAM) plus refolds on two
+  independent engines. Most bad candidates are not *mediocre*, they are wrongly
+  shaped, and the wrong shape is visible from the gradient in under a second.
+
+  Four checks. **direction** — at a composition where the term is active, does the
+  gradient push the named residue class the way the author intends (a loss is
+  minimised, so a positive gradient *suppresses*). **length** — hold the
+  distribution fixed, vary L; catches the extensive-vs-intensive bug that silently
+  penalises long binders. **silence** — a one-sided hinge must be exactly inert once
+  the property holds, because a term that always pulls always distorts, invisibly.
+  **order** — shuffling preserves composition and destroys adjacency, so a term
+  claiming to read order must move more than shuffle noise.
+
+  Backend-agnostic: `jax.grad` inside the Mosaic venv where real terms live, central
+  finite differences on numpy otherwise, so the harness and its tests run in CI with
+  no GPU and no jax.
+
+  Validated by rebuilding the case that motivated it. Upstream Mosaic's
+  `UnigramExcess` (`sum(relu(empirical − natural)²)`) is **flagged**: being one-sided
+  *above* the natural marginal makes it inert on exactly the residues hallucination
+  over-produces and active only on those below it, most of which are hydrophobic —
+  measured here at **2.66×** more suppressive gradient on hydrophobics than on
+  everything else combined, wrong-signed for promoting a hydrophobic core. The
+  one-sided hydrophobic-*deficit* hinge derived as its replacement **passes** all
+  three. Both are test fixtures, so the harness is pinned against the real defect
+  rather than a synthetic one (10 mutations, all caught).
+
+  Two design errors of my own were caught by writing those fixtures, and both are
+  encoded in the tool. Direction must be probed where the term is **active** — a
+  correct one-sided hinge is inert at a uniform PSSM, so probing only there would
+  flag the good term and pass the bad one. And the length check defaults to the
+  **design-time** regime (exact-frequency PSSM, the smooth input a loss actually
+  sees), not iid sampling: in the discrete regime *both* a wrongly-shaped and a
+  correctly-shaped one-sided term look length-confounded, because both fire only on
+  finite-sample excursions, so reading that as a design-time verdict rejects the
+  correct term too.
+
+  A pass is advisory — it means a term is not obviously mis-shaped, not that it
+  helps. That still costs a campaign, judged on AF3 or ESMFold2 and never on
+  Boltz-2, which Mosaic optimises by construction.
+
 ### Added — 2.0 evaluation and provenance
 
 - **Per-design `generation_index`, with its provenance.** `ExtractedBinder`
