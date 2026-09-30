@@ -1054,3 +1054,96 @@ Noted and deliberately not touched: `binder-compare filter-soluprot` and
 `refolding.run_soluprot_filter` only *score* despite their names — public API, so
 documented rather than renamed — and a pre-existing `if True:` at
 `visualization/report.py:1530`.
+
+---
+
+## The knob that was never connected, and what it took to run four arms
+
+**2026-09-30.** Two pieces: wiring `ss_bias`, and actually running the arms. The wiring
+was twenty minutes. The running was the interesting part, and most of it was about not
+breaking somebody else's machine.
+
+### A dead knob is not a missing feature, which is why it survives
+
+`design()` in the Mosaic template took an `ss_bias` argument. It gated two real loss
+terms — `sp.HelixLoss()` and `sp.DistogramRadiusOfGyration()`. It had a `print` that
+announced the bias when set. Everything about it read as a working feature.
+
+**Its sole call site never passed it.** So it was permanently `"none"`, both terms were
+unreachable in every script the configurator has ever generated, and the template went on
+advertising helix/compact shaping that no run could reach. The configurator injects eight
+values and this was not among them, so there was no route to it through the documented
+path either.
+
+That shape is worth naming because it is this repo's most repeated defect and it is
+*invisible to testing the parts*: the parameter works, the terms work, the print works.
+Only the join is missing. The same shape produced the AggreProt reduction that nothing
+calls, and — found the same week — the TmProt keys the wizard wrote into `tools_enabled`
+while the writer read them off `cfg`.
+
+Two more defects fell out while wiring it, both of the same family:
+
+* the branch was `if/elif`, so `"helix+compact"` silently meant `"helix"`. They are
+  different properties; upstream composes its contact and globularity terms rather than
+  choosing between them. Now they stack.
+* an unrecognised value was silently ignored, which costs a *whole campaign* running with
+  no bias at all. It now raises and names the valid set.
+
+Worth having because it moves the RFD3 lesson in-loop. There we learned to gate on
+geometry — `Rg/expected <= 1.45`, long-range contacts `>= 0.80/res` — **after** backbone
+generation, and that a Pro/Gly-rich sequence is a *symptom* of a coil rather than an MPNN
+problem. As a differentiable term the backbone never gets to be a coil in the first place.
+Upstream independently converged on shipping globularity as a standing term in its
+minibinder recipe.
+
+### Running the arms meant not touching a working machine
+
+BM2 has the GPU. BM2's Mosaic is **seven commits behind our pin**, so the template would
+not even import — `batched_simplex_APGM` arrived in the commit we pin.
+
+The two obvious routes were both bad. Checking our pin out *in place* moves the source
+under their venv's editable install, and their Boltz-2 refolder rides that venv — so the
+experiment would have changed the behaviour of a production engine on someone else's box.
+`uv` is not installed there, so an isolated venv means installing uv and pulling gigabytes
+of jax-cuda wheels.
+
+The third route cost seconds: a **git worktree** at our pin plus `PYTHONPATH`, reusing
+their existing venv. `PYTHONPATH` precedes the `.pth` an editable install appends, so the
+pinned source shadows theirs for our process and for nothing else. Our offline-MSA patch
+is a working-tree modification rather than a commit, so it had to be carried across
+explicitly — which is a nice illustration of why that patch being installer-managed rather
+than committed is a standing liability.
+
+Verified before spending GPU: both loss terms importable, `TargetChain.msa_path` present,
+**zero writes to their installation**.
+
+### Two mistakes of mine in the experimental setup
+
+**The queue died silently.** I backgrounded a `nohup`'d chain on BM2 to run the remaining
+arms after the first. It was running when I checked, and gone afterwards with an empty log
+— the process group took the SIGHUP when the ssh session ended, `nohup` notwithstanding.
+Nothing had run. Relaunching the chain from this side, where the ssh connection is itself
+the background job, is both simpler and observable.
+
+**All four arms share a working directory.** They write the same `designs.csv` and the
+same `structures_28aa_8_top2/`. I noticed while arm 2 was already running. It is
+recoverable — every row carries a `worker_id`, each run generates a fresh one, and each
+arm's id is in its own log — so the arms are separable post hoc and no re-run is needed.
+But the correct setup was one CWD per arm, and I did not think about it until the second
+arm was writing into the first one's file.
+
+### The readout to trust, and the one not to
+
+The load-bearing check is the cheapest one: **how many terms the optimiser prints**. The
+baseline arm logs exactly nine (`.0` target_contact through `.8` plddt). A bias must add
+one each. That is the only direct evidence the term reached the loss — everything else is
+downstream of it, and a knob that silently does nothing would otherwise look like a term
+that simply did not help.
+
+What this run **cannot** answer is whether geometry bias is good. Eight designs, one
+length, one target, and the weight is unvalidated: ours is 0.1, upstream ships 0.2 against
+a different three-term loss, and our nine-term loss already carries `WithinBinderPAE` and
+`WithinBinderContact`, both correlated with compactness. A null result here would not mean
+the term is useless, only that this weight in this loss moved nothing. Judging it properly
+means refolding on AF3 or ESMFold2 — never Boltz-2, which Mosaic optimises by
+construction — across more than one target.
