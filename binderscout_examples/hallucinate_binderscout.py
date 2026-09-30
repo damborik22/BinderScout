@@ -96,6 +96,21 @@ MIN_LENGTH = 65  # minimum binder length (aa)
 MAX_LENGTH = 100  # maximum binder length (aa)
 LENGTH_STEP = 5  # step between scanned lengths; set MIN=MAX for a single length
 EPITOPE_IDX = None  # 0-based target-residue indices the binder must contact (hotspots); None = whole surface
+# Secondary-structure / geometry bias on the design loss. "none" (default), "helix" adds
+# 0.1*HelixLoss, "compact" adds 0.1*DistogramRadiusOfGyration -- an elu hinge on the
+# binder's radius of gyration against 2.38*L**0.365. The two stack; they are not exclusive.
+#
+# This was a DEAD KNOB until 2026-09-30: the parameter existed and gated both terms, but
+# the sole call site never passed it, so neither term was reachable in any generated run.
+# Worth having because it moves our RFD3 lesson in-loop -- there we learned to gate on
+# geometry (Rg/expected <= 1.45, long-range contacts >= 0.80/res) AFTER backbone
+# generation, and that a Pro/Gly-rich sequence is a SYMPTOM of a coil rather than an MPNN
+# problem. As a differentiable term the backbone never gets to be a coil in the first
+# place. Upstream Mosaic independently converged on shipping globularity as a standing
+# term in its minibinder recipe (at weight 0.2 against a different 3-term loss -- that
+# number does not transfer to our 9-term loss, which already carries WithinBinderPAE and
+# WithinBinderContact, both correlated with compactness).
+SS_BIAS = "none"  # "none" | "helix" | "compact" | "helix+compact"
 
 
 # ============================
@@ -423,9 +438,20 @@ def design(
         + 0.1 * sp.PLDDTLoss()
     )
 
-    if ss_bias == "helix":
+    # Independent `if`s, not if/elif: helix and compactness are different properties and
+    # upstream composes its contact and globularity terms together rather than choosing
+    # between them. An elif here silently made "helix+compact" mean "helix".
+    _bias = {b.strip() for b in str(ss_bias).split("+") if b.strip() and b.strip() != "none"}
+    _unknown = _bias - {"helix", "compact"}
+    if _unknown:
+        raise ValueError(
+            f"ss_bias={ss_bias!r} contains unknown term(s) {sorted(_unknown)}. "
+            'Valid: "none", "helix", "compact", or "helix+compact". Refusing rather than '
+            "silently running with no bias -- a typo here used to cost a whole campaign."
+        )
+    if "helix" in _bias:
         sp_loss = sp_loss + 0.1 * sp.HelixLoss()
-    elif ss_bias == "compact":
+    if "compact" in _bias:
         sp_loss = sp_loss + 0.1 * sp.DistogramRadiusOfGyration()
 
     target_tc = TargetChain(
@@ -961,6 +987,7 @@ def main():
             template_chain=template_chain,
             checkpoint_path=ckpt_path,
             epitope_idx=EPITOPE_IDX,
+            ss_bias=SS_BIAS,
             esm2_pll=esm2_pll,
             esm2_weight=ESM2_WEIGHT,
             esm2_clip=ESM2_CLIP,

@@ -1085,6 +1085,10 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
         "LENGTH_STEP = 5  # step between scanned lengths; set MIN=MAX for a single length\n"
         "EPITOPE_IDX = None  # 0-based target-residue indices the binder must contact (hotspots); None = whole surface"
     )
+    # SS_BIAS is injected separately: it sits below a long comment block in the template,
+    # so folding it into the verbatim-matched block above would make the drift guard
+    # depend on that prose staying byte-identical.
+    old_ss = 'SS_BIAS = "none"  # "none" | "helix" | "compact" | "helix+compact"'
     new_block = (
         f"TARGET_SEQUENCE = {cfg['target_sequence']!r}  # target protein sequence\n"
         f"TARGET_PDB = {target_pdb_path!r}  # path to target PDB (structural template)\n"
@@ -1111,6 +1115,21 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
         sys.exit(1)
 
     content = content.replace(old_block, new_block)
+
+    # Geometry bias. Injected even at its default, so the generated script records what it
+    # ran with rather than leaving the reader to infer it from the template's default.
+    ss_bias = str(cfg.get("mosaic_ss_bias", "none"))
+    valid = {"none", "helix", "compact", "helix+compact"}
+    if ss_bias not in valid:
+        print_fail(f"mosaic_ss_bias={ss_bias!r} is not one of {sorted(valid)}")
+        sys.exit(1)
+    if old_ss not in content:
+        print_fail(f"Mosaic template has drifted: no SS_BIAS line in {MOSAIC_HALLUCINATE_SRC}")
+        print_warn("  Re-run `binderscout install --tool mosaic`, or point")
+        print_warn("  MOSAIC_HALLUCINATE_SRC at the repo copy in binderscout_examples/.")
+        sys.exit(1)
+    content = content.replace(old_ss, f'SS_BIAS = {ss_bias!r}  # "none" | "helix" | "compact" | "helix+compact"', 1)
+
     path.write_text(content)
 
 

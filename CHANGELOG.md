@@ -8,6 +8,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`ss_bias` was a dead knob: two design-loss terms were unreachable in every
+  generated run.** `design()` in the Mosaic template took an `ss_bias` argument
+  that gated `sp.HelixLoss()` and `sp.DistogramRadiusOfGyration()` — and its sole
+  call site never passed it, so both terms sat at the default `"none"` and could
+  not fire, while the template advertised helix/compact shaping. The configurator
+  injected eight values and this was not one of them, so there was no way to reach
+  it through the documented path either.
+
+  Wired end to end: the call site passes it, the configurator injects and validates
+  it, and it is a first-class run parameter recorded in the generated script.
+
+  Two things fixed while wiring it. The branch was `if/elif`, which silently made
+  `"helix+compact"` mean `"helix"` — the two are different properties and now
+  compose. And an unrecognised value was silently ignored, which cost a whole
+  campaign running with no bias at all; it now raises.
+
+  Worth having because it moves the RFD3 geometry lesson in-loop. There we learned
+  to gate on `Rg/expected <= 1.45` and long-range contacts **after** backbone
+  generation, and that a Pro/Gly-rich sequence is a *symptom* of a coil rather than
+  an MPNN problem. As a differentiable term the backbone never gets to be a coil.
+  Upstream Mosaic independently converged on shipping globularity as a standing
+  term in its minibinder recipe — at weight 0.2 against a different 3-term loss, a
+  number that does **not** transfer to our 9-term loss, which already carries
+  `WithinBinderPAE` and `WithinBinderContact`, both correlated with compactness.
+  Our 0.1 is equally unvalidated; it is one of the few single dimensions genuinely
+  worth a sweep.
+
 - **AF3 aborted on every small pool, and the cause was ours.** `refold_af3.py`
   computed `bucket = len(target) + max(len(binder))` with **no lower bound**, so a
   60-token pool (CALCA's 32-aa target + a 28-aa binder) asked AF3 for
