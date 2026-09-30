@@ -1147,3 +1147,81 @@ a different three-term loss, and our nine-term loss already carries `WithinBinde
 the term is useless, only that this weight in this loss moved nothing. Judging it properly
 means refolding on AF3 or ESMFold2 — never Boltz-2, which Mosaic optimises by
 construction — across more than one target.
+
+### The result, and what nearly went in the changelog instead
+
+The four arms answered. On both held-out engines, permutation test over n=16 vs 16:
+
+| arm | AF3 Δ | AF3 p | ESMFold2 Δ | ESM p |
+|---|---|---|---|---|
+| **helix** | **+0.111** | **0.0062** | +0.093 | 0.088 |
+| compact | +0.031 | 0.489 | +0.021 | 0.699 |
+| helix+compact | +0.073 | 0.070 | +0.060 | 0.317 |
+
+`HelixLoss` at 0.1 helps. The Rg hinge at 0.1 does not, and stacking it onto helix makes
+things *worse* than helix alone. A geometry readout corroborates the second half from a
+completely different direction: the compact arm produced binders **looser** than baseline
+(Rg/expected 1.204 vs 1.104), so the term failed at its own stated job before it failed to
+help. Wiring the knob was right; the compactness half of what it exposes is not earning
+its place.
+
+**The limitation belongs first, not last: the target is a helix.** A helix-promoting term
+helping on the 32-aa CALCA helix is the least surprising result available. It may be
+target-matched rather than useful, and nothing here touches a globular target.
+
+### What the control did to the story
+
+The first pass had **one** baseline replicate. It read:
+
+    helix +0.143 (AF3) / +0.134 (ESMFold2)   -- two engines, magnitudes within 0.01
+
+and I had written most of a message calling that a clean two-engine agreement. It was
+agreement, and it was also partly agreement about a baseline measured once. A second
+baseline replicate moved the control by **0.065** on AF3 and **0.080** on ESMFold2 —
+comparable to the effects themselves — and cut every delta by roughly a third. Two of the
+three arms did not survive it.
+
+So the honest sequence is: I flagged the single-replicate baseline as the weakest joint,
+reported the result anyway, and then had to walk most of it back one message later. The
+flag was not worth much without the second run behind it. **A control measured once is not
+a control; it is one more arm.** Cheap here — 12 minutes of GPU — and it changed the
+conclusion from three effects to one.
+
+The permutation test mattered for the same reason. Eyeballing "effect vs replicate spread"
+had me calling helix+compact marginal and compact dead; the test agrees on compact
+(p=0.49, 0.70) but puts helix+compact at p=0.070/0.317, i.e. also dead, and lifts AF3's
+helix to p=0.0062 — which survives Bonferroni across all six tests. Three arms of eyeball
+became one arm of measurement.
+
+### The confound I could not remove
+
+The arms **do not share an objective**. Adding a geometry term changes the loss, so an
+equally good reading is that *any* well-behaved extra term regularises Mosaic away from
+Boltz-2-specific overfitting, and the held-out engines reward that rather than rewarding
+geometry. Distinguishing the two needs an arm with an *unrelated* term of similar
+magnitude, and that arm was never run. Until it is, "HelixLoss helps" should be read as
+"adding this term helped, on this target, for a reason not yet isolated".
+
+### Infrastructure that came out solid regardless
+
+Three things were validated by production runs rather than probes, which is the standard
+this repo keeps failing and then fixing:
+
+* **`ss_bias` is genuinely wired** — term counts 9 / 10 / 10 / 11 across the arms, with
+  the 11 proving the `if/elif` → `if/if` fix at runtime.
+* **AF3 refolded 56/56 on a 60-token pool on sm_86, zero empty rows**, at
+  `--buckets=256`. That is this morning's floor holding on a real pool, in the exact
+  configuration that aborted with a shared-memory error.
+* **ESMFold2 completed a full 56-design pool in 64 s.** "No completed ESMFold2 fold has
+  ever been observed" is now falsified twice over.
+
+And nothing on BM2's installation was modified at any point: a git worktree plus
+`PYTHONPATH` for Mosaic, `--scripts-path` for AF3, BM2's own script for ESMFold2 — the
+last because our pinned ESMFold2 revision has no weights there and upgrading `transformers`
+to satisfy it would break the configuration that demonstrably works. Two engines, two
+opposite decisions about whose code to trust, both recorded rather than guessed.
+
+One own-goal for the record: staging our AF3 script for `--scripts-path` broke its
+relative resolution of the AF3 repo, so the first refold failed instantly. It failed
+*loudly*, naming `AF3_REPO_DIR` as the fix, which cost a minute instead of producing 56
+empty rows — the 1.0.3 work on silent refold failures paying for itself.
