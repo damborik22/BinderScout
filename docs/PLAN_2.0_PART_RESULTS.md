@@ -556,9 +556,47 @@ builds the shared runner.
 
 ---
 
-## AI — tune Mosaic's design loss · **verdict: defer on hardware**
+## AI — tune Mosaic's design loss · **first measured data point, 2026-09-30**
 
-Needs Mosaic GPU runs, so not startable here. That is the whole reason.
+> **UPDATE 2026-09-30 — the first AI arms have been run**, on BM2's RTX 3090, after
+> wiring the previously dead `ss_bias` knob. Four arms x 8 designs, 2 replicates each
+> (baseline included), refolded on **both held-out engines** per the constraint below.
+> Permutation test, n=16 vs 16:
+>
+> | arm | AF3 delta | AF3 p | ESMFold2 delta | ESM p |
+> |---|---|---|---|---|
+> | **helix** (`0.1*HelixLoss`) | **+0.111** | **0.0062** | +0.093 | 0.088 |
+> | compact (`0.1*DistogramRadiusOfGyration`) | +0.031 | 0.489 | +0.021 | 0.699 |
+> | helix+compact | +0.073 | 0.070 | +0.060 | 0.317 |
+>
+> **`HelixLoss` at 0.1 helps; the Rg hinge at 0.1 does not; combining them is worse than
+> helix alone.** AF3's helix result survives Bonferroni over all six tests (0.05/6 =
+> 0.0083). ESMFold2 agrees in direction and magnitude but does not reach significance --
+> it is the noisier engine here (baseline sd 0.155 vs AF3's 0.117).
+>
+> Corroborating, and the reason to disbelieve the Rg term specifically: a geometry readout
+> on the output structures found the compact arm produced binders **looser** than baseline
+> (Rg/expected 1.204 vs 1.104) -- it failed at its own stated job, and it also diluted
+> helix's benefit when stacked.
+>
+> **The biggest limitation, stated first: the target IS a helix.** This is the 32-aa CALCA
+> helix, and a helix-promoting loss term helping on a helical target is the least
+> surprising possible outcome. It may be target-matched rather than generally useful, and
+> nothing here tests a globular target.
+>
+> Other limits: one target, one binder length (28 aa), 8 designs per run. The arms do not
+> share an objective -- adding any term changes the loss -- so an alternative reading is
+> that the extra term regularises against Boltz-2-specific overfitting, in which case
+> geometry is incidental. **The control that would separate those (an unrelated term of
+> similar magnitude) was not run.** And 0.1 is our invented weight; upstream ships 0.2 for
+> globularity against a different loss.
+>
+> **The baseline is why this is reportable at all.** The first pass had ONE baseline
+> replicate and showed helix at +0.143 / +0.134. A second baseline replicate moved the
+> control by 0.065 (AF3) and 0.080 (ESMFold2) -- comparable to the effects themselves --
+> and cut every delta by about a third. Two of the three arms did not survive that.
+
+Needs Mosaic GPU runs, so not startable on the development box. That is the only blocker.
 
 > **CORRECTED 2026-09-29.** This entry previously read "verdict: defer, and it
 > conflicts with a measured result", and argued that AI "runs against Part U".

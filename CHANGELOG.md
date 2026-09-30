@@ -115,6 +115,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `binder-compare filter-soluprot` and `refolding.run_soluprot_filter` only
   *score*. They are kept because they are public API.
 
+### Measured
+
+- **Part AI's first data point: `HelixLoss` at 0.1 helps, the Rg hinge at 0.1 does
+  not.** Four arms of the newly wired `ss_bias` knob (none / helix / compact /
+  helix+compact), 8 designs each with 2 replicates per arm, refolded on **both**
+  held-out engines — AF3 and ESMFold2, never Boltz-2, which Mosaic optimises by
+  construction. Permutation test, n=16 vs 16:
+
+  | arm | AF3 Δ | AF3 p | ESMFold2 Δ | ESM p |
+  |---|---|---|---|---|
+  | **helix** | **+0.111** | **0.0062** | +0.093 | 0.088 |
+  | compact | +0.031 | 0.489 | +0.021 | 0.699 |
+  | helix+compact | +0.073 | 0.070 | +0.060 | 0.317 |
+
+  AF3's helix result survives Bonferroni over all six tests. ESMFold2 agrees in
+  direction and magnitude without reaching significance, being the noisier engine
+  (baseline sd 0.155 vs 0.117). Stacking the two terms is *worse* than helix alone,
+  and a geometry readout found the compact arm produced binders **looser** than
+  baseline (Rg/expected 1.204 vs 1.104) — it failed at its own stated job.
+
+  **Read with the limitation first: the target is a helix.** A helix-promoting term
+  helping on the 32-aa CALCA helix is the least surprising possible outcome, and may
+  be target-matched rather than generally useful. One target, one binder length, and
+  the arms do not share an objective — so "the extra term regularises against
+  Boltz-2 overfitting" is an unexcluded alternative, because the control that would
+  separate it (an unrelated term of similar magnitude) was not run.
+
+  The methodological point worth keeping: the first pass had **one** baseline
+  replicate and showed +0.143/+0.134. A second baseline moved the control by
+  0.065–0.080 — comparable to the effects — and cut every delta by about a third,
+  leaving one of three arms standing. The control, not the arms, was the experiment's
+  weakest joint.
+
 ### Added
 
 - **`tools/loss_screen.py` — a CPU screen for candidate design-loss terms.** A Mosaic
