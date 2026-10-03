@@ -2254,7 +2254,7 @@ install_bindcraft2() {
         # BindCraft 2 needs >=3.12; uv fetches an interpreter when the machine
         # has none that new, which is the usual case on an older login node.
         run_logged "Creating BindCraft 2 venv (Python >=3.12)" \
-            uv venv --seed --python ">=3.12" "${BINDCRAFT2_DIR}/.venv" \
+            uv venv --clear --seed --python ">=3.12" "${BINDCRAFT2_DIR}/.venv" \
             || { print_fail "Failed to create ${BINDCRAFT2_DIR}/.venv"; return 1; }
     fi
 
