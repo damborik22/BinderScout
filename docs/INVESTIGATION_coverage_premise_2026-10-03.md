@@ -10,6 +10,14 @@
 > §3 retraction is unaffected — it retracted a Cao claim *using* the Adaptyv benchmark,
 > which is the right direction.
 >
+> **RE-MEASURED on the canonical pool the same day — §1 REPLICATES.** 8 of 9 numbers
+> reproduce within noise and none reverses: premise ratio **5.69×** CI [3.27, 18.39]
+> (Cao 5.2×, sitting mid-CI), bottom-decile 11.44× (Cao 10.5×), error correlation
+> **ρ 0.389 Spearman** (Cao 0.382), effective n **1.63–1.69** of 3 (Cao 1.70), rescue
+> 92.9 % / 25.0 % / 0 % for binders buried by 1 / 2 / 3 engines (Cao 73.2 / 27.5 / 0 — the
+> mean works *better* here). A label-permutation null confirms these are genuinely errors
+> (burial 0.175 vs 0.247 for arbitrary designs, p<0.0001). See §6.
+>
 > The canonical benchmark is the curated **Adaptyv/ProteinBase** set under
 > `EVALUATOR/Benchmark/` on the MUNI share (563 designs with the full PAE panel, 4 targets,
 > replicated binding calls). The premise numbers below — the 5.2×, the ρ ≈ 0.382, the
@@ -190,3 +198,85 @@ must not be used for "3 engines vs the *best* single engine" without this caveat
 3. ~~`mean(af3, esm)` vs `mean(all 3)` is the one live question.~~ **SETTLED, negative** —
    see the retraction in §3. It was settled on the second pool, and the answer is no.
 4. **Correct Part U's two sentences** so the next reader does not inherit them.
+
+
+---
+
+## 6. Re-measured on the canonical Adaptyv benchmark (563 designs, 4 targets, 258 binders)
+
+Cao excluded per the operator decision. 100 % three-engine coverage;
+`compute_consensus_iptm` reproduced from the shipped code to 2.2e-16.
+
+### 6.1 The premise replicates — and is bounded by correlation
+
+Covered in the banner above. Two additions beyond replication:
+
+**The gate's benefit is capped by how correlated the engines are.** Observed ratio 5.69×
+against a **random-ordering null of 17.19×** (null 95 % [7.84, 80.50], p=0.0008). Perfectly
+independent engines would give ~17×; correlation costs roughly two thirds of the achievable
+ratio. So "three engines protect you 5.7× better than one" is right, and "they are
+independent votes" is not.
+
+**Joint burial is length-linked**, which names the shared failure mode instead of leaving it
+as noise. Mean binder length of true binders by number of engines burying them: k=0 **84.5
+aa**, k=1 94.7, k=2 **119.9**, k=3 113.4. Consistent with the long-binder penalty already
+recorded against `ipsae_min`.
+
+Not resolved on this pool: the **false-alarm** direction fails its null (p=0.071), so only
+the binder-burial half of the premise is established here.
+
+### 6.2 The engine panel — and why we still change nothing
+
+| scorer | macro AUC | 95 % CI |
+|---|---|---|
+| max of 3 | 0.7361 | [0.686, 0.784] |
+| mean(boltz, esm) | **0.7279** | [0.677, 0.776] |
+| **mean of 3 (shipped)** | **0.7231** | [0.673, 0.771] |
+| boltz-2 | 0.7204 | [0.670, 0.769] |
+| mean(boltz, af3) | 0.7125 | [0.662, 0.760] |
+| mean(af3, esm) | 0.7021 | [0.652, 0.750] |
+| esmfold2 | 0.6933 | [0.641, 0.743] |
+| af3 | 0.6134 | [0.562, 0.663] |
+
+- **The §3 retraction is confirmed:** `mean(af3,esm)` loses to the 3-mean by exactly
+  −0.0210, on 4/4 targets.
+- **But the untested direction looks better:** `mean(boltz,esm)` *beats* the 3-mean, and on
+  the deployment metric by **+14 binders at top-20 (p=0.0012)** and +17 at top-50 (p=0.0024).
+- **AF3 is significantly anti-predictive on one target** — egfr AUC 0.394, P(AUC ≥ 0.5) =
+  0.008 — and that single target carries most of the apparent gain from dropping it.
+
+**We change nothing, for four reasons that do not rely on deferring to Part U:**
+
+1. **At the shortlist sizes we actually ship (N = 3–8) the entire panel is within ±4
+   binders** — the choice is unmeasurable. The advantage only appears at N ≥ 15, deep in a
+   list nobody orders from.
+2. **Drop-AF3 does not keep its sign across leave-one-target-out folds of this very pool**
+   (−0.017, +0.008, −0.002, +0.030). It fails an out-of-fold test needing no second dataset.
+3. **It inverts on the secondary pool**, where dropping Boltz-2 gains +0.071 and dropping
+   AF3 gains nothing.
+4. **Unique catch — the measure that would have defended the status quo — fails its own
+   random-voter null for two of three engines.** It supports neither the change nor the
+   default.
+
+### 6.3 Three claims of ours to weaken, not strengthen
+
+1. **"No engine wins everywhere, so keep all three because dropping any one loses uniquely
+   caught binders."** Not supported by its own null: the unique-catch measure fails a
+   random-voter test for two of three engines. Keep all three — but not for this reason.
+2. **The "do not drop Boltz-2" result's p-value.** Recorded as p<0.001; measured here as
+   **p=0.035**, with the direction and the 4/4 target split intact. Real, weaker than stated.
+3. **The implicit claim that the 3-mean is at least as good as the best single engine is
+   false.** Out of fold the 3-mean beats the *average* single engine (+0.0474, p=0.0002) but
+   **not the best** (+0.0026, p=0.69).
+
+### 6.4 The caveat that limits all of §6
+
+**`consensus_iptm_mean` was itself selected on this dataset** (the Benchmark's own README
+records this as an open item), so §6.2 is **not** an independent validation of the shipped
+metric — only a check that it is not beaten by an obvious alternative on the pool it came
+from. A genuinely independent engine-set test needs a pool neither the metric nor the
+engines were tuned on, and we do not have one.
+
+Also: four targets, macro CIs ±0.05 wide, every target-level sign count out of 4. The gate
+itself is **exactly inert** here (within-target Spearman 1.000, max rank difference 0 between
+`min_engines` 2 and 3) because coverage never varies — consistent with §4.
