@@ -194,6 +194,50 @@ Now published **before** folding as well as after.
 
 ## 5. Open decisions — these are the user's, not the code's
 
+### 5.0 The cross-engine gate should degrade gracefully, not switch off — **identified 2026-10-03, not implemented**
+
+**The argument, which is the gate's own justification sharpened.** A 3-engine mean can of
+course be worse than a single engine on any given design. But P(one engine wrong) must be
+much larger than P(three engines wrong together) — so coverage is informative, and that is
+exactly why the gate prefers it.
+
+**How much it is worth depends on error correlation, and that is now measured.** On the 64
+ss_bias designs scored by both AF3 and ESMFold2 (2026-10-03): Pearson **r = +0.52**,
+Spearman 0.51 — only **27 % shared variance**, so 73 % of each engine's signal is its own.
+A two-engine mean therefore cuts sd by ×0.872 against ×0.707 for perfect independence and
+×1.0 for redundancy. The engines are weakly correlated, so extra opinions buy real
+information and the premise holds.
+*Two caveats:* this is **agreement, not accuracy** (no labels in that pool), and it is
+computed on the engines' **native** `iptm`, whereas the ranking averages the
+PAE-recomputed `*_pae_iptm` under a common TM kernel. The native scales differ sharply
+(AF3 0.625 vs ESMFold2 0.339), which is *why* the pipeline recomputes — so the operative
+correlation may well differ, and re-measuring on `*_pae_iptm` needs the PAE `.npy` files.
+
+**The live defect this exposes.** When nothing clears the gate, `passes_engine_gate` goes
+constant, the order becomes `consensus_iptm_mean` alone, and a 1-engine design outranks a
+3-engine one (measured). As of `92e415b` the warning says so loudly — but the *ordering*
+still discards coverage at exactly the moment coverage matters most.
+
+**The form the fix should take, and why not either obvious one.** Pure coverage-first is
+also wrong: a 3-engine design at 0.30 should not beat a 1-engine design at 0.99 —
+confidently mediocre losing to possibly excellent. The correct form is **shrinkage**:
+pull each design's mean toward the pool mean in proportion to its uncertainty, so a
+1-engine estimate moves a lot and a 3-engine estimate barely moves. That subsumes both the
+cliff-gate and the raw mean as limiting cases and has one free parameter.
+
+**Why it is not implemented.** It is a ranking change, and Part U measured that searching
+for a better ranking on our data made it *worse* (0.5170 vs 0.5552, p=0.0014). Unlike
+metric search, though, this is a *principled* estimator with a fittable parameter, so the
+objection is about validation rather than about the idea. **The test:** fit the shrinkage
+constant on one labelled pool and check precision@top-10 % on a held-out one, against both
+the current cliff-gate and the raw mean. Part T §5.1 is the cautionary precedent — a
+within-target "free win" there reversed sign on independent data.
+
+**Blocked on:** the labelled pools (Adaptyv 2,515 / Cao 4,442) are not on this box or BM2,
+and `Evaluator/benchmarks/` is Part Y's empty registry. This is the same access gap that
+blocks promoting four shadow columns.
+
+
 ### 5.1 Does the discovery-rank metric accept a pre-filtered pool? **(the big one)**
 **Blocks: finishing Stage 1.** Everything else in it is built.
 
