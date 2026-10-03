@@ -1390,8 +1390,9 @@ def _ranking_methodology_html(min_engines: int, ipsae_link: str) -> str:
     )
     return (
         f"Ranking is <b>cross-engine iPTM</b> (gate → <code>consensus_iptm_mean</code>), validated on "
-        f"two <em>internal</em> 4-target benchmarks (Adaptyv: Nipah / EGFR / IL7R / PD-L1, Kd-screened, "
-        f"n = 662; ProteinBase: the same 4 targets, n = 175). "
+        f"one <em>internal</em> 4-target benchmark (Nipah / EGFR / IL7R / PD-L1, Kd-screened — "
+        f"Adaptyv Bio competition results published on proteinbase.com, refolded in two batches of "
+        f"662 and 175 designs that overlap, <b>613 distinct designs</b>; the two are not independent). "
         f"<b>Stage 0 — cross-engine gate:</b> a design must have been refolded by at least "
         f"<b>{min_engines}</b> independent engines to be eligible. <code>consensus_iptm_mean</code> skips "
         f"missing engines, so without this a single-engine design's mean <em>is</em> that one engine's "

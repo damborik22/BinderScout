@@ -700,8 +700,12 @@ def add_chain_iptm_interface(df: pd.DataFrame, prefix: str = "esmfold2") -> pd.D
     ``pair_chains_iptm``) and ``iptm_pair_min`` (= min). For a 2-chain binder
     complex those are the two directional target<->binder interface iPTMs, so their
     mean ``(iptm_pair + iptm_pair_min) / 2`` is the symmetric chain-pair interface
-    iPTM — the strongest single binder-vs-non-binder screen on the ProteinBase
-    4-target benchmark (macro AUC ≈ 0.745).
+    iPTM. On the 175-design slice of the Adaptyv/ProteinBase benchmark it scores
+    macro AUC ≈ 0.745, but **that figure is a small-slice artefact and it is not the
+    strongest single screen**: the row-wise max of the three engine iPTMs reaches
+    0.755 on the same slice, and on the full 662-design refold this metric falls to
+    ≈ 0.692 (IL7R alone drops 0.875 → 0.683 going from 20 to 96 designs). Quote
+    0.692.
 
     Prefix-aware so one definition serves both column conventions: ``prefix="esmfold2"``
     for the merged report frame (``esmfold2_iptm_pair``), ``prefix=""`` for a raw refold
@@ -722,7 +726,10 @@ def add_chain_iptm_interface(df: pd.DataFrame, prefix: str = "esmfold2") -> pd.D
 def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
     """Add a ``consensus_iptm`` column = max of the per-engine PAE-recomputed iptms.
 
-    Across the ProteinBase 4-target benchmark (Nipah / EGFR / IL7R / PD-L1, n=175),
+    Across the 175-design slice of the Adaptyv/ProteinBase benchmark (Nipah / EGFR /
+    IL7R / PD-L1 — ONE dataset: proteinbase.com publishes the Adaptyv Bio competition
+    results, so this slice and the 662-design refold are two batches over the same
+    designs, 613 distinct in total, not two benchmarks),
     an exhaustive 297-combination search found that the row-wise **max** of the
     engine iptms is the best *deployable, parameter-free* binder-vs-non-binder
     score (macro ROC AUC ≈ 0.75 — at or above the best single engine, and above any

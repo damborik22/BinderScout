@@ -2093,3 +2093,67 @@ construct while WT is ApoE4, so those numbers confound isoform with oligomerisat
 right answer is a binder-local filter set (`i_pTM` + binder pLDDT + interface count, no whole-complex
 `pTM`/`i_pAE`) for targets above ~250 residues. 556 trajectories is enough evidence to ask the
 question; it is not yet enough to answer it, because no round has run the alternative bar.
+
+## 2026-10-03 — "Adaptyv" and "ProteinBase" were always the same dataset, and the labels underneath them are replicated
+
+Consolidating this benchmark into `EVALUATOR/Benchmark/` on muni surfaced two defects that had
+been load-bearing for months.
+
+**One dataset, counted as two.** proteinbase.com publishes the Adaptyv Bio competition results,
+so the two archived folders are two *refold batches* over one dataset. Settled by design-ID
+comparison against the raw export, not by reading: `master_designs.csv` carries exactly the same
+**5,253** ids, every one of the 180 "ProteinBase" designs is a subset of the 2,196-design
+"Adaptyv" labelled universe, and **130 `(design, target)` pairs were refolded in both** — **613
+distinct designs**, not 743. The roll-up therefore double-counted: 5,295 → **5,165** rows, 27 →
+**23** targets, binders 385 → **273**, Kd-carrying designs 350 → **246**, and the pair of
+near-identical AUCs that had been read as independent corroboration ("Adaptyv 0.711 / ProteinBase
+0.711") collapses to **one** macro AUC of **0.7155**. With 75.6 % design overlap and the same
+pipeline, that agreement was close to tautological. The 2026-06-16 screen flip to `mean` was
+argued as trusting "Adaptyv's real Kd over ProteinBase" — two samples of the same dataset; what
+actually differed was sample size and whether Kd had been attached. Moot now (Part U retired the
+knob) but the reasoning was unsound when it was made.
+
+**The merge is lossless, which is why this is cheap to fix.** The Adaptyv batch wins every
+duplicate because it carries the PAE-recomputed panel and the AF3/ESMFold2 ipSAE columns that were
+never archived for the ProteinBase batch, so deduplication only *adds* that batch's 50 unique rows.
+
+**The labels are per-target AND replicated — the real trap.** `evaluations` in the export is
+long-format `{metric, target, value}`: **2,028** `(design, target)` pairs carry a `binding` call,
+usually 2–6 times, and **263** carry more than one `kd` (2–3 distinct values typical, median spread
+**1.54×**, worst **39×**). Any flattening to one row per design silently picks a target and a
+replicate, and the two batches picked differently — `bright-panther-frost`/il7r is **6.80 nM** in
+one batch and **11.86 nM** in the other, which are simply its two replicates. The archived build
+took the **first** record in JSON order (81 % match); an earlier pass of mine took the last. Neither
+is a defensible value. Worse, **89 designs (14.5 %) were counter-screened against a second target**,
+so the wrong pick produces a chimeric row: `radiant-bat-ruby` binds il7r at 8.8 nM and not pd-l1,
+and `master_designs.csv` pairs **pd-l1's `binding=False` with il7r's Kd**. Same bug class as the
+July `candidates.csv` chimeras, this time in the benchmark's ground truth.
+
+Fixed by deriving both labels from the export with a stated aggregation — **Kd = median of the
+distinct replicates, binding = majority of the replicate calls**, keyed on `(design_id, target)`.
+That changed 189 Kd values, corrected **one** binary label (`bright-panther-frost`, unanimously a
+Strong 6.8–11.9 nM il7r binder that had been carrying its pd-l1 counter-screen's `False`), and made
+all 104 previously-conflicting shared Kd values agree. Affinity ρ moved by at most 0.11 and no
+conclusion changed — the screen still works at ~0.72, affinity still does not rank, nipah/AF3 is
+still the largest wrong-direction correlation at **+0.578**.
+
+**Two things the deeper look reversed, worth recording because both looked settled.**
+`swift-otter-bronze`/egfr is one of only 6 pairs whose binding replicates disagree
+(`[False, False, True]`): majority is `False`, so the archived label was right and the "correction"
+I first proposed would have introduced an error. And the `chain_iptm_interface` docstring claiming
+"the strongest single screen, macro AUC ≈ 0.745" is wrong twice — the row-wise max of three engine
+iPTMs beats it at 0.755 on that same 175-design slice, and on the full 662 the metric falls to
+**0.692**.
+
+**Also measured, as a by-product.** The 130 designs scored in both batches are an accidental
+reproducibility test of our own pipeline, and it passes: ρ **0.989** Boltz-2 / **0.965** AF3 /
+**0.998** ESMFold2, mean Δ iPTM ≤ 0.007. Put that beside our Boltz-2 versus the *designers'*
+reported Boltz-2 on the same 90 Nipah sequences — ρ **0.481**, **27 %** of designs off by more than
+0.2 iPTM — and the disagreement localises to their setup versus ours, not to run-to-run noise in
+ours. That one-to-one check had sat in the archive unscored since June.
+
+**Open:** the Kd is the 2026-01-28 export's replicates; a fresher export could shift the medians
+(one function, `derive_adaptyv_labels()`, and a re-run). The cause of the Boltz-2 gap against the
+designers is unknown — MSA handling or sampling settings are the obvious suspects. And
+`binding_strength` disagrees across replicates on **41** pairs, which the binary AUCs do not use
+but any tier-based analysis would.

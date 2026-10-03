@@ -119,7 +119,8 @@ Promera into `evaluate.sh` as a 5th engine.
 
 **Validation gate (hard):** wire Promera into the pipeline **only if `iCS` (or
 Promera-ipSAE) beats the incumbent** `ipsae_min` macro-AUC (~0.71 Adaptyv / ~0.755
-ProteinBase). If it doesn't beat it, document the negative result and stop.
+the Adaptyv/ProteinBase benchmark — one dataset, so it is a single validation gate,
+not two). If it doesn't beat it, document the negative result and stop.
 → **Gate FAILED; documented; stopped.**
 
 ---

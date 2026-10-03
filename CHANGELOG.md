@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Adaptyv" and "ProteinBase" were one benchmark counted as two.** proteinbase.com publishes the
+  Adaptyv Bio competition results, so the two archived folders are two *refold batches* over the same
+  dataset, not two datasets. Verified by design-ID comparison against the raw export:
+  `master_designs.csv` carries exactly the same 5,253 ids, every "ProteinBase" design is a subset of
+  the "Adaptyv" labelled universe, and **130 `(design, target)` pairs were refolded in both** — 613
+  distinct designs. Consequences: the cross-benchmark roll-up double-counted those 130 designs
+  (5,295 → **5,165** rows, 27 → **23** targets); this benchmark's binders were overstated as 385
+  (→ **273**) and its Kd-carrying designs as 350 (→ **246**); and its "Adaptyv 0.711 / ProteinBase
+  0.711" agreement was never independent corroboration — it is **one** macro AUC of **0.7155**. The
+  2026-06-16 screen-metric flip was likewise justified by trusting "Adaptyv's real Kd over
+  ProteinBase", i.e. by comparing two samples of the same dataset (moot since Part U retired the
+  knob). Methodology text in `report.py`, the `scoring.py` docstrings, `CLAUDE.md` and the standing
+  provenance notes in `docs/` are corrected; the roll-up on muni is rebuilt with its previous
+  outputs preserved under `_combined/superseded_2026-08-09/`.
+- **The benchmark's experimental labels are now derived, not picked.** `evaluations` in the raw
+  export is long-format `{metric, target, value}`, so labels are **per-target and replicated** —
+  2,028 `(design, target)` pairs carry a `binding` call (usually 2–6 times) and 263 carry more than
+  one `kd` (2–3 distinct values typical, median spread **1.54×**, worst **39×**). Flattening to one
+  row per design silently picks a target and a replicate, and the two batches picked differently:
+  `bright-panther-frost`/il7r appears as 6.80 nM in one and 11.86 nM in the other, which are simply
+  its two replicates. 89 designs (14.5%) were also counter-screened against a second target, so the
+  wrong pick yields a **chimeric row** — `radiant-bat-ruby` binds il7r at 8.8 nM and not pd-l1, and
+  `master_designs.csv` pairs pd-l1's `binding=False` with il7r's Kd. The roll-up now derives both
+  labels from the export (**Kd = median of distinct replicates, binding = majority of replicate
+  calls**, keyed on `(design_id, target)`), which changed 189 Kd values, corrected one binary label
+  and made all 104 conflicting shared Kd values agree. Affinity ρ moved by ≤ 0.11; no conclusion
+  changed. Treat `master_designs.csv`'s flat `binding`/`kd` columns as unreliable.
+- **`chain_iptm_interface`'s "≈ 0.745, strongest single screen" docstring was wrong twice over.**
+  0.745 is the 175-design slice; the row-wise max of three engine iPTMs beats it at 0.755 on that
+  same slice, and on the full 662-design refold the metric falls to **≈ 0.692** (IL7R alone drops
+  0.875 → 0.683 from 20 to 96 designs). The docstring now quotes 0.692.
+
 ## [1.1.1] — 2026-09-23
 
 ### Fixed

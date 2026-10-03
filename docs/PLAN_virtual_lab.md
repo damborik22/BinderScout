@@ -56,7 +56,7 @@ critic *with repo access* would plausibly have flagged it.
 
 | Date | Miss | Caught by | Catchability |
 |---|---|---|---|
-| 2026-07-01 | Report methodology claimed *"Adaptyv: 8 hand-curated targets, n > 3,700"* — **contradicted by this repo's own diary**; real = Adaptyv 4-target/662 + ProteinBase 4-target/175 | user review | **High** |
+| 2026-07-01 | Report methodology claimed *"Adaptyv: 8 hand-curated targets, n > 3,700"* — **contradicted by this repo's own diary**; real = one 4-target dataset refolded in two overlapping batches of 662 and 175, **613 distinct designs** (corrected again 2026-10-03: "Adaptyv" and "ProteinBase" are the same dataset) | user review | **High** |
 | 2026-07-01 | `agreement_count` legend read "0–2" against 3 engines; two tier systems under one count table; wet-lab strike-through read as definitive; 3 tools missing native ranks; `str(length).rstrip(".0")` → 140 renders "14" | user review (6 findings, one pass) | **High** |
 | 2026-07-16→23 | BoltzGen's 29 Boltz-2-"selective" designs were **gamed** — 0/29 survived the AF3 confirm | AF3 counter-screen | **High** |
 | 2026-06-18 | "screen-then-invert" looked usable pooled; actually a **Simpson's-paradox artifact** (replicates on EGFR only — IL7R flat, Nipah reversed) | per-target replication | **Med-High** |
@@ -104,7 +104,8 @@ Fires before a report is trusted or wet-lab picks are committed:
 - Every quantitative claim traced to a source in `REPO_DIARY.md` / `CHANGELOG.md` / a
   results CSV. **Unsourced or contradicted numbers are the top finding class** (2026-07-01).
 - Benchmark provenance stated exactly: Adaptyv 4-target/662-design (macro AUC mean 0.710 /
-  max 0.689) and ProteinBase 4-target/175-design (max ~0.755). Never "planned scope".
+  max 0.689) and its 175-design slice (max ~0.755) — the same 4-target dataset in both
+  cases, 613 distinct designs, **not two independent benchmarks**. Never "planned scope".
 - Legends vs. reality: engine count, tier systems, which axis a flag encodes.
 - **Same-engine gaming flagged per tool** — Mosaic / BoltzGen / Protein-Hunter vs Boltz-2;
   PXDesign vs Protenix; BindCraft vs AF2. A design that only its own engine likes is a
