@@ -22,7 +22,7 @@ state). As of `v2.0.x`, 893 tests, ruff + shellcheck clean.
 | **AC** | seed aggregation | **HALF DONE, not DONE.** The row-multiplication hazard is fixed, wired and guarded; **seed aggregation itself was never built**, and the shipped guard forecloses it as written |
 | **Z** | staged cheap-filter | **Closed on SoluProt** (measured: gate and GPU saving are mutually exclusive). `prefilter` remains open on **one measurement**, not an implementation — it is already written |
 | **AE** | tool racing | **Not started, deferred.** Its one cheap prerequisite — per-tool time-to-first-good-design on an archived campaign — has never been measured, so the deferral rests on no evidence either way |
-| **AF** | fourth engine (Chai-1) | **Reopen as an ADDITION.** Source analysis says no sm_86 wall, favourable memory design, outputs match our schema. Unverified by execution |
+| **AF** | fourth engine (Chai-1) | **EXECUTED 2026-10-03 — portability confirmed, cost measured, NOT adopted.** Folds on sm_86 (326-token complex, 5 models); peak 9,484 MiB allocated and *identical* with/without the 6 GB ESM2-3B, confirming the component-shuffling design; **345.9 s with ESM vs 86.4 s without** → ~48 vs ~12 GPU-h per 500 designs, against ~30 for all three current engines combined. Adoption is a separate decision: a 4th engine re-scopes the rank |
 | **AG** | fleet/Clara benchmark consumer | **Not started** — and NOT a measured negative like Z/AH. No measurement, no verdict; only the naming blocker cleared. Needs ~50–95 GPU-hours |
 | **AH** | BindPred | **Obtained and REJECTED** — benchmarked blind on our SPOC data, ranks backwards |
 | **AI** | tune Mosaic's design loss | **NULL at this sample size (2026-10-03).** 5 arms, 2 held-out engines: nothing survives Bonferroni; 3 placebo arms scatter as widely as the effects. The real finding is a power calculation — **~140 designs/arm needed, we ran 8** (~26 GPU-h for a real answer) |
@@ -37,7 +37,8 @@ counted AC as done. Verified against the code, the twelve sort into:
 | **half shipped** | AD, AC, AA | one half wired, the other unbuilt. AC's shipped half *forecloses* its unbuilt half |
 | **closed, measured** | Z (on SoluProt), AH | the work is done and the answer is no. **Not** outstanding |
 | **deferred, no measurement** | AE, AI*, AJ | a judgement, not a result. AI now has its first arms |
-| **not started** | AF, AG | no measurement, no verdict. AF has a scoping study; AG has only GPU-hours |
+| **not started** | AG | no measurement, no verdict; only GPU-hours |
+| **measured, not adopted** | AF | folds on sm_86 and the cost is known; adoption deferred because it re-scopes the rank |
 | **library only** | Y | works, `list_benchmarks()` returns `[]` — zero contents |
 
 The distinction that matters when reading this as a to-do list: **"closed, measured" is
@@ -480,6 +481,58 @@ the low peak is PCIe-bound and is the risk the source cannot settle. Packaging i
 own env comes **after** those three answers, not before — `chai_lab` currently sits in
 `binderscout_protein_hunter`, a design tool's env, and building a fourth refold env for
 an engine that has never folded here would be the wrong order.
+
+### EXECUTED 2026-10-03 — it folds on sm_86, and the cost is the ESM embedder
+
+Run on BM2 (RTX 3090, sm_86, idle), `chai_lab 0.6.1`, torch 2.5.1+cu121. One
+binder:target complex from the public Adaptyv IL7R set — target 219 aa + binder 107 aa,
+**326 tokens**, squarely in our size regime. Both arms produced 5 models and scores.
+
+| | wall-clock | peak allocated | peak reserved | iPTM | pTM |
+|---|---|---|---|---|---|
+| `use_esm_embeddings=True` (default) | **345.9 s** | 9,484 MiB | 12,300 MiB | 0.285 | 0.660 |
+| `use_esm_embeddings=False` | **86.4 s** | 9,484 MiB | 12,300 MiB | 0.104 | 0.404 |
+
+**1. No architectural wall on sm_86.** The source analysis was right: no `triton`/`pallas`
+request, no shared-memory abort, nothing resembling AF3's failure mode. Answered.
+
+**2. The component-shuffling memory design is real and measurable.** Peak allocated is
+**identical** with and without the ~6 GB ESM2-3B, which is only possible because the
+embedder is moved to the GPU and back rather than retained — exactly `_component_moved_to`.
+So peak ≈ largest single component, not the sum. **But note the reserved figure: 12,300 MiB
+exceeds a 12 GB card's 12,288 MiB.** Allocated (9,484) would fit, reserved would not, so a
+3060 is marginal rather than clearly fine and would need
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` at minimum. Untested there.
+
+**3. Throughput is the problem, and it is the ESM embedder.** 345.9 s against 86.4 s — ESM
+costs **260 s per design**, 4× the total. Extrapolated to a 500-design pool: **~48 GPU-h
+with ESM, ~12 GPU-h without.** For scale, the entire existing 3-engine pipeline is ~30 GPU-h
+per 500 designs. **So Chai-1 with ESM embeddings costs more than all three current engines
+combined; with them off it is competitive.** Turning them off is an accuracy change, not a
+free saving, so this is a real trade rather than a tuning knob.
+
+### The one design was a non-binder, and that is interesting but it is n=1
+
+Checked after the fact: the folded design is `binding=False`, `expressed=True` — a
+**confirmed non-binder** — and our three engines scored it **Boltz-2 0.905, ESMFold2 0.827,
+AF3 0.52**. Chai-1 gave 0.285/0.104. So on this one design Chai-1 is the only engine that
+rejects a true non-binder two of ours rank highly, which is precisely the independent fourth
+opinion AF was re-scoped around.
+
+**It is not evidence of ranking quality and must not be cited as such.** Two reasons:
+- **n=1.** This repo retracted five single-pool effects in the week of 2026-09-29.
+- **Chai-1 ran MSA-free while our three engines read a cached target MSA.** A uniformly
+  less-confident engine rejects non-binders *and* binders alike, which looks like
+  discrimination and is not. A calibration shift is the leading alternative explanation for
+  these numbers, and n=1 cannot separate it from skill.
+
+**What a real AF measurement now needs:** the labelled 3-engine subset (563 designs,
+4 targets), ESM off for cost, and a decision on MSA parity — either feed Chai-1 the same
+cached target MSA our others use, or report it explicitly as the MSA-free engine. At ~86 s
+that is ~13 GPU-h, which is affordable. Until then AF stays **unadopted**: a 4th engine
+re-scopes the rank (`--min-engines 3` silently becomes "3 of 4", and `consensus_iptm_mean`
+over four is not the metric Part U validated), so adoption is a separate decision from
+portability — which is all that was asked here.
 
 ---
 
