@@ -254,6 +254,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **First pool registered in the label registry: `adaptyv`** (Part Y shipped as a working
+  library whose `list_benchmarks()` returned `[]`). 2,018 labelled designs over 4 targets;
+  the manifest is committed, the label rows are not — they live in the private store named
+  by `$BINDERSCOUT_BENCHMARK_STORE` and are verified against the manifest's SHA-256. Only
+  Adaptyv is registered: our own SPOC panels are deliberately left out for now.
+
+  The manifest carries four caveats, two of which bound what may be computed from the pool:
+  Adaptyv and ProteinBase are **one** dataset (75.6 % design overlap, so agreeing figures
+  from the two refold batches are not independent replication); only **563 of the 2,018**
+  designs were scored by all three engines, which is the subset every published macro-AUC
+  including 0.7113 comes from, and coverage was never random, so a figure recomputed on all
+  2,018 is not comparable; non-expressed designs are labelled non-binders (immaterial here
+  at 20 of 305 negatives, **−0.002**, but the identical conflation moves our 125-design
+  CALCA panel by ~0.22, so the "immaterial" finding must not be carried to a smaller pool);
+  and the nipah labels **disagree with the source table** — 1,030 labelled / 103 binders
+  here against `master_designs.csv`'s `nipah-glycoprotein-g` at 927 / 1, which is
+  unresolved and makes any nipah-inclusive number provisional.
+
+- **`tests/test_registered_pools_are_wellformed.py`** — validates the manifests actually in
+  the tree, which nothing did: the existing suite exercises the library against synthetic
+  manifests under `tmp_path`, so a malformed real manifest would only surface when someone
+  loaded that pool, by which time its number carries a right-looking name. Checks the audit
+  fields, that `name` matches its directory (a mismatch loads one pool's provenance against
+  another's rows), that the checksum is a real digest rather than the schema's placeholder,
+  that caveats are not a stub, and that the declared label file is neither present nor
+  tracked **and would be gitignored** — `git add` refuses an ignored path without `-f`, so
+  that last one is the guard that actually prevents the irreversible mistake. Runs with no
+  private data, which is every CI run. Mutation-tested against five reversions.
+
 - **`agreement_denom` — `agreement_count` now ships with a per-design denominator.**
   `(vals > thr).fillna(False)` is False both when an engine scored a design and rejected it
   and when the engine never scored it at all, so `agreement_count = 1` could not

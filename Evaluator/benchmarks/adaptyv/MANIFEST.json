@@ -1,0 +1,13 @@
+{
+  "name": "adaptyv",
+  "description": "Curated Adaptyv/ProteinBase de novo binder pool, 4 targets (EGFR, IL7R, Nipah glycoprotein G, PD-L1), with replicated binding calls",
+  "source": "Adaptyv Bio binder-design competition rounds + ProteinBase collection, assembled 2026-10-02 on the MUNI share under EVALUATOR/Benchmark/; see that directory's README.md and PROVENANCE.md",
+  "n_designs": 2018,
+  "label_column": "binds",
+  "label_meaning": "1 = measured binder, 0 = measured non-binder. Non-expressed designs carry binds=0 (see caveats) -- all 223 expressed=False rows are labelled 0.",
+  "labels": {
+    "filename": "labels.csv",
+    "sha256": "c71037eaaa12b48fa6a437513c39c47459eaa396066a51e8a4d85556c4306222"
+  },
+  "caveats": "FOUR, and the third and fourth bound what may be computed from this pool. (1) 'Adaptyv' and 'ProteinBase' are ONE dataset, not two corroborating ones -- the share's adaptyv_662 and proteinbase_175 directories are two refold batches over the same designs with 75.6% overlap, so agreeing figures from them are not independent replication. (2) Only 563 of these 2018 designs were scored by all three refold engines (egfr 190/826, il7r 96/96, nipah 211/1030, pd-l1 66/66); every published macro-AUC from this pool -- including consensus_iptm_mean 0.7113 -- is computed on that 563 subset, and coverage was never random, so a figure recomputed on all 2018 is not comparable. The n_engines_scored column records it per design. (3) Non-expressed designs are labelled as non-binders, conflating 'did not bind' with 'did not express'. On the 563 subset this is 20 of 305 negatives and excluding them moves consensus_iptm_mean by -0.002 (0.7113 -> 0.7093), so it is immaterial here -- but the same conflation on our own 125-design CALCA panel is 11 of 26 negatives and moves the AUC by ~0.22, so do not carry this 'immaterial' finding to a smaller pool. The expressed column is included so the filter is available. (4) UNRESOLVED: the nipah labels disagree with the source table. Here nipah is 1030 labelled with 103 binders (10%); 00_source_data/master_designs.csv has nipah-glycoprotein-g at 927 designs with 1 binder (0.1%). Similar names, incompatible label sets, almost certainly two sources -- there is a separate proteinbase_collection_nipah-binder-competition-results.csv. Nipah is the largest single block, so any nipah-inclusive number from this pool is provisional until that is settled. Filter on target to exclude it."
+}
