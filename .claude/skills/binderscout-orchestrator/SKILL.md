@@ -379,7 +379,7 @@ If a user says "I want iPTM ≥ 0.85," that's a goal, not an immutable constrain
 
 ### 6.3 Don't compare scoring engines directly
 
-iPTM from Boltz-2 (with target MSA) ≠ iPTM from AF2-multimer. Empirically on 2VDY, PC's top tier ≥0.70 corresponds roughly to PH's top tier ≥0.85 — different engines, different bars. Cross-engine refold + `ipsae_min` agreement is what unifies them at the campaign's final ranking. See `references/tools/README.md` cross-method bias matrix.
+iPTM from Boltz-2 (with target MSA) ≠ iPTM from AF2-multimer. Empirically on 2VDY, PC's top tier ≥0.70 corresponds roughly to PH's top tier ≥0.85 — different engines, different bars. What unifies them at the campaign's final ranking is the cross-engine refold and **`consensus_iptm_mean`** — the mean of the three engines' PAE-recomputed ipTM, behind a `--min-engines` gate (see §3 item 3). **Not** `ipsae_min`, and **not** `agreement_count`: both are diagnostics, and the absolute ipSAE cut they use measured inverted against our own Kd data. See `references/tools/README.md` cross-method bias matrix.
 
 ### 6.4 Negative results are evidence
 

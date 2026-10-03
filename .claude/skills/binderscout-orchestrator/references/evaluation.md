@@ -121,12 +121,40 @@ agreement_count = sum(1 for engine in available_engines if engine.ipsae_min > ip
 
 Threshold 0.61 is the per-engine "pass" cutoff (and the same number that goes into `agreement_count`).
 
-**The orchestrator's ranking:**
+> **These tiers did NOT hold up against our own experimental results** (two targets with
+> measured Kd, 2026-09-28): the designs the 0.61 cut *rejected* bound tighter than the ones
+> it kept, and on one target the "Reject" tier held most of the confirmed binders while
+> "High" was empty. They are absolute values calibrated elsewhere and do not transfer to a
+> short-helix target. **Never present a tier as evidence a design will bind.**
 
-1. Primary sort: `agreement_count` **descending** (3 > 2 > 1 > 0)
-2. Secondary sort: chosen ipsae_min aggregator **descending** (typically `mean(ipsae_min across engines)` or `min(ipsae_min across engines)`; campaign choice)
+**The ranking — `agreement_count` is NOT it, and there is nothing to choose.**
 
-This produces a single ranked CSV that respects "engine disagreement is signal" while still being deterministic.
+This section used to instruct a primary sort on `agreement_count` and a campaign-chosen
+ipSAE aggregator. Both were removed in Part U. There is **ONE** ranking, it is not
+selectable, and `rank_designs()` in `scoring.py` is its only implementation:
+
+1. **Gate:** a design must have been scored by at least `--min-engines` independent
+   engines (default **3** = Boltz-2 / AF3 / ESMFold2; floor 2). Recorded in
+   `passes_engine_gate`. Failures are ranked **last, not dropped**.
+2. **Sort:** `consensus_iptm_mean` **descending** — the mean of the three engines'
+   **PAE-recomputed** ipTM (`boltz_pae_iptm`, `af3_pae_iptm`, `esmfold2_pae_iptm`), not
+   the engines' self-reported `*_iptm`.
+3. **Ties:** `consensus_iptm_n` desc (more engines behind an equal mean wins), then
+   `consensus_iptm` (the max) desc, then binder pLDDT desc.
+
+`agreement_count` does not enter that sort at any position, and no aggregator is a
+campaign choice. **Do not re-derive a ranking in the orchestrator** — read the `rank`
+column the report writes. Searching for a better metric on labelled data measured
+*worse*: honest nested selection over 72 metrics scored 0.5170 against 0.5552 for
+`consensus_iptm_mean` alone (p=0.0014).
+
+**What `agreement_count` is for.** It is a **warning flag for a human**, and it reads a
+*different quantity* from the one the rank averages: the rank averages **ipTM**, while
+`agreement_count` counts engines over an absolute **ipSAE** threshold. The useful reading
+is the disagreement between the two — a high ipTM mean with only two engines calling the
+ipSAE high is worth a second look. As of 2026-10-03 it is reported in `wetlab_reason` as a
+note that **cannot** withhold `wetlab_recommended`. Do not gate, stratify or rank on it.
+As a pool-wide screen it was a flat null (macro-AUC 0.532, 87.2 % of designs tied at zero).
 
 ---
 
