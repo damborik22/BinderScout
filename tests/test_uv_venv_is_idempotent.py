@@ -39,9 +39,7 @@ INSTALLERS = ["install/install.sh", "install/install_aarch.sh"]
 # plain \buv\s+venv\b matched nine such strings and three real calls, so the test
 # reported six phantom offenders. An invocation is always followed by a flag or a
 # path, and prose never is.
-_CALL = re.compile(
-    r"""(?:\buv|\$\{UV\}|'\$\{UV\}')\s+venv(?=\s+(?:--|-\w|[./$'"]))[^\n]*(?:\\\n[^\n]*)*"""
-)
+_CALL = re.compile(r"""(?:\buv|\$\{UV\}|'\$\{UV\}')\s+venv(?=\s+(?:--|-\w|[./$'"]))[^\n]*(?:\\\n[^\n]*)*""")
 
 
 def _calls(text: str) -> list[str]:
@@ -57,8 +55,7 @@ def test_every_uv_venv_call_passes_clear(rel: str) -> None:
     assert not offenders, (
         f"{rel} has {len(offenders)} `uv venv` call(s) without --clear, so re-installing that "
         "tool on a machine that already has its venv fails at the first step and silently "
-        "leaves the old environment in place:\n  "
-        + "\n  ".join(" ".join(c.split())[:140] for c in offenders)
+        "leaves the old environment in place:\n  " + "\n  ".join(" ".join(c.split())[:140] for c in offenders)
     )
 
 
