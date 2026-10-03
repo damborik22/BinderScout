@@ -1892,6 +1892,34 @@ hold at once, and conflating them is the trap. Costed the ask anyway: 15 per too
 per-tool rates needs **~119,000 designs, ~5.6x the entire round-1 campaign**, and BoltzGen cannot
 reach it at any scale (0/9,986).
 
+**Correction, 2026-10-03 — under the adopted label convention there is no CALCA-vs-CBG contrast.**
+The figures above exclude 11 of the panel's blank-`KD` rows: `CALCA_SPOC.csv` holds **125** designs
+(99 with a Kd, 26 blank) while this entry and the EuRosettaCon poster use **114**, stated as *99
+binders, 15 non-binders*. A blank cell means *binding not detected* **or** *not expressed*, and the
+panel records nothing that distinguishes them — so the exclusion rests on an assumption the data
+cannot support. **Operator decision 2026-10-03: a design with no measured Kd is scored `not
+bound`**, unless an expression failure is evidenced for it. That is the conservative direction — if
+some blanks really were expression failures they are unmeasured for binding, and counting them as
+non-binders adds noise that *deflates* AUC, biasing against our own predictor.
+
+Re-measured on the sheet's own `Mean_ipTM` under that convention: **CALCA 0.4835** on 125 designs
+(was 0.706 on 114) and **CBG 0.4595** on 136 (against the 0.496 above). CBG barely moves because
+its negative class is 127; CALCA moves 0.22 because 11 of 26 is **42 %** of its negatives. So the
+**between-target contrast this entry rests on is 0.4595 vs 0.4835 — it is gone**, and with it the
+"pool mean iPTM tells you the target is tractable" reading. Both targets measure at chance.
+
+What is *not* affected: the external benchmark. Its labels already score non-expressed designs as
+non-binders — all 223 `expressed=False` rows carry `y = 0` — so its **0.7113** is a full-panel
+figure, unchanged by this decision, and it was checked against the flag directly (expressed-only
+0.7093, **−0.002**). The gap between our panels and the benchmark is negative-class size, not
+method. And the `135/137 match` verified above still holds: this was our metric being tested, not a
+proxy. The label rule was the problem, not the column.
+
+The EuRosettaCon poster's **n = 114 (99/15)** is therefore superseded rather than merely
+re-derived. The wording rule from the 2026-09-10 Adaptyv *n* correction extends to this: alongside
+*labelled* and *scored*, state that blanks are scored as non-binders. Full detail:
+`docs/PLAN_2.0_PART_AK_verify_the_rank.md` §0.
+
 Corroboration that CBG is a *target* problem, not a sampling-depth problem — BoltzGen, identical
 filters, ~10k designs against each target: `pass_filter_rmsd` ("folds as intended")
 **80.3 % CALCA vs 5.2 % CBG**, while every composition filter behaves the same on both. The

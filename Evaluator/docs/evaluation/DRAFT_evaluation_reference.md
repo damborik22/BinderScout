@@ -106,25 +106,32 @@ villain was Boltz-2.
 **This section belongs near the top of the final doc.** It is what decides whether a top-N
 list should be trusted.
 
-| pool | binders | `consensus_iptm_mean` within-target AUC |
-|---|---|---|
-| CALCA, **expressed only** (114 of 125) | 99 vs 15 | **~0.706** |
-| CALCA, **full panel** (125) | 99 vs 26 | **0.4835** |
-| CBG / 2VDY (full panel, 136 scored) | 10 (7.3 %) | **0.4595** (0.496 recorded) |
-| curated Adaptyv/ProteinBase (563, 4 targets) | 258 (45.8 %) | **0.7113** |
-| …same, expressed only (543) | 258 vs 285 | 0.7093 (**−0.002**) |
+**Label convention (operator decision, 2026-10-03): a design with no measured Kd is scored
+`not bound`** — not "untested", not "not expressed" — unless there is evidence of an expression
+failure for that design. Our panels record a Kd or a blank and nothing else, so any
+expression-based exclusion would be an unsupported assumption. The convention is deliberately
+conservative: if some blanks were expression failures, they are unmeasured for binding and
+counting them as non-binders adds noise that *deflates* AUC, biasing against our own predictor.
 
-**Always state the denominator.** A blank `KD` on our panel means *binding not detected* **or**
-*not expressed*; the 114 figure excludes the 11 non-expressed, which is a principled filter and
-the same one Adaptyv uses. The filter is near-free there (6.6 % of the negative class, −0.002)
-and decisive on CALCA (42 % of it, ~0.22) purely because CALCA has 26 negatives. Expressed-only
-asks *can the metric rank binding among proteins that exist*; the full panel asks *will a top
-pick yield a usable hit* — the campaign question. Neither is wrong; quoting one without its
-denominator is. Note `CALCA_SPOC.csv` has no expressed column, so the 114 cannot be recomputed
-from it (Part AK, step AK0).
+| pool | n | binders | within-target AUC |
+|---|---|---|---|
+| CALCA (our SPOC panel) | 125 | 99 | **0.4835** |
+| CBG / 2VDY (our SPOC panel) | 136 scored | 10 | **0.4595** |
+| curated Adaptyv/ProteinBase, 4 targets | 563 | 258 | **0.7113** |
 
-**On a hard target the ranking measured at chance.** On CBG the `>= 0.85` slice bound at
-**6.8 %** against **10.0 %** below it (Fisher p=0.74) — the lever ran backwards. Confirmed
+The benchmark's labels already follow this convention — all 223 of its `expressed=False` rows are
+`y = 0` — so 0.7113 is its full-panel figure and is unchanged by the decision. Only CALCA moves:
+the diary and the EuRosettaCon poster use 114 designs (99 binders / 15 non-binders), excluding 11
+blanks, and those 11 are non-binders here. CBG barely moves because its negative class is 127.
+
+**Both of our own targets therefore measure at chance, while the external benchmark holds at
+0.711.** The 0.711 is not thereby wrong — it was verified independently, including against its own
+expression flag (−0.002) — but we have **no own-data corroboration** of it, and the figure we had
+been citing as such does not survive this convention. Part AK exists for that reason.
+
+**On a hard target the ranking measured at chance, and that part is unchanged.** On CBG the
+`>= 0.85` slice bound at **6.8 %** against **10.0 %** below it (Fisher p=0.74) — the lever ran
+backwards. Confirmed
 to be our metric and not a proxy: the panel's `Mean_iPTM` matches `consensus_iptm_mean` on
 135/137 designs to the decimal.
 

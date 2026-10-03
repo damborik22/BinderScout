@@ -14,62 +14,72 @@ that matters more than the GPU work.
 
 ---
 
-## 0. Why this is needed — one number, two denominators
+## 0. Why this is needed — under the adopted label convention, both of our own targets are at chance
 
-Our own wet-lab figure and the external benchmark figure are **both correct and are not the
-same measurement**, and nothing records which is which at the point of use.
+**Label convention, operator decision 2026-10-03: a design with no measured Kd is scored
+`not bound`.** Not "untested", not "not expressed" — *not bound*, on both SPOC panels, unless and
+until there is evidence of an expression failure for that design. The panels record a Kd or a
+blank cell and nothing else, so an expression-based exclusion would be an assumption we cannot
+support from the data we hold. This is deliberately the **conservative** direction: if some blanks
+really were expression failures, they are unmeasured for binding and calling them non-binders adds
+label noise that *deflates* AUC. The bias therefore runs against our own predictor, which is the
+correct way round for a claim about it.
 
-`CALCA_SPOC.csv` holds **125** designs: 99 with a numeric `KD`, 26 blank. Blank means *binding
-not detected* **or** *not expressed* — two different outcomes sharing one empty cell. The diary
-and the EuRosettaCon poster use **114** designs, stated as *99 binders, 15 non-binders*. So the
-26 blanks split 15 / 11, and the exclusion criterion is **expression**, not score:
+Applying it:
 
-| label set | what it asks | within-target AUC |
-|---|---|---|
-| **114** — expressed only (99 binders vs 15 expressed non-binders) | can the metric rank binding among proteins that exist? | **~0.71** |
-| **125** — full panel, non-expressed counted as non-binders | will a top pick yield a usable hit? | **0.4835** |
+| pool | n | binders | within-target AUC |
+|---|---|---|---|
+| CALCA, full panel | 125 | 99 | **0.4835** |
+| CBG / 2VDY, full panel | 136 scored | 10 | **0.4595** |
+| curated Adaptyv/ProteinBase | 563 | 258 | **0.7113** |
 
-The second is the campaign question — a design scoring 0.9 that does not express is a failed
-pick — so both belong in the record, each with its denominator.
+**The external benchmark is unaffected, because its labels already follow this convention.** All
+223 `expressed=False` rows in `master_designs.csv` carry `y = 0`. The 0.7113 we have always quoted
+*is* the full-panel number; 0.7093 was the expressed-only variant, and the −0.002 gap between them
+is simply how little the question matters when the negative class is large.
 
-**The external benchmark uses the same convention, and this was verified rather than assumed.**
-`00_source_data/master_designs.csv` carries an `expressed` flag. On the all-3-engine labelled
-subset, 20 of 563 designs are `expressed=False` and **all 20 are labelled non-binders** — the
-identical conflation. Excluding them moves `consensus_iptm_mean` **0.7113 → 0.7093**, i.e.
-**−0.002**. So the filter is the same; only the leverage differs. On Adaptyv it removes 6.6 % of
-the negative class, on CALCA **42 %** (11 of 26). That is the whole explanation for why 0.711 is
-robust and the CALCA figure moves by 0.22, and it is a property of negative-class size, not of
-method.
+**What changes is CALCA.** The diary and the EuRosettaCon poster use **114** designs, stated as
+*99 binders, 15 non-binders* — i.e. 11 of the 26 blanks excluded. Under the adopted convention
+those 11 are non-binders, the panel is 125, and the figure is **0.4835** rather than ~0.706. CBG
+barely moves (0.4595 against the recorded 0.496) because its negative class is 127, so a handful
+of rows changes nothing. The leverage is entirely negative-class size: 11 of 26 is 42 % of CALCA's
+negatives against 20 of 305, or 6.6 %, on Adaptyv.
 
-**What is actually broken is provenance, not the number.** The 114 cannot be recomputed from
-`CALCA_SPOC.csv` — that file has no expressed/tested column, so the poster's n exists only in the
-poster and in the lab diary. This is the same class as the 662-vs-563 error caught on 2026-09-10,
-and that entry's wording rule extends to it: **report *expressed* and *tested* separately whenever
-an n sits next to an AUC**, exactly as *labelled* and *scored* already are.
+**So: both of our own wet-lab targets measure at chance, while the external benchmark holds at
+0.711.** That is the honest picture and it is the reason this part exists. It does not make the
+0.711 wrong — it was verified independently here — but it does mean we have no *own-data*
+corroboration of it, and that the one figure we had been citing as such does not survive the
+convention we have now chosen.
 
-CBG is insensitive either way (127 negatives) and reproduces: 0.4595 measured against the
-recorded 0.496.
+### Consequences to carry forward
 
-### What this does and does not say
+- **`docs/REPO_DIARY.md`'s 2026-09-10 entry** records "AUC 0.496 on CBG versus 0.706 on CALCA" and
+  builds a between-target reading on the contrast ("pool mean iPTM tells you the target is
+  tractable"). Under this convention the contrast is 0.4595 vs 0.4835 — **there is no contrast**,
+  and that reading loses its support. A dated correction is appended to that entry rather than
+  rewriting it.
+- **The EuRosettaCon poster printed n = 114 with 99 binders / 15 non-binders.** That number is
+  superseded, not merely re-derived. Worth knowing before the panel is cited again.
+- **The wording rule from the 2026-09-10 Adaptyv *n* correction still applies** — report
+  *labelled* and *scored* separately whenever an n sits next to an AUC — and now extends to the
+  binder/non-binder rule itself: state that blanks are scored as non-binders.
 
-It does **not** say either figure is wrong, and it does not touch the 0.711. It says the two have
-different denominators, only one of which is written down where it is used, and that the
-campaign-relevant reading is the stricter one. Verification is therefore about making the
-denominator explicit and widening the evidence — not about replacing the metric.
+## 1. Step AK0 — free, do first (no longer blocking)
 
-## 1. Step AK0 — free, blocking, do before any GPU time
+**Re-state the SPOC figures under the adopted convention, and drop the 114-design split.**
+No new data needed: CALCA is 0.4835 on 125 designs and CBG is 0.4595 on 136. Also drop the 3 CBG
+rows marked `Duplicated, exclude` in its `Note` column, which were left in today's figure — too
+few to move a 136-row AUC, but they should not be in a final table.
 
-**Make CALCA's expressed flag recoverable.** Neither `CALCA_SPOC.csv` nor `CBG_SPOC_NEW.csv`
-carries the column that distinguishes *expressed, no binding detected* from *not expressed* —
-`master_designs.csv` has `expressed`, but that is the Adaptyv data, not ours. So the poster's
-114-design split (99 / 15) cannot be reproduced from the file we share, and the two AUCs cannot
-be reported side by side with their denominators. Add the column to the panel; both numbers then
-follow from one file and neither needs explaining.
+**Expression stays an open question, not a blocking one.** If expression data ever arrives for the
+panel, the expressed-only figure becomes computable and worth reporting *beside* the full-panel
+one; until then there is nothing to recover and no choice to make. This step is bookkeeping, not a
+dependency — which is a change from this plan's first draft, where it was the blocker.
 
 Also drop the 3 CBG rows marked `Duplicated, exclude` in its `Note` column — they were left in
 today's 136-row figure. Too few to move it, but they should not be in a final table.
 
-**Cost:** zero GPU. **Blocker:** needs the lab sheet or the operator, not compute.
+**Cost:** zero GPU, and no external input required.
 
 ## 2. Step AK1 — the GPU verification, staged so nothing big runs unattended first
 
