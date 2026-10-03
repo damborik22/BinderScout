@@ -17,23 +17,50 @@ state). As of `v2.0.x`, 893 tests, ruff + shellcheck clean.
 |---|---|---|
 | **AD** | discovery rank / `generation_index` | **Half shipped.** Extraction + provenance done across 5 tools; the metric is blocked on a decision |
 | **Y** | private label registry | **Shipped as a library**, and its naming collision with AG is now settled |
-| **AA** | cheap pre-GPU screens | **3 of 6 shipped.** Two need models, one closed, promotion needs labels |
-| **AB** | diversity | **Not built.** Measured properly: ~13% of design pairs are same-fold but sequence-unrelated — real, modest |
-| **AC** | seed aggregation | **DONE.** The hazard was live; fixed and guarded |
-| **Z** | staged cheap-filter | **Measured — do not build on SoluProt.** Gate and GPU saving are mutually exclusive; `prefilter` is the remaining candidate |
-| **AE** | tool racing | **Verdict: defer.** Needs the fleet; no evidence it is the bottleneck |
+| **AA** | cheap pre-GPU screens | **3 of 6 shipped**, but D3 (AggreProt) is **built-and-tested with nothing calling it** — no CLI, no evaluate.sh step, no report consumer, no env |
+| **AB** | diversity | **SHIPPED AND WIRED** (2026-09-29). Both axes, the `Fold` column and the suggested swap. The "not built" verdict below is superseded |
+| **AC** | seed aggregation | **HALF DONE, not DONE.** The row-multiplication hazard is fixed, wired and guarded; **seed aggregation itself was never built**, and the shipped guard forecloses it as written |
+| **Z** | staged cheap-filter | **Closed on SoluProt** (measured: gate and GPU saving are mutually exclusive). `prefilter` remains open on **one measurement**, not an implementation — it is already written |
+| **AE** | tool racing | **Not started, deferred.** Its one cheap prerequisite — per-tool time-to-first-good-design on an archived campaign — has never been measured, so the deferral rests on no evidence either way |
 | **AF** | fourth engine (Chai-1) | **Reopen as an ADDITION.** Source analysis says no sm_86 wall, favourable memory design, outputs match our schema. Unverified by execution |
-| **AG** | fleet/Clara benchmark consumer | **Not started, now unblocked.** Naming settled; only GPU-hours remain |
+| **AG** | fleet/Clara benchmark consumer | **Not started** — and NOT a measured negative like Z/AH. No measurement, no verdict; only the naming blocker cleared. Needs ~50–95 GPU-hours |
 | **AH** | BindPred | **Obtained and REJECTED** — benchmarked blind on our SPOC data, ranks backwards |
-| **AI** | tune Mosaic's design loss | **Verdict: defer on HARDWARE only.** The earlier "conflicts with Part U" reason was wrong — corrected 2026-09-29 |
-| **AJ** | MD reverse check | **Verdict: do not build now.** No tooling, and the premise is weak |
+| **AI** | tune Mosaic's design loss | **FIRST ARMS RUN (2026-09-30).** `0.1*HelixLoss` +0.111 AF3 ipTM (p=0.0062, held-out); the Rg hinge does nothing. Placebo control in flight |
+| **AJ** | MD reverse check | **Verdict: do not build now** — on cost and a weak premise. "No tooling" was wrong: OpenMM 8.6 with CUDA is in the `BindCraft` env (GROMACS is not) |
 
-**2½ of 12 complete.** Four (AE, AF, AI, AJ) had *zero* prior coverage; they now
-have verdicts rather than silence.
+**Recount, 2026-10-03** — the old "2½ of 12 complete" line predated AB shipping and
+counted AC as done. Verified against the code, the twelve sort into:
+
+| state | parts | meaning |
+|---|---|---|
+| **done + wired** | AB | shipped and reachable on the documented path |
+| **half shipped** | AD, AC, AA | one half wired, the other unbuilt. AC's shipped half *forecloses* its unbuilt half |
+| **closed, measured** | Z (on SoluProt), AH | the work is done and the answer is no. **Not** outstanding |
+| **deferred, no measurement** | AE, AI*, AJ | a judgement, not a result. AI now has its first arms |
+| **not started** | AF, AG | no measurement, no verdict. AF has a scoping study; AG has only GPU-hours |
+| **library only** | Y | works, `list_benchmarks()` returns `[]` — zero contents |
+
+The distinction that matters when reading this as a to-do list: **"closed, measured" is
+finished work, not remaining work.** Counting Z and AH as outstanding overstates what is
+left by two, and counting AF alongside them understates it — AF has a completed source
+analysis and zero implementation, which is a different thing from a measured no.
 
 ---
 
-## AC — seed aggregation · **DONE, and it was a live defect**
+## AC — seed aggregation · **the HAZARD is fixed; the FEATURE was never built**
+
+> **CORRECTED 2026-10-03.** This section was headed "DONE". What is done is the
+> row-multiplication fix: `merge_refold_results` dedupes per engine and the outer merge
+> carries `validate="1:1"`, wired on the documented path (`run_evaluate.sh` ->
+> `evaluate.sh` -> `binder-compare report` -> `merger`). **Seed aggregation itself does
+> not exist**: nothing can produce per-seed rows (`--num-seeds` is not exposed through
+> `evaluate.sh` or the configurator, and the Boltz-2 / ESMFold2 runners take a scalar
+> `--seed`), and AF3 pre-collapses to its top-ranked sample.
+>
+> **The shipped guard forecloses the feature as written**, which is the part worth
+> knowing: `merger.py` keeps the first row per `sequence`, so seed replicates are
+> *discarded* before the report sees them. Building AC means changing that line's
+> semantics, not adding alongside it. Counting this part as complete is what hid that.
 
 The plan listed this as a hazard already running in production (item G10). It was.
 
@@ -125,6 +152,14 @@ with structures. What is now shown is the underlying failure in its within-tool 
 which is the harder case to dismiss.
 
 ### Decision on implementing it now: **no**
+
+> **SUPERSEDED 2026-09-29 — AB was built.** Both axes shipped and are wired into the
+> report: `annotate_sequence_families` (k-mer Jaccard, single linkage) and
+> `annotate_structural_families` (Foldseek TM >= 0.5 over the binder chain alone), plus
+> the `Fold` column with duplicate badges in `top30_slim.html` and a printed suggested
+> swap. `design_families.py` + `foldseek.py`, pinned by `tests/test_design_families.py`
+> and `tests/test_foldseek_runner.py`. The reasoning below for *why* it was deferred is
+> left intact as the record of the decision; the decision itself no longer holds.
 
 Asked directly (2026-09-29) whether to build the Foldseek path. **Not yet**, for reasons
 that only became clear after looking at what already exists:
@@ -635,8 +670,14 @@ already-shipped shadow columns.
 
 Molecular-dynamics validation of designed complexes.
 
-- **No tooling.** Neither GROMACS (`gmx`) nor OpenMM is installed anywhere in this
-  repo's environments.
+- **Tooling: half-present, and the original claim here was wrong.** This bullet read
+  "Neither GROMACS (`gmx`) nor OpenMM is installed anywhere in this repo's
+  environments". **Corrected 2026-10-03:** GROMACS is indeed absent, but **OpenMM
+  8.6.0.dev with a working CUDA platform is installed in the `BindCraft` env**
+  (`Platform` reports `Reference,CPU,CUDA`). So the MD engine is already here and
+  "no tooling" is not a reason. The verdict below still stands on its other two legs
+  — cost, and a premise Part N and Part U both undercut — but it should not be
+  defended with a false one.
 - **Expensive.** MD on a pool is orders of magnitude beyond a refold.
 - **The premise is weak given what 2.0 measured.** Part N closed
   affinity-from-structure-confidence as a negative result, and Part U found that
