@@ -194,7 +194,34 @@ Now published **before** folding as well as after.
 
 ## 5. Open decisions — these are the user's, not the code's
 
-### 5.0 The cross-engine gate should degrade gracefully, not switch off — **identified 2026-10-03, not implemented**
+### 5.0 ~~The cross-engine gate should degrade gracefully~~ — **RETRACTED the same day, measured**
+
+> **Tested and withdrawn 2026-10-03.** See
+> [INVESTIGATION_coverage_premise_2026-10-03.md](INVESTIGATION_coverage_premise_2026-10-03.md).
+> Shrinkage gains **+0.0003 … +0.0006** macro AUC over the raw mean with every CI
+> straddling zero, is **worse** on precision@top-10 % in 8/8 regimes, and `k` is
+> unidentifiable (the objective spans 0.0013 across the whole grid; the leave-one-target-out
+> fit selects both k=0 and k→∞ in every configuration).
+>
+> **And the premise behind the proposal was wrong.** Coverage is 100 % constant on every
+> labelled set we own (Cao 4,442/4,442, denovo 110/110, Adaptyv 563/563). In the only
+> missingness mode we have evidence of — an engine's env absent, or PAE files unresolvable,
+> where 50 Adaptyv rows lost *all three* engines at once — coverage is constant and the
+> gate, the raw mean and shrinkage at any k are **provably the same within-target ranking**.
+> The regime where they differ, per-design heterogeneous coverage, has never been observed.
+>
+> What survives from the reasoning below: the user's premise is **true about errors**
+> (one engine buries a true binder 5.2× more often than all three together, 7.6× on clean
+> labels), and the mean rescues **73.2 %** of binders buried by exactly one engine. The
+> error-correlation estimate is ρ ≈ 0.382 measured within target and within class, not the
+> ρ = 0.52 quoted below, which was computed on the engines' native ipTM rather than the
+> PAE-recomputed columns the ranking averages.
+>
+> The reasoning is kept because the retraction is the useful part: a principled estimator
+> with a fittable parameter is still worth nothing if the failure mode it addresses does
+> not occur.
+
+### 5.0 (superseded) The cross-engine gate should degrade gracefully, not switch off
 
 **The argument, which is the gate's own justification sharpened.** A 3-engine mean can of
 course be worse than a single engine on any given design. But P(one engine wrong) must be
