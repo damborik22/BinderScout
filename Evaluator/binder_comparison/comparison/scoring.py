@@ -896,6 +896,12 @@ def rank_designs(df: pd.DataFrame, min_engines: int = MIN_ENGINES_DEFAULT) -> pd
             f"[rank] no design was refolded by {min_engines}+ engines "
             f"(best coverage in this pool: {n_available}); the ranking is ordered by "
             f"consensus_iptm_mean but NO design cleared the cross-engine gate. "
+            f"CONSEQUENCE, which is worse than it sounds: with the gate empty, "
+            f"passes_engine_gate is constant and stops discriminating, so the order is "
+            f"consensus_iptm_mean alone — and a design scored by ONE engine can now "
+            f"outrank a design scored by {n_available}. That is the single-engine "
+            f"designer-bias failure this gate exists to prevent (a tool's own engine "
+            f"loves its own designs). Do not read the top of this list as a shortlist. "
             f"Run the missing engine(s), or lower the gate with --min-engines "
             f"{max(MIN_ENGINES_FLOOR, n_available)}.",
             stacklevel=2,

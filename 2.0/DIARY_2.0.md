@@ -1135,8 +1135,9 @@ arm was writing into the first one's file.
 ### The readout to trust, and the one not to
 
 The load-bearing check is the cheapest one: **how many terms the optimiser prints**. The
-baseline arm logs exactly nine (`.0` target_contact through `.8` plddt). A bias must add
-one each. That is the only direct evidence the term reached the loss — everything else is
+baseline arm logs exactly ten (`.0` target_contact through `.9` plddt — an earlier note here
+said nine, from a lowercase-only grep that skipped `pTMEnergy`). A bias must add one each;
+the DELTA is the evidence, and it is unaffected by that miscount. That is the only direct evidence the term reached the loss — everything else is
 downstream of it, and a knob that silently does nothing would otherwise look like a term
 that simply did not help.
 
@@ -1207,8 +1208,8 @@ magnitude, and that arm was never run. Until it is, "HelixLoss helps" should be 
 Three things were validated by production runs rather than probes, which is the standard
 this repo keeps failing and then fixing:
 
-* **`ss_bias` is genuinely wired** — term counts 9 / 10 / 10 / 11 across the arms, with
-  the 11 proving the `if/elif` → `if/if` fix at runtime.
+* **`ss_bias` is genuinely wired** — term counts 10 / 11 / 11 / 12 across the arms, with
+  the 12 proving the `if/elif` → `if/if` fix at runtime.
 * **AF3 refolded 56/56 on a 60-token pool on sm_86, zero empty rows**, at
   `--buckets=256`. That is this morning's floor holding on a real pool, in the exact
   configuration that aborted with a shared-memory error.
