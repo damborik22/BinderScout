@@ -1283,3 +1283,66 @@ The placebo is half HelixLoss's magnitude (0.30 vs 0.63). The constant ratio pre
 placebo scaled to 0.63 lands at **+0.085**, matching helix. If it does, H2 is confirmed
 outright. If it lands at +0.041 again — i.e. magnitude does *not* scale — then the
 proportionality was a coincidence of two points and I am wrong again. ~25 min.
+
+### The dose-response refuted my refutation, and the answer is "underpowered"
+
+**2026-10-03 (later).** I wrote the falsification condition down before running it:
+
+> "The constant ratio predicts a placebo scaled to 0.63 lands at +0.085. If it returns
+> +0.041 instead, the proportionality was a coincidence of two points and I am wrong
+> again."
+
+The arm at measured magnitude **0.835** returned **+0.042** (AF3) and **+0.011**
+(ESMFold2), against a prediction of +0.115. The ratio collapses from 0.135 to 0.051/0.013,
+and at magnitude 0.335 the two engines disagree in **sign** (+0.055 vs −0.032). The
+proportionality was a coincidence of two points.
+
+That is three overturns of the same experiment in four days:
+
+1. `HelixLoss helps`, p=0.0062 — killed by a second baseline replicate and a placebo.
+2. `It is magnitude, not content`, two engines agreeing on the ratio to 0.003 — killed by
+   a third magnitude.
+3. Now: **nothing is detectable.**
+
+### Why I kept getting results that were not there
+
+Three placebo arms should measure the same thing. On ESMFold2 they span **0.072**
+(−0.032 to +0.040), and helix's +0.079 sits *inside* that. Across 4 arms × 2 engines the
+Bonferroni threshold is 0.0063 and the best p is 0.0168. No arm survives.
+
+The arithmetic I should have done on day one:
+
+| to detect | AF3 (sd 0.117) | ESMFold2 (sd 0.155) |
+|---|---|---|
+| Δ = +0.04 | ~137/arm | ~240/arm |
+| Δ = +0.087 | ~29/arm | ~51/arm |
+
+We ran **8 per campaign, 16–24 per arm** — between 3× and 12× underpowered for the effects
+being chased. Every apparent result was noise large enough to look like signal at n=16,
+and each new control happened to delete the previous interpretation rather than the
+underlying nothing.
+
+**The deliverable is therefore a budget, not a verdict.** A real answer needs ~140 designs
+per arm × 4 arms × 2 replicates ≈ **26 GPU-hours** plus refolds. That was never budgeted,
+and not budgeting it is why four days produced three retractions. A power calculation costs
+one minute and would have prevented all of them.
+
+One incidental finding worth keeping for whoever designs that sweep: **the achieved term
+magnitude does not track the weight.** Scale 5.0 → 0.30, 12.5 → 0.335, 25.0 → 0.835. A
+stronger term drives the composition to reduce itself, so the loss is self-limiting and a
+weight sweep is not a magnitude sweep.
+
+### What I would do differently, concretely
+
+Not "be more careful". Three specific things:
+
+* **Compute the detectable effect size before the first arm.** If the smallest interesting
+  effect needs 10× the n you can afford, the experiment is not worth running in that form
+  — and you learn that in a minute rather than in four days.
+* **Run the control first, not last.** The placebo was the cheapest arm and the most
+  informative; it ran fourth. Had it run first, "HelixLoss helps" would never have been
+  written down.
+* **Treat agreement between two engines as one observation, not two.** AF3 and ESMFold2
+  agreeing to within 0.01 felt like replication and was the single most persuasive thing
+  in the whole sequence. They were scoring *the same designs*; correlated readouts of one
+  underpowered sample do not become powered by being read twice.

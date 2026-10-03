@@ -25,7 +25,7 @@ state). As of `v2.0.x`, 893 tests, ruff + shellcheck clean.
 | **AF** | fourth engine (Chai-1) | **Reopen as an ADDITION.** Source analysis says no sm_86 wall, favourable memory design, outputs match our schema. Unverified by execution |
 | **AG** | fleet/Clara benchmark consumer | **Not started** — and NOT a measured negative like Z/AH. No measurement, no verdict; only the naming blocker cleared. Needs ~50–95 GPU-hours |
 | **AH** | BindPred | **Obtained and REJECTED** — benchmarked blind on our SPOC data, ranks backwards |
-| **AI** | tune Mosaic's design loss | **MEASURED, and the geometry terms do nothing (2026-10-03).** A random-functional placebo matches `HelixLoss` (p=0.199 AF3). Effect tracks term MAGNITUDE, not content — the loss is under-regularised |
+| **AI** | tune Mosaic's design loss | **NULL at this sample size (2026-10-03).** 5 arms, 2 held-out engines: nothing survives Bonferroni; 3 placebo arms scatter as widely as the effects. The real finding is a power calculation — **~140 designs/arm needed, we ran 8** (~26 GPU-h for a real answer) |
 | **AJ** | MD reverse check | **Verdict: do not build now** — on cost and a weak premise. "No tooling" was wrong: OpenMM 8.6 with CUDA is in the `BindCraft` env (GROMACS is not) |
 
 **Recount, 2026-10-03** — the old "2½ of 12 complete" line predated AB shipping and
@@ -593,7 +593,44 @@ builds the shared runner.
 
 ## AI — tune Mosaic's design loss · **first measured data point, 2026-09-30**
 
-> **UPDATE 2026-10-03 — THE CONTROL OVERTURNED THE RESULT BELOW.** A placebo arm (frozen
+> **UPDATE 2026-10-03 (second, and final for now) — THE DOSE-RESPONSE REFUTED THE
+> MAGNITUDE STORY TOO. The honest verdict is that nothing here is detectable, and the
+> experiment was 3-7x underpowered throughout.**
+>
+> The magnitude hypothesis made a falsifiable prediction and it failed. A placebo at
+> measured magnitude **0.835** should have given +0.115 at the observed ratio of 0.138.
+> It gave **+0.042** (AF3) and **+0.011** (ESMFold2). The ratio collapses from 0.135 to
+> 0.051 / 0.013, and at magnitude 0.335 the two engines disagree in **sign**
+> (AF3 +0.055, ESMFold2 −0.032).
+>
+> | arm | \|term\| | AF3 Δ | Δ/\|term\| | ESM Δ | Δ/\|term\| |
+> |---|---|---|---|---|---|
+> | placebo | 0.300 | +0.041 | 0.135 | +0.040 | 0.135 |
+> | placebo | 0.335 | +0.055 | 0.164 | −0.032 | −0.095 |
+> | helix | 0.630 | +0.087 | 0.138 | +0.079 | 0.125 |
+> | placebo | 0.835 | +0.042 | 0.051 | +0.011 | 0.013 |
+>
+> **What is left is the null.** Three placebo arms that should measure the same thing
+> scatter by 0.072 on ESMFold2, and helix's +0.079 sits *inside* that scatter. Across
+> 4 arms × 2 engines = 8 tests, the Bonferroni threshold is 0.0063 and helix's best
+> p = 0.0168 **fails** it. No arm survives.
+>
+> **The usable result is a power calculation.** With baseline sd 0.117 (AF3) / 0.155
+> (ESMFold2), detecting a +0.04 effect at 80 % power needs **~137 / ~240 designs per arm**.
+> We ran 16–24 — between **3× and 12× underpowered** for the effects being chased. Even
+> the largest apparent effect (+0.087) needs ~29/51. So **Part AI cannot be answered with
+> 8-design arms**, and every "result" in this entry was noise that survived until the next
+> control.
+>
+> Budget for a real answer: ~140 designs per arm × 4 arms × 2 replicates at ~11 min per 8
+> designs ≈ **26 GPU-hours**, plus refolds. That was never budgeted, and it is the actual
+> finding.
+>
+> Also self-limiting, worth knowing before designing the next sweep: the achieved term
+> magnitude does not track the weight. Scale 5.0 → 0.30, scale 12.5 → 0.335, scale
+> 25.0 → 0.835. A stronger term drives the composition to reduce itself.
+>
+> **UPDATE 2026-10-03 (first) — THE CONTROL OVERTURNED THE RESULT BELOW.** A placebo arm (frozen
 > random linear functional of the binder composition; same elu hinge, same 0.1 weight as
 > `HelixLoss`; zero structural content) is **statistically indistinguishable from the helix
 > arm**: AF3 +0.046 p=0.199, ESMFold2 +0.039 p=0.48. Effect per unit of measured term
