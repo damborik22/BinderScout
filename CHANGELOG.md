@@ -117,8 +117,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Measured
 
-- **Part AI, OVERTURNED BY ITS OWN CONTROL (2026-10-03): the geometry terms do
-  nothing. What helps is adding *a* term, in proportion to its magnitude.** A
+- **Part AI: NULL, and the deliverable is a power calculation.** Five arms
+  (baseline / helix / Rg / both / random placebo at three magnitudes), each
+  refolded on both held-out engines. **Nothing survives multiple comparisons:**
+  across 4 arms × 2 engines the Bonferroni threshold is 0.0063 and the best
+  p is 0.0168. Three placebo arms that measure the same thing scatter by 0.072 on
+  ESMFold2, and helix's +0.079 sits *inside* that scatter.
+
+  The magnitude hypothesis (committed earlier the same day) made a falsifiable
+  prediction and failed it: a placebo at measured magnitude 0.835 should have
+  given +0.115 and gave **+0.042** / **+0.011**. At magnitude 0.335 the two
+  engines disagree in sign.
+
+  **The usable finding:** at baseline sd 0.117 / 0.155, detecting +0.04 at 80 %
+  power needs **~137 / ~240 designs per arm**. We ran 16–24 — 3× to 12×
+  underpowered. Part AI cannot be answered with 8-design arms; a real answer is
+  ≈26 GPU-hours. Also: achieved term magnitude does not track the weight
+  (scale 5→0.30, 12.5→0.335, 25→0.835), because a stronger term drives the
+  composition to reduce itself.
+
+- ~~**Part AI, OVERTURNED BY ITS OWN CONTROL: it is magnitude, not geometry.**~~
+  **SUPERSEDED — see above.** A
   placebo arm — a frozen random linear functional of the binder composition, same
   elu hinge and same 0.1 weight as `HelixLoss`, zero structural content — cannot be
   distinguished from the helix arm: **AF3 p=0.199, ESMFold2 p=0.48**. And the effect
