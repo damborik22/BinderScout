@@ -60,7 +60,49 @@ A per-target counterexample worth keeping: on Tie2 (clean) the engines score 0.3
 / 0.579 and the 3-mean lands at **0.336** — worse than two of the three it averages. The
 raw mean inherits a failing engine rather than outvoting it.
 
-## 3. The only statistically significant engine-set result points at REMOVING an engine
+## 3. ~~The only significant engine-set result points at REMOVING an engine~~ — **RETRACTED 2026-10-03, replication**
+
+> **It does not replicate. It reverses, with significance, and the originating effect does
+> not survive Cao's own label-quality flag. Three independent failures:**
+>
+> **(a) It dies on Cao's own flag.** My "label-clean" slice was *positives with a finite
+> `kd_ub_num`*. Cao ships `kd_ok` — `kd_lb<1000 & ~avid_doesnt_agree & ~low_conf &
+> kd_ub/kd_lb ∈ [1,10]` — and **Part U's own archived script uses it**. On `kd_ok` the
+> effect is **−0.0097, p=0.673 — a sign flip**. The 48 designs separating the two
+> definitions *all* have `kd_lb_num == 0.0`: a Kd interval of [0, X], an upper bound with a
+> degenerate lower bound, not a two-sided measurement. They are concentrated — H3 22 of its
+> 24, Tie2 4 of 4 — and **Tie2 exists as a 12th target only because of them** while
+> carrying the largest per-target delta (+0.1275 on 4 positives). Dropping Tie2 halves the
+> effect to +0.0113.
+>
+> **(b) I bundled two different slices.** The "+0.153 enrichment, p=0.031" and "3-mean wins
+> only 3/12" are the **all-labels** numbers. On the slice that carries the AUC effect,
+> enrichment delta is **+0.0000 (p=2.0, 0/12 wins)**. The effect and its stated
+> corroboration came from different label definitions, and I reported them as one finding.
+>
+> **(c) Adaptyv is the exact mirror image.** On the curated benchmark (563 designs, 4
+> targets, 100 % coverage): **−0.0210, CI [−0.0309, −0.0095], p<0.0001, af3+esm wins 0/4
+> targets**, under *both* metric panels. It independently reproduces the benchmark's own
+> prior measurement (−0.0190, p<0.001, 0/4).
+>
+> **And the mechanism inverts.** My stated reason was "Boltz-2 is simultaneously the most
+> decorrelated and the weakest". On Adaptyv Boltz-2 is the **strongest** engine
+> (0.7204 vs AF3 0.6134, ESMFold2 0.6933) while being *equally* decorrelated (within-target
+> Spearman 0.380 Cao / 0.384 Adaptyv). So there the independence is bought without paying
+> noise — which is precisely why the sign reverses. The proposed change would have **dropped
+> the strongest engine on the benchmark the shipped metric was validated against.**
+>
+> Context that should have been in the original: on Cao's all-labels slice **8 of 12 targets
+> sit at the random-ordering noise floor**, so the question was being settled on 4
+> informative targets. And the denovo holdout cannot adjudicate — its minimum detectable
+> effect is ±0.133, **6.3× larger** than the 0.021 in question, and `mean(all 3)` at 0.6709
+> falls *inside* the null interval [0.335, 0.670].
+>
+> **Conclusion: keep all three engines and the shipped `consensus_iptm_mean`.** Part T §5's
+> "every engine earns its slot" stands; my AUC argument against it was a single-pool,
+> single-slice artifact.
+
+### (superseded) The claim as originally reported
 
 **`mean(af3, esmfold2)` beats `mean(all three)`:** clean labels **+0.0210 macro AUC,
 95 % CI [+0.0040, +0.0440], p=0.0078**, with the 3-mean winning only 3/12 targets;
@@ -121,12 +163,14 @@ must not be used for "3 engines vs the *best* single engine" without this caveat
 
 ## 6. What to do
 
-1. **Keep the gate and keep the 3-engine mean.** The premise holds about errors, the mean
+1. **Keep the gate, the 3-engine mean, and all three engines.** §3 is retracted: the
+   engine-set change reverses with significance on Adaptyv and does not survive Cao's own
+   `kd_ok` flag.
+1. ~~Keep the gate and keep the 3-engine mean.~~ The premise holds about errors, the mean
    rescues 73 % of binders buried by one engine, and nothing measured here beats it by
    enough to justify a ranking change against Part U's bar.
 2. **Do not ship shrinkage.** §5.0 is retracted; the cliff it was meant to fix does not
    occur on observed data.
-3. **`mean(af3, esm)` vs `mean(all 3)` is the one live question** — significant on clean
-   Cao, contradicted on Adaptyv by Part T §5. Settle it on a second pool before touching
-   anything.
+3. ~~`mean(af3, esm)` vs `mean(all 3)` is the one live question.~~ **SETTLED, negative** —
+   see the retraction in §3. It was settled on the second pool, and the answer is no.
 4. **Correct Part U's two sentences** so the next reader does not inherit them.
