@@ -220,3 +220,71 @@ start at all.
 
 **BM5 and Clara could not be reached** from this session or from BM2 (neither resolves), so their
 readiness is unverified.
+
+
+---
+
+## 7. Part AF follow-on — pre-registration for the Chai-1 adoption study
+
+**Written before the data exists, deliberately.** The question is "could Chai-1 be our fourth
+engine", which is an adoption decision, and CLAUDE.md already records the trap: *"Do NOT
+re-litigate the engine set on one pool… Four single-pool effects were retracted in the week of
+2026-09-29. Treat a single-pool effect as a hypothesis, not a result."* Fixing the criteria first
+is the only thing that makes a single-pool answer worth having.
+
+### MSA parity is mandatory, and the pilot proves why
+
+Our three engines read a cached target MSA; the binder is `use_msa=False`. Chai-1 accepts
+`msa_directory` holding `.aligned.pqt` files keyed by `expected_basename(sequence)`, so converting
+our cached a3m with `a3m_to_aligned_dataframe` reproduces that arrangement exactly — target
+aligned, binder single-sequence (the run log confirms `No MSA found for sequence: SKLEEIKRL…`,
+which is the binder).
+
+**Measured on one design, and it changes the conclusion of the first AF run:**
+
+| | iPTM on a **confirmed non-binder** |
+|---|---|
+| Boltz-2 | 0.905 |
+| ESMFold2 | 0.827 |
+| **Chai-1, MSA parity** | **0.818** |
+| AF3 | 0.52 |
+| Chai-1, MSA-free | **0.285** |
+
+The first AF run's striking result — Chai-1 alone rejecting a non-binder that two of our engines
+rank highly — was **an artifact of running it MSA-free**. With parity it behaves like Boltz-2 and
+ESMFold2 and makes the same mistake. This is the calibration confound flagged in the AF write-up,
+confirmed in one shot: a uniformly less-confident engine rejects binders and non-binders alike.
+**Had the 563-design study been run MSA-free it would have produced a false positive for
+adoption.**
+
+Cost also revises down: **118 s per design** with MSA (the 346 s in the AF run included cold model
+load), so 563 designs ≈ **18.5 GPU-h**, not the 48–54 estimated.
+
+### Criteria, fixed in advance
+
+Chai-1 is worth adopting only if **both** hold:
+
+1. **It carries incremental signal.** Partial Spearman of `chai_iptm` against binding, conditioning
+   on the other three engines' iPTM. The standing precedent on this pool is Boltz-2 **+0.314** and
+   ESMFold2 **+0.213**, both p<1e-4. **Pass: |partial| ≥ 0.15 with p < 0.01.** A high solo AUC with
+   a near-zero partial means it is a fourth copy of an opinion we already have, which costs
+   GPU-hours and buys nothing.
+2. **The effect keeps its sign across all four leave-one-target-out folds.** This is the test that
+   killed `mean(af3,esm)`, which looked good on exactly this pool and reversed on the next.
+
+Reported alongside, not as criteria: solo macro-AUC against the other three; whether Chai-1
+rescues true binders that all three of ours bury (the adversarial rationale); and per-target
+breakdown.
+
+### Explicitly NOT a criterion
+
+**"`mean(4)` beats `mean(3)` on this pool" does not justify adoption.** On this very benchmark the
+3-engine mean does not beat the best single engine out of fold (+0.0026, p=0.69) and
+`mean(boltz,esm)` out-scores it (0.7279 vs 0.7231). A 4-mean improvement here would be the same
+class of evidence as effects already retracted, so it is recorded and not acted on.
+
+### If it passes
+
+Adoption is still a second step, because a fourth engine **re-scopes the rank**: `--min-engines 3`
+silently becomes "3 of 4", and `consensus_iptm_mean` over four engines is not the metric Part U
+validated. Both need re-deriving against the labelled pool before any default changes.
