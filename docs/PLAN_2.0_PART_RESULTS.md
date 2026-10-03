@@ -376,6 +376,14 @@ Protenix, AF3". Two things happened since:
 - **`agreement_count` was measured as a flat null** — macro-AUC 0.532 with 87.2%
   of designs tied at zero (Part U). CLAUDE.md now forbids gating or stratifying on
   it. So "raises the agreement denominator" is not a benefit.
+  **Partly superseded 2026-10-03:** that 0.532/87.2% is the **Cao** figure, carried
+  into CLAUDE.md and the benchmark README without re-measurement. On the canonical
+  benchmark's all-3-engine labelled subset it is **0.6295** with 70.5% tied, and the
+  binder rate runs 0.378 → 0.567 → **0.778** → 0.758. So it is *not* a flat null —
+  but it **saturates above 2**, 2-vs-3 being indistinguishable, which kills this
+  rationale more cleanly than "flat null" did: a fourth voter cannot help a count
+  whose information is already exhausted at two. The re-scope to *portability* below
+  is therefore still the right one.
 
 **A second rationale looked live on 2026-09-27 and is now in doubt.** AF3 failed
 on an RTX 3060 with a 110,592-vs-101,376-byte shared-memory error, and I concluded
@@ -460,6 +468,18 @@ Because it is an addition, two things downstream change and neither is automatic
 this box is a 12 GB RTX 3060 kept for development. The prediction to test on a
 3090 or GB10 is: Chai-1 loads and folds without an architectural error, at a peak
 well under the sum of its components. **Correction, 2026-09-28: AF3 is probably not blocked on sm_86 at all — see below.**
+
+**That blocker is gone as of 2026-10-03.** BM2 is idle (RTX 3090, sm_86, 24 576 MiB,
+23 MiB used) — exactly the card this prediction names. So AF's one unexecuted step is
+now a single fold on an available machine, and it is the cheapest unstarted item on
+the "what would move the most" list. What a first run must report, in this order:
+**(1)** does it fold at all without an architectural error; **(2)** peak VRAM with
+`use_esm_embeddings=True` and with it off — the ~6 GB ESM2-3B is the one large optional
+cost; **(3)** wall-clock per design, because the CPU↔GPU component shuffling that buys
+the low peak is PCIe-bound and is the risk the source cannot settle. Packaging into its
+own env comes **after** those three answers, not before — `chai_lab` currently sits in
+`binderscout_protein_hunter`, a design tool's env, and building a fourth refold env for
+an engine that has never folded here would be the wrong order.
 
 ---
 
