@@ -680,7 +680,24 @@ def compute_agreement(
     because its DunbrackLab distribution is mis-calibrated on short targets
     (see docs/INVESTIGATION_RANKING_DISCREPANCY.md §6).
 
-    Adds column 'agreement_count' (0–3: Boltz-2, AF3, ESMFold2 over their thresholds).
+    Adds column 'agreement_count' (0–3: Boltz-2, AF3, ESMFold2 over their thresholds)
+    and **'agreement_denom'**, how many of those engines actually produced a score for
+    that design.
+
+    The denominator is not decoration. ``(vals > thr)`` is False both when an engine
+    scored the design and rejected it, and when the engine never scored it at all, so
+    without a denominator ``agreement_count = 1`` cannot distinguish "two engines doubt
+    this" from "two engines never ran" — opposite meanings, and only the first is a
+    warning about the design. Measured on the canonical benchmark (2026-10-03):
+    **99 labelled designs carry exactly 2 of 3 engines**, so their count is capped at 2
+    and can never reach 3, while they sit in the same table as designs whose ceiling is 3.
+    ``consensus_iptm_mean`` has carried ``consensus_iptm_n`` for exactly this reason;
+    ``agreement_count`` shipped without the equivalent.
+
+    Note this is **per design**, which is what was missing. The report already derives a
+    pool-level ceiling from which engine *columns* exist (``report._active_engines``);
+    that is a different question and does not catch a design whose column is present but
+    empty — the shape a failed refold actually takes.
     """
     result = df.copy()
     thresholds = {**DEFAULT_ENGINE_THRESHOLDS, **(engine_thresholds or {})}
@@ -691,12 +708,15 @@ def compute_agreement(
     }
 
     count = pd.Series(0, index=df.index)
+    denom = pd.Series(0, index=df.index)
     for engine, col in engine_cols.items():
         if col in result.columns:
             vals = pd.to_numeric(result[col], errors="coerce")
             thr = thresholds.get(engine, threshold)
             count += (vals > thr).fillna(False).astype(int)
+            denom += vals.notna().astype(int)
     result["agreement_count"] = count
+    result["agreement_denom"] = denom
     return result
 
 
@@ -1000,21 +1020,32 @@ def annotate_wetlab_recommended(
 ) -> pd.DataFrame:
     """Item 9: per-design ``wetlab_recommended`` bool + ``wetlab_reason`` string.
 
-    Combines existing advisory signals (SoluProt + agreement_count + binder
-    pLDDT min) into a single conservative "would-I-ship-this" annotation. The
-    report renders failing rows with a CSS strike-through in the Top-30 — but
-    never reorders or drops them. NaN values are treated as "we don't know" and
-    do NOT block recommendation (we don't penalise an unknown).
+    Combines existing advisory signals into a single conservative
+    "would-I-ship-this" annotation. The report renders failing rows with a CSS
+    strike-through in the Top-30 — but never reorders or drops them. NaN values are
+    treated as "we don't know" and do NOT block recommendation (we don't penalise an
+    unknown).
 
     Rule (all required for recommend=True):
-      - Cross-engine agreement: agreement_count >= ``agreement_min`` (when known).
+      - Cross-engine gate: ``passes_engine_gate`` is not False. This is the only
+        criterion here that also moves a design's rank.
       - Binder fold confidence: plddt_binder_min >= ``min_plddt_binder`` (when known).
       - No FAILED RUN convergence flag from the per-tool classification.
 
-    SoluProt is deliberately NOT in that list. It was until 2026-09-28; measured
-    against our own experimental results it withheld the recommendation from designs
-    that turned out to be among the tightest binders, so it now lands in
-    ``wetlab_reason`` as an informational note that cannot block.
+    Two signals are deliberately NOT in that list, and both land in ``wetlab_reason``
+    as informational notes that cannot withhold the recommendation:
+
+    - **SoluProt**, since 2026-09-28. Measured against our own experimental results it
+      withheld the recommendation from designs that turned out to be among the tightest
+      binders.
+    - **agreement_count**, since 2026-10-03, by operator decision: it is a warning
+      flag, not a criterion to discriminate on. It also reads a *different quantity*
+      from the one the pipeline ranks — the rank averages ipTM (``*_pae_iptm``) while
+      ``agreement_count`` counts engines over an **absolute ipSAE** threshold — and
+      that absolute ipSAE cut measured *inverted* against our own Kd data, so a
+      shortfall is not evidence against a design. The useful reading is the
+      disagreement between the two: a high ipTM mean with only two engines calling the
+      ipSAE high is worth a second look, which is what the note says.
     """
     out = df.copy()
     reasons: list[list[str]] = [[] for _ in range(len(out))]
@@ -1023,6 +1054,8 @@ def annotate_wetlab_recommended(
     # experimental results, at the paper threshold of 0.5 it failed four of the ten
     # tightest binders on one target, so letting it block would withhold the
     # recommendation from designs that bind best. It is a label, not a gate.
+    # agreement_count joined it on 2026-10-03 (see the docstring): a warning, not a
+    # criterion, and keyed to an absolute ipSAE cut that measured inverted on our data.
     notes: list[list[str]] = [[] for _ in range(len(out))]
 
     if soluprot_passes_col in out.columns:
@@ -1064,28 +1097,48 @@ def annotate_wetlab_recommended(
 
     if "agreement_count" in out.columns:
         agreement = pd.to_numeric(out["agreement_count"], errors="coerce")
-        # agreement_count cannot exceed the number of engines that actually ran, and a
-        # single-engine run is a supported, auto-detected configuration (evaluate.sh
-        # skips engines whose conda env is absent). Applying the >= 2 rule there failed
-        # EVERY design for a reason the operator cannot act on by improving a design,
-        # which makes the whole column uninformative. Treat it as unknown instead.
-        # Treated as "unknown", consistent with this function's NaN policy: unknowns do
-        # not block. Warn once so the operator knows the criterion was not applied.
-        n_engines = 0
-        if "consensus_iptm_n" in out.columns:
-            counts = pd.to_numeric(out["consensus_iptm_n"], errors="coerce")
-            n_engines = int(counts.max()) if counts.notna().any() else 0
-        if n_engines and n_engines < agreement_min:
-            warnings.warn(
-                f"[wetlab] only {n_engines} refold engine(s) in this pool, so cross-engine "
-                f"agreement (>= {agreement_min}) could not be assessed and was NOT applied to "
-                f"wetlab_recommended. Run a second engine before trusting this column.",
-                stacklevel=2,
-            )
+        # agreement_count cannot exceed the number of engines that actually scored the
+        # design, and a single-engine run is a supported, auto-detected configuration
+        # (evaluate.sh skips engines whose conda env is absent). Applying the >= 2 rule
+        # there noted EVERY design for a reason no design change could fix, which makes
+        # the column uninformative. Treat it as unknown instead -- consistent with this
+        # function's NaN policy, where unknowns are never held against a design.
+        #
+        # Prefer the PER-DESIGN denominator. The pool-level max (below) misses the case
+        # that actually occurs: all three engine columns present, but empty for *this*
+        # design because its refold failed. On the canonical benchmark 99 labelled
+        # designs have exactly 2 of 3 engines while the pool max is 3, so the pool-level
+        # test does not fire and those designs get noted for a shortfall whose ceiling
+        # made it unreachable.
+        if "agreement_denom" in out.columns:
+            denom = pd.to_numeric(out["agreement_denom"], errors="coerce")
         else:
-            for i, val in enumerate(agreement):
-                if pd.notna(val) and val < agreement_min:
-                    reasons[i].append(f"agreement {int(val)} < {agreement_min}")
+            denom = None
+            n_engines = 0
+            if "consensus_iptm_n" in out.columns:
+                counts = pd.to_numeric(out["consensus_iptm_n"], errors="coerce")
+                n_engines = int(counts.max()) if counts.notna().any() else 0
+            if n_engines and n_engines < agreement_min:
+                warnings.warn(
+                    f"[wetlab] only {n_engines} refold engine(s) in this pool, so cross-engine "
+                    f"agreement (>= {agreement_min}) could not be assessed and is NOT noted in "
+                    f"wetlab_reason. Run a second engine before trusting this column.",
+                    stacklevel=2,
+                )
+                agreement = pd.Series([float("nan")] * len(out), index=out.index)
+
+        for i, val in enumerate(agreement):
+            if pd.isna(val) or val >= agreement_min:
+                continue
+            if denom is not None:
+                d = denom.iloc[i]
+                # Unmeasured, not doubted: a ceiling below the bar is not a finding
+                # about the design, so say nothing rather than something misleading.
+                if pd.isna(d) or d < agreement_min:
+                    continue
+                notes[i].append(f"agreement {int(val)} of {int(d)} engines (note only)")
+            else:
+                notes[i].append(f"agreement {int(val)} < {agreement_min} (note only)")
 
     if "plddt_binder_min" in out.columns:
         plddt_min = pd.to_numeric(out["plddt_binder_min"], errors="coerce")

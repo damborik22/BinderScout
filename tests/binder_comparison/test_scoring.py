@@ -295,8 +295,14 @@ def test_wetlab_not_blocked_by_unassessable_agreement():
     assert out["wetlab_recommended"].all(), "a 1-engine run must not fail every design"
 
 
-def test_wetlab_still_blocks_real_disagreement():
-    """With enough engines present, a genuinely low agreement_count must still block."""
+def test_wetlab_notes_low_agreement_but_does_not_block_on_it():
+    """agreement_count is a WARNING, not a criterion (operator decision 2026-10-03).
+
+    It must still be reported -- a high ipTM mean with only two engines calling the
+    ipSAE high is exactly the case worth a second look -- but it must not withhold the
+    recommendation. It reads an *absolute ipSAE* cut, a different quantity from the
+    ipTM the rank averages, and that cut measured inverted against our own Kd data.
+    """
     from binder_comparison.comparison.scoring import annotate_wetlab_recommended
 
     df = pd.DataFrame(
@@ -309,9 +315,31 @@ def test_wetlab_still_blocks_real_disagreement():
     )
     out = annotate_wetlab_recommended(df)
     rec = dict(zip(out["id"], out["wetlab_recommended"]))
-    assert rec["good"] is True or rec["good"]
-    assert not rec["lonely"]
-    assert "agreement 1 < 2" in out.loc[out["id"] == "lonely", "wetlab_reason"].iloc[0]
+    reason = dict(zip(out["id"], out["wetlab_reason"]))
+    assert rec["good"]
+    assert rec["lonely"], "a low agreement_count must NOT withhold the recommendation"
+    # Reported, though -- dropping the signal would be the opposite error.
+    assert "agreement 1 < 2" in reason["lonely"]
+    assert "note only" in reason["lonely"]
+    assert reason["good"] == ""
+
+
+def test_wetlab_blocks_on_plddt_even_when_agreement_is_fine():
+    """Guard against the move to notes emptying `reasons` entirely: a real blocker
+    must still block, so the paragraph above cannot be satisfied by never blocking."""
+    from binder_comparison.comparison.scoring import annotate_wetlab_recommended
+
+    df = pd.DataFrame(
+        {
+            "id": ["floppy"],
+            "agreement_count": [3],
+            "consensus_iptm_n": [3],
+            "plddt_binder_min": [0.20],
+        }
+    )
+    out = annotate_wetlab_recommended(df)
+    assert not out["wetlab_recommended"].iloc[0]
+    assert "pLDDT" in out["wetlab_reason"].iloc[0]
 
 
 # --- PAE file resolution -------------------------------------------------------
@@ -365,3 +393,60 @@ class TestUnresolvedPaeFilesAreReported:
             _w.simplefilter("always")
             add_iptm_from_pae_files(df, pae_file_col="pae_file", prefix="boltz")
         assert [x for x in caught if "[pae]" in str(x.message)] == []
+
+
+def test_agreement_count_carries_a_per_design_denominator():
+    """`(vals > thr)` is False both for "engine rejected it" and "engine never ran".
+
+    Without a denominator, `agreement_count = 1` cannot distinguish two engines doubting
+    a design from two engines never scoring it — opposite meanings, and only the first is
+    a statement about the design. Measured on the canonical benchmark 2026-10-03: 99
+    labelled designs carry exactly 2 of 3 engines, so their count is capped at 2 while
+    they sit in the same table as designs whose ceiling is 3.
+    """
+    from binder_comparison.comparison.scoring import compute_agreement
+
+    df = pd.DataFrame(
+        {
+            "boltz_pae_ipsae_min": [0.9, 0.9, 0.9],
+            "af3_ipsae_min": [0.2, 0.2, None],
+            "esmfold2_ipsae_min": [0.2, None, None],
+        }
+    )
+    out = compute_agreement(df)
+    # One engine passes in every row, so the count alone is uninformative...
+    assert list(out["agreement_count"]) == [1, 1, 1]
+    # ...and the denominator is the thing that makes it readable.
+    assert list(out["agreement_denom"]) == [3, 2, 1]
+
+
+def test_wetlab_does_not_warn_about_an_unreachable_agreement_bar():
+    """A ceiling below the bar is not a finding about the design.
+
+    The pool-level guard this replaces could not catch it: with all three engine columns
+    present and only *this* design's refold failed, the pool max is 3, so the old check
+    did not fire and the design was noted for a shortfall it could not have avoided.
+    """
+    from binder_comparison.comparison.scoring import annotate_wetlab_recommended, compute_agreement
+
+    df = pd.DataFrame(
+        {
+            "id": ["three", "two", "one"],
+            "boltz_pae_ipsae_min": [0.9, 0.9, 0.9],
+            "af3_ipsae_min": [0.2, 0.2, None],
+            "esmfold2_ipsae_min": [0.2, None, None],
+        }
+    )
+    out = annotate_wetlab_recommended(compute_agreement(df))
+    reason = dict(zip(out["id"], out["wetlab_reason"]))
+
+    # 3 engines scored it and 2 doubt it: a real warning, with its denominator.
+    assert "agreement 1 of 3 engines" in reason["three"]
+    # 2 engines scored it, 1 doubts it: still assessable at agreement_min=2.
+    assert "agreement 1 of 2 engines" in reason["two"]
+    # 1 engine scored it: the bar is unreachable, so say nothing at all.
+    assert "agreement" not in reason["one"], (
+        "a single-engine design was warned about cross-engine agreement it could not have"
+    )
+    # None of this withholds the recommendation — it is a note (operator decision).
+    assert out["wetlab_recommended"].all()

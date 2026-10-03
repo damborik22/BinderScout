@@ -2725,8 +2725,11 @@ def _advisory_legend_html(df: pd.DataFrame) -> str:
         )
     if "wetlab_recommended" in df.columns:
         bits.append(
-            "<b>wetlab_recommended</b> = SoluProt pass + agreement_count ≥ 2 of 3 + min binder pLDDT ≥ 0.50 "
-            "+ no FAILED RUN. Failing rows are <b>marked with a wavy red underline</b> in the Top-30 "
+            "<b>wetlab_recommended</b> = passes the cross-engine gate + min binder pLDDT ≥ 0.50 "
+            "+ no FAILED RUN. SoluProt and <code>agreement_count</code> are reported in the reason "
+            "column but <b>cannot</b> withhold the recommendation — both measured badly against our "
+            "own Kd results, so they are notes, not criteria. "
+            "Failing rows are <b>marked with a wavy red underline</b> in the Top-30 "
             "(advisory only — the rank does not change). This is a <em>separate</em> axis from the "
             "<span style='color:#c62828;font-weight:bold;'>⚠</span> engine-disagreement flag — a design can be "
             "marked here (e.g. predicted-insoluble) while all engines agree on the interface, or vice-versa. "
@@ -3069,8 +3072,11 @@ _METRIC_DESCRIPTION = {
     "ipsae_min": (
         "Interface Predicted Structural Alignment Error — TM-score-like metric computed from PAE matrix. "
         "Measures how confidently the model predicts the binder–target interface. "
-        f"This is the primary ranking metric. Higher = more likely to bind. "
-        f"Want >{_TIER_MED} (medium), >{_TIER_HIGH} (high)."
+        "<b>This is a diagnostic, NOT the ranking metric</b> — designs are ranked by "
+        "<code>consensus_iptm_mean</code> behind a cross-engine gate (Part U). Higher = more likely "
+        f"to bind; the >{_TIER_MED} / >{_TIER_HIGH} tier cuts are absolute values calibrated "
+        "elsewhere and measured <em>inverted</em> against our own Kd data on two targets, so never "
+        "read a tier as evidence a design will bind."
     ),
     "bt_ipsae_aux": (
         "ipSAE in the binder→target direction, reported by the design tool during generation (not independent). "

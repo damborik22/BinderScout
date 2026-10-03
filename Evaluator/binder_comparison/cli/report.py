@@ -441,9 +441,11 @@ def run(args: argparse.Namespace) -> None:
                 print(f"[report] Fold coverage of the top {_n_pick}: all distinct folds")
     print(f"[report] Ranking by consensus_iptm_mean (cross-engine gate: min {min_engines} engines)")
 
-    # Item 9: wet-lab-ready badge (SoluProt-passes + agreement_count >= 2 +
-    # min binder pLDDT >= 0.50 + no FAILED RUN). Advisory only — the rank is
-    # unchanged; the report renders failing rows with CSS strike-through.
+    # Item 9: wet-lab-ready badge (cross-engine gate + min binder pLDDT >= 0.50
+    # + no FAILED RUN). SoluProt and agreement_count are REPORTED in the reason
+    # column but cannot withhold the recommendation -- both measured badly against
+    # our own Kd results. Advisory only either way: the rank is unchanged; the
+    # report renders failing rows with CSS strike-through.
     df = annotate_wetlab_recommended(df)
 
     # "Best design, not multiple sequences per design": collapse near-duplicate

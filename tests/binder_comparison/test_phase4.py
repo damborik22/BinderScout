@@ -34,13 +34,15 @@ def test_wetlab_recommended_passes_when_all_signals_clear():
     assert df.loc[df.binder_id == "a", "wetlab_reason"].iloc[0] == ""
 
 
-def test_wetlab_recommended_flags_soluprot_fail():
+def test_wetlab_reports_soluprot_and_agreement_without_blocking():
+    """Design 'b' carries a SoluProt fail AND agreement 1 -- both note-only signals
+    (SoluProt since 2026-09-28, agreement_count since 2026-10-03), so both must be
+    reported and neither may withhold the recommendation."""
     df = annotate_wetlab_recommended(_toy_df())
-    # Design 'b': SoluProt fail + agreement 1.
-    assert bool(df.loc[df.binder_id == "b", "wetlab_recommended"].iloc[0]) is False
     reason = df.loc[df.binder_id == "b", "wetlab_reason"].iloc[0]
     assert "SoluProt" in reason
     assert "agreement" in reason
+    assert bool(df.loc[df.binder_id == "b", "wetlab_recommended"].iloc[0]) is True
 
 
 def test_wetlab_recommended_flags_low_plddt_min():

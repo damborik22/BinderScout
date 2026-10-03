@@ -67,14 +67,34 @@ bash Evaluator/evaluate.sh \
 
 ## Metrics
 
-| Metric | Direction | Description |
-|--------|-----------|-------------|
-| `ipsae_min` | higher = better | Primary ranking metric. min(bt_ipSAE, tb_ipSAE) |
-| `iptm` | higher = better | Interface pTM (gameable by the engine that designed the sequence — never rank on one engine) |
-| `pae_bt_mean` | lower = better | Mean binder-to-target PAE (angstroms) |
-| `pae_tb_mean` | lower = better | Mean target-to-binder PAE |
-| `plddt_binder_mean` | higher = better | Mean binder pLDDT [0,1] |
-| `agreement_count` | higher = better | Engines agreeing ipsae_min > 0.61 |
+**The ranking metric is `consensus_iptm_mean`.** This table said `ipsae_min` until
+2026-10-03; that was wrong, and wrong in the one file CLAUDE.md cites as the metrics
+reference. `ipsae_min` is a diagnostic. There is ONE ranking and no way to select another
+(Part U):
+
+1. **Gate:** a design must have been scored by at least `--min-engines` independent
+   engines (default **3** = Boltz-2 / AF3 / ESMFold2; floor 2). Recorded in
+   `passes_engine_gate`. Failures are ranked **last, not dropped**.
+2. **Sort:** `consensus_iptm_mean` **descending** — the mean of the three engines'
+   **PAE-recomputed** ipTM (`boltz_pae_iptm`, `af3_pae_iptm`, `esmfold2_pae_iptm`), not
+   the engines' self-reported `*_iptm`.
+3. **Ties:** `consensus_iptm_n` desc (more engines behind an equal mean wins), then
+   `consensus_iptm` (the max) desc, then binder pLDDT desc.
+
+| Metric | Direction | Role | Description |
+|--------|-----------|------|-------------|
+| `consensus_iptm_mean` | higher = better | **RANKS** | Mean of the three engines' PAE-recomputed ipTM. The sort key |
+| `passes_engine_gate` | higher = better | **RANKS** | Cleared `--min-engines`. Failures rank last, not dropped |
+| `consensus_iptm_n` | higher = better | **RANKS** | How many engines scored this design (first tie-break) |
+| `consensus_iptm` | higher = better | **RANKS** | **max** ipTM across engines (later tie-break; max-ranking loses to mean-ranking, so it does not lead) |
+| `*_pae_iptm` | higher = better | **RANKS** | Per-engine ipTM recomputed from the PAE matrix — what the mean averages |
+| `ipsae_min` | higher = better | diagnostic | min(bt_ipSAE, tb_ipSAE). **Not the ranking metric.** Its absolute tier cuts measured *inverted* against our own Kd data on two targets |
+| `iptm` | higher = better | reported | Engine's **self-reported** ipTM (gameable by the engine that designed the sequence — never rank on one engine; scales differ between engines) |
+| `pae_bt_mean` | lower = better | reported | Mean binder-to-target PAE (angstroms) |
+| `pae_tb_mean` | lower = better | reported | Mean target-to-binder PAE |
+| `plddt_binder_mean` | higher = better | reported | Mean binder pLDDT [0,1] |
+| `plddt_binder_min` | higher = better | gates `wetlab` | Min binder pLDDT; < 0.50 withholds `wetlab_recommended` |
+| `agreement_count` | higher = better | **warns** | Engines over an absolute **ipSAE** 0.61 cut — a *different quantity* from the ipTM that ranks. A per-design caution for a human; as of 2026-10-03 a note that cannot withhold `wetlab_recommended`. Do not gate, stratify or rank on it |
 
 ### BindCraft 2 native metrics
 
