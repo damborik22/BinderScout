@@ -1416,3 +1416,134 @@ test ("must not say ipsae_min ranks") passes on a file that says nothing at all,
 would leave an operator with no statement of what the order means. So each surface must
 also *name* `consensus_iptm_mean`. That fifth mutation failed the test, which is the only
 reason I know the pin is worth anything.
+
+---
+
+## Four things that only showed up when I ran them: Chai-1's MSA, a registry's labels, a gate pointing backwards, and a tool that was never re-installable
+
+**2026-10-03, later the same day.** All four of these were "already known" in some sense — written
+down in a plan, a docstring, or a commit message. Each was wrong in a way only execution exposed.
+
+### 1. Chai-1 folds on sm_86, and the headline was an MSA artifact
+
+Part AF had a source analysis and no execution: *"No Chai-1 fold was executed — the GPU was in
+use, and this box is a 12 GB RTX 3060."* BM2's 3090 came free, so I ran it. 326-token complex,
+`chai_lab 0.6.1`:
+
+| | wall | peak alloc | iPTM |
+|---|---|---|---|
+| `use_esm_embeddings=True` | 345.9 s | 9,484 MiB | 0.285 |
+| `use_esm_embeddings=False` | 86.4 s | 9,484 MiB | 0.104 |
+
+The source analysis was right about everything structural: no `triton`/`pallas`, no
+shared-memory abort, and peak allocated **identical** with and without the ~6 GB ESM2-3B —
+which is only possible because `_component_moved_to` moves each component to the GPU and back
+rather than retaining it. Peak is the largest single component, not the sum.
+
+Then I checked what the design actually was, and it was a **confirmed non-binder** that Boltz-2
+scored 0.905 and ESMFold2 0.827. Chai-1 at 0.285 was the only engine to reject it — exactly the
+independent-fourth-opinion case AF was re-scoped around. I recorded it as suggestive and
+explicitly not as evidence, on two grounds: n=1, and Chai-1 had run **MSA-free** while our three
+engines read a cached target MSA, so a uniformly less-confident engine would reject binders and
+non-binders alike.
+
+**The second ground turned out to be the whole story.** `msa_directory` takes `.aligned.pqt`
+files keyed by `expected_basename(sequence)`, and `a3m_to_aligned_dataframe` converts our cached
+a3m, so parity was achievable — target aligned, binder single-sequence, matching `use_msa=False`.
+At parity the same design scores **0.818**. Chai-1 makes the same mistake as the others.
+
+So the striking result was the missing MSA, not the model. **Had I run the 563-design study
+MSA-free it would have produced a false positive for adoption** — and the shape of that error,
+impressive on one pool and driven by a confound, is the shape of the five retractions in the
+week of 2026-09-29. The study now runs at parity, with criteria fixed in advance.
+
+Worth keeping: I proved the MSA was consumed rather than assuming it. 0.818 vs 0.286 on one
+input is the proof. Passing `msa_directory` and never checking would have been indistinguishable
+from passing nothing.
+
+### 2. The registry's first pool, and `master_designs.csv` is not a label source
+
+Part Y shipped as a working library whose `list_benchmarks()` returned `[]`, which blocked
+promoting three shadow-mode columns. Registering `adaptyv` fixed that: manifest committed, rows
+in a private store, verified by SHA-256.
+
+Then the `docs/adaptyv-proteinbase-one-dataset` branch landed a warning — the raw exports are
+long-format per (design, target) with replicates, and `master_designs.csv`'s flattened
+`binding`/`kd` columns silently pick a target and a replicate, so a counter-screened design
+yields a chimeric row. I had built labels partly from that file.
+
+Checking beat assuming in both directions. **2,018/2,018 of our rows match the exports** — two
+egfr/il7r rows were wrong and are corrected (binders 323 → 325), and expression was wrong too
+(1,795/223 → 1,810/208). And the **nipah discrepancy I had logged as "unresolved" yesterday was
+the flat file's error, not ours**: nipah's labels come from a *separate* export whose competition
+screened against **two** targets, `nipah-glycoprotein-g` and `human-serum-albumin`. All 1,030 of
+our nipah rows match it exactly, 103 binders both ways. `master_designs.csv`'s "927 designs,
+1 binder" is the flattening artifact.
+
+Also found while rebuilding: `expressed` is a property of the **design**, not of a
+(design, target) pair — it records whether the protein was produced at all. Keying it per-target
+produced an all-null column, which the join hid completely.
+
+### 3. The composition gate points backwards, and that is what the registry was for
+
+With a registered pool, `would_exclude_composition` could finally be judged against outcomes
+instead of intuition. Over all 2,018 labelled designs:
+
+| | |
+|---|---|
+| flagged for exclusion | 1,512 (74.9 %) |
+| true binders it would remove | **271 of 325 (83.4 %)** |
+| binder rate among **kept** | 0.107 |
+| binder rate among **excluded** | **0.179** |
+
+Lift **0.663× — inverted.** The designs it discards bind at a *higher* rate than the ones it
+keeps. It survives the obvious confounds: inverted in **4 of 5** length bands and on both large
+targets (egfr 0.062 vs 0.171, nipah 0.065 vs 0.119). And no individual feature carries signal —
+every one scores between **0.462 and 0.547** AUC, with `comp_pro_gly_frac` at 0.462, i.e.
+pointing the wrong way.
+
+The honest reading is not "composition is uninformative" but "these thresholds do not transfer".
+They were calibrated on the RFD3 Pro/Gly-coil failure mode, where a bad backbone really does
+produce a Pro/Gly-rich sequence. A de novo competition pool has no such artifact, and flagging
+75 % of it is the symptom. **`would_exclude_composition` must not be promoted.** The two targets
+that point the right way (il7r, pd-l1) are n=96 and n=66 at 0.64/0.48 prevalence.
+
+### 4. A tool documented as installable was never *re-*installable
+
+PC's aarch64 install was fixed on 2026-09-26 to use `jax[cuda12]==0.6.2` instead of the CPU-only
+`jax[cpu]==0.4.29`. I went to measure the MCTS throughput that has blocked the tool since
+2026-07-29, and found BM5's PC venv reporting:
+
+```
+An NVIDIA GPU may be present on this machine, but a CUDA-enabled jaxlib is not installed.
+jax 0.4.29 jaxlib 0.4.29 backend cpu
+```
+
+The fix had never arrived. Running the installer showed why in one line: **`uv venv` refuses when
+a venv already exists** ("Use `--clear` to replace it"), exits non-zero, the installer's
+`|| { print_fail; return 1; }` fires, and the tool is reported as failed while the *old* env is
+left untouched. BM5 had a pre-0.6.2 venv, so every re-install since has been a no-op that
+reported failure.
+
+So "installable on aarch64 since 2026-09-26" was only ever true of a box that had **never
+installed it**. The deprecation's whole cost argument — ~130× too slow, 1.7 years for PC-v3's
+50 replicates — rests on a CPU-bound AF2 reward, and the box's own BindCraft env has been running
+`jax 0.6.2` on `gpu` the entire time. The hardware was never the problem and the fix existed; it
+just could not land.
+
+Three call sites had it, not one: aarch64 PC plus BindCraft 2 on both platforms.
+
+**What writing the test taught me, which is the part I would otherwise have got wrong.** A plain
+`\buv\s+venv\b` matcher reported **six phantom offenders** — both installers carry "uv venv" in
+menu descriptions, comments, `run_logged` labels and a `print_fail` string. I nearly "fixed" nine
+call sites when three existed. The matcher now requires a flag or path to follow, and a second
+test bounds the match count so it cannot go loose again and start passing vacuously.
+
+### The pattern across all four
+
+Each was recorded as settled. The source analysis said Chai-1 would fold — right, but silent on
+the MSA. The branch said our labels were suspect — right about the file, wrong about our rows.
+The gate shipped with thresholds that read as principled. The installer's own log said the tool
+failed, and nobody asked why a *re*-install would. **In every case the written claim was true of
+a situation that was not ours**, and the only thing that separated them was running it on the
+machine that mattered.
