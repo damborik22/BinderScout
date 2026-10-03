@@ -1346,3 +1346,73 @@ Not "be more careful". Three specific things:
   agreeing to within 0.01 felt like replication and was the single most persuasive thing
   in the whole sequence. They were scoring *the same designs*; correlated readouts of one
   underpowered sample do not become powered by being read twice.
+
+---
+
+## The ranking was never wrong — only every label describing it
+
+**2026-10-03.** Asked to write down how the evaluator ranks, because it "seems lost
+throughout time". It was. Reading the code and every file that describes it turned up 50
+contradictions, four of them load-bearing enough to change what someone does.
+
+The shape of this one is worth recording because it is the opposite of the usual failure.
+`rank_designs()` has been correct the whole time: gate on `--min-engines`, sort on
+`consensus_iptm_mean`, tie-break on `consensus_iptm_n` → `consensus_iptm` → binder pLDDT.
+No run produced a wrong order. No test went red. Nothing in any output looked wrong. What
+had drifted was every *description* of it:
+
+* `report.html`'s own glossary told the operator `ipsae_min` was "the primary ranking
+  metric" — on the same page that ranks by `consensus_iptm_mean`.
+* `Evaluator/docs/pipeline_reference.md`, the file CLAUDE.md names as **the** metrics
+  reference, said the same in its metrics table.
+* The orchestrator skill's `references/evaluation.md` instructed an agent to sort on
+  `agreement_count` **descending** as the primary key.
+* `SKILL.md` §6.3 said `ipsae_min` agreement "is what unifies them at the campaign's final
+  ranking".
+
+An agent following the third would have produced a differently-ordered shortlist from the
+report's own and had no mechanism to notice the disagreement. That is the real cost: not a
+wrong number, but two authorities giving different orders with no arbiter.
+
+### Why the glossary one mattered more than it looked
+
+I nearly logged the `report.html` string as cosmetic. Rendering an actual report is what
+changed my mind, and it only worked on the second attempt — my first render passed
+`summary={}` and the new text did **not** appear. `_METRIC_DESCRIPTION` renders only for
+metrics present in the `summary` dict, and per the `compute_statistics`-ordering defect
+that dict is built *before* the consensus columns exist. So the shipped per-tool table
+shows `ipsae_min` and **never shows `consensus_iptm_mean` at all**. The glossary was the
+operator's only in-page statement of what ranks, and it named the wrong column.
+
+I would have "verified" that fix with a grep and been wrong about its importance in both
+directions — thinking it cosmetic, and not knowing whether the string renders. Grepping the
+source tells you a string exists. It does not tell you a human ever sees it.
+
+### agreement_count moved to notes, and the code disagreed with the intent
+
+Separately: `agreement_count` was *blocking* `wetlab_recommended`
+(`scoring.py` appended `agreement {n} < 2` to `reasons`, and the badge is
+`len(reasons) == 0`), while the operator's position is that it is a warning and must not
+discriminate. It now lands in `notes`, exactly where SoluProt went on 2026-09-28.
+
+Two things fell out of that worth keeping:
+
+* **The same string had been wrong about SoluProt for five days.** The glossary still read
+  `wetlab_recommended = SoluProt pass + agreement_count ≥ 2 of 3 + …` after SoluProt became
+  note-only. Moving a criterion out of a gate is a two-line change; finding every sentence
+  that still advertises it is not, and nothing connects the two.
+* **Two tests had to change sign, which is the moment to be careful.** A test asserting
+  "low agreement blocks" becomes "low agreement does not block", and a pair of tests like
+  that is satisfiable by a function that never blocks anything. So the third test exists:
+  `test_wetlab_blocks_on_plddt_even_when_agreement_is_fine`. Without it the suite would
+  pass if `reasons` were deleted outright.
+
+### What I did differently, and it caught something
+
+Every fix here is pinned by `tests/test_ranking_metric_is_not_misnamed.py`, and I
+mutation-tested it against all four reversions **plus** the escape I expected to be the
+real weakness: deleting every mention of ranking rather than correcting it. A pure negative
+test ("must not say ipsae_min ranks") passes on a file that says nothing at all, which
+would leave an operator with no statement of what the order means. So each surface must
+also *name* `consensus_iptm_mean`. That fifth mutation failed the test, which is the only
+reason I know the pin is worth anything.
