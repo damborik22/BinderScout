@@ -117,6 +117,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Measured
 
+- **The cross-engine premise, tested: true about errors, false about ranking — and an
+  engine-set change found on Cao was retracted on replication the same day.** Full
+  write-up: `docs/INVESTIGATION_coverage_premise_2026-10-03.md`.
+
+  **Confirmed.** One engine buries a true binder in its within-target bottom quartile
+  **5.2×** more often than all three do together (7.6 % on clean labels), and the ratio
+  *grows* as the cut sharpens (10.5× at bottom-decile). It holds in the false-alarm
+  direction (3.8×). Perfect independence would give 19.9×, identical engines 1.0× — the
+  three sit about halfway on a log scale. Error correlation measured *within target and
+  within class* is **ρ ≈ 0.382**, i.e. effective n = 1.70 of 3. The mean rescues **73.2 %**
+  of binders buried by exactly one engine (27.5 % of those buried by two, 0 % by three).
+
+  **Not confirmed for ranking.** The 3-mean beats the *average* single engine (+0.0088) and
+  **loses to the best** (AF3 alone 0.5603 vs 0.5552; AF3 is the out-of-fold pick on 12/12
+  folds, so not a selection artifact).
+
+  **Retracted.** An apparent win for `mean(af3,esm)` over `mean(all 3)` on "clean" Cao
+  (+0.0210, p=0.0078) **reverses with significance** on the curated Adaptyv benchmark
+  (−0.0210, CI [−0.0309,−0.0095], p<0.0001, 0/4 targets, both metric panels) and does not
+  survive Cao's **own** label flag `kd_ok` (−0.0097, p=0.673). My hand-rolled "finite
+  `kd_ub`" slice admitted 48 designs with `kd_lb == 0` — degenerate [0,X] intervals — and
+  Tie2 existed as a 12th target only because of them while carrying the largest per-target
+  delta. I also bundled two slices: the quoted "+0.153 enrichment" was the *all-labels*
+  number, and on the AUC slice the enrichment delta is +0.0000. The mechanism inverts as
+  well: Boltz-2 is the **strongest** engine on Adaptyv (0.720 vs AF3 0.613) while equally
+  decorrelated, so the change would have dropped the strongest engine on the benchmark the
+  shipped metric was validated against. **Keep all three engines and the shipped ranking.**
+
+  **Shrinkage, proposed and withdrawn the same day** (conclusion §5.0): +0.0003…+0.0006
+  macro AUC with CIs straddling zero, *worse* on precision@top-10 % in 8/8 regimes, `k`
+  unidentifiable — and its premise was wrong, because coverage is 100 % constant on every
+  labelled set we own, making the gate, the raw mean and shrinkage the same ranking.
+
+  **Two of Part U's supporting claims withdrawn.** Its binary-assay corroboration is
+  near-circular (`binder_4000_nm` is predicted by `kd_ub < 4000` at MCC 0.819, 0.075 %
+  error over 654,716 rows), and one-sided binders are not "experimentally indistinguishable"
+  from non-binders — 8.7× the pass rate (p=4e-62), 32× at 400 nM. Part U's headline stands:
+  73.41 % reproduces exactly, and the 0.5552 → 0.7228 clean-label lift to four decimals.
+
 - **Part AI: NULL, and the deliverable is a power calculation.** Five arms
   (baseline / helix / Rg / both / random placebo at three magnitudes), each
   refolded on both held-out engines. **Nothing survives multiple comparisons:**
