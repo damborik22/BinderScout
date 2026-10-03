@@ -54,6 +54,11 @@ import numpy as np
 
 #: Residue order the harness presents to a term. Callers using a different order must say
 #: so via ``alphabet=``; getting it wrong silently permutes every per-class result.
+#:
+#: **Mosaic does not use this order.** ``mosaic.common.TOKENS`` is
+#: ``ARNDCQEGHILKMFPSTWYV`` (checked 2026-10-03). Screening a real Mosaic loss term with
+#: the default below therefore feeds it a permuted composition and every per-class number
+#: is wrong while looking entirely plausible. Pass ``alphabet=TOKENS`` for Mosaic terms.
 ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
 
 #: The class our composition problem is about. Y is included by convention; excluding it
