@@ -3083,7 +3083,18 @@ SHIMPY
     # It does NOT prove a full AF2 pass, let alone throughput. Both remain to be
     # confirmed on the box -- see the closing note.
     print_step "Smoke test: compiling a jitted bf16 graph on this GPU"
-    if "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" - <<'SMOKE'
+    # XLA_PYTHON_CLIENT_PREALLOCATE=false is NOT a tuning nicety here -- without it this
+    # smoke test reports a false XLA/LLVM failure on the exact platform it was written for.
+    # On GB10 the GPU pool IS system RAM (121.7 GiB), and jax takes its 0.75 default
+    # fraction as a reservation at import, so a test needing a few MB reserves ~91 GiB and
+    # the kernel OOM-killer takes the process. Measured on BM5 2026-10-03: the script
+    # printed "jax 0.6.2 | backend gpu", "bf16 graph compiled and ran: 128.000" and
+    # "colabdesign imports", then exited **137** (SIGKILL) at shutdown -- and the installer,
+    # seeing non-zero, declared "the XLA/LLVM blocker is NOT resolved here". With
+    # preallocation off the identical script exits 0. So this guard, written to stop us
+    # overclaiming aarch64 support, was instead attributing an out-of-memory kill to the
+    # bf16 lowering, and would have kept Proteina-Complexa deprecated on a false diagnosis.
+    if XLA_PYTHON_CLIENT_PREALLOCATE=false "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" - <<'SMOKE'
 import sys
 
 import jax
