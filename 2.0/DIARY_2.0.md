@@ -1226,3 +1226,60 @@ One own-goal for the record: staging our AF3 script for `--scripts-path` broke i
 relative resolution of the AF3 repo, so the first refold failed instantly. It failed
 *loudly*, naming `AF3_REPO_DIR` as the fix, which cost a minute instead of producing 56
 empty rows — the 1.0.3 work on silent refold failures paying for itself.
+
+### The control overturned it, and the proportionality is the finding
+
+**2026-10-03.** I committed `HelixLoss at 0.1 helps` three days ago with p=0.0062 on AF3,
+agreement from a second held-out engine, and a corroborating geometry readout. The control
+arm removed it.
+
+A placebo — a frozen random linear functional of the binder's composition, same elu hinge
+and same 0.1 weight as `HelixLoss`, no structural content whatsoever — is **statistically
+indistinguishable from the helix arm**: AF3 +0.046 p=0.199, ESMFold2 +0.039 p=0.48. The
+third helix replicate landed at 0.610 against the placebo's 0.612.
+
+The number that settles it is the ratio of effect to the term's measured magnitude in the
+loss:
+
+| | term magnitude | AF3 Δ/mag | ESMFold2 Δ/mag |
+|---|---|---|---|
+| helix | 0.63 | 0.138 | 0.125 |
+| placebo | 0.30 | 0.135 | 0.135 |
+
+**Identical, on two independent engines.** A random functional buys exactly as much
+held-out score per unit of loss magnitude as an α-helix prior does. Content contributes
+nothing; magnitude contributes everything. And it explains the arm I had called a clean
+negative: `compact` at +0.031 implies a magnitude near 0.23, which is what an Rg hinge
+sitting close to its target would add. **One parameter explains all four arms.**
+
+So Part AI is asking the wrong question. It asks *which structural prior*; the answer is
+that Mosaic's nine-term loss is **under-regularised**, and the question is *how much*. That
+is a more useful finding than the one I thought I had, and I would not have reached it by
+adding more structural terms.
+
+### Four stages, each of which looked like a result
+
+Worth laying out, because the shape is the transferable part:
+
+1. **One baseline replicate.** helix +0.143 AF3 / +0.134 ESMFold2, two engines agreeing to
+   within 0.01. I nearly reported this as settled.
+2. **A second baseline replicate.** Moved the control by 0.065–0.080 — comparable to the
+   effects — and cut every delta by about a third. Two of three arms died.
+3. **A permutation test.** Replaced eyeballing "effect vs spread". `compact` p=0.49,
+   `helix+compact` p=0.070 — both dead; helix survived Bonferroni at p=0.0062.
+4. **The placebo.** Removed the attribution entirely.
+
+Each step was cheap — 12 to 35 minutes of GPU — and each one deleted a conclusion the
+previous step supported. The flagging was not the problem; I flagged the weak baseline and
+the missing control both times. **Flagging a weakness and then reporting anyway is not
+caution, it is a hedge.** The run was 25 minutes.
+
+One asymmetry worth keeping: the control could only ever weaken the result, never
+strengthen it. I said so before running it. That is the right reason to run something.
+
+### The next test, stated so it can falsify this too
+
+The placebo is half HelixLoss's magnitude (0.30 vs 0.63). The constant ratio predicts a
+placebo scaled to 0.63 lands at **+0.085**, matching helix. If it does, H2 is confirmed
+outright. If it lands at +0.041 again — i.e. magnitude does *not* scale — then the
+proportionality was a coincidence of two points and I am wrong again. ~25 min.

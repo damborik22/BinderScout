@@ -117,8 +117,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Measured
 
-- **Part AI's first data point: `HelixLoss` at 0.1 helps, the Rg hinge at 0.1 does
-  not.** Four arms of the newly wired `ss_bias` knob (none / helix / compact /
+- **Part AI, OVERTURNED BY ITS OWN CONTROL (2026-10-03): the geometry terms do
+  nothing. What helps is adding *a* term, in proportion to its magnitude.** A
+  placebo arm — a frozen random linear functional of the binder composition, same
+  elu hinge and same 0.1 weight as `HelixLoss`, zero structural content — cannot be
+  distinguished from the helix arm: **AF3 p=0.199, ESMFold2 p=0.48**. And the effect
+  per unit of measured term magnitude is identical on both engines
+  (helix 0.138 / 0.135, placebo 0.135 / 0.135), which is the signature of
+  regularisation rather than of a useful prior. The pattern across all four original
+  arms is explained by magnitude alone — `compact`'s +0.031 implies a term magnitude
+  near 0.23, consistent with an Rg hinge near its target.
+
+  So the reframing is the result: Mosaic's nine-term loss looks **under-regularised**,
+  and Part AI's question is *how much* regularisation rather than *which* structural
+  prior. The sharp falsifiable prediction, not yet run: a placebo scaled to
+  HelixLoss's 0.63 magnitude should reproduce helix's +0.087 exactly.
+
+  The superseded first pass is kept below, because the sequence is the lesson — a
+  single-replicate baseline, then two held-out engines agreeing, then a control that
+  removed the attribution.
+
+- ~~**Part AI's first data point: `HelixLoss` at 0.1 helps, the Rg hinge at 0.1 does
+  not.**~~ **SUPERSEDED — see above.** Four arms of the newly wired `ss_bias` knob (none / helix / compact /
   helix+compact), 8 designs each with 2 replicates per arm, refolded on **both**
   held-out engines — AF3 and ESMFold2, never Boltz-2, which Mosaic optimises by
   construction. Permutation test, n=16 vs 16:
