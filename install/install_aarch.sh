@@ -3003,8 +3003,22 @@ install_proteina_complexa() {
         "${PCPIP[@]}" torch torchvision --index-url https://download.pytorch.org/whl/cu130 \
         || { print_fail "PyTorch install failed"; return 1; }
 
+    # --index-strategy unsafe-best-match is required, and the name overstates the risk.
+    # PC's own pyproject carries `[tool.uv] extra-index-url = [download.pytorch.org/...]`,
+    # and uv's default `first-index` strategy stops at the first index holding a package.
+    # The torch index holds *some* tqdm but not the `tqdm==4.66.4` that proteinfoundation
+    # pins, so resolution fails outright:
+    #
+    #   Because there is no version of tqdm==4.66.4 and proteinfoundation==1.1.0 depends
+    #   on tqdm==4.66.4, we can conclude that proteinfoundation==1.1.0 cannot be used.
+    #
+    # uv's own hint names this flag. It lets a *subsequent* index (PyPI) supply the pinned
+    # version instead of failing; both indexes here are ones we already install from, so
+    # the dependency-confusion surface the default guards against is not widened.
+    # Measured on BM5 2026-10-03: without it the editable step is the second of two
+    # independent reasons PC had never actually installed on this platform.
     run_logged "Installing Proteina-Complexa (editable)" \
-        bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && '${UV}' pip install --python .venv/bin/python -q -e ." \
+        bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && '${UV}' pip install --python .venv/bin/python -q --index-strategy unsafe-best-match -e ." \
         || { print_fail "PC editable install failed"; return 1; }
 
     # Blocker 2: torch_scatter has no aarch64 wheel and needs no compile here --
