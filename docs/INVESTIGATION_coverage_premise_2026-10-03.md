@@ -1,5 +1,21 @@
 # Does more engines mean less wrong? — measured on Cao 2022
 
+> ## ⚠️ POOL SUPERSEDED, 2026-10-03
+> **Cao 2022 is not to be used as a benchmark** (operator decision, same day, for the
+> reason this investigation independently measured: its Kd labels are too censored).
+> 73.4 % of its binder labels are one-sided, 94.2 % across the full library, `kd_ok` keeps
+> ~495 designs, and **8 of 12 targets sit at the random-ordering noise floor**.
+>
+> **Everything in §1 and §2 below was computed on Cao and is therefore PROVISIONAL.** The
+> §3 retraction is unaffected — it retracted a Cao claim *using* the Adaptyv benchmark,
+> which is the right direction.
+>
+> The canonical benchmark is the curated **Adaptyv/ProteinBase** set under
+> `EVALUATOR/Benchmark/` on the MUNI share (563 designs with the full PAE panel, 4 targets,
+> replicated binding calls). The premise numbers below — the 5.2×, the ρ ≈ 0.382, the
+> 73.2 % rescue rate — **need re-measuring there.** Nothing should be built on them until
+> that is done.
+
 **Date:** 2026-10-03 · **Pool:** `cao_merged.csv`, 4,442 designs, 12 targets, 2,042 binders
 (`kd_lb < 1000 nM`), 100 % three-engine coverage. Aggregates only; no per-design data.
 
