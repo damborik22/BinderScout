@@ -2093,3 +2093,82 @@ construct while WT is ApoE4, so those numbers confound isoform with oligomerisat
 right answer is a binder-local filter set (`i_pTM` + binder pLDDT + interface count, no whole-complex
 `pTM`/`i_pAE`) for targets above ~250 residues. 556 trajectories is enough evidence to ask the
 question; it is not yet enough to answer it, because no round has run the alternative bar.
+
+---
+
+## 2026-09-23 → 09-28 — A refold engine ran on random weights and did not fail; the box that crashed was the lucky one
+
+Adding one oligomer state to the ApoE study (the trimer, n=3, 897 tokens) meant running the same
+three refold engines on a second machine for the first time. Two of the three broke, and the more
+important of the two broke in a way that produced numbers instead of an error.
+
+**ESMFold2 loaded a randomly-initialised ESMC-6B encoder, on both machines.** The pin on ESMFold2
+does not cover the 6B model it nests: `from_pretrained()` ends in `load_esmc(config.esmc_id)` with
+the bare repo id `biohub/ESMC-6B`, so that encoder always resolves at whatever upstream tags `main`.
+Upstream re-published it around 2026-09-17 in a Llama-style layout whose key overlap against the 802
+parameters the pinned `transformers` ESMCModel expects is **0/802**. HF only warns. Clara cached the
+new revision on 09-17; **BM5 cached it on 09-21**.
+
+**My first diagnosis was wrong, and it was wrong in a plausible way.** Clara aborted with
+
+    linalg.svd: (Batch element 0): The algorithm failed to converge because
+    the input matrix is ill-conditioned or has too many repeated singular values
+
+while BM5 produced finite output — and the two boxes run different torch builds (2.6.0+cu124 vs
+2.12.0+cu130). That reads as a cuSOLVER portability difference, and I wrote it up as one. It is not.
+Two attempted fixes, the second informative:
+
+1. `preferred_linalg_library("magma")` — **cannot work**, and the error says why: `driver=` is only
+   accepted by cuSOLVER, and the call site
+   (`transformers/models/esmfold2/modeling_esmfold2_common.py:1688`) already passes
+   `driver="gesvd"`, cuSOLVER's most robust. A backend swap is dead on arrival there.
+2. Keep cuSOLVER, fall back to CPU LAPACK. CPU then reports the real cause:
+   **"the input matrix contained non-finite values."** The SVD was never the problem; NaNs were
+   arriving from an untrained encoder upstream.
+
+**The machine that crashed was the lucky one.** Clara's degenerate frames hit an SVD that refused
+them. BM5's did not — it returned a complete structure, a pLDDT array, an iPTM, and those numbers
+went into the campaign report and the geometry table, where they sat for five days. The retraction
+changed the WT trimer C-domain radius of gyration from **14.1 Å to 27.2 Å**, which had been written
+up as a novel non-monotonicity. It was an artifact of random weights.
+
+Fixed by pinning the nested encoder to `45b0fa5d` and **asserting parameter coverage at load**
+(802/802) rather than trusting the warning — the same guard `refold_esmfold2.py` gained in `f596509`,
+which landed four minutes after I finished producing the bad data. Re-run 2026-09-28.
+
+**Three things worth carrying:**
+- **A warning is not a guard.** `from_pretrained` tolerating a 100% key miss with a log line is the
+  entire failure. Assert coverage; it costs seconds.
+- **A fallback that rescues a numerical failure can launder one.** Had the CPU-SVD fallback
+  "succeeded", it would have written a structure from NaN coordinates — and Rg and inter-chain
+  contact counts evaluate happily on garbage and return plausible numbers. Same shape as the silent
+  single-sequence MSA fallback and the RFD3 `infer_ori_strategy` omission that produced structures
+  reporting `n_chainbreaks=0`.
+- **Two machines disagreeing is evidence, not an explanation.** The disagreement was real and the
+  inference from it was wrong, because the actual variable (when each box last refreshed an HF cache)
+  was not one I was looking at.
+
+**Boltz-2 needs `--no_kernels` on Clara.** `boltz/model/layers/triangular_mult.py` imports
+`cuequivariance_torch` inside its kernel branch, and that module is installed on **neither** machine —
+so BM5's earlier successful runs cannot have taken that branch either. The flag makes the reference
+PyTorch path explicit and restores parity rather than departing from it. Unresolved: `use_kernels`
+defaults to true and `boltz/main.py` has no capability gate, so *why* BM5 skips the kernel
+automatically is not established. Both machines are boltz 2.2.1.
+
+**AF3 is the one that travels.** Same WT trimer computed independently on BM5 and Clara: iPTM 0.16 vs
+0.16, pTM 0.20 vs 0.20, pLDDT 0.536 vs 0.527. Worth knowing, because the existing ApoE oligomer report
+compares control folds run on the fleet against WT folds run on BM5, and that comparison had never
+been checked.
+
+**Practical consequence.** "Engine X is installed on machine Y" is not the same as "engine X produces
+valid output on machine Y". Note what the real variable turned out to be: **not** token size and
+**not** the torch version, both of which I suspected, but *when each box last refreshed a Hugging
+Face cache* — an input nothing in the run records. Any engine that resolves a weight id without a
+revision is exposed to this, and the exposure is invisible in the run log. Before moving a refold to
+a new box: assert the weights actually loaded, and check the outputs are **finite** — not just that
+the process exited 0.
+
+**Two stale paths found the same day**, both cheap and both the kind that only surface on re-run:
+`build_apoe4_session.py` still pointed at `Project-01-BINDMASTER/2L7B_ApoE3 FL/`, which was renamed to
+`ApoE FL/` (PyMOL raised, so this one was loud), and BM5's only PyMOL lives in a `pymol-viz` env that
+no other tooling references.
