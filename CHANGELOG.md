@@ -8,6 +8,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Four surfaces named the wrong metric as the ranking metric, and one of them was an
+  agent instruction.** `rank_designs()` has always been correct — gate on `--min-engines`,
+  sort on `consensus_iptm_mean`, tie-break on `consensus_iptm_n` → `consensus_iptm` →
+  binder pLDDT — so no run produced a wrong order and no test went red. Only the
+  descriptions had drifted: `report.html`'s own glossary called `ipsae_min` "the primary
+  ranking metric" on the page that ranks by `consensus_iptm_mean`;
+  `Evaluator/docs/pipeline_reference.md`, the file CLAUDE.md cites as *the* metrics
+  reference, said the same in its metrics table; the orchestrator skill's
+  `references/evaluation.md` instructed an agent to sort on `agreement_count`
+  **descending** as the primary key; and `SKILL.md` §6.3 said `ipsae_min` agreement
+  "unifies them at the campaign's final ranking".
+
+  An agent following the third would have produced a differently-ordered shortlist from
+  the report's own, with no mechanism to notice. Pinned by
+  `tests/test_ranking_metric_is_not_misnamed.py`, mutation-tested against all four
+  reversions **plus** the escape a purely negative test allows — deleting every mention of
+  ranking instead of correcting it — so each surface must also name the real metric.
+  `pipeline_reference.md`'s table gained a ROLE column
+  (RANKS / GATES / WARNS / REPORTS / NATIVE), the distinction whose absence let this drift.
+
+  Verified by rendering a real `report.html`, not by grepping the source, and that
+  mattered: `_METRIC_DESCRIPTION` renders only for metrics present in the `summary` dict,
+  and because `compute_statistics` runs before the consensus columns exist, the shipped
+  per-tool table shows `ipsae_min` and **never shows `consensus_iptm_mean` at all** — so
+  that glossary line was the operator's only in-page statement of what ranks.
+
 - **`ss_bias` was a dead knob: two design-loss terms were unreachable in every
   generated run.** `design()` in the Mosaic template took an `ss_bias` argument
   that gated `sp.HelixLoss()` and `sp.DistogramRadiusOfGyration()` — and its sole
@@ -228,6 +254,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`agreement_denom` — `agreement_count` now ships with a per-design denominator.**
+  `(vals > thr).fillna(False)` is False both when an engine scored a design and rejected it
+  and when the engine never scored it at all, so `agreement_count = 1` could not
+  distinguish "two engines doubt this" from "two engines never ran" — opposite meanings,
+  only one of which is a statement about the design. Measured on the canonical benchmark:
+  **99 labelled designs carry exactly 2 of 3 engines**, so their count is capped at 2 and
+  can never reach 3 while sitting in the same table as designs whose ceiling is 3.
+  `consensus_iptm_mean` has carried `consensus_iptm_n` for this reason; `agreement_count`
+  shipped without the equivalent. The wet-lab note now reads `agreement 1 of 3 engines` and
+  stays **silent** where the bar is unreachable. The pool-level guard this replaces could
+  not catch the case that actually occurs — all three engine columns present, empty only for
+  *this* design because its refold failed.
+
+- **`docs/PLAN_2.0_PART_AK_verify_the_rank.md`** — planned, nothing launched. Scoped to
+  *verify* the existing ranking, not re-scope it: no new metric, no engine change, no
+  normalisation, no metric search. Step AK0 is free and blocking.
+
+- **`Evaluator/docs/evaluation/DRAFT_evaluation_reference.md`** — the consolidated
+  ranking/metrics reference, under review. Committed as a DRAFT so it is not lost; intended
+  to split into `ranking.md` + `metrics.md` in that directory once settled.
+
 - **`tools/loss_screen.py` — a CPU screen for candidate design-loss terms.** A Mosaic
   loss arm costs a hallucination campaign (>24 GB VRAM) plus refolds on two
   independent engines. Most bad candidates are not *mediocre*, they are wrongly
@@ -329,6 +376,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`binder-eval-boltz2`); Boltz-2 refolding runs in the Mosaic venv.
 
 ### Changed
+
+- **`agreement_count` no longer withholds `wetlab_recommended`; it is a note** (operator
+  decision). It had been appending `agreement {n} < 2` to the blocking `reasons` list, so
+  a low count silently vetoed the badge. It now prints in `wetlab_reason` alongside the
+  blockers without suppressing the recommendation, exactly as SoluProt was moved on
+  2026-09-28 — and the `report.html` glossary string advertising both as criteria, wrong
+  about SoluProt for five days, was corrected with it.
+
+  The rationale: `agreement_count` reads a **different quantity** from the rank. The rank
+  averages ipTM (`*_pae_iptm`); `agreement_count` counts engines over an **absolute ipSAE**
+  cut, and that cut measured *inverted* against our own Kd data. Two tests changed sign,
+  and because a pair of sign-flipped tests is satisfiable by a function that never blocks
+  anything, `test_wetlab_blocks_on_plddt_even_when_agreement_is_fine` holds the other side.
+
+  Re-measured on the canonical benchmark while doing this: the figure in CLAUDE.md and in
+  the benchmark's own README — "a flat null, macro-AUC 0.532, 87.2 % tied at zero" — is the
+  **Cao** result, carried over without re-measurement. On the all-3-engine labelled subset
+  it is **0.6295** with 70.5 % tied, and the binder rate runs 0.378 → 0.567 → **0.778** →
+  0.758. So it carries real signal, is worse than the mean as a ranker, and **2-vs-3 is
+  indistinguishable** — warning-shaped, not rank-shaped, and a gate at 3 would be
+  unjustified.
 
 - **Refold structures are saved under the design's `binder_id`.** All three
   engines named every artifact after the loop index — `refold7_a1b2c3d4.pdb`,
