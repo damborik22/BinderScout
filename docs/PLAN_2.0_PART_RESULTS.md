@@ -25,7 +25,7 @@ state). As of `v2.0.x`, 893 tests, ruff + shellcheck clean.
 | **AF** | fourth engine (Chai-1) | **Reopen as an ADDITION.** Source analysis says no sm_86 wall, favourable memory design, outputs match our schema. Unverified by execution |
 | **AG** | fleet/Clara benchmark consumer | **Not started** — and NOT a measured negative like Z/AH. No measurement, no verdict; only the naming blocker cleared. Needs ~50–95 GPU-hours |
 | **AH** | BindPred | **Obtained and REJECTED** — benchmarked blind on our SPOC data, ranks backwards |
-| **AI** | tune Mosaic's design loss | **FIRST ARMS RUN (2026-09-30).** `0.1*HelixLoss` +0.111 AF3 ipTM (p=0.0062, held-out); the Rg hinge does nothing. Placebo control in flight |
+| **AI** | tune Mosaic's design loss | **MEASURED, and the geometry terms do nothing (2026-10-03).** A random-functional placebo matches `HelixLoss` (p=0.199 AF3). Effect tracks term MAGNITUDE, not content — the loss is under-regularised |
 | **AJ** | MD reverse check | **Verdict: do not build now** — on cost and a weak premise. "No tooling" was wrong: OpenMM 8.6 with CUDA is in the `BindCraft` env (GROMACS is not) |
 
 **Recount, 2026-10-03** — the old "2½ of 12 complete" line predated AB shipping and
@@ -592,6 +592,25 @@ builds the shared runner.
 ---
 
 ## AI — tune Mosaic's design loss · **first measured data point, 2026-09-30**
+
+> **UPDATE 2026-10-03 — THE CONTROL OVERTURNED THE RESULT BELOW.** A placebo arm (frozen
+> random linear functional of the binder composition; same elu hinge, same 0.1 weight as
+> `HelixLoss`; zero structural content) is **statistically indistinguishable from the helix
+> arm**: AF3 +0.046 p=0.199, ESMFold2 +0.039 p=0.48. Effect per unit of measured term
+> magnitude is identical across both terms and both engines — helix 0.138/0.125, placebo
+> 0.135/0.135. **`HelixLoss` is not doing the work; its magnitude is.** The whole four-arm
+> pattern follows from magnitude alone (`compact` at +0.031 implies ~0.23, what an Rg hinge
+> near its target would contribute).
+>
+> **Part AI's question is therefore the wrong one.** It asks which structural prior to add;
+> the data says the nine-term loss is under-regularised and almost any extra constraint
+> helps in proportion to its size. Next test, falsifiable and ~25 min: a placebo scaled to
+> HelixLoss's 0.63 magnitude should reproduce +0.087.
+>
+> The superseded reading follows. It is kept because the SEQUENCE is the lesson: one
+> baseline replicate, then two held-out engines agreeing to within 0.01, then a second
+> baseline that cut every delta by a third, then a control that removed the attribution
+> entirely. Each step looked like a result.
 
 > **UPDATE 2026-09-30 — the first AI arms have been run**, on BM2's RTX 3090, after
 > wiring the previously dead `ss_bias` knob. Four arms x 8 designs, 2 replicates each
