@@ -81,7 +81,13 @@ today's 136-row figure. Too few to move it, but they should not be in a final ta
 
 **Cost:** zero GPU, and no external input required.
 
-## 2. Step AK1 — the GPU verification, staged so nothing big runs unattended first
+## 2. Step AK1 — **DEFERRED, do not start** (operator: "nothing big", and no benchmark work now)
+
+Kept here because the sizing is done and correct, not because it is queued. Nothing below runs
+until it is explicitly asked for. The GPU being idle is not a reason to start it — AK0 above and
+Part AF below are both ahead of it, and AF is cheap.
+
+### Sizing, for when it is wanted
 
 The external benchmark's own bottleneck is engine **coverage**, not labels. Of **2,018** labelled
 designs, only **563** have all three engines:
@@ -157,3 +163,60 @@ the designs that already got three engines.
   not separable from 2/3 on the data we have).
 - No search over metrics. Part U measured that honest nested selection over 72 metrics scores
   **0.5170** against **0.5552** for `consensus_iptm_mean` alone. Verification only.
+
+
+---
+
+## 5. Parked — benchmark *expansion* is not part of this, and not wanted now
+
+Recorded so the measurement is not repeated, and flagged as **acquisition, not verification** —
+which is why it is out of scope here. It came up while sizing AK1 and was pushed the wrong way
+before being corrected.
+
+`00_source_data/master_designs.csv` carries **2,517 labelled designs across 24 targets**, but
+target sequences exist for only **4 names** (`egfr`, `il7r`, `nipah`, `pd-l1`) in
+`01_refold_inputs/*/target_seqs.json`:
+
+| | targets | labelled designs |
+|---|---|---|
+| target sequence available | 4 (3 usable — see nipah below) | 988 |
+| **no target sequence** | **17** | **1,529** |
+
+Several of the unavailable ones are far better balanced than what we use today — spcas9 70 %
+binders, human-insulin-receptor 60 %, human-pdgfr-beta 60 %, human-mzb1-perp1 50 %, human-phyh
+50 %, against EGFR's 15.7 % — so a 17-target macro-AUC would be a much stronger basis than a
+3-target one. **That is a reason it would be valuable later, not a reason to do it now:** it means
+sourcing 17 target sequences and refolding ~1,529 new designs, which is new benchmark data, not a
+check on the ranking we already ship.
+
+### One data-integrity problem to settle before *any* future use of this table
+
+`master_designs.csv` has **`nipah-glycoprotein-g`: 927 designs, 1 binder (0.1 %)**, while the
+merged 3-engine table has **`nipah`: 1,030 labelled, 103 binders (10 %)**. Similar names,
+incompatible label sets, and almost certainly two different sources — there is a separate
+`00_source_data/proteinbase_collection_nipah-binder-competition-results.csv`. Nipah is the single
+largest block in both tables, so this is not a rounding difference and it must be resolved before
+either number is cited. Four further targets (human-serum-albumin 103, human-tnfa 35, human-orm2
+30, human-gm2a 30) have **zero** binders and cannot contribute a within-target AUC at all, though
+they are usable as negative controls.
+
+## 6. Machine readiness, as measured 2026-10-03
+
+Verified on BM2 so it does not need re-discovering:
+
+| | status |
+|---|---|
+| GPU | RTX 3090, 24 576 MiB, **23 MiB used — idle** |
+| Boltz-2 | `Mosaic/.venv/bin/binder-compare` present |
+| AF3 | env present **and weights present** (`~/.alphafold3/models/af3.bin`) |
+| ESMFold2 | env present, console script works |
+| disk | ample (~1.5 GB of PAE for the whole of AK1) |
+
+**One gap:** BM2's checkout is on `v1.1.x`, and all four envs are editable-installed against it,
+so they predate `AF3_MIN_BUCKET`, `agreement_denom` and the `<binder_id>_<engine>` structure
+naming. Any GPU work there needs `git checkout v2.0.x` plus `pip install -e 'Evaluator[report]'`
+in all four — the `[report]` extra, **never** `--no-deps`, which leaves `binder-compare` unable to
+start at all.
+
+**BM5 and Clara could not be reached** from this session or from BM2 (neither resolves), so their
+readiness is unverified.
