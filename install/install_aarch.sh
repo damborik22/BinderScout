@@ -2175,7 +2175,7 @@ install_bindcraft2() {
         # BindCraft 2 needs >=3.12; uv fetches an interpreter when the machine
         # has none that new, which is the usual case on an older login node.
         run_logged "Creating BindCraft 2 venv (Python >=3.12)" \
-            uv venv --seed --python ">=3.12" "${BINDCRAFT2_DIR}/.venv" \
+            uv venv --clear --seed --python ">=3.12" "${BINDCRAFT2_DIR}/.venv" \
             || { print_fail "Failed to create ${BINDCRAFT2_DIR}/.venv"; return 1; }
     fi
 
@@ -2982,8 +2982,18 @@ install_proteina_complexa() {
     fi
 
     # Upstream env/build_uv_env.sh is x86/cu126-pinned, so the venv is built here.
+    #
+    # --clear is load-bearing: without it `uv venv` REFUSES when a .venv already
+    # exists ("A virtual environment already exists at `.venv`. Use --clear to
+    # replace it") and the whole tool install fails at its first step. Measured on
+    # BM5 2026-10-03, where a venv from the pre-0.6.2 era was present: the installer
+    # exited with "Proteina-Complexa failed to install" and the stale CPU-only
+    # jax 0.4.29 venv was left in place. So "installable on aarch64 since
+    # 2026-09-26" was only ever true of a box with NO prior PC venv -- i.e. never
+    # re-installable, which is how the jax 0.6.2 fix failed to reach the one machine
+    # it was written for. Reinstall means rebuild, matching every other tool here.
     run_logged "Creating uv venv (python 3.12)" \
-        bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && '${UV}' venv --python 3.12 .venv" \
+        bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && '${UV}' venv --clear --python 3.12 .venv" \
         || { print_fail "uv venv failed"; return 1; }
 
     local PCPIP=("${UV}" pip install --python "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" -q)
