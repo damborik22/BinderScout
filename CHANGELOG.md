@@ -254,6 +254,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`adaptyv` labels rebuilt from the raw exports' `evaluations`, not the flat columns.**
+  Prompted by a finding on the `docs/adaptyv-proteinbase-one-dataset` branch: the exports are
+  long-format per (design, target) with replicates, and `master_designs.csv`'s flattened
+  `binding`/`kd` columns silently pick a target and a replicate, so a design counter-screened
+  against two targets can yield a chimeric row. Checked rather than assumed, and the outcome
+  was better than feared: **2,018/2,018 of our rows match the exports**, with two egfr/il7r
+  rows corrected (binders 323 → 325) and expression corrected from the flat file's 1,795/223
+  to the export's 1,810/208. Labels now carry `n_binding_replicates` (median **6**) and
+  `replicates_disagree` (**7** of 2,018 pairs).
+
+  **The nipah discrepancy is resolved, and it was the flat file's error, not ours.** Nipah's
+  labels come from a *separate* export, `proteinbase_collection_nipah-binder-competition-results.csv`,
+  which screened against **two** targets — `nipah-glycoprotein-g` and `human-serum-albumin`.
+  All 1,030 of our nipah rows match it exactly (103 binders both ways). `master_designs.csv`'s
+  "927 designs / 1 binder" is the flattening artifact. The manifest now says plainly: do not
+  take labels from that file.
+
 - **First pool registered in the label registry: `adaptyv`** (Part Y shipped as a working
   library whose `list_benchmarks()` returned `[]`). 2,018 labelled designs over 4 targets;
   the manifest is committed, the label rows are not — they live in the private store named
