@@ -3061,9 +3061,35 @@ SHIMPY
     # Blocker 3, and the whole point of this function: the AF2 reward's JAX.
     # jax[cpu]==0.4.29 was the manual port's answer because 0.4.x cannot compile
     # AF2 for sm_121 at all. 0.6.2 can, and is the version BindCraft 1 uses here.
-    run_logged "Installing jax[cuda12]==0.6.2 + colabdesign (AF2 reward)" \
-        "${PCPIP[@]}" "jax[cuda12]==0.6.2" git+https://github.com/sokrypton/ColabDesign.git \
-        || { print_fail "jax/colabdesign install failed"; return 1; }
+    #
+    # DO NOT add upstream ColabDesign here. PC vendors its OWN fork and maps it in
+    # pyproject.toml (`"community_models/colabdesign" = "colabdesign"`), so the editable
+    # install above already provides `colabdesign`. That fork supports a `device` kwarg
+    # (`community_models/colabdesign/af/model.py:35` does
+    # `self._device = kwargs.pop("device", None)`) and PC's reward calls
+    # `mk_afdesign_model(..., device=self.device)`. Upstream has no such parameter, so
+    # installing it here SHADOWS the vendored fork and every `complexa generate` dies on
+    # config instantiation with
+    #   AssertionError("ERROR: the following inputs were not set: {'device': CudaDevice(id=0)}")
+    # Measured on BM5 2026-10-04: this step was installing upstream 1.1.3 over the fork,
+    # which is why PC failed in 25-33 s no matter what else was fixed.
+    run_logged "Installing jax[cuda12]==0.6.2 (AF2 reward)" \
+        "${PCPIP[@]}" "jax[cuda12]==0.6.2" \
+        || { print_fail "jax install failed"; return 1; }
+
+    # The import must resolve INSIDE the checkout, not into site-packages. Anything that
+    # pulls upstream colabdesign in as a transitive dependency reintroduces the shadowing
+    # silently, and the symptom is a hydra error that names the dataloader instead.
+    print_step "Checking colabdesign resolves to PC's vendored fork"
+    PC_CD=$("${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" -c \
+        "import colabdesign,os;print(os.path.dirname(colabdesign.__file__))" 2>/dev/null) || PC_CD=""
+    if [[ "${PC_CD}" == "${PROTEINA_COMPLEXA_DIR}"* ]]; then
+        print_ok "colabdesign -> ${PC_CD}"
+    else
+        print_fail "colabdesign resolves to '${PC_CD:-<import failed>}', not PC's vendored fork."
+        print_warn "Upstream ColabDesign has no 'device' kwarg; PC's reward passes one. Reinstall PC editable."
+        return 1
+    fi
 
     # Blocker 4/5 and the rest of the manual recipe.
     run_logged "Installing biotite 1.6.0 + graphein + atomworks" \
