@@ -80,10 +80,18 @@ done
 # Probe MPS first: it decides the floor.
 export CUDA_MPS_PIPE_DIRECTORY="${BINDERSCOUT_MPS_DIR:-/tmp/binderscout-mps}/pipe"
 MPS_UP=0
+LEGACY_MPS_UP=0
 if command -v nvidia-cuda-mps-control >/dev/null 2>&1 \
    && echo get_default_device_pinned_mem_limit 0 2>/dev/null \
       | timeout 5 nvidia-cuda-mps-control >/dev/null 2>&1; then
   MPS_UP=1
+# A PRE-RENAME daemon on /tmp/bindmaster-mps/pipe is invisible to the probe above, so MPS
+# reads "down" while nvidia-smi shows it alive. We do not join it (gpu_mem_guard.sh refuses
+# to run two control daemons) -- the floor below correctly falls back to UNENFORCED, and the
+# banner says which, so the lost ceiling is visible rather than inferred.
+elif echo get_default_device_pinned_mem_limit 0 2>/dev/null \
+     | CUDA_MPS_PIPE_DIRECTORY=/tmp/bindmaster-mps/pipe timeout 5 nvidia-cuda-mps-control >/dev/null 2>&1; then
+  LEGACY_MPS_UP=1
 fi
 if [[ -z "$MIN_OS_GIB" ]]; then
   if [[ "$MPS_UP" -eq 1 ]]; then MIN_OS_GIB=$ENFORCED_FLOOR_GIB
@@ -256,6 +264,8 @@ if [[ "$MPS_UP" -eq 1 ]]; then
   if [[ -n "$SRV" ]] && (( CAP_GIB > SRV )); then
     MPS_STATE="up but server default is ${SRV}G < requested ${CAP_GIB}G -- the SERVER value wins"
   fi
+elif [[ "$LEGACY_MPS_UP" -eq 1 ]]; then
+  MPS_STATE="down -- PRE-RENAME daemon on /tmp/bindmaster-mps/pipe, not joined; --cap is advisory only"
 fi
 
 # --- kernel victim selection ---------------------------------------------------------------

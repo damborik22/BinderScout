@@ -414,8 +414,8 @@ BinderScout without applying the patch makes every design fail its feature
 build:
 
 ```bash
-ssh <m> "cd ~/dev/BindMaster/Mosaic && git apply ~/dev/BindMaster/install/patches/mosaic-offline-msa.patch"
-ssh <m> "grep -c msa_path ~/dev/BindMaster/Mosaic/src/mosaic/structure_prediction.py"   # must be >= 1
+ssh <m> 'bash -lc "cd ~/dev/BindMaster/Mosaic 2>/dev/null || cd ~/dev/BinderScout/Mosaic; git apply ../install/patches/mosaic-offline-msa.patch"'
+ssh <m> 'bash -lc "cd ~/dev/BindMaster 2>/dev/null || cd ~/dev/BinderScout; grep -c msa_path Mosaic/src/mosaic/structure_prediction.py"'   # must be >= 1
 ```
 
 Verify with that grep as part of any sync — do not assume the checkout is

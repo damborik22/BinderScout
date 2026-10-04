@@ -32,7 +32,7 @@ sq() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
 # escapes quotes/backslashes correctly — a hand-rolled printf %s could not.
 probe_one() {
     ssh -o BatchMode=yes -o ConnectTimeout=8 "$1" \
-        "BINDERSCOUT_DIR='$(sq "${BINDERSCOUT_DIR:-}")' GPU_BUSY_MIB=$GPU_BUSY_MIB bash -s" <<'REMOTE'
+        "FLEET_REPO_DIR='$(sq "${FLEET_REPO_DIR:-}")' GPU_BUSY_MIB=$GPU_BUSY_MIB bash -s" <<'REMOTE'
 set -u
 gpu=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1)
 procs=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits 2>/dev/null \
@@ -40,7 +40,11 @@ procs=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounit
 # The checkout directory is machine-local and spelled either way after the 2.0
 # rename, so resolve it instead of assuming one name — hardcoding BinderScout
 # made every env/git field below fall into its own "none" fallback.
-repo="${BINDERSCOUT_DIR:-}"
+# The override is FLEET_REPO_DIR, deliberately NOT BINDERSCOUT_DIR: that name means
+# "this machine's checkout" to both installers and every bin/ shortcut, so forwarding
+# it would ship the DRIVER's absolute path to boxes with a different $HOME, skip the
+# detect loop on a path that does not exist there, and report "none" for every field.
+repo="${FLEET_REPO_DIR:-}"
 if [ -z "$repo" ]; then
     for d in "$HOME/dev/BinderScout" "$HOME/dev/BindMaster" "$HOME/BinderScout" "$HOME/BindMaster"; do
         if [ -f "$d/binderscout.py" ] || [ -f "$d/bindmaster.py" ]; then repo=$d; break; fi
@@ -99,19 +103,22 @@ cmd_status() {
     # render through this format, so they can never drift out of sync again.
     # MACHINE is 7 chars wide because the literal label "MACHINE" is 7 chars;
     # %s is a minimum width and would silently NOT truncate a shorter spec.
-    local row_fmt='%-7s %-14s %-24.24s %-6s %-6s %-8s %s'
+    local row_fmt='%-7s %-14s %-24.24s %-6s %-6s %-8s %-10s %s'
     # shellcheck disable=SC2059  # row_fmt is our own fixed literal, not user input
-    printf '%s%s%s\n' "$BOLD" "$(printf "$row_fmt" MACHINE HOST GPU BUSY RAM DISK BRANCH)" "$RESET"
+    printf '%s%s%s\n' "$BOLD" "$(printf "$row_fmt" MACHINE HOST GPU BUSY RAM DISK BRANCH REPO)" "$RESET"
     local m
     for m in "${FLEET_MACHINES[@]}"; do
+        # REPO is the checkout the probe actually read, so a "none" branch can be told
+        # apart from a machine whose repo was resolved to the wrong directory.
         jq -r --arg m "$m" '
             .machines[$m] as $x
             | if $x.reachable
               then [$m, $x.host, ($x.gpu // "-" | split(",")[0]), ($x.gpu_procs|tostring),
-                    (($x.ram_gb|tostring) + "G"), $x.disk_free, $x.git_branch]
-              else [$m, "UNREACHABLE", "-", "-", "-", "-", "-"] end
+                    (($x.ram_gb|tostring) + "G"), $x.disk_free, $x.git_branch,
+                    ($x.repo_dir // "-")]
+              else [$m, "UNREACHABLE", "-", "-", "-", "-", "-", "-"] end
             | @tsv' "$INVENTORY" \
-        | awk -F'\t' -v fmt="$row_fmt" '{printf fmt"\n", $1,$2,$3,$4,$5,$6,$7}'
+        | awk -F'\t' -v fmt="$row_fmt" '{printf fmt"\n", $1,$2,$3,$4,$5,$6,$7,$8}'
     done
 
     local tunnel key

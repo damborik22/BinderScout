@@ -53,9 +53,11 @@ On the worker machine:
 ~/runs/<TARGET>-<machine>-<tool>/.progress     ← optional local progress notes (don't ship)
 ```
 
-The checkout directory itself was **not** renamed in 2.0 — it is `~/dev/BindMaster`
-on every fleet machine, and the directory name is machine-local. Resolve it rather
-than assuming either spelling in a command you ship to another box.
+The checkout directory is machine-local and spelled either way after the 2.0
+rename — `~/dev/BindMaster` on today's fleet boxes, `~/dev/BinderScout` on a fresh
+clone. Resolve it rather than asserting one: `cd ~/dev/BindMaster 2>/dev/null || cd
+~/dev/BinderScout`. The path listings in this skill use the `BindMaster` spelling
+for brevity.
 
 On muni-disk (XBay, mounted or VPN-reachable):
 
@@ -105,7 +107,7 @@ Run these checks before touching anything. See `references/pre-flight.md` for fu
 - **Disk space.** `df -h ~/runs` and the muni-disk mount. Budget 50-200 GB per run depending on tool.
 - **BinderScout repo is at the pinned commit.**
   ```bash
-  cd ~/dev/BindMaster
+  cd ~/dev/BindMaster 2>/dev/null || cd ~/dev/BinderScout
   git fetch && git checkout <pinned-SHA>
   ```
   If the pinned commit doesn't exist locally yet, `git fetch --all` first.

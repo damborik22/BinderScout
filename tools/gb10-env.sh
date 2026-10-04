@@ -121,6 +121,13 @@ PY
     if echo get_default_device_pinned_mem_limit 0 2>/dev/null \
        | timeout 5 nvidia-cuda-mps-control >/dev/null 2>&1; then
         export CUDA_MPS_PINNED_DEVICE_MEM_LIMIT="0=${cap}G"; mps="up (${cap}G enforced)"
+    elif echo get_default_device_pinned_mem_limit 0 2>/dev/null \
+         | CUDA_MPS_PIPE_DIRECTORY=/tmp/bindmaster-mps/pipe timeout 5 nvidia-cuda-mps-control >/dev/null 2>&1; then
+        # A PRE-RENAME daemon still serves /tmp/bindmaster-mps/pipe. We deliberately do not join
+        # it -- gpu_mem_guard.sh refuses to run two control daemons -- so the budget above is
+        # advisory to the frameworks only. Say which, instead of a bare "down" that reads like
+        # "no MPS anywhere" while nvidia-smi shows MPS alive.
+        mps="down -- PRE-RENAME daemon on /tmp/bindmaster-mps/pipe, not joined (tools/gpu_mem_guard.sh status)"
     fi
 
     # Make this shell's children the designated OOM victim. Driver pages are charged to no task,

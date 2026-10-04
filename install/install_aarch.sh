@@ -614,6 +614,29 @@ _resolve_env_name() {
     fi
 }
 
+# _refuse_if_env_in_use <env-name>
+# Refuse to install into a conda env a process is still running out of.
+# resolve_env_names can repoint an install at a pre-rename env, and the install
+# steps are destructive even when the env already exists: `pip install torch
+# --force-reinstall` replaces shared objects under whatever interpreter is live
+# in that prefix (ImportError or a half-written .so in the running job), and
+# --force removes the env outright. Refusing is the safer of the two policies
+# the reviewers proposed: warn-and-skip-the-destructive-steps leaves a
+# half-installed env behind and still reports the tool installed. Same pgrep
+# test as _remove_legacy_env; uninstall keeps its own, which skips rather than
+# fails because leaving a legacy env in place is not an error.
+_refuse_if_env_in_use() {
+    local name="$1"
+    env_exists "${name}" || return 0
+    if pgrep -f "${CONDA_BASE}/envs/${name}/" >/dev/null 2>&1; then
+        print_fail "Conda env '${name}' is IN USE by a running process — refusing to install into it."
+        print_warn "  Installing would force-reinstall packages under the live interpreter."
+        print_warn "  Wait for that job to finish, then re-run."
+        return 1
+    fi
+    return 0
+}
+
 # ensure_conda_in_path
 ensure_conda_in_path() {
     export PATH="${CONDA_BASE}/bin:${PATH}"
@@ -1801,6 +1824,7 @@ _run_pxdesign_patch() {
 
 install_pxdesign() {
     print_step "Installing PXDesign"
+    _refuse_if_env_in_use "${PXDESIGN_ENV}" || return 1
 
     # Clone PXDesign
     if [[ -d "${PXDESIGN_DIR}" ]]; then
@@ -1854,12 +1878,12 @@ install_pxdesign() {
     run_logged "Installing Protenix (PXDesign fork)" \
         "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" \
         pip install --no-cache-dir "git+https://github.com/bytedance/Protenix.git@v0.5.0+pxd" \
-        || print_warn "Protenix install failed — PXDesign may not work"
+        || { print_fail "Protenix install failed — the protenix patch below would have nothing to patch"; return 1; }
 
     run_logged "Installing PXDesignBench" \
         "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" \
         pip install --no-cache-dir "git+https://github.com/bytedance/PXDesignBench.git@v0.1.2" --no-deps \
-        || print_warn "PXDesignBench install failed — PXDesign may not work"
+        || { print_fail "PXDesignBench install failed — the pxdbench patches below would have nothing to patch"; return 1; }
 
     # PXDesign setup.py has install_requires commented out; install deps from requirements.txt
     if [[ -f "${PXDESIGN_DIR}/requirements.txt" ]]; then
@@ -1904,6 +1928,12 @@ install_pxdesign() {
         || print_warn "dm-haiku/JAX pin failed"
 
     # ── Post-install patches for known upstream issues ──────────────────────
+    # A patch that did not land is FATAL here, same as install.sh: CLAUDE.md
+    # lists all of them as required, and the advisory variant let PXDesign
+    # report installed and then fail hours later on an empty AF2-eval file.
+    # The two installers keep different assertion MECHANISMS (a stamp file the
+    # patch script writes here, a grep of the patched file on x86) but now the
+    # same semantics: a missing package or a missing marker fails the install.
     print_step "Applying PXDesign compatibility patches (aarch64)"
 
     # Patch: configs_infer.py num_workers (default 16 causes dataloader deadlock)
@@ -1921,7 +1951,7 @@ import importlib.util, pathlib, sys
 stamp = pathlib.Path(sys.argv[1])
 spec = importlib.util.find_spec('pxdbench')
 if not spec or not spec.submodule_search_locations:
-    print('pxdbench not found — skipping'); stamp.write_text('OK'); raise SystemExit(0)
+    raise SystemExit('FAILED: pxdbench is not installed — patch cannot be applied')
 base = pathlib.Path(spec.submodule_search_locations[0])
 ENC = ('\n\nclass _NumpyEncoder(json.JSONEncoder):\n'
     '    def default(self, obj):\n'
@@ -1932,6 +1962,7 @@ ENC = ('\n\nclass _NumpyEncoder(json.JSONEncoder):\n'
     '        if isinstance(obj, np.ndarray):\n'
     '            return obj.tolist()\n'
     '        return super().default(obj)\n')
+verified = 0
 for fn in ['tools/af2/main_af2_complex.py', 'tools/af2/main_af2_monomer.py']:
     fp = base / fn
     if not fp.exists(): continue
@@ -1946,10 +1977,15 @@ for fn in ['tools/af2/main_af2_complex.py', 'tools/af2/main_af2_monomer.py']:
         fp.write_text(t); print(f'Patched: {fn}')
     if '_NumpyEncoder' not in fp.read_text():
         raise SystemExit(f'FAILED: {fn} still has no _NumpyEncoder')
+    verified += 1
+# A loop that skipped every file patched nothing, so stamping OK here would be
+# the same silent success the temp-file rewrite exists to remove.
+if not verified:
+    raise SystemExit('FAILED: no pxdbench AF2 eval file was found to patch')
 stamp.write_text('OK')
 PATCHEOF
     _run_pxdesign_patch "Patching pxdbench JSON serialization" "${pxd_patch}" \
-        || print_warn "pxdbench JSON patch did not apply — AF2 eval may die on a numpy float32"
+        || { print_fail "pxdbench JSON patch did not apply — the AF2 eval will die on a numpy float32"; return 1; }
 
     # Patch: pxdbench AF2 eval must not use bf16 on aarch64.
     # The AF2 eval runs under JAX_PLATFORMS=cpu here (the JAX CUDA backend is
@@ -1967,15 +2003,16 @@ import importlib.util, pathlib, re, sys
 stamp = pathlib.Path(sys.argv[1])
 spec = importlib.util.find_spec('pxdbench')
 if not spec or not spec.submodule_search_locations:
-    print('pxdbench not found - skipping'); stamp.write_text('OK'); raise SystemExit(0)
+    raise SystemExit('FAILED: pxdbench is not installed - patch cannot be applied')
 base = pathlib.Path(spec.submodule_search_locations[0]) / 'tools' / 'af2'
+verified = 0
 for fn in ('main_af2_complex.py', 'main_af2_monomer.py'):
     fp = base / fn
     if not fp.exists():
         print(f'{fn} not found - skipping'); continue
     t = fp.read_text()
     if 'use_bfloat16' in t:
-        print(f'Already patched: {fn}'); continue
+        print(f'Already patched: {fn}'); verified += 1; continue
     t2, n = re.subn(r'(prediction_model = mk_afdesign_model\(\n)',
                     r'\1        use_bfloat16=False,\n', t, count=1)
     if not n:
@@ -1983,10 +2020,14 @@ for fn in ('main_af2_complex.py', 'main_af2_monomer.py'):
     fp.write_text(t2); print(f'Patched {fn} (use_bfloat16=False)')
     if 'use_bfloat16' not in fp.read_text():
         raise SystemExit(f'FAILED: {fn} still runs AF2 in bf16')
+    verified += 1
+# Same reason as the JSON patch above: skipping every file is not success.
+if not verified:
+    raise SystemExit('FAILED: no pxdbench AF2 eval file was found to patch')
 stamp.write_text('OK')
 PATCHEOF
     _run_pxdesign_patch "Patching pxdbench AF2 eval (no bf16 on aarch64)" "${pxd_patch}" \
-        || print_warn "bf16 patch did not apply — the AF2 eval will SIGABRT on this platform"
+        || { print_fail "bf16 patch did not apply — the AF2 eval will SIGABRT on this platform"; return 1; }
 
     # Patch: protenix torch_ext_compile.py.  TWO independent fixes, and they are
     # applied independently on purpose -- an env patched by an older installer has
@@ -2004,11 +2045,11 @@ import importlib.util, pathlib, re, sys
 stamp = pathlib.Path(sys.argv[1])
 spec = importlib.util.find_spec('protenix')
 if not spec or not spec.submodule_search_locations:
-    print('protenix not found — skipping'); stamp.write_text('OK'); raise SystemExit(0)
+    raise SystemExit('FAILED: protenix is not installed — patch cannot be applied')
 base = pathlib.Path(spec.submodule_search_locations[0])
 fp = base / 'model' / 'layer_norm' / 'torch_ext_compile.py'
 if not fp.exists():
-    print(f'{fp} not found — skipping'); stamp.write_text('OK'); raise SystemExit(0)
+    raise SystemExit(f'FAILED: {fp} does not exist — patch cannot be applied')
 t = fp.read_text()
 orig = t
 # Set TORCH_CUDA_ARCH_LIST
@@ -2420,6 +2461,7 @@ EOF
 # serialization flavour PH asks the wheel installer for.
 install_protein_hunter() {
     print_step "Installing Protein-Hunter (aarch64)"
+    _refuse_if_env_in_use "${PROTEIN_HUNTER_ENV}" || return 1
 
     if [[ -d "${PROTEIN_HUNTER_DIR}" ]]; then
         print_ok "Protein-Hunter already cloned at ${PROTEIN_HUNTER_DIR}"
@@ -2568,6 +2610,7 @@ EOF
 
 install_rfd3() {
     print_step "Installing RFD3 (foundry) — aarch64"
+    _refuse_if_env_in_use "${RFD3_ENV}" || return 1
     ensure_conda_in_path
 
     # NOTE: UNVALIDATED on aarch64 hardware. RFD3 should port cleanly (pure pip, no
@@ -2876,7 +2919,7 @@ uninstall_tool() {
             print_step "Uninstalling PXDesign"
             env_exists binderscout_pxdesign && run_logged "Removing binderscout_pxdesign conda env" \
                 "${CONDA_CMD}" env remove -n binderscout_pxdesign -y
-            _remove_legacy_env bindmaster_pxdesign
+            _remove_legacy_env bindmaster_pxdesign || return 1
             rm -f "${SHORTCUTS_DIR}/pxdesign"
             [[ -d "${PXDESIGN_DIR}" ]] && { rm -rf "${PXDESIGN_DIR}"; print_ok "Removed ${PXDESIGN_DIR}"; }
             # CUTLASS v3.5.1 headers (~150 MB) cloned by install_pxdesign for the
@@ -2897,7 +2940,7 @@ uninstall_tool() {
             print_step "Uninstalling RFD3 (foundry)"
             env_exists binderscout_rfd3 && run_logged "Removing binderscout_rfd3 conda env" \
                 "${CONDA_CMD}" env remove -n binderscout_rfd3 -y
-            _remove_legacy_env bindmaster_rfd3
+            _remove_legacy_env bindmaster_rfd3 || return 1
             rm -f "${SHORTCUTS_DIR}/rfd3"
             [[ -d "${FOUNDRY_WEIGHTS_DIR}" ]] && { rm -rf "${FOUNDRY_WEIGHTS_DIR}"; print_ok "Removed ${FOUNDRY_WEIGHTS_DIR}"; }
             print_ok "RFD3 uninstalled"
@@ -2906,7 +2949,7 @@ uninstall_tool() {
             print_step "Uninstalling Protein-Hunter"
             env_exists binderscout_protein_hunter && run_logged "Removing binderscout_protein_hunter env" \
                 "${CONDA_CMD}" env remove -n binderscout_protein_hunter -y
-            _remove_legacy_env bindmaster_protein_hunter
+            _remove_legacy_env bindmaster_protein_hunter || return 1
             rm -f "${SHORTCUTS_DIR}/protein-hunter"
             [[ -d "${PROTEIN_HUNTER_DIR}" ]] && { rm -rf "${PROTEIN_HUNTER_DIR}"; print_ok "Removed ${PROTEIN_HUNTER_DIR}"; }
             print_ok "Protein-Hunter uninstalled"
@@ -3640,6 +3683,7 @@ preflight() {
     [[ "${DO_AF3}"       == true ]]         && need=$(( need + 6 ))
     [[ "${DO_ESMFOLD2}"  == true ]]         && need=$(( need + 6 ))
     [[ "${DO_SOLUPROT}"  == true ]]         && need=$(( need + 2 ))
+    [[ "${DO_TMPROT}"    == true ]]         && need=$(( need + 5 ))   # py3.11 env + torch/transformers/peft + the bundled ESM2-LoRA weights + the clone
     [[ "${CONDA_BASE}" == "${LOCAL_CONDA_DIR}" ]] && need=$(( need + 1 ))
 
     local avail
