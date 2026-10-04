@@ -1865,7 +1865,29 @@ Mutation testing caught two tests that verified text instead of behaviour:
   *did* fold are still published, because re-raising immediately strands them: the
   publish/absolutise step sits **after** the call in all three runners.
 
-15 mutations, all caught. 1077 tests pass.
+### The wiring check caught a fifth hole, in the installer
+
+The standing rule on this branch is that a new thing must be live in all four modules, so
+I went looking for the installer's view of it — and found the same defect one stage
+earlier. `install_esmfold2` verified that `binder-compare refold-esmfold2 --help` parses
+and then printed **"ESMFold2 refolder installation complete"** on a 12 GB box. The env is
+genuinely correct; the engine simply cannot fold there. That is exactly what CLAUDE.md
+records for BindCraft 1 and PXDesign, both of which "reported themselves healthy while
+being unusable" on Spark.
+
+Both installers now warn, naming the measured size and the floor. A warning and not a
+refusal, because installing on a small box is legitimate — this box is the CI box. The
+property worth keeping is that it **imports `ENGINE_MIN_DEVICE_MIB`** instead of repeating
+`14248`: a second copy of a threshold is a second thing to forget. Verified live on this
+machine: the probe returns rc=7 and `12288 14248`.
+
+One thing I would not have trusted by reading: the warning branch reads `$?` inside an
+`else`, which is fragile enough that I executed all three cases (rc=7 with output, rc=0,
+rc=1 with no output) rather than reasoning about it. rc=1 matters — a probe that itself
+breaks must not warn about memory, and the mutation that warned on any non-zero rc is
+caught.
+
+19 mutations, all caught. 1084 tests pass.
 
 ### D9 — the DO-NOT-ORDER row was de-duplication, not a verdict
 
