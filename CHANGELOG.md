@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-10-04
+
+**Shipped to the fleet only; not published.** 2.0 is an *evaluation* release, not
+a feature release: no new design tool, and the three-engine refold pipeline
+(Boltz-2 + AF3 + ESMFold2) is the same one 1.1 shipped. What changed is what the
+pipeline is allowed to claim.
+
+Three themes, and they are the reason for the major version:
+
+- **One ranking, and no way to choose another** (Part U): a cross-engine gate
+  then `consensus_iptm_mean`, producing a single `rank` column. `two_stage_rank`,
+  `adaptyv_rank`, `consensus_rank`, `active_rank`, `passes_max_screen`,
+  `--rank-by` and `--screen-metric` are **gone with no compatibility shim** —
+  searching for a better metric on labelled data measured *worse* than not
+  searching (0.5170 vs 0.5552, p=0.0014). This is the breaking change.
+- **Silent success is now a failure.** A run that produced nothing, or produced
+  blanks, used to exit 0: ESMFold2 loading random weights from an unpinned
+  revision, AF3 reserving half a card, a refold engine writing a column of empty
+  rows, a reward that could not be computed returning `0.0`, an installer
+  declaring an engine ready on a card that cannot run it. Each now refuses and
+  names what is wrong.
+- **Claims are separated from evidence.** The negative results are recorded as
+  loudly as the positive ones, four single-pool effects were retracted rather
+  than shipped, and Cao 2022 was withdrawn as a benchmark on label censoring.
+  `docs/PLAN_2.0_CONCLUSION.md` §4 is the list that must not be relearned.
+
+Known not-done, by decision: the **GPU-memory pass goes last** (a reading taken
+against an unfinished pipeline is stale by the time it ships), and Stages 1–4 of
+the plan are feature work, not shipping blockers. See
+`docs/PLAN_2.0_CONCLUSION.md` §3.
+
 ### Fixed
 
 - **A partial refold failure exited 0, and four separate mechanisms kept it quiet.** Each

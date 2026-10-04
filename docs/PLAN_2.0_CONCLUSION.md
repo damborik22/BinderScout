@@ -6,12 +6,12 @@ diary first; pointers are given where the detail lives.
 | | |
 |---|---|
 | **Branch** | `v2.0.x` (all 2.0 work; `master` is frozen at 1.0.3, `v1.1.x` is the BindCraft 2 line) |
-| **HEAD** | `9be1436`, clean, pushed |
-| **Tests** | **1023 passing**, 7 skipped; ruff + shellcheck clean |
-| **Version** | **2.0.0** — decided 2026-09-28. `binderscout.py:32` carries it; **not yet tagged**. Newest tag is `v1.1.1`; HEAD is **151 commits past it**, so `git describe` reports `v1.1.1-151-g9be1436` until `v2.0.0` is cut. Deliberate: the tag waits on §3's GPU-memory pass |
-| **Fleet** | BM2 and BM5 moved to `v2.0.x` on 2026-10-04 (branch only, no tag). BM1 / BM4 / Clara pending, via BM4 as fleet manager |
+| **HEAD** | tagged `v2.0.0`, clean, pushed |
+| **Tests** | **1084 passing**, 7 skipped; ruff + shellcheck clean |
+| **Version** | **`v2.0.0`, TAGGED 2026-10-04** on `v2.0.x` — 158 commits past `v1.1.1`. Fleet only: not published, and **not merged to `master`** by decision. **This row previously read "the tag waits on §3's GPU-memory pass" — the operator overrode that on 2026-10-04**, and the reasoning inverts cleanly: the memory pass goes last *because a reading taken against an unfinished pipeline is stale*, which means the pipeline must ship first for the reading to be worth taking. Stage 6 is now post-2.0.0 work, not a tag blocker |
+| **Fleet** | BM2 and BM5 on `v2.0.x` but **behind the tag** (9 and 5 commits, measured 2026-10-04 after forcing a fetch — their stale `origin` refs reported `behind=0`). BM1 / BM4 / Clara pending, via BM4 as fleet manager. **Do not pull on BM2 until the Chai-1 study finishes** — it runs against the editable `binder_comparison` install there. Fleet checkout path is `~/dev/BindMaster`, not `~/dev/BinderScout` |
 | **As of** | 2026-10-04 |
-| **Changelog** | 2.0 work sits under `[Unreleased]` |
+| **Changelog** | released as `## [2.0.0] — 2026-10-04`; `[Unreleased]` is now empty |
 
 Companions: [NEXT_STAGES.md](NEXT_STAGES.md) (stage detail),
 [MORNING_DECISIONS.md](MORNING_DECISIONS.md) (the open decisions in full),
@@ -433,9 +433,9 @@ shortfall; it is now documented in CLAUDE.md.
 ## 8. How to confirm this state
 
 ```bash
-git -C . rev-parse --short HEAD          # expect 5fb9d99 (or later on v2.0.x)
+git -C . describe --tags                 # expect v2.0.0 (or later on v2.0.x)
 git status --short                       # expect empty
-./conda/envs/binder-eval/bin/python -m pytest tests/ -q     # 887 passed, 7 skipped
+./conda/envs/binder-eval/bin/python -m pytest tests/ -q     # 1084 passed, 7 skipped
 uvx ruff check . && uvx ruff format --check .
 shellcheck --shell=bash --severity=warning install/install.sh install/install_aarch.sh Evaluator/evaluate.sh
 ./install/install.sh --tool all --verify # audits what is actually on disk
