@@ -129,8 +129,24 @@ def test_menu_does_not_spin_when_stdin_closes(path):
         timeout=180,
         cwd=path.parent.parent,
     )
+    out = (proc.stdout + proc.stderr).lower()
     assert proc.returncode != 0, "selecting no tools must not report success"
-    assert "no tools selected" in (proc.stdout + proc.stderr).lower()
+
+    # An installer that refuses to run on THIS platform never reaches the menu, so the
+    # spin cannot be exercised for it here -- `install.sh` exits on aarch64 before
+    # printing anything menu-shaped. That is correct behaviour, and asserting menu text
+    # against it was a false failure on every aarch64 box.
+    #
+    # The refusal is itself worth checking and had no test of its own, so it is asserted
+    # rather than waved past: non-zero (already asserted above) AND it must name the
+    # override, or an operator who genuinely needs it is stuck. Then skip, because the
+    # property in the docstring is untestable for this script on this machine -- the
+    # x86 menu is still fully exercised wherever install.sh actually runs.
+    if "allow_x86_installer" in out:
+        assert "install_aarch.sh" in out, f"{path.name} refused to run here but did not point at the right installer"
+        pytest.skip(f"{path.name} refuses to run on this platform before reaching the menu")
+
+    assert "no tools selected" in out
 
 
 @pytest.mark.parametrize("path", INSTALLERS, ids=lambda p: p.name)
