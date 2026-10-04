@@ -1547,3 +1547,82 @@ The gate shipped with thresholds that read as principled. The installer's own lo
 failed, and nobody asked why a *re*-install would. **In every case the written claim was true of
 a situation that was not ours**, and the only thing that separated them was running it on the
 machine that mattered.
+
+---
+
+## Proteina-Complexa was never too slow for Spark. It was six bugs deep in our own installer
+
+**2026-10-04.** The tool has been deprecated since 2026-07-29 on a throughput argument: 3,300
+AF2 calls per 100-design replicate at ~320 s each = 12.2 days, ~1.7 years for PC-v3's 50
+replicates, "run Proteina-Complexa on x86". Asked to run a short MCTS and time it.
+
+**Measured, same box, same config, `mcts n_simulations=2` through `gpurun --cap 40`:**
+
+| | |
+|---|---|
+| single-pass, no reward | **39.9 s**, 1 sample |
+| MCTS, 9 AF2 reward evaluations | **112.3 s → ~12.5 s per AF2 call** |
+
+Against ~320 s that is **~25×**, which re-costs the production recipe at **~11.5 h per
+100-design replicate** and PC-v3 at **~24 days**. GB10 is about **5× an H200, not 130×**.
+
+### Getting there took six fixes, and not one of them was aarch64
+
+The deprecation's premise — that the AF2 reward has no GPU here — had already been undermined
+in CLAUDE.md on 2026-09-25: PC's reward *is* the ColabDesign that BindCraft had been running on
+this GPU for weeks. What nobody had done was try it. Six things were in the way, each of which
+alone looks like "the tool doesn't work on this platform":
+
+1. **`uv venv` without `--clear`.** It refuses when a venv exists, exits non-zero, the
+   installer reports the tool as failed and leaves the OLD env in place. BM5 had a pre-0.6.2
+   venv, so **every re-install since 2026-09-26 was a no-op that reported failure** — which is
+   exactly why the jax 0.6.2 fix never reached the one machine it was written for. "Installable
+   on aarch64" was only ever true of a box that had never installed it.
+2. **The editable install's index strategy.** PC's pyproject carries
+   `[tool.uv] extra-index-url` pointing at the PyTorch wheel index, and uv's default
+   `first-index` stops at the first index holding a package. That index has *some* `tqdm` but not
+   the `tqdm==4.66.4` proteinfoundation pins, so resolution failed outright instead of falling
+   through to PyPI. uv's own hint names the fix.
+3. **The bf16 smoke test blaming XLA for an OOM kill.** This is the one I would most like to
+   have written differently. The guard exists *specifically* to stop us overclaiming aarch64
+   support — and it printed `jax 0.6.2 | backend gpu`, `bf16 graph compiled and ran: 128.000`,
+   `colabdesign imports`, then exited **137** at interpreter shutdown, and the installer
+   concluded "the XLA/LLVM blocker is NOT resolved here". That is the one conclusion its own
+   output ruled out: the graph had already compiled and run. Cause was BM5's memory model, which
+   `tools/gpurun`'s own docstring describes: jax reserves 0.75 of a pool that *is* system RAM,
+   ~91 GiB of 121, and the kernel takes the process. With `PREALLOCATE=false` the identical
+   script exits 0.
+4. **`openbabel` missing.** `atomworks.ml.transforms.openbabel_utils` imports it at module level,
+   and `gen_dataset.py` imports that, so a protein-only binder run needs a chemistry toolkit.
+   Hydra reported it as `Error locating target 'gen_dataset.collate_fn'` — a symbol that exists.
+5. **The installer shadowing PC's vendored ColabDesign.** PC maps its own fork
+   (`"community_models/colabdesign" = "colabdesign"`), and that fork accepts a `device` kwarg
+   (`af/model.py:35`: `self._device = kwargs.pop("device", None)`) which PC's reward passes.
+   The jax step installed `git+ColabDesign` alongside jax, *after* the editable install, so
+   upstream 1.1.3 landed in site-packages and won. Every run then died in 25–33 s with
+   `AssertionError("the following inputs were not set: {'device': CudaDevice(id=0)}")`, again
+   surfaced by hydra as a failure to locate the dataloader.
+6. **(mine) `env.sh` not sourced, and sourcing it under `set -u`.** `complexa` refuses with
+   "Environment not initialized"; `env.sh` then references variables it does not define.
+
+### The pattern, which is the same one as yesterday
+
+Three of those six report a cause that is not the cause. Hydra names the dataloader when the
+real problem is a missing C++ toolkit or a shadowed fork. The installer names XLA when the real
+problem is memory. **The error message pointed somewhere other than the fault in half the
+cases**, and the only thing that worked was running the next layer down by hand: import
+`gen_dataset` directly, run the smoke script directly, print where `colabdesign.__file__`
+resolves.
+
+And the deprecation itself is the larger version of the same shape. Its arithmetic was right.
+Its measurement was right. Its *premise* — that this hardware puts the reward on the CPU — was an
+artifact of tooling, and it survived two months and three separate corrections to the stated
+blocker because nobody ran the thing.
+
+### What I have NOT shown
+
+n=1, 9 calls, one target, and the 112.3 s includes a cold compile. The archived CPU baselines
+(354 s, 394 s per call) were taken on `apoe4_ntd` while this ran on `33_TrkA`, so a CPU control
+on the identical config is running to remove the target confound — the 25× gap is far too large
+for target size to explain, but that is an argument rather than a measurement. And **nothing
+here says anything about design quality on this platform**, only throughput.

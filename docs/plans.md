@@ -80,7 +80,61 @@ binderscout pack --output FILE              cd BinderScout
 
 ---
 
-## Proteina-Complexa on aarch64 (DGX Spark) — NOT VIABLE
+## Proteina-Complexa on aarch64 (DGX Spark) — **DEPRECATION LIFTED 2026-10-04, measured**
+
+> **Status: VIABLE. ~11.5 h per 100-design replicate on GB10, measured end to end.**
+> The 2026-07-29 deprecation below is preserved as written, because its *reasoning* was sound
+> and its *premise* was false. Everything after "Why it is deprecated anyway" describes a
+> machine whose AF2 reward was on the CPU. It was on the CPU because of five defects in our own
+> installer, not because of the hardware.
+>
+> **The measurement.** Same box, same config (`search_binder_local_pipeline`, target `33_TrkA`),
+> `search.algorithm=mcts`, `n_simulations=2`, `nsamples=1`, dispatched through
+> `tools/gpurun --cap 40`:
+>
+> | | result |
+> |---|---|
+> | single-pass, no reward | **39.9 s**, 1 sample |
+> | MCTS, 9 AF2 reward evaluations | **112.3 s** → **~12.5 s per AF2 call** |
+>
+> Against the table below's **~320 s per AF2 call**, that is **~25×**. Re-costing the production
+> recipe (3,300 AF2 calls per 100-design replicate) at 12.5 s/call:
+>
+> | | H200 (Clara) | GB10, as deprecated | **GB10, measured** |
+> |---|---|---|---|
+> | per AF2 call | <= 2.46 s | ~320 s | **~12.5 s** |
+> | 100-design replicate | 2.25 h | 12.2 days | **~11.5 h** |
+> | PC-v3, 50 replicates | ~2 weeks | ~1.7 years | **~24 days** |
+>
+> So GB10 is roughly **5x slower than an H200, not 130x**. "Run Proteina-Complexa on x86" is no
+> longer the recommendation; Spark is a usable PC node.
+>
+> **What the five defects were** — all in `install/install_aarch.sh`, all fixed on `v2.0.x`:
+> 1. `uv venv` without `--clear`, so the tool could never be *re*-installed and the 2026-09-26
+>    jax 0.6.2 fix never reached the one box it was written for;
+> 2. the editable install resolving `tqdm==4.66.4` against the PyTorch index (needs
+>    `--index-strategy unsafe-best-match`);
+> 3. the bf16 smoke test running uncapped, so jax reserved ~91 GiB of a 121 GiB unified pool and
+>    the OOM killer took it — reported as "the XLA/LLVM blocker is NOT resolved here", which is
+>    the one conclusion its own output ruled out;
+> 4. `openbabel` missing, which `atomworks` imports unconditionally even for protein-only runs,
+>    surfacing as a hydra error naming `gen_dataset.collate_fn`;
+> 5. the installer installing **upstream** ColabDesign over PC's **vendored fork**, which is the
+>    only one that accepts the `device=` kwarg PC's reward passes.
+>
+> None of these is a property of aarch64. The bf16 lowering that the original verdict feared
+> works: `jax 0.6.2 / jaxlib 0.6.2 / backend gpu / CudaDevice(id=0)`, and BindCraft 1 had been
+> running the same ColabDesign on the same GPU for weeks.
+>
+> **Caveats, stated because this reverses a standing verdict on one run.** n=1, 9 AF2 calls, and
+> the 112.3 s includes a cold compile, so steady state is probably faster rather than slower. The
+> archived CPU baselines (354 s and 394 s per call) were taken on `apoe4_ntd` while this ran on
+> `33_TrkA`, so a CPU control on the identical config is in flight to remove the target confound.
+> Nothing here measures design *quality* on this platform, only throughput.
+
+---
+
+### The original verdict, 2026-07-29 — preserved; its premise was false
 
 > **Status: DEPRECATED 2026-07-29. Do not run production Proteina-Complexa on Spark.**
 > This is a throughput verdict, not an install failure — the port works. It reopens only if
