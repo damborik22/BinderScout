@@ -6,14 +6,18 @@ diary first; pointers are given where the detail lives.
 | | |
 |---|---|
 | **Branch** | `v2.0.x` (all 2.0 work; `master` is frozen at 1.0.3, `v1.1.x` is the BindCraft 2 line) |
-| **HEAD** | `5fb9d99`, clean, pushed, CI green |
-| **Tests** | 887 passing, 7 skipped; ruff + shellcheck clean |
-| **Version** | **2.0.0** — decided 2026-09-28. `binderscout.py:32` carries it; **not yet tagged**. Newest tag in the repo is `v1.1.1`, and HEAD is 84 commits past it, so `git describe` still reports `v1.1.1-84-g…` until `v2.0.0` is cut |
+| **HEAD** | `9be1436`, clean, pushed |
+| **Tests** | **1023 passing**, 7 skipped; ruff + shellcheck clean |
+| **Version** | **2.0.0** — decided 2026-09-28. `binderscout.py:32` carries it; **not yet tagged**. Newest tag is `v1.1.1`; HEAD is **151 commits past it**, so `git describe` reports `v1.1.1-151-g9be1436` until `v2.0.0` is cut. Deliberate: the tag waits on §3's GPU-memory pass |
+| **Fleet** | BM2 and BM5 moved to `v2.0.x` on 2026-10-04 (branch only, no tag). BM1 / BM4 / Clara pending, via BM4 as fleet manager |
+| **As of** | 2026-10-04 |
 | **Changelog** | 2.0 work sits under `[Unreleased]` |
 
 Companions: [NEXT_STAGES.md](NEXT_STAGES.md) (stage detail),
 [MORNING_DECISIONS.md](MORNING_DECISIONS.md) (the open decisions in full),
-[REPO_DIARY.md](REPO_DIARY.md) (how each finding was reached),
+[../2.0/DIARY_2.0.md](../2.0/DIARY_2.0.md) (**how each finding was reached, wrong turns
+included — the 2.0 diary**; `REPO_DIARY.md` is the *historical* diary and is not where 2.0 work
+goes),
 [PLAN_binderscout_v2.md](PLAN_binderscout_v2.md) (the original plan) and
 [PLAN_binderscout_v2_corrections.md](PLAN_binderscout_v2_corrections.md) (where
 its facts were wrong).
@@ -61,6 +65,17 @@ Both are now guarded by tests, and the guards are mutation-tested.
 | **Provenance** | PXDesign collector reads the CSV that exists · every run keeps each tool's native CSV **and** the design structures |
 | **Installer** | `--verify` / `--repair` / retries · one tool registry · 12-tool menu · aarch64 parity (TmProt, Proteina-Complexa) · drift guarded by test |
 | **Hygiene** | Usernames scrubbed tree-wide and enforced · optional-import guard · several false CLAUDE.md claims corrected |
+
+### Added 2026-10-03 / 10-04
+
+| area | state |
+|---|---|
+| **Ranking is described correctly** | Four surfaces named the wrong metric as the rank — including a skill file that told an **agent** to sort on `agreement_count`, and `report.html`'s own glossary. `rank_designs()` was correct throughout; only the labels had drifted. Pinned by `tests/test_ranking_metric_is_not_misnamed.py`, mutation-tested against all four reversions **and** against the "delete every mention instead" escape |
+| **`agreement_count` is a note, not a gate** | It was appending to the blocking `reasons` list. Now reported in `wetlab_reason` without withholding the recommendation, and it carries **`agreement_denom`** — `(vals > thr).fillna(False)` had made "engine never ran" indistinguishable from "engine said no", and 99 labelled benchmark designs are capped at 2 of 3 |
+| **Label registry has its first pool (Y)** | `adaptyv`: 2,018 labelled designs, 4 targets. Manifest public, rows private and checksum-verified. Labels rebuilt from the exports' `evaluations` — **2,018/2,018 verified**, 2 corrected, expression corrected 1,795/223 → 1,810/208. `list_benchmarks()` no longer returns `[]` |
+| **A reward that cannot be computed must not be 0.0** | `install/patches/` + both installers. PC caught every reward exception, reported it with `warnings.warn`, and its CLI runs python with `-W ignore` — so an unusable AF2 reward produced a completed search full of zeros that exited 0 |
+| **1.1.x parity** | Two commits were missing, one a **rollout blocker**: `f596509` pins ESMFold2's nested ESMC-6B encoder, without which it loads random weights and still exits 0 (300/300 binders lost, four days to spot); `bd2d112` stops a skipped engine's existing CSV being dropped from the report |
+| **Proteina-Complexa installs and runs on aarch64** | First time. Six defects fixed, five of them ours — `uv venv --clear`, the editable install's index strategy, the bf16 smoke test blaming XLA for an OOM kill, missing `openbabel`, and the installer shadowing PC's vendored ColabDesign fork |
 
 ### Verified end to end (2026-09-27)
 
@@ -149,6 +164,28 @@ while BindCraft 2 hallucinates against AF2 and produces charged, helical,
 hydrophobic-poor sequences *by construction*. **This needs per-tool calibration,
 not a nudged global pair.** Pinned by `tests/test_composition_gate_stays_advisory.py`.
 
+**Measured against labels, 2026-10-04, and it is worse than "needs calibration".** The registry
+(§2) made it possible to judge the shipped shadow column against real outcomes for the first
+time. Over all **2,018** labelled Adaptyv designs, `would_exclude_composition`:
+
+| | |
+|---|---|
+| flagged for exclusion | **1,512 (74.9 %)** |
+| true binders it would remove | **271 of 325 (83.4 %)** |
+| binder rate among **kept** | **0.107** |
+| binder rate among **excluded** | **0.179** |
+
+Lift **0.663× — inverted.** The designs it discards bind at a *higher* rate than those it keeps,
+and it survives the obvious confounds: inverted in **4 of 5** length bands and on both large
+targets (egfr 0.062 vs 0.171, nipah 0.065 vs 0.119). No individual feature carries signal —
+every one scores **0.462–0.547** AUC, with `comp_pro_gly_frac` at 0.462, i.e. pointing the wrong
+way.
+
+So the diagnosis above is right about the cause (thresholds calibrated on RFD3's Pro/Gly-coil
+failure mode do not transfer to a de novo pool, and flagging 75 % of one is the symptom) and too
+generous about the remedy. **`would_exclude_composition` must not be promoted out of shadow
+mode.** The two targets pointing the right way are n=96 and n=66 at 0.64/0.48 prevalence.
+
 ### 4.2 Ranking expectations
 The ranking is a **triage filter, not a decision procedure**. On the Cao
 near-miss pool the whole 72-metric field spans macro-AUC 0.471–0.560; the top
@@ -191,6 +228,41 @@ returned, all 8 were stranded. `--resume` did not help — it hit the same abort
 Now published **before** folding as well as after.
 
 ---
+
+### 4.7 A measurement needs its numerator checked, not just its denominator
+
+The sharpest self-inflicted error of 2.0. A Proteina-Complexa MCTS was timed at 112.3 s for
+"9 AF2 reward evaluations" → ~12.5 s per call → a 25× speedup over the CPU figure the tool's
+deprecation rests on. **It was published and retracted within the hour.** Every reward was
+`0.0`; AF2 never executed; the GPU and CPU control runs produced byte-identical sequences. What
+had been timed was MCTS lookahead against a null reward.
+
+`total_reward` was sitting in the rewards CSV **one column from the row count used to derive
+"9 AF2 calls"**. The denominator was read and the numerator was not. The CPU control caught it
+only because it came back *identical* (111.5 s vs 112.3 s) — and that control had been run to
+remove a *target* confound, not to test whether the reward fired. Had it returned ~3,000 s it
+would have been taken as confirmation.
+
+Two durable consequences: wall-clock is a **proxy** for "the expensive thing ran", never
+evidence of it; and §4.3's rule now extends to measurements, not just interfaces. The swallowing
+that allowed it is fixed (§2).
+
+### 4.8 Three of four claims failed on *identity*, with the evidence in the same artefact
+
+Across 2026-10-03/04, the pattern was not missing information but unread information:
+
+- the installer reported Proteina-Complexa "installable" while its own log showed it had
+  **never re-installed** (`uv venv` refuses when a venv exists);
+- `CLAUDE.md` argued PC inherits BindCraft's jax fix because its reward "**is** the same
+  ColabDesign" — in a sentence that gave **two different version numbers** (1.1.1.1 vs 1.1.3).
+  The version gap is the blocker: 93 `jax.tree_map` call sites against 0;
+- Chai-1 appeared to be the only engine rejecting a true non-binder (0.285 where Boltz-2 said
+  0.905) — an artefact of running **MSA-free**. At parity it scores 0.818 and makes the same
+  mistake. Had the 563-design study run that way it would have produced a **false positive for
+  adoption**.
+
+The lesson that generalises: when a document asserts two things are *the same*, check the
+identifiers it cites in the same breath.
 
 ## 5. Open decisions — these are the user's, not the code's
 
@@ -265,7 +337,19 @@ and `Evaluator/benchmarks/` is Part Y's empty registry. This is the same access 
 blocks promoting four shadow columns.
 
 
-### 5.1 Does the discovery-rank metric accept a pre-filtered pool? **(the big one)**
+### 5.1 ~~Does the discovery-rank metric accept a pre-filtered pool?~~ — **DECIDED 2026-10-04: (b), uniformly**
+
+Carry the caveat: emit the rank with `pool_pre_filtered=True` alongside, for **all eight tools
+with no exceptions**. The operator's reasoning is the stronger one — a discovery rank meaning
+"earliest among survivors" for five tools and "earliest overall" for three, in one table, is the
+same incomparability the cross-engine gate exists to prevent. The "(c) where it is cheap"
+half was explicitly declined for that reason.
+
+**Still blocked on data, not on this decision:** AD's validating gate is "holdout passes a KS
+test vs the pool", which needs a campaign with a real generation order. This box has none, so
+(b) ships a column that cannot yet be checked. Not built pending that.
+
+### 5.1 (original wording) Does the discovery-rank metric accept a pre-filtered pool? **(the big one)**
 **Blocks: finishing Stage 1.** Everything else in it is built.
 
 Most extractor inputs are already downstream of a quality filter, so a discovery
@@ -287,7 +371,15 @@ one behind a single CLI flag each.
 
 **Standing recommendation: (b) now, (c) where it is cheap.**
 
-### 5.2 Which labelled pools go into the registry first? — DEFERRED
+### 5.2 ~~Which labelled pools go into the registry first?~~ — **DECIDED 2026-10-04: Adaptyv only**
+
+`adaptyv` registered (2,018 designs, 4 targets). Our own SPOC panels are deliberately **not**
+registered yet — operator decision, on the grounds that we are not sharing our data. Noted at the
+time: Part Y's design means registering a pool does *not* publish its labels (the manifest carries
+provenance and a checksum; rows stay in a private store), and CALCA/CBG/2VDY are already named
+throughout the public repo — so the constraint is narrower than it looks if that changes.
+
+### 5.2 (original wording) Which labelled pools go into the registry first? — DEFERRED
 Bookkeeping rather than compute (all four are already refolded through our
 engines), but **73.4% of Cao's binder labels are one-sided Kd**, and excluding
 them moves macro-AUC 0.53 → 0.73. The subset choice changes every number

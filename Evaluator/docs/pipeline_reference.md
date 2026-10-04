@@ -67,6 +67,10 @@ bash Evaluator/evaluate.sh \
 
 ## Metrics
 
+> **The full reference lives in [`evaluation/`](evaluation/)**: `ranking.md` (how designs are
+> ranked, why three engines, and what the ranking is worth on each labelled pool) and
+> `metrics.md` (one row per column with its ROLE). This table is the quick version.
+
 **The ranking metric is `consensus_iptm_mean`.** This table said `ipsae_min` until
 2026-10-03; that was wrong, and wrong in the one file CLAUDE.md cites as the metrics
 reference. `ipsae_min` is a diagnostic. There is ONE ranking and no way to select another
