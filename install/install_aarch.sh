@@ -3070,6 +3070,22 @@ SHIMPY
         "${PCPIP[@]}" "biotite==1.6.0" graphein atomworks \
         || print_warn "biotite/graphein/atomworks install failed — some PC paths may not import"
 
+    # openbabel is a HARD requirement even for protein-only binder design, despite the
+    # name of the module that pulls it in. `gen_dataset.py:15` imports
+    # `atomworks_ligand_transforms`, which imports
+    # `atomworks.ml.transforms.openbabel_utils`, which does a top-level
+    # `from openbabel import openbabel, pybel`. There is no ligand in a binder run and no
+    # guard on the import, so without openbabel every `complexa generate` dies on config
+    # instantiation with hydra's unhelpful
+    #   Error locating target 'proteinfoundation.datasets.gen_dataset.collate_fn'
+    # which names a symbol that exists and says nothing about the missing module.
+    #
+    # `openbabel-wheel` is the prebuilt distribution (3.1.1.23 has an aarch64 cp312 wheel);
+    # plain `openbabel` resolves to an sdist that would compile the whole C++ toolkit.
+    run_logged "Installing openbabel-wheel (atomworks imports it unconditionally)" \
+        "${PCPIP[@]}" openbabel-wheel \
+        || { print_fail "openbabel-wheel install failed — complexa generate cannot instantiate its dataloader"; return 1; }
+
     # THE SMOKE TEST, and it is deliberately narrow.
     #
     # `jax.devices("gpu")` succeeding proves nothing -- that check plus a clean
