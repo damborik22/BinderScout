@@ -276,26 +276,43 @@ def detect_installs() -> dict:
         libs = (CONDA_ENVS_DIR / env / "lib").glob("python3.*/site-packages")
         return any((lib / package).is_dir() for lib in libs)
 
+    def _resolve_env(name: str) -> str:
+        """Return `name`, or its pre-rename `bindmaster_*` twin when only that exists.
+
+        2.0 renamed three envs. The installer resolves a legacy env in place
+        rather than cloning 13 GB of it, so the wizard has to probe the name the
+        installer will actually use -- otherwise it reports a working tool as
+        not installed and refuses to configure it.
+        """
+        if CONDA_ENVS_DIR is None or _env_exists(name):
+            return name
+        legacy = name.replace("binderscout_", "bindmaster_", 1)
+        return legacy if legacy != name and _env_exists(legacy) else name
+
+    pxdesign_env = _resolve_env("binderscout_pxdesign")
+    rfd3_env = _resolve_env("binderscout_rfd3")
+    protein_hunter_env = _resolve_env("binderscout_protein_hunter")
+
     return {
         "bindcraft": _env_exists("BindCraft"),
         "boltzgen": _env_exists("BoltzGen"),
         "mosaic": (MOSAIC_VENV / "bin" / "python").exists(),
         "evaluator": ((EVALUATOR_DIR / "evaluate.sh").exists() and _env_exists("binder-eval")),
-        "pxdesign_local": _env_exists("binderscout_pxdesign"),
+        "pxdesign_local": _env_exists(pxdesign_env),
         "proteina_complexa": (PROTEINA_COMPLEXA_VENV / "bin" / "python").exists(),
         # Not a conda env: BindCraft 2 builds its own venv, and the `bindcraft`
         # console script only exists once the editable install succeeded, so it
         # distinguishes a finished install from a staged-but-unbuilt checkout.
         "bindcraft2": (BINDCRAFT2_VENV / "bin" / "bindcraft").exists(),
-        "rfd3": _env_exists("binderscout_rfd3") and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
+        "rfd3": _env_exists(rfd3_env) and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
         # An env directory is not an install: BM5 carried a `binderscout_protein_hunter`
         # env for months that held only pip and setuptools — no PyRosetta, no boltz_ph —
         # and this probe reported the tool as ready. Look for PyRosetta, which is the
         # part that actually fails to install, and which design.py imports at startup.
         "protein_hunter": (
-            _env_exists("binderscout_protein_hunter")
+            _env_exists(protein_hunter_env)
             and PROTEIN_HUNTER_DIR.exists()
-            and _env_has_package("binderscout_protein_hunter", "pyrosetta")
+            and _env_has_package(protein_hunter_env, "pyrosetta")
         ),
         "af3": _env_exists("binder-eval-af3"),
         "esmfold2": _env_exists("binder-eval-esmfold2"),
