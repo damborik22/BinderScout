@@ -475,6 +475,41 @@ the plan are feature work, not shipping blockers. See
 
 ### Fixed — 2.0
 
+- **Every heredoc-fed installer patch executed nothing and reported success.**
+  `run_logged` launches its command with `&`, and bash redirects an async
+  command's stdin from `/dev/null`; `conda run` compounds it by not forwarding
+  stdin even in the foreground, though `mamba run` does. So all four PXDesign
+  site-packages patches on x86, and three on aarch64 including the load-bearing
+  protenix `sm_120` + `-std=c++20` one, were skipped while the log printed a
+  green check. Measured on BM4: a May install whose log claimed all four applied
+  had none of them. Each body now goes to a temp file passed as an argv path,
+  and an assertion greps the target for the marker the patch writes, so a silent
+  no-op fails loudly.
+- **The 2.0 env rename stranded the envs it renamed.** Nothing named the
+  pre-rename spellings, so install created a duplicate beside each one, status
+  and verify reported installed tools as missing, and uninstall reported success
+  while leaving 28.6 GB behind. Install, status, verify and the configurator now
+  resolve a legacy env in place; uninstall removes both names through
+  `env_exists` + `run_logged`, never `rm -rf`, and surviving legacy envs are
+  listed with their size in the "Left in place" report.
+- **An uninstall could not reach five of thirteen tools.** The dispatch is now
+  driven by `TOOL_REGISTRY`, so a tool cannot be installable with no uninstall
+  path; TmProt gained its arm, step counter and preflight footprint, and aarch64
+  gained its missing RFD3 and Proteina-Complexa dispatch.
+- **`--resume` skipped exactly the designs it existed to retry.** The merger
+  kept a blank refold row and dropped the retried score for the same design.
+  `PartialRefoldFailure` now also exits 3 rather than 1, as the contract says.
+- **`fleet.sh` probed a directory that exists on no machine**, so every probe
+  reported no envs and no version. It resolves the checkout instead of
+  hardcoding one spelling. `gpu_mem_guard.sh` also refuses to fork a second MPS
+  daemon beside a legacy one rather than silently doubling it.
+- **RFD3's ProteinMPNN checkpoint was never fetched on x86** while aarch64
+  fetched it unconditionally, and verify counted only `.ckpt` so both reported
+  RFD3 usable. The download moved outside the weights-dir guard and verify now
+  requires the `.pt`.
+- **The pre-cached AF2 weights path was renamed although the directory on disk
+  was not**, so a reinstall re-downloaded weights already on the box. The
+  pre-rename spelling is back in the search order as a fallback.
 - **`rank` could be corrupted by a duplicate sequence.** Four unguarded left
   joins in `report.py` multiplied rows when two designs shared a sequence —
   confirmed live in a shipped 2VDY campaign, where 3 duplicates turned 439
@@ -581,6 +616,32 @@ the plan are feature work, not shipping blockers. See
   unit** — the old `bindmaster-mps.service` will keep running under its old
   name until it is disabled and the new unit installed, and
   `gpu_mem_guard.sh` now looks for `UNIT=binderscout-mps`.
+
+  **Upgrading a machine that was installed before 2.0** takes four steps, none
+  of which the git checkout does for you. They were derived by migrating BM1,
+  BM4 and BM5:
+
+  1. `python3 binderscout.py configure --status` once, which writes
+     `bin/binderscout` and `~/.local/bin/binderscout` and unlinks a stale
+     `bindmaster` shim. It must be a real subcommand: `--version` and `--help`
+     are deliberately side-effect-free and write nothing.
+  2. `conda rename -n bindmaster_<tool> binderscout_<tool>` for `pxdesign`,
+     `protein_hunter` and `rfd3`, on an idle box only. It is a clone-then-remove,
+     so it must never run while a job is live out of the source env. The
+     installer and the configurator both reuse a legacy env in place instead, so
+     this is tidying rather than a prerequisite.
+  3. `sed -i 's/bindmaster_/binderscout_/g' bin/{pxdesign,protein-hunter,rfd3}`
+     in the same window as step 2 — those wrappers hardcode the env name, so
+     they work before the rename and break after it.
+  4. On GB10 only, migrate the MPS unit: `systemctl --user disable --now
+     bindmaster-mps`, copy `tools/systemd/binderscout-mps.service` into
+     `~/.config/systemd/user/`, then `systemctl --user enable --now
+     binderscout-mps`. Until this is done the driver-enforced memory ceiling is
+     off, because the guard looks for a unit that does not exist.
+
+  The `binder-eval-esmfold2` env also needs `pip install 'transformers>=5.16'`
+  if it predates 2.0: the pinned checkpoint revision cannot be parsed by the
+  4.x loader, and ESMFold2 is the default refold engine.
 
 ## [1.1.1] — 2026-09-23
 

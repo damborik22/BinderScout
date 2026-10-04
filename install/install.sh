@@ -3906,6 +3906,11 @@ main() {
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
               "${DO_MOSAIC}" == true && "${DO_EVALUATOR}" == true ]]; then
             if [[ -d "${LOCAL_CONDA_DIR}" ]]; then
+                # This rm -rf takes every env with it, including any still in use.
+                if pgrep -f "${LOCAL_CONDA_DIR}/envs/" >/dev/null 2>&1; then
+                    print_warn "A process is still running out of ${LOCAL_CONDA_DIR}/envs/ — removing"
+                    print_warn "  Miniforge3 now would delete that environment under the live job."
+                fi
                 if confirm_destructive "Also remove local Miniforge3 installation (${LOCAL_CONDA_DIR})?"; then
                     rm -rf "${LOCAL_CONDA_DIR}"
                     print_ok "Removed local Miniforge3"
