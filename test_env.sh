@@ -16,8 +16,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="binderscout-test"
 CONTAINER_NAME="binderscout-test-run"
 
-# Pre-cached resources (AF2 weights, ARM64 binaries) — mounted read-only
-OLD_TOOLS_DIR="${OLD_TOOLS_DIR:-$HOME/Documents/OLD/BinderScout/bindcraft-tools}"
+# Pre-cached resources (AF2 weights, ARM64 binaries) — mounted read-only.
+# 2.0 renamed the project but NOT this external archive, which is still
+# Documents/OLD/BindMaster on the machines that hold it, so try both spellings
+# in the same order the installers do. Asserting one name here is how a
+# reinstall came to re-download weights already on the box.
+if [[ -z "${OLD_TOOLS_DIR:-}" ]]; then
+    for _candidate in "$HOME/Documents/OLD/BinderScout/bindcraft-tools" \
+                      "$HOME/Documents/OLD/BindMaster/bindcraft-tools"; do
+        if [[ -d "${_candidate}" ]]; then OLD_TOOLS_DIR="${_candidate}"; break; fi
+    done
+    OLD_TOOLS_DIR="${OLD_TOOLS_DIR:-$HOME/Documents/OLD/BinderScout/bindcraft-tools}"
+fi
 
 REBUILD=false
 GPU=false
