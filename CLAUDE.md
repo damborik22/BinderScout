@@ -4,7 +4,50 @@
 
 BinderScout is a unified toolkit for GPU-accelerated **protein binder design**. It wraps eight independent design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) behind a single CLI (`binderscout`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders. BindCraft 2 is a rewrite, not a new version of BindCraft: it does not replace it, and the two coexist as separate tools in separate environments.
 
-**Current status:** `master` is **frozen at 1.0.3** — the validated seven-tool pipeline (Parts A–H plus I, J, K, L, M, N, T and U; 1.0.1 added three aarch64 platform fixes — BindCraft 1 on jax 0.6.2, PXDesign's cu130 torch and its AF2 bf16 abort; 1.0.2 pinned the ESMFold2 model revision; 1.0.3 stopped AF3 reserving half of any large card and stopped ESMFold2 failing silently). It is not committed to. Active work is **1.1.0** on the `v1.1.x` branch, adding BindCraft 2 as the eighth design tool — see [docs/PLAN_bindcraft2_integration.md](docs/PLAN_bindcraft2_integration.md). Engine line-up: Evaluator AF2 refolding removed (Part I), AF3 v3.0.2 as the canonical 2nd refolding engine (Part K — **runs on 24 GB consumer GPUs for our size regime**; the old ">=100 GB" figure was a preallocation artifact, see the AF3 memory note below), Protenix refolding removed (Part J reverted — AF3 covers the 2nd-engine role), Protein-Hunter (Part L) and RFD3 (Part M) installed and configurable. Ranking: affinity-from-structure-confidence closed as a negative result (Part N), and three ranking methods collapsed into one — cross-engine gate then `consensus_iptm_mean` (Part U). SoluProt is part of `--tool all` and both platforms build USEARCH v12 from source. Proteina-Complexa is installable on aarch64 again as of 2026-09-26 (opt-in, unvalidated end to end) — its blocker was jax 0.4.x failing to compile AF2 for sm_121, which jax 0.6.2 fixes; throughput is the open question, not capability. **Both BindCraft 1 and PXDesign now run on the GPU on DGX Spark** — each previously reported itself healthy while being unusable there.
+**Current status: `v2.0.0`, tagged 2026-10-04 on the `v2.0.x` branch.** Shipped to the fleet
+only — **not published**, and deliberately **not merged to `master`**, which stays frozen at
+1.0.3. `v2.0.x` is the working branch: all work on these machines lands there, never on `master`
+or `v1.1.x`.
+
+**What 2.0 is.** An *evaluation* release, not a feature release. No new design tool (the eighth,
+BindCraft 2, arrived in 1.1.0) and the same three-engine refold pipeline — Boltz-2 + AF3 +
+ESMFold2. What changed is what the pipeline is allowed to claim:
+
+- **One ranking, and no way to choose another** (Part U): cross-engine gate then
+  `consensus_iptm_mean`, one `rank` column. `two_stage_rank`, `adaptyv_rank`, `consensus_rank`,
+  `active_rank`, `passes_max_screen`, `--rank-by` and `--screen-metric` are gone with **no
+  compatibility shim** — that is the breaking change and the reason for the major version.
+- **Silent success is now a failure.** A run that produced nothing, or produced blanks, used to
+  exit 0. Each of those paths now refuses and names what is wrong — see the ESMFold2 device
+  floor, `PartialRefoldFailure` (exit 3), the AF3 bucket floor, and `evaluate.sh` counting
+  *scored* rows rather than rows.
+- **Claims are separated from evidence.** Negative results are recorded as loudly as positive
+  ones; four single-pool effects were retracted rather than shipped; Cao 2022 was withdrawn as a
+  benchmark on label censoring.
+
+**Where 2.0's own records live** — read these before re-deriving anything:
+`2.0/DIARY_2.0.md` (the 2.0 chapter; `docs/REPO_DIARY.md` is the *historical* diary and is not
+where 2.0 work goes), `docs/PLAN_2.0_CONCLUSION.md` (§3 remaining work, **§4 findings that must
+not be relearned**, §5 decisions), `docs/PLAN_2.0_PART_RESULTS.md` (per-part verdicts, including
+the parts that were deliberately *not* built), and `docs/PLAN_2.0_PART_AK_verify_the_rank.md`.
+
+**Known not-done, by decision:** the **GPU-memory pass goes last**, because a reading taken
+against an unfinished pipeline is stale by the time it ships. Stages 1–4 of the plan are feature
+work, not shipping blockers.
+
+**Engine line-up** (unchanged from 1.1 and carried forward): Evaluator AF2 refolding removed
+(Part I), AF3 v3.0.2 as the canonical 2nd refolding engine (Part K — **runs on 24 GB consumer
+GPUs for our size regime**; the old ">=100 GB" figure was a preallocation artifact, see the AF3
+memory note below), Protenix refolding removed (Part J reverted — AF3 covers the 2nd-engine
+role), Protein-Hunter (Part L) and RFD3 (Part M) installed and configurable. Affinity-from-
+structure-confidence closed as a negative result (Part N). SoluProt is part of `--tool all` and
+both platforms build USEARCH v12 from source. Proteina-Complexa installs and **runs** on aarch64
+as of 2026-10-04 (opt-in; throughput still unmeasured — see the aarch64 entry, which has been
+wrong three times). **Both BindCraft 1 and PXDesign run on the GPU on DGX Spark** — each
+previously reported itself healthy while being unusable there.
+
+**Fleet note.** The checkout on the fleet boxes is `~/dev/BindMaster` (the pre-rename directory
+name), not `~/dev/BinderScout`. BM4 is the orchestrator and owns the rollout.
 
 **Repository:** `github.com/damborik22/BinderScout` (the working-tree directory may be checked out as `BinderScout`; the CLI command and Python package are both `binderscout`. The old `damborik22/BinderScout` URL redirects.)
 
