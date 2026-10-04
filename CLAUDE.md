@@ -214,8 +214,18 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
   **Established:** six installer defects fixed and PC runs end to end on aarch64 for the first
   time (single-pass generation 39.9 s, exit 0, `jax 0.6.2` on `gpu`, bf16 compiles).
   **Not established:** any throughput claim; the 2026-07-29 arithmetic stands until an AF2 call is
-  actually timed. Leading suspect for the 0.0 reward is the AF2 weights layout — `af_params_dir`
-  held only `*_multimer_v3.npz` — with the failure swallowed rather than raised.
+  actually timed. **Root cause found the same day, and it refutes this entry's own premise:** the weights are
+  fine (`AF2RewardModel` constructs in 3.0 s, `Found 5 model parameters`, `device=cuda:0`).
+  Calling `score()` directly raises `jax.tree_map was removed in JAX v0.6.0`, then PC's
+  `_cleanup_jax_state()` raises again on `jax.clear_backends`, masking it — and the pipeline
+  swallows both into `reward = 0.0`. **PC's AF2 reward is NOT "the same ColabDesign" BindCraft
+  runs:** BindCraft's is **1.1.3** with **0** `jax.tree_map` sites, PC vendors **1.1.1.1** with
+  **93 across 23 files**. This file recorded both version numbers and concluded PC "inherits the
+  fix"; the version gap *is* the blocker. PC is pinched from both sides — 0.4.x cannot compile
+  AF2 for sm_121, 0.6.2 removed what 1.1.1.1 calls, and 0.5.3 tops out at sm_120.
+  **Tractable fix:** PC vendors 1.1.1.1 only for a `device` kwarg, which is **4 call sites in 2
+  files** (`af/model.py:35,143`, `shared/model.py:163,167`) — port those onto 1.1.3 rather than
+  migrate 93 call sites. Plus PC's own 2 `jax.tree_map` uses and its `clear_backends` call.
 
   **The withdrawn claim, kept legible:** ~~throughput is fine and the deprecation is LIFTED.~~ Same box, same
   config (`search_binder_local_pipeline`, `33_TrkA`), `mcts n_simulations=2`, via

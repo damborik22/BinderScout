@@ -108,6 +108,43 @@ binderscout pack --output FILE              cd BinderScout
 > params, with the failure swallowed into a 0.0 reward rather than raised.
 >
 > Do not plan a campaign on Spark on the strength of this section.
+>
+> ### ROOT CAUSE FOUND, 2026-10-04 — jax 0.6.2 vs ColabDesign 1.1.1.1, and the fix is 4 lines
+>
+> The 0.0 reward is **not** a weights problem — `AF2RewardModel` constructs in 3.0 s, reports
+> `Found 5 model parameters` and `device=cuda:0`. Calling `score()` directly is what surfaces it:
+>
+> ```
+> AttributeError: jax.tree_map was removed in JAX v0.6.0
+> AttributeError: module 'jax' has no attribute 'clear_backends'
+> ```
+>
+> The AF2 call raises, then PC's own `_cleanup_jax_state()` raises a *second* time on
+> `jax.clear_backends` — masking the first — and the pipeline swallows both into `reward = 0.0`.
+> A search then runs to completion looking healthy.
+>
+> **This refutes the premise this section has rested on since 2026-09-25.** CLAUDE.md argued that
+> PC "inherits" BindCraft's fix because "PC's AF2 reward *is* ColabDesign — the same library". It
+> is not the same library. Measured:
+>
+> | | version | `jax.tree_map` call sites |
+> |---|---|---|
+> | BindCraft's (runs on jax 0.6.2 here) | 1.1.3 | **0** |
+> | PC's vendored fork | **1.1.1.1** | **93, across 23 files** |
+>
+> CLAUDE.md recorded both version numbers and drew the opposite conclusion from them. The version
+> gap *is* the blocker: 1.1.1.1 predates jax 0.6's API removals. So PC on sm_121 is pinched from
+> both sides — jax 0.4.x cannot compile AF2 for this GPU, and jax 0.6.2 removed what 1.1.1.1
+> calls. (jax 0.5.3 is not a middle ground; it tops out at sm_120.)
+>
+> **The tractable fix, and why it is small.** PC vendors 1.1.1.1 only to carry a `device` kwarg,
+> and that patch is **4 call sites in 2 files** — `af/model.py:35,143` and
+> `shared/model.py:163,167`. Porting those 4 lines onto 1.1.3, which BindCraft already proves
+> works on jax 0.6.2 on this hardware, is far smaller than migrating 93 `jax.tree_map` sites.
+> Either path also needs PC's own 2 `jax.tree_map` uses and its `jax.clear_backends` call fixed.
+>
+> **Also worth fixing regardless:** a reward model that cannot execute should refuse, not return
+> 0.0. The swallowing is what let a wrong throughput number be published.
 
 ---
 

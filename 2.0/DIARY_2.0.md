@@ -1668,3 +1668,54 @@ want a different layout or the non-multimer params too — with the load failure
 zero reward instead of raised. **That swallowing is itself worth a fix**: a reward model that
 cannot load its weights should refuse, not score everything 0.0 and let a search run to
 completion looking healthy.
+
+### Root cause: jax 0.6.2 vs ColabDesign 1.1.1.1, and the premise was backwards
+
+Chasing the 0.0 reward gave the real answer, and it is more useful than the throughput number I
+got wrong.
+
+The weights were never the problem — the suspicion in my own retraction was also wrong.
+`AF2RewardModel` constructs in **3.0 s**, prints `Found 5 model parameters` and all five multimer
+names, `device=cuda:0`. The flat `~/af2_params/*.npz` layout is fine: the fork tries four
+fallbacks and the second matches it.
+
+Calling `score()` directly is what surfaces it:
+
+```
+AttributeError: jax.tree_map was removed in JAX v0.6.0
+AttributeError: module 'jax' has no attribute 'clear_backends'
+```
+
+The AF2 call raises, then PC's own `_cleanup_jax_state()` raises a **second** time on
+`jax.clear_backends` while handling the first — so the original error is masked — and the
+pipeline swallows both into `reward = 0.0`. A 112-second MCTS then completes, writes nine rows,
+and looks healthy.
+
+**And this refutes the premise the whole reopen argument rested on.** CLAUDE.md has said since
+2026-09-25 that PC "inherits" BindCraft's jax fix because "PC's AF2 reward *is* ColabDesign — the
+same library, verified in its venv". Measured:
+
+| | version | `jax.tree_map` sites |
+|---|---|---|
+| BindCraft's, running on jax 0.6.2 here | 1.1.3 | **0** |
+| PC's vendored fork | **1.1.1.1** | **93, in 23 files** |
+
+Not the same library. And the sharpest part: **CLAUDE.md recorded both version numbers in the
+same paragraph** — "BindCraft here runs `colabdesign 1.1.3` on `jax 0.6.0`, PC runs
+`colabdesign 1.1.1.1`" — and treated the difference as a mere *pin* to be bumped, when the
+version gap is itself the blocker. The evidence to refute the conclusion was sitting inside the
+sentence that stated it.
+
+So PC on sm_121 is pinched from both sides: jax 0.4.x cannot compile AF2 for this GPU, jax 0.6.2
+removed what 1.1.1.1 calls, and 0.5.3 is no middle ground (it tops out at sm_120).
+
+**The fix is small, which is the good news.** PC vendors 1.1.1.1 only to carry a `device` kwarg,
+and that patch is **4 call sites in 2 files** (`af/model.py:35,143`, `shared/model.py:163,167`).
+Porting 4 lines onto 1.1.3 — already proven on 0.6.2 on this box — beats migrating 93 call sites.
+PC's own 2 `jax.tree_map` uses and its `clear_backends` call need fixing either way.
+
+**The lesson I want to keep is not "check the reward".** It is that two of my three errors today
+came from accepting a written claim about *identity* — "the same ColabDesign", "installable since
+2026-09-26" — where the artefact in front of me recorded a version or a date that contradicted
+it. The installer said PC was installable; the log said it had never re-installed. CLAUDE.md said
+same library; the same sentence said 1.1.1.1 versus 1.1.3.
