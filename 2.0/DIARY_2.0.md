@@ -1936,3 +1936,67 @@ mean is a gamed number, and an out-of-fold AUC on a public pool cannot see that,
 that pool was not produced by our tools. The install friction is already handled loudly
 rather than silently, and `--min-engines 2` is one flag away. What would settle it is a
 labelled pool of *our own* designs — AK1's output, not its premise.
+
+---
+
+## 2026-10-04 (release) — v2.0.0 tagged on `v2.0.x`, fleet only
+
+Tagged `v2.0.0` at `d6ed96b`, 158 commits past `v1.1.1`. Deliberately **not** merged to
+`master` (still frozen at 1.0.3, now 194 commits behind) and **not** published. `v2.0.x`
+remains the working branch.
+
+### What I checked before saying "ready", and the two things that were not
+
+The code was ready — 1084 tests, ruff and shellcheck clean, `binderscout --version` already
+reporting 2.0.0 since 2026-09-28. The release was not, in two places that would both have
+mattered only later:
+
+**CHANGELOG had no `[2.0.0]` section.** Every 2.0 entry sat under `[Unreleased]`. A tag
+pointing at an `[Unreleased]` changelog is specifically the artefact that makes a future
+session unable to tell what shipped from what was merely in flight — and this repo has
+already spent days on exactly that class of ambiguity. Cut it as
+`## [2.0.0] — 2026-10-04`, with a heading that says what the release *is* rather than
+listing 570 lines of entries unoriented: an **evaluation** release, not a feature release.
+
+**CLAUDE.md described a pre-2.0 world.** It opened with *"`master` is frozen at 1.0.3…
+Active work is **1.1.0** on the `v1.1.x` branch"* and did not mention `v2.0.x` anywhere. It
+is the one document every session reads first, so for the whole of 2.0 the map handed to
+each new session was two releases out of date. That is a worse defect than any single stale
+fact inside it, because every other correction in this diary was made *from* that map.
+
+Also stale, and found while fixing the above: `PLAN_2.0_CONCLUSION.md` §8's "how to confirm
+this state" block told the reader to expect commit `5fb9d99` and `887 passed`, against a
+HEAD 158 commits later and 1084 tests. A confirmation procedure that cannot pass is worse
+than none, since it reads as a broken repo rather than a stale doc.
+
+### The decision that was overridden, and why it is coherent
+
+The status table said the tag **waits on §3's GPU-memory pass** (Stage 6). The operator
+overrode that today. Recorded as an override rather than quietly deleted, because the
+reasoning actually inverts in favour of shipping: Stage 6 goes last *because a reading taken
+against an unfinished pipeline is stale by the time it ships* — which means the pipeline has
+to ship before the reading is worth taking. Stage 6 is post-2.0.0 work.
+
+### `behind=0` was a lie, and I nearly reported it
+
+Asked whether the fleet was on the release, both reachable boxes answered
+`behind_origin_v2.0.x=0` while sitting at visibly older commits — BM2 at `9176112`, BM5 at
+`7557805`. The comparison was against each box's **local** `origin/v2.0.x` ref, which had not
+been fetched since they were last updated, so each was measuring its distance from its own
+past. Forcing `git fetch` first: BM2 is **9** commits behind, BM5 **5**.
+
+This is the same shape as the defects D6 fixed an hour earlier — a check that reads a proxy
+(a cached ref) for the quantity it claims to measure (distance from the remote), and answers
+confidently. The tell was identical too: a number that was *too clean* for the circumstances.
+Worth keeping as a rule: **a `behind` count without a preceding fetch is not a measurement.**
+
+Two operational facts went into CLAUDE.md because both cost time today: the fleet checkout is
+`~/dev/BindMaster`, the pre-rename directory name — four guessed paths failed before I looked
+— and BM4 owns the rollout.
+
+### One hazard attached to the rollout
+
+**Do not pull on BM2 until the Chai-1 study finishes** (272/563 at the time of tagging, ~11 h
+to go). It runs against the *editable* `binder_comparison` install in `~/dev/BindMaster`, so a
+pull swaps the package under a live process. The study is Part AF — adopt or do not adopt a
+fourth engine — so its answer lands after the tag and belongs to 2.1 either way.
