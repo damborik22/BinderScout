@@ -178,8 +178,13 @@ def _run_evaluate_sh(tmp_path: Path, envs: list[str], argv: list[str]):
     # "single engine". It also meant the real SoluProt env was invoked for real.
     conda_sh = tmp_path / "conda" / "etc" / "profile.d" / "conda.sh"
     conda_sh.parent.mkdir(parents=True, exist_ok=True)
-    # `return`, not `exit`: this runs as a function inside evaluate.sh's own shell, so
-    # `exit` would terminate the script under test instead of the fake command.
+    # `return`, not `exit`, because this is a function in evaluate.sh's own shell.
+    # Mutation-tested, and the mutation PASSED: with `exit` the test is still green,
+    # because every `conda` call site in evaluate.sh today sits in a pipeline
+    # (`conda env list | awk ...`) or a command substitution, both of which are
+    # subshells, so `exit` kills only the subshell. So `return` is the correct form and
+    # cheap insurance against a future call site in the main shell -- it is not what
+    # makes this test work, and the earlier version of this comment claimed it was.
     conda_sh.write_text(f'conda() {{\n  if [ "$1" = "env" ]; then\n{listing}\n    return 0\n  fi\n  return 7\n}}\n')
 
     # Kept as well, for any `conda` reached from a child process rather than from
