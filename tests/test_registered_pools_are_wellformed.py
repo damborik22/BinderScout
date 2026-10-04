@@ -115,3 +115,91 @@ def test_adaptyv_records_the_two_bounds_that_limit_what_it_can_support():
     c = b.load_manifest("adaptyv")["caveats"].lower()
     assert "563" in c, "the labelled-vs-scored bound (563 of 2018) is gone from the caveats"
     assert "nipah" in c, "the unresolved nipah label discrepancy is gone from the caveats"
+
+
+@pytest.mark.skipif(not REGISTERED, reason="no pools registered yet")
+@pytest.mark.parametrize("pool", REGISTERED)
+def test_manifest_declares_an_outcome_column(pool: str) -> None:
+    """Every pool must name a column carrying an explicit experimental outcome.
+
+    This is the structural form of the 2026-10-03 label error. A panel's empty Kd cells were
+    read as "tested, did not bind" when they marked designs that had never been ordered; the
+    sheet recorded that with a divider row, and the other panel used an explicit ``N/A`` for
+    tested-and-not-bound which ``pd.read_csv`` silently converts to ``NaN``. Eleven such rows
+    dragged a 114-design AUC from 0.706 to 0.4835, caught only because a reviewer noticed they
+    outranked 81 % of the confirmed binders.
+
+    An inference from a blank cell is what failed, so the outcome is a required column with no
+    default and no fallback.
+    """
+    m = b.load_manifest(pool)
+    assert "outcome_column" in m, f"{pool}: no outcome_column — a blank cell must never imply a negative"
+    assert isinstance(m["outcome_column"], str) and m["outcome_column"].strip()
+
+
+def test_the_loader_refuses_a_row_with_no_outcome(tmp_path, monkeypatch) -> None:
+    """The guard has to fire on data, not just exist in the manifest."""
+    import json
+
+    import pandas as pd
+
+    reg = tmp_path / "benchmarks" / "p"
+    reg.mkdir(parents=True)
+    store = tmp_path / "store" / "p"
+    store.mkdir(parents=True)
+    rows = pd.DataFrame({"id": ["a", "b"], "binds": [1, 0], "outcome": ["bound", ""]})
+    f = store / "labels.csv"
+    rows.to_csv(f, index=False)
+    import hashlib
+
+    (reg / "MANIFEST.json").write_text(
+        json.dumps(
+            {
+                "name": "p",
+                "n_designs": 2,
+                "label_column": "binds",
+                "outcome_column": "outcome",
+                "labels": {"filename": "labels.csv", "sha256": hashlib.sha256(f.read_bytes()).hexdigest()},
+            }
+        )
+    )
+    monkeypatch.setattr(b, "BENCHMARKS_DIR", tmp_path / "benchmarks")
+    monkeypatch.setenv(b.STORE_ENV, str(tmp_path / "store"))
+    with pytest.raises(ValueError, match="empty"):
+        b.load_labels("p")
+
+
+def test_the_loader_refuses_an_unrecognised_outcome(tmp_path, monkeypatch) -> None:
+    """ "probably didn't bind" is not an outcome."""
+    import hashlib
+    import json
+
+    import pandas as pd
+
+    reg = tmp_path / "benchmarks" / "p"
+    reg.mkdir(parents=True)
+    store = tmp_path / "store" / "p"
+    store.mkdir(parents=True)
+    f = store / "labels.csv"
+    pd.DataFrame({"id": ["a"], "binds": [0], "outcome": ["maybe"]}).to_csv(f, index=False)
+    (reg / "MANIFEST.json").write_text(
+        json.dumps(
+            {
+                "name": "p",
+                "n_designs": 1,
+                "label_column": "binds",
+                "outcome_column": "outcome",
+                "labels": {"filename": "labels.csv", "sha256": hashlib.sha256(f.read_bytes()).hexdigest()},
+            }
+        )
+    )
+    monkeypatch.setattr(b, "BENCHMARKS_DIR", tmp_path / "benchmarks")
+    monkeypatch.setenv(b.STORE_ENV, str(tmp_path / "store"))
+    with pytest.raises(ValueError, match="unrecognised"):
+        b.load_labels("p")
+    # ...but excluded:<reason> is
+    pd.DataFrame({"id": ["a"], "binds": [0], "outcome": ["excluded:never ordered"]}).to_csv(f, index=False)
+    man = json.loads((reg / "MANIFEST.json").read_text())
+    man["labels"]["sha256"] = hashlib.sha256(f.read_bytes()).hexdigest()
+    (reg / "MANIFEST.json").write_text(json.dumps(man))
+    assert len(b.load_labels("p")) == 1

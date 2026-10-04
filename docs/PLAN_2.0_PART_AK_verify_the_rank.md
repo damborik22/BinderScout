@@ -156,18 +156,28 @@ cross-target join, and a failure on one leaves the other's output usable.
 Pre-registered, with today's 563-design values as the prediction. **No metric is being selected
 here** — each is a pass/fail on an existing claim:
 
-| claim | now (n=563) | verified if |
-|---|---|---|
-| `consensus_iptm_mean` ranks | macro-AUC 0.7113 | holds within ±0.03 at n=2,018 |
-| egfr is the weak target, not a small-sample artifact | 0.6478 (n=190) | stays < 0.70 at n=826 |
-| nipah holds up | 0.7261 (n=211) | stays > 0.68 at n=1,030 |
-| the 3-engine mean beats the average single engine | +0.047, p=0.0002 | sign holds on 4/4 targets |
-| `agreement_count` is informative but saturates | 0.6295; rate 0.378/0.567/0.778/0.758 | 2-vs-3 still indistinguishable |
-| the gate's rescue gradient | 92.9 % / 25.0 % / 0 % | monotone, 1-engine rescue > 80 % |
+| claim | now (n=563) | verified if | refuted if |
+|---|---|---|---|
+| `consensus_iptm_mean` ranks | macro-AUC 0.7113 | **≥ 0.681** at n=2,018 | **< 0.681** |
+| egfr is the weak target, not a small-sample artifact | 0.6478 (n=190) | stays < 0.70 at n=826 | ≥ 0.70 |
+| nipah holds up | 0.7261 (n=211) | stays > 0.68 at n=1,030 | ≤ 0.68 |
+| **the 3-engine mean beats the BEST single engine out of fold** | **+0.0026, p=0.69** | a positive effect that keeps its sign on 4/4 LOTO folds | anything less |
+| (weak form, recorded only) 3-mean beats the *average* single engine | +0.047, p=0.0002 | — | — |
+| `agreement_count` is informative but saturates | 0.6295; rate 0.378/0.567/0.778/0.758 | 2-vs-3 still indistinguishable | 3 > 2 by a margin that survives LOTO |
+| the gate's rescue gradient | 92.9 % / 25.0 % / 0 % | monotone, 1-engine rescue > 80 % | non-monotone |
 
-**If `consensus_iptm_mean` drops below ~0.65 at n=2,018, that is the finding** — and it would
-mean the 563-design result was a coverage artifact, since coverage was never random: the 563 are
-the designs that already got three engines.
+**One threshold, not two (D2, 2026-10-04).** An earlier draft said "holds within ±0.03" *and*
+"below ~0.65 is the finding", which left **0.65–0.681 in neither bucket** — and since benchmark
+coverage was never random, that gap is exactly where a coverage-selection effect would land. The
+rule is now a single cut at **0.681**: at or above it the 563-design result survives the 3.6×
+expansion; below it, the result was a coverage artifact, because the 563 are precisely the designs
+that already got three engines.
+
+**The ensemble row is the strong form now (D4, 2026-10-04).** It previously read "beats the
+*average* single engine, +0.047, p=0.0002" — which §7 of this same document already reports as the
+weak form: the 3-mean does **not** beat the *best* single engine out of fold (+0.0026, p=0.69) and
+`mean(boltz, esm)` out-scores it (0.7279 vs 0.7231). As written the row could pass while the thing
+worth knowing failed. The weak form is kept on its own line, marked as recorded-only.
 
 ## 4. Explicitly out of scope
 
@@ -214,29 +224,31 @@ either number is cited. Four further targets (human-serum-albumin 103, human-tnf
 30, human-gm2a 30) have **zero** binders and cannot contribute a within-target AUC at all, though
 they are usable as negative controls.
 
-## 6. Machine readiness, as measured 2026-10-03
+## 6. Where AK1 runs — **Clara, dispatched by BM4** (operator, 2026-10-04)
 
-Verified on BM2 so it does not need re-discovering:
+AK1 is Clara's job, orchestrated by BM4 as fleet manager. The readiness notes below are kept
+because they were measured, not because BM2 is the target.
 
-| | status |
+**Readiness means *executes one design end to end*, not *installed*.** This is the plan's own
+lesson — verify the real interface, not a proxy — and an earlier version of this table broke it by
+marking BM2 ready on "env present and weights present". Two separate things on this fleet have
+already hidden behind that: BM5's `binder-eval-af3` and `binder-eval-esmfold2` were
+editable-installed against a **different checkout** and so were not running `AF3_MIN_BUCKET` at
+all, and Protein-Hunter's env on BM5 is a ~198 MB empty shell. Both passed "installed".
+
+| machine | state, 2026-10-04 |
 |---|---|
-| GPU | RTX 3090, 24 576 MiB, **23 MiB used — idle** |
-| Boltz-2 | `Mosaic/.venv/bin/binder-compare` present |
-| AF3 | env present **and weights present** (`~/.alphafold3/models/af3.bin`) |
-| ESMFold2 | env present, console script works |
-| disk | ample (~1.5 GB of PAE for the whole of AK1) |
+| **Clara** | AK1's target. Readiness **not yet verified by execution** — do that first |
+| BM2 (RTX 3090, sm_86) | on `v2.0.x`; all four envs verified against the repo path; **AF3 executes here** — `iptm 0.88, ptm 0.85` on a real 258-token complex, and a 60-vs-256 bucket pair confirms the `AF3_MIN_BUCKET = 256` floor is what made it work. Currently running the Part AF Chai-1 study |
+| BM5 (GB10, aarch64) | on `v2.0.x`; sweep 24 pass / 1 fail (the fail is PH's empty env shell); the two mis-pointed eval envs re-pointed |
+| BM3 (RTX 3060, 12 GB) | **engineering/CI box — must never produce authoritative refolds.** ESMFold2 cannot run at any size here (14.2 GB floor), and Boltz-2 fails outright at 600 and 900 tokens on 24 GB, let alone 12 |
 
-**One gap:** BM2's checkout is on `v1.1.x`, and all four envs are editable-installed against it,
-so they predate `AF3_MIN_BUCKET`, `agreement_denom` and the `<binder_id>_<engine>` structure
-naming. Any GPU work there needs `git checkout v2.0.x` plus `pip install -e 'Evaluator[report]'`
-in all four — the `[report]` extra, **never** `--no-deps`, which leaves `binder-compare` unable to
-start at all.
-
-**BM5 and Clara could not be reached** from this session or from BM2 (neither resolves), so their
-readiness is unverified.
-
-
----
+**A claim that must not be reintroduced:** "no 3090, 4090 or 3060 can run AF3 regardless of
+tokens, because tokamax requests 110,592 bytes of shared memory against sm_86's 101,376." That was
+believed on 2026-09-27 and is **false** — it was our own missing bucket floor. `refold_af3.py`
+computed `bucket = len(target) + max(len(binder))` with no lower bound, so a 60-token pool asked
+AF3 for a shape its stock ladder never produces. With `AF3_MIN_BUCKET = 256` the same input runs.
+The shared-memory figure is real; the conclusion drawn from it was not.
 
 ## 7. Part AF follow-on — pre-registration for the Chai-1 adoption study
 
