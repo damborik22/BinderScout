@@ -2124,6 +2124,20 @@ install_proteina_complexa() {
             bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && .venv/bin/complexa init" \
             || print_warn "complexa init failed — .env may need manual setup"
 
+
+        # Three edits found as UNCOMMITTED state in BM5's PC checkout on 2026-10-04, now
+        # reproducible (the cu126 index is correct on x86 and is left alone): the apoe4_ntd target,
+        # and the REMOVAL of a try/except that silently moved the AF2 reward to the CPU -- which
+        # is the ~130x slowdown the tool's deprecation rests on, made invisible. See the patch's
+        # docstring. Verified: wiping all three and re-running the patches reproduces them
+        # byte-identically.
+        print_step "Patching PC: apoe4_ntd target, no silent CPU reward"
+        if python3 "${BINDERSCOUT_DIR}/install/patches/pc_targets_index_and_no_cpu_fallback.py" \
+                "${PROTEINA_COMPLEXA_DIR}"; then
+            print_ok "PC checkout patches applied"
+        else
+            print_warn "PC checkout patch reported a problem — inspect before trusting a PC run"
+        fi
         # Make the composite reward REFUSE rather than silently score 0.0 when a reward model
         # cannot execute. PC catches every reward exception, reports it with warnings.warn, and
         # its CLI runs python with -W ignore -- so an unusable AF2 reward produces a completed
