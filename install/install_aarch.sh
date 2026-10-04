@@ -2646,6 +2646,35 @@ install_esmfold2() {
     print_ok "  Switch via:    --esmfold2-model full  (larger, MSA-capable; ~3-5 GB)"
     echo ""
 
+    # Say so NOW if this card cannot run it. The engine refuses at runtime
+    # (require_device_memory), but an installer that prints "complete" on a box where the
+    # engine can never fold is the pattern this project has already paid for twice --
+    # BindCraft 1 and PXDesign both reported themselves healthy while being unusable on
+    # Spark. Reads the floor from ENGINE_MIN_DEVICE_MIB rather than repeating the number,
+    # so the installer and the runtime cannot disagree.
+    _esm_floor_check() {
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 python -c '
+import sys
+from binder_comparison.refolding.memory_policy import ENGINE_MIN_DEVICE_MIB, device_total_mib
+floor = ENGINE_MIN_DEVICE_MIB["esmfold2"]
+total = device_total_mib()
+if total <= 0:
+    sys.exit(0)          # unmeasurable -- say nothing rather than guess
+if total < floor:
+    print(f"{total} {floor}")
+    sys.exit(7)
+' 2>/dev/null
+    }
+    if _esm_card=$(_esm_floor_check); then :; else
+        if [[ $? -eq 7 && -n "$_esm_card" ]]; then
+            print_warn "This GPU has ${_esm_card% *} MiB; ESMFold2 needs at least ${_esm_card#* } MiB."
+            print_warn "  The environment is installed and correct, but ESMFold2 will REFUSE to fold here"
+            print_warn "  at any input size -- the floor is the cost of resident ESMC-6B weights, so a"
+            print_warn "  smaller complex does not make it fit. Run this engine on a larger card, or"
+            print_warn "  evaluate with --skip-esmfold2 --min-engines 2."
+        fi
+    fi
+
     print_ok "ESMFold2 refolder installation complete"
 }
 

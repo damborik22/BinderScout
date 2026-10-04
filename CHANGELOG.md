@@ -40,8 +40,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     since the three engines order their columns differently and a hard-coded index would
     read a different column per engine.
 
-  Pinned by `tests/test_a_blank_refold_row_is_not_a_score.py` (43 tests), mutation-tested
-  against 15 mutations. Two of those mutations initially passed: commenting the preflight
+  Both installers now warn at install time when the card is below ESMFold2's floor, rather
+  than printing "ESMFold2 refolder installation complete" on a box where the engine can
+  never fold — the pattern this project has already paid for with BindCraft 1 and PXDesign,
+  both of which reported themselves healthy while being unusable on Spark. It is a warning
+  and not a refusal, because installing on a small box is legitimate (CI, development, an
+  env destined for another machine), and it reads `ENGINE_MIN_DEVICE_MIB` rather than
+  repeating the number, so the installer and the runtime cannot disagree.
+
+  Pinned by `tests/test_a_blank_refold_row_is_not_a_score.py` (50 tests), mutation-tested
+  against 19 mutations. Two of those mutations initially passed: commenting the preflight
   out left a substring-based ordering assertion green, and making a runner swallow the
   exception was untested altogether — the runner is the only boundary production crosses,
   since `binder-compare refold-<engine>` never calls the scripts' `main()`.

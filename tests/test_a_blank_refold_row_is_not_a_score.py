@@ -402,3 +402,71 @@ def test_the_guard_says_it_counts_scored_rows():
     """The operator reads this message when a run aborts; it must not say "rows"."""
     src = EVALUATE_SH.read_text()
     assert "no new SCORED rows" in src
+
+
+# ---------------------------------------------------------------------------
+# 5. The installer must not declare success on a card that cannot fold
+# ---------------------------------------------------------------------------
+#
+# The runtime refusal is correct but late: the installer verified that
+# `binder-compare refold-esmfold2 --help` parses and then printed "ESMFold2 refolder
+# installation complete" on a 12 GB box. That is the pattern this project has already paid
+# for twice -- CLAUDE.md records BindCraft 1 and PXDesign both reporting themselves healthy
+# while being unusable on Spark. A warning, not a refusal: installing on a small box is
+# legitimate (CI, development, an env that will be used elsewhere).
+
+INSTALLERS = [REPO / "install" / "install.sh", REPO / "install" / "install_aarch.sh"]
+
+
+@pytest.mark.parametrize("installer", INSTALLERS, ids=lambda p: p.name)
+def test_both_installers_check_the_device_floor(installer):
+    """Parity: test_installers_do_not_drift compares --tool vocabulary, not this."""
+    src = installer.read_text()
+    assert "_esm_floor_check" in src, f"{installer.name} installs ESMFold2 without checking the card"
+    i_check = src.index("_esm_floor_check()")
+    i_done = src.index('print_ok "ESMFold2 refolder installation complete"')
+    assert i_check < i_done, "the check must run before the success message, not after"
+
+
+@pytest.mark.parametrize("installer", INSTALLERS, ids=lambda p: p.name)
+def test_the_installer_reads_the_floor_instead_of_repeating_it(installer):
+    """A second copy of 14248 is a second thing to forget to update.
+
+    The installer imports ENGINE_MIN_DEVICE_MIB, so the installer and the runtime cannot
+    disagree about what the floor is.
+    """
+    src = installer.read_text()
+    assert "ENGINE_MIN_DEVICE_MIB" in src
+    block = src[src.index("_esm_floor_check()") : src.index('print_ok "ESMFold2 refolder installation complete"')]
+    assert "14248" not in block, "the installer hard-codes the floor instead of reading it"
+
+
+def _floor_warning_block() -> str:
+    """The shipped shell logic, extracted rather than copied."""
+    src = INSTALLERS[0].read_text()
+    start = src.index("    if _esm_card=$(_esm_floor_check); then :; else")
+    end = src.index('print_ok "ESMFold2 refolder installation complete"', start)
+    return src[start:end]
+
+
+@pytest.mark.parametrize(
+    ("rc", "stdout", "expect_warning"),
+    [
+        (7, "12288 14248", True),  # a 3060: below the floor
+        (0, "", False),  # a big card, or unmeasurable
+        (1, "", False),  # the probe itself broke -- must not warn about memory
+    ],
+)
+def test_the_floor_warning_fires_only_when_the_card_is_too_small(tmp_path, rc, stdout, expect_warning):
+    """Reading `$?` inside an `else` branch is fragile enough to be worth executing."""
+    script = tmp_path / "t.sh"
+    script.write_text(
+        'print_warn () { echo "WARN: $*"; }\n'
+        f'_esm_floor_check () {{ printf "%s" "{stdout}"; return {rc}; }}\n' + _floor_warning_block()
+    )
+    out = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False)
+    warned = "WARN:" in out.stdout
+    assert warned is expect_warning, f"rc={rc} stdout={stdout!r} -> warned={warned}, stdout={out.stdout!r}"
+    if expect_warning:
+        assert "12288" in out.stdout and "14248" in out.stdout, "the warning must name both numbers"
+        assert "--skip-esmfold2" in out.stdout, "the warning must give the operator a way forward"
