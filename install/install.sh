@@ -629,6 +629,29 @@ _resolve_env_name() {
     fi
 }
 
+# _refuse_if_env_in_use <env-name>
+# Refuse to install into a conda env a process is still running out of.
+# resolve_env_names can repoint an install at a pre-rename env, and the install
+# steps are destructive even when the env already exists: `pip install torch
+# --force-reinstall` replaces shared objects under whatever interpreter is live
+# in that prefix (ImportError or a half-written .so in the running job), and
+# --force removes the env outright. Refusing is the safer of the two policies
+# the reviewers proposed: warn-and-skip-the-destructive-steps leaves a
+# half-installed env behind and still reports the tool installed. Same pgrep
+# test as _remove_legacy_env; uninstall keeps its own, which skips rather than
+# fails because leaving a legacy env in place is not an error.
+_refuse_if_env_in_use() {
+    local name="$1"
+    env_exists "${name}" || return 0
+    if pgrep -f "${CONDA_BASE}/envs/${name}/" >/dev/null 2>&1; then
+        print_fail "Conda env '${name}' is IN USE by a running process — refusing to install into it."
+        print_warn "  Installing would force-reinstall packages under the live interpreter."
+        print_warn "  Wait for that job to finish, then re-run."
+        return 1
+    fi
+    return 0
+}
+
 # ensure_conda_in_path
 ensure_conda_in_path() {
     export PATH="${CONDA_BASE}/bin:${PATH}"
@@ -1542,6 +1565,9 @@ EOF
 # in the patched file instead, and a miss is fatal: CLAUDE.md lists all four
 # patches as required, and without them PXDesign fails hours later with the
 # documented JSONDecodeError on an empty AF2-eval output file.
+# install_aarch.sh now applies the same fatal policy through its own stamp-file
+# mechanism -- same semantics (absent package or absent marker fails), different
+# implementation, because neither mechanism is worth rewriting blind.
 pxd_assert_patched() {
     local label="$1" file="$2" marker="$3"
     if [[ -f "${file}" ]] && grep -qF -- "${marker}" "${file}"; then
@@ -1554,6 +1580,7 @@ pxd_assert_patched() {
 
 install_pxdesign() {
     print_step "Installing PXDesign"
+    _refuse_if_env_in_use "${PXDESIGN_ENV}" || return 1
 
     # Clone PXDesign
     if [[ -d "${PXDESIGN_DIR}" ]]; then
@@ -1605,12 +1632,12 @@ install_pxdesign() {
     run_logged "Installing Protenix (PXDesign fork)" \
         "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" \
         pip install --no-cache-dir "git+https://github.com/bytedance/Protenix.git@v0.5.0+pxd" \
-        || print_warn "Protenix install failed — PXDesign may not work"
+        || { print_fail "Protenix install failed — the protenix patch below would have nothing to patch"; return 1; }
 
     run_logged "Installing PXDesignBench" \
         "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" \
         pip install --no-cache-dir "git+https://github.com/bytedance/PXDesignBench.git@v0.1.2" --no-deps \
-        || print_warn "PXDesignBench install failed — PXDesign may not work"
+        || { print_fail "PXDesignBench install failed — the pxdbench patches below would have nothing to patch"; return 1; }
 
     # PXDesign setup.py has install_requires commented out; install deps from requirements.txt
     if [[ -f "${PXDESIGN_DIR}/requirements.txt" ]]; then
@@ -2478,6 +2505,7 @@ EOF
 
 install_rfd3() {
     print_step "Installing RFD3 (foundry)"
+    _refuse_if_env_in_use "${RFD3_ENV}" || return 1
 
     # Conda env: Py 3.12 + PyTorch 2.2+ (CUDA 12.x)
     if env_exists "${RFD3_ENV}"; then
@@ -2578,6 +2606,7 @@ EOF
 
 install_protein_hunter() {
     print_step "Installing Protein-Hunter"
+    _refuse_if_env_in_use "${PROTEIN_HUNTER_ENV}" || return 1
 
     # Clone at pinned commit
     if [[ -d "${PROTEIN_HUNTER_DIR}" ]]; then
@@ -3899,7 +3928,14 @@ main() {
         # the local-Miniforge prompt below.
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
               "${DO_MOSAIC}" == true && "${DO_EVALUATOR}" == true ]]; then
-            rm -f "${SHORTCUTS_DIR}/binderscout" "${SHORTCUTS_DIR}/bindmaster"
+            rm -f "${SHORTCUTS_DIR}/binderscout"
+            # Same guard as _write_binderscout_shortcut and install_aarch.sh: only
+            # delete the pre-rename shim when its body actually execs bindmaster.py,
+            # so a v1.1.x checkout sharing this bin/ keeps its working `bindmaster`.
+            if [[ -f "${SHORTCUTS_DIR}/bindmaster" ]] \
+               && grep -q 'bindmaster\.py' "${SHORTCUTS_DIR}/bindmaster" 2>/dev/null; then
+                rm -f "${SHORTCUTS_DIR}/bindmaster"
+            fi
         fi
 
         # Offer to remove local Miniforge when all tools are uninstalled

@@ -88,9 +88,12 @@ binder-eval-esmfold2/                          ← ESMFold2 refold env (default 
 ~/.claude/.../memory/MEMORY.md                 ← persistent cross-session lessons
 ```
 
-The checkout directory itself was **not** renamed in 2.0 — it is `~/dev/BindMaster`
-on every fleet machine, and the directory name is machine-local. Resolve it rather
-than assuming either spelling in a command you ship to another box.
+The checkout directory is machine-local and spelled either way after the 2.0
+rename — `~/dev/BindMaster` on today's fleet boxes, `~/dev/BinderScout` on a fresh
+clone. Resolve it rather than asserting one in a command you ship to another box:
+`cd ~/dev/BindMaster 2>/dev/null || cd ~/dev/BinderScout`. `tools/fleet.sh probe`
+resolves both spellings itself, so no symlink is needed. The path listings in this
+skill use the `BindMaster` spelling for brevity.
 
 The three CLI verbs that matter campaign-side:
 

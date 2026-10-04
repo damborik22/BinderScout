@@ -120,7 +120,7 @@ BindCraft 2 is absent from that table because its footprint isn't in the run dir
 ## 5. Verify BinderScout repo is at pinned commit
 
 ```bash
-cd ~/dev/BindMaster
+cd ~/dev/BindMaster 2>/dev/null || cd ~/dev/BinderScout   # machine-local spelling
 git fetch --all
 git status                          # should be clean
 git checkout <pinned-SHA-from-assignment>
@@ -185,9 +185,14 @@ The run script tries these in order and exports the first that exists. At least 
 
 ```bash
 ls -d "${BINDCRAFT2_AF2_PARAMS:-/nonexistent}" \
-      ~/dev/BindMaster/BindCraft/params \
-      ~/Documents/OLD/BinderScout/bindcraft-tools/af2_params 2>/dev/null
+      ~/dev/Bind{Master,erScout}/BindCraft/params \
+      ~/Documents/OLD/Bind{erScout,Master}/bindcraft-tools/af2_params 2>/dev/null
 ```
+
+Both spellings are listed because both are probed: the checkout directory is
+machine-local, and the `Documents/OLD` archive lives outside the repo and was
+never renamed on disk, so the run script tries the `BinderScout` spelling first
+and falls back to `BindMaster`.
 
 `BindCraft/params` is BindCraft 1's copy, so it only exists where BindCraft 1 was installed — don't count on it on a machine that has only ever run BindCraft 2.
 

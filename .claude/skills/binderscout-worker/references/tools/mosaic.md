@@ -22,7 +22,8 @@ For progress monitoring: `wc -l designs.csv` grows monotonically as design steps
 
 - **JAX + CUDA in the venv** — verify with:
   ```bash
-  source ~/dev/BindMaster/Mosaic/.venv/bin/activate
+  source ~/dev/BindMaster/Mosaic/.venv/bin/activate 2>/dev/null \
+      || source ~/dev/BinderScout/Mosaic/.venv/bin/activate   # checkout name is machine-local
   python -c "import jax; print(jax.devices())"
   # Should list GPU(s); CPU-only means CUDA setup broken
   ```

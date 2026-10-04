@@ -65,10 +65,23 @@ legacy_mps_running () {
 }
 refuse_if_legacy_mps () {
     legacy_mps_running || return 0
+    local cap unit_src
+    cap=$(echo 'get_default_device_pinned_mem_limit 0' \
+          | CUDA_MPS_PIPE_DIRECTORY="$LEGACY_MPS_DIR/pipe" timeout 20 nvidia-cuda-mps-control 2>/dev/null \
+          | tr -d '[:space:]')
+    unit_src="$(dirname "$(readlink -f "$0")")/systemd/$UNIT.service"
     echo "${RED}a pre-rename MPS daemon is already running${RST} ($LEGACY_UNIT / $LEGACY_MPS_DIR)" >&2
     echo "  refusing to start a second control daemon. Migrate it first:" >&2
     echo "    systemctl --user disable --now $LEGACY_UNIT" >&2
+    # No installer installs the new unit -- it exists in-tree only -- so enabling it
+    # by name fails on exactly the box that needs the migration. Copy it in first.
+    echo "    install -Dm644 $unit_src ~/.config/systemd/user/$UNIT.service" >&2
+    echo "    systemctl --user daemon-reload" >&2
     echo "    systemctl --user enable --now $UNIT" >&2
+    # The unit's ExecStartPost sets 24G as a fallback default. Adopting it silently
+    # would tighten a deliberately-sized budget, so
+    # the last step restores the cap this daemon is actually running with.
+    echo "    $0 start ${cap:-$DEFAULT_CAP}   # the unit defaults to 24G; live cap is ${cap:-unknown}" >&2
     return 1
 }
 # NB: capture into a variable and match the string -- do NOT pipe into grep.

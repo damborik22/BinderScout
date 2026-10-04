@@ -96,7 +96,10 @@ def _install_binderscout_shortcut() -> None:
             shortcut.chmod(0o755)
             print(f"{GREEN}✓{RESET} Shortcut installed: {shortcut}")
         _remove_stale_bindmaster_shortcut(local_bin)
-    except OSError as exc:
+    # UnicodeDecodeError (a ValueError, not an OSError) is caught too: a shortcut
+    # that is not valid UTF-8 must degrade to "shortcut not maintained", never take
+    # down the CLI before dispatch.
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"{RED}!{RESET} Could not write {local_bin / 'binderscout'}: {exc}")
 
     # Secondary: ~/.local/bin/ (convenience, non-fatal if not writable)
@@ -108,7 +111,7 @@ def _install_binderscout_shortcut() -> None:
             home_shortcut.write_text(shortcut_content)
             home_shortcut.chmod(0o755)
         _remove_stale_bindmaster_shortcut(home_bin)
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         pass  # ~/.local/bin not writable — BinderScout/bin/ is the primary location
 
 
