@@ -2981,6 +2981,21 @@ install_proteina_complexa() {
         fi
     fi
 
+    # Three edits found as UNCOMMITTED state in BM5's PC checkout on 2026-10-04, now
+    # reproducible: the cu130 torch index (no aarch64 build on cu126), the apoe4_ntd target,
+    # and the REMOVAL of a try/except that silently moved the AF2 reward to the CPU -- which
+    # is the ~130x slowdown the tool's deprecation rests on, made invisible. See the patch's
+    # docstring. Verified: wiping all three and re-running the patches reproduces them
+    # byte-identically.
+    print_step "Patching PC: torch index, apoe4_ntd target, no silent CPU reward"
+    if python3 "${BINDERSCOUT_DIR}/install/patches/pc_targets_index_and_no_cpu_fallback.py" \
+            "${PROTEINA_COMPLEXA_DIR}" --torch-index cu130; then
+        print_ok "PC checkout patches applied (aarch64)"
+    else
+        print_warn "PC checkout patch reported a problem — inspect before trusting a PC run"
+    fi
+
+
     # Upstream env/build_uv_env.sh is x86/cu126-pinned, so the venv is built here.
     #
     # --clear is load-bearing: without it `uv venv` REFUSES when a .venv already
