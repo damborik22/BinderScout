@@ -205,9 +205,21 @@ class TestMinEnginesGate:
     def test_flag_is_accepted(self):
         assert "--min-engines" in _accepted_flags(EVALUATE_SH.read_text())
 
-    def test_warns_when_fewer_engines_run_than_the_default_gate(self, tmp_path):
+    def test_warns_when_fewer_engines_reach_the_report_than_the_default_gate(self, tmp_path):
+        """The count is engines that REACH THE REPORT, not engines that will run.
+
+        Those differ: a skipped engine whose CSV is already on disk still feeds the gate,
+        so a top-up run over a directory where two engines already succeeded is a
+        3-engine report even though only one engine executes. Counting executions made
+        the warning claim a 3-engine directory had 1.
+
+        The wording moved with that change and this assertion did not, on v1.1.x where
+        the fix landed -- its evaluate.sh said "will reach the report" while its test
+        still asserted "will run". It went unnoticed because CI did not run on release
+        branches at the time; `v*.x` was added to the triggers on v2.0.x.
+        """
         out = _run_evaluate_sh(tmp_path, self._TWO, [])
-        assert "2 refold engine(s) will run" in out
+        assert "2 refold engine(s) will reach the report" in out
         assert "--min-engines 2" in out, "the warning must name the flag that fixes it"
 
     def test_no_warning_once_the_gate_matches_the_engines(self, tmp_path):
