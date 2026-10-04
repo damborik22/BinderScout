@@ -105,20 +105,28 @@ require `--gpus all` and a CUDA-capable host.
 The quickest honest check is the integration suite — it builds a deterministic
 three-engine pool, runs a real `binder-compare report` against it, and also
 pins the ranking against a committed fixture from a real campaign. No GPU, no
-network, about ten seconds:
+network, about ten seconds.
 
-```bash
-pytest tests/integration/
-```
-
-To look at a report by hand, run both steps with the *environment's* Python.
-System `python3` will not do: the pool builder needs numpy, and `binder-compare`
-lives in the env. `$EVAL` below is your `binder-eval` env — under a standalone
-install that is `./conda/envs/binder-eval`, otherwise `conda env list` will say.
+Run it with the *environment's* Python, not an ambient `pytest`. `$EVAL` below
+is your `binder-eval` env — under a standalone install that is
+`./conda/envs/binder-eval`, otherwise `conda env list` will say:
 
 ```bash
 EVAL=./conda/envs/binder-eval        # adjust for a system conda
 
+"$EVAL/bin/python" -m pytest tests/integration/
+"$EVAL/bin/python" -m pytest tests/            # the whole suite, ~1 minute
+```
+
+A bare `pytest tests/integration/` collects but then **errors on import**: the
+pool builder needs numpy, and a standalone install's base Miniforge Python does
+not have it. The failure reads as a broken test rather than a missing
+dependency, which is why the env is named explicitly here.
+
+To look at a report by hand, the same applies — `binder-compare` also lives in
+the env:
+
+```bash
 "$EVAL/bin/python" -c "import sys; sys.path.insert(0, 'tests/integration'); \
     from pathlib import Path; from synthetic_pool import build; build(Path('/tmp/pool'))"
 
