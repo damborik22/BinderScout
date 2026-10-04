@@ -43,7 +43,45 @@ STORE_ENV = "BINDERSCOUT_BENCHMARK_STORE"
 
 #: A manifest without these cannot be audited, so it is refused rather than
 #: half-trusted. Mirrors ``manifest_required_fields`` in SCHEMA.json.
-REQUIRED_FIELDS = ("name", "n_designs", "label_column", "labels")
+REQUIRED_FIELDS = ("name", "n_designs", "label_column", "labels", "outcome_column")
+
+#: The only outcomes a labelled row may carry. ``excluded:`` takes a free-text reason.
+#:
+#: There is deliberately NO default and no fallback. On 2026-10-03 a panel's blank Kd cells
+#: were read as "tested, did not bind" when they were in fact designs that had never been
+#: ordered -- the sheet recorded it with a divider row, and one of the two panels even used an
+#: explicit ``N/A`` for tested-and-not-bound, which ``pd.read_csv`` silently turns into NaN.
+#: Eleven such rows dragged a 114-design AUC from 0.706 to 0.4835, and they were only caught
+#: because a reviewer noticed they outranked 81% of the confirmed binders. A design with no
+#: experimental outcome must be structurally incapable of becoming a negative, which means the
+#: distinction has to be a required, explicit, non-defaulting column rather than an inference
+#: from an empty cell.
+OUTCOMES = ("bound", "not_bound", "not_tested")
+_EXCLUDED_PREFIX = "excluded:"
+
+
+def _check_outcomes(name: str, df, column: str) -> None:
+    """Refuse the pool unless every row carries an explicit, recognised outcome."""
+    if column not in df.columns:
+        raise ValueError(
+            f"{name!r}: manifest declares outcome_column {column!r}, which is not in the label "
+            f"file (columns: {', '.join(map(str, df.columns))}). Every row must state its "
+            "experimental outcome explicitly; it is never inferred from a blank cell."
+        )
+    vals = df[column].astype("string")
+    blank = vals.isna() | (vals.str.strip() == "")
+    if blank.any():
+        raise ValueError(
+            f"{name!r}: {int(blank.sum())} row(s) have an empty {column!r}. A row without an "
+            f"outcome cannot be scored as a negative -- label it {'/'.join(OUTCOMES)} or "
+            f"'{_EXCLUDED_PREFIX}<reason>'. Rows: {list(df.index[blank][:5])}"
+        )
+    bad = ~(vals.isin(OUTCOMES) | vals.str.startswith(_EXCLUDED_PREFIX))
+    if bad.any():
+        raise ValueError(
+            f"{name!r}: unrecognised {column!r} value(s) {sorted(set(vals[bad]))[:5]}. "
+            f"Allowed: {', '.join(OUTCOMES)}, or '{_EXCLUDED_PREFIX}<reason>'."
+        )
 
 
 def list_benchmarks() -> list[str]:
@@ -175,4 +213,5 @@ def load_labels(name: str):
             f"{name!r}: manifest's label_column {label_col!r} is not in {path} "
             f"(columns: {', '.join(map(str, df.columns))})."
         )
+    _check_outcomes(name, df, manifest["outcome_column"])
     return df

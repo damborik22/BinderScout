@@ -34,7 +34,9 @@ pd = pytest.importorskip("pandas")
 
 from binder_comparison import benchmarks as bm  # noqa: E402
 
-_LABELS = "sequence,target,binds\nMKTAYIAK,CALCA,1\nGGSGGSWE,CALCA,0\n"
+# Every row carries an explicit `outcome`; the loader refuses a pool without it, because an
+# inference from a blank cell is what produced the 2026-10-03 label error.
+_LABELS = "sequence,target,binds,outcome\nMKTAYIAK,CALCA,1,bound\nGGSGGSWE,CALCA,0,not_bound\n"
 
 
 def _make_store(tmp_path, name="cao2022", body=_LABELS, filename="labels.csv"):
@@ -57,6 +59,7 @@ def _make_registry(tmp_path, name="cao2022", checksum="x" * 64, filename="labels
         "n_designs": 2,
         "label_column": "binds",
         "label_meaning": "1 = measured binder, 0 = measured non-binder",
+        "outcome_column": "outcome",
         "labels": {"filename": filename, "sha256": checksum},
     }
     manifest.update(extra)
@@ -94,7 +97,49 @@ def test_a_manifest_missing_a_required_field_is_refused(tmp_path, monkeypatch):
     root = _make_registry(tmp_path)
     (root / "cao2022" / "MANIFEST.json").write_text(json.dumps({"name": "cao2022"}))
     monkeypatch.setattr(bm, "BENCHMARKS_DIR", root)
-    with pytest.raises(ValueError, match=r"label_column|labels|n_designs"):
+    with pytest.raises(ValueError, match=r"label_column|labels|n_designs|outcome_column"):
+        bm.load_manifest("cao2022")
+
+
+def test_the_required_field_set_is_pinned_literally():
+    """The required fields, written out — not read from the code under test.
+
+    Mutation testing on 2026-10-04 found two layers of hollowness here. First, the only
+    coverage of ``outcome_column`` asserted that the *registered* manifests carry it, so
+    deleting it from ``REQUIRED_FIELDS`` broke nothing. Then the parametrised test below was
+    added — and it *also* missed, because it iterates ``bm.REQUIRED_FIELDS`` itself, so removing
+    an entry silently generates one fewer case instead of failing.
+
+    A test whose expectation comes from the thing it is testing cannot detect a deletion. Hence
+    this literal set. Adding a field is a deliberate act and should fail here too, so the
+    assertion is equality.
+    """
+    assert set(bm.REQUIRED_FIELDS) == {
+        "name",
+        "n_designs",
+        "label_column",
+        "labels",
+        "outcome_column",
+    }
+
+
+@pytest.mark.parametrize("field", bm.REQUIRED_FIELDS)
+def test_each_required_field_is_individually_enforced(tmp_path, monkeypatch, field):
+    """Drop exactly one field and the manifest must still be refused.
+
+    The blanket test above passes a manifest missing almost everything, so it stays green even
+    if a field is quietly dropped from REQUIRED_FIELDS -- which mutation testing caught on
+    2026-10-04: removing ``outcome_column`` from the tuple broke nothing, because the only
+    coverage was an assertion that the *registered* manifests happen to carry it. A pool could
+    then be registered with no outcome column at all, which is the failure this field exists to
+    prevent.
+    """
+    root = _make_registry(tmp_path)
+    man = json.loads((root / "cao2022" / "MANIFEST.json").read_text())
+    del man[field]
+    (root / "cao2022" / "MANIFEST.json").write_text(json.dumps(man))
+    monkeypatch.setattr(bm, "BENCHMARKS_DIR", root)
+    with pytest.raises(ValueError, match=field):
         bm.load_manifest("cao2022")
 
 
@@ -114,7 +159,7 @@ def test_loading_labels_verifies_the_checksum(tmp_path, monkeypatch):
     monkeypatch.setenv(bm.STORE_ENV, str(store))
 
     df = bm.load_labels("cao2022")
-    assert list(df.columns) == ["sequence", "target", "binds"]
+    assert list(df.columns) == ["sequence", "target", "binds", "outcome"]
     assert len(df) == 2
 
 

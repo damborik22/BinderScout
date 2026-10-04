@@ -31,8 +31,8 @@ pytest.importorskip("pandas")
 
 from binder_comparison import benchmarks
 
-_ROWS_A = "design_id,is_binder\nd1,1\nd2,0\n"
-_ROWS_B = "design_id,is_binder\nd9,1\nd8,0\n"
+_ROWS_A = "design_id,is_binder,outcome\nd1,1,bound\nd2,0,not_bound\n"
+_ROWS_B = "design_id,is_binder,outcome\nd9,1,bound\nd8,0,not_bound\n"
 
 
 def _register(tmp_path, monkeypatch, pools: dict[str, str]) -> None:
@@ -49,6 +49,7 @@ def _register(tmp_path, monkeypatch, pools: dict[str, str]) -> None:
                     "name": name,
                     "n_designs": rows.count("\n") - 1,
                     "label_column": "is_binder",
+                    "outcome_column": "outcome",
                     "labels": {
                         "filename": "labels.csv",
                         "sha256": hashlib.sha256(rows.encode()).hexdigest(),
