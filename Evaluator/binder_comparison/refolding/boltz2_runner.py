@@ -93,22 +93,36 @@ def run_boltz2_refold(
 
     # refold_boltz2.refold_batch writes refold_designs.csv relative to CWD.
     # Change to output_dir so the CSV lands there.
+    # A PARTIAL failure is held, not propagated immediately.  refold_batch now exits
+    # non-zero when some designs were skipped (a short pool must not be reported as
+    # complete), but the designs that DID fold are finished work already written to
+    # refold_designs.csv -- and the copy to the caller's --output path happens only
+    # AFTER this block.  Letting the exception fly here would strand exactly the rows
+    # the operator needs in order to re-run only the missing indices, for the same
+    # reason the pre-publish above exists.  So: publish, then re-raise.
+    partial: Exception | None = None
     old_cwd = os.getcwd()
     os.chdir(output_dir)
     try:
         sys.path.insert(0, str(scripts_dir))
-        from refold_boltz2 import refold_batch
+        # The MODULE, so the except clause below resolves even if the import fails --
+        # `from x import A, B` plus `except B` turns an ImportError into a NameError
+        # that hides it.
+        import refold_boltz2 as _boltz2_script
 
-        refold_batch(
-            binder_sequences=sequences,
-            binder_ids=binder_ids,
-            target_sequence=target_sequence,
-            output_dir="structures",
-            target_pdb=target_pdb_abs,
-            num_samples=num_samples,
-            recycling_steps=recycling_steps,
-            skip_indices=skip_indices,
-        )
+        try:
+            _boltz2_script.refold_batch(
+                binder_sequences=sequences,
+                binder_ids=binder_ids,
+                target_sequence=target_sequence,
+                output_dir="structures",
+                target_pdb=target_pdb_abs,
+                num_samples=num_samples,
+                recycling_steps=recycling_steps,
+                skip_indices=skip_indices,
+            )
+        except _boltz2_script.PartialRefoldFailure as exc:
+            partial = exc
     finally:
         os.chdir(old_cwd)
 
@@ -118,6 +132,9 @@ def run_boltz2_refold(
         print(f"[boltz2] Results → {output_csv}")
     else:
         raise FileNotFoundError(f"Expected refold_boltz2 to write {generated_csv} but it was not found.")
+
+    if partial is not None:
+        raise partial
 
 
 def _publish_csv(generated_csv: Path, output_csv: Path, output_dir: Path) -> bool:
@@ -148,8 +165,20 @@ def _load_completed_indices(csv_path: Path) -> set[int]:
             reader = csv.DictReader(f)
             for row in reader:
                 idx_val = row.get("idx")
-                if idx_val is not None:
-                    indices.add(int(idx_val))
+                if idx_val is None:
+                    continue
+                try:
+                    i = int(idx_val)
+                except ValueError:
+                    continue
+                # Completed means SCORED, as in the other two runners.  Boltz-2 omits a
+                # failed design's row entirely rather than blanking it, so this is
+                # currently the same answer either way -- kept identical on purpose,
+                # because three copies of this function that disagree about what
+                # "completed" means is how the ESMFold2 copy came to skip the designs a
+                # resume exists to retry.
+                if (row.get("iptm") or "").strip():
+                    indices.add(i)
         return indices
     except Exception:
         return set()

@@ -45,6 +45,11 @@ parallelism from AF3's 5 GB footprint.
   preallocated RESERVATION, not demand: `refold_af3.py` hardcodes
   PREALLOCATE=true for its child, which no env var reaches.
 - GB10 ESMFold2 IS real demand (13,781 -> 27,187 MiB, tracks the other cards).
-- ESMFold2 writes an EMPTY row and exits 0 on CUDA OOM, so a design can be
-  demoted for a hardware reason and look like a quality judgement.
+- ESMFold2 writes an EMPTY row on CUDA OOM, so a design can be demoted for a
+  hardware reason and look like a quality judgement. **It no longer exits 0**
+  (fixed 2026-10-04): a partial failure raises and exits 3, the device floor
+  refuses a card below 14,248 MiB before the weight download, `--resume` keys on
+  the score rather than the row, and `evaluate.sh` counts scored rows. The rows
+  it writes are still blank — the fix is that they can no longer be mistaken for
+  scores. Pinned by `tests/test_a_blank_refold_row_is_not_a_score.py`.
 - H200 timings share a node with other jobs; if anything they are pessimistic.

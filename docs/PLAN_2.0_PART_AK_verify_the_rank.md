@@ -28,9 +28,9 @@ the restart has an empty `KD` and sits at the **top** of the pool by `Mean_ipTM`
 | panel | n | split | AUC | 95 % CI (Hanley–McNeil) |
 |---|---|---|---|---|
 | **CALCA, as ordered and tested** | **114** | 99 / 15 | **0.7061** | **[0.581, 0.831]** |
-| ~~CALCA, 11 never-ordered rows as y = 0~~ | ~~125~~ | ~~99 / 26~~ | ~~0.4835~~ | — |
+| ~~CALCA, 11 below-divider rows as y = 0~~ | ~~125~~ | ~~99 / 26~~ | ~~0.4835~~ | — |
 | **CBG / 2VDY, as ordered and tested** | **114** | 10 / 104 | **0.4957** | **[0.308, 0.683]** |
-| ~~CBG, 23 never-ordered rows as y = 0~~ | ~~137~~ | ~~10 / 127~~ | ~~0.4579~~ | — |
+| ~~CBG, 23 below-divider rows as y = 0~~ | ~~137~~ | ~~10 / 127~~ | ~~0.4579~~ | — |
 | curated Adaptyv/ProteinBase (unaffected) | 563 | 258 / 305 | 0.7113 | [0.668, 0.754] |
 
 **CALCA's interval overlaps the benchmark's**, so our own wet-lab data *corroborates* 0.711
@@ -76,13 +76,38 @@ untouched — that was always about benchmark coverage, never about our panels.
 the never-ordered rows recorded as a separate count beside each *n* rather than folded into the
 negatives:
 
-| panel | n tested | binders | non-binders | excluded (never ordered) | AUC [95 % CI] |
+| panel | n tested | binders | non-binders | excluded (below the divider) | AUC [95 % CI] |
 |---|---|---|---|---|---|
 | CALCA | 114 | 99 | 15 | **11** | 0.7061 [0.581, 0.831] |
-| CBG / 2VDY | 114 | 10 | 104 | **23** (20 unordered + 3 flagged duplicates) | 0.4957 [0.308, 0.683] |
+| CBG / 2VDY | 114 | 10 | 104 | **23** | 0.4957 [0.308, 0.683] |
 
-The 3 CBG rows marked `Duplicated, exclude` in the `Note` column are **outside** the 114 —
-confirmed, they fall among the blanks, so no recompute is needed on their account.
+Verified directly against the sheet on 2026-10-04: the ordered block is **exactly 114 rows on
+both targets**, every row carries an outcome (CALCA 99 with a Kd + 15 `N/A`; CBG 10 + 104 `N/A`),
+there are **no blank** `KD` cells and **no repeated sequence** inside either ordered block. So the
+two *n* = 114 panels are 114 distinct designs with 114 known outcomes, and the AUCs above do not
+depend on any judgement about the excluded rows.
+
+**What the excluded rows actually are — and "never ordered" was the wrong name for them (D9).**
+All 34 were checked by sequence against the ordered block:
+
+| | CALCA | CBG | what it is |
+|---|---|---|---|
+| exact-sequence duplicate of an *ordered* design | 11 | 19 | the same design listed twice, once under its per-method code and once under its refold-ranked `BinderScout-NN` code |
+| near-duplicate, `Note` = `Duplicated, exclude` | 0 | 3 | 97.2–98.6 % identity to an ordered RFD3 design; the note gives the differentiator (the refolded complex) |
+| no duplicate, no reason recorded | 0 | **1** | `2VDY-BinderScout-27` (PXDesign, 120 aa); nearest ordered design is 36.2 % identity |
+
+So **33 of 34 vetoes are de-duplication bookkeeping, not a quality judgement**, and every one of
+the 30 exact duplicates has a twin inside the 114 whose outcome *is* recorded. The designs were
+ordered and tested; only the duplicate row was not. This is why the original error was so costly:
+those rows are blank because they are duplicates, and on CALCA their twins are among the tightest
+binders in the pool — which is exactly why they outranked 81 % of the positives.
+
+**Consequence for D9's proposed table, which is therefore NOT produced.** D9 asked to tabulate the
+vetoed designs against `wetlab_recommended`, the ProtParam panel and `would_exclude_composition`.
+That test is not meaningful: with 33 of 34 vetoes encoding duplicate removal, a filter that
+"agreed" with the veto block would be agreeing with a spreadsheet's de-duplication step, and the
+agreement rate would be a measure of nothing. The one row that *is* an unexplained exclusion
+cannot support a comparison on its own. Recorded rather than run.
 
 **Remaining, and cheap:** the poster's claim is *comparative* — consensus 0.706 against the design
 tools' own native score on the same 114 designs. Only the consensus side has been recomputed here,
@@ -179,6 +204,63 @@ weak form: the 3-mean does **not** beat the *best* single engine out of fold (+0
 `mean(boltz, esm)` out-scores it (0.7279 vs 0.7231). As written the row could pass while the thing
 worth knowing failed. The weak form is kept on its own line, marked as recorded-only.
 
+## 3b. Two review questions settled by reading the code, not by running anything (D5)
+
+**Does `prefilter` collapse backbones, i.e. is its top-N per backbone or per sequence?**
+**Per sequence.** There is no `groupby` anywhere in it: it sorts by `_metric` and takes
+`head(top)`. So with k MPNN sequences per backbone, one good backbone can occupy several
+slots and a mediocre one none — which is a defensible policy, but it is not best-over-k and
+nothing in the code is "collapsing" anything. Best-over-k would have to be built (it is
+step 2 of the RFD3 cascade recorded in `PLAN_2.0_PART_RESULTS.md`, and deliberately not
+built yet).
+
+**Is there a refold-versus-design-model RMSD?** **Yes, and the review's premise was wrong.**
+`binder_comparison/.../self_consistency.py:47` defines `target_aligned_rmsd`, which
+superposes the refolded complex onto the design model *by the target* and measures the
+binder's displacement — exactly the quantity asked for. The review checked `monomer.py`,
+which computes a different thing (binder-to-binder, no target frame).
+
+---
+
+## 3c. `MIN_ENGINES_DEFAULT` stays at 3 — the decision and the three arguments against it (D4)
+
+Three independent lines point at lowering the default to 2, and all three are recorded here
+rather than acted on:
+
+1. **Out-of-the-box friction.** `--tool all` installs Boltz-2 + ESMFold2 and *not* AF3
+   (gated weights), so a fresh install has exactly 2 engines against a default of 3 and
+   **every design fails the gate**. This is real and it is the strongest of the three.
+2. **`mean(boltz, esm)` out-scores the 3-engine mean on the benchmark** — 0.7279 vs 0.7231,
+   +14 binders at top-20.
+3. **The 3-mean does not beat the best single engine out of fold** (+0.0026, p = 0.69).
+
+**It stays at 3.** Reasons, in order of weight:
+
+- **(2) and (3) are single-pool effects**, and the week of 2026-09-29 retracted four of
+  those (helix, magnitude, shrinkage, `mean(af3,esm)`). The drop-AF3 effect specifically
+  **does not keep its sign across leave-one-target-out folds of its own pool** and inverts
+  on the secondary pool. CLAUDE.md's standing rule — do not re-litigate the engine set on
+  one pool — was written for exactly this shape of evidence.
+- **The case for three engines is adversarial, not statistical**, so a benchmark AUC is the
+  wrong instrument to judge it. Mosaic games `boltz_iptm` *by construction*; BindCraft and
+  BindCraft 2 game AF2 i_pTM. A 2-engine default of Boltz-2 + ESMFold2 means a Mosaic
+  design is scored by the engine that designed it plus one other — half the mean is a
+  gamed number, and no amount of out-of-fold AUC detects that, because the benchmark pool
+  was not produced by our tools.
+- **(1) is already handled without weakening the gate.** The shortfall is reported loudly
+  and names itself (`tests/test_empty_gate_names_its_consequence.py`,
+  `test_gate_failure_is_explained.py`), and `--min-engines 2` is one flag away. A default
+  of 2 would instead make the gamed-engine case the silent default.
+- The operator's framing for all of Part AK: *verify the rank, do not change its scope.*
+  Lowering the default is a change of scope decided on the evidence the verification was
+  meant to test.
+
+**What would change it:** the adversarial argument is about *our* designs, so the evidence
+that would settle it is a labelled pool of **our own tools'** designs, not a public
+benchmark — i.e. AK1's output, not AK1's premise.
+
+---
+
 ## 4. Explicitly out of scope
 
 - No new ranking metric, no re-weighting, no normalisation (operator decision, draft §12.4), no
@@ -241,7 +323,7 @@ all, and Protein-Hunter's env on BM5 is a ~198 MB empty shell. Both passed "inst
 | **Clara** | AK1's target. Readiness **not yet verified by execution** — do that first |
 | BM2 (RTX 3090, sm_86) | on `v2.0.x`; all four envs verified against the repo path; **AF3 executes here** — `iptm 0.88, ptm 0.85` on a real 258-token complex, and a 60-vs-256 bucket pair confirms the `AF3_MIN_BUCKET = 256` floor is what made it work. Currently running the Part AF Chai-1 study |
 | BM5 (GB10, aarch64) | on `v2.0.x`; sweep 24 pass / 1 fail (the fail is PH's empty env shell); the two mis-pointed eval envs re-pointed |
-| BM3 (RTX 3060, 12 GB) | **engineering/CI box — must never produce authoritative refolds.** ESMFold2 cannot run at any size here (14.2 GB floor), and Boltz-2 fails outright at 600 and 900 tokens on 24 GB, let alone 12 |
+| BM3 (RTX 3060, 12 GB) | **engineering/CI box — must never produce authoritative refolds, and this is now enforced in code rather than in convention.** ESMFold2 cannot run at any size here (14,248 MiB at 150 tokens on a 3090, 13,781 on GB10 — `rtx3090_sweep.jsonl`; a floor, not a slope, because it is resident-weight cost), and Boltz-2 fails outright at 600 and 900 tokens on 24 GB, let alone 12 (`rtx3090_boltz2.jsonl`: 8,518 MiB ok at 150, 16,712 ok at 300, rc=1 at 600 and 900). `require_device_memory` refuses ESMFold2 below its floor before the weight download; Boltz-2 deliberately has no static floor, because its demand is card-dependent and a predicted floor would either refuse a card that can fold a 60-token complex or pass one that cannot do 300 |
 
 **A claim that must not be reintroduced:** "no 3090, 4090 or 3060 can run AF3 regardless of
 tokens, because tokamax requests 110,592 bytes of shared memory against sm_86's 101,376." That was
@@ -249,6 +331,14 @@ believed on 2026-09-27 and is **false** — it was our own missing bucket floor.
 computed `bucket = len(target) + max(len(binder))` with no lower bound, so a 60-token pool asked
 AF3 for a shape its stock ladder never produces. With `AF3_MIN_BUCKET = 256` the same input runs.
 The shared-memory figure is real; the conclusion drawn from it was not.
+
+**A source that must not be cited for the Boltz-2 figure above.** `rtx3090_sweep.jsonl`
+*also* has Boltz-2 rows, and all four read `peak_mib: 0, ok: false, rc: 2` — at 150 tokens
+as much as at 900. That is `refold_boltz2.py`'s `MissingTargetMSA` exit, not a memory
+failure: the arm never folded anything, so it measures nothing about card size. Reading
+"Boltz-2 fails on a 3090" off that file would be right by accident at 600 and 900 and
+wrong at 150 and 300. The real numbers are in `rtx3090_boltz2.jsonl`, which is why both
+are now named explicitly in the table.
 
 ## 7. Part AF follow-on — pre-registration for the Chai-1 adoption study
 

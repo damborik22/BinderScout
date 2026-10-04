@@ -86,8 +86,10 @@ because each one changes how a number is read:
   cell (`skills/binderscout-orchestrator/references/tools/README.md`). The evaluator skill
   names that file as its authority, so it cannot simply be deleted.
 - **The measured GPU-memory table** (`README.md`) — AF3 2.3–5.2 GB flat; **ESMFold2's
-  14.2 GB floor at 150 tokens, so a 12 GB card cannot run it at any size**, and it writes an
-  empty row and exits 0 on CUDA OOM; Boltz-2 139.6 GB at 900 tokens.
+  14.2 GB floor at 150 tokens, so a 12 GB card cannot run it at any size** (`require_device_memory`
+  now refuses before the weight download); Boltz-2 139.6 GB at 900 tokens. ESMFold2 and AF3 still
+  *write* a blank row on a per-design CUDA OOM, but a blank row no longer exits 0 — see
+  `tests/test_a_blank_refold_row_is_not_a_score.py`.
 - **`chain_iptm_interface` macro-AUC 0.69** on the *full* Adaptyv batch, with the explicit
   instruction not to quote the inflated 0.745 subset figure.
 - **BindCraft 2 native scales** (`pipeline_reference.md`) — `bindcraft2_plddt`/`_iptm` arrive on [0,1] and must NOT be rescaled; `bindcraft2_ipae` is interface PAE ÷ 31 and is **not** in ångströms.

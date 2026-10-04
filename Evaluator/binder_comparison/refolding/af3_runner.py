@@ -82,26 +82,35 @@ def run_af3_refold(
         if skip_indices:
             print(f"[af3] Resuming — skipping {len(skip_indices)} already-completed binders")
 
+    # See boltz2_runner for why a partial failure is held rather than propagated: the
+    # rows that DID fold are valid work, and _absolutize_csv_paths below is what makes
+    # their cif/pdb/pae_file columns resolvable from outside output_dir.  Re-raised
+    # after, so a partial pool still exits non-zero.
+    partial: Exception | None = None
     old_cwd = os.getcwd()
     os.chdir(output_dir)
     try:
         sys.path.insert(0, str(scripts_dir))
-        from refold_af3 import refold_batch
+        # The MODULE, so the except clause resolves even if the import fails.
+        import refold_af3 as _af3_script
 
-        refold_batch(
-            binder_sequences=sequences,
-            binder_ids=binder_ids,
-            target_sequence=target_sequence,
-            output_dir=output_dir,
-            output_csv=output_csv,
-            num_seeds=num_seeds,
-            num_samples=num_samples,
-            model_dir=str(model_dir) if model_dir else None,
-            skip_indices=skip_indices,
-            use_msa=use_msa,
-            msa_cache_dir=str(msa_cache_dir) if msa_cache_dir else None,
-            allow_no_msa=allow_no_msa,
-        )
+        try:
+            _af3_script.refold_batch(
+                binder_sequences=sequences,
+                binder_ids=binder_ids,
+                target_sequence=target_sequence,
+                output_dir=output_dir,
+                output_csv=output_csv,
+                num_seeds=num_seeds,
+                num_samples=num_samples,
+                model_dir=str(model_dir) if model_dir else None,
+                skip_indices=skip_indices,
+                use_msa=use_msa,
+                msa_cache_dir=str(msa_cache_dir) if msa_cache_dir else None,
+                allow_no_msa=allow_no_msa,
+            )
+        except _af3_script.PartialRefoldFailure as exc:
+            partial = exc
     finally:
         os.chdir(old_cwd)
 
@@ -110,6 +119,9 @@ def run_af3_refold(
 
     _absolutize_csv_paths(output_csv, output_dir, ["cif", "pdb", "pae_file"])
     print(f"[af3] Results → {output_csv}")
+
+    if partial is not None:
+        raise partial
 
 
 def _load_completed_indices(csv_path: Path) -> set[int]:
@@ -124,11 +136,19 @@ def _load_completed_indices(csv_path: Path) -> set[int]:
             reader = csv.DictReader(f)
             for row in reader:
                 idx_val = row.get("idx")
-                if idx_val is not None:
-                    try:
-                        indices.add(int(idx_val))
-                    except ValueError:
-                        continue
+                if idx_val is None:
+                    continue
+                try:
+                    i = int(idx_val)
+                except ValueError:
+                    continue
+                # AF3 writes a row for a FAILED design too -- _empty_row() fills in idx
+                # and sequence and leaves every score blank.  Keying "completed" on idx
+                # alone therefore skipped precisely the designs a resume exists to retry,
+                # so a re-run after a partial failure reproduced the gap exactly and
+                # reported success.  Completed means scored.
+                if (row.get("iptm") or "").strip():
+                    indices.add(i)
         return indices
     except Exception:
         return set()

@@ -1790,3 +1790,127 @@ the three do not sum to the rows read. D8 of the review proposes exactly this as
 schema change (`outcome: bound | not_bound | not_tested | excluded:<reason>`, no default, loader
 refuses a row without one). That makes the failure structurally impossible rather than
 remembered, and Part Y is still imported by nothing, so it is the cheapest it will ever be.
+
+---
+
+## 2026-10-04 (later) — D6/D7/D9: the review's remaining items, and what the "NOT TO Order" row actually was
+
+The eight remaining review items split cleanly: one was a real code fix (D6), two were
+"record the design, do not build it" (D7, D9), and the rest were decisions to write down.
+The code fix turned out to be bigger than the item described.
+
+### D6 — the silent-demotion hole was four holes, and the guard that was meant to catch it counted the wrong thing
+
+The item said: *make the runners refuse below a VRAM threshold rather than truncate
+silently, make an empty engine row a non-zero exit, and enforce in code that BM3 never
+produces authoritative refolds.* Each engine already refused when **every** design failed
+— added after a total OOM reported "Wrote 1 row(s)" with rc=0. Nothing refused when
+**some** did, which is the more likely case and the harder one to see, because the engines'
+demand rises with token count: on a marginal card the long binders fail and the short ones
+pass, so the CSV comes back plausible.
+
+Tracing it end to end found four independent ways the failure stayed quiet, each of which
+defeats the others:
+
+1. **No preflight.** ESMFold2 discovered a 12 GB card was too small *after* fetching the
+   MSA and downloading ~12 GB of weights, one design at a time.
+2. **A partial failure exited 0** in all three engines.
+3. **`--resume` keyed on `idx`** — and a failed design's blank row has an `idx`. So the
+   retry skipped precisely the designs it existed to repair, reproduced the gap exactly,
+   and reported success. This is in all three *runners*, which is the path production
+   uses, not just the scripts' dev entrypoints.
+4. **`evaluate.sh` counted rows.** A blank row is a row, so `tail -n +2 | wc -l` over 50
+   blanks printed `ok -- 50 new row(s)`. The guard that existed specifically to catch "an
+   engine that exits 0 and writes nothing" was reading a proxy for the thing it cared
+   about.
+
+(4) is the one worth keeping in mind. That guard was written deliberately, with a comment
+explaining the incident it came from — and it still measured the wrong quantity, because
+"did the file grow" is not "did the engine produce scores". It now counts rows with a
+non-empty `iptm`, found by column name rather than index, since the three engines order
+their columns differently and a hard-coded `$6` would read a different column per engine.
+
+**Only ESMFold2 gets a static device floor, and the asymmetry is the content of the fix.**
+Its cost is dominated by resident ESMC-6B weights, so its smallest-size peak *is* its
+floor — 14,248 MiB on a 3090 and 13,781 on GB10, two architectures agreeing, which is what
+makes "a card below this cannot run it at any size" a prediction rather than a guess.
+Boltz-2 deliberately gets none: 8,518 MiB at 150 tokens on a 3090, 16,712 at 300, outright
+failure at 600, and GB10 needs ~1.5× a discrete card for identical work. Any static floor
+would either refuse a card that can genuinely fold a 60-token complex (CALCA is 60) or
+pass one that cannot do 300. The benchmark README exists to stop exactly that inference.
+So Boltz-2 is covered by (2) instead, which **measures** rather than predicts.
+
+### How it was found out, and the two hollow tests
+
+The trail started from the evidence file rather than the code: `rtx3090_sweep.jsonl` has
+ESMFold2 succeeding at all four sizes and Boltz-2 at `peak_mib: 0, ok: false, rc: 2` at
+all four — including 150 tokens. `rc=2` is `MissingTargetMSA`, so that arm never folded
+anything and measures nothing about memory. The real Boltz-2 numbers are in a separate
+file. Part AK §6's claim "Boltz-2 fails outright at 600 and 900 on 24 GB" happens to be
+**true**, but reading it off the sweep would have been right by accident at 600 and 900
+and wrong at 150 and 300, so both files are now named explicitly at the claim.
+
+Mutation testing caught two tests that verified text instead of behaviour:
+
+- **Commenting the preflight out** (`pass  # require_device_memory("esmfold2")`) left the
+  ordering test green, because it asserted on `src.index(...)` and the substring was still
+  there — inside the comment. Replaced with an AST check that the call exists inside
+  `refold_batch` and precedes both the MSA fetch and the weight load by line number. Both
+  variants (comment out; move it after the load) now fail.
+- **Making a runner swallow the exception** (`raise partial` → `pass`) passed everything.
+  Nothing tested the runner boundary — which is the only boundary production crosses,
+  since `binder-compare refold-<engine>` calls the runner, not the script's `main()`. Now
+  tested by injecting a stub module under the name the runner imports, so the real
+  boundary runs with no torch, no JAX and no GPU. A second test asserts the rows that
+  *did* fold are still published, because re-raising immediately strands them: the
+  publish/absolutise step sits **after** the call in all three runners.
+
+15 mutations, all caught. 1077 tests pass.
+
+### D9 — the DO-NOT-ORDER row was de-duplication, not a verdict
+
+The question was whether the veto's reason is recorded per row, and if so to tabulate the
+vetoed designs against the composition and ProtParam filters. The answer makes the second
+half not worth doing.
+
+Checking all 34 below-divider rows by sequence against the ordered block: **30 are
+exact-sequence duplicates of a design that *was* ordered**, 3 are near-duplicates at
+97.2–98.6 % identity carrying an explicit `Duplicated, exclude` note, and **1** has no
+near-match and no recorded reason. So 33 of 34 are bookkeeping — the same design listed
+twice, once under its per-method code and once under its refold-ranked `BinderScout-NN`
+code. A filter that "agreed" with that block would be agreeing with a spreadsheet's
+duplicate removal, and the agreement rate would measure nothing. Recorded, not run.
+
+**Two things fall out of it.** First, the ordered block is **exactly 114 rows on both
+targets**, every row carries an outcome, there are **no blank `KD` cells** and **no
+repeated sequence** inside either block — so the published n = 114 panels (CALCA 99/15,
+CBG 10/104) are 114 distinct designs with 114 known outcomes, and the AUCs do not depend
+on any judgement about the excluded rows. That is a stronger footing than the correction
+claimed for itself.
+
+Second, it explains the original error more precisely than "blanks were read as negatives".
+Those rows are blank **because they are duplicates**, and each one's twin inside the 114
+has a recorded outcome — on CALCA, twins among the tightest binders in the pool. That is
+why the 11 outranked 81 % of the positives: they were not unmeasured designs that happened
+to score well, they were *copies of the best measured designs*. Calling them "never
+ordered" was itself imprecise, and Part AK now says "below the divider" and names what
+they are.
+
+### D4 — the default stays at 3, with the case against it written down
+
+Three lines point at lowering `MIN_ENGINES_DEFAULT` to 2, and the strongest is not a
+statistic: `--tool all` ships two engines (AF3's weights are gated), so a fresh install
+fails the gate on every design. The other two are that `mean(boltz, esm)` out-scores the
+3-engine mean on the benchmark, and that the 3-mean does not beat the best single engine
+out of fold.
+
+It stays at 3. Both statistical arguments are single-pool effects, and the drop-AF3 one
+does not keep its sign across leave-one-target-out folds of its own pool — the same shape
+as the four effects retracted the week of 2026-09-29. More to the point, **the case for
+three engines is adversarial, not statistical**, so a benchmark AUC is the wrong
+instrument: Mosaic games `boltz_iptm` by construction, so a 2-engine default of Boltz-2 +
+ESMFold2 scores a Mosaic design with the engine that designed it plus one other. Half the
+mean is a gamed number, and an out-of-fold AUC on a public pool cannot see that, because
+that pool was not produced by our tools. The install friction is already handled loudly
+rather than silently, and `--min-engines 2` is one flag away. What would settle it is a
+labelled pool of *our own* designs — AK1's output, not its premise.

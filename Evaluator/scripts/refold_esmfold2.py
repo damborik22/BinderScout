@@ -116,6 +116,10 @@ except Exception as _exc:  # binder_comparison unavailable in this env
         return "", "single_sequence"
 
 
+class PartialRefoldFailure(RuntimeError):
+    """Some designs folded and some did not.  Distinct exit code, rows kept."""
+
+
 # Saved structures are named after the design's binder_id.  Guarded separately from the
 # MSA import above: if binder_comparison is not importable here the fold must still run,
 # just under the legacy index-based names.
@@ -128,6 +132,26 @@ except Exception:  # pragma: no cover - only when binder_comparison is missing
 
     def parse_fasta_pairs(text):
         return [(None, ln.strip()) for ln in text.splitlines() if ln.strip() and not ln.startswith(">")]
+
+
+# Device floor.  ESMFold2's cost is dominated by resident ESMC-6B weights, so its
+# smallest-size peak IS its floor (14,248 MiB on a 3090, 13,781 on GB10) and no input
+# size runs below it.  Checked before the MSA fetch and the weight download, because
+# the alternative is the measured failure: a per-binder CUDA OOM is caught, a BLANK row
+# is written, and the run exits 0 having demoted every design below the cross-engine
+# gate for a hardware reason.  Guarded like the imports above -- an env without
+# binder_comparison must still fold, just without the preflight.
+try:
+    from binder_comparison.refolding.memory_policy import require_device_memory
+except Exception as _exc:  # pragma: no cover - only when binder_comparison is missing
+    _FLOOR_IMPORT_ERROR = _exc
+
+    def require_device_memory(engine, *, min_mib=None, env=None):
+        print(
+            f"  [{engine}] NOTE: device-memory floor not checked ({_FLOOR_IMPORT_ERROR}).",
+            file=sys.stderr,
+        )
+        return 0
 
 
 def refold_batch(
@@ -172,6 +196,11 @@ def refold_batch(
     # Sort jobs by binder length ascending (shorter first → warmer cache when
     # bigger jobs arrive; matches the Boltz-2 OOM mitigation).
     jobs.sort(key=lambda t: len(t[1]))
+
+    # Refuse a card that cannot run ESMFold2 at any size, BEFORE the MSA fetch and the
+    # multi-GB weight download.  Raises InsufficientDeviceMemory; override with
+    # BINDERSCOUT_ALLOW_SMALL_GPU=1 for output that is explicitly not authoritative.
+    require_device_memory("esmfold2")
 
     repo_id = _resolve_repo_id(model_name)
     print(
@@ -232,7 +261,7 @@ def refold_batch(
             writer.writeheader()
             fh.flush()
 
-        n_failed = 0
+        failed_idx: list[int] = []
         first_exc: Exception | None = None
         for idx, binder_seq in jobs:
             binder_len = len(binder_seq)
@@ -251,7 +280,7 @@ def refold_batch(
             except Exception as exc:
                 print(f"[esmfold2] ERROR on binder #{idx}: {exc}")
                 first_exc = first_exc or exc
-                n_failed += 1
+                failed_idx.append(idx)
                 writer.writerow(_empty_row(idx, binder_seq, target_sequence))
                 fh.flush()
                 _free_torch_cache()
@@ -264,7 +293,7 @@ def refold_batch(
             if isinstance(result, (list, tuple)):
                 if not result:
                     print(f"[esmfold2] No samples returned for #{idx}; recording empty row.")
-                    n_failed += 1
+                    failed_idx.append(idx)
                     writer.writerow(_empty_row(idx, binder_seq, target_sequence))
                     fh.flush()
                     _free_torch_cache()
@@ -306,7 +335,7 @@ def refold_batch(
                 cif_str = complex_obj.to_mmcif() if complex_obj is not None else None
             except Exception as exc:
                 print(f"[esmfold2] ERROR extracting outputs for #{idx}: {exc}")
-                n_failed += 1
+                failed_idx.append(idx)
                 writer.writerow(_empty_row(idx, binder_seq, target_sequence))
                 fh.flush()
                 _free_torch_cache()
@@ -314,7 +343,7 @@ def refold_batch(
 
             if pae is None or pae.size == 0:
                 print(f"[esmfold2] No PAE returned for #{idx}; recording empty row.")
-                n_failed += 1
+                failed_idx.append(idx)
                 writer.writerow(_empty_row(idx, binder_seq, target_sequence))
                 fh.flush()
                 _free_torch_cache()
@@ -384,6 +413,7 @@ def refold_batch(
     # contributing a column of blanks, and every design silently drops to a 2-engine mean
     # and fails the >=3-engine gate for no visible reason. A design must not be demoted for
     # a hardware reason and have that read as a quality judgement.
+    n_failed = len(failed_idx)
     if jobs and n_failed == len(jobs):
         raise RuntimeError(
             f"All {len(jobs)} binder(s) failed — ESMFold2 produced no usable output. "
@@ -391,6 +421,31 @@ def refold_batch(
             "Common cause: CUDA OOM (~14 GB at 150 tokens rising to ~28.7 GB at 900, so a "
             "24 GB card cannot hold the largest complexes), or the pinned HF revision "
             "could not be fetched."
+        )
+
+    # A PARTIAL failure is the same defect wearing a smaller number, and it was the
+    # one still exiting 0.  The all-failed guard above was added because "Wrote 1
+    # row(s)" with rc=0 hid a total OOM; it does nothing for 30 of 50, which hides
+    # just as well and is MORE likely -- the engine's demand rises with token count,
+    # so on a marginal card the long binders fail and the short ones pass.  Downstream
+    # saw only a row count: evaluate.sh asked "did the CSV gain rows?", a blank row is
+    # a row, so a half-blank column reported "ok".  Every blank design then silently
+    # drops to a 2-engine mean and fails the >=3-engine gate, which is indistinguishable
+    # in metrics.csv from a design three engines disliked.
+    #
+    # Rows already written are KEPT -- they are flushed per design and are valid work.
+    # The exit code is what changes, so a wrapper cannot read this as success and a
+    # re-run picks up via --skip-indices.
+    if n_failed:
+        raise PartialRefoldFailure(
+            f"{n_failed} of {len(jobs)} binder(s) failed — ESMFold2 wrote a BLANK row for each "
+            f"and the rest are valid. Exiting non-zero because a blank row is not a score: it "
+            f"drops that design below the cross-engine gate for a hardware reason, which reads "
+            f"as a quality judgement in metrics.csv. First error: {first_exc}. "
+            f"Failed design indices: {', '.join(str(i) for i in sorted(failed_idx))}. "
+            f"Common cause: CUDA OOM on the longer binders (demand rises with token count, so a "
+            f"marginal card fails exactly the large ones). Re-run those indices on a larger card, "
+            f"or drop the engine with --skip-esmfold2 --min-engines 2 rather than reporting blanks."
         )
 
 
@@ -753,16 +808,29 @@ if __name__ == "__main__":
 
     skip: set[int] = set()
     if args.resume and Path(args.output).exists():
+        n_blank = 0
         with open(args.output) as f:
             for row in csv.DictReader(f):
                 v = row.get("idx")
-                if v:
-                    try:
-                        skip.add(int(v))
-                    except ValueError:
-                        pass
+                if not v:
+                    continue
+                try:
+                    i = int(v)
+                except ValueError:
+                    continue
+                # A failed design still gets a row -- _empty_row() writes its idx and
+                # sequence with every score blank.  Keying resume on idx alone therefore
+                # skipped precisely the designs that needed re-running, so the retry
+                # that was supposed to repair a partial OOM reproduced it exactly and
+                # looked clean.  Resume on the SCORE, which is what "completed" means.
+                if (row.get("iptm") or "").strip():
+                    skip.add(i)
+                else:
+                    n_blank += 1
         if skip:
             print(f"[esmfold2] Resuming — skipping {len(skip)} already-completed binders")
+        if n_blank:
+            print(f"[esmfold2] Resuming — RE-RUNNING {n_blank} binder(s) whose previous row was blank")
 
     try:
         refold_batch(
@@ -784,3 +852,8 @@ if __name__ == "__main__":
     except MissingTargetMSA as exc:
         print(f"\n{exc}", file=sys.stderr)
         sys.exit(2)
+    except PartialRefoldFailure as exc:
+        # 3, not 1: the valid rows are on disk and worth keeping, so a wrapper can
+        # distinguish "re-run these indices" from "this environment is broken".
+        print(f"\n{exc}", file=sys.stderr)
+        sys.exit(3)

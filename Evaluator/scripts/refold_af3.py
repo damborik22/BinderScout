@@ -81,6 +81,10 @@ except Exception:  # pragma: no cover - only when binder_comparison is missing
 AF3_MIN_BUCKET = 256
 
 
+class PartialRefoldFailure(RuntimeError):
+    """Some designs folded and some did not.  Distinct exit code, rows kept."""
+
+
 def refold_batch(
     binder_sequences: list[str],
     target_sequence: str,
@@ -188,7 +192,7 @@ def refold_batch(
             writer.writeheader()
             fh.flush()
 
-        n_failed = 0
+        failed_idx: list[int] = []
         first_exc: Exception | None = None
         for idx, binder_seq in jobs:
             binder_len = len(binder_seq)
@@ -210,7 +214,7 @@ def refold_batch(
                 )
             except Exception as exc:
                 print(f"[af3] ERROR on binder #{idx}: {exc}")
-                n_failed += 1
+                failed_idx.append(idx)
                 first_exc = first_exc or exc
                 row = _empty_row(idx, binder_seq, target_sequence)
                 writer.writerow(row)
@@ -219,7 +223,7 @@ def refold_batch(
 
             if af3_out is None:
                 print(f"[af3] No output found for binder #{idx}")
-                n_failed += 1
+                failed_idx.append(idx)
                 row = _empty_row(idx, binder_seq, target_sequence)
                 writer.writerow(row)
                 fh.flush()
@@ -299,6 +303,7 @@ def refold_batch(
     # host compositor): a 60-token complex died on a 54 MiB allocation. The guard
     # fired correctly, but the advice named neither cause, so the message now
     # leads with VRAM and the build_data artifact.
+    n_failed = len(failed_idx)
     if jobs and n_failed == len(jobs):
         raise RuntimeError(
             f"All {len(jobs)} binder(s) failed — AF3 produced no usable output. "
@@ -310,6 +315,29 @@ def refold_batch(
             "aborts on a missing CCD pickle; JAX cannot see the GPU (check "
             "JAX_PLATFORMS is not set to 'cpu'); or the AF3 model weights / "
             "run_alphafold.py are missing."
+        )
+
+    # A PARTIAL failure is the same defect at a smaller count, and it was still
+    # exiting 0.  AF3 blanks the row like ESMFold2 does, and a blank row is not a
+    # neutral absence: it drops that design below the >=3-engine gate, which in
+    # metrics.csv looks exactly like three engines disliking it.  AF3's working set
+    # is nearly flat across our regime (~4.4 GB at 150-900 tokens), so a partial
+    # failure here is almost never "the big ones did not fit" -- it is usually free
+    # VRAM taken by something else, one bad input, or a transient -- which is
+    # precisely why it must be re-run rather than averaged over.
+    #
+    # Rows already written are KEPT; they are flushed per design and are valid work.
+    if n_failed:
+        raise PartialRefoldFailure(
+            f"{n_failed} of {len(jobs)} binder(s) failed — AF3 wrote a BLANK row for each and "
+            f"the rest are valid. Exiting non-zero because a blank row is not a score: it drops "
+            f"that design below the cross-engine gate for a non-quality reason. "
+            f"First error: {first_exc}. "
+            f"Failed design indices: {', '.join(str(i) for i in sorted(failed_idx))}. "
+            f"AF3's footprint is flat in our size regime, so suspect free VRAM (check nvidia-smi "
+            f"free memory, not card size) or one malformed input rather than complex size. "
+            f"Re-run those indices, or drop the engine with --skip-af3 --min-engines 2 rather "
+            f"than reporting blanks as scores."
         )
 
 
@@ -895,3 +923,8 @@ if __name__ == "__main__":
     except MissingTargetMSA as exc:
         print(f"\n{exc}", file=sys.stderr)
         raise SystemExit(2) from None
+    except PartialRefoldFailure as exc:
+        # 3, not 1: the valid rows are on disk and worth keeping, so a wrapper can
+        # distinguish "re-run these indices" from "this environment is broken".
+        print(f"\n{exc}", file=sys.stderr)
+        raise SystemExit(3) from None
