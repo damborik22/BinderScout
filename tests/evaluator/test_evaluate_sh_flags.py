@@ -160,9 +160,32 @@ def _run_evaluate_sh(tmp_path: Path, envs: list[str], argv: list[str]):
     (sandbox / "envs").mkdir(parents=True, exist_ok=True)
     shutil.copy(EVALUATE_SH, sandbox / "evaluate.sh")
 
+    listing = "\n".join(f"echo '{name} /x'" for name in envs)
+
+    # The stub has to beat a conda SHELL FUNCTION, not just a conda on PATH.
+    #
+    # evaluate.sh sources the first `conda.sh` it finds, which defines `conda` as a
+    # function -- and a function takes precedence over every PATH entry, so the stub
+    # binary below was simply never consulted on any box that has a system conda. The
+    # search list starts with `$_BINDERSCOUT_DIR/conda/etc/profile.d/conda.sh` and
+    # `$_BINDERSCOUT_DIR` is the sandbox's parent, so planting our own there wins the
+    # loop's `break` deterministically, on every platform.
+    #
+    # Without this the test passed only where NONE of evaluate.sh's candidates existed
+    # -- true on a standalone-install box, false on one with ~/miniforge3. On the
+    # latter the real conda answered, the real env list was read, and the script took a
+    # different branch than the one under test while the assertion still said
+    # "single engine". It also meant the real SoluProt env was invoked for real.
+    conda_sh = tmp_path / "conda" / "etc" / "profile.d" / "conda.sh"
+    conda_sh.parent.mkdir(parents=True, exist_ok=True)
+    # `return`, not `exit`: this runs as a function inside evaluate.sh's own shell, so
+    # `exit` would terminate the script under test instead of the fake command.
+    conda_sh.write_text(f'conda() {{\n  if [ "$1" = "env" ]; then\n{listing}\n    return 0\n  fi\n  return 7\n}}\n')
+
+    # Kept as well, for any `conda` reached from a child process rather than from
+    # evaluate.sh's own shell (shell functions are not exported).
     stub_bin = tmp_path / "stubbin"
     stub_bin.mkdir(exist_ok=True)
-    listing = "\n".join(f"echo '{name} /x'" for name in envs)
     conda = stub_bin / "conda"
     conda.write_text(f'#!/bin/sh\nif [ "$1" = "env" ]; then\n{listing}\nexit 0\nfi\nexit 7\n')
     conda.chmod(0o755)
