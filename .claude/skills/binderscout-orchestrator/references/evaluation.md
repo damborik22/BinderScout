@@ -201,7 +201,7 @@ for tar in /path/to/RESULTS/<TARGET>_*.tar.gz; do
 done
 
 # Activate the evaluator env (Mosaic venv hosts the Boltz-2 refolder and the merge code)
-source ~/dev/BinderScout/Mosaic/.venv/bin/activate
+source ~/dev/BindMaster/Mosaic/.venv/bin/activate
 
 # Run cross-engine evaluation
 python -m binderscout.evaluator \

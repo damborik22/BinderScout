@@ -15,6 +15,7 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import sys
 
 from . import __version__
 from .cli import (
@@ -42,6 +43,7 @@ from .cli import (
     validate,
     wetlab,
 )
+from .refolding.errors import PartialRefoldFailure
 
 
 def main(argv=None) -> None:
@@ -81,7 +83,13 @@ def main(argv=None) -> None:
     hits.add_parser(subparsers)
 
     args = parser.parse_args(argv)
-    args.func(args)
+    try:
+        args.func(args)
+    except PartialRefoldFailure as exc:
+        # 3, not 1: rows for the designs that DID fold are already on disk, so the
+        # wrapper should re-run the named indices rather than treat the env as broken.
+        print(f"\n{exc}", file=sys.stderr)
+        raise SystemExit(3) from None
 
 
 if __name__ == "__main__":

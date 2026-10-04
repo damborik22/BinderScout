@@ -371,7 +371,16 @@ if [[ $SKIP_SOLUPROT -eq 0 ]]; then
     # the py3.7 ${SOLUPROT_ENV} via $SOLUPROT_PYTHON. The two envs are mutually
     # exclusive — SoluProt needs scikit-learn 0.20.x / py3.7, binder-comparison
     # needs py3.10+ — so we cannot run binder-compare inside ${SOLUPROT_ENV}.
-    SOLUPROT_PYTHON="$(conda run -n "${SOLUPROT_ENV}" python -c 'import sys; print(sys.executable)' 2>/dev/null)"
+    # Guarded, and with its stderr kept: under `set -e` a bare assignment from a failing
+    # command substitution exits the whole script, so a half-built ${SOLUPROT_ENV} (which
+    # the name-only auto-detect above cannot see) killed the evaluation right after the
+    # step header printed and before any refold engine ran -- silently, because the
+    # error went to /dev/null. An empty SOLUPROT_PYTHON is fine: soluprot_runner.py
+    # treats it as unset and falls back, and the guarded call below catches the rest.
+    if ! SOLUPROT_PYTHON="$(conda run -n "${SOLUPROT_ENV}" python -c 'import sys; print(sys.executable)')"; then
+        SOLUPROT_PYTHON=""
+        echo "[soluprot] WARNING: cannot resolve python in ${SOLUPROT_ENV} — trying the runner's fallback." >&2
+    fi
     export SOLUPROT_PYTHON
     # SoluProt is an OPTIONAL pre-screen, so a failure must not take the whole
     # evaluation down with it (it did: a missing USEARCH binary aborted the run

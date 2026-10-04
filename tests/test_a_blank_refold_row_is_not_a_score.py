@@ -45,6 +45,7 @@ sys.path.insert(0, str(REPO / "Evaluator"))
 
 from binder_comparison.refolding import af3_runner, boltz2_runner, esmfold2_runner  # noqa: E402
 from binder_comparison.refolding import memory_policy as mp  # noqa: E402
+from binder_comparison.refolding.errors import PartialRefoldFailure as PackagePartialRefoldFailure  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. The device floor -- refuse before loading weights
@@ -212,6 +213,58 @@ def test_a_partial_failure_exits_3_not_1(script):
 
 
 # ---------------------------------------------------------------------------
+# 2b. ...and the CLI, which is the path production uses
+# ---------------------------------------------------------------------------
+#
+# The checks above read the scripts' own main(), which `binder-compare refold-<engine>`
+# never calls. The console script is binder_comparison.main:main, where the exception
+# used to escape uncaught -- so the exit-3 contract was pinned only on a dead path and
+# every real run exited 1 with a traceback.
+
+
+@pytest.mark.parametrize(
+    ("subcommand", "cli_module", "entry"),
+    [
+        ("refold-af3", "refold_af3", "run_af3_refold"),
+        ("refold-esmfold2", "refold_esmfold2", "run_esmfold2_refold"),
+        ("refold-boltz2", "refold_boltz2", "run_boltz2_refold"),
+    ],
+)
+def test_the_cli_maps_a_partial_failure_to_exit_3(monkeypatch, tmp_path, subcommand, cli_module, entry):
+    import importlib
+
+    from binder_comparison import main as main_mod
+    from binder_comparison.refolding.errors import PartialRefoldFailure
+
+    mod = importlib.import_module(f"binder_comparison.cli.{cli_module}")
+
+    def _partial(**kwargs):
+        raise PartialRefoldFailure("2 of 5 binder(s) failed -- indices: 3, 4")
+
+    monkeypatch.setattr(mod, entry, _partial)
+
+    fasta = tmp_path / "seqs.fasta"
+    fasta.write_text(">d_0001 tool=mosaic\nAAAWWWAAA\n")
+
+    with pytest.raises(SystemExit) as excinfo:
+        main_mod.main(
+            [
+                subcommand,
+                "--sequences",
+                str(fasta),
+                "--target-seq",
+                "TTTTTT",
+                "--output",
+                str(tmp_path / "engine.csv"),
+            ]
+        )
+    assert excinfo.value.code == 3, (
+        f"`binder-compare {subcommand}` exited {excinfo.value.code!r} on a partial failure; "
+        "3 means 'rows are on disk, re-run these indices' and 1 means 'this env is broken'"
+    )
+
+
+# ---------------------------------------------------------------------------
 # 3. Resume must key on the score, not on the row
 # ---------------------------------------------------------------------------
 
@@ -298,7 +351,6 @@ def _install_stub(monkeypatch, script_name: str, output_csv: Path, boltz2_dir: P
     mod.PartialRefoldFailure = PartialRefoldFailure
     mod.refold_batch = refold_batch
     monkeypatch.setitem(sys.modules, script_name, mod)
-    return PartialRefoldFailure
 
 
 @pytest.mark.parametrize("script_name", sorted(_RUNNERS))
@@ -307,9 +359,12 @@ def test_the_runner_re_raises_a_partial_failure(monkeypatch, tmp_path, script_na
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     csv = tmp_path / "engine.csv"
-    exc_type = _install_stub(monkeypatch, script_name, csv, out_dir if "boltz2" in script_name else None)
+    _install_stub(monkeypatch, script_name, csv, out_dir if "boltz2" in script_name else None)
 
-    with pytest.raises(exc_type):
+    # The canonical class, not the stub's: the runners translate the script's own
+    # PartialRefoldFailure into binder_comparison.refolding.errors' one so the CLI has a
+    # single class to map to exit 3 whichever way the script was loaded.
+    with pytest.raises(PackagePartialRefoldFailure):
         getattr(runner, entry)(
             sequences=["AAA", "BBB"],
             target_sequence="TTT",
@@ -330,9 +385,12 @@ def test_the_runner_keeps_the_rows_that_did_fold(monkeypatch, tmp_path, script_n
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     csv = tmp_path / "engine.csv"
-    exc_type = _install_stub(monkeypatch, script_name, csv, out_dir if "boltz2" in script_name else None)
+    _install_stub(monkeypatch, script_name, csv, out_dir if "boltz2" in script_name else None)
 
-    with pytest.raises(exc_type):
+    # The canonical class, not the stub's: the runners translate the script's own
+    # PartialRefoldFailure into binder_comparison.refolding.errors' one so the CLI has a
+    # single class to map to exit 3 whichever way the script was loaded.
+    with pytest.raises(PackagePartialRefoldFailure):
         getattr(runner, entry)(
             sequences=["AAA", "BBB"],
             target_sequence="TTT",

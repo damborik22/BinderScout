@@ -48,6 +48,29 @@ ctl () { echo "$1" | timeout 20 nvidia-cuda-mps-control 2>&1; }
 # machine-wide MPS state. Observed 2026-08-20.
 UNIT=binderscout-mps
 unit_active () { systemctl --user is-active --quiet "$UNIT" 2>/dev/null; }
+
+# A PRE-RENAME daemon (2.0 renamed the unit and the pipe dir) is invisible to
+# unit_active and mps_up, which only know the new names. Starting a second
+# control daemon beside it is exactly the stray-daemon condition of 2026-08-20,
+# and on GB10 the loser is the whole box. Detect it by state and refuse.
+LEGACY_UNIT=bindmaster-mps
+LEGACY_MPS_DIR=/tmp/bindmaster-mps
+legacy_mps_running () {
+    systemctl --user is-active --quiet "$LEGACY_UNIT" 2>/dev/null && return 0
+    [ -d "$LEGACY_MPS_DIR/pipe" ] || return 1
+    local out
+    out=$(echo get_server_list \
+          | CUDA_MPS_PIPE_DIRECTORY="$LEGACY_MPS_DIR/pipe" timeout 20 nvidia-cuda-mps-control 2>&1)
+    [[ -n "$out" && "$out" != *"Cannot find"* ]]
+}
+refuse_if_legacy_mps () {
+    legacy_mps_running || return 0
+    echo "${RED}a pre-rename MPS daemon is already running${RST} ($LEGACY_UNIT / $LEGACY_MPS_DIR)" >&2
+    echo "  refusing to start a second control daemon. Migrate it first:" >&2
+    echo "    systemctl --user disable --now $LEGACY_UNIT" >&2
+    echo "    systemctl --user enable --now $UNIT" >&2
+    return 1
+}
 # NB: capture into a variable and match the string -- do NOT pipe into grep.
 # `set -o pipefail` is on, and nvidia-cuda-mps-control exits 1 when the daemon is
 # down, so a pipeline would return 1 regardless of what grep found and `!` would
@@ -67,6 +90,7 @@ cmd_start () {
         return 0
     fi
     if mps_up; then echo "MPS already running"; else
+        refuse_if_legacy_mps || return 1
         nvidia-cuda-mps-control -d >/dev/null 2>&1; sleep 3
         mps_up || { echo "${RED}failed to start MPS${RST}"; sed 's/^/  /' "$CUDA_MPS_LOG_DIRECTORY/control.log" 2>/dev/null; return 1; }
     fi
@@ -88,6 +112,7 @@ cmd_status () {
         echo "  cap:  $(ctl 'get_default_device_pinned_mem_limit 0')"
     else
         echo "  MPS:  ${RED}DOWN${RST}  -- clients run UNCAPPED against the whole 121.7 GiB pool"
+        legacy_mps_running && echo "  ${YEL}but a pre-rename daemon is live ($LEGACY_UNIT / $LEGACY_MPS_DIR) -- migrate it${RST}"
     fi
     echo "  MemAvailable: $(mem_avail_gb) GB"
     echo "  GPU clients:"
@@ -131,6 +156,7 @@ p = ctypes.c_void_p()
 sys.exit(0 if rt.cudaMalloc(ctypes.byref(p), gib * 2**30) == 0 else 1)
 PY
     mkdir -p "$CUDA_MPS_PIPE_DIRECTORY" "$CUDA_MPS_LOG_DIRECTORY"
+    refuse_if_legacy_mps || { rm -f "$probe"; return 1; }
     nvidia-cuda-mps-control -d >/dev/null 2>&1; sleep 3
     if ! mps_up; then echo "  ${RED}FAIL${RST}: MPS daemon would not start"; rm -f "$probe"; return 1; fi
     ctl "set_default_device_pinned_mem_limit 0 ${cap_gib}G" >/dev/null

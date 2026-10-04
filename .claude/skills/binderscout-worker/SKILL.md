@@ -48,10 +48,14 @@ Either mode: you don't decide *what* to run or *what settings* — the assignmen
 On the worker machine:
 
 ```
-~/dev/BinderScout/                              ← cloned repo (orchestrator pins commit SHA in assignment)
+~/dev/BindMaster/                              ← cloned repo (orchestrator pins commit SHA in assignment)
 ~/runs/<TARGET>-<machine>-<tool>/              ← per-tool run dir (you create)
 ~/runs/<TARGET>-<machine>-<tool>/.progress     ← optional local progress notes (don't ship)
 ```
+
+The checkout directory itself was **not** renamed in 2.0 — it is `~/dev/BindMaster`
+on every fleet machine, and the directory name is machine-local. Resolve it rather
+than assuming either spelling in a command you ship to another box.
 
 On muni-disk (XBay, mounted or VPN-reachable):
 
@@ -101,7 +105,7 @@ Run these checks before touching anything. See `references/pre-flight.md` for fu
 - **Disk space.** `df -h ~/runs` and the muni-disk mount. Budget 50-200 GB per run depending on tool.
 - **BinderScout repo is at the pinned commit.**
   ```bash
-  cd ~/dev/BinderScout
+  cd ~/dev/BindMaster
   git fetch && git checkout <pinned-SHA>
   ```
   If the pinned commit doesn't exist locally yet, `git fetch --all` first.

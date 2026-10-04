@@ -35,6 +35,7 @@ BOLD = "\033[1m"
 CYAN = "\033[0;36m"
 GREEN = "\033[0;32m"
 RED = "\033[0;31m"
+YELLOW = "\033[0;33m"
 RESET = "\033[0m"
 
 USAGE = f"""{BOLD}BinderScout{RESET} — GPU-accelerated protein binder design toolkit
@@ -65,6 +66,19 @@ USAGE = f"""{BOLD}BinderScout{RESET} — GPU-accelerated protein binder design t
 """
 
 
+def _remove_stale_bindmaster_shortcut(bin_dir: Path) -> None:
+    """Unlink a pre-rename `bindmaster` shim that execs the deleted bindmaster.py.
+
+    Only a shim whose body still names `bindmaster.py` is removed — a shortcut
+    pointing anywhere else (e.g. a v1.1.x checkout) is left alone. `bindmaster-config`
+    is deliberately untouched: it execs configurator/configurator.py, which still exists.
+    """
+    stale = bin_dir / "bindmaster"
+    if stale.is_file() and "bindmaster.py" in stale.read_text():
+        stale.unlink()
+        print(f"{YELLOW}→{RESET} Removed stale shortcut: {stale} (renamed to binderscout)")
+
+
 def _install_binderscout_shortcut() -> None:
     """Write BinderScout/bin/binderscout pointing at this script (idempotent)."""
     local_bin = REPO / "bin"
@@ -81,6 +95,7 @@ def _install_binderscout_shortcut() -> None:
             shortcut.write_text(shortcut_content)
             shortcut.chmod(0o755)
             print(f"{GREEN}✓{RESET} Shortcut installed: {shortcut}")
+        _remove_stale_bindmaster_shortcut(local_bin)
     except OSError as exc:
         print(f"{RED}!{RESET} Could not write {local_bin / 'binderscout'}: {exc}")
 
@@ -92,6 +107,7 @@ def _install_binderscout_shortcut() -> None:
         if not home_shortcut.exists() or target_line not in home_shortcut.read_text():
             home_shortcut.write_text(shortcut_content)
             home_shortcut.chmod(0o755)
+        _remove_stale_bindmaster_shortcut(home_bin)
     except OSError:
         pass  # ~/.local/bin not writable — BinderScout/bin/ is the primary location
 

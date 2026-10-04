@@ -26,7 +26,7 @@ The assignment names the env. Check it exists:
 ```bash
 conda env list | grep <env_name>
 # or for venvs:
-ls -la ~/dev/BinderScout/<tool>/.venv/bin/python
+ls -la ~/dev/BindMaster/<tool>/.venv/bin/python
 ```
 
 Activate and test:
@@ -51,7 +51,7 @@ ls -la <BC2_DIR>/.venv/bin/bindcraft      # BC2_DIR is named at the top of run_b
 <BC2_DIR>/.venv/bin/bindcraft --help
 ```
 
-Read `BC2_DIR` out of the run script rather than assuming `~/dev/BinderScout/BindCraft2` — the source is supplied per machine, so the checkout that got built isn't always the one under the main BinderScout tree.
+Read `BC2_DIR` out of the run script rather than assuming `~/dev/BindMaster/BindCraft2` — the source is supplied per machine, so the checkout that got built isn't always the one under the main BinderScout tree.
 
 This check earns its place. BindCraft 2's source arrives as an archive per machine rather than a `git clone`, so `BindCraft2/` can perfectly well have been **staged but never built** — the tree is there, the sources are there, and the install either never ran or died part-way. Every looser check passes on that state (the directory exists, the Python files are present) and the campaign then dies at launch. If `.venv/bin/bindcraft` is missing or won't run, that's a pre-flight failure: report it rather than hunting for the source yourself, because there is nowhere to fetch it from.
 
@@ -120,7 +120,7 @@ BindCraft 2 is absent from that table because its footprint isn't in the run dir
 ## 5. Verify BinderScout repo is at pinned commit
 
 ```bash
-cd ~/dev/BinderScout
+cd ~/dev/BindMaster
 git fetch --all
 git status                          # should be clean
 git checkout <pinned-SHA-from-assignment>
@@ -185,7 +185,7 @@ The run script tries these in order and exports the first that exists. At least 
 
 ```bash
 ls -d "${BINDCRAFT2_AF2_PARAMS:-/nonexistent}" \
-      ~/dev/BinderScout/BindCraft/params \
+      ~/dev/BindMaster/BindCraft/params \
       ~/Documents/OLD/BinderScout/bindcraft-tools/af2_params 2>/dev/null
 ```
 
@@ -230,8 +230,8 @@ uname -m                                # should print 'aarch64'
 Confirm tool-specific aarch64 ports:
 - **BindCraft:** ARM64 `DAlphaBall.gcc` and `dssp` bundled in `binderscout_examples/`; run-script template copies them automatically. Verify post-copy:
   ```bash
-  ls -la ~/dev/BinderScout/BindCraft/functions/DAlphaBall.gcc  # should be ARM64
-  file ~/dev/BinderScout/BindCraft/functions/DAlphaBall.gcc
+  ls -la ~/dev/BindMaster/BindCraft/functions/DAlphaBall.gcc  # should be ARM64
+  file ~/dev/BindMaster/BindCraft/functions/DAlphaBall.gcc
   ```
 - **Proteina-Complexa:** NOT yet ported. Refuse the assignment if it landed here by mistake; ask the orchestrator.
 - **Protein-Hunter:** permanently blocked on aarch64, not just "not yet ported" — PyRosetta has no aarch64 wheels. Refuse if this machine is BM5/Spark; route to BM1/BM2/BM4 or Clara instead.

@@ -9,8 +9,8 @@
 # Usage:
 #   bash install/install_aarch.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|af3|esmfold2|all] [--tools-dir PATH] [--skip-examples]
 #
-# --tools-dir: path to pre-cached resources. Defaults to the sibling
-#              Documents/OLD/BinderScout/bindcraft-tools directory.
+# --tools-dir: path to pre-cached resources. Defaults to the first of
+#              ~/Documents/OLD/{BinderScout,BindMaster}/bindcraft-tools present.
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 BINDERSCOUT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -68,13 +68,30 @@ PROTEIN_HUNTER_REPO="https://github.com/yehlincho/Protein-Hunter.git"
 PROTEIN_HUNTER_COMMIT="d4bd9515882c2aa81e97f3d3bf7f42247a9fe80c"
 PROTEIN_HUNTER_DIR="${BINDERSCOUT_DIR}/Protein-Hunter"
 
+# Conda env names for the three envs 2.0 renamed (bindmaster_* -> binderscout_*).
+# Nothing renames them on disk, so resolve_env_names() repoints these at an
+# existing pre-rename env instead of building a second copy beside it.
+PXDESIGN_ENV="binderscout_pxdesign"
+PROTEIN_HUNTER_ENV="binderscout_protein_hunter"
+RFD3_ENV="binderscout_rfd3"
+
 ARCH="$(uname -m)"     # expected: aarch64
 CUDA_VERSION="13.0"    # DGX Spark GB10 (Blackwell, sm_121)
 FOUNDRY_VERSION="0.1.9"   # rc-foundry release pinned for RFD3 (matches install.sh)
 
-# Pre-cached resources: two levels up → Documents/OLD/BinderScout/bindcraft-tools
-_default_tools="$(cd "${BINDERSCOUT_DIR}" && cd ../../Documents/OLD/BinderScout/bindcraft-tools 2>/dev/null && pwd || true)"
-TOOLS_DIR="${_default_tools}"
+# Pre-cached resources (AF2 weights, ARM64 binaries). BOTH spellings are probed,
+# new name first: the 2.0 rename renamed this archive directory in the source
+# tree, but it lives OUTSIDE the repo and was never renamed on disk, so the new
+# spelling alone misses the cache and the installer re-downloads ~3 GB of AF2
+# weights that are sitting right there. $TOOLS_DIR from the environment wins, and
+# --tools-dir still overrides both.
+TOOLS_DIR="${TOOLS_DIR:-}"
+if [[ -z "${TOOLS_DIR}" ]]; then
+    for _candidate_tools in "${HOME}/Documents/OLD/BinderScout/bindcraft-tools" \
+                            "${HOME}/Documents/OLD/BindMaster/bindcraft-tools"; do
+        [[ -d "${_candidate_tools}" ]] && { TOOLS_DIR="${_candidate_tools}"; break; }
+    done
+fi
 
 CONDA_CMD=""          # set by detect_conda: full path to mamba (preferred) or conda
 
@@ -572,6 +589,31 @@ env_exists() {
     [[ -d "${CONDA_BASE}/envs/$1" ]]
 }
 
+# resolve_env_names
+# 2.0 renamed three conda envs but nothing renames them on disk, so on a
+# pre-rename box the installer saw none of them: it reported the tools "not
+# installed" and built a second ~12 GB env beside each orphan. Reuse the legacy
+# env IN PLACE when only it exists. Deliberately NOT `conda rename`: that is
+# clone-then-remove, so it needs the env's size again in free space and would
+# pull the env out from under a job already running from it.
+# Must run after detect_conda — env_exists reads CONDA_BASE.
+resolve_env_names() {
+    _resolve_env_name PXDESIGN_ENV bindmaster_pxdesign
+    _resolve_env_name PROTEIN_HUNTER_ENV bindmaster_protein_hunter
+    _resolve_env_name RFD3_ENV bindmaster_rfd3
+}
+
+# _resolve_env_name <var-holding-new-name> <legacy-name>
+_resolve_env_name() {
+    local -n _ren_var="$1"
+    local legacy="$2"
+    if ! env_exists "${_ren_var}" && env_exists "${legacy}"; then
+        print_warn "Reusing pre-rename conda env '${legacy}' (2.0 renamed it to '${_ren_var}')."
+        print_warn "  Reclaim the old name with --uninstall --tool <tool> then a fresh install."
+        _ren_var="${legacy}"
+    fi
+}
+
 # ensure_conda_in_path
 ensure_conda_in_path() {
     export PATH="${CONDA_BASE}/bin:${PATH}"
@@ -792,7 +834,7 @@ is_evaluator_installed() {
 }
 
 is_pxdesign_installed() {
-    [[ -d "${PXDESIGN_DIR}" ]] && env_exists binderscout_pxdesign
+    [[ -d "${PXDESIGN_DIR}" ]] && env_exists "${PXDESIGN_ENV}"
 }
 
 # print_tool_status
@@ -1732,6 +1774,31 @@ EOF
 
 # ─── PXDesign ────────────────────────────────────────────────────────────────
 
+# _run_pxdesign_patch <label> <script-path>
+# Runs one post-install patch script in the PXDesign env.
+#
+# The body MUST reach python as an argv PATH, never on stdin. Two independent
+# reasons, both real: run_logged launches its command with `&`, and bash
+# redirects an async command's stdin from /dev/null; and `conda run` in its
+# default capture mode does not forward stdin to the child either. A heredoc-fed
+# `python` therefore read an empty program from /dev/null, exited 0, and every
+# patch below silently no-opped behind a green check — surfacing hours later as
+# the documented JSONDecodeError on an empty AF2-eval output file.
+#
+# The rc alone is not trusted for the same reason: each script asserts its own
+# effect on the patched file and only then writes "OK" to the stamp file named
+# in argv[1]. No stamp means no patch, whatever the rc said.
+_run_pxdesign_patch() {
+    local label="$1" script="$2"
+    local stamp rc=0
+    stamp="$(mktemp)"
+    run_logged "${label}" \
+        "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" python "${script}" "${stamp}" || rc=1
+    [[ "$(cat "${stamp}" 2>/dev/null)" == "OK" ]] || rc=1
+    rm -f "${stamp}" "${script}"
+    return ${rc}
+}
+
 install_pxdesign() {
     print_step "Installing PXDesign"
 
@@ -1754,85 +1821,85 @@ install_pxdesign() {
     # env_exists guard so a re-run after a mid-install network failure resumes rather
     # than aborting here — every remaining step in this function is network-bound.
     # Mirrors install.sh. Use --force to rebuild from scratch.
-    print_step "Creating binderscout_pxdesign conda environment"
-    if env_exists binderscout_pxdesign; then
+    print_step "Creating ${PXDESIGN_ENV} conda environment"
+    if env_exists "${PXDESIGN_ENV}"; then
         if [[ "${FORCE}" == true ]]; then
-            run_logged "Removing existing binderscout_pxdesign env (--force)" \
-                "${CONDA_CMD}" env remove -n binderscout_pxdesign -y \
-                || { print_fail "Failed to remove binderscout_pxdesign env"; return 1; }
+            run_logged "Removing existing ${PXDESIGN_ENV} env (--force)" \
+                "${CONDA_CMD}" env remove -n "${PXDESIGN_ENV}" -y \
+                || { print_fail "Failed to remove ${PXDESIGN_ENV} env"; return 1; }
         else
-            print_warn "Conda environment 'binderscout_pxdesign' already exists — reusing it."
+            print_warn "Conda environment '${PXDESIGN_ENV}' already exists — reusing it."
             print_warn "  The remaining steps are idempotent; pass --force to rebuild from scratch."
         fi
     fi
-    if ! env_exists binderscout_pxdesign; then
-        run_logged "Creating binderscout_pxdesign env" \
-            "${CONDA_CMD}" create -n binderscout_pxdesign -y python=3.11 \
+    if ! env_exists "${PXDESIGN_ENV}"; then
+        run_logged "Creating ${PXDESIGN_ENV} env" \
+            "${CONDA_CMD}" create -n "${PXDESIGN_ENV}" -y python=3.11 \
                 gcc_linux-aarch64 gxx_linux-aarch64 -c conda-forge \
-            || { print_fail "Failed to create binderscout_pxdesign env"; return 1; }
+            || { print_fail "Failed to create ${PXDESIGN_ENV} env"; return 1; }
     fi
 
     # aarch64: install PyTorch from PyPI with cu130 index (no conda pytorch-cuda for aarch64)
     run_logged "Installing PyTorch (aarch64, CUDA 13.0)" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign \
+        "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" \
         pip install torch --index-url https://download.pytorch.org/whl/cu130 \
         || { print_fail "Failed to install PyTorch"; return 1; }
 
     # Install PXDesign
     run_logged "Installing PXDesign (pip)" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign pip install -q -e "${PXDESIGN_DIR}" \
+        "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" pip install -q -e "${PXDESIGN_DIR}" \
         || { print_fail "Failed to install PXDesign"; return 1; }
 
     # Install Protenix (PXDesign-specific fork) and PXDesignBench
     run_logged "Installing Protenix (PXDesign fork)" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign \
+        "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" \
         pip install --no-cache-dir "git+https://github.com/bytedance/Protenix.git@v0.5.0+pxd" \
         || print_warn "Protenix install failed — PXDesign may not work"
 
     run_logged "Installing PXDesignBench" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign \
+        "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" \
         pip install --no-cache-dir "git+https://github.com/bytedance/PXDesignBench.git@v0.1.2" --no-deps \
         || print_warn "PXDesignBench install failed — PXDesign may not work"
 
     # PXDesign setup.py has install_requires commented out; install deps from requirements.txt
     if [[ -f "${PXDESIGN_DIR}/requirements.txt" ]]; then
         run_logged "Installing PXDesign requirements" \
-            "${CONDA_CMD}" run -n binderscout_pxdesign pip install -q -r "${PXDESIGN_DIR}/requirements.txt" \
+            "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" pip install -q -r "${PXDESIGN_DIR}/requirements.txt" \
             || print_warn "Some PXDesign deps failed — may need manual install"
     fi
     # click is needed by pxdesign CLI but not in requirements.txt
     run_logged "Installing PXDesign CLI deps" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign pip install -q click \
+        "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" pip install -q click \
         || print_warn "Failed to install click — pxdesign CLI may not work"
 
     # requirements.txt pins torch==2.3.1 (CPU-only from PyPI); reinstall with CUDA
     run_logged "Reinstalling PyTorch with CUDA 13.0 (aarch64)" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign \
+        "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" \
         pip install torch --force-reinstall --index-url https://download.pytorch.org/whl/cu130 \
         || print_warn "PyTorch CUDA reinstall failed — GPU may not work"
 
     # ColabDesign from GitHub (PyPI version 1.1.1 too old, missing 'weights' param)
     run_logged "Installing ColabDesign from GitHub" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign \
+        "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" \
         pip install --no-cache-dir "git+https://github.com/sokrypton/ColabDesign.git" \
         || print_warn "ColabDesign install failed — AF2 eval may not work"
 
     # Pin JAX <=0.4.34 here (PXDesign's ColabDesign path; BindCraft itself now
     # uses 0.6.2 -- see the sm_121 note in install_bindcraft)
     run_logged "Pinning JAX for ColabDesign compatibility" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign \
+        "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" \
         pip install -q "jax<=0.4.34" "jaxlib<=0.4.34" \
         || print_warn "JAX pin failed — AF2 eval may not work"
 
     # Upgrade deepspeed for PyTorch 2.10+ compatibility (torch.amp.custom_fwd changes)
     run_logged "Upgrading deepspeed" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign \
+        "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" \
         pip install -q "deepspeed>=0.18" \
         || print_warn "deepspeed upgrade failed"
 
     # Pin dm-haiku + JAX (haiku 0.0.12 is last to support jax.core.JaxprEqn)
     run_logged "Pinning dm-haiku and JAX versions" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign \
+        "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" \
         pip install -q "dm-haiku==0.0.12" "jax==0.4.35" "jaxlib==0.4.35" \
         || print_warn "dm-haiku/JAX pin failed"
 
@@ -1847,12 +1914,14 @@ install_pxdesign() {
     fi
 
     # Patch: pxdbench NumpyEncoder (numpy float32 not JSON serializable)
-    run_logged "Patching pxdbench JSON serialization" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign python << 'PATCHEOF'
-import importlib.util, pathlib
+    local pxd_patch
+    pxd_patch="$(mktemp)"
+    cat > "${pxd_patch}" << 'PATCHEOF'
+import importlib.util, pathlib, sys
+stamp = pathlib.Path(sys.argv[1])
 spec = importlib.util.find_spec('pxdbench')
 if not spec or not spec.submodule_search_locations:
-    print('pxdbench not found — skipping'); exit(0)
+    print('pxdbench not found — skipping'); stamp.write_text('OK'); raise SystemExit(0)
 base = pathlib.Path(spec.submodule_search_locations[0])
 ENC = ('\n\nclass _NumpyEncoder(json.JSONEncoder):\n'
     '    def default(self, obj):\n'
@@ -1867,13 +1936,20 @@ for fn in ['tools/af2/main_af2_complex.py', 'tools/af2/main_af2_monomer.py']:
     fp = base / fn
     if not fp.exists(): continue
     t = fp.read_text()
-    if '_NumpyEncoder' in t: print(f'Already patched: {fn}'); continue
-    m = 'from colabdesign import clear_mem, mk_afdesign_model'
-    if m in t: t = t.replace(m, m + ENC)
-    t = t.replace('json.dump(stats, f)', 'json.dump(stats, f, cls=_NumpyEncoder)')
-    t = t.replace('json.dump(results, f)', 'json.dump(results, f, cls=_NumpyEncoder)')
-    fp.write_text(t); print(f'Patched: {fn}')
+    if '_NumpyEncoder' in t:
+        print(f'Already patched: {fn}')
+    else:
+        m = 'from colabdesign import clear_mem, mk_afdesign_model'
+        if m in t: t = t.replace(m, m + ENC)
+        t = t.replace('json.dump(stats, f)', 'json.dump(stats, f, cls=_NumpyEncoder)')
+        t = t.replace('json.dump(results, f)', 'json.dump(results, f, cls=_NumpyEncoder)')
+        fp.write_text(t); print(f'Patched: {fn}')
+    if '_NumpyEncoder' not in fp.read_text():
+        raise SystemExit(f'FAILED: {fn} still has no _NumpyEncoder')
+stamp.write_text('OK')
 PATCHEOF
+    _run_pxdesign_patch "Patching pxdbench JSON serialization" "${pxd_patch}" \
+        || print_warn "pxdbench JSON patch did not apply — AF2 eval may die on a numpy float32"
 
     # Patch: pxdbench AF2 eval must not use bf16 on aarch64.
     # The AF2 eval runs under JAX_PLATFORMS=cpu here (the JAX CUDA backend is
@@ -1885,12 +1961,13 @@ PATCHEOF
     # that says nothing about the real cause.  Bisected on BM5: bf16 on = abort,
     # bf16 off = AF2 completes on CPU in 89 s.  x86 is unaffected, so this patch
     # lives only in the aarch64 installer.
-    run_logged "Patching pxdbench AF2 eval (no bf16 on aarch64)" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign python << 'PATCHEOF'
-import importlib.util, pathlib, re
+    pxd_patch="$(mktemp)"
+    cat > "${pxd_patch}" << 'PATCHEOF'
+import importlib.util, pathlib, re, sys
+stamp = pathlib.Path(sys.argv[1])
 spec = importlib.util.find_spec('pxdbench')
 if not spec or not spec.submodule_search_locations:
-    print('pxdbench not found - skipping'); raise SystemExit(0)
+    print('pxdbench not found - skipping'); stamp.write_text('OK'); raise SystemExit(0)
 base = pathlib.Path(spec.submodule_search_locations[0]) / 'tools' / 'af2'
 for fn in ('main_af2_complex.py', 'main_af2_monomer.py'):
     fp = base / fn
@@ -1902,9 +1979,14 @@ for fn in ('main_af2_complex.py', 'main_af2_monomer.py'):
     t2, n = re.subn(r'(prediction_model = mk_afdesign_model\(\n)',
                     r'\1        use_bfloat16=False,\n', t, count=1)
     if not n:
-        print(f'Anchor not found in {fn} - skipping'); continue
+        raise SystemExit(f'FAILED: mk_afdesign_model anchor not found in {fn}')
     fp.write_text(t2); print(f'Patched {fn} (use_bfloat16=False)')
+    if 'use_bfloat16' not in fp.read_text():
+        raise SystemExit(f'FAILED: {fn} still runs AF2 in bf16')
+stamp.write_text('OK')
 PATCHEOF
+    _run_pxdesign_patch "Patching pxdbench AF2 eval (no bf16 on aarch64)" "${pxd_patch}" \
+        || print_warn "bf16 patch did not apply — the AF2 eval will SIGABRT on this platform"
 
     # Patch: protenix torch_ext_compile.py.  TWO independent fixes, and they are
     # applied independently on purpose -- an env patched by an older installer has
@@ -1916,16 +1998,17 @@ PATCHEOF
     #   2. -std=c++17 -> c++20: torch >= 2.9 headers hard-error with
     #      "C++20 or later compatible compiler is required to use PyTorch", so the
     #      extension fails to build against the cu130 torch we install below.
-    run_logged "Patching protenix CUDA arch (sm_120) + C++20" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign python << 'PATCHEOF'
-import importlib.util, pathlib, re
+    pxd_patch="$(mktemp)"
+    cat > "${pxd_patch}" << 'PATCHEOF'
+import importlib.util, pathlib, re, sys
+stamp = pathlib.Path(sys.argv[1])
 spec = importlib.util.find_spec('protenix')
 if not spec or not spec.submodule_search_locations:
-    print('protenix not found — skipping'); exit(0)
+    print('protenix not found — skipping'); stamp.write_text('OK'); raise SystemExit(0)
 base = pathlib.Path(spec.submodule_search_locations[0])
 fp = base / 'model' / 'layer_norm' / 'torch_ext_compile.py'
 if not fp.exists():
-    print(f'{fp} not found — skipping'); exit(0)
+    print(f'{fp} not found — skipping'); stamp.write_text('OK'); raise SystemExit(0)
 t = fp.read_text()
 orig = t
 # Set TORCH_CUDA_ARCH_LIST
@@ -1945,15 +2028,29 @@ if 'compute_120' not in t:
 # torch >= 2.9 requires C++20; protenix hardcodes c++17.
 t = t.replace('"-std=c++17"', '"-std=c++20"')
 if t == orig:
-    print('Already patched'); exit(0)
-fp.write_text(t)
-# Stale objects were built against the old torch ABI -- drop them or the rebuild
-# links against headers it no longer matches.
-for stale in list(fp.parent.glob('*.so')) + list(fp.parent.glob('*.o')) + \
-             list(fp.parent.glob('build.ninja')) + list(fp.parent.glob('.ninja_*')):
-    stale.unlink()
-print('Patched torch_ext_compile.py (sm_120 + C++20); cleared stale build artifacts')
+    print('Already patched')
+else:
+    fp.write_text(t)
+    # Stale objects were built against the old torch ABI -- drop them or the rebuild
+    # links against headers it no longer matches.
+    for stale in list(fp.parent.glob('*.so')) + list(fp.parent.glob('*.o')) + \
+                 list(fp.parent.glob('build.ninja')) + list(fp.parent.glob('.ninja_*')):
+        stale.unlink()
+    print('Patched torch_ext_compile.py (sm_120 + C++20); cleared stale build artifacts')
+# This patch is load-bearing: without it the fused LayerNorm extension does not
+# build at all on GB10, so assert the file on disk rather than the exit code.
+final = fp.read_text()
+missing = [m for m in ('TORCH_CUDA_ARCH_LIST',) if m not in final]
+if 'arch=compute_' in final and 'compute_120' not in final:
+    missing.append('arch=compute_120,code=sm_120')
+if '"-std=c++17"' in final:
+    missing.append('-std=c++20')
+if missing:
+    raise SystemExit('FAILED: torch_ext_compile.py still lacks ' + ', '.join(missing))
+stamp.write_text('OK')
 PATCHEOF
+    _run_pxdesign_patch "Patching protenix CUDA arch (sm_120) + C++20" "${pxd_patch}" \
+        || { print_fail "protenix sm_120/C++20 patch did not apply — the fused LayerNorm extension will not build"; return 1; }
 
     # Download weights if script exists
     if [[ -f "${PXDESIGN_DIR}/download_tool_weights.sh" ]]; then
@@ -1966,7 +2063,7 @@ PATCHEOF
 
     # Smoke test
     smoke_test "PXDesign import check" \
-        "${CONDA_CMD}" run -n binderscout_pxdesign python -c "import torch; print('PXDesign env OK')" \
+        "${CONDA_CMD}" run -n "${PXDESIGN_ENV}" python -c "import torch; print('PXDesign env OK')" \
         || return 1
 
     # Shortcut
@@ -1982,7 +2079,7 @@ if [[ -r "${BINDERSCOUT_DIR}/tools/gb10-env.sh" ]]; then
     source "${BINDERSCOUT_DIR}/tools/gb10-env.sh"
     gb10_apply pxdesign
 fi
-exec ${CONDA_CMD} run -n binderscout_pxdesign bash
+exec ${CONDA_CMD} run -n "${PXDESIGN_ENV}" bash
 PXDEOF
     chmod +x "${SHORTCUTS_DIR}/pxdesign"
 
@@ -2128,6 +2225,7 @@ _bindcraft2_af2_params() {
         "${BINDCRAFT2_AF2_PARAMS:-}" \
         "${BINDERSCOUT_DIR}/BindCraft/params" \
         "${HOME}/Documents/OLD/BinderScout/bindcraft-tools/af2_params" \
+        "${HOME}/Documents/OLD/BindMaster/bindcraft-tools/af2_params" \
         "${HOME}/bindcraft-tools/af2_params"
     do
         [[ -n "${candidate}" && -d "${candidate}" ]] || continue
@@ -2339,21 +2437,21 @@ install_protein_hunter() {
     # package built against the first interpreter is then orphaned. numpy is
     # pinned <2 in the same solve: rosetta.so reaches numpy.core, which numpy 2
     # renamed, and boltz_ph pins numpy<2 anyway, so the two agree.
-    if env_exists binderscout_protein_hunter; then
-        print_warn "Conda environment 'binderscout_protein_hunter' already exists — skipping creation."
+    if env_exists "${PROTEIN_HUNTER_ENV}"; then
+        print_warn "Conda environment '${PROTEIN_HUNTER_ENV}' already exists — skipping creation."
         print_warn "  If it predates this installer it may lack PyRosetta; the smoke test below will say."
     else
-        print_step "Creating binderscout_protein_hunter conda environment (Python 3.10 + PyRosetta)"
-        run_logged "Creating binderscout_protein_hunter env" \
-            "${CONDA_CMD}" create -n binderscout_protein_hunter -y \
+        print_step "Creating ${PROTEIN_HUNTER_ENV} conda environment (Python 3.10 + PyRosetta)"
+        run_logged "Creating ${PROTEIN_HUNTER_ENV} env" \
+            "${CONDA_CMD}" create -n "${PROTEIN_HUNTER_ENV}" -y \
             python=3.10 pip "numpy<2" pyrosetta \
             -c conda-forge --channel https://conda.graylab.jhu.edu \
-            || { print_fail "Failed to create binderscout_protein_hunter env with PyRosetta"; return 1; }
+            || { print_fail "Failed to create ${PROTEIN_HUNTER_ENV} env with PyRosetta"; return 1; }
     fi
 
     # cu130, matching every other torch install on this platform (x86 uses cu121).
     run_logged "Installing PyTorch (CUDA 13.0)" \
-        "${CONDA_CMD}" run -n binderscout_protein_hunter \
+        "${CONDA_CMD}" run -n "${PROTEIN_HUNTER_ENV}" \
         pip install -q "torch>=2.2" "torchvision" "torchaudio" --index-url https://download.pytorch.org/whl/cu130 \
         || { print_fail "Failed to install PyTorch"; return 1; }
 
@@ -2361,7 +2459,7 @@ install_protein_hunter() {
     # gemmi 0.6.5 has no aarch64 wheel and builds from its sdist here; that is the
     # only source build in the set and it needs a C/C++ toolchain.
     run_logged "Installing Protein-Hunter Python deps (gemmi builds from source)" \
-        "${CONDA_CMD}" run -n binderscout_protein_hunter bash -c \
+        "${CONDA_CMD}" run -n "${PROTEIN_HUNTER_ENV}" bash -c \
         "cd '${PROTEIN_HUNTER_DIR}' && pip install -q -e './boltz_ph' && pip install -q matplotlib seaborn prody py3Dmol pyyaml ml_collections biopython modelcif jaxtyping pandera logmd==0.1.45" \
         || print_warn "Some Protein-Hunter deps failed — may need manual follow-up"
 
@@ -2395,7 +2493,7 @@ install_protein_hunter() {
     # the same directory, so on a machine with Mosaic this usually passes already.
     if [[ ! -f "${HOME}/.boltz/mols/ALA.pkl" ]]; then
         print_warn "Boltz-2 cache incomplete (~/.boltz/mols/ALA.pkl missing). Bootstrap it with:"
-        echo "    conda run -n binderscout_protein_hunter python -c \"from boltz.main import download_boltz2; from pathlib import Path; download_boltz2(cache=Path.home()/'.boltz')\""
+        echo "    conda run -n ${PROTEIN_HUNTER_ENV} python -c \"from boltz.main import download_boltz2; from pathlib import Path; download_boltz2(cache=Path.home()/'.boltz')\""
     else
         print_ok "Boltz-2 cache present at ${HOME}/.boltz"
     fi
@@ -2403,12 +2501,12 @@ install_protein_hunter() {
     # Two smoke tests, because the two halves fail independently: PyRosetta is
     # the platform risk, boltz the dependency risk.
     smoke_test "PyRosetta (aarch64 conda build)" \
-        "${CONDA_CMD}" run -n binderscout_protein_hunter python -c \
+        "${CONDA_CMD}" run -n "${PROTEIN_HUNTER_ENV}" python -c \
         "import pyrosetta; print(pyrosetta.version())" \
         || print_warn "PyRosetta import failed — Protein-Hunter design will not run"
 
     smoke_test "Protein-Hunter import check" \
-        "${CONDA_CMD}" run -n binderscout_protein_hunter bash -c \
+        "${CONDA_CMD}" run -n "${PROTEIN_HUNTER_ENV}" bash -c \
         "cd '${PROTEIN_HUNTER_DIR}' && python -c 'import boltz; print(\"boltz_ph import OK\")'" \
         || print_warn "Protein-Hunter import failed — env may still work after first-use weight download"
 
@@ -2423,9 +2521,10 @@ _write_protein_hunter_shortcut() {
     mkdir -p "${SHORTCUTS_DIR}"
     {
         echo "#!/bin/bash"
-        echo "# Protein-Hunter shortcut — activates binderscout_protein_hunter conda env"
+        echo "# Protein-Hunter shortcut — activates the Protein-Hunter conda env"
         echo "# and opens an interactive shell in the Protein-Hunter directory."
         echo ""
+        echo "PROTEIN_HUNTER_ENV=\"${PROTEIN_HUNTER_ENV}\""
         echo "PROTEIN_HUNTER_DIR=\"${PROTEIN_HUNTER_DIR}\""
         echo "CONDA_CMD=\"${CONDA_CMD}\""
         echo "BINDERSCOUT_DIR=\"${BINDERSCOUT_DIR}\""
@@ -2434,7 +2533,7 @@ _write_protein_hunter_shortcut() {
 
 cd "${PROTEIN_HUNTER_DIR}"
 
-echo "Protein-Hunter environment (binderscout_protein_hunter) activated."
+echo "Protein-Hunter environment (${PROTEIN_HUNTER_ENV}) activated."
 echo "Working directory: ${PROTEIN_HUNTER_DIR}"
 echo "Minimal protein binder run:"
 echo "  python boltz_ph/design.py --num_designs 50 --num_cycles 7 \\"
@@ -2462,7 +2561,7 @@ if [[ -r "${BINDERSCOUT_DIR}/tools/gb10-env.sh" ]]; then
     gb10_apply protein-hunter
 fi
 
-exec "${CONDA_CMD}" run --live-stream -n binderscout_protein_hunter bash
+exec "${CONDA_CMD}" run --live-stream -n "${PROTEIN_HUNTER_ENV}" bash
 EOF
     chmod +x "${SHORTCUTS_DIR}/protein-hunter"
 }
@@ -2476,28 +2575,28 @@ install_rfd3() {
     # aarch64 installer had no --tool rfd3 case at all, so that claim was untestable.
     # Kept out of `--tool all` until someone confirms it on a Spark / GH200.
     # Mirrors install.sh's install_rfd3(); the only difference is the CUDA wheel index.
-    if env_exists binderscout_rfd3; then
-        print_warn "Conda environment 'binderscout_rfd3' already exists — skipping creation."
+    if env_exists "${RFD3_ENV}"; then
+        print_warn "Conda environment '${RFD3_ENV}' already exists — skipping creation."
     else
-        run_logged "Creating binderscout_rfd3 env" \
-            "${CONDA_CMD}" create -n binderscout_rfd3 -y python=3.12 pip \
+        run_logged "Creating ${RFD3_ENV} env" \
+            "${CONDA_CMD}" create -n "${RFD3_ENV}" -y python=3.12 pip \
             -c conda-forge \
-            || { print_fail "Failed to create binderscout_rfd3 env"; return 1; }
+            || { print_fail "Failed to create ${RFD3_ENV} env"; return 1; }
     fi
 
     # cu130 wheels for Blackwell/GB10 (the x86 installer pins cu121).
     run_logged "Installing PyTorch (cu130, aarch64)" \
-        "${CONDA_CMD}" run -n binderscout_rfd3 \
+        "${CONDA_CMD}" run -n "${RFD3_ENV}" \
         pip install -q torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130 \
         || { print_fail "Failed to install PyTorch"; return 1; }
 
     run_logged "Installing rc-foundry[rfd3]==${FOUNDRY_VERSION}" \
-        "${CONDA_CMD}" run -n binderscout_rfd3 \
+        "${CONDA_CMD}" run -n "${RFD3_ENV}" \
         pip install -q "rc-foundry[rfd3]==${FOUNDRY_VERSION}" \
         || { print_fail "Failed to install rc-foundry"; return 1; }
 
     run_logged "Installing rc-foundry[mpnn]==${FOUNDRY_VERSION}" \
-        "${CONDA_CMD}" run -n binderscout_rfd3 \
+        "${CONDA_CMD}" run -n "${RFD3_ENV}" \
         pip install -q "rc-foundry[mpnn]==${FOUNDRY_VERSION}" \
         || print_warn "rc-foundry[mpnn] install failed — MPNN redesign step may not work"
 
@@ -2506,20 +2605,20 @@ install_rfd3() {
         print_ok "Foundry weights dir already populated at ${FOUNDRY_WEIGHTS_DIR}"
     else
         run_logged "Downloading RFD3 weights (~2.5 GB)" \
-            "${CONDA_CMD}" run -n binderscout_rfd3 \
+            "${CONDA_CMD}" run -n "${RFD3_ENV}" \
             foundry install rfd3 --checkpoint-dir "${FOUNDRY_WEIGHTS_DIR}" \
-            || print_warn "RFD3 weight download failed — retry: conda run -n binderscout_rfd3 foundry install rfd3 --checkpoint-dir ${FOUNDRY_WEIGHTS_DIR}"
+            || print_warn "RFD3 weight download failed — retry: conda run -n ${RFD3_ENV} foundry install rfd3 --checkpoint-dir ${FOUNDRY_WEIGHTS_DIR}"
     fi
 
     # ProteinMPNN weights are NOT bundled with rfd3 (foundry install rfd3 fetches only
     # rfd3_latest.ckpt) — the MPNN sequence-design stage needs this ~7 MB file.
     run_logged "Downloading ProteinMPNN weights (~7 MB)" \
-        "${CONDA_CMD}" run -n binderscout_rfd3 \
+        "${CONDA_CMD}" run -n "${RFD3_ENV}" \
         foundry install proteinmpnn --checkpoint-dir "${FOUNDRY_WEIGHTS_DIR}" \
         || print_warn "ProteinMPNN weight download failed — 'mpnn' will not run until it is fetched"
 
     smoke_test "RFD3 CLI check" \
-        "${CONDA_CMD}" run -n binderscout_rfd3 rfd3 --help \
+        "${CONDA_CMD}" run -n "${RFD3_ENV}" rfd3 --help \
         || print_warn "rfd3 CLI smoke test failed — env may need foundry weights first"
 
     _write_rfd3_shortcut
@@ -2533,10 +2632,11 @@ _write_rfd3_shortcut() {
     mkdir -p "${SHORTCUTS_DIR}"
     {
         echo "#!/bin/bash"
-        echo "# RFD3 shortcut — runs 'rfd3 design ...' in the binderscout_rfd3 env."
+        echo "# RFD3 shortcut — runs 'rfd3 design ...' in the RFD3 conda env."
         echo "# With no args: opens an interactive env shell."
         echo ""
         echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "RFD3_ENV=\"${RFD3_ENV}\""
         echo "FOUNDRY_WEIGHTS_DIR=\"${FOUNDRY_WEIGHTS_DIR}\""
     } > "${SHORTCUTS_DIR}/rfd3"
     cat >> "${SHORTCUTS_DIR}/rfd3" << 'EOF'
@@ -2547,14 +2647,14 @@ _write_rfd3_shortcut() {
 export FOUNDRY_CHECKPOINT_DIRS="${FOUNDRY_WEIGHTS_DIR}"
 
 if [[ $# -eq 0 ]]; then
-    echo "RFD3 environment (binderscout_rfd3). Weights: ${FOUNDRY_WEIGHTS_DIR}"
+    echo "RFD3 environment (${RFD3_ENV}). Weights: ${FOUNDRY_WEIGHTS_DIR}"
     echo "Examples:"
     echo "  rfd3 design out_dir=./run inputs=examples/ppi.yaml"
     echo "  foundry list-installed"
-    exec "${CONDA_CMD}" run --live-stream -n binderscout_rfd3 bash
+    exec "${CONDA_CMD}" run --live-stream -n "${RFD3_ENV}" bash
 fi
 
-exec "${CONDA_CMD}" run --live-stream -n binderscout_rfd3 rfd3 "$@"
+exec "${CONDA_CMD}" run --live-stream -n "${RFD3_ENV}" rfd3 "$@"
 EOF
     chmod +x "${SHORTCUTS_DIR}/rfd3"
 }
@@ -2705,6 +2805,24 @@ ESMFOLD2EOF
 
 # ─── Uninstall ─────────────────────────────────────────────────────────────────
 
+# _remove_legacy_env <name>
+# Removes a pre-rename conda env (2.0 renamed bindmaster_* -> binderscout_*).
+# Nothing in the 2.0 tree names these any more, so without this an "uninstall
+# everything" reported success while tens of GB stayed on disk unreferenced.
+# Same env_exists + run_logged shape as the binder-eval-af2 case below — never
+# an rm -rf — and it refuses while a process is still running out of the prefix,
+# because conda's own removal would unlink it under the live interpreter.
+_remove_legacy_env() {
+    local name="$1"
+    env_exists "${name}" || return 0
+    if pgrep -f "${CONDA_BASE}/envs/${name}/" >/dev/null 2>&1; then
+        print_warn "Legacy conda env '${name}' is IN USE by a running process — left in place."
+        return 0
+    fi
+    run_logged "Removing legacy ${name} conda env" \
+        "${CONDA_CMD}" env remove -n "${name}" -y
+}
+
 uninstall_tool() {
     local tool="${1,,}"
     case "${tool}" in
@@ -2758,6 +2876,7 @@ uninstall_tool() {
             print_step "Uninstalling PXDesign"
             env_exists binderscout_pxdesign && run_logged "Removing binderscout_pxdesign conda env" \
                 "${CONDA_CMD}" env remove -n binderscout_pxdesign -y
+            _remove_legacy_env bindmaster_pxdesign
             rm -f "${SHORTCUTS_DIR}/pxdesign"
             [[ -d "${PXDESIGN_DIR}" ]] && { rm -rf "${PXDESIGN_DIR}"; print_ok "Removed ${PXDESIGN_DIR}"; }
             # CUTLASS v3.5.1 headers (~150 MB) cloned by install_pxdesign for the
@@ -2765,10 +2884,20 @@ uninstall_tool() {
             [[ -d "${HOME}/cutlass" ]] && { rm -rf "${HOME}/cutlass"; print_ok "Removed ${HOME}/cutlass"; }
             print_ok "PXDesign uninstalled"
             ;;
+        proteina-complexa|proteina_complexa|complexa)
+            print_step "Uninstalling Proteina-Complexa"
+            if [[ -d "${PROTEINA_COMPLEXA_DIR}/.venv" ]]; then
+                rm -rf "${PROTEINA_COMPLEXA_DIR}/.venv"
+                print_ok "Removed Proteina-Complexa .venv"
+            fi
+            [[ -d "${PROTEINA_COMPLEXA_DIR}" ]] && { rm -rf "${PROTEINA_COMPLEXA_DIR}"; print_ok "Removed ${PROTEINA_COMPLEXA_DIR}"; }
+            print_ok "Proteina-Complexa uninstalled"
+            ;;
         rfd3|foundry)
             print_step "Uninstalling RFD3 (foundry)"
             env_exists binderscout_rfd3 && run_logged "Removing binderscout_rfd3 conda env" \
                 "${CONDA_CMD}" env remove -n binderscout_rfd3 -y
+            _remove_legacy_env bindmaster_rfd3
             rm -f "${SHORTCUTS_DIR}/rfd3"
             [[ -d "${FOUNDRY_WEIGHTS_DIR}" ]] && { rm -rf "${FOUNDRY_WEIGHTS_DIR}"; print_ok "Removed ${FOUNDRY_WEIGHTS_DIR}"; }
             print_ok "RFD3 uninstalled"
@@ -2777,6 +2906,7 @@ uninstall_tool() {
             print_step "Uninstalling Protein-Hunter"
             env_exists binderscout_protein_hunter && run_logged "Removing binderscout_protein_hunter env" \
                 "${CONDA_CMD}" env remove -n binderscout_protein_hunter -y
+            _remove_legacy_env bindmaster_protein_hunter
             rm -f "${SHORTCUTS_DIR}/protein-hunter"
             [[ -d "${PROTEIN_HUNTER_DIR}" ]] && { rm -rf "${PROTEIN_HUNTER_DIR}"; print_ok "Removed ${PROTEIN_HUNTER_DIR}"; }
             print_ok "Protein-Hunter uninstalled"
@@ -2826,6 +2956,14 @@ uninstall_tool() {
                 print_ok "Removed ${_solu_dir}"
             fi
             print_ok "SoluProt solubility screen uninstalled"
+            ;;
+        tmprot|tm|thermostability)
+            print_step "Uninstalling TmProt melting-temperature screen"
+            env_exists binder-eval-tmprot && run_logged "Removing binder-eval-tmprot conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-tmprot -y
+            rm -f "${SHORTCUTS_DIR}/tmprot"
+            [[ -d "${TMPROT_DIR}" ]] && { rm -rf "${TMPROT_DIR}"; print_ok "Removed ${TMPROT_DIR}"; }
+            print_ok "TmProt uninstalled"
             ;;
         *)
             print_fail "Unknown tool: ${tool}"
@@ -3597,12 +3735,17 @@ verify_tool() {
                 VERIFY_REASON="binder-compare does not run in binder-eval (evaluate.sh drives every step through it)"
             fi ;;
         rfd3)
-            # The check that RFD3's own smoke test was missing.
-            (( $(_count_glob "${FOUNDRY_WEIGHTS_DIR}"/*.ckpt) >= 1 )) \
-                || VERIFY_REASON="no .ckpt in ${FOUNDRY_WEIGHTS_DIR} — run: foundry install rfd3" ;;
+            # The check that RFD3's own smoke test was missing. Both halves are
+            # required: `foundry install rfd3` fetches only rfd3_latest.ckpt, and
+            # the MPNN sequence-design stage needs proteinmpnn's separate .pt.
+            if (( $(_count_glob "${FOUNDRY_WEIGHTS_DIR}"/*.ckpt) < 1 )); then
+                VERIFY_REASON="no .ckpt in ${FOUNDRY_WEIGHTS_DIR} — run: foundry install rfd3"
+            elif (( $(_count_glob "${FOUNDRY_WEIGHTS_DIR}"/*.pt) < 1 )); then
+                VERIFY_REASON="no ProteinMPNN .pt in ${FOUNDRY_WEIGHTS_DIR} — run: foundry install proteinmpnn"
+            fi ;;
         pxdesign)
-            _env_python_ok binderscout_pxdesign "import torch" \
-                || VERIFY_REASON="torch does not import in binderscout_pxdesign" ;;
+            _env_python_ok "${PXDESIGN_ENV}" "import torch" \
+                || VERIFY_REASON="torch does not import in ${PXDESIGN_ENV}" ;;
         proteina-complexa)
             if [[ ! -x "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" ]]; then
                 VERIFY_REASON="no venv at ${PROTEINA_COMPLEXA_DIR}/.venv"
@@ -3610,8 +3753,8 @@ verify_tool() {
                 VERIFY_REASON="no .ckpt in ${PROTEINA_COMPLEXA_DIR}/ckpts — run: complexa download --everything"
             fi ;;
         protein-hunter)
-            _env_python_ok binderscout_protein_hunter "import pyrosetta" \
-                || VERIFY_REASON="pyrosetta does not import in binderscout_protein_hunter" ;;
+            _env_python_ok "${PROTEIN_HUNTER_ENV}" "import pyrosetta" \
+                || VERIFY_REASON="pyrosetta does not import in ${PROTEIN_HUNTER_ENV}" ;;
         af3)
             # __file__ is None for a namespace-package shadow, so assert it.
             if ! _env_python_ok binder-eval-af3 \
@@ -3697,6 +3840,29 @@ verify_selected_tools() {
     [[ "${any}" == false ]]
 }
 
+# _write_cli_shortcut
+# The top-level CLI shim. The installer wrote eleven per-tool shortcuts and never
+# this one, so after the 2.0 rename a pre-rename `bindmaster` on PATH execs the
+# deleted bindmaster.py (exit 2, which reads like a broken checkout rather than a
+# rename) and re-running the installer could not repair it.
+_write_cli_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    cat > "${SHORTCUTS_DIR}/binderscout" <<CLIEOF
+#!/bin/bash
+# BinderScout CLI shortcut
+exec python3 "${BINDERSCOUT_DIR}/binderscout.py" "\$@"
+CLIEOF
+    chmod +x "${SHORTCUTS_DIR}/binderscout"
+    print_ok "CLI shortcut installed at ${SHORTCUTS_DIR}/binderscout"
+    # Remove the pre-rename shim only when it is ours: a shortcut of that name
+    # pointing anywhere else is not this installer's to delete.
+    if [[ -f "${SHORTCUTS_DIR}/bindmaster" ]] \
+       && grep -q "bindmaster.py" "${SHORTCUTS_DIR}/bindmaster" 2>/dev/null; then
+        rm -f "${SHORTCUTS_DIR}/bindmaster"
+        print_ok "Removed stale ${SHORTCUTS_DIR}/bindmaster (it execs the deleted bindmaster.py)"
+    fi
+}
+
 main() {
     echo ""
     echo -e "${BOLD}=== BinderScout Installer — DGX Spark (aarch64) — $(date) ===${RESET}"
@@ -3710,6 +3876,7 @@ main() {
     if [[ "${CONDA_BASE}" == "${LOCAL_CONDA_DIR}" ]]; then
         print_ok "Standalone mode — all environments local to ${BINDERSCOUT_DIR}"
     fi
+    resolve_env_names
     check_tools_dir
 
     print_tool_status
@@ -3755,26 +3922,62 @@ main() {
             DO_AF3=true
             DO_ESMFOLD2=true
             DO_SOLUPROT=true
+            # …and the five opt-in tools, which `--tool all` never installs on this
+            # platform but which an "uninstall everything" must still reach: without
+            # these, BindCraft2/, the RFD3 and Protein-Hunter envs, the Complexa venv
+            # and the TmProt env all survived and the script still said it was done.
+            DO_RFD3=true
+            DO_PROTEINA_COMPLEXA=true
+            DO_BINDCRAFT2=true
+            DO_PROTEIN_HUNTER=true
+            DO_TMPROT=true
         fi
 
-        local failed_uninstalls=()
-        [[ "${DO_BINDCRAFT}" == true ]] && { uninstall_tool bindcraft  || failed_uninstalls+=("BindCraft"); }
-        [[ "${DO_BOLTZGEN}"  == true ]] && { uninstall_tool boltzgen   || failed_uninstalls+=("BoltzGen");  }
-        [[ "${DO_MOSAIC}"    == true ]] && { uninstall_tool mosaic     || failed_uninstalls+=("Mosaic");    }
-        [[ "${DO_EVALUATOR}" == true ]] && { uninstall_tool evaluator  || failed_uninstalls+=("Evaluator"); }
-        [[ "${DO_PXDESIGN}"  == true ]] && { uninstall_tool pxdesign  || failed_uninstalls+=("PXDesign"); }
-        # NOTE: RFD3 has no line here, so `--uninstall --tool all` leaves it on
-        # disk on this platform. Pre-existing; flagged rather than fixed here.
-        [[ "${DO_BINDCRAFT2}" == true ]] && { uninstall_tool bindcraft2 || failed_uninstalls+=("BindCraft 2"); }
-        [[ "${DO_PROTEIN_HUNTER}" == true ]] && { uninstall_tool protein-hunter || failed_uninstalls+=("Protein-Hunter"); }
-        [[ "${DO_AF3}"       == true ]] && { uninstall_tool af3       || failed_uninstalls+=("AF3"); }
-        [[ "${DO_ESMFOLD2}"  == true ]] && { uninstall_tool esmfold2  || failed_uninstalls+=("ESMFold2"); }
-        [[ "${DO_SOLUPROT}"  == true ]] && { uninstall_tool soluprot  || failed_uninstalls+=("SoluProt"); }
+        # Driven from a flag|tool|label table rather than one `&&` line per tool:
+        # the per-tool lines silently omitted five of the thirteen, and a flag whose
+        # tool name uninstall_tool does not know now lands in failed_uninstalls via
+        # its `*)` arm instead of passing for success.
+        local failed_uninstalls=() spec flag tool label
+        for spec in \
+            "DO_BINDCRAFT|bindcraft|BindCraft" \
+            "DO_BOLTZGEN|boltzgen|BoltzGen" \
+            "DO_MOSAIC|mosaic|Mosaic" \
+            "DO_EVALUATOR|evaluator|Evaluator" \
+            "DO_PXDESIGN|pxdesign|PXDesign" \
+            "DO_RFD3|rfd3|RFD3" \
+            "DO_PROTEINA_COMPLEXA|proteina-complexa|Proteina-Complexa" \
+            "DO_BINDCRAFT2|bindcraft2|BindCraft 2" \
+            "DO_PROTEIN_HUNTER|protein-hunter|Protein-Hunter" \
+            "DO_AF3|af3|AF3" \
+            "DO_ESMFOLD2|esmfold2|ESMFold2" \
+            "DO_SOLUPROT|soluprot|SoluProt" \
+            "DO_TMPROT|tmprot|TmProt"
+        do
+            IFS='|' read -r flag tool label <<< "${spec}"
+            [[ "${!flag}" == true ]] || continue
+            uninstall_tool "${tool}" || failed_uninstalls+=("${label}")
+        done
+
+        # The CLI shim belongs to no tool, so no arm owns it. Remove it only when
+        # everything is going, along with a stale pre-rename `bindmaster` — which
+        # execs the deleted bindmaster.py and would otherwise stay on PATH forever.
+        if [[ "${TOOL_ALL}" == true ]]; then
+            rm -f "${SHORTCUTS_DIR}/binderscout"
+            if [[ -f "${SHORTCUTS_DIR}/bindmaster" ]] \
+               && grep -q "bindmaster.py" "${SHORTCUTS_DIR}/bindmaster" 2>/dev/null; then
+                rm -f "${SHORTCUTS_DIR}/bindmaster"
+            fi
+        fi
 
         # Offer to remove local Miniforge when all tools are uninstalled
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
               "${DO_MOSAIC}" == true && "${DO_EVALUATOR}" == true ]]; then
             if [[ -d "${LOCAL_CONDA_DIR}" ]]; then
+                # This rm -rf takes every env with it, including any still in use.
+                if pgrep -f "${LOCAL_CONDA_DIR}/envs/" >/dev/null 2>&1; then
+                    print_warn "A process is still running out of ${LOCAL_CONDA_DIR}/envs/ — removing"
+                    print_warn "  Miniforge3 now would delete that environment under the live job."
+                fi
                 if confirm_destructive "Also remove local Miniforge3 installation (${LOCAL_CONDA_DIR})?"; then
                     rm -rf "${LOCAL_CONDA_DIR}"
                     print_ok "Removed local Miniforge3"
@@ -3800,6 +4003,14 @@ main() {
         [[ -d "${HOME}/.boltz" ]] && print_warn "  ${HOME}/.boltz/                — Boltz-2 weight cache (~4.5 GB)"
         [[ -d "${HOME}/.cache/binderscout" ]] && print_warn "  ${HOME}/.cache/binderscout/     — shared target-MSA cache"
         [[ -d "${HOME}/.cache/huggingface" ]] && print_warn "  ${HOME}/.cache/huggingface/    — ESMFold2 weights (shared with other tools)"
+        # Pre-rename envs (2.0 renamed bindmaster_* -> binderscout_*). Nothing in
+        # the 2.0 tree names them any more, so an operator reclaiming space had no
+        # pointer to them at all — name them with their size.
+        local _legacy_env
+        for _legacy_env in "${CONDA_BASE}"/envs/bindmaster_*; do
+            [[ -d "${_legacy_env}" ]] || continue
+            print_warn "  ${_legacy_env}/ ($(du -sh "${_legacy_env}" 2>/dev/null | cut -f1)) — pre-rename conda env"
+        done
         grep -q "${SHORTCUTS_DIR}" "${HOME}/.bashrc" 2>/dev/null && \
             print_warn "  the PATH line for ${SHORTCUTS_DIR} in ~/.bashrc"
         [[ ${#failed_uninstalls[@]} -gt 0 ]] && exit 1 || exit 0
@@ -3860,8 +4071,10 @@ main() {
     fi
 
     # Shortcuts and PATH instructions
+    _write_cli_shortcut
     echo ""
     echo -e "Shortcuts available in ${SHORTCUTS_DIR}:"
+    echo -e "  ${GREEN}binderscout${RESET} — the BinderScout CLI (install / configure / evaluate)"
     [[ "${DO_BINDCRAFT}" == true ]] && echo -e "  ${GREEN}bindcraft${RESET}  — open BindCraft shell"
     [[ "${DO_BOLTZGEN}"  == true ]] && echo -e "  ${GREEN}boltzgen${RESET}   — open BoltzGen shell"
     [[ "${DO_MOSAIC}"    == true ]] && echo -e "  ${GREEN}mosaic${RESET}     — open Mosaic shell"
