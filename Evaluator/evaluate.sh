@@ -512,8 +512,18 @@ gpu_guard_up || true
 # shellcheck disable=SC2046  # cap_env deliberately expands to 0 or 1 words
 engine_boltz2 () {
     local f=""; [[ $RESUME -eq 1 ]] && f="--resume"
+    # --output-dir is NOT optional here, even though refold-boltz2 defaults it.
+    # Its default is CWD-relative ./refold_boltz2, so without this every run
+    # shares one directory keyed on where evaluate.sh happened to be invoked
+    # from -- and --resume then reads THAT directory's accumulated
+    # refold_designs.csv. Measured on BM5 2026-10-04: a fresh 20-design run
+    # resumed against 86 unrelated completed binders, folded nothing, and
+    # published 260 rows from previous runs as its result. csv_rows() counts
+    # non-empty iptm, so the guard reported "ok -- 260 new row(s)" over it.
+    # AF3 and ESMFold2 already scope their output dirs this way.
     env $(cap_env "$GPU_CAP_BOLTZ2") "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
-        --sequences "$SEQUENCES" --target-seq "$TARGET_SEQ" -o "$BOLTZ2_CSV" $f
+        --sequences "$SEQUENCES" --target-seq "$TARGET_SEQ" -o "$BOLTZ2_CSV" \
+        --output-dir "$OUTPUT/refold_boltz2" $f
 }
 # shellcheck disable=SC2046
 engine_af3 () {
