@@ -1,6 +1,11 @@
 # Repo diary — the 2.0 chapter
 
-> **Extract, not a source.** Lines 2099+ of `docs/REPO_DIARY.md` as of `23379f2`.
+> **Extract, not a source.** Lines 2099+ of `docs/REPO_DIARY.md`, re-synced 2026-10-04.
+>
+> **This went wrong once, so it is worth stating louder.** On 2026-10-03/04 a whole session's
+> entries were written here and NOT into the diary — 370 lines that existed only in the extract,
+> which is exactly backwards from the rule two lines below. Append to `docs/REPO_DIARY.md` and
+> re-extract; do not write here first.
 > The diary is the living copy; this exists so the 2.0 chapter can travel without
 > its 2,098 lines of predecessors. If they disagree, the diary is right.
 >
