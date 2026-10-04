@@ -1626,3 +1626,45 @@ n=1, 9 calls, one target, and the 112.3 s includes a cold compile. The archived 
 on the identical config is running to remove the target confound — the 25× gap is far too large
 for target size to explain, but that is an argument rather than a measurement. And **nothing
 here says anything about design quality on this platform**, only throughput.
+
+### RETRACTION, same hour: the AF2 reward never ran, so the 25× was not real
+
+**The entry above is wrong where it matters and I am leaving it visible rather than editing it
+away.** The ~12.5 s per AF2 call is not an AF2 cost. In the GPU run **and** in the CPU control,
+every reward was `0.0` and AF2 never loaded:
+
+```
+DEBUG    Sample 0: reward = 0.0          reward_utils.py:164
+         Mean reward: 0.0000
+```
+
+The two runs also produced **byte-identical sequences**, which cannot happen if a reward
+influenced the search. What I timed was MCTS lookahead with a null reward.
+
+**The CPU control is the only reason I know.** GPU 112.31 s against CPU 111.52 s for the same
+nine "evaluations" — a 0.7 % difference where the hypothesis predicted ~25×. And I had not run
+that control to test the reward at all; I ran it to remove a *target* confound between
+`apoe4_ntd` and `33_TrkA`. If it had returned ~3,000 s I would have taken it as confirmation and
+shipped a speedup that does not exist. I did ship the claim, for about forty minutes, before the
+control landed.
+
+**The specific mistake, stated plainly.** I used wall-clock as a proxy for "AF2 executed" and
+never checked the thing itself: whether a reward was computed. `total_reward` was sitting in the
+rewards CSV the whole time, one column away from the row count I *did* read to get my "9 AF2
+calls". I read the denominator and not the numerator. My own standing note for this repo is
+*verify the real interface, not a proxy*, and the failure mode I walked into — a run that reports
+plausible numbers while the expensive part silently no-ops — is the one CLAUDE.md records twice
+about this very platform ("each previously reported itself healthy while being unusable there").
+
+**What survives.** The six install fixes are real and independently verified: PC now runs end to
+end on aarch64 for the first time, `complexa generate` exits 0, single-pass generation takes
+39.9 s, `jax 0.6.2` reports `gpu`, and the bf16 lowering compiles. That was the hard part and it
+holds.
+
+**What does not.** Every throughput number. The 2026-07-29 deprecation arithmetic is untouched
+until an AF2 call is genuinely timed. Leading suspect for the silent 0.0: `af_params_dir` was
+pointed at a directory containing only the five `*_multimer_v3.npz` files, and ColabDesign may
+want a different layout or the non-multimer params too — with the load failure swallowed into a
+zero reward instead of raised. **That swallowing is itself worth a fix**: a reward model that
+cannot load its weights should refuse, not score everything 0.0 and let a search run to
+completion looking healthy.

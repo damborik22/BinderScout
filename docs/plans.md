@@ -80,7 +80,40 @@ binderscout pack --output FILE              cd BinderScout
 
 ---
 
-## Proteina-Complexa on aarch64 (DGX Spark) — **DEPRECATION LIFTED 2026-10-04, measured**
+## Proteina-Complexa on aarch64 (DGX Spark) — install FIXED, throughput STILL UNMEASURED
+
+> **RETRACTION, 2026-10-04 (same day, within the hour).** The "DEPRECATION LIFTED" banner below
+> was **wrong and is withdrawn**. The ~12.5 s per AF2 call it reported is not an AF2 cost: in both
+> the GPU run and the CPU control **every reward was 0.0** and the AF2 model never loaded. The log
+> says so plainly — `DEBUG Sample 0: reward = 0.0 (reward_utils.py:164)`, `Mean reward: 0.0000` —
+> and the two runs produced **byte-identical sequences**, which is only possible if no reward
+> influenced the search. I measured the wall-clock of MCTS with a **null reward** and reported it
+> as the AF2 call cost.
+>
+> **The CPU control is what caught it, and only because it came out identical.** GPU 112.31 s vs
+> CPU 111.52 s for the same 9 "evaluations". I had run that control to remove a *target* confound;
+> had it come back at ~3,000 s I would have published a 25x speedup that was not there. The
+> failure is mine and it is the exact one this repo documents twice over: wall-clock is a **proxy**
+> for AF2 running, and I did not check the real interface — whether a reward was computed.
+>
+> **What IS established, and it is not nothing:** six install defects are fixed, and
+> Proteina-Complexa now *runs* end to end on aarch64 for the first time (`complexa generate`
+> exits 0, 39.9 s for single-pass generation). `jax 0.6.2 / jaxlib 0.6.2 / backend gpu /
+> CudaDevice(id=0)`, and the bf16 lowering the original verdict feared compiles fine.
+>
+> **What is NOT established: anything about throughput.** The deprecation's arithmetic stands
+> untouched until an AF2 call is actually timed. Next step is to find why the reward is 0.0 — the
+> leading suspect is the AF2 weights: `af_params_dir` was pointed at a directory holding only the
+> five `*_multimer_v3.npz` files, and ColabDesign may need a different layout or the non-multimer
+> params, with the failure swallowed into a 0.0 reward rather than raised.
+>
+> Do not plan a campaign on Spark on the strength of this section.
+
+---
+
+### Withdrawn banner, kept so the error is legible rather than deleted
+
+## ~~Proteina-Complexa on aarch64 (DGX Spark) — DEPRECATION LIFTED 2026-10-04, measured~~ (RETRACTED)
 
 > **Status: VIABLE. ~11.5 h per 100-design replicate on GB10, measured end to end.**
 > The 2026-07-29 deprecation below is preserved as written, because its *reasoning* was sound
