@@ -2124,6 +2124,19 @@ install_proteina_complexa() {
             bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && .venv/bin/complexa init" \
             || print_warn "complexa init failed — .env may need manual setup"
 
+        # Make the composite reward REFUSE rather than silently score 0.0 when a reward model
+        # cannot execute. PC catches every reward exception, reports it with warnings.warn, and
+        # its CLI runs python with -W ignore -- so an unusable AF2 reward produces a completed
+        # search full of zeros that exits 0. Measured on BM5 2026-10-04 (aarch64, but the defect
+        # is upstream and platform-independent), where it cost a retracted throughput result.
+        print_step "Patching PC: a reward that cannot be computed must not be 0.0"
+        if python3 "${BINDERSCOUT_DIR}/install/patches/pc_reward_refuses_when_every_model_fails.py" \
+                "${PROTEINA_COMPLEXA_DIR}"; then
+            print_ok "PC composite reward now refuses on total failure"
+        else
+            print_warn "Could not patch PC's composite reward — an unusable reward model will score 0.0 silently"
+        fi
+
         # Download ALL models (Complexa + community models).
         # Activate the venv first: `complexa download` shells out to
         # `python script_utils/download/download_esm_model.py`, which
