@@ -1724,3 +1724,69 @@ came from accepting a written claim about *identity* — "the same ColabDesign",
 2026-09-26" — where the artefact in front of me recorded a version or a date that contradicted
 it. The installer said PC was installable; the log said it had never re-installed. CLAUDE.md said
 same library; the same sentence said 1.1.1.1 versus 1.1.3.
+
+---
+
+## The label convention was wrong, and the rows I called non-binders were never ordered
+
+**2026-10-04.** A review landed (`INVESTIGATION_label_convention_2026-10-04.md`, nine items) whose
+first item says the 2026-10-03 label convention is void. **It is right, and the error was mine.**
+
+Both SPOC sheets carry a **divider row**: below it, designs were not ordered, because of
+duplication. On CALCA the `No` column simply restarts — …112, 113, 114, then 87, 89, 92 — and
+every row past the restart has an empty `KD` and the *highest* `Mean_ipTM` in the pool (0.938,
+0.936, 0.929). Those designs have no experimental outcome. They cannot be non-binders.
+
+Verified before editing anything:
+
+| panel | n tested | split | excluded | AUC [95 % CI] |
+|---|---|---|---|---|
+| CALCA | 114 | 99 / 15 | **11** never ordered | **0.7061** [0.581, 0.831] |
+| CBG / 2VDY | 114 | 10 / 104 | **23** (20 + 3 flagged dups) | **0.4957** [0.308, 0.683] |
+| ~~my versions~~ | ~~125 / 137~~ | — | — | ~~0.4835 / 0.4579~~ |
+
+My numbers reproduce exactly, which is how I know the mechanism is the one described. **CALCA's
+interval overlaps the Adaptyv benchmark's 0.7113**, so our own wet-lab data *corroborates* the
+benchmark; the surviving caveat is sample size — 15 non-binders — not sign.
+
+### Two mechanisms, and the second is the one I will remember
+
+**CALCA.** I read an empty `KD` as "tested, did not bind". The divider was already in the sheet.
+No inference about expression was ever required — I asked the operator what blanks meant, got
+"not detected binding / not expressed", implemented "not bound", and never checked whether the
+sheet itself distinguished *tested* from *ordered*. The answer to a question I asked was not a
+substitute for reading the file.
+
+**CBG.** The sheet **did** distinguish them: `N/A` for tested-and-not-bound, empty for
+never-ordered. And **`pd.read_csv` converts `"N/A"` to `NaN` by default**, so 104 real negatives
+and 20 unordered rows arrived in one indistinguishable bucket. `keep_default_na=False` recovers it
+and reproduces 0.4957 to four decimals. A library default that destroys exactly the distinction
+under test is the quietest data loss I have hit — nothing warns, the column simply loses a
+category.
+
+### The check that should have caught it in seconds
+
+Eleven rows cannot move a 114-design AUC from 0.706 to 0.4835 **unless they sit at the top of the
+ranking** — and they do, outranking **81 %** of the 99 confirmed binders (median ipTM 0.923 vs
+0.903). A supposed negative that beats four fifths of the positives is far more likely to be
+*unmeasured* than *negative*. That signature needs no divider, no flag and no provenance: it is
+computable from the labels and the scores alone, and it is now written into Part AK §0 as a
+routine check on any label import.
+
+### What this is the third instance of
+
+§4.7 of the conclusion says a measurement needs its numerator checked, not just its denominator.
+This is the same failure one level up: **I checked the scores and not the labels.** The run of
+errors over two days now reads
+— reward `0.0` swallowed → timed a null reward as if it were AF2;
+— `agreement_count` 0.532 quoted from Cao as if it were this pool;
+— blanks counted as negatives when the sheet said otherwise.
+Each one was a *category* error in the input, not an arithmetic error, and in each case the
+contradicting evidence was already in the artefact I was reading.
+
+**What I will do differently, concretely:** before any AUC, print the label provenance —
+how many positives, how many negatives, how many excluded and *why* — and refuse to compute if
+the three do not sum to the rows read. D8 of the review proposes exactly this as a registry
+schema change (`outcome: bound | not_bound | not_tested | excluded:<reason>`, no default, loader
+refuses a row without one). That makes the failure structurally impossible rather than
+remembered, and Part Y is still imported by nothing, so it is the cheapest it will ever be.

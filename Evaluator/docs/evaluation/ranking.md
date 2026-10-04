@@ -104,30 +104,33 @@ villain was Boltz-2.
 **This section belongs near the top of the final doc.** It is what decides whether a top-N
 list should be trusted.
 
-**Label convention (operator decision, 2026-10-03): a design with no measured Kd is scored
-`not bound`** — not "untested", not "not expressed" — unless there is evidence of an expression
-failure for that design. Our panels record a Kd or a blank and nothing else, so any
-expression-based exclusion would be an unsupported assumption. The convention is deliberately
-conservative: if some blanks were expression failures, they are unmeasured for binding and
-counting them as non-binders adds noise that *deflates* AUC, biasing against our own predictor.
+**Label rule — the boundary is outcome availability, not Kd presence.** Corrected 2026-10-04,
+after an earlier version of this file counted never-ordered designs as non-binders:
 
-| pool | n | binders | within-target AUC |
-|---|---|---|---|
-| CALCA (our SPOC panel) | 125 | 99 | **0.4835** |
-| CBG / 2VDY (our SPOC panel) | 136 scored | 10 | **0.4595** |
-| curated Adaptyv/ProteinBase, 4 targets | 563 | 258 | **0.7113** |
+> A design is labelled only if it has an experimental outcome.
+> Ordered and tested, no binding detected → `not_bound`.
+> Not ordered, or ordered with no result returned → **excluded** from binding AUCs, and reported
+> as a separate count beside every *n*.
 
-The benchmark's labels already follow this convention — all 223 of its `expressed=False` rows are
-`y = 0` — so 0.7113 is its full-panel figure and is unchanged by the decision. Only CALCA moves:
-the diary and the EuRosettaCon poster use 114 designs (99 binders / 15 non-binders), excluding 11
-blanks, and those 11 are non-binders here. CBG barely moves because its negative class is 127.
+| pool | n | binders / non-binders | excluded | within-target AUC [95 % CI] |
+|---|---|---|---|---|
+| CALCA (our SPOC panel) | 114 | 99 / 15 | 11 never ordered | **0.7061** [0.581, 0.831] |
+| CBG / 2VDY (our SPOC panel) | 114 | 10 / 104 | 23 | **0.4957** [0.308, 0.683] |
+| curated Adaptyv/ProteinBase, 4 targets | 563 | 258 / 305 | — | **0.7113** [0.668, 0.754] |
+| …same, expressed only | 543 | 258 / 285 | 20 `expressed=False` | 0.7093 (**−0.002**) |
 
-**Both of our own targets therefore measure at chance, while the external benchmark holds at
-0.711.** The 0.711 is not thereby wrong — it was verified independently, including against its own
-expression flag (−0.002) — but we have **no own-data corroboration** of it, and the figure we had
-been citing as such does not survive this convention. Part AK exists for that reason.
+**CALCA's interval overlaps the benchmark's, so our own wet-lab data corroborates 0.711.** The
+surviving caveat is sample size, not sign: 0.7061 rests on **15** non-binders, so quote it with
+its interval. Both of our panels carry a divider below which designs were never ordered (because
+of duplication) — on CALCA the `No` column simply restarts, and the 11 rows past it sit at the
+*top* of the pool by ipTM, outranking **81 %** of the confirmed binders. A supposed negative that
+outranks four fifths of the positives is unmeasured, not negative.
 
-**On a hard target the ranking measured at chance, and that part is unchanged.** On CBG the
+**Two numbers that must never travel without their pool and n:** 0.7061 (CALCA, n = 114) and
+0.7113 (Adaptyv, n = 563) are near-identical figures from different pools. The same collision
+already caused one error on `agreement_count` (0.532 on Cao quoted as though it were 0.6295 here).
+
+**On a hard target the ranking measures at chance, and that part is unchanged.** On CBG the
 `>= 0.85` slice bound at **6.8 %** against **10.0 %** below it (Fisher p=0.74) — the lever ran
 backwards. Confirmed
 to be our metric and not a proxy: the panel's `Mean_iPTM` matches `consensus_iptm_mean` on

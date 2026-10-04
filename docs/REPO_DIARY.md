@@ -1892,33 +1892,29 @@ hold at once, and conflating them is the trap. Costed the ask anyway: 15 per too
 per-tool rates needs **~119,000 designs, ~5.6x the entire round-1 campaign**, and BoltzGen cannot
 reach it at any scale (0/9,986).
 
-**Correction, 2026-10-03 — under the adopted label convention there is no CALCA-vs-CBG contrast.**
-The figures above exclude 11 of the panel's blank-`KD` rows: `CALCA_SPOC.csv` holds **125** designs
-(99 with a Kd, 26 blank) while this entry and the EuRosettaCon poster use **114**, stated as *99
-binders, 15 non-binders*. A blank cell means *binding not detected* **or** *not expressed*, and the
-panel records nothing that distinguishes them — so the exclusion rests on an assumption the data
-cannot support. **Operator decision 2026-10-03: a design with no measured Kd is scored `not
-bound`**, unless an expression failure is evidenced for it. That is the conservative direction — if
-some blanks really were expression failures they are unmeasured for binding, and counting them as
-non-binders adds noise that *deflates* AUC, biasing against our own predictor.
+**Correction RETRACTED 2026-10-04 — this entry was right; the retraction was wrong.**
+On 2026-10-03 a dated correction was appended here claiming "under the adopted label convention
+there is no CALCA-vs-CBG contrast", restating CALCA at 0.4835 and CBG at 0.4595. **That is
+withdrawn.** It rested on labelling as non-binders 11 CALCA and 23 CBG rows that were **never
+ordered** — both sheets carry a divider, below which designs were not ordered because of
+duplication, and on CALCA the `No` column simply restarts (…113, 114, then 87, 89, 92…).
 
-Re-measured on the sheet's own `Mean_ipTM` under that convention: **CALCA 0.4835** on 125 designs
-(was 0.706 on 114) and **CBG 0.4595** on 136 (against the 0.496 above). CBG barely moves because
-its negative class is 127; CALCA moves 0.22 because 11 of 26 is **42 %** of its negatives. So the
-**between-target contrast this entry rests on is 0.4595 vs 0.4835 — it is gone**, and with it the
-"pool mean iPTM tells you the target is tractable" reading. Both targets measure at chance.
+Re-measured as ordered and tested: **CALCA 0.7061 [0.581, 0.831] on n = 114 (99/15)** and
+**CBG 0.4957 [0.308, 0.683] on n = 114 (10/104)**. So the figures in this entry stand, the
+contrast stands, and so does the reading built on it — *pool mean ipTM tells you the target is
+tractable, not which design on a hard target will bind.* The EuRosettaCon poster's n = 114 is
+correct and was never superseded.
 
-What is *not* affected: the external benchmark. Its labels already score non-expressed designs as
-non-binders — all 223 `expressed=False` rows carry `y = 0` — so its **0.7113** is a full-panel
-figure, unchanged by this decision, and it was checked against the flag directly (expressed-only
-0.7093, **−0.002**). The gap between our panels and the benchmark is negative-class size, not
-method. And the `135/137 match` verified above still holds: this was our metric being tested, not a
-proxy. The label rule was the problem, not the column.
+Two mechanisms produced the bad correction. On CALCA an empty `KD` was read as "tested, did not
+bind", when the divider in the sheet already recorded what was ordered. On CBG the sheet *did*
+distinguish the cases — `N/A` for tested-and-not-bound, empty for never-ordered — and
+`pd.read_csv` converts `"N/A"` to `NaN` by default, collapsing 104 real negatives into the same
+bucket as 20 unordered rows; `keep_default_na=False` recovers it.
 
-The EuRosettaCon poster's **n = 114 (99/15)** is therefore superseded rather than merely
-re-derived. The wording rule from the 2026-09-10 Adaptyv *n* correction extends to this: alongside
-*labelled* and *scored*, state that blanks are scored as non-binders. Full detail:
-`docs/PLAN_2.0_PART_AK_verify_the_rank.md` §0.
+The diagnostic that should have caught it immediately: 11 rows cannot drag a 114-design AUC from
+0.706 to 0.4835 unless they sit at the top of the ranking, and they do — outranking **81 %** of
+the 99 confirmed binders. A supposed negative that beats four fifths of the positives is
+unmeasured, not negative. Full detail: `docs/PLAN_2.0_PART_AK_verify_the_rank.md` §0.
 
 Corroboration that CBG is a *target* problem, not a sampling-depth problem — BoltzGen, identical
 filters, ~10k designs against each target: `pass_filter_rmsd` ("folds as intended")
