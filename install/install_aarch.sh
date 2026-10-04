@@ -3091,6 +3091,19 @@ SHIMPY
         return 1
     fi
 
+    # Make the composite reward REFUSE rather than silently score 0.0 when a reward model
+    # cannot execute. See the patch's own docstring: PC catches every reward exception,
+    # reports it with warnings.warn, and its CLI runs python with -W ignore -- so an
+    # unusable AF2 reward produces a completed search full of zeros that exits 0. Measured
+    # on BM5 2026-10-04, where that cost a retracted throughput result.
+    print_step "Patching PC: a reward that cannot be computed must not be 0.0"
+    if python3 "${BINDERSCOUT_DIR}/install/patches/pc_reward_refuses_when_every_model_fails.py" \
+            "${PROTEINA_COMPLEXA_DIR}"; then
+        print_ok "PC composite reward now refuses on total failure"
+    else
+        print_warn "Could not patch PC's composite reward — an unusable reward model will score 0.0 silently"
+    fi
+
     # Blocker 4/5 and the rest of the manual recipe.
     run_logged "Installing biotite 1.6.0 + graphein + atomworks" \
         "${PCPIP[@]}" "biotite==1.6.0" graphein atomworks \
