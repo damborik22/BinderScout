@@ -26,32 +26,43 @@ ok()   { printf '%s%s%s\n' "$GREEN"  "$*" "$RESET"; }
 # arbitrary commands into the remote ssh session.
 sq() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
 
-# Emit 10 newline-separated raw fields describing a remote machine:
-# host, arch, gpu, gpu_procs, ram_gb, disk_free, envs, git_sha, git_branch, tmux.
+# Emit 11 newline-separated raw fields describing a remote machine: host, arch,
+# gpu, gpu_procs, ram_gb, disk_free, envs, git_sha, git_branch, tmux, repo_dir.
 # Raw values (not JSON) so the caller can assemble JSON with `jq --arg`, which
 # escapes quotes/backslashes correctly — a hand-rolled printf %s could not.
 probe_one() {
-    ssh -o BatchMode=yes -o ConnectTimeout=8 "$1" "GPU_BUSY_MIB=$GPU_BUSY_MIB bash -s" <<'REMOTE'
+    ssh -o BatchMode=yes -o ConnectTimeout=8 "$1" \
+        "BINDERSCOUT_DIR='$(sq "${BINDERSCOUT_DIR:-}")' GPU_BUSY_MIB=$GPU_BUSY_MIB bash -s" <<'REMOTE'
 set -u
 gpu=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1)
 procs=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits 2>/dev/null \
         | awk -v floor="$GPU_BUSY_MIB" '$1+0 > floor' | wc -l)
+# The checkout directory is machine-local and spelled either way after the 2.0
+# rename, so resolve it instead of assuming one name — hardcoding BinderScout
+# made every env/git field below fall into its own "none" fallback.
+repo="${BINDERSCOUT_DIR:-}"
+if [ -z "$repo" ]; then
+    for d in "$HOME/dev/BinderScout" "$HOME/dev/BindMaster" "$HOME/BinderScout" "$HOME/BindMaster"; do
+        if [ -f "$d/binderscout.py" ] || [ -f "$d/bindmaster.py" ]; then repo=$d; break; fi
+    done
+fi
+repo="${repo:-$HOME/dev/BinderScout}"
 envs=$(ls -1 "$HOME"/miniforge3/envs "$HOME"/miniconda3/envs "$HOME"/anaconda3/envs \
-             "$HOME"/dev/BinderScout/conda/envs 2>/dev/null \
+             "$repo"/conda/envs 2>/dev/null \
        | grep -vE '^$|:' | sort -u | paste -sd,)
-sha=$(git -C "$HOME/dev/BinderScout" rev-parse --short HEAD 2>/dev/null || echo none)
-br=$(git -C "$HOME/dev/BinderScout" rev-parse --abbrev-ref HEAD 2>/dev/null || echo none)
+sha=$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || echo none)
+br=$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo none)
 printf '%s\n' \
     "$(hostname)" "$(uname -m)" "$gpu" "${procs:-0}" \
     "$(free -g | awk '/^Mem:/{print $2}')" \
     "$(df -h "$HOME" | awk 'NR==2{print $4}')" "$envs" "$sha" "$br" \
-    "$(tmux -V 2>/dev/null | awk '{print $2}')"
+    "$(tmux -V 2>/dev/null | awk '{print $2}')" "$repo"
 REMOTE
 }
 
 # Full-shape placeholder for an unreachable machine — same key set as a
 # reachable one, typed defaults (null for strings, 0 for gpu_procs).
-UNREACHABLE_JSON='{"reachable":false,"host":null,"arch":null,"gpu":null,"gpu_procs":0,"ram_gb":null,"disk_free":null,"envs":null,"git_sha":null,"git_branch":null,"tmux":null}'
+UNREACHABLE_JSON='{"reachable":false,"host":null,"arch":null,"gpu":null,"gpu_procs":0,"ram_gb":null,"disk_free":null,"envs":null,"git_sha":null,"git_branch":null,"tmux":null,"repo_dir":null}'
 
 cmd_probe() {
     mkdir -p "$FLEET_DIR"
@@ -65,9 +76,10 @@ cmd_probe() {
                 --argjson gpu_procs "${f[3]:-0}" --argjson ram_gb "${f[4]:-0}" \
                 --arg disk_free "${f[5]}" --arg envs "${f[6]}" \
                 --arg git_sha "${f[7]}" --arg git_branch "${f[8]}" --arg tmux "${f[9]}" \
+                --arg repo_dir "${f[10]}" \
                 '{reachable:true, host:$host, arch:$arch, gpu:$gpu, gpu_procs:$gpu_procs,
                   ram_gb:$ram_gb, disk_free:$disk_free, envs:$envs, git_sha:$git_sha,
-                  git_branch:$git_branch, tmux:$tmux}')
+                  git_branch:$git_branch, tmux:$tmux, repo_dir:$repo_dir}')
         else
             json="$UNREACHABLE_JSON"
             warn "probe: $m unreachable"

@@ -29,6 +29,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from .errors import PartialRefoldFailure
+
 
 def run_boltz2_refold(
     sequences: list[str],
@@ -134,7 +136,10 @@ def run_boltz2_refold(
         raise FileNotFoundError(f"Expected refold_boltz2 to write {generated_csv} but it was not found.")
 
     if partial is not None:
-        raise partial
+        # The scripts keep their own PartialRefoldFailure for envs where this package
+        # is not importable, so re-raise the canonical class: that is the one
+        # binder_comparison.main catches to exit 3 rather than 1.
+        raise PartialRefoldFailure(str(partial)) from partial
 
 
 def _publish_csv(generated_csv: Path, output_csv: Path, output_dir: Path) -> bool:

@@ -2461,11 +2461,13 @@ export PATH="$BC2_DIR/.venv/bin:$PATH"
 # Reuse the AlphaFold 2 parameters already on this machine rather than letting
 # BindCraft 2 download another 5.3 GB. Exported ONLY when a directory was found:
 # an exported-but-empty BINDCRAFT_* variable counts as a value and fails, rather
-# than falling back.
+# than falling back. The Documents/OLD archive was never renamed on disk, so the
+# pre-rename spelling stays in the search order.
 for _af2 in \\
     "${{BINDCRAFT2_AF2_PARAMS:-}}" \\
     "{BINDERSCOUT_DIR}/BindCraft/params" \\
-    "${{HOME}}/Documents/OLD/BinderScout/bindcraft-tools/af2_params"; do
+    "${{HOME}}/Documents/OLD/BinderScout/bindcraft-tools/af2_params" \\
+    "${{HOME}}/Documents/OLD/BindMaster/bindcraft-tools/af2_params"; do
     if [[ -n "$_af2" && -d "$_af2" ]]; then
         export BINDCRAFT_AF2_PARAMS="$_af2"
         break

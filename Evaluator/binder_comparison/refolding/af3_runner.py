@@ -27,6 +27,8 @@ import os
 import sys
 from pathlib import Path
 
+from .errors import PartialRefoldFailure
+
 
 def run_af3_refold(
     sequences: list[str],
@@ -121,7 +123,10 @@ def run_af3_refold(
     print(f"[af3] Results → {output_csv}")
 
     if partial is not None:
-        raise partial
+        # The scripts keep their own PartialRefoldFailure for envs where this package
+        # is not importable, so re-raise the canonical class: that is the one
+        # binder_comparison.main catches to exit 3 rather than 1.
+        raise PartialRefoldFailure(str(partial)) from partial
 
 
 def _load_completed_indices(csv_path: Path) -> set[int]:

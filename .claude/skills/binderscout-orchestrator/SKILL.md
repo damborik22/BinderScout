@@ -75,9 +75,9 @@ muni-disk/.../<TARGET>/
 On Spark (the orchestrator's home):
 
 ```
-~/dev/BinderScout/                              ← cloned repo
-~/dev/BinderScout/binderscout (CLI on $PATH)     ← unified entrypoint: `binderscout install|configure|evaluate`
-~/dev/BinderScout/tools/fleet.sh                ← drives BM1/BM2/BM4 directly over LAN SSH (probe|status|launch|poll|fetch)
+~/dev/BindMaster/                              ← cloned repo
+~/dev/BindMaster/binderscout (CLI on $PATH)     ← unified entrypoint: `binderscout install|configure|evaluate`
+~/dev/BindMaster/tools/fleet.sh                ← drives BM1/BM2/BM4 directly over LAN SSH (probe|status|launch|poll|fetch)
 ~/.claude/skills/binderscout-orchestrator/      ← this skill
 ~/.claude/skills/binderscout-worker/            ← sibling skill (used when Spark drives a remote worker)
 Mosaic/.venv/                                  ← Boltz-2 refold env (also hosts `binder-compare`)
@@ -88,6 +88,10 @@ binder-eval-esmfold2/                          ← ESMFold2 refold env (default 
 ~/.claude/.../memory/MEMORY.md                 ← persistent cross-session lessons
 ```
 
+The checkout directory itself was **not** renamed in 2.0 — it is `~/dev/BindMaster`
+on every fleet machine, and the directory name is machine-local. Resolve it rather
+than assuming either spelling in a command you ship to another box.
+
 The three CLI verbs that matter campaign-side:
 
 - `binderscout install --tool <tool>` — provisions or verifies a tool's env (worker pre-flight; orchestrator uses it to stand Spark up after a fresh clone). Standalone Miniforge auto-detect handles servers without writable system conda.
@@ -97,7 +101,7 @@ The three CLI verbs that matter campaign-side:
 On each worker machine (BM1, BM2, BM4, Clara, others):
 
 ```
-~/dev/BinderScout/                              ← cloned repo
+~/dev/BindMaster/                              ← cloned repo
 ~/runs/<TARGET>-<machine>-<tool>/              ← per-tool run dir, mirrored to RESULTS later
 ```
 

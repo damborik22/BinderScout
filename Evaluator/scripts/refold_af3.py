@@ -150,9 +150,20 @@ def refold_batch(
     # ladder AF3 would pad a 60-token complex to 256 anyway. We were not saving compute
     # by asking for 60, we were requesting a shape that cannot run.
     bucket = max(AF3_MIN_BUCKET, len(target_sequence) + max(len(s) for s in binder_sequences))
-    jax_cache_dir = Path(
-        os.environ.get("AF3_JAX_CACHE_DIR") or Path.home() / ".cache" / "binderscout" / "af3_jax_compile"
-    )
+    jax_cache_env = os.environ.get("AF3_JAX_CACHE_DIR")
+    if jax_cache_env:
+        jax_cache_dir = Path(jax_cache_env)
+    else:
+        jax_cache_dir = Path.home() / ".cache" / "binderscout" / "af3_jax_compile"
+        # 2.0 renamed this cache. A machine that already has the pre-2.0 one
+        # populated must keep using it, or every prediction shape recompiles from
+        # cold after the upgrade. Same rule as the shared target-MSA cache
+        # (target_msa._resolve_cache_dir): prefer the new path, fall back to the
+        # legacy one only when the new one does not exist.
+        if not jax_cache_dir.exists():
+            legacy = Path.home() / ".cache" / "bindmaster" / "af3_jax_compile"
+            if legacy.exists():
+                jax_cache_dir = legacy
     jax_cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Pre-warm / load the shared target MSA once for the whole batch.  Raises

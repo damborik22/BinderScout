@@ -68,7 +68,7 @@ enforced by `fleet.sh`, they're judgment calls at assignment time:**
   BM1 the same run OOMs far sooner. The three x86 boxes are *not*
   interchangeable — BM1 gets short jobs or non-BindCraft tools.
 - **BindCraft 2 on BM1 lives in a git worktree on an unpushed branch — you
-  will not find it by looking at BM1's main checkout.** `~/dev/BinderScout`
+  will not find it by looking at BM1's main checkout.** `~/dev/BindMaster`
   there is still on `master` and untouched; BindCraft 2 sits in a second
   worktree, `~/dev/bc2_x86_test`, checked out on `eight_tool`, with the tool
   itself at `~/dev/bc2_x86_test/BindCraft2` (~4.7 GB, its own uv venv,
@@ -414,8 +414,8 @@ BinderScout without applying the patch makes every design fail its feature
 build:
 
 ```bash
-ssh <m> "cd ~/dev/BinderScout/Mosaic && git apply ~/dev/BinderScout/install/patches/mosaic-offline-msa.patch"
-ssh <m> "grep -c msa_path ~/dev/BinderScout/Mosaic/src/mosaic/structure_prediction.py"   # must be >= 1
+ssh <m> "cd ~/dev/BindMaster/Mosaic && git apply ~/dev/BindMaster/install/patches/mosaic-offline-msa.patch"
+ssh <m> "grep -c msa_path ~/dev/BindMaster/Mosaic/src/mosaic/structure_prediction.py"   # must be >= 1
 ```
 
 Verify with that grep as part of any sync — do not assume the checkout is
@@ -517,7 +517,7 @@ Three rules, in order.
 **1. Query the ceiling; never quote one.** Before sizing any GPU job for BM5:
 
 ```bash
-ssh bm5 'bash -lc "~/dev/BinderScout/tools/gpurun --max"'
+ssh bm5 'bash -lc "cd ~/dev/BindMaster 2>/dev/null || cd ~/dev/BinderScout; tools/gpurun --max"'
 ```
 
 The admissible cap is `pool − unreclaimable(live) − watermark − 13 host − floor`

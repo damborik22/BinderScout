@@ -107,15 +107,29 @@ def _load_engine(path: str | Path, prefix: str) -> pd.DataFrame:
     # AF3 collapses its seeds, so neither of those can trigger it.)
     if "sequence" in df.columns:
         n_before = len(df)
+        if "iptm" in df.columns:
+            # Prefer a scored row over a blank one for the same sequence. AF3 and
+            # ESMFold2 write a BLANK row when a design fails and append the retry's
+            # scored row after it, so `keep="first"` alone kept the blank and threw away
+            # the score `--resume` existed to produce -- the design then stayed one
+            # engine short and was ranked last for a hardware reason. kind="stable"
+            # keeps file order among rows that are equally scored.
+            df = (
+                df.assign(_scored=df["iptm"].notna())
+                .sort_values("_scored", ascending=False, kind="stable")
+                .drop(columns=["_scored"])
+            )
         df = df.drop_duplicates("sequence", keep="first")
         n_dropped = n_before - len(df)
         if n_dropped:
             warnings.warn(
                 f"[merger] {prefix}: dropped {n_dropped} duplicate row(s) sharing a sequence "
-                f"with an earlier row, keeping the first of each ({n_before} -> {len(df)}). "
+                f"with an earlier row, keeping the scored one where there was one and "
+                f"otherwise the first ({n_before} -> {len(df)}). "
                 "Left in, the outer join would have multiplied those designs across every "
-                "engine. Usual cause: a refold re-run without --resume appending to an "
-                f"existing CSV -- check {path}.",
+                "engine. Usual causes: a `--resume` retry appending a score next to the "
+                "blank row an earlier failure wrote, or a refold re-run WITHOUT --resume "
+                f"appending the whole pool again -- check {path}.",
                 stacklevel=2,
             )
     rename = {col: f"{prefix}_{col}" for col in df.columns if col not in _PASSTHROUGH_COLS}

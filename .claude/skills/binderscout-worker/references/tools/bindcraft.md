@@ -27,7 +27,7 @@ In addition to the generic `pre-flight.md` checks:
 - **PyRosetta license** — academic free, commercial requires license. Confirm the env was installed with the right license posture.
 - **Aarch64 binaries (if on Spark / ARM):** `DAlphaBall.gcc` and `dssp` ARM64 versions bundled in `binderscout_examples/`. The run-script template copies them; verify post-copy:
   ```bash
-  file ~/dev/BinderScout/BindCraft/functions/DAlphaBall.gcc
+  file ~/dev/BindMaster/BindCraft/functions/DAlphaBall.gcc
   # Should report: ELF 64-bit LSB shared object, ARM aarch64
   ```
 - **Beta detection / `optimise_beta`** — if running on a known beta-sheeted target, the trajectory might trigger extra iterations. Wall-clock budget should account for this.
