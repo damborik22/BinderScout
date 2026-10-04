@@ -118,6 +118,11 @@ def test_a_fatal_fold_still_leaves_the_earlier_work_published(tmp_path, monkeypa
         raise RuntimeError("stand-in for the XLA allocator CHECK")
 
     fake.refold_batch = _explode
+    # The runner catches the script's PartialRefoldFailure in order to publish the rows
+    # that DID fold before re-raising, so the stub must carry the attribute. A plain
+    # RuntimeError like _explode is deliberately NOT that type: an abort must still fly
+    # straight through, and the pre-publish above is what saves the earlier work.
+    fake.PartialRefoldFailure = type("PartialRefoldFailure", (RuntimeError,), {})
     monkeypatch.setitem(sys.modules, "refold_boltz2", fake)
 
     with pytest.raises(RuntimeError, match="XLA allocator CHECK"):

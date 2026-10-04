@@ -233,9 +233,12 @@ with zero investigation.**
 
 **BM3 reality:** everything above marked "develop + run" is sequence-only or
 CPU. This box **cannot refold** — ESMFold2 peaks at 14,248 MiB at 150 tokens,
-above the 12 GB card at the smallest benchmarked size, and it **writes an empty
-row and exits 0 on CUDA OOM**, which would produce a complete-looking
-`metrics.csv` in which designs were demoted for a hardware reason. Every
+above the 12 GB card at the smallest benchmarked size. It used to **write an
+empty row and exit 0 on CUDA OOM**, producing a complete-looking `metrics.csv`
+in which designs were demoted for a hardware reason; as of 2026-10-04 the engine
+refuses outright on a card below 14,248 MiB, so BM3 can no longer produce that
+file at all. The conclusion is unchanged — this box still cannot refold — but it
+now fails loudly instead of plausibly. Every
 measurement step therefore blocks on one archived, fully-refolded pool being
 copied here — the longest-lead item in the plan.
 

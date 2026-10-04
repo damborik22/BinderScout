@@ -37,6 +37,11 @@ except Exception as _mem_policy_exc:  # binder_comparison not importable in this
         file=sys.stderr,
     )
 
+
+class PartialRefoldFailure(RuntimeError):
+    """Some designs folded and some did not.  Distinct exit code, rows kept."""
+
+
 import equinox as eqx
 import gemmi
 import jax
@@ -557,7 +562,7 @@ def refold_batch(
         # skipping EVERY design means the environment is broken (e.g. a Mosaic
         # checkout without the msa_path patch), and reporting that as a clean
         # run lets a batch claim success with zero results. See the guard below.
-        n_skipped = 0
+        skipped_idx: list[int] = []
         first_skip_exc = None
         prev_length = -1
 
@@ -611,7 +616,7 @@ def refold_batch(
                 )
             except Exception as e:
                 print(f"[SKIP] Binder #{idx} feature-build failed ({e!r}) — skipping")
-                n_skipped += 1
+                skipped_idx.append(idx)
                 first_skip_exc = first_skip_exc or repr(e)
                 jax.clear_caches()
                 continue
@@ -820,6 +825,7 @@ def refold_batch(
     print(f"\n{'=' * 55}")
     print("=== Run Complete ===")
     print(f"Processed {len(results_ref)} binder(s).")
+    n_skipped = len(skipped_idx)
     if n_skipped:
         print(f"Skipped  {n_skipped} binder(s) on feature-build failure.")
     print(f"Results  → {txt_path}, {csv_path}")
@@ -840,6 +846,32 @@ def refold_batch(
             f"This is an environment fault, not bad input. First error: {first_skip_exc}. "
             "Common cause: this machine's Mosaic checkout predates the msa_path "
             "parameter — apply install/patches/mosaic-offline-msa.patch in Mosaic/."
+        )
+
+    # And a PARTIAL skip, which until now exited 0.  Boltz-2 omits the row entirely
+    # rather than blanking it (unlike ESMFold2), so the CSV is simply SHORT -- and the
+    # downstream guard only asked whether the file gained *any* rows, which a short
+    # file does.  The consequence is identical either way: the missing designs drop to
+    # a 2-engine mean and fail the >=3-engine gate, indistinguishable in metrics.csv
+    # from designs three engines disliked.
+    #
+    # Boltz-2 has no static VRAM floor for the same reason it needs this check more:
+    # its demand scales hard and card-dependently (8,518 MiB at 150 tokens on a 3090,
+    # 16,712 at 300, failure at 600; GB10 needs ~1.5x a discrete card for identical
+    # work), so any predicted floor would either refuse a card that can fold a
+    # 60-token complex or pass one that cannot do 300.  This guard measures instead.
+    #
+    # Folded rows are kept -- they are valid work, written as they complete.
+    if n_skipped:
+        raise PartialRefoldFailure(
+            f"{n_skipped} of {n_todo} binder(s) were SKIPPED and {n_todo - n_skipped} folded. "
+            f"Exiting non-zero because a missing row is not a neutral absence: it drops that "
+            f"design below the cross-engine gate for a non-quality reason, which reads as a "
+            f"quality judgement in metrics.csv. First error: {first_skip_exc}. "
+            f"Skipped design indices: {', '.join(str(i) for i in sorted(skipped_idx))}. "
+            f"Re-run those indices (a larger card if the cause is memory — demand rises steeply "
+            f"with token count), or drop the engine with --skip-boltz2 --min-engines 2 rather "
+            f"than reporting a short pool as complete."
         )
 
 
@@ -937,6 +969,11 @@ def main():
     except MissingTargetMSA as exc:
         print(f"\n{exc}", file=sys.stderr)
         sys.exit(2)
+    except PartialRefoldFailure as exc:
+        # 3, not 1: the folded rows are on disk and worth keeping, so a wrapper can
+        # distinguish "re-run these indices" from "this environment is broken".
+        print(f"\n{exc}", file=sys.stderr)
+        sys.exit(3)
 
 
 if __name__ == "__main__":

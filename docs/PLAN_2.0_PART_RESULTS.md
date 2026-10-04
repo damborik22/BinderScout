@@ -822,6 +822,36 @@ not as a pool-wide ranker.
 
 ---
 
+## RFD3 design-side triage · **recorded, deliberately NOT built (D7, 2026-10-04)**
+
+A review proposed a seven-step triage cascade for RFD3 backbones. It is recorded here in
+full because the pieces are individually sound and the ordering matters, and **not built**
+because step 0 decides whether any of the rest is worth paying for and has never been
+measured.
+
+| # | step | status / why |
+|---|---|---|
+| 0 | **geometry gate before MPNN** — Rg/expected ≤ 1.45, long-range contacts ≥ 0.80/res | The one step with evidence behind it already (the `infer_ori_strategy` incident: 304 backbones lost, Rg 23.1 Å vs 10.9, long-range contacts 0.21 vs 1.19/res). **Measure the cull rate first.** If it culls ~0 % on correctly-centred runs it is free insurance and nothing downstream is justified by it; if it culls 30 % the saving is the whole case for the cascade. Nobody has counted. |
+| 1 | MPNN on survivors | unchanged from today |
+| 2 | **best-over-k by fraction-clearing-scRMSD** | A genuinely better ordinal than mean scRMSD — it asks "how many of the k sequences fold back", which is what a designer wants. Needs a fold-back per sequence, so it is the expensive step, and `prefilter` already does cheap fold-back ranking (see Z). Build the two together or neither. |
+| 3 | cluster at TM 0.60 | Reasonable, but Y/`design_families` already clusters; this would be a second definition of "family" unless it reuses `design_ids.safe_stem` and the existing join. |
+| 4 | AF2 initial-guess | A real cross-check, and the cheapest *independent* one we are not running. Note what it is **not**: it is not a fourth consensus engine, because BindCraft and BindCraft 2 hallucinate against AF2, so an AF2 score must never enter `consensus_iptm_mean`. Diagnostic only. |
+| 5 | SAP (spatial aggregation propensity) | Overlaps AggreProt (D3), which is built and waiting on a model. Do not add a second aggregation signal before the first one has a label to validate against. |
+| 6 | move `qc-annotate` upstream | Cheap and clearly right — it currently annotates after the expensive work, which is the wrong end. The one item here that could ship on its own. |
+
+**Calibration anchor.** The published 1.5–7 % experimental hit-rate band is the right
+sanity check on any cascade's output volume: a cascade that leaves 200 designs for a
+campaign expecting ~5 hits is not triaging.
+
+**Why recorded and not built.** Every step past 0 costs either GPU time or a second copy
+of machinery that already exists (clustering, aggregation, fold-back ranking). Z is the
+cautionary precedent: a cascade that looked safe against our own *ranking* lost four of
+the ten genuinely tightest binders when checked against measured affinity. So the order
+is: measure step 0's cull rate, ship step 6 if it stands alone, and do not build 2–5
+until there is a labelled pool to validate recall against.
+
+---
+
 ## What would move the most, next
 
 1. **Decide §1** (pre-filtered pools) — unblocks finishing AD, the largest

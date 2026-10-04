@@ -188,3 +188,117 @@ def apply_jax_memory_policy(engine: str, target_gib: float, *, env=None, verbose
     if verbose:
         print(f"  [{engine}] XLA mem fraction {frac} ({why})")
     return frac
+
+
+# ---------------------------------------------------------------------------
+# Device floor: refuse BEFORE loading weights on a card that cannot run at all
+# ---------------------------------------------------------------------------
+#
+# WHY A SEPARATE GUARD
+# --------------------
+# The functions above size a memory *cap*.  They say nothing about whether the
+# card is large enough in the first place, and the failure when it is not is
+# silent by construction: ESMFold2 catches a per-binder CUDA OOM, writes an EMPTY
+# row and continues, so a 12 GB card produces a full-length CSV of blanks and
+# exits 0.  Every one of those designs then drops to a 2-engine mean and fails the
+# >=3-engine gate -- demoted for a hardware reason, reported as if it were a
+# quality judgement.  Recorded in docs/data/gpu_benchmark_2026-09-18/README.md and
+# in docs/PLAN_binderscout_v2.md, where it is the reason BM3 "cannot refold".
+#
+# ONLY ESMFOLD2 HAS A FLOOR, and the asymmetry is the point.
+#   ESMFold2 is dominated by getting ESMC-6B onto the card, so its 150-token peak
+#   IS the floor and does not fall with a smaller complex: 14,248 MiB on an RTX
+#   3090 and 13,781 MiB on GB10 -- two architectures agreeing, because the number
+#   is a weight-residency cost, not a graph cost.  "A floor, not a slope"
+#   (docs/NEXT_STAGES.md).  A card that cannot hold the weights cannot run it at
+#   any size, which is a prediction a static check can make honestly.
+#
+#   Boltz-2 gets NO floor on purpose.  It scales hard AND card-dependently: 8,518
+#   MiB at 150 tokens on a 3090, 16,712 at 300, outright failure at 600 -- while
+#   GB10 needs ~1.5x a discrete card for identical work.  The benchmark README
+#   exists to stop precisely this inference ("predicting one card's requirement
+#   from another's is what this file exists to stop").  A static floor would either
+#   refuse a 12 GB card that can genuinely fold a 60-token complex -- CALCA is 60 --
+#   or pass one that cannot do 300.  Boltz-2 is covered instead by the per-design
+#   accounting in its runner, which MEASURES rather than predicts.
+#
+#   AF3 gets none because it never exceeded 5,224 MiB anywhere in the sweep, flat
+#   across 150-900 tokens.  No card in the fleet is below that.
+ENGINE_MIN_DEVICE_MIB: dict[str, int] = {"esmfold2": 14248}
+
+ALLOW_SMALL_GPU_ENV = "BINDERSCOUT_ALLOW_SMALL_GPU"
+
+
+class InsufficientDeviceMemory(RuntimeError):
+    """This GPU cannot run the engine at any input size."""
+
+
+def device_total_mib() -> int:
+    """Total memory of device 0 in MiB, or 0 when it cannot be measured.
+
+    Same two-source resolution as ``resolve_mem_fraction``: ``libcudart`` first,
+    ``nvidia-smi`` as the second opinion (the Mosaic uv venv cannot dlopen
+    libcudart at all, yet its card is perfectly usable).
+    """
+    gib = _cuda_pool_gib() or _nvidia_smi_total_gib()
+    return int(gib * 1024) if gib > 0 else 0
+
+
+def require_device_memory(engine: str, *, min_mib: int | None = None, env=None) -> int:
+    """Raise ``InsufficientDeviceMemory`` if this card is below *engine*'s floor.
+
+    Call this BEFORE loading weights.  Returns the measured device total in MiB
+    (0 when unmeasurable).
+
+    Three deliberate non-refusals, each of which must stay a non-refusal:
+
+    * **No floor recorded** for the engine -- see the comment above; the absence is
+      a measurement decision, not an oversight, so this is silent.
+    * **Pool unmeasurable** (``libcudart`` absent and no ``nvidia-smi``).  Refusing
+      here would break CPU-only test hosts and every container without the NVIDIA
+      stack, and we would be refusing on an *assumption* about size.  Says so and
+      proceeds.
+    * ``BINDERSCOUT_ALLOW_SMALL_GPU=1`` -- the escape hatch for deliberately
+      exercising the code path on a small card.  It warns that the output is NOT
+      authoritative, because that is the whole content of the refusal: the engine
+      will still write blank rows, and they must not be read as scores.
+    """
+    env = os.environ if env is None else env
+    floor = ENGINE_MIN_DEVICE_MIB.get(engine) if min_mib is None else min_mib
+    if not floor:
+        return device_total_mib()
+
+    total = device_total_mib()
+    if total <= 0:
+        print(
+            f"  [{engine}] NOTE: device memory could not be measured, so the {floor} MiB floor was not checked.",
+            file=sys.stderr,
+        )
+        return 0
+    if total >= floor:
+        return total
+
+    override = (env.get(ALLOW_SMALL_GPU_ENV) or "").strip().lower()
+    if override in ("1", "true", "yes"):
+        print(
+            f"  [{engine}] WARNING: {ALLOW_SMALL_GPU_ENV} is set and this card has "
+            f"{total} MiB against a {floor} MiB floor. Proceeding, but the output is "
+            f"NOT AUTHORITATIVE: {engine} writes a blank row on CUDA OOM, and a blank "
+            f"row demotes a design below the cross-engine gate for a hardware reason. "
+            f"Do not report these rows as scores.",
+            file=sys.stderr,
+        )
+        return total
+
+    raise InsufficientDeviceMemory(
+        f"{engine} needs at least {floor} MiB of GPU memory and this device has {total} MiB. "
+        f"This is a floor, not a slope -- the figure is the cost of resident weights, so a "
+        f"smaller complex does not make it fit, and no input size will run here. Refusing "
+        f"BEFORE loading weights, because the alternative is what this guard exists to stop: "
+        f"{engine} catches the CUDA OOM per design, writes a BLANK row and exits 0, so the run "
+        f"looks complete while every design silently drops an engine and fails the cross-engine "
+        f"gate -- demoted for a hardware reason and reported as a quality judgement. "
+        f"Run this engine on a larger card, pass --skip-{engine} to evaluate without it (and "
+        f"--min-engines 2), or set {ALLOW_SMALL_GPU_ENV}=1 to proceed with output that is "
+        f"explicitly not authoritative."
+    )

@@ -8,6 +8,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A partial refold failure exited 0, and four separate mechanisms kept it quiet.** Each
+  engine already refused when *every* design failed; none refused when *some* did — the
+  likelier case, because demand rises with token count, so on a marginal card the long
+  binders fail and the short ones pass and the CSV comes back plausible. A failed design
+  loses an engine, so its `consensus_iptm_mean` is taken over the survivors and it drops
+  below the `>=3`-engine gate — in `metrics.csv` that is indistinguishable from three
+  engines having disliked it. Four fixes, because any one alone is defeated by the others:
+
+  - `require_device_memory()` refuses ESMFold2 on a card below **14,248 MiB** *before* the
+    MSA fetch and the weight download (measured: 14,248 MiB at 150 tokens on an RTX 3090,
+    13,781 on GB10 — a floor rather than a slope, because it is resident-weight cost). This
+    is what enforces "BM3 must never produce authoritative refolds" in code rather than in
+    convention. `BINDERSCOUT_ALLOW_SMALL_GPU=1` overrides it and says the output is not
+    authoritative. **Boltz-2 and AF3 deliberately get no floor** — Boltz-2's demand is
+    card-dependent (8,518 MiB at 150 tokens, 16,712 at 300, failure at 600; GB10 needs
+    ~1.5× a discrete card), so a static floor would either refuse a card that can fold a
+    60-token complex or pass one that cannot do 300.
+  - All three engines now raise `PartialRefoldFailure` and **exit 3** when some designs
+    failed — 3, not 1, because the rows that did fold are on disk and the message names the
+    failed indices, so a wrapper can tell "re-run these" from "this environment is broken".
+    The runners hold the exception until after the publish/absolutise step, which sits
+    *after* the call, so re-raising immediately would strand exactly those rows.
+  - `--resume` now keys on the **score**, not on `idx`. A failed design's blank row carries
+    an `idx`, so resume skipped precisely the designs it existed to retry, reproduced the
+    gap exactly and reported success. Fixed in all three runners (the path production uses)
+    and in ESMFold2's own entrypoint.
+  - `evaluate.sh`'s `csv_rows()` counts rows with a non-empty `iptm`, not rows. A blank row
+    is a row, so the guard added specifically to catch "an engine that exits 0 and writes
+    nothing" printed `ok -- 50 new row(s)` over 50 blanks. The column is found by **name**,
+    since the three engines order their columns differently and a hard-coded index would
+    read a different column per engine.
+
+  Pinned by `tests/test_a_blank_refold_row_is_not_a_score.py` (43 tests), mutation-tested
+  against 15 mutations. Two of those mutations initially passed: commenting the preflight
+  out left a substring-based ordering assertion green, and making a runner swallow the
+  exception was untested altogether — the runner is the only boundary production crosses,
+  since `binder-compare refold-<engine>` never calls the scripts' `main()`.
+
 - **Four surfaces named the wrong metric as the ranking metric, and one of them was an
   agent instruction.** `rank_designs()` has always been correct — gate on `--min-engines`,
   sort on `consensus_iptm_mean`, tie-break on `consensus_iptm_n` → `consensus_iptm` →

@@ -528,7 +528,25 @@ engine_esmfold2 () {
 # that exits 0 and writes nothing is the same failure wearing a success code
 # (cf. the AF3 empty-rows incident of 2026-08-21), so rc alone is not enough:
 # the CSV must actually gain rows.
-csv_rows () { if [[ -f "$1" ]]; then tail -n +2 "$1" | wc -l; else echo 0; fi; }
+# Counts rows that carry a SCORE, not rows.  The distinction is the whole guard:
+# ESMFold2 writes a full-length row with every score blank when a design OOMs, so
+# `tail -n +2 | wc -l` -- which this was -- counted 50 blanks as 50 successes and
+# printed "ok -- 50 new row(s)" over an engine that produced nothing.  A blank row is
+# not a neutral absence either: it drops that design below the >=3-engine gate, which
+# in metrics.csv is indistinguishable from three engines disliking it.
+#
+# `iptm` is the right column because it is what consensus_iptm_mean averages -- the
+# exact quantity whose absence demotes the design -- and all three engines emit it
+# under that name.  Done in awk rather than by field index: the engines' CSVs have
+# different column orders, so a hard-coded $7 would silently read the wrong column.
+csv_rows () {
+    if [[ ! -f "$1" ]]; then echo 0; return; fi
+    awk -F',' '
+        NR == 1 { for (i = 1; i <= NF; i++) if ($i == "iptm") c = i; next }
+        c && $c != "" { n++ }
+        END { print n + 0 }
+    ' "$1"
+}
 
 engine_csv () {
     case "$1" in
@@ -548,7 +566,8 @@ check_engine_rows () {
         return 1
     fi
     if [[ "$after" -le "$before" ]]; then
-        echo "Error: $name exited 0 but wrote no new rows to $csv ($before -> $after)." >&2
+        echo "Error: $name exited 0 but wrote no new SCORED rows to $csv ($before -> $after)." >&2
+        echo "       Counted on a non-empty iptm, so a file full of blank rows counts as zero." >&2
         echo "       A missing engine silently breaks the cross-engine gate -- aborting." >&2
         return 1
     fi
