@@ -54,19 +54,26 @@ _MODEL_IDS: dict[str, str] = {
 # adopted — and re-validate before trusting cross-run comparisons.
 _MODEL_REVISIONS: dict[str, str | None] = {
     "biohub/ESMFold2-Fast": os.environ.get("ESMFOLD2_REVISION") or None,
-    # Moved forward from 8fc3ff471022 on 2026-09-27: that snapshot cannot be
-    # loaded by any installable transformers. A pinned checkpoint with an UNPINNED
-    # loader is only half a contract, and the two halves drifted apart via a renamed
-    # config key. Measured from the two configs:
-    #   8fc3ff471022  transformers_version 4.57.6, structure_head.distogram_bins = 64
-    #   69869f737bef  transformers_version 5.16.0.dev0, structure_head carries BOTH
-    #                 num_distogram_bins = 64 and distogram_bins = 64
-    # transformers 5.x reads `num_distogram_bins`; the old config has only the old key,
-    # so the head is built from the CLASS DEFAULT of 128 over 64-bin weights and the
-    # load fails with `distogram_head.weight: ckpt torch.Size([64, 256]) vs model
-    # torch.Size([128, 256])`. The newer snapshot carries both names for exactly this
-    # reason. Override with $ESMFOLD2_REVISION.
-    "biohub/ESMFold2": os.environ.get("ESMFOLD2_REVISION") or "69869f737beffec5294845ede23db5fc0b4f509e",
+    # REVERTED to 8fc3ff471022 on 2026-10-05, and the 2026-09-27 reasoning for
+    # moving to 69869f737bef is recorded here because it was wrong in one premise.
+    #
+    # That reasoning said 8fc3ff "cannot be loaded by any installable transformers".
+    # True of PyPI transformers, and irrelevant: this engine does not run on PyPI
+    # transformers at all. The loader is the BIOHUB FORK, pinned by the esm SDK at
+    # github.com/Biohub/transformers @ 3a8956fb, which reports version 4.57.6 and is
+    # the only build whose class is named `ESMFold2Model` and carries `load_esmc`.
+    # PyPI transformers 5.x ships its own `EsmFold2Model` with neither, so adopting
+    # 69869f737bef (authored against 5.16.0.dev0) silently swapped the implementation
+    # and took out the DEFAULT refold engine: `from_pretrained(..., load_esmc=False)`
+    # raises TypeError on every released 5.x. Measured 2026-10-05 on 5.16.1, 5.17.0
+    # and 5.18.0 -- all three have __init__(self, config) and no load_esmc.
+    #
+    # 8fc3ff471022 is also the revision every validated result in this project was
+    # produced with: the CALCA and CBG pools and the 563-design benchmark. With the
+    # fork it loads and reproduces them -- control design quick-boar-ruby refolds to
+    # iptm 0.8875 against a stored 0.8925. Override with $ESMFOLD2_REVISION, and
+    # re-validate before trusting cross-run comparisons if you do.
+    "biohub/ESMFold2": os.environ.get("ESMFOLD2_REVISION") or "8fc3ff471022fdce52c77030685eb775de0c00a3",
 }
 
 # Pinning ESMFold2 alone is NOT enough: it nests a second, separately-fetched model.
@@ -531,6 +538,27 @@ def _load_model_and_builder(repo_id: str, *, target_msa=None):
             '`conda run -n binder-eval-esmfold2 python -c "import transformers; '
             'print(transformers.__version__)"`, then reinstall the env with '
             "`binderscout install --tool esmfold2`."
+        )
+
+    # A class under the right NAME is not the right class. Only the biohub fork
+    # carries `load_esmc`, and the fold calls it two lines later -- so without this
+    # check the failure is a bare TypeError about an unexpected keyword argument,
+    # hundreds of lines into a run, naming nothing that points at the loader. PyPI
+    # transformers 5.x satisfies the import above and fails here.
+    if not hasattr(ESMFold2Model, "load_esmc"):
+        import transformers as _tf
+
+        raise RuntimeError(
+            f"transformers {_tf.__version__} at {_tf.__file__} has an ESMFold2 class "
+            "WITHOUT `load_esmc`, so it is PyPI transformers, not the biohub fork this "
+            "engine requires. ESMFold2 cannot fold on it. The fork is pinned by the esm "
+            "SDK at github.com/Biohub/transformers @ 3a8956fb (it reports version "
+            "4.57.6). Its git URL currently 404s, so a fresh env must mirror the "
+            "package from a machine that already has it: copy site-packages/transformers "
+            "and transformers-4.57.6.dist-info, with tokenizers==0.22.2, "
+            "safetensors==0.8.0 and huggingface-hub==0.36.2 to match. To verify, import "
+            "ESMFold2Model from transformers.models.esmfold2.modeling_esmfold2 and check "
+            "that it has a load_esmc attribute."
         )
 
     try:
