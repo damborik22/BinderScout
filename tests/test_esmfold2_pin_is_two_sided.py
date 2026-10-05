@@ -1,27 +1,42 @@
 """A pinned checkpoint needs a pinned loader, or the pin is only half a contract.
 
-BinderScout 1.0.2 pinned the ESMFold2 model revision for reproducibility but left
-`transformers` at `>=4.50` with no upper bound. The two halves then drifted apart via a
-renamed config key, and by 2026-09-27 the pinned snapshot could not be loaded by any
-installable transformers -- which broke the DEFAULT refold engine on every fresh install,
-not just one machine.
+**The 2026-09-27 version of this file asserted the wrong half, and is retracted here.**
+It concluded that ESMFold2 support "exists only from transformers 5.x" because PyPI
+4.57.6 ships no ``transformers.models.esmfold2`` module, and therefore required the
+installers to pin ``transformers>=5.16`` and the checkpoint to be ``69869f737bef``.
 
-Measured from the two checkpoint configs on that date:
+That reasoning confused a version STRING with a distribution. The loader this engine
+actually runs on is the **biohub fork**, ``github.com/Biohub/transformers`` at commit
+``3a8956fb``, which *reports* version 4.57.6 and is the only build whose class is named
+``ESMFold2Model`` and carries ``load_esmc`` -- the method the fold calls. Measured
+2026-10-05:
 
-    8fc3ff471022  transformers_version 4.57.6      structure_head.distogram_bins = 64
-    69869f737bef  transformers_version 5.16.0.dev0 structure_head carries BOTH
-                                                   num_distogram_bins = 64 and
-                                                   distogram_bins = 64
+* BM2's working env, untouched since it produced the CALCA and CBG pools and the
+  563-design benchmark: ``transformers 4.57.6`` whose ``direct_url.json`` records
+  ``github.com/Biohub/transformers @ 3a8956fb``, with ``ESMFold2Model.load_esmc``
+  present.
+* PyPI ``transformers`` 5.16.1, 5.17.0 and 5.18.0: all three expose ``EsmFold2Model``
+  with ``__init__(self, config)`` and **no** ``load_esmc``. So
+  ``from_pretrained(..., load_esmc=False)`` raises
+  ``TypeError: unexpected keyword argument 'load_esmc'`` on every released 5.x.
+* Consequence of the retracted pin: installing ``transformers>=5.16`` replaced a working
+  loader with one that cannot fold, while the env still verified clean. ESMFold2 is the
+  DEFAULT refold engine, so this took it out everywhere the pin was applied.
+* With the fork plus ``8fc3ff471022``, the control design ``quick-boar-ruby`` refolds to
+  ``iptm 0.8875`` against a stored ``0.8925`` -- i.e. it reproduces the benchmark.
 
-transformers 5.x reads `num_distogram_bins`. The old config has only the old key, so the
-head is built from the class default of 128 over 64-bin weights:
-`distogram_head.weight: ckpt torch.Size([64, 256]) vs model torch.Size([128, 256])`.
+So ``8fc3ff471022`` is not "unloadable": it is the revision every validated result in
+this project was produced with, and the one the fork loads. The ``num_distogram_bins``
+measurement in the retracted docstring was real but applies only to PyPI 5.x, which this
+engine does not run on.
 
-And the old floor described nothing real: **4.57.6 has no `transformers.models.esmfold2`
-module at all**, so `>=4.50` could never have been satisfied by a 4.x release.
+The fork's git URL currently 404s, so a fresh env cannot fetch it and must mirror the
+package from a machine that has it. ``refold_esmfold2`` refuses at load time when the
+resolved class lacks ``load_esmc``, which is what turns that from a silent half-install
+into a named failure.
 
-These checks are static -- they read the pin and the revision -- because the alternative
-needs ~10 GB of weights and a datacentre-class card.
+These checks are static -- they read the pin, the revision and the guard -- because the
+alternative needs ~10 GB of weights and a datacentre-class card.
 """
 
 from __future__ import annotations
@@ -35,54 +50,77 @@ REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "Evaluator" / "scripts" / "refold_esmfold2.py"
 INSTALLERS = (REPO / "install" / "install.sh", REPO / "install" / "install_aarch.sh")
 
-#: The snapshot whose config predates the key rename. It cannot be loaded by any
-#: transformers that ships esmfold2, so it must never come back as the default.
-_UNLOADABLE_REVISION = "8fc3ff471022fdce52c77030685eb775de0c00a3"
+#: The revision the biohub fork loads, and the one behind every validated result here.
+_VALIDATED_REVISION = "8fc3ff471022fdce52c77030685eb775de0c00a3"
 
-#: ESMFold2 support exists only from transformers 5.x, and the pinned snapshot's config
-#: reports 5.16.0.dev0.
-_MIN_TRANSFORMERS = (5, 16)
+#: Authored against a transformers pre-release (5.16.0.dev0) whose API no released
+#: transformers reproduces. Pinning it is what broke the default engine.
+_DEV_ONLY_REVISION = "69869f737beffec5294845ede23db5fc0b4f509e"
 
 
-def test_the_unloadable_revision_is_not_pinned():
+def _pinned_revision() -> str:
     text = SCRIPT.read_text()
-    match = re.search(r'"biohub/ESMFold2":\s*os\.environ\.get\("ESMFOLD2_REVISION"\)\s*or\s*"([0-9a-f]{40})"', text)
+    match = re.search(
+        r'"biohub/ESMFold2":\s*os\.environ\.get\("ESMFOLD2_REVISION"\)\s*or\s*"([0-9a-f]{40})"',
+        text,
+    )
     assert match, "refold_esmfold2 no longer pins a revision for biohub/ESMFold2"
-    assert match.group(1) != _UNLOADABLE_REVISION, (
-        "the pinned ESMFold2 revision is the one whose config predates the "
-        "num_distogram_bins rename — it cannot be loaded by any transformers that "
-        "ships esmfold2. See this test's docstring for the measurement."
+    return match.group(1)
+
+
+def test_the_validated_revision_is_the_default():
+    assert _pinned_revision() == _VALIDATED_REVISION, (
+        "the default ESMFold2 revision must be the one the biohub fork loads and that "
+        "produced the benchmark. See this module's docstring for the measurement."
+    )
+
+
+def test_the_dev_only_revision_is_not_pinned():
+    assert _pinned_revision() != _DEV_ONLY_REVISION, (
+        "69869f737bef was authored against transformers 5.16.0.dev0, whose load_esmc "
+        "API no released transformers provides — pinning it disables the default engine."
     )
 
 
 @pytest.mark.parametrize("installer", INSTALLERS, ids=lambda p: p.name)
-def test_transformers_is_pinned_high_enough_to_have_esmfold2(installer):
-    text = installer.read_text()
-    found = re.findall(r"'transformers([><=!,.0-9]*)'", text)
-    assert found, f"{installer.name} no longer installs transformers into the ESMFold2 env"
-    for spec in found:
-        floor = re.search(r">=\s*(\d+)\.(\d+)", spec)
-        assert floor, f"{installer.name}: transformers spec {spec!r} has no >= floor"
-        version = (int(floor.group(1)), int(floor.group(2)))
-        assert version >= _MIN_TRANSFORMERS, (
-            f"{installer.name} pins transformers{spec}, but ESMFold2 support starts at 5.x "
-            f"(4.57.6 has no transformers.models.esmfold2 module at all) and the pinned "
-            f"checkpoint's config reports {_MIN_TRANSFORMERS[0]}.{_MIN_TRANSFORMERS[1]}."
-        )
+def test_no_installer_forces_a_transformers_5x_into_the_esmfold2_env(installer):
+    """A 5.x pin installs a class that cannot fold, over a fork that can."""
+    for spec in re.findall(r"'transformers([><=!,.0-9]*)'", installer.read_text()):
+        for major, _minor in re.findall(r"(\d+)\.(\d+)", spec):
+            assert int(major) < 5, (
+                f"{installer.name} pins transformers{spec}; PyPI 5.x ships EsmFold2Model "
+                "without load_esmc and cannot fold. The loader is the biohub fork."
+            )
 
 
 @pytest.mark.parametrize("installer", INSTALLERS, ids=lambda p: p.name)
-def test_both_installers_agree_on_the_pin(installer):
-    """The two installers are separate implementations, and a loader pin that matches a
-    checkpoint on one platform but not the other is the same defect wearing a hat."""
-    specs = {re.findall(r"'transformers([><=!,.0-9]*)'", i.read_text())[0] for i in INSTALLERS}
+def test_installers_do_not_replace_a_present_fork(installer):
+    text = installer.read_text()
+    assert "load_esmc" in text, (
+        f"{installer.name} must detect an existing biohub fork (by ESMFold2Model.load_esmc) "
+        "and skip installing transformers over it"
+    )
+
+
+def test_both_installers_agree_on_the_pin():
+    """Two implementations pinning different loaders is the same defect wearing a hat."""
+    specs = {tuple(re.findall(r"'transformers([><=!,.0-9]*)'", i.read_text())) for i in INSTALLERS}
     assert len(specs) == 1, f"the installers pin different transformers versions: {specs}"
 
 
 def test_the_loader_accepts_both_class_names():
-    """transformers renamed the class ESMFold2Model -> EsmFold2Model in 5.x. Asserting
-    either one alone re-breaks the other direction."""
+    """The fork calls it ESMFold2Model, PyPI 5.x calls it EsmFold2Model. Asserting either
+    one alone re-breaks the other direction, so the loader tries both."""
     text = SCRIPT.read_text()
     assert "EsmFold2Model" in text and "ESMFold2Model" in text, (
         "refold_esmfold2 must try both transformers class spellings"
+    )
+
+
+def test_the_loader_refuses_a_class_without_load_esmc():
+    """A class under the right name is not the right class. Without this guard the
+    failure is a bare TypeError hundreds of lines into a run, naming nothing."""
+    text = SCRIPT.read_text()
+    assert 'hasattr(ESMFold2Model, "load_esmc")' in text, (
+        "refold_esmfold2 must refuse when the resolved class has no load_esmc"
     )

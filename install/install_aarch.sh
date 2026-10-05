@@ -2735,15 +2735,35 @@ install_esmfold2() {
         "${CONDA_CMD}" run -n binder-eval-esmfold2 \
         pip install -q --index-url https://download.pytorch.org/whl/cu130 torch \
         || { print_fail "Failed to install torch into binder-eval-esmfold2"; return 1; }
-    # transformers>=5.16, not >=4.50: the 4.x series has NO
-    # transformers.models.esmfold2 module at all (checked on 4.57.6), so the old floor
-    # described nothing real, and it left the upper end open -- which is how a pinned
-    # checkpoint ended up unloadable by the version pip actually installs. 5.16 is where
-    # the pinned snapshot's config comes from (transformers_version 5.16.0.dev0); keep
-    # this floor and refold_esmfold2._MODEL_REVISIONS in step.
-    run_logged "Installing transformers + gemmi + safetensors into binder-eval-esmfold2" \
-        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'transformers>=5.16' gemmi safetensors \
-        || { print_fail "Failed to install transformers/gemmi/safetensors into binder-eval-esmfold2"; return 1; }
+    # NO PyPI transformers pin here, and that is deliberate. This engine runs on the
+    # BIOHUB FORK (github.com/Biohub/transformers @ 3a8956fb, reports 4.57.6): it is the
+    # only build whose class is `ESMFold2Model` WITH `load_esmc`, which the fold calls.
+    # PyPI transformers 5.x ships its own `EsmFold2Model` with neither, so the previous
+    # `transformers>=5.16` pin replaced a working loader with one that cannot fold and
+    # left the env verifying clean -- measured 2026-10-05 on 5.16.1, 5.17.0 and 5.18.0,
+    # all three `__init__(self, config)` with no load_esmc. The fork's git URL 404s, so
+    # it cannot be fetched here; an env without it must mirror it from a machine that
+    # has it. Never install transformers OVER a present fork.
+    if "${CONDA_CMD}" run -n binder-eval-esmfold2 python -c \
+        'from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model as M; raise SystemExit(0 if hasattr(M, "load_esmc") else 1)' \
+        >/dev/null 2>&1; then
+        print_ok "biohub transformers fork already present (ESMFold2Model.load_esmc) — not replacing it"
+        run_logged "Installing gemmi + safetensors into binder-eval-esmfold2" \
+            "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q gemmi safetensors \
+            || { print_fail "Failed to install gemmi/safetensors into binder-eval-esmfold2"; return 1; }
+    else
+        # Install a transformers so `import esm` resolves, but say plainly that ESMFold2
+        # cannot fold yet. 4.57.6 matches the version the fork reports and the one the
+        # esm SDK was built against. refold_esmfold2.py refuses at load time with the
+        # mirroring instructions, so this is a warning and not a silent half-install.
+        run_logged "Installing transformers 4.57.6 + gemmi + safetensors into binder-eval-esmfold2" \
+            "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'transformers==4.57.6' gemmi safetensors \
+            || { print_fail "Failed to install transformers/gemmi/safetensors into binder-eval-esmfold2"; return 1; }
+        print_warn "ESMFold2 cannot fold until the biohub transformers fork is mirrored into"
+        print_warn "  binder-eval-esmfold2 (site-packages/transformers + transformers-4.57.6.dist-info"
+        print_warn "  from a machine that has it; pair with tokenizers==0.22.2, safetensors==0.8.0,"
+        print_warn "  huggingface-hub==0.36.2). The refolder refuses at load time until then."
+    fi
     # biohub/esm: pinned commit per the HuggingFace model card (no PyPI release yet).
     #
     # --no-deps is load-bearing, not an optimisation, and this file was missing it:
