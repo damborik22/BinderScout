@@ -2788,6 +2788,18 @@ install_af3() {
         "${CONDA_CMD}" run -n binder-eval-af3 build_data \
         || { print_fail "Failed to run AF3 build_data (CCD pickle)"; return 1; }
 
+    # Upstream AF3 rounds every confidence score it writes to TWO decimals (iPTM 0.87, not
+    # 0.868557), which left AF3 with 81 distinct iPTM values against 563 for every other
+    # engine on the 563-design benchmark and understated it in every rank-based metric.
+    # This edits the INSTALLED package, so a reinstall silently undoes it; applying it here
+    # on every install_af3 is what keeps it applied. The patch is a script FILE passed to
+    # python, never a heredoc: `conda run` does not forward stdin, so a heredoc-fed patch runs
+    # nothing and exits 0 (how the PXDesign patches were skipped for months). The script
+    # re-reads the file it wrote and exits non-zero if AF3 would still round.
+    run_logged "Patching AF3 to write confidence scores at full precision" \
+        "${CONDA_CMD}" run -n binder-eval-af3 python "${BINDERSCOUT_DIR}/install/patches/af3_full_precision.py" \
+        || { print_fail "AF3 precision patch did not apply -- iPTM would be rounded to 2 decimals"; return 1; }
+
     # Install binder-compare into the env so 'binder-compare refold-af3' works
     run_logged "Installing binder-compare into binder-eval-af3" \
         "${CONDA_CMD}" run -n binder-eval-af3 pip install -q -e "${EVALUATOR_DIR}[report]" \
@@ -3621,6 +3633,14 @@ _af3_ccd_built() {
     [[ -n "${sp}" && -f "${sp}/constants/converters/chemical_component_sets.pickle" ]]
 }
 
+# True when the installed AF3 writes its confidence scores at full precision. Without the
+# patch AF3 still runs and still produces plausible numbers, just rounded to two decimals, so
+# nothing else can see it: `import alphafold3` and the CCD check both pass.
+_af3_full_precision() {
+    "${CONDA_BASE}/envs/binder-eval-af3/bin/python" \
+        "${BINDERSCOUT_DIR}/install/patches/af3_full_precision.py" --check >/dev/null 2>&1
+}
+
 _count_glob() {
     # shellcheck disable=SC2012  # count only; names are not parsed
     ls "$@" 2>/dev/null | wc -l
@@ -3676,6 +3696,8 @@ verify_tool() {
                 VERIFY_REASON="alphafold3 not installed in binder-eval-af3 (wheel build failed?)"
             elif ! _af3_ccd_built; then
                 VERIFY_REASON="AF3 CCD data missing in binder-eval-af3 — run: ${CONDA_CMD} run -n binder-eval-af3 build_data"
+            elif ! _af3_full_precision; then
+                VERIFY_REASON="AF3 rounds its confidence scores to 2 decimals (precision patch missing or lost) — run: ${CONDA_CMD} run -n binder-eval-af3 python ${BINDERSCOUT_DIR}/install/patches/af3_full_precision.py"
             elif ! _env_refold_cli_ok binder-eval-af3 refold-af3; then
                 VERIFY_REASON="binder-compare refold-af3 does not run in binder-eval-af3 (evaluate.sh calls it there)"
             fi ;;

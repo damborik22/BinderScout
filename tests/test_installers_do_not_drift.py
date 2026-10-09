@@ -168,7 +168,14 @@ def test_the_rejection_message_invents_nothing(path):
 # the aarch64 copy of a check rots, and `install_aarch.sh` had no verifier at all
 # until 2026-09-27: `--verify` dispatches there on aarch64 and exited 1 with
 # "Unknown option", leaving Spark as the only platform that could not be audited.
-_SHARED_VERIFY_FUNCTIONS = ("_env_python_ok", "_env_refold_cli_ok", "_af3_ccd_built", "_count_glob", "verify_tool")
+_SHARED_VERIFY_FUNCTIONS = (
+    "_env_python_ok",
+    "_env_refold_cli_ok",
+    "_af3_ccd_built",
+    "_af3_full_precision",
+    "_count_glob",
+    "verify_tool",
+)
 
 
 def _function_body(path: Path, name: str) -> str:
