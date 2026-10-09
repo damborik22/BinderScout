@@ -2134,3 +2134,7 @@ should be moved once more, then frozen: further fixes belong in a patch version,
 no longer names one thing in anyone's notes. In flight when this was written: the Clara rerun of
 nipah c24-c26 (the clean test of the BM5 site effect), the GuideFlip alpha-synuclein and RBX1
 arms, and the muni-disk archive, which has not been read back.
+
+### 2026-10-09 (late) — the Clara rerun, and the tag
+
+The 85 nipah designs refolded on Clara agree with BM5 closely for ESMFold2 (mean |delta iPTM| 0.022), less for AF3 (0.068) and least for Boltz-2 (0.108), which ran identical software at both sites. So the spread is mostly run-to-run noise, and the AF3 build difference is not distinguishable from it. No same-site repeat was run, so that is an inference. Recorded in plan 4.13. The `v2.0.0` tag was re-cut once more to include the AF3 installer patch and these records; later fixes go into `v2.0.1`.
