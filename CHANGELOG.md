@@ -475,6 +475,29 @@ the plan are feature work, not shipping blockers. See
 
 ### Fixed — 2.0
 
+- **ESMFold2, the default refold engine, could not fold under the 2.0 pin.** The engine runs on the
+  **biohub fork** of transformers (`github.com/Biohub/transformers` @ `3a8956fb`, which reports
+  version 4.57.6), the only build whose `ESMFold2Model` has `load_esmc`. PyPI transformers 5.16.1,
+  5.17.0 and 5.18.0 expose a same-named class without it, so `from_pretrained(..., load_esmc=False)`
+  raised `TypeError` on every released 5.x. `transformers>=5.16` and the default checkpoint
+  `69869f737bef` (authored against a 5.16.0.dev0 pre-release) had replaced a working loader with one
+  that cannot fold, while the env still verified clean. Reverted to `8fc3ff471022`, the revision every
+  validated result used. The loader now refuses a class without `load_esmc` and names the fork and the
+  mirroring procedure; neither installer pins 5.x or installs over a present fork; the pin test, which
+  asserted the opposite contract, is rewritten. The fork's git URL 404s, so an env without it must
+  copy `site-packages/transformers` from a machine that has it (pure Python).
+- **A Boltz-2 refold could publish another run's rows.** `engine_boltz2` was the only engine that did
+  not pass `--output-dir`, whose default is relative to the current directory, so `--resume` read a
+  shared `refold_designs.csv`. A fresh 20-design run skipped 86 "completed" binders, folded nothing and
+  reported 260 new rows, which the row guard accepted because it counts non-empty iPTM. Scoped to
+  `$OUTPUT/refold_boltz2`, as AF3 and ESMFold2 already were.
+- **AF3 wrote every confidence score to two decimals.** iPTM 0.87 instead of 0.868557: 81 distinct values
+  over 563 designs against 563 for each other engine, which understated AF3 in every rank-based metric.
+  `install/patches/af3_full_precision.py` fixes the installed package; both installers run it after
+  every build (a reinstall silently undoes it), and `--verify` detects a lost patch through its
+  `--check` mode. It is a script file, not a heredoc (`conda run` does not forward stdin), re-reads
+  what it wrote, and fails loudly on source it does not recognise.
+
 - **Every heredoc-fed installer patch executed nothing and reported success.**
   `run_logged` launches its command with `&`, and bash redirects an async
   command's stdin from `/dev/null`; `conda run` compounds it by not forwarding

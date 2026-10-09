@@ -2000,3 +2000,137 @@ Two operational facts went into CLAUDE.md because both cost time today: the flee
 to go). It runs against the *editable* `binder_comparison` install in `~/dev/BindMaster`, so a
 pull swaps the package under a live process. The study is Part AF — adopt or do not adopt a
 fourth engine — so its answer lands after the tag and belongs to 2.1 either way.
+
+
+## 2026-10-07 to 10-09 — AK1 ran, and most of what it taught was about the apparatus
+
+Part AK1 was the plan's own verification step: refold every labelled design on the four targets
+with a known sequence through all three engines, so the shipped ranking is measured on more data
+than 563 designs. It ran: 2,033 designs x 3 engines = 6,099 folds, 50 chunks, four sites (Clara
+x5 workers, BM5, BM2, BM4), no chunk failed. The ranking result is in plan §4.16. This entry is
+about everything that had to be fixed before the run could be believed, because that is where
+nearly all of the two days went.
+
+### The default engine had been dead since the pin, and "upgrading" it made it worse
+
+I started AK1 on BM5 through the Evaluator, deliberately, to exercise it. Boltz-2 and AF3
+reproduced the stored benchmark (Spearman 0.994 and 0.981 on 20 designs). ESMFold2 died with
+`TypeError: EsmFold2Model.__init__() got an unexpected keyword argument 'load_esmc'` and the
+evaluator refused to report a partial pool, which is the 2.0 behaviour working as designed.
+
+**Wrong turn.** Earlier I had upgraded `transformers` to 5.18 on BM4 and BM5 to satisfy the
+installer's `>=5.16` floor and told the owner it fixed ESMFold2. It had not: it moved the failure
+from "config cannot be parsed" to "model API does not match". I tested 5.16.1, 5.17.0 and 5.18.0
+and none has `load_esmc`, so the cause could not be a 5.18 regression, and I had been proposing a
+choice between "fix the loader" and "run two-engine" as though the engine had only ever been half
+built.
+
+The owner's correction reframed it: *ESMFold2 produced all our CALCA and CBG data, and the
+benchmark.* It had worked. So what differed on a machine that still worked? BM2, untouched since
+that data was made, had `transformers 4.57.6` whose `direct_url.json` named
+`github.com/Biohub/transformers` at commit `3a8956fb`. The engine runs on a fork. PyPI's 5.x
+ships a same-named class without the method. The 2026-09-27 reasoning that `8fc3ff471022`
+"cannot be loaded by any installable transformers" was true and irrelevant. Mirroring the fork
+(pure Python, copied between architectures) and pairing it with `8fc3ff471022` gave iPTM 0.8875
+against a stored 0.8925 on the control design. pip had been saying it all along:
+`esm 3.3.0 requires transformers @ git+...Biohub/transformers.git@3a8956fb`.
+
+### Three failures that looked like one
+
+BM5 failed Boltz-2 on nipah's longest design three times on the same 53.75 GiB allocation, under
+a "48G" cap, a "70G" run and an "85G" attempt. I read the first as "48G is too small" and raised it.
+The log line that settled it was `XLA mem fraction 0.197 ... target 24 GiB`, printed *after* I had
+passed 85G: `--gpu-cap-boltz2` sets the MPS driver limit and never the JAX pool, which
+`refold_boltz2.py` hardcodes at 24 GiB. The first and second failures were the same pool. The
+85 GiB attempt then died differently, with SIGKILL (rc 137), and that was `gb10-guard`: `MemFree`
+fell to 15.9 GiB against its 24 GiB floor, and it kills **unregistered** jobs first ("launch it via
+gpurun so it can be reasoned about"). `gpurun --max` had advertised 91 GiB. A job launched through
+`gpurun --cap 70` registered a budget and left 33 GiB. The 70 GiB run then failed on the real limit:
+Boltz-2 on GB10 needs about 1.5x a discrete card, and the same designs fit a 70 GiB pool on an H200.
+So BM5 took the short end of nipah and Clara the long. Three runs, three causes, one symptom.
+
+### The phantom resume
+
+The first clean-looking evaluator run on BM5 printed `Resuming - skipping 86 already-completed
+binders` into a brand-new output directory, folded nothing, and ended with
+`[Boltz-2] ok -- 260 new row(s)`. `engine_boltz2` was the only engine without `--output-dir`; its
+default is relative to the working directory, so `--resume` read another run's CSV and the row
+guard (non-empty iPTM) counted someone else's 260 rows as this run's. The 2.0 guard catches an
+engine that writes nothing and cannot catch one that publishes something else. Found only because
+I used the Evaluator for the job instead of calling the engines directly.
+
+### Where the time went: distinct lengths, not designs
+
+Boltz-2 took 25 minutes on egfr c01 and 101 on c02, both 40 designs of similar size. c01 has one
+distinct length and c02 thirteen. JAX recompiles per input shape, about 6 minutes each on an H200
+against 0.6 to fold. I had projected from the first chunk and was wrong by a factor of two for
+the next; the corrected estimate came from three measured chunks.
+
+### Clara: a path alias
+
+All three first Clara workers died in 3 seconds on `No module named 'binder_comparison'`. The pre-warm
+step discards its own output, so the error was invisible; running its command by hand showed
+`conda run -n binder-eval python` resolving to the **base** interpreter. Conda reports its base as
+its filesystem's canonical mount path and strips only that spelling from PATH; the shorter
+home-directory alias I had put on PATH stayed, and won. Canonical spelling fixed it for all four envs. No GPU time was lost.
+
+### The AF3 patch I applied by hand, and what it cost to leave it there
+
+AF3 rounds confidence scores to two decimals (81 distinct iPTM values over 563 designs). I patched
+`site-packages` on four machines. Then I rebuilt BM5's AF3 to the pinned commit and the patch
+vanished, exactly as a reinstall would. It is now `install/patches/af3_full_precision.py`, run by
+both installers and checked by `--verify`; I confirmed the new tests go red when the call is
+turned into a heredoc and when the verify branch is removed. The same pass found that BM5's AF3
+was the April v3.0.2 build while the pin is July's `fd39d2c5`, and that its ESMFold2 env had
+xformers.
+
+### Auditing my own result, which found that I had overstated it
+
+I had written that the three-engine mean "has the best macro AUC and is a robust choice" and that
+AF3 "carries no signal on egfr". Five independent auditors, told to find what was wrong and given
+no credit for confirming, rebuilt everything from raw files. The data held (all 16 AUCs and the
+egfr bootstrap interval reproduced); my claims did not. The mean's +0.021 over the best single
+engine is within noise and reverses under n-weighting; AF3's egfr result is confounded by binder
+collapse (352 of 826 designs). I also generalised "refolding noise is about +-0.1 AUC" from pd-l1
+(Boltz-2 0.717 to 0.820) and il7r then showed under 0.01. Both are corrected in plan §4.16 and
+§4.18. The audit also confirmed one stale label and 215 unexpressed designs scored as negatives.
+
+### Small mistakes, listed because each cost time
+
+* `pkill -f` with a pattern that also matched my own ssh command line killed my session, not the
+  job. The repo's own guard script warns about exactly this in a comment I had not re-read.
+* I let GPU runs write to muni-disk, which is transfer and backup, not a working disk; moved them
+  to local NVMe and kept the first output as evidence.
+* A dedupe in my monitor lost its state inside a pipe subshell and replayed old failures as new
+  ones every cycle; it also ended one watch window as "silence", when my filter had no heartbeat.
+* I read an archive stream's start time as 30 minutes ago when it was 3.
+* A `$HOME` in a single-quoted deploy argument created a literal directory named `$HOME` inside the
+  repo. Moved and removed; the tree stayed clean.
+
+### Two external sets, and why neither is the next benchmark
+
+**OpenBind** (small molecules against one viral protease) was prepared and then dropped on the
+owner's clarification that the goal is designing proteins that bind a small molecule, the inverse
+direction. What carried over: the affinity task reproduced the June numbers (molecular weight 0.486,
+Boltz-2 0.401); co-folding pose success at top-1 is only 5.7% (Boltz-2) to 26% (Protenix), so a
+designed protein-ligand complex cannot be trusted on ipTM alone; and AF3 accepts a SMILES ligand in
+the JSON it already builds (two hand-built complexes folded). Public data for the real task is tiny
+(17 designs / 2 binders; 26 / 4).
+
+**GuideFlip** (de novo binders to flexible targets): the repository has no experimental data, only
+the preprint's supplementary tables, which I parsed (88 designs, 71 measured, 30 binders). Its own
+labelling is careful and I kept it: designs with no assay record are excluded, not negatives. The
+nanobody arm folded in 25 minutes and was uninformative: Boltz-2 gave every design 0.90 to 0.94,
+ESMFold2 0.85 to 0.90, AF3 almost every design 0.11 to 0.20, identically for binders and
+non-binders (5 non-binders). The tested designs were pre-filtered on structure-prediction
+confidence, so there is no spread left, and the target is an agonist-bound conformation that a
+protein-only fold cannot express. The owner set it aside as BinderScout nano work.
+
+### Where it stands
+
+All sites were on the tag on 2026-10-09; `v2.0.x` is one commit ahead (the installer patch) and
+the changelog now describes what the tag contains. The tag was re-cut five times after release and
+should be moved once more, then frozen: further fixes belong in a patch version, because "v2.0.0"
+no longer names one thing in anyone's notes. In flight when this was written: the Clara rerun of
+nipah c24-c26 (the clean test of the BM5 site effect), the GuideFlip alpha-synuclein and RBX1
+arms, and the muni-disk archive, which has not been read back.
