@@ -6,10 +6,10 @@ diary first; pointers are given where the detail lives.
 | | |
 |---|---|
 | **Branch** | `v2.0.x` (all 2.0 work; `master` is frozen at 1.0.3, `v1.1.x` is the BindCraft 2 line) |
-| **HEAD** | `v2.0.x` is **one commit ahead of the `v2.0.0` tag** (`cd7faa9`: the AF3 full-precision patch encoded in both installers). The tag itself was **re-cut five times after release** (2026-10-04 to 10-09, with the owner's say-so) to carry the audit fixes, the Boltz-2 output-dir fix and the ESMFold2 loader fix, and sits at `dec5268`. Anything that recorded the original `d6ed96b` is stale. Clean, pushed |
+| **HEAD** | The `v2.0.0` tag was **re-cut six times after release** (2026-10-04 to 10-09, with the owner's say-so) to carry the audit fixes, the Boltz-2 output-dir fix, the ESMFold2 loader fix, the AF3 full-precision installer patch and this session's records. It sits at the tip of `v2.0.x`; further fixes go into `v2.0.1`. Anything that recorded the original `d6ed96b` is stale. Clean, pushed |
 | **Tests** | **1109 passing**, 7 skipped; ruff + shellcheck clean |
 | **Version** | **`v2.0.0`, TAGGED 2026-10-04** on `v2.0.x` — 158 commits past `v1.1.1`. Fleet only: not published, and **not merged to `master`** by decision. **This row previously read "the tag waits on §3's GPU-memory pass" — the operator overrode that on 2026-10-04**, and the reasoning inverts cleanly: the memory pass goes last *because a reading taken against an unfinished pipeline is stale*, which means the pipeline must ship first for the reading to be worth taking. Stage 6 is now post-2.0.0 work, not a tag blocker |
-| **Fleet** | All five sites (BM1, BM2, BM4, BM5, Clara) were checked out at the tag, `dec5268`, on 2026-10-09. A moved tag is **not** updated by a plain `git fetch`: use `git fetch --tags --force`, and measure `behind` only after a forced fetch. `v2.0.x` is one commit ahead (the installer patch), which no site has pulled. Checkout path is `~/dev/BindMaster` on the BM boxes and `~/BindMaster` on Clara; `tools/fleet.sh` resolves either. **Do not switch a checkout under a running job**: the eval envs are editable installs of it |
+| **Fleet** | All five sites (BM1, BM2, BM4, BM5, Clara) were pinned to the tag on 2026-10-09 after the last re-cut. A moved tag is **not** updated by a plain `git fetch`: use `git fetch --tags --force`, and measure `behind` only after a forced fetch. Checkout path is `~/dev/BindMaster` on the BM boxes and `~/BindMaster` on Clara; `tools/fleet.sh` resolves either. **Do not switch a checkout under a running job**: the eval envs are editable installs of it |
 | **As of** | 2026-10-09 (about 10:00 UTC). In flight at that moment, and recorded as such below: the Clara rerun of 85 nipah designs, the GuideFlip refolds, and the muni-disk archive |
 | **Changelog** | released as `## [2.0.0] — 2026-10-04`; `[Unreleased]` is now empty |
 
@@ -164,7 +164,7 @@ it ships. Memory, not speed, decides whether a step runs at all.
 | **Archive read-back** | Everything is streamed to muni-disk as tarballs with a checksum taken in the same pass. **Nothing has been read back and compared yet**, and the rerun needs its own archive |
 | **Ligand mode in the evaluator** | The three refolders take protein sequences only. AF3 accepts a ligand entry in the JSON it already builds; Boltz-2 (Mosaic JAX port) and ESMFold2 are unverified. Needed for any small-molecule target; blocked on §5.5 |
 | **Record the AF3 build in every run** | `settings.json` should carry the AF3 commit and the ESMFold2 attention backend, so a cross-site difference is a lookup and not an audit |
-| **Re-cut the tag** | `v2.0.x` is one commit ahead. Do it only after the Clara rerun, and re-pin with `git fetch --tags --force` |
+| ~~Re-cut the tag~~ | Done 2026-10-09 after the Clara rerun; fleet re-pinned with `git fetch --tags --force` |
 
 ---
 
@@ -308,6 +308,16 @@ Upstream AF3 rounds iPTM, pTM and ranking_score to two decimals, which left AF3 
 ### 4.13 Compare engines across sites only after auditing the software at each
 
 BM5 ran nipah c24-c26 (85 designs, every one a non-binder, the shortest binders) on **AF3 3.0.2 from April** while every other site ran the pinned July build (`fd39d2c5`), and its ESMFold2 env had **xformers 0.0.35 on torch 2.12+cu130** where the x86 sites fall back to PyTorch attention. Because chunks were sorted by length, the site boundary *is* a length boundary, so the effect cannot be separated from length with this data; dropping those designs moves nipah ESMFold2 AUC 0.669 to 0.655 (a bound, not an estimate). BM5 is now rebuilt to the pin (`3.0.4.dev14+gfd39d2c5d`) and xformers is removed. Six test folds against BM2: AF3 mean |delta iPTM| 0.006 (max 0.015); ESMFold2 four of six within 0.007 but two moved by 0.06 and 0.19, which is the size of ordinary run-to-run spread but proves nothing at n = 6. **The Clara rerun is the test.** Everything else matched across sites: identical ESMFold2 revision, identical Boltz-2 and AF3 settings, byte-identical target MSAs (sha256), one git commit.
+
+**Result of the Clara rerun (2026-10-09, all 85 designs, same sequences, 3 engines).** Mean |delta iPTM| Clara vs BM5, rank correlation, designs moving more than 0.15:
+
+| engine | mean abs delta | Spearman | > 0.15 |
+|---|---|---|---|
+| ESMFold2 | 0.022 | 0.89 | 1 |
+| AF3 | 0.068 | 0.66 | 7 |
+| Boltz-2 | 0.108 | 0.76 | 23 |
+
+Read it carefully. ESMFold2, the engine with the xformers difference, agrees closely, so attention backend was not a large effect. AF3 moved more, but Boltz-2 moved *most* although its software and settings were identical at both sites. That makes the Boltz-2 figure a floor for run-to-run spread (diffusion sampling, GPU model, memory pool) and means the AF3 gap is **not clearly a software effect**: it sits below that floor. No same-site repeat exists, so the floor is inferred, not measured. Consequence: nipah per-design iPTM from BM5 carries roughly this much noise per engine; the nipah AUCs above stand as bounds, not corrected values. Short (<=30 aa) and longer binders differ little for AF3 and ESMFold2; Boltz-2 is noisier on the short ones (0.129 vs 0.099).
 
 ### 4.14 GPU memory: the cap flags are not what they look like
 
@@ -522,7 +532,7 @@ shortfall; it is now documented in CLAUDE.md.
 ## 8. How to confirm this state
 
 ```bash
-git -C . describe --tags                 # expect v2.0.0 (the tag is at dec5268; v2.0.x is one commit ahead)
+git -C . describe --tags                 # expect v2.0.0 (the tag is at the tip of v2.0.x)
 git status --short                       # expect empty
 ./conda/envs/binder-eval/bin/python -m pytest tests/ -q     # 1109 passed, 7 skipped
 uvx ruff check . && uvx ruff format --check .
