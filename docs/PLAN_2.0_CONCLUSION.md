@@ -6,11 +6,11 @@ diary first; pointers are given where the detail lives.
 | | |
 |---|---|
 | **Branch** | `v2.0.x` (all 2.0 work; `master` is frozen at 1.0.3, `v1.1.x` is the BindCraft 2 line) |
-| **HEAD** | tagged `v2.0.0`, clean, pushed |
-| **Tests** | **1084 passing**, 7 skipped; ruff + shellcheck clean |
+| **HEAD** | `v2.0.x` is **one commit ahead of the `v2.0.0` tag** (`cd7faa9`: the AF3 full-precision patch encoded in both installers). The tag itself was **re-cut five times after release** (2026-10-04 to 10-09, with the owner's say-so) to carry the audit fixes, the Boltz-2 output-dir fix and the ESMFold2 loader fix, and sits at `dec5268`. Anything that recorded the original `d6ed96b` is stale. Clean, pushed |
+| **Tests** | **1109 passing**, 7 skipped; ruff + shellcheck clean |
 | **Version** | **`v2.0.0`, TAGGED 2026-10-04** on `v2.0.x` — 158 commits past `v1.1.1`. Fleet only: not published, and **not merged to `master`** by decision. **This row previously read "the tag waits on §3's GPU-memory pass" — the operator overrode that on 2026-10-04**, and the reasoning inverts cleanly: the memory pass goes last *because a reading taken against an unfinished pipeline is stale*, which means the pipeline must ship first for the reading to be worth taking. Stage 6 is now post-2.0.0 work, not a tag blocker |
-| **Fleet** | BM2 and BM5 on `v2.0.x` but **behind the tag** (9 and 5 commits, measured 2026-10-04 after forcing a fetch — their stale `origin` refs reported `behind=0`). BM1 / BM4 / Clara pending, via BM4 as fleet manager. **Do not pull on BM2 until the Chai-1 study finishes** — it runs against the editable `binder_comparison` install there. Fleet checkout path is `~/dev/BindMaster`, not `~/dev/BinderScout` |
-| **As of** | 2026-10-04 |
+| **Fleet** | All five sites (BM1, BM2, BM4, BM5, Clara) were checked out at the tag, `dec5268`, on 2026-10-09. A moved tag is **not** updated by a plain `git fetch`: use `git fetch --tags --force`, and measure `behind` only after a forced fetch. `v2.0.x` is one commit ahead (the installer patch), which no site has pulled. Checkout path is `~/dev/BindMaster` on the BM boxes and `~/BindMaster` on Clara; `tools/fleet.sh` resolves either. **Do not switch a checkout under a running job**: the eval envs are editable installs of it |
+| **As of** | 2026-10-09 (about 10:00 UTC). In flight at that moment, and recorded as such below: the Clara rerun of 85 nipah designs, the GuideFlip refolds, and the muni-disk archive |
 | **Changelog** | released as `## [2.0.0] — 2026-10-04`; `[Unreleased]` is now empty |
 
 Companions: [NEXT_STAGES.md](NEXT_STAGES.md) (stage detail),
@@ -77,6 +77,20 @@ Both are now guarded by tests, and the guards are mutation-tested.
 | **1.1.x parity** | Two commits were missing, one a **rollout blocker**: `f596509` pins ESMFold2's nested ESMC-6B encoder, without which it loads random weights and still exits 0 (300/300 binders lost, four days to spot); `bd2d112` stops a skipped engine's existing CSV being dropped from the report |
 | **Proteina-Complexa installs and runs on aarch64** | First time. Six defects fixed, five of them ours — `uv venv --clear`, the editable install's index strategy, the bf16 smoke test blaming XLA for an OOM kill, missing `openbabel`, and the installer shadowing PC's vendored ColabDesign fork |
 
+### Added 2026-10-07 / 10-09
+
+| area | state |
+|---|---|
+| **Post-release audit** | 27 bugs confirmed by two adversarial reviewers each, fixed; 24 issues then raised against the fixes (3 blockers, 21 items), all closed. The headline: `run_logged` backgrounds its command and `conda run` does not forward stdin, so every heredoc-fed PXDesign patch **executed nothing and printed a green check** (7 sites across both installers). Patch bodies are now files passed as an argument, with an assertion on the result. See §4.10 |
+| **ESMFold2 was broken by the 2.0 pin** | The engine runs on the **biohub fork** of transformers, not PyPI. `transformers>=5.16` plus the default revision `69869f737bef` disabled the *default* refold engine while the env still verified clean. Reverted to `8fc3ff471022`; the loader now refuses a class without `load_esmc`; neither installer pins 5.x or installs over a present fork; the pin test was rewritten. See §4.9 |
+| **Boltz-2 output directory leak** | `engine_boltz2` was the only engine without `--output-dir`, so `--resume` read another run's CSV: a fresh 20-design run published 260 foreign rows and the guard printed `ok -- 260 new row(s)`. Scoped to `$OUTPUT/refold_boltz2`. See §4.11 |
+| **AF3 full precision** | Upstream rounds confidence scores to two decimals (81 distinct iPTM values over 563 designs, against 563 for each other engine). `install/patches/af3_full_precision.py`, run by both installers after the build; `--verify` re-checks it through `--check`. Mutation-tested. See §4.12 |
+| **Part AK1 executed** | 2,033 designs x 3 engines on 4 targets = 6,099 folds, 50 chunks, 4 sites, **zero failures**. Result and its limits in §4.16 |
+| **AK1 integrity audit** | Five independent read-only auditors (identity, labels, engine outputs, run provenance, statistics). No identity or output defect; one stale label; one cross-site software difference (BM5); and interpretation claims that did not survive. See §4.13, §4.16, §4.17 |
+| **Part AF adjudicated** | Chai-1 on 563/563 designs, 0 errors. Partial Spearman **+0.116** (p = 0.006) against a pre-registered bar of 0.15: **not adopted**. Criterion 2 (sign stable across folds) passes |
+| **GuideFlip external set** | Labelled data extracted from the preprint's supplementary tables (the repository holds code only): 88 designs, 71 measured, 30 binders. Alpha-synuclein and RBX1 arms folding; the nanobody arm is done and **set aside as BinderScout nano work** |
+| **OpenBind assessed, dropped** | Wrong direction for this toolkit (fixed protein, varying ligand). Its affinity task reproduces the June numbers; AF3 accepts a SMILES ligand input (verified by hand, not yet in the refolder). See §5.5 |
+
 ### Verified end to end (2026-09-27)
 
 The whole pipeline was run as an operator would — install → configure →
@@ -109,9 +123,7 @@ refold data. What is now demonstrated rather than assumed:
 
 
 ### Stage 1 (AD) — the metric itself
-`hits.py` holdout. **Blocked on decision §5.1** (pre-filtered pools) and, for
-its stated gate ("holdout passes a KS test vs the pool"), on a real campaign
-with a genuine generation order.
+`hits.py` holdout. §5.1 was **decided on 2026-10-04** (so the old "blocked on §5.1" is stale); what remains is, for its stated gate ("holdout passes a KS test vs the pool"), a real campaign with a genuine generation order.
 
 ### Stage 2 (Y) — one decision before anything consumes it
 Y and AG both specify `binder_comparison/benchmarks.py`; AG additionally
@@ -128,8 +140,8 @@ starts.** Unblocks AG and AH.
 
 ### Stage 4 (Z) — staged cheap-filter mode
 Can start whenever; AA's one load-bearing prerequisite is already closed in
-code. Its real prerequisite is **two archived pools with all three engine
-CSVs**, to measure recall at the keep-fraction — this box has none.
+code. Its real prerequisite was **two archived pools with all three engine
+CSVs**, to measure recall at the keep-fraction. **That is now met (2026-10-09):** AK1 produced complete three-engine pools for egfr (826 designs, 128 binders) and nipah (1,045, 111), plus il7r and pd-l1, archived on muni-disk. What is not done is the recall measurement itself.
 
 One correction to carry: Z's stated gate ("`rank` byte-identical with and
 without `--stage1-results`") **tests the wrong thing.** That flag only attaches
@@ -140,6 +152,19 @@ bound.**
 ### Stage 6 — the GPU-memory pass, and it goes LAST
 By decision: a reading taken against an unfinished pipeline is stale by the time
 it ships. Memory, not speed, decides whether a step runs at all.
+
+**Inputs measured on 2026-10-07/09, so the pass starts from facts** (details in §4.14): the `--gpu-cap-*` flags set only the driver limit and never the JAX pool; `refold_boltz2.py` hardcodes 24 GiB; on GB10 the memory guard and `gpurun --max` disagree about what is safe; Boltz-2 on GB10 needs about 1.5x a discrete card, so designs of roughly 840+ tokens cannot be folded there at a safe size; and chunk wall time follows the number of **distinct lengths**, not the number of designs (§4.15).
+
+### Opened 2026-10-09 (not yet staged)
+
+| item | state |
+|---|---|
+| **`--gpu-cap-*` flags do nothing for JAX** | Either wire the cap into `<ENGINE>_XLA_MEM_FRACTION` or remove the flags. Decision in §5.6 |
+| **Clara rerun of nipah c24-c26** | 85 designs (all non-binders, the shortest binders) were folded on BM5 with an older AF3 build and an ESMFold2 env that had xformers. Being refolded on Clara so every site matches. When it lands: replace them in the consolidated table and **measure the BM5-vs-Clara site effect directly** (the only clean measurement; the audit could only bound it) |
+| **Archive read-back** | Everything is streamed to muni-disk as tarballs with a checksum taken in the same pass. **Nothing has been read back and compared yet**, and the rerun needs its own archive |
+| **Ligand mode in the evaluator** | The three refolders take protein sequences only. AF3 accepts a ligand entry in the JSON it already builds; Boltz-2 (Mosaic JAX port) and ESMFold2 are unverified. Needed for any small-molecule target; blocked on §5.5 |
+| **Record the AF3 build in every run** | `settings.json` should carry the AF3 commit and the ESMFold2 attention backend, so a cross-site difference is a lookup and not an audit |
+| **Re-cut the tag** | `v2.0.x` is one commit ahead. Do it only after the Clara rerun, and re-pin with `git fetch --tags --force` |
 
 ---
 
@@ -263,6 +288,57 @@ Across 2026-10-03/04, the pattern was not missing information but unread informa
 
 The lesson that generalises: when a document asserts two things are *the same*, check the
 identifiers it cites in the same breath.
+
+### 4.9 The default refold engine runs on a fork, and a pin can disable it while everything verifies
+
+ESMFold2 produced the CALCA and CBG pools and the 563-design benchmark, and 2.0 stopped it from folding anywhere that was installed or upgraded under the new pin. The engine runs on **`github.com/Biohub/transformers` at `3a8956fb`**, which *reports* version 4.57.6 and is the only build whose class is `ESMFold2Model` **with `load_esmc`**, the method the fold calls. PyPI transformers 5.16.1, 5.17.0 and 5.18.0 were each checked: all expose `EsmFold2Model` with `__init__(self, config)` and no `load_esmc`. So `transformers>=5.16` plus the default revision `69869f737bef` (authored against the 5.16.0.dev0 pre-release) replaced a working loader with one that raises `TypeError: unexpected keyword argument 'load_esmc'`, while the env still verified clean. The 2026-09-27 reasoning that `8fc3ff471022` "cannot be loaded by any installable transformers" was true of PyPI and irrelevant: this engine does not run on PyPI transformers. **The class name is not the contract; the method is.** The fork's git URL now 404s, so an env without it must be mirrored from one that has it (pure Python, so it crosses architectures), with `tokenizers==0.22.2`, `safetensors==0.8.0`, `huggingface-hub==0.36.2`. The loader refuses with those instructions rather than failing mid-run. pip itself recorded the truth: `esm 3.3.0 requires transformers @ git+...Biohub/transformers.git@3a8956fb`.
+
+### 4.10 A patch that is not a file is not a patch
+
+`conda run` does not forward stdin, and `run_logged` launches its command with `&` (bash then redirects an async command's stdin from `/dev/null`). A heredoc fed to `python` under either executes nothing and exits 0, so `run_logged` printed a green check over a no-op. Seven PXDesign patch sites were skipped this way, and a May install whose log said all four applied had none of them. The rule for every patch: **a script file passed as an argument, then an assertion on what is on disk**, never the return code. Mutation-check it: put the heredoc back and confirm a test goes red.
+
+### 4.11 Scope every engine's output directory to the run
+
+A default that is relative to the current directory is shared state. `refold-boltz2` defaulted `--output-dir` to `./refold_boltz2`; `--resume` then read whatever an earlier run left there. A fresh 20-design run logged "skipping 86 already-completed binders", folded nothing, and reported **260 new rows** (other runs'), because the guard counts non-empty iPTM and all 260 had one. **The guard added in 2.0 catches an engine that writes nothing; it cannot catch one that publishes someone else's rows.** AF3 and ESMFold2 already scoped theirs.
+
+### 4.12 A patch to installed software dies on reinstall
+
+Upstream AF3 rounds iPTM, pTM and ranking_score to two decimals, which left AF3 with 81 distinct iPTM values against 563 for every other engine and understated it in every rank metric. The fix edits the installed package, so it vanished the moment BM5's AF3 was rebuilt. It now lives in the installers (`install/patches/af3_full_precision.py`), runs after every build, and `--verify` can see a loss. Without the `--check` path nothing could: `import alphafold3` and the CCD check both pass on a rounded build. Only some builds also round PAE to one decimal, so that edit is optional; an *unrecognised* source fails loudly.
+
+### 4.13 Compare engines across sites only after auditing the software at each
+
+BM5 ran nipah c24-c26 (85 designs, every one a non-binder, the shortest binders) on **AF3 3.0.2 from April** while every other site ran the pinned July build (`fd39d2c5`), and its ESMFold2 env had **xformers 0.0.35 on torch 2.12+cu130** where the x86 sites fall back to PyTorch attention. Because chunks were sorted by length, the site boundary *is* a length boundary, so the effect cannot be separated from length with this data; dropping those designs moves nipah ESMFold2 AUC 0.669 to 0.655 (a bound, not an estimate). BM5 is now rebuilt to the pin (`3.0.4.dev14+gfd39d2c5d`) and xformers is removed. Six test folds against BM2: AF3 mean |delta iPTM| 0.006 (max 0.015); ESMFold2 four of six within 0.007 but two moved by 0.06 and 0.19, which is the size of ordinary run-to-run spread but proves nothing at n = 6. **The Clara rerun is the test.** Everything else matched across sites: identical ESMFold2 revision, identical Boltz-2 and AF3 settings, byte-identical target MSAs (sha256), one git commit.
+
+### 4.14 GPU memory: the cap flags are not what they look like
+
+`evaluate.sh --gpu-cap-boltz2/-af3/-esmfold2` set `CUDA_MPS_PINNED_DEVICE_MEM_LIMIT` only. The JAX pool is set elsewhere: `refold_boltz2.py` hardcodes a 24 GiB target, and only `<ENGINE>_XLA_MEM_FRACTION` overrides it. Three BM5 runs failed identically (a 53.75 GiB single allocation) because the "48G" and "85G" caps never reached JAX. On GB10 the pool is system RAM and `gb10-guard` SIGKILLs at `MemFree` below 24 GiB, **unregistered jobs first**; an 85 GiB pool left 15.9 GiB and was killed although `gpurun --max` advertised 91 GiB. A job launched through `gpurun --cap N` registers a declared budget; 70 GiB left 33 GiB and ran. And **Boltz-2 on GB10 needs about 1.5x a discrete card**: the same nipah designs fit a 70 GiB pool on an H200 but not on GB10 (845-token complexes), so the longest designs belong on Clara. Query the live ceiling, never quote it.
+
+### 4.15 Chunk time follows distinct lengths, not designs
+
+JAX recompiles for every new input shape and there is no persistent compile cache for Boltz-2. egfr c01 (40 designs, **1** distinct length) took 25 minutes in Boltz-2; c02 (40 designs, **13** lengths) took 101. About 6 minutes per distinct length on an H200, against 0.6 minutes to fold. Chunks sorted by length share few shapes with their neighbours, so a cache would not have helped much. Plan runs by distinct-length count. BM5 spends roughly 5 minutes per design per engine on compilation alone.
+
+### 4.16 AK1: what the full-scale refold shows, with the claims it does not support
+
+2,033 designs, labels corrected (one stale label, il7r `bright-panther-frost` 0 to 1; effect <= 0.004):
+
+| solo AUC | egfr | il7r | nipah | pd-l1 | macro, equal | macro, by n |
+|---|---|---|---|---|---|---|
+| Boltz-2 | 0.687 | 0.671 | 0.543 | 0.820 | 0.680 | 0.617 |
+| AF3 | 0.498 | 0.709 | 0.589 | 0.771 | 0.642 | 0.563 |
+| ESMFold2 | 0.621 | 0.712 | 0.669 | 0.686 | 0.672 | 0.652 |
+| mean of three | 0.629 | 0.737 | 0.636 | 0.805 | **0.702** | 0.643 |
+
+**Supported:** no engine wins on every target (Boltz-2 on egfr and pd-l1, ESMFold2 on il7r and nipah); the mean is never the worst and is within 0.06 of the best everywhere; it beats AF3 by 0.060 [+0.030, +0.090]. **Not supported, and previously stated:** that the mean is *better* than the best single engine. Its macro edge is +0.021, 95% CI [-0.011, +0.039], indistinguishable from zero, and it reverses under n-weighting (ESMFold2 0.652 vs 0.643). On egfr alone the mean is *worse* than Boltz-2 by 0.058 [-0.092, -0.025]. Dropping AF3 does not help (0.696). "No signal from AF3 on egfr" is also too strong: AF3 returns a collapsed binder (pLDDT < 0.5) for 352/826 egfr and 324/1045 nipah designs and for none in il7r or pd-l1. Chai-1, adjudicated separately, is not adopted. **The mean is a defensible hedge, not a demonstrated improvement.**
+
+### 4.17 Label denominators, again
+
+215 of 2,033 designs (10.6%; egfr 69, nipah 146) did not express and are labelled non-binders by documented convention, so the AUCs partly measure expression (dropping them moves macro mean3 by 0.006). State the denominator beside any number. The GuideFlip supplement says the same thing in its own words, "an undetermined affinity does not imply absence of binding", and marks `dnRB7` as "not classified as a binding negative"; 17 of its 88 designs were never assayed and are kept out of the labels. The historical failure (never-ordered rows read as negatives) has now been met three times.
+
+### 4.18 Do not generalise a noise estimate from one target
+
+Refolding the same designs moved Boltz-2's pd-l1 AUC from 0.717 to 0.820 (n = 66) and the same engine on il7r (n = 96) by under 0.01, with per-design movement independent across engines and unbiased in both. Individual designs move by 0.15 to 0.5 in a few percent of cases; what that does to an AUC depends on how many designs there are to dilute it.
+
+---
 
 ## 5. Open decisions — these are the user's, not the code's
 
@@ -389,6 +465,18 @@ computed from it.
 `tools/aarch64/dssp` carries a `/home/<account>` baked in at compile time.
 Recorded and pinned by a test. **Rebuild next time someone is on Spark anyway.**
 
+### 5.4 How AK1-style numbers are reported (proposed, not decided)
+
+Report macro AUC **both** equal-weighted and n-weighted, state the expressed/unexpressed denominator, and give a paired bootstrap interval for any claim that one ranking beats another. The equal-weighted ordering of the mean over the best single engine does not survive n-weighting (§4.16); the audit found no defect in the arithmetic, only in what was claimed from it.
+
+### 5.5 Which small molecule? **(the user's)**
+
+The goal stated on 2026-10-09 is designing proteins that bind a small organic compound, which is the inverse of OpenBind (fixed protein, varying ligand). Public experimental data for that task is tiny (RFdiffusion All-Atom digoxigenin: 17 designs, 2 binders; the Kortemme steroid set: 26 designs, 4 binders, licence not stated), so a benchmark of the AK1 kind cannot come from public sources and has to come from the first ordered designs. Our design tools that take a ligand target are RFD3, Protein-Hunter and BoltzGen. Nothing about the evaluator's ligand mode is worth building until a target is chosen. If none is, digoxigenin is the calibration case: published designs, crystal structures, a purchasable ligand.
+
+### 5.6 The `--gpu-cap-*` flags
+
+Wire them to the JAX pool fraction, or remove them (§4.14). Today they promise a ceiling they do not set.
+
 ---
 
 ## 6. Platform reality — engines, and where they actually run
@@ -422,20 +510,21 @@ shortfall; it is now documented in CLAUDE.md.
 
 | | what |
 |---|---|
-| **AF3 on BM2** | One re-run recording which `AF3_COMMIT` was used, to settle §6 |
-| **One ESMFold2 fold** | On a card that holds ~12 GB of weights, to close the loop on the pin fix (the *load* is confirmed; a completed fold is not) |
+| ~~AF3 on BM2~~ | **CLOSED 2026-10-09.** The audit read the commit at every site: Clara, BM2 and BM4 run `fd39d2c5`; BM5 ran `f6a5aec` and has been rebuilt to the pin |
+| ~~One ESMFold2 fold~~ | **CLOSED, and bigger than asked.** 2,033 ESMFold2 folds completed in AK1; the question also surfaced the fork regression (§4.9) |
 | **Proteina-Complexa throughput** | Installable on aarch64 again since 2026-09-26; the MCTS timing question is unmeasured. Run a short MCTS on Spark and time it before planning a campaign |
-| **Stage 4 validation** | Two archived pools with all three engine CSVs |
-| **Shadow-mode promotion** | Wet-lab outcome labels |
+| **Stage 4 validation** | Pools now exist (§3, Stage 4). Needs someone to run the recall-bound measurement |
+| **Shadow-mode promotion** | Wet-lab outcome labels. The GuideFlip alpha-synuclein and RBX1 sets (about 48 measured designs, 12 binders) are a possible small source; they cannot discriminate between rankings |
+| **BM5 site effect** | Needs the Clara rerun of nipah c24-c26 to finish (§3, Opened 2026-10-09) |
 
 ---
 
 ## 8. How to confirm this state
 
 ```bash
-git -C . describe --tags                 # expect v2.0.0 (or later on v2.0.x)
+git -C . describe --tags                 # expect v2.0.0 (the tag is at dec5268; v2.0.x is one commit ahead)
 git status --short                       # expect empty
-./conda/envs/binder-eval/bin/python -m pytest tests/ -q     # 1084 passed, 7 skipped
+./conda/envs/binder-eval/bin/python -m pytest tests/ -q     # 1109 passed, 7 skipped
 uvx ruff check . && uvx ruff format --check .
 shellcheck --shell=bash --severity=warning install/install.sh install/install_aarch.sh Evaluator/evaluate.sh
 ./install/install.sh --tool all --verify # audits what is actually on disk
