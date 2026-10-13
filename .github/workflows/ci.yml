@@ -62,8 +62,11 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.10"
+      # Pinned: an unpinned install turned CI red on 2026-10-13 when ruff 0.17 added a rule
+      # (RUF071) that flagged code unchanged since the last green run. Bump it on purpose,
+      # locally first (`ruff check` + `ruff format --check` on tracked files), never by drift.
       - name: Install ruff
-        run: pip install ruff
+        run: pip install ruff==0.17.0
       - name: Lint
         run: ruff check .
       - name: Format check
@@ -111,8 +114,8 @@ jobs:
   #
   # ruff and pytest are deliberately NOT here: both run the same static binary / the same
   # manylinux wheels on the same hostedtoolcache 3.10.21 on either image, so they cannot
-  # produce an Ubuntu-26-specific result -- and 'pip install ruff' is unpinned, so a
-  # canary running it would go red for reasons that have nothing to do with the OS.
+  # produce an Ubuntu-26-specific result, so a canary running them would go red for
+  # reasons that have nothing to do with the OS.
   #
   # No `shell:` key on any step, deliberately: the explicit `shell: bash` form is
   # `bash -eo pipefail`, while the real jobs above get the Linux default `bash -e`. A

@@ -63,7 +63,7 @@ exporting `$BINDCRAFT2_SOURCE` once for the host.
 ### Python — ruff
 
 ```bash
-pip install ruff
+pip install ruff==0.17.0   # the version CI pins; bump both together
 ruff check .            # lint
 ruff format --check .   # format check
 ruff format .           # auto-format
