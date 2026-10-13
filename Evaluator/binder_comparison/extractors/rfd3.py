@@ -262,7 +262,7 @@ class RFD3Extractor(SequenceExtractor):
 
         seqs = [s.strip().upper() for _, entries in entries_by_file for _, s in entries]
         seqs = [s for s in seqs if self._validate_sequence(s)]
-        shared = os.path.commonprefix(seqs) if len(seqs) >= 2 else ""
+        shared = os.path.commonprefix(seqs) if len(seqs) >= 2 else ""  # noqa: RUF071 -- sequences, not paths
         if _MIN_SHARED_TARGET_PREFIX <= len(shared) < min((len(s) for s in seqs), default=0):
             warnings.warn(
                 f"RFD3: all {len(seqs)} FASTA sequences under {input_dir} share a "

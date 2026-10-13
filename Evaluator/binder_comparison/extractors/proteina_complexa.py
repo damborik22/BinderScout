@@ -247,7 +247,7 @@ class ProteinaComplexaExtractor(SequenceExtractor):
                 )
         elif len(ok) >= 2:
             # Every row of a run embeds the same target, so the pool reveals it.
-            lcp = os.path.commonprefix(ok)
+            lcp = os.path.commonprefix(ok)  # noqa: RUF071 -- these are sequences, not paths; character-wise is intended
             if _MIN_INFERRED_TARGET_LEN <= len(lcp) < min(len(d) for d in ok):
                 prefix_len = len(lcp)
                 warnings.warn(
