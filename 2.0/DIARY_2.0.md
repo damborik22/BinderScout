@@ -2138,3 +2138,55 @@ arms, and the muni-disk archive, which has not been read back.
 ### 2026-10-09 (late) — the Clara rerun, and the tag
 
 The 85 nipah designs refolded on Clara agree with BM5 closely for ESMFold2 (mean |delta iPTM| 0.022), less for AF3 (0.068) and least for Boltz-2 (0.108), which ran identical software at both sites. So the spread is mostly run-to-run noise, and the AF3 build difference is not distinguishable from it. No same-site repeat was run, so that is an inference. Recorded in plan 4.13. The `v2.0.0` tag was re-cut once more to include the AF3 installer patch and these records; later fixes go into `v2.0.1`.
+
+---
+
+## 2026-09-23 → 09-28 (back-filled 2026-10-13) — A refold engine ran on random weights and did not fail; the box that crashed was the lucky one
+
+**Back-filled.** This predates the 2.0 split and was written to `docs/REPO_DIARY.md` on `v1.1.x`
+(commit `63fbbfc`) before the 2026-10-04 decision that the historical diary is closed and 2.0 work
+lives here. It sits in the line-2099+ region this chapter was extracted from, so this is its home
+on the 2.0 line. The fix itself is already in 2.0 — `Evaluator/scripts/refold_esmfold2.py` carries
+the pin and the coverage assert, and `dec5268`'s loader rework preserved both.
+
+**ESMFold2 loaded a randomly-initialised ESMC-6B encoder, on both machines.** The pin on ESMFold2
+does not cover the 6B model it nests: `from_pretrained()` ends in `load_esmc(config.esmc_id)` with
+the bare repo id `biohub/ESMC-6B`, so that encoder resolves at whatever upstream tags `main`.
+Upstream re-published it around 2026-09-17 in a Llama-style layout whose key overlap against the
+802 parameters the pinned `transformers` ESMCModel expects is **0/802**. HF only warns. Clara
+cached the new revision on 09-17; BM5 cached it on 09-21.
+
+**The first diagnosis was wrong, and wrong in a plausible way.** Clara aborted with
+`linalg.svd: ... failed to converge because the input matrix is ill-conditioned`, while BM5
+produced finite output — and the two boxes run different torch builds (2.6.0+cu124 vs
+2.12.0+cu130). That reads as a cuSOLVER portability difference, and it was written up as one.
+Two attempted fixes, the second informative:
+
+1. `preferred_linalg_library("magma")` — **cannot work**: `driver=` is only accepted by cuSOLVER,
+   and the call site already passes `driver="gesvd"`, its most robust.
+2. Keep cuSOLVER, fall back to CPU LAPACK. CPU then reports the real cause: **"the input matrix
+   contained non-finite values."** The SVD was never the problem; NaNs from an untrained encoder
+   were.
+
+**The machine that crashed was the lucky one.** Clara's degenerate frames hit an SVD that refused
+them. BM5's did not — it returned a complete structure, a pLDDT array and an iPTM, and those went
+into the ApoE campaign report and geometry table, where they sat for five days. The retraction
+moved the WT trimer C-domain radius of gyration from **14.1 Å to 27.2 Å**, withdrawing a
+"non-monotonic compaction" finding that was pure artifact.
+
+**Three things worth carrying:**
+- **A warning is not a guard.** `from_pretrained` tolerating a 100 % key miss with a log line is
+  the entire failure. Assert coverage; it costs seconds.
+- **A fallback that rescues a numerical failure can launder one.** Had the CPU-SVD fallback
+  "succeeded", it would have written a structure from NaN coordinates — and Rg and inter-chain
+  contact counts evaluate happily on garbage and return plausible numbers. Same shape as the silent
+  single-sequence MSA fallback and the RFD3 `infer_ori_strategy` omission.
+- **Two machines disagreeing is evidence, not an explanation.** The disagreement was real and the
+  inference from it was wrong, because the actual variable — when each box last refreshed an HF
+  cache — was not one I was looking at. It appears in no run log.
+
+**Boltz-2, from the same exercise:** needs `--no_kernels` on Clara. Its triangular-multiplication
+kernel imports `cuequivariance_torch`, installed on neither machine, so BM5's earlier successful
+runs cannot have taken that branch either. The flag makes the reference PyTorch path explicit
+rather than changing it. Unresolved: `use_kernels` defaults true and `boltz/main.py` has no
+capability gate, so why BM5 skips the kernel automatically is not established.
