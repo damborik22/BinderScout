@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed (for 2.0.1)
+
+- **A space inside a design id no longer yields mis-named structures with exit 0.** The binder id is a FASTA header's first whitespace token, so `>CALCA-Protein Hunter-01` became `CALCA-Protein` for all twelve such designs; their structures were written as `CALCA-Protein_af3.pdb` and `__2`..`__6` in file order, and none carried its own id (metrics CSVs were unaffected - they join on sequence). The three `refold-*` commands now refuse such a header before any GPU time is spent (`header_binder_id`), and `write_fasta` (so `extract` and `parse-seqs`) writes ids with whitespace replaced by `_`.
+
 ## [2.0.0] — 2026-10-04
 
 **Shipped to the fleet only; not published.** 2.0 is an *evaluation* release, not

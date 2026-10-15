@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from ..io.design_ids import header_binder_id
 from ..io.read import read_fasta
 from ..refolding.boltz2_runner import run_boltz2_refold
 
@@ -31,7 +32,7 @@ def run(args: argparse.Namespace) -> None:
     sequences = [seq for _, seq in entries]
     # The header's first token is the binder_id that 'extract' wrote; saved structures
     # are named after it, so it must not be dropped here.
-    binder_ids = [h.split()[0] if h.split() else None for h, _ in entries]
+    binder_ids = [header_binder_id(h) for h, _ in entries]
     print(f"[refold-boltz2] Loaded {len(sequences)} sequences from {args.sequences}")
     print(f"[refold-boltz2] Target length: {len(args.target_seq)} aa")
     if args.target_pdb:

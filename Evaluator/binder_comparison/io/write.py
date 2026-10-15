@@ -44,7 +44,8 @@ def write_fasta(
     with path.open("w") as fh:
         for header, seq, tag_dict in zip(headers, sequences, tags):
             tag_str = "  ".join(f"{k}={v}" for k, v in tag_dict.items())
-            full_header = f">{header}  {tag_str}".rstrip()
+            # A space inside the id would end it early for every reader (first token).
+            full_header = f">{'_'.join(str(header).split())}  {tag_str}".rstrip()
             fh.write(full_header + "\n")
             if line_width > 0:
                 for i in range(0, len(seq), line_width):
