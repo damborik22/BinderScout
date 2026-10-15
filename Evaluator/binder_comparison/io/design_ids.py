@@ -30,6 +30,29 @@ def safe_stem(binder_id) -> str:
     return "".join(c if (c.isalnum() or c in _SAFE_EXTRA) else "_" for c in str(binder_id))
 
 
+def header_binder_id(header: str) -> str | None:
+    """The ``binder_id`` of one FASTA header: its first whitespace token.
+
+    Raises ``ValueError`` when the header's second token is not a ``key=value`` tag,
+    because that means the id itself contains a space (``>CALCA-Protein Hunter-01``).
+    Reading only the first token would then give ``CALCA-Protein`` to every design from
+    that source, the stems would be rescued from colliding by ``__2``, ``__3`` suffixes
+    in file order, and no file would carry the design's own id. Measured 2026-10-14 on a
+    114-design pool: 12 structures named ``CALCA-Protein_af3.pdb`` and ``__2``..``__6``.
+    Refusing before the GPU is spent is the only point where this is cheap.
+    """
+    tokens = header.split()
+    if not tokens:
+        return None
+    if len(tokens) > 1 and "=" not in tokens[1]:
+        raise ValueError(
+            f"FASTA header {header!r} has a space inside its id: only {tokens[0]!r} would be "
+            "kept as the binder_id, and structures could not be matched back to designs. "
+            "Remove the space (use '_') in the header and re-run."
+        )
+    return tokens[0]
+
+
 def structure_stems(binder_ids, fallbacks, *, engine: str | None = None) -> list[str]:
     """One unique, filesystem-safe stem per design: ``<binder_id>_<engine>``.
 
