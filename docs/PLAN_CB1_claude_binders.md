@@ -41,3 +41,7 @@ Cas9 (90 designs) is folded against a ribonucleoprotein including 98-nt sgRNA. B
 2. Archive raw output and report to muni-disk, same layout as AK1.
 3. Decide Phase 2 from the Phase 1 result.
 4. Record the result and its caveats in the 2.0 plan next to the AK1 findings.
+
+## Result (Phase 1, 2026-10-20)
+
+Macro AUC over the ten monomer targets (263 binders): `consensus_iptm_mean` 0.671, Boltz-2 0.616, AF3 0.617, ESMFold2 0.687, binder length 0.428. mean3 minus best single engine -0.015 [-0.05, +0.02], so the AK1 pattern replicates. Ranking is strong on PD-L1 (0.90) and TREM2 (0.92), at chance on BBF-14, BHRF1 and Nipah-G. Per the decision rule, no metric search was run. Phase 2 (`--target-copies`) is therefore justified only as a replication of this modest signal, not as a route to a better ranking. Full write-up: `docs/REPORT_2026-10-23_CB1_GroScore_PPBind.md`.
