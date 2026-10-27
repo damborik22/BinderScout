@@ -102,3 +102,8 @@ Evaluator/benchmarks/**/*.pkl
 Evaluator/benchmarks/**/*.json
 !Evaluator/benchmarks/**/MANIFEST.json
 !Evaluator/benchmarks/SCHEMA.json
+
+# Repo diaries live only on the MUNI share (sensitive data); never track them
+REPO_DIARY.md
+DIARY_2.0.md
+DIARY_*.md

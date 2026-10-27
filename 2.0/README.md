@@ -2,8 +2,7 @@
 
 Everything needed to pick up 2.0. **You have the repo**, so most of this points
 at files already in it rather than copying them — a second copy of `CLAUDE.md`
-drifts from the first within a week. Only `DIARY_2.0.md` lives here, because it
-is an extract that exists nowhere else as a standalone file.
+drifts from the first within a week. The diaries are deliberately not in the repo (sensitive data); they live on MUNI in MUNI `Project-01-BINDMASTER/REPO_DIARY/`.
 
 | | |
 |---|---|
@@ -55,7 +54,7 @@ per-tool runtime gotchas that each cost a campaign to learn.
 > mislead you, but it is the one knowingly-uncertain statement in that file.
 
 ### 6. How the findings were reached
-**[`DIARY_2.0.md`](DIARY_2.0.md)** *(in this folder)*
+**`DIARY_2.0.md`** *(MUNI, MUNI `Project-01-BINDMASTER/REPO_DIARY/`)*
 
 The 2.0 chapter of the repo diary — 8 entries, 771 lines. Records the wrong
 turns as well as the conclusions, which is the part that stops them being

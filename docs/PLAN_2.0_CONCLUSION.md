@@ -15,7 +15,7 @@ diary first; pointers are given where the detail lives.
 
 Companions: [NEXT_STAGES.md](NEXT_STAGES.md) (stage detail),
 [MORNING_DECISIONS.md](MORNING_DECISIONS.md) (the open decisions in full),
-[../2.0/DIARY_2.0.md](../2.0/DIARY_2.0.md) (**how each finding was reached, wrong turns
+`DIARY_2.0.md` on MUNI, MUNI `Project-01-BINDMASTER/REPO_DIARY/` (**how each finding was reached, wrong turns
 included — the 2.0 diary**; `REPO_DIARY.md` is the *historical* diary and is not where 2.0 work
 goes),
 [PLAN_binderscout_v2.md](PLAN_binderscout_v2.md) (the original plan) and

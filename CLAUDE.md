@@ -26,8 +26,7 @@ ESMFold2. What changed is what the pipeline is allowed to claim:
   benchmark on label censoring.
 
 **Where 2.0's own records live** — read these before re-deriving anything:
-`2.0/DIARY_2.0.md` (the 2.0 chapter; `docs/REPO_DIARY.md` is the *historical* diary and is not
-where 2.0 work goes), `docs/PLAN_2.0_CONCLUSION.md` (§3 remaining work, **§4 findings that must
+`DIARY_2.0.md` (the 2.0 chapter; `REPO_DIARY.md` is the *historical* diary and is not where 2.0 work goes) — **both diaries live only on the MUNI share, in MUNI `Project-01-BINDMASTER/REPO_DIARY/`, and must never be added to this public repo (they hold sensitive data)**, `docs/PLAN_2.0_CONCLUSION.md` (§3 remaining work, **§4 findings that must
 not be relearned**, §5 decisions), `docs/PLAN_2.0_PART_RESULTS.md` (per-part verdicts, including
 the parts that were deliberately *not* built), and `docs/PLAN_2.0_PART_AK_verify_the_rank.md`.
 
