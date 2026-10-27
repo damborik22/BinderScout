@@ -13,6 +13,13 @@ Protein-Hunter/
 RFD4-Proteina/
 LigandMPNN/
 rf_diffusion_all_atom/
+# Clones that appeared in the working tree untracked. Same posture as every other
+# tool checkout above, and not only for tidiness: neither is in ruff.toml's
+# extend-exclude, so a `git add -A` that picked them up turns CI red on lint with
+# 3398 errors and 101 files to reformat, none of them ours. If either is ever
+# genuinely vendored, that needs its own licence decision first.
+LASErMPNN/
+NISE/
 
 # `BC2/` is the upstream directory name; same treatment as BindCraft2/ above.
 BC2/
