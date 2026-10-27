@@ -695,7 +695,13 @@ design tool, and it shares nothing with BindCraft 2 but a number.
 git clone https://github.com/damborik22/BinderScout.git ~/BinderScout
 cd ~/BinderScout
 
-binderscout install              # interactive menu (auto-detects standalone mode)
+./binderscout.py install         # interactive menu (auto-detects standalone mode).
+                                # The FIRST command must be the script: the `binderscout`
+                                # shortcut is created BY the installer, into ~/.local/bin.
+                                # That directory enters PATH from ~/.profile only if it
+                                # already existed at LOGIN, so on a fresh account the
+                                # short form below works in the next shell, not this one
+                                # — the installer prints the `export PATH=…` to use now.
 binderscout configure            # interactive wizard
 bash runs/<name>/run_all.sh     # run all enabled tools
 bash runs/<name>/run_evaluate.sh  # rank and report (drives Evaluator/evaluate.sh)
@@ -705,6 +711,9 @@ export PATH="$(pwd)/bin:$PATH"
 ```
 
 ### Install
+
+On a fresh clone run these as `./binderscout.py install …` — the `binderscout` shortcut
+does not exist until the installer has run once (see Quick start above).
 
 ```bash
 binderscout install                          # interactive tool selection
@@ -728,6 +737,10 @@ binderscout install --tool bindcraft2        # install BindCraft 2 (eighth tool)
 # --bc2-source overrides with a .zip, a directory or another git URL (or export $BINDCRAFT2_SOURCE).
 binderscout install --tool esmfold2          # install ESMFold2 refolder individually (default engine; also in --tool all)
 binderscout install --tool soluprot          # install SoluProt screen alone (also in --tool all; x86 + aarch64)
+binderscout install --tool tmprot            # install the TmProt melting-temperature screen (opt-in,
+                                             # NOT in --tool all; GPL-3.0, cloned not vendored)
+binderscout install --verify --tool all      # audit what is on disk and exit; installs nothing
+binderscout install --repair --tool all      # audit, then re-install only what failed the audit
 binderscout install --uninstall --tool all   # remove envs + shortcuts (preserves runs/)
 binderscout install --standalone --tool all    # force local Miniforge install
 binderscout install --system-conda --tool all  # use existing system conda

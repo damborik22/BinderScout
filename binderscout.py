@@ -19,10 +19,17 @@ Usage:
 
 import os
 import platform
+import shutil
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
+
+# How to invoke this CLI *on this machine right now*. On a fresh clone the
+# `binderscout` shortcut does not exist yet — it is written by the first real
+# sub-command — so printing `binderscout install …` in USAGE would hand a new
+# user the one command that cannot work (`command not found`, exit 127).
+_INVOKE = "binderscout" if shutil.which("binderscout") else "./binderscout.py"
 
 # The product version. This is the single source of truth: every generated run
 # script stamps it into `runs/<name>/<tool>/settings.json`, so a run directory
@@ -41,12 +48,12 @@ RESET = "\033[0m"
 USAGE = f"""{BOLD}BinderScout{RESET} — GPU-accelerated protein binder design toolkit
 
 {BOLD}Usage:{RESET}
-  binderscout                                                    Interactive menu (TUI)
-  binderscout install   [--tool all|<tool>] [--cuda VERSION] [--skip-examples]   (--help for the tool list)
-  binderscout configure [options passed through]
-  binderscout evaluate  <binder-compare args>   (e.g. run --mosaic DIR --target-seq SEQ -o OUT)
-  binderscout --version
-  binderscout --help
+  {_INVOKE}                                                    Interactive menu (TUI)
+  {_INVOKE} install   [--tool all|<tool>] [--cuda VERSION] [--skip-examples]   (--help for the tool list)
+  {_INVOKE} configure [options passed through]
+  {_INVOKE} evaluate  <binder-compare args>   (e.g. run --mosaic DIR --target-seq SEQ -o OUT)
+  {_INVOKE} --version
+  {_INVOKE} --help
 
 {BOLD}Commands:{RESET}
   {CYAN}(no args){RESET}  Launch interactive menu — install, configure, run, evaluate
@@ -110,6 +117,15 @@ def _install_binderscout_shortcut() -> None:
         if not home_shortcut.exists() or target_line not in home_shortcut.read_text():
             home_shortcut.write_text(shortcut_content)
             home_shortcut.chmod(0o755)
+            # This is the copy that makes the bare `binderscout` command work, so it is
+            # the one worth reporting: BinderScout/bin/ above is normally NOT on PATH,
+            # and printing only that one told the user to use a directory that does not
+            # help them. Say which it is and whether it resolves yet.
+            if str(home_bin) in os.environ.get("PATH", "").split(os.pathsep):
+                hint = "  — you can now run `binderscout …`"
+            else:
+                hint = f'  — not on PATH yet:  export PATH="{home_bin}:$PATH"'
+            print(f"{GREEN}✓{RESET} Shortcut installed: {home_shortcut}{hint}")
         _remove_stale_bindmaster_shortcut(home_bin)
     except (OSError, UnicodeDecodeError):
         pass  # ~/.local/bin not writable — BinderScout/bin/ is the primary location
@@ -133,6 +149,23 @@ def _find_conda_base() -> Path | None:
     return None
 
 
+def _exec(path: str, argv: list) -> None:
+    """os.execv, but do not lose what we printed. Never returns.
+
+    os.execv() replaces this process image WITHOUT flushing Python's buffers, and
+    stdout is block-buffered whenever it is not a terminal. Everything printed
+    before the exec -- which shortcut was installed and whether it is on PATH, and
+    the `BinderScout -> <cmd>` banner naming the architecture and the script that
+    was selected -- was therefore silently dropped in any piped, logged or CI run.
+    Flushing at the top of _dispatch() was not enough: each banner is printed after
+    that point, immediately before its own exec. So the flush belongs here, where
+    no future arm can be added without it.
+    """
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.execv(path, argv)
+
+
 def _dispatch(cmd: str, args: list) -> None:
     """Resolve and exec the appropriate sub-command. Never returns."""
     if cmd == "install":
@@ -146,7 +179,7 @@ def _dispatch(cmd: str, args: list) -> None:
             print(f"{RED}✗ {name} not found: {script}{RESET}", file=sys.stderr)
             sys.exit(1)
         print(f"{BOLD}BinderScout → install{RESET}  ({platform.machine()} → {name})")
-        os.execv("/bin/bash", ["/bin/bash", str(script)] + args)
+        _exec("/bin/bash", ["/bin/bash", str(script)] + args)
 
     elif cmd == "configure":
         script = REPO / "configurator" / "configurator.py"
@@ -154,7 +187,7 @@ def _dispatch(cmd: str, args: list) -> None:
             print(f"{RED}✗ configurator.py not found: {script}{RESET}", file=sys.stderr)
             sys.exit(1)
         print(f"{BOLD}BinderScout → configure{RESET}")
-        os.execv(sys.executable, [sys.executable, str(script)] + args)
+        _exec(sys.executable, [sys.executable, str(script)] + args)
 
     elif cmd == "evaluate":
         conda_base = _find_conda_base()
@@ -166,7 +199,7 @@ def _dispatch(cmd: str, args: list) -> None:
             sys.exit(1)
         conda_bin = conda_base / "bin" / "conda"
         print(f"{BOLD}BinderScout → evaluate (binder-compare){RESET}")
-        os.execv(
+        _exec(
             str(conda_bin),
             [str(conda_bin), "run", "-n", "binder-eval", "--no-capture-output", "binder-compare"] + args,
         )

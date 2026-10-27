@@ -166,7 +166,7 @@ flowchart TB
     end
 
     subgraph Artifacts["Per-run artifacts"]
-        Runs["runs/&lt;name&gt;/\n├── target/\n├── &lt;tool&gt;/        # one per enabled tool\n│   └── settings.json\n├── evaluate/\n│   ├── sequences.fasta\n│   ├── sequences_native_metrics.csv\n│   ├── boltz2_results.csv\n│   ├── af3_results.csv           (opt)\n│   ├── esmfold2_results.csv      (opt)\n│   ├── soluprot_results.csv      (opt)\n│   ├── refold_boltz2/            # &lt;binder_id&gt;_boltz2.pdb …\n│   ├── refold_af3/               # &lt;binder_id&gt;_af3.pdb …\n│   ├── refold_esmfold2/          # &lt;binder_id&gt;_esmfold2.pdb …\n│   └── report/\n│       ├── metrics.csv\n│       ├── top30_candidates.csv\n│       ├── top20_structures/\n│       └── report.html\n├── run_&lt;tool&gt;.sh\n├── run_evaluate.sh\n└── run_all.sh"]:::arti
+        Runs["runs/&lt;name&gt;/\n├── target/\n├── &lt;tool&gt;/        # one per enabled tool\n│   └── settings.json\n├── evaluate/\n│   ├── sequences.fasta\n│   ├── sequences_native_metrics.csv\n│   ├── boltz2_results.csv\n│   ├── af3_results.csv           (opt)\n│   ├── esmfold2_results.csv      (opt)\n│   ├── soluprot_results.csv      (opt)\n│   ├── refold_boltz2/            # &lt;binder_id&gt;_boltz2.pdb …\n│   ├── refold_af3/               # &lt;binder_id&gt;_af3.pdb …\n│   ├── refold_esmfold2/          # &lt;binder_id&gt;_esmfold2.pdb …\n│   └── report/\n│       ├── metrics.csv\n│       ├── metrics_zscore.csv\n│       ├── summary.json\n│       ├── candidates.csv\n│       ├── top30_candidates.csv\n│       ├── top30_slim.html\n│       ├── top30_slim.csv\n│       ├── top20_structures/\n│       └── report.html\n├── run_&lt;tool&gt;.sh\n├── run_evaluate.sh\n└── run_all.sh"]:::arti
     end
 
     InstallSh -->|creates| GenEnvs
@@ -223,9 +223,15 @@ Tool directories (`BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-C
 git clone https://github.com/damborik22/BinderScout.git ~/BinderScout
 cd ~/BinderScout
 
-# 2. Install tools
-binderscout install             # interactive menu
-binderscout install --tool all  # install everything
+# 2. Install tools — on a fresh clone call the script directly: the `binderscout`
+#    shortcut does not exist yet, because the installer is what creates it
+./binderscout.py install             # interactive menu
+./binderscout.py install --tool all  # install everything
+#    This also installs a `binderscout` shortcut into ~/.local/bin. Ubuntu's
+#    ~/.profile adds that directory to PATH only `if [ -d … ]`, evaluated at
+#    LOGIN — and the installer is what creates it. So on an account that never
+#    had one, the short form below works in the next login shell, not this one.
+#    The installer prints the exact `export PATH=…` line when it does not resolve.
 
 # 3a. Or start from the shipped example — every tool, one design each
 #     (see examples/README.md)
@@ -259,9 +265,12 @@ binderscout evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bin
 
 ```
 binderscout install   [--tool bindcraft|bindcraft2|boltzgen|mosaic|pxdesign|proteina-complexa|protein-hunter|rfd3|all]
+                     [--tool rfd4]                     # ninth design tool, x86_64 only, not in --tool all
                      [--bc2-source <zip|dir|git-url>]  # override BindCraft 2's source (default: upstream)
-                     [--tool af3|soluprot]             # extra evaluator engines (esmfold2 ships in --tool all)
+                     [--tool evaluator]                # the evaluator alone (binder-eval env + binder-compare)
+                     [--tool af3|soluprot|tmprot]      # extra evaluator engines (esmfold2 ships in --tool all)
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
+                     [--skip-preflight] [--force] [--verify] [--repair]
 binderscout configure [options passed through to configurator.py]
 binderscout evaluate  <binder-compare args>             # passthrough, e.g. run / extract / report / autosize
 binderscout --help
@@ -269,20 +278,29 @@ binderscout --help
 
 ### `binderscout install`
 
+On a fresh clone use `./binderscout.py install …` — the `binderscout` shortcut is created by
+the first run of the installer (see [Quick start](#quick-start)).
+
 Options:
 
 | Flag | Description |
 |---|---|
 | `--tool all\|bindcraft\|bindcraft2\|boltzgen\|mosaic\|pxdesign\|proteina-complexa\|protein-hunter\|rfd3` | Which design tool(s) to install. Omit for interactive menu. |
 | `--bc2-source <zip\|dir>` | Where BindCraft 2's source is — a `.zip` or an unpacked directory. Same as exporting `$BINDCRAFT2_SOURCE`. Required by `--tool bindcraft2`, since there is nothing public to download; without it `--tool all` warns and skips BindCraft 2 rather than failing the whole install. |
+| `--tool rfd4\|rfd4-proteina` | RFD4-Proteina, the ninth design tool. **x86_64 only** (upstream's `setup_venv.sh` refuses other architectures and the pinned wheels are x86 cu13) and **not** in `--tool all`: it is new here, validated by one 4-design run on one node, and its **weights licence is unverified** — the BSD-3 licence covers the code only. |
+| `--tool evaluator` | Evaluator pipeline only — the `binder-eval` conda env and the `binder-compare` CLI (already in `--tool all`). This is the one to use when someone else ran the designs and you only want to refold, rank and report them. |
 | `--tool esmfold2` | ESMFold2 refolder — **default** (already in `--tool all`); lightweight, no gated weights; also the `autosize` gate. Listed here for explicit re-install. |
-| `--tool af3\|soluprot` | Extra evaluator tools (not in `--tool all`). `af3` = AlphaFold 3 v3.0.2 (gated weights — canonical cross-check). `soluprot` = solubility screen (x86 needs the SoluProt + USEARCH downloads; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it source-builds scikit-learn 0.20.4 + USEARCH v12 and uses the `--no_tmhmm` model). |
+| `--tool af3\|soluprot\|tmprot` | Evaluator-side tools, each in its own env. `af3` = AlphaFold 3 v3.0.2, **opt-in** (gated weights — canonical cross-check). `soluprot` = solubility screen, **already in `--tool all`**; listed here for an explicit re-install (both platforms source-build USEARCH v12, so a C/C++ toolchain is needed; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it also source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model). `tmprot` = sequence-only melting-temperature screen, **opt-in**, cloned rather than vendored (GPL-3.0); advisory label only, it never filters or ranks. |
 | `--cuda VERSION` | CUDA version for conda package resolution (default: 12.4) |
 | `--skip-examples` | Do not prompt to run bundled examples after install |
 | `--standalone` | Force local Miniforge3 install (no system conda needed) |
 | `--system-conda` | Use existing system conda instead of local install |
 | `--uninstall` | Remove tool environments, directories, and shortcuts |
-| `--yes` / `-y` | Non-interactive mode (accept all defaults) |
+| `--yes` / `-y` | Non-interactive mode: auto-confirms the **safe** prompts only. Destructive ones (re-clone a repo, re-create an env, remove the local Miniforge) are auto-answered **no**, so a repeat install keeps what is already downloaded. |
+| `--skip-preflight` | Skip the disk / GPU / network / toolchain checks run before anything is downloaded |
+| `--verify` | Audit what is actually on disk for the selected tools and exit, checking the artifact each tool needs to **run** (weights, env, venv) rather than that its entry point answers. Non-zero exit if anything is unusable; installs nothing. |
+| `--repair` | The same audit, then re-install only the tools that failed it and verify again. The cheap recovery path for a half-built environment — far cheaper than `--force`. |
+| `--force` | Let `--yes` accept the destructive prompts too: re-clones tool repos and re-creates conda envs, **deleting what is there — including `BindCraft/params/*.npz`, ~4 GB of AF2 weights**. Reach for `--repair` first. |
 
 ### `binderscout configure`
 
@@ -384,7 +402,21 @@ binder-compare run --mosaic runs/PDL1/mosaic --bindcraft runs/PDL1/bindcraft \
 
 The configurator-generated `runs/<name>/run_evaluate.sh` wraps `Evaluator/evaluate.sh`, which auto-detects the installed engines and drives the whole thing.
 
-Report output lands in `…/evaluate/report/` — `report.html`, `metrics.csv`, and `top30_candidates.csv`.
+Report output lands in `…/evaluate/report/`. A report run writes every one of these:
+
+| File | Contents |
+|---|---|
+| `report.html` | The full report — plots, tables, per-engine comparisons, fairness banner, provenance footer |
+| `metrics.csv` | Every metric for **every row**, duplicates included (the files below collapse duplicate designs to one representative) |
+| `metrics_zscore.csv` | The same designs with the `*_z` z-scored columns only |
+| `summary.json` | Per-tool, per-metric summary statistics (mean, std, median, n) |
+| `top30_candidates.csv` | The shortlist: top 30 distinct designs with sequences and the key metrics. **This is the file to script against** |
+| `top30_slim.html` / `top30_slim.csv` | Decision-metrics tables — overall plus per-tool, with all-metric roll-ups. The human-facing "what do we order" table |
+| `candidates.csv` | Per-tool native top-20 (from each tool's own ranking) followed by the refold top-50, with sequences |
+| `top20_structures/` | The top-20 refolded complexes as `rank<NN>_<binder_id>.<ext>`, in the primary engine's own format — the source extension is preserved, so `.cif` where that is what the engine wrote — plus `view_top20.pml` to load them all into PyMOL. The directory is always created; it is empty when no refold structure could be located |
+
+Note the asymmetry in the names: the CSV shortlist is **30** designs and the structure
+directory is **20**. Both are deliberate — don't "correct" either to match the other.
 
 **Refold structures** land in one directory per engine (`…/evaluate/refold_boltz2/`, `refold_af3/`, `refold_esmfold2/`), named **`<binder_id>_<engine>`** — `rfd3_b0007_mpnn2_af3.pdb`, and beside it `_pae.npy` plus `_plddt.csv` (Boltz-2) or `_model.cif` (AF3, ESMFold2). The id is the one in `metrics.csv`, so a design's structures are found by name without joining on its sequence first. The engine is in the *name* and not only in the directory because the usual way to hand over "all the PDBs" is to pool the three directories, and without it a design's three structures are three identically-named files. A design whose id is missing keeps the engine's legacy index name (`af3_0007`); two designs sharing an id get `__2`. Re-running an engine into the same directory **overwrites** that design's structure.
 
@@ -612,7 +644,8 @@ git clone https://github.com/damborik22/BinderScout.git
 git clone -b aarch64 https://github.com/damborik22/BinderScout.git
 ```
 
-Both branches: `binderscout install` or `bash install/install.sh`.
+Both branches: `./binderscout.py install` (the `binderscout` shortcut only exists after
+that first run) or `bash install/install.sh`.
 
 ### aarch64 notes
 
