@@ -8,19 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **Mosaic could not complete a single optimisation step on any install after
-  2025-06-05.** `losses/esm.py` imports `esm2quinox`'s private `_alphabet` and
-  indexes it with `"b"`/`"e"`/`"m"`, one-hotting to a hardcoded width of 33.
-  esm2quinox 0.2.0 rewrote that table as 32 entries keyed by symbol, so the ESM2
-  expressibility prior died with `KeyError: 'b'` inside the jitted loss — after the
-  model and MSA had loaded, on the first batch. Mosaic asks only for
-  `esm2quinox>=0.1.0`. Re-pinned to `0.1.0` in the vendored `install/locks/mosaic.uv.lock`
-  (`Mosaic/` is gitignored and recloned, so its own `pyproject.toml` is not a durable
-  place for this); 216 of 217 packages unchanged. `install_mosaic()` now asserts the
-  alphabet's **symbols and width** rather than trusting `import mosaic`, which never
-  reaches this loss. Note the first vendored lock pinned the *broken* version,
-  because it was captured from an install that had never run a design — exactly the
-  gap `install/locks/EVIDENCE.md` records.
+- **Mosaic's ESM2 expressibility prior had never once run.** `losses/esm.py` imports
+  `esm2quinox`'s private `_alphabet` and indexes it with `"b"`/`"e"`/`"m"`,
+  one-hotting to a hardcoded width of 33. esm2quinox 0.2.0 (2025-06-05) rewrote that
+  table as 32 entries keyed by symbol, so the prior died with `KeyError: 'b'` inside
+  the jitted loss — after the model and MSA had loaded, on the first batch. Mosaic
+  asks only for `esm2quinox>=0.1.0`, so any fresh resolve takes 0.2.0.
+
+  The prior was added in 6caae52 (2026-07-21) and verified only as far as one finite
+  gradient; that commit says so itself ("NOT yet run end-to-end in a full GPU design
+  loop"). No Mosaic design run happened between then and now, so the defect sat
+  latent for three months on a box whose long-lived venv still carried 0.1.0, and
+  surfaced the moment that venv was rebuilt from scratch. Mosaic results produced
+  before 2026-07-21 are unaffected — the prior did not exist, and their logs carry no
+  `esm_pll` term. A *new* user, however, has never been able to run it.
+
+  Re-pinned to `0.1.0` in the vendored `install/locks/mosaic.uv.lock` (`Mosaic/` is
+  gitignored and recloned, so its own `pyproject.toml` is not a durable place for
+  this); 216 of 217 packages unchanged. `install_mosaic()` now asserts the alphabet's
+  **keys and width** rather than trusting `import mosaic`, which never reaches this
+  loss. Note the first vendored lock pinned the *broken* version, because it was
+  captured from an install that had never run a design — exactly the gap
+  `install/locks/EVIDENCE.md` records.
 
 - **`install.sh --tool mosaic` on a complete install silently broke the Evaluator.**
   `uv sync` prunes whatever the lock does not list, and `install_evaluator()` injects
