@@ -5,6 +5,8 @@ Run these checks in order before touching the run script. If any fails, append a
 ## 1. Read and validate the assignment
 
 **Driven mode (BM1/BM2/BM4 via `tools/fleet.sh`):** there's no `CLUSTER/` doc — read the run script `fleet.sh launch` will ship (or already shipped) instead; it carries the same settings a `CLUSTER/` doc's "Setup / install" section would. The rest of this checklist (§2-5, §7-9) still applies; §6 (muni-disk reachability) does not.
+`tools/fleet.sh` itself is **not in this repository** — it is archived off-repo on the lab
+share, so fetch it from there before using driven mode, or push the run script by plain `scp`.
 
 Open `CLUSTER/<TARGET>_<tool>_<machine>_SETTINGS.md`. Confirm it has:
 
@@ -133,7 +135,7 @@ If the repo has uncommitted changes locally, that's a worker-side mess; ask befo
 
 ## 6. Verify muni-disk reachable
 
-This check applies to **assignment mode** — Clara, or any machine reading a `CLUSTER/` doc directly. **Skip it for driven-mode LAN jobs** (BM1/BM2/BM4 launched via `tools/fleet.sh` from BM5): the run script arrives by direct SSH push, not a `CLUSTER/` read, and results are pulled back by `fleet.sh fetch` and archived to muni-disk by BM5 itself — the worker machine never touches muni-disk in that flow. See `binderscout-orchestrator/references/lab-deploy.md`.
+This check applies to **assignment mode** — Clara, or any machine reading a `CLUSTER/` doc directly. **Skip it for driven-mode LAN jobs** (BM1/BM2/BM4 launched via `tools/fleet.sh` from BM5): the run script arrives by direct SSH push, not a `CLUSTER/` read, and results are pulled back by `fleet.sh fetch` and archived to muni-disk by BM5 itself — the worker machine never touches muni-disk in that flow.
 
 For assignment mode, either it's mounted:
 

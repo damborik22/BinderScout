@@ -44,7 +44,8 @@ this document records only what was observed.
 
 ## B7 — GPU occupancy detection fails open (most serious)
 
-`tools/fleet.sh:144-150` documents an explicit invariant:
+The fleet driver script — `tools/fleet.sh`, since removed from this repo and archived
+off-repo on the lab share — documented an explicit invariant:
 
 > Three distinguishable outcomes: confirmed-idle (launch), confirmed-busy
 > (refuse, name the PID), could-not-determine (refuse — nvidia-smi failed, or

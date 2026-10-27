@@ -54,11 +54,12 @@ per-tool runtime gotchas that each cost a campaign to learn.
 > mislead you, but it is the one knowingly-uncertain statement in that file.
 
 ### 6. How the findings were reached
-**`DIARY_2.0.md`** *(MUNI, MUNI `Project-01-BINDMASTER/REPO_DIARY/`)*
+**`DIARY_2.0.md`** *(MUNI share, `Project-01-BINDMASTER/REPO_DIARY/`)*
 
 The 2.0 chapter of the repo diary — 8 entries, 771 lines. Records the wrong
 turns as well as the conclusions, which is the part that stops them being
-repeated. Extracted from `docs/REPO_DIARY.md`; the diary is the living copy.
+repeated. Extracted from `REPO_DIARY.md` in that same MUNI folder; the diary is the
+living copy.
 
 ---
 
@@ -68,7 +69,7 @@ repeated. Extracted from `docs/REPO_DIARY.md`; the diary is the living copy.
 |---|---|
 | **Stage 1 / `generation_index`** | [`docs/INVESTIGATION_generation_index_2026-09-24.md`](../docs/INVESTIGATION_generation_index_2026-09-24.md) — the per-tool verdicts on what generation order can honestly be recovered. Small and load-bearing |
 | **the ranking** | [`docs/INVESTIGATION_partU_cao_benchmark.md`](../docs/INVESTIGATION_partU_cao_benchmark.md) — the evidence behind "one ranking, no way to choose another", and why each removed alternative stays removed |
-| **affinity ranking** | [`docs/completed_plans.md`](../docs/completed_plans.md) — archives Part N's negative result |
+| **affinity ranking** | `docs/completed_plans.md` — archives Part N's negative result; no longer in this repo, archived off-repo on the lab share |
 | **the original plan** | [`docs/PLAN_binderscout_v2.md`](../docs/PLAN_binderscout_v2.md) **together with** [`docs/PLAN_binderscout_v2_corrections.md`](../docs/PLAN_binderscout_v2_corrections.md) — **never the first alone.** The plan contains premises later measured false; the corrections file is what says which |
 
 ---
@@ -79,7 +80,8 @@ The repo holds ~14 other `PLAN_*` / `INVESTIGATION_*` documents — BindCraft 2
 integration, the AF3 Spark runbook, fleet orchestration, SoluProt, BM5 unified
 memory, the virtual-lab concept. All real, none about 2.0.
 
-`docs/REPO_DIARY.md` in full is 2,858 lines, of which 2,098 predate 2.0.
+The historical diary (`REPO_DIARY.md`, on the MUNI share) in full is 2,858 lines, of
+which 2,098 predate 2.0.
 
 ---
 

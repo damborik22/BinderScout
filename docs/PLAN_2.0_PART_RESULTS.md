@@ -364,8 +364,8 @@ decides whether AE is worth weeks.
 
 ## AF — fourth refold engine (Chai-1) · **verdict: reopen, for a new reason**
 
-There is already a plan: [PLAN_chai_and_designers.md](PLAN_chai_and_designers.md),
-"Part O — Chai-1 as 4th refold engine". **`chai_lab` is installed** in
+There is already a plan — `PLAN_chai_and_designers.md`, "Part O — Chai-1 as 4th refold
+engine", archived off-repo on the lab share. **`chai_lab` is installed** in
 `binderscout_protein_hunter`.
 
 **Its original rationale is dead.** The doc justifies Chai-1 as strengthening

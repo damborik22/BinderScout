@@ -136,7 +136,7 @@ backwards. Confirmed
 to be our metric and not a proxy: the panel's `Mean_iPTM` matches `consensus_iptm_mean` on
 135/137 designs to the decimal.
 
-**The correct reading, from `docs/REPO_DIARY.md`:** pool mean ipTM tells you **the target
+**The correct reading, from the repo diary** (MUNI share, `Project-01-BINDMASTER/REPO_DIARY/`)**:** pool mean ipTM tells you **the target
 is tractable**, not **which design on a hard target will bind**. A between-target signal,
 on n=2 targets. Conflating the two is the trap.
 

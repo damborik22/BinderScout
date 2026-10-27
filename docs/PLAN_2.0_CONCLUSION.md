@@ -9,13 +9,13 @@ diary first; pointers are given where the detail lives.
 | **HEAD** | The `v2.0.0` tag was **re-cut six times after release** (2026-10-04 to 10-09, with the owner's say-so) to carry the audit fixes, the Boltz-2 output-dir fix, the ESMFold2 loader fix, the AF3 full-precision installer patch and this session's records. It sits at the tip of `v2.0.x`; further fixes go into `v2.0.1`. Anything that recorded the original `d6ed96b` is stale. Clean, pushed |
 | **Tests** | **1109 passing**, 7 skipped; ruff + shellcheck clean |
 | **Version** | **`v2.0.0`, TAGGED 2026-10-04** on `v2.0.x` — 158 commits past `v1.1.1`. Fleet only: not published, and **not merged to `master`** by decision. **This row previously read "the tag waits on §3's GPU-memory pass" — the operator overrode that on 2026-10-04**, and the reasoning inverts cleanly: the memory pass goes last *because a reading taken against an unfinished pipeline is stale*, which means the pipeline must ship first for the reading to be worth taking. Stage 6 is now post-2.0.0 work, not a tag blocker |
-| **Fleet** | All five sites (BM1, BM2, BM4, BM5, Clara) were pinned to the tag on 2026-10-09 after the last re-cut. A moved tag is **not** updated by a plain `git fetch`: use `git fetch --tags --force`, and measure `behind` only after a forced fetch. Checkout path is `~/dev/BindMaster` on the BM boxes and `~/BindMaster` on Clara; `tools/fleet.sh` resolves either. **Do not switch a checkout under a running job**: the eval envs are editable installs of it |
+| **Fleet** | All five sites (BM1, BM2, BM4, BM5, Clara) were pinned to the tag on 2026-10-09 after the last re-cut. A moved tag is **not** updated by a plain `git fetch`: use `git fetch --tags --force`, and measure `behind` only after a forced fetch. Checkout path is `~/dev/BindMaster` on the BM boxes and `~/BindMaster` on Clara — resolve it rather than naming one. **Do not switch a checkout under a running job**: the eval envs are editable installs of it |
 | **As of** | 2026-10-09 (about 10:00 UTC). In flight at that moment, and recorded as such below: the Clara rerun of 85 nipah designs, the GuideFlip refolds, and the muni-disk archive |
 | **Changelog** | released as `## [2.0.0] — 2026-10-04`; `[Unreleased]` is now empty |
 
 Companions: [NEXT_STAGES.md](NEXT_STAGES.md) (stage detail),
 [MORNING_DECISIONS.md](MORNING_DECISIONS.md) (the open decisions in full),
-`DIARY_2.0.md` on MUNI, MUNI `Project-01-BINDMASTER/REPO_DIARY/` (**how each finding was reached, wrong turns
+`DIARY_2.0.md` on the MUNI share at `Project-01-BINDMASTER/REPO_DIARY/` (**how each finding was reached, wrong turns
 included — the 2.0 diary**; `REPO_DIARY.md` is the *historical* diary and is not where 2.0 work
 goes),
 [PLAN_binderscout_v2.md](PLAN_binderscout_v2.md) (the original plan) and

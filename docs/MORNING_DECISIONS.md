@@ -13,8 +13,8 @@ Written 2026-09-25 overnight; decision state updated 2026-09-27.
 Written 2026-09-25 overnight. Everything below is blocked on a judgement call,
 not on implementation. Each has my recommendation, but they are yours.
 
-The work that needed no decision is done and pushed — see
-[REPO_DIARY.md](REPO_DIARY.md)'s Part 2.0 chapter for the night's entries.
+The work that needed no decision is done and pushed — see the repo diary's Part 2.0
+chapter for the night's entries (MUNI share, `Project-01-BINDMASTER/REPO_DIARY/`).
 
 ---
 

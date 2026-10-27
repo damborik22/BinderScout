@@ -34,7 +34,7 @@ Three model variants on NGC, each with its own (model + autoencoder) checkpoint 
 - **NVIDIA license.** Open Model License Agreement for the model weights (Apache 2.0 for the code itself). Review terms for commercial use.
 - **JAX recompilation overhead.** AF2 reward model uses JAX; first sample of an eval job pays ~20s build + compile cost (subsequent samples ~1–5s). Recompiles once per unique sequence length.
 - **`dssp` and `sc` binaries not bundled.** Must be obtained from FreeBindCraft repo or built locally.
-- **aarch64 not yet ported.** Per BinderScout CLAUDE.md known issues: "Proteina-Complexa: Not yet ported to aarch64. See `docs/plans.md` for the porting plan." Needs PyTorch Geometric + torchtext aarch64 wheel patches (same approach as Mosaic).
+- **aarch64 not yet ported.** Per BinderScout CLAUDE.md known issues: "Proteina-Complexa: Not yet ported to aarch64." (The porting plan it pointed to is archived off-repo on the lab share.) Needs PyTorch Geometric + torchtext aarch64 wheel patches (same approach as Mosaic).
 - **tmol install fragile.** Some Python 3.12 setups hit llvmlite/numba version conflicts (workaround documented in README).
 
 ## Pick when

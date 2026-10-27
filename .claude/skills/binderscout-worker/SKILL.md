@@ -7,6 +7,13 @@ description: Use this skill when running a BinderScout design job on a compute n
 
 **Audience:** an AI agent acting as the *worker* on a BinderScout compute node — typically Clara, BM1/BM2/BM4, or BM5 (DGX Spark) itself when it's doing multiple duty as orchestrator + refold host + worker. The worker may be literally logged into the compute node, or it may be BM5 driving BM1/BM2/BM4 remotely over direct LAN SSH via `tools/fleet.sh` (no VPN, no CLUSTER/ doc — see §1.2), or the orchestrator-Claude on BM5 driving Clara over VPN/SSH per the handoff-doc model, or a human following the playbook. The job: read the assignment (or receive a fleet-pushed job) → execute → monitor → package → handoff.
 
+> **The fleet tooling is no longer in this repository.** `tools/fleet.sh` and the two
+> direct-deploy playbooks (`lab-deploy.md`, `clara-deploy.md`) were removed from the
+> public tree and archived off-repo on the lab share. Every `fleet.sh` command named
+> below therefore describes tooling you must fetch from the lab share first; without
+> it, drive the nodes with plain `ssh` / `scp` / `rsync`, or fall back to the
+> handoff-doc model.
+
 **When you read this:** at the start of any worker session — when the orchestrator has placed a new assignment in `CLUSTER/`, when BM5 has pushed a job to you via `fleet.sh launch` (driven mode, §1.2), when an in-progress job needs attention, or when results are ready to package.
 
 **What this skill is NOT:**
@@ -27,12 +34,12 @@ The worker is part of the **swarm** described in `binderscout-orchestrator/SKILL
 
 ### 1.2 Driven mode (BM1/BM2/BM4, launched from BM5 over `tools/fleet.sh`)
 
-BM5 shares a LAN subnet with BM1/BM2/BM4 and drives them by direct SSH — no VPN, no `CLUSTER/` doc. Nobody is sitting on the worker machine; the job runs under tmux and survives disconnects. Full playbook: `binderscout-orchestrator/references/lab-deploy.md`.
+BM5 shares a LAN subnet with BM1/BM2/BM4 and drives them by direct SSH — no VPN, no `CLUSTER/` doc. Nobody is sitting on the worker machine; the job runs under tmux and survives disconnects.
 
 - **Input:** a run script pushed by `fleet.sh launch` into `<remote-dir>/run.sh` and started in a detached tmux session named `<job>` (by convention `<TARGET>_<tool>`). The script itself still carries every setting — generated the same way as an assignment-mode script (`binderscout configure` or the template, §4.3) — only the *delivery* differs, not the content.
 - **Output:** package **locally** on the worker machine (§6.3); BM5 pulls it with `fleet.sh fetch` (rsync, `.tar.gz` integrity-verified) and archives one copy to muni-disk itself. The worker does not push to muni-disk directly in this mode.
 
-Either mode: you don't decide *what* to run or *what settings* — the assignment (or pushed script) is the contract. You decide *how* to execute it well: pre-flight properly, surface real errors fast, package cleanly, transfer reliably. In driven mode you're also standing in for the orchestrator side of the PROGRESS.md record, same as the Clara direct-deploy model — see `binderscout-orchestrator/references/clara-deploy.md` §4.
+Either mode: you don't decide *what* to run or *what settings* — the assignment (or pushed script) is the contract. You decide *how* to execute it well: pre-flight properly, surface real errors fast, package cleanly, transfer reliably. In driven mode you're also standing in for the orchestrator side of the PROGRESS.md record, same as the Clara direct-deploy model.
 
 **The four phases:**
 
@@ -71,7 +78,7 @@ muni-disk/.../<TARGET>/
     └── <TARGET>_<tool>_<machine>.tar.gz       ← where your output goes
 ```
 
-**Driven-mode addendum:** `fleet.sh launch`'s `<remote-dir>` must be an absolute path — `~` does not expand across the ssh/tmux boundary `fleet.sh` uses (it's embedded in a single-quoted remote-shell argument, not evaluated by a shell that would expand it). Use the same `~/runs/<TARGET>-<machine>-<tool>/` convention, just spelled out with the target user's actual home, e.g. `<BM2_HOME>/runs/2VDY-bm2-rfd3` — not `~/runs/...`. BM5-side, the local destination for `fleet.sh fetch` *is* `~`-expandable (that expansion happens on BM5's own shell) — typically an eval-workdir, not a `CLUSTER`/`RESULTS` pair. See `binderscout-orchestrator/references/lab-deploy.md` §3.3.
+**Driven-mode addendum:** `fleet.sh launch`'s `<remote-dir>` must be an absolute path — `~` does not expand across the ssh/tmux boundary `fleet.sh` uses (it's embedded in a single-quoted remote-shell argument, not evaluated by a shell that would expand it). Use the same `~/runs/<TARGET>-<machine>-<tool>/` convention, just spelled out with the target user's actual home, e.g. `<BM2_HOME>/runs/2VDY-bm2-rfd3` — not `~/runs/...`. BM5-side, the local destination for `fleet.sh fetch` *is* `~`-expandable (that expansion happens on BM5's own shell) — typically an eval-workdir, not a `CLUSTER`/`RESULTS` pair.
 
 **Never edit PROGRESS.md outside the "Worker updates" section.** The orchestrator owns everything above the `---` separator. You append below it. See `binderscout-orchestrator/SKILL.md` §3.5 for the full ownership protocol.
 
@@ -283,7 +290,7 @@ Then switch, transfer, switch back if you need Clara access again.
 tools/fleet.sh fetch <machine> <remote-dir>/<TARGET>_<tool>_<machine>.tar.gz ~/eval_workdir/<TARGET>/
 ```
 
-`fetch` runs `rsync -s -a --partial` and, for a `.tar.gz`, verifies the archive with `tar -tzf` before declaring success — a corrupt or partial transfer dies loudly instead of reporting a false green. BM5 then archives one copy to muni-disk RESULTS/ itself; that archived copy — not your worker-side tarball — is what closes the campaign record. See `binderscout-orchestrator/references/lab-deploy.md` §3.5.
+`fetch` runs `rsync -s -a --partial` and, for a `.tar.gz`, verifies the archive with `tar -tzf` before declaring success — a corrupt or partial transfer dies loudly instead of reporting a false green. BM5 then archives one copy to muni-disk RESULTS/ itself; that archived copy — not your worker-side tarball — is what closes the campaign record.
 
 ### 6.5 Append the completion-entry to PROGRESS.md
 
@@ -353,7 +360,6 @@ When NOT to write a memory:
 - `references/tools/<tool>.md` — per-tool operational playbooks (source-of-truth file, common errors, packaging quirks, kill criteria, OOM thresholds)
 - `binderscout-orchestrator/SKILL.md` — sibling skill (campaign-level meta)
 - `binderscout-orchestrator/references/tools/<tool>.md` — engine principles (read for context, not for execution)
-- `binderscout-orchestrator/references/lab-deploy.md` — driven-mode playbook (fleet.sh probe/status/launch/poll/fetch) for BM1/BM2/BM4 when driven from BM5
-- `tools/fleet.sh` — the script that drives LAN workers in driven mode
+- The driven-mode playbook (`lab-deploy.md`) and the script that drives LAN workers (`tools/fleet.sh`) are **not in this repository** — both are archived off-repo on the lab share
 - `CLAUDE.md` (BinderScout repo root) — codebase reference, install instructions, design decisions
 - `binderscout_examples/run_*.sh.template` — canonical run script templates (use these, do not hand-write)

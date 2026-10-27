@@ -99,7 +99,7 @@
 ## Part I: Pre-packed standalone distribution (future)
 
 > Goal: Ship BinderScout as a single archive needing zero install on the target server.
-> Depends on Part H (complete). Detailed plan in `docs/plans.md`.
+> Depends on Part H (complete). The detailed plan is archived off-repo on the lab share.
 
 - [ ] I1.  Add `conda-pack` dependency + verify env packing works
 - [ ] I2.  Create `pack/build_pack.sh` — build relocatable archive on dev machine

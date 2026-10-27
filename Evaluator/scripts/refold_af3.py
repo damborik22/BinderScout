@@ -602,7 +602,7 @@ def _build_af3_env(parent_env) -> dict[str, str]:
     ``XLA_CLIENT_MEM_FRACTION`` > ``XLA_PYTHON_CLIENT_MEM_FRACTION`` > a pool-aware
     default (see ``_default_mem_fraction``; was a hard-coded 0.8, which rebooted BM5).
 
-    Revisit if a jax upgrade ever drops the legacy name — see docs/PLAN_af3_v304_upgrade.md.
+    Revisit if a jax upgrade ever drops the legacy name.
     """
     env = {**parent_env, "XLA_PYTHON_CLIENT_PREALLOCATE": "true"}
 

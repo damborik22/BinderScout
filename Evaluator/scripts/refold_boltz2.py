@@ -10,8 +10,8 @@ import uuid
 # default XLA_PYTHON_CLIENT_MEM_FRACTION=0.75.  On a discrete card that is 0.75 of
 # the card.  On DGX Spark's unified memory, cudaMemGetInfo total == system RAM, so
 # it reserved 93,802 MiB of the machine's own 121.7 GiB and triggered
-# `NVRM: Out of memory` on 2026-08-19.  See binder_comparison.refolding.memory_policy
-# and docs/PLAN_bm5_unified_memory.md.  Override with BOLTZ2_XLA_MEM_FRACTION.
+# `NVRM: Out of memory` on 2026-08-19.  See binder_comparison.refolding.memory_policy.
+# Override with BOLTZ2_XLA_MEM_FRACTION.
 #
 # MEASURED 2026-08-20 on BM5 (GB10, 121.7 GiB unified), PREALLOCATE=false under an
 # MPS cap.  Demand is FLAT across our size regime -- 273 tokens and 340 tokens both peak

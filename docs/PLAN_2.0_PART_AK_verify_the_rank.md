@@ -1,8 +1,9 @@
 # Part AK — Verify the ranking (do not change its scope)
 
 > Named **AK** because 2.0's parts run Y, Z, AA…**AJ**, and `V` is already spoken for:
-> `docs/INVESTIGATION_partT_promera.md:203` reserves it for a Promera follow-up, and
-> `PLAN_ranking_and_engines_roadmap.md` has its own Part X.
+> the Promera investigation reserves it for a Promera follow-up, and the
+> ranking-and-engines roadmap has its own Part X. (Both are archived off-repo
+> on the lab share.)
 
 **Status:** planned, nothing launched. **Brief:** *"We do not want to change scope of our rank,
 just verify it."* So: no new metric, no new engine, no re-weighting, no gate change. Same

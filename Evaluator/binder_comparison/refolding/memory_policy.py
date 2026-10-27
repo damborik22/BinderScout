@@ -23,8 +23,8 @@ shipped.  XLA *has* the capability internally (``gpu_system_memory_size`` in
 fraction ourselves from an absolute GiB target and the real pool size.
 
 This is defense in depth, NOT the primary guard.  The hard ceiling is a CUDA MPS
-per-client limit -- see ``tools/gpu_mem_guard.sh`` and
-``docs/PLAN_bm5_unified_memory.md``.  This module covers the case where MPS is
+per-client limit -- see ``tools/gpu_mem_guard.sh`` (the unified-memory analysis
+behind it is archived off-repo on the lab share).  This module covers the case where MPS is
 not running, in which every client silently reverts to uncapped direct mode.
 """
 

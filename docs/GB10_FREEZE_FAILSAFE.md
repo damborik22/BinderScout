@@ -1,6 +1,7 @@
 # GB10 unified-memory freeze — root cause and failsafe
 
-Companion to `PLAN_bm5_unified_memory.md`. Written 2026-09-18 after the 2026-09-17 freeze.
+Companion to the BM5 unified-memory plan, which is archived off-repo on the lab share.
+Written 2026-09-18 after the 2026-09-17 freeze.
 Every claim below was verified on this box or in the shipped driver source; inferences are
 marked as such.
 

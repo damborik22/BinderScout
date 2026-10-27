@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+# RFD4-Proteina binder-design template — copy to runs/<name>/run_rfd4.sh and fill
+# the placeholders. `binderscout configure` generates this script and its input
+# spec for you; this file is the canonical hand-written pattern, taken from the
+# PD-L1 / TrkA pool run of 2026-10-23 (690 designs, two Clara L40S jobs).
+#
+# One stage: rfd4-generate reads a condition spec and writes one mmCIF per design
+# holding the preserved target plus the designed binder on its own chain.
+# Sequence and structure are designed together, so there is no MPNN pass — the
+# design pool is read back out of those structures.
+#
+# Placeholders:
+#   {{RUN_DIR}}          Absolute path of runs/<name>/
+#   {{RFD4_REPO}}        Absolute path of the RFD4-Proteina checkout (its .venv
+#                        is the installation: editable install, no conda env)
+#   {{TARGET_CHAIN}}     Chain id of the PRESERVED target in the contig (e.g. A).
+#                        The designed binder is the other chain in the output.
+#   {{NUM_REPLICATES}}   Number of designs (one design per replicate)
+#   {{SEED}}             Random seed
+#
+# The input spec lives at $RFD4_OUT/input.yaml and is NOT generated here, so it
+# can be edited and rerun without touching this script. Its shape, verbatim from
+# the run that produced the TrkA pool:
+#
+#   trka_binder:
+#     input: /abs/path/trka_target.cif
+#     contig: "60-100, /0, A5-105"
+#     conditions:
+#       C_CRDGRP:
+#         1:
+#           - select: "sel('A/*/*/[N,CA,C,O]') and not has_nan_coord()"
+#       C_SEQ:
+#         true:
+#           - select: "sel('A')"
+#
+# contig = designed binder length range, "/0" chain break, preserved target
+# segment. THE RESIDUE IDS ARE label_seq_id, NOT auth_seq_id — RFD4 resolves a
+# contig against the mmCIF label column (upstream docs/reference/yaml-json.md).
+# Author numbering is rejected outright, and cost two queued jobs on that run:
+#   ValueError: Preserved segment 'A18-132' runs outside chain A, whose residues are 2-116.
+#   ValueError: Preserved segment 'A282-382' matched no atoms in the input structure.
+# `A5-105` above IS author 282-382, written the way RFD4 reads it. The input must
+# be .cif, .cif.gz or .bcif; a .pdb carries no label_seq_id at all.
+
+set -euo pipefail
+
+RUN_DIR="{{RUN_DIR}}"
+RFD4_REPO="{{RFD4_REPO}}"
+RFD4_BIN="$RFD4_REPO/.venv/bin/rfd4-generate"
+RFD4_PY="$RFD4_REPO/.venv/bin/python"
+RFD4_OUT="$RUN_DIR/rfd4"
+INPUT_YAML="$RFD4_OUT/input.yaml"
+GEN_DIR="$RFD4_OUT/generate"
+TARGET_CHAIN="{{TARGET_CHAIN}}"
+
+mkdir -p "$GEN_DIR"
+
+[[ -x "$RFD4_BIN" ]] || { echo "ERROR: RFD4-Proteina not installed at $RFD4_REPO" >&2; exit 1; }
+[[ -f "$INPUT_YAML" ]] || { echo "ERROR: $INPUT_YAML is missing" >&2; exit 1; }
+
+# Read the spec back rather than restating it here: it is editable, and
+# settings.json has to record the run that actually ran. awk, not `grep | head`,
+# so nothing can trip `set -o pipefail`.
+CONTIG=$(awk -F'"' '/^  contig: /{print $2; exit}' "$INPUT_YAML")
+INPUT_CIF=$(awk '/^  input: /{sub(/^  input: /, ""); print; exit}' "$INPUT_YAML")
+[[ -n "$CONTIG" && -n "$INPUT_CIF" ]] || { echo "ERROR: no contig/input in $INPUT_YAML" >&2; exit 1; }
+[[ -f "$INPUT_CIF" ]] || { echo "ERROR: $INPUT_CIF (from $INPUT_YAML) not found" >&2; exit 1; }
+
+# ── Persist exact run settings to $RFD4_OUT/settings.json ───────────────────
+# Convention (CLAUDE.md "Per-run settings.json"): every tool run writes a
+# self-describing settings.json into its output subdir BEFORE the design step.
+GIT_SHA=$(git -C "$RUN_DIR/../.." rev-parse HEAD 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git -C "$RUN_DIR/../.." rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+# `|| echo` is load-bearing: under `set -euo pipefail` a failing nvidia-smi in a
+# command substitution would kill the script BEFORE the design step, inside the
+# provenance block that exists to make the run reproducible.
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i 0 2>/dev/null | head -1 || echo "unknown")
+GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i 0 2>/dev/null | head -1 || echo 0)
+# GB10 (DGX Spark) answers this query SUCCESSFULLY with the string "[N/A]", so the
+# `|| echo 0` never fires. gpu_memory_mib is the one unquoted value in the JSON, so
+# that string lands bare and settings.json stops parsing. Keep only a number.
+GPU_MEM=$(printf '%s' "$GPU_MEM" | grep -E '^[0-9]+$' || echo 0)
+RFD4_SHA=$(git -C "$RFD4_REPO" rev-parse HEAD 2>/dev/null || echo "unknown")
+RFD4_VER=$("$RFD4_PY" -c 'import importlib.metadata;print(importlib.metadata.version("rfd4-proteina"))' 2>/dev/null || echo "unknown")
+PY_VER=$("$RFD4_PY" -c 'import sys;print(".".join(map(str,sys.version_info[:3])))' 2>/dev/null || echo "unknown")
+cat > "$RFD4_OUT/settings.json" <<JSON
+{
+  "tool": "rfd4-proteina",
+  "started_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "version": {
+    "binderscout_git_sha": "$GIT_SHA",
+    "binderscout_git_branch": "$GIT_BRANCH",
+    "rfd4_repo_git_sha": "$RFD4_SHA",
+    "rfd4_pkg_version": "$RFD4_VER"
+  },
+  "target": {
+    "cif": "$INPUT_CIF",
+    "preserved_chain": "$TARGET_CHAIN"
+  },
+  "design_params": {
+    "input_spec": "$INPUT_YAML",
+    "contig": "$CONTIG",
+    "num_replicates": {{NUM_REPLICATES}},
+    "batch_size": 1,
+    "seed": {{SEED}},
+    "native_metrics": "removed (~metrics)"
+  },
+  "env": {
+    "conda_env": "(uv venv: RFD4-Proteina/.venv)",
+    "python": "$PY_VER",
+    "gpu_id": 0,
+    "gpu_name": "$GPU_NAME",
+    "gpu_memory_mib": $GPU_MEM
+  }
+}
+JSON
+
+echo "============================================================"
+echo "  RFD4-Proteina generation"
+echo "  Spec:    $INPUT_YAML"
+echo "  Contig:  $CONTIG"
+echo "  Designs: {{NUM_REPLICATES}} (batch_size=1, seed={{SEED}})"
+# Measured on one L40S, 2026-10-23: 330 designs in 1652 s -- 5.0 s/design including
+# ~24 s of startup -- GPU peak 3119 MiB for a 101 aa target and 60-100 aa binders.
+echo "  Cost:    ~5 s/design, ~3.1 GiB GPU peak measured on an L40S"
+echo "  Settings persisted: $RFD4_OUT/settings.json"
+echo "============================================================"
+
+# '~metrics' is LOAD-BEARING and is quoted. It removes RFD4's native metrics
+# block, which runs AF2/AF3 oracles out of environments this install does not
+# create; the run fails without it. The quotes stop the shell touching the '~'.
+"$RFD4_BIN" \
+    inputs="$INPUT_YAML" \
+    num_replicates={{NUM_REPLICATES}} \
+    batch_size=1 \
+    seed={{SEED}} \
+    out_dir="$GEN_DIR" \
+    '~metrics'
+
+# RFD4 writes one <id>_generated.cif per design, inside a run-named directory of
+# its own choosing under out_dir (".../inference_samples/<id>/"). Found rather
+# than spelled out, because that middle component is RFD4's to pick.
+echo ""
+echo "=== Reading binder sequences out of the generated structures ==="
+mapfile -t GENERATED < <(find "$GEN_DIR" -name '*_generated.cif' -size +0c | sort)
+if (( ${#GENERATED[@]} == 0 )); then
+    echo "ERROR: rfd4-generate exited 0 but wrote no non-empty *_generated.cif under" >&2
+    echo "       $GEN_DIR -- nothing was designed." >&2
+    exit 1
+fi
+echo "  found ${#GENERATED[@]} structures"
+
+# The binder is the chain that is NOT the preserved target chain. Verified on the
+# pool run: every output carries chains [B, A] with A the preserved target
+# (sequence identical to the input, CA RMSD 0.14-0.17 A) and B the design.
+python3 - "$GEN_DIR" "$RFD4_OUT" "$TARGET_CHAIN" <<'PYEOF'
+import csv
+import sys
+from pathlib import Path
+
+gen_dir, out_dir, target_chain = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+Q = "'" + chr(34)  # mmCIF values may be quoted either way
+
+AA3TO1 = {
+    'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C', 'GLN': 'Q', 'GLU': 'E',
+    'GLY': 'G', 'HIS': 'H', 'ILE': 'I', 'LEU': 'L', 'LYS': 'K', 'MET': 'M', 'PHE': 'F',
+    'PRO': 'P', 'SER': 'S', 'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V', 'MSE': 'M',
+}
+
+
+def ca_chains(path):
+    # {chain: sequence} from the mmCIF _atom_site CA records, in file order.
+    cols, chains, seen_rows = [], {}, False
+    with path.open(errors='replace') as fh:
+        for raw in fh:
+            line = raw.strip()
+            if line.startswith('_atom_site.'):
+                cols.append(line.split('.', 1)[1].split()[0].lower())
+                continue
+            if not cols:
+                continue
+            if not line or line.startswith(('#', '_', 'loop_', 'data_')):
+                if seen_rows:
+                    break
+                continue
+            row = line.split()
+            if len(row) != len(cols):
+                continue
+            seen_rows = True
+            rec = dict(zip(cols, row))
+            if rec.get('label_atom_id', '').strip(Q) != 'CA':
+                continue
+            chain = (rec.get('label_asym_id') or rec.get('auth_asym_id') or '').strip(Q)
+            res = rec.get('label_comp_id', '').strip(Q).upper()
+            chains.setdefault(chain, []).append(AA3TO1.get(res, 'X'))
+    return {c: ''.join(v) for c, v in chains.items()}
+
+
+rows, problems = [], []
+for cif in sorted(gen_dir.rglob('*_generated.cif')):
+    chains = ca_chains(cif)
+    present = ','.join(sorted(chains)) or 'none'
+    if target_chain not in chains:
+        problems.append((cif.name, 'preserved target chain %s absent; chains present: %s'
+                         % (target_chain, present)))
+        continue
+    binders = [(c, s) for c, s in chains.items() if c != target_chain and s]
+    if len(binders) != 1:
+        problems.append((cif.name, '%d designed chains besides %s; chains present: %s'
+                         % (len(binders), target_chain, present)))
+        continue
+    chain, seq = binders[0]
+    if set(seq) <= {'X'}:
+        problems.append((cif.name, 'chain %s holds no canonical residues' % chain))
+        continue
+    rows.append({
+        'design_id': 'rfd4_' + cif.name[: -len('_generated.cif')],
+        'sequence': seq,
+        'length': len(seq),
+        'binder_chain': chain,
+        'structure': str(cif),
+        'source': 'rfd4',
+    })
+
+for cif_name, why in problems:
+    print('  WARN: %s: %s' % (cif_name, why), file=sys.stderr)
+
+if not rows:
+    print('ERROR: no binder sequences could be read from %s' % gen_dir, file=sys.stderr)
+    sys.exit(1)
+
+with (out_dir / 'sequences.csv').open('w', newline='') as fh:
+    w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+    w.writeheader()
+    w.writerows(rows)
+with (out_dir / 'sequences.fasta').open('w') as fh:
+    for r in rows:
+        fh.write('>%s  length=%d  source=rfd4\n%s\n' % (r['design_id'], r['length'], r['sequence']))
+
+lengths = sorted(r['length'] for r in rows)
+print('  -> %d binder sequences (length %d-%d) -> %s/sequences.csv'
+      % (len(rows), lengths[0], lengths[-1], out_dir))
+if problems:
+    print('  %d of %d structures skipped (see the WARN lines above)'
+          % (len(problems), len(rows) + len(problems)))
+PYEOF
+
+echo ""
+echo "=== RFD4-Proteina design complete ==="
+echo "  Structures:       $GEN_DIR"
+echo "  Aggregated CSV:   $RFD4_OUT/sequences.csv"
+echo "  Aggregated FASTA: $RFD4_OUT/sequences.fasta"

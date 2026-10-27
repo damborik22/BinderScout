@@ -1,13 +1,20 @@
 ---
 name: binderscout-orchestrator
-description: Use this skill when planning, dispatching, and evaluating a BinderScout binder-design campaign. Triggers include any mention of orchestrating a binder campaign, deciding which design tool to run on which target, writing kickoff docs for compute nodes, deploying or checking jobs directly on the Clara (CIIRC) cluster or the LAN fleet (BM1/BM2/BM4) over ssh, managing PROGRESS.md state across machines, or running the cross-engine refold + iPSAE merge after results return. Use whenever the user says "let's start a campaign on <target>", "what should we run next", "which tool fits this target", "deploy/run/check a job on Clara or BM1/BM2/BM4", "merge the results", "evaluate the pool", or refers to BinderScout, ApoE4 binders, CBG binders, 2VDY, or similar binder-design contexts. When this machine has direct ssh access to Clara and/or the LAN fleet, the orchestrator can deploy and monitor those jobs itself (see references/clara-deploy.md and references/lab-deploy.md); otherwise it hands off to the sibling skill `binderscout-worker` which handles the per-machine execution layer.
+description: Use this skill when planning, dispatching, and evaluating a BinderScout binder-design campaign. Triggers include any mention of orchestrating a binder campaign, deciding which design tool to run on which target, writing kickoff docs for compute nodes, deploying or checking jobs directly on the Clara (CIIRC) cluster or the LAN fleet (BM1/BM2/BM4) over ssh, managing PROGRESS.md state across machines, or running the cross-engine refold + iPSAE merge after results return. Use whenever the user says "let's start a campaign on <target>", "what should we run next", "which tool fits this target", "deploy/run/check a job on Clara or BM1/BM2/BM4", "merge the results", "evaluate the pool", or refers to BinderScout, ApoE4 binders, CBG binders, 2VDY, or similar binder-design contexts. When this machine has direct ssh access to Clara and/or the LAN fleet, the orchestrator can deploy and monitor those jobs itself; otherwise it hands off to the sibling skill `binderscout-worker` which handles the per-machine execution layer.
 ---
 
 # BinderScout Campaign Orchestration — SKILL base
 
 **Audience:** an AI agent acting as the *orchestrator* of a BinderScout binder-design campaign — typically running on Spark. The orchestrator coordinates work across multiple compute nodes (BM1, BM2, BM4, Clara, others as available); each worker is either a Claude Code instance reading the assignment locally, a remote session driven by the orchestrator over VPN/SSH, or a human. This skill is meta — for per-tool engine principles see `references/tools/`, for empirical campaign lessons see `references/learnings.md`, for the local cross-engine refold + iPSAE merge recipe see `references/evaluation.md`, and for the worker-side operational playbook see the sibling skill `binderscout-worker`.
 
-When this machine has direct LAN SSH to BM1/BM2/BM4 (no VPN, same subnet — as BM5 does), the orchestrator can drive those machines itself via `tools/fleet.sh` (`probe|status|launch|poll|fetch`), the same direct-deploy collapse of orchestrator/worker roles described below for Clara. See `references/lab-deploy.md`.
+When this machine has direct LAN SSH to BM1/BM2/BM4 (no VPN, same subnet — as BM5 does), the orchestrator can drive those machines itself via `tools/fleet.sh` (`probe|status|launch|poll|fetch`), the same direct-deploy collapse of orchestrator/worker roles described below for Clara.
+
+> **The fleet tooling is no longer in this repository.** `tools/fleet.sh` and the two
+> direct-deploy playbooks (`lab-deploy.md`, `clara-deploy.md`) were removed from the
+> public tree and archived off-repo on the lab share. Every `fleet.sh` command named
+> below therefore describes tooling you must fetch from the lab share first; without
+> it, drive the nodes with plain `ssh` / `scp` / `rsync`, or fall back to the
+> handoff-doc model.
 
 **When you read this:** at the start of any campaign session, after `MEMORY.md`, before touching the run dirs. It encodes patterns that took a full campaign (2VDY / human CBG, May 2026) to learn.
 
@@ -22,7 +29,7 @@ When this machine has direct LAN SSH to BM1/BM2/BM4 (no VPN, same subnet — as 
 
 A campaign is a **swarm of independent design jobs** running on compute nodes that don't share filesystems with each other. Dispatch happens in one of two modes:
 
-- **Direct-deploy over SSH** — when the orchestrator machine has plain SSH reachability to a compute node (LAN, no VPN gate; or a VPN already up), it drives that node itself: deploy scripts, launch, monitor, fetch results, all inside its own session, no separate worker. This is the primary mode now for BM1/BM2/BM4 (`tools/fleet.sh probe|status|launch|poll|fetch` over the lab LAN — `references/lab-deploy.md`) and for Clara once `ssh clara` is wired up (`references/clara-deploy.md`).
+- **Direct-deploy over SSH** — when the orchestrator machine has plain SSH reachability to a compute node (LAN, no VPN gate; or a VPN already up), it drives that node itself: deploy scripts, launch, monitor, fetch results, all inside its own session, no separate worker. This is the primary mode now for BM1/BM2/BM4 (`tools/fleet.sh probe|status|launch|poll|fetch` over the lab LAN) and for Clara once `ssh clara` is wired up.
 - **Handoff-doc model** — the fallback, still live for any machine the orchestrator can't SSH into directly: a human-operated box, a machine outside the lab LAN, or Clara before its key is set up. Coordination runs through two shared artifacts on muni-disk:
   - **`RESULTS/PROGRESS.md`** — the single source of truth for "what's done / running / queued / failed."
   - **`CLUSTER/<tool>_<machine>_SETTINGS.md`** — kickoffs you write and worker Claudes (or remote sessions) execute.
@@ -33,16 +40,16 @@ A campaign is a **swarm of independent design jobs** running on compute nodes th
 
 Even in direct-deploy mode, still write the kickoff doc in `CLUSTER/` for any campaign-significant run — it's the durable record of *why* and *how*. PROGRESS.md stays the state dashboard either way; §3.5 covers who owns which section when the orchestrator is playing both roles.
 
-**muni-disk's role has changed.** With BM1/BM2/BM4 sharing a subnet with BM5 (no VPN, no NAT), muni-disk is no longer the coordination substrate for LAN work — it's the **archive of record**. Results are pulled straight to BM5 over LAN (`fleet.sh fetch`), refolded locally, and only then pushed to muni-disk as the durable copy. Clara-bound work, and any machine outside the LAN, still coordinates through muni-disk more directly, per `clara-deploy.md`.
+**muni-disk's role has changed.** With BM1/BM2/BM4 sharing a subnet with BM5 (no VPN, no NAT), muni-disk is no longer the coordination substrate for LAN work — it's the **archive of record**. Results are pulled straight to BM5 over LAN (`fleet.sh fetch`), refolded locally, and only then pushed to muni-disk as the durable copy. Clara-bound work, and any machine outside the LAN, still coordinates through muni-disk more directly.
 
 **The orchestrator runs on Spark (or any workstation with the refold envs).** The canonical cross-engine refold trio — Boltz-2, AlphaFold 3, and ESMFold2 — all have their conda envs on Spark; refolding is done locally as code, not dispatched as jobs. (Protenix refolding was retired — Part J reverted; PXDesign still uses Protenix internally as a design tool, that's unrelated.) Design tools that need bigger GPUs or specific architectures run on remote workers (BM1, BM2, BM4, Clara, …) and ship results back — over LAN to BM5 for the fleet machines, or to muni-disk for Clara / non-LAN machines.
 
-**Dispatch to Clara can be direct, but the access model is deliberately manual — not an always-on tunnel.** Standing policy (decided 2026-07-27): **the VPN tunnel is the only gate.** A human starts the CIIRC VPN by hand every time; it is gateway-timed and drops on its own after roughly a working day, and nothing holds it open automatically — no systemd unit, no stored password, no sudo for the agent. The Clara key is deliberately **passphrase-less**, so there is no `ssh-add` step and no key-side time window: Clara is reachable exactly while the tunnel is up and unreachable the moment it drops. Because the key file is therefore readable by anything running as `<BM5_USER>`, the Clara-side `authorized_keys` options carry the real protection — applied 2026-07-27 as `restrict,pty,expiry-time="20270727"` (verified: `-R` refused, `-L` carries no traffic, interactive PTY still works). **No `from=` restriction**: BM5 reaches Clara through the VPN, so the source address Clara sees is a pool address (<CIIRC_VPN_POOL>) that is reassigned per session and shared with other CIIRC users — pinning it would be both fragile and weak. When the tunnel is up and `ssh clara "true"` succeeds, "dispatch a job to Clara" does **not** have to mean writing a handoff doc and waiting for a separate worker — the orchestrator can drive Clara itself over SSH, running the full worker loop (pre-flight → deploy scripts → submit → monitor → package → transfer) remotely inside its own session. The orchestrator and worker roles collapse into one operator for Clara-bound work. Whether *this* machine has that access, and the exact machine-specific setup (VPN, DNS pin, key, alias), lives in the repo-root `CLAUDE.local.md`; the operational playbook is `references/clara-deploy.md`. If `ssh clara` isn't set up here, fall back to the handoff-doc model above.
+**Dispatch to Clara can be direct, but the access model is deliberately manual — not an always-on tunnel.** Standing policy (decided 2026-07-27): **the VPN tunnel is the only gate.** A human starts the CIIRC VPN by hand every time; it is gateway-timed and drops on its own after roughly a working day, and nothing holds it open automatically — no systemd unit, no stored password, no sudo for the agent. The Clara key is deliberately **passphrase-less**, so there is no `ssh-add` step and no key-side time window: Clara is reachable exactly while the tunnel is up and unreachable the moment it drops. Because the key file is therefore readable by anything running as `<BM5_USER>`, the Clara-side `authorized_keys` options carry the real protection — applied 2026-07-27 as `restrict,pty,expiry-time="20270727"` (verified: `-R` refused, `-L` carries no traffic, interactive PTY still works). **No `from=` restriction**: BM5 reaches Clara through the VPN, so the source address Clara sees is a pool address (<CIIRC_VPN_POOL>) that is reassigned per session and shared with other CIIRC users — pinning it would be both fragile and weak. When the tunnel is up and `ssh clara "true"` succeeds, "dispatch a job to Clara" does **not** have to mean writing a handoff doc and waiting for a separate worker — the orchestrator can drive Clara itself over SSH, running the full worker loop (pre-flight → deploy scripts → submit → monitor → package → transfer) remotely inside its own session. The orchestrator and worker roles collapse into one operator for Clara-bound work. Whether *this* machine has that access, and the exact machine-specific setup (VPN, DNS pin, key, alias), lives in the repo-root `CLAUDE.local.md`. If `ssh clara` isn't set up here, fall back to the handoff-doc model above.
 
 **The orchestrator's job is:**
 1. Read PROGRESS.md and CLUSTER/ to know the current state.
 2. Decide what to run next (which tools on which machines, what settings).
-3. Draft per-machine assignments in CLUSTER/ — and, for Clara or the LAN fleet when this machine has direct SSH, deploy and run them itself (`references/clara-deploy.md`, `references/lab-deploy.md`).
+3. Draft per-machine assignments in CLUSTER/ — and, for Clara or the LAN fleet when this machine has direct SSH, deploy and run them itself.
 4. Track work as it lands, merge worker updates into PROGRESS.md.
 5. After results return, run cross-engine refold + iPSAE merge locally on Spark (see `references/evaluation.md`).
 6. Recognize when to kill, scale, pivot, or stop.
@@ -77,7 +84,7 @@ On Spark (the orchestrator's home):
 ```
 ~/dev/BindMaster/                              ← cloned repo
 ~/dev/BindMaster/binderscout (CLI on $PATH)     ← unified entrypoint: `binderscout install|configure|evaluate`
-~/dev/BindMaster/tools/fleet.sh                ← drives BM1/BM2/BM4 directly over LAN SSH (probe|status|launch|poll|fetch)
+~/dev/BindMaster/tools/fleet.sh                ← drove BM1/BM2/BM4 over LAN SSH; archived off-repo, not in the public tree
 ~/.claude/skills/binderscout-orchestrator/      ← this skill
 ~/.claude/skills/binderscout-worker/            ← sibling skill (used when Spark drives a remote worker)
 Mosaic/.venv/                                  ← Boltz-2 refold env (also hosts `binder-compare`)
@@ -91,7 +98,7 @@ binder-eval-esmfold2/                          ← ESMFold2 refold env (default 
 The checkout directory is machine-local and spelled either way after the 2.0
 rename — `~/dev/BindMaster` on today's fleet boxes, `~/dev/BinderScout` on a fresh
 clone. Resolve it rather than asserting one in a command you ship to another box:
-`cd ~/dev/BindMaster 2>/dev/null || cd ~/dev/BinderScout`. `tools/fleet.sh probe`
+`cd ~/dev/BindMaster 2>/dev/null || cd ~/dev/BinderScout`. The fleet driver's `probe`
 resolves both spellings itself, so no symlink is needed. The path listings in this
 skill use the `BindMaster` spelling for brevity.
 
@@ -226,9 +233,9 @@ Worker side (the per-machine Claude, the orchestrator driving a remote session, 
 2. Set up: source env, register target, generate sbatch/run script.
 3. Submit. Append a started-entry to PROGRESS.md "Worker updates" with SLURM ID and 🔄.
 
-**Direct-deploy shortcut (Clara).** When this machine has `ssh clara` access, the orchestrator performs the worker-side steps above itself over SSH — deploy the scripts (`scp` or heredoc), submit, monitor, package, transfer — without a separate worker or a Worker-updates handshake (you own both role's PROGRESS.md sections). Full loop, command patterns, and direct-deploy-specific failure modes: `references/clara-deploy.md`. Still write the kickoff doc in `CLUSTER/` for any campaign-significant run (durable record of why/how), then execute it yourself.
+**Direct-deploy shortcut (Clara).** When this machine has `ssh clara` access, the orchestrator performs the worker-side steps above itself over SSH — deploy the scripts (`scp` or heredoc), submit, monitor, package, transfer — without a separate worker or a Worker-updates handshake (you own both role's PROGRESS.md sections). Still write the kickoff doc in `CLUSTER/` for any campaign-significant run (durable record of why/how), then execute it yourself.
 
-**Direct-deploy shortcut (LAN fleet).** When this machine has direct LAN SSH to BM1/BM2/BM4 (no VPN, same subnet — as BM5 does), the same collapse applies: `tools/fleet.sh launch <machine> <job> <remote-dir> <script>` ships the script, runs two admission checks (tmux session collision, GPU occupancy), and starts it under tmux; `fleet.sh poll` and `fleet.sh fetch` replace the Worker-updates handshake and the muni-disk RESULTS/ drop — `fetch` pulls and verifies (`tar -tzf`) before you trust it. Full loop, machine facts (BM1's 31 GB RAM ceiling, why Protein-Hunter still routes off BM5, which machines have BindCraft 2), and failure modes: `references/lab-deploy.md`.
+**Direct-deploy shortcut (LAN fleet).** When this machine has direct LAN SSH to BM1/BM2/BM4 (no VPN, same subnet — as BM5 does), the same collapse applies: `tools/fleet.sh launch <machine> <job> <remote-dir> <script>` ships the script, runs two admission checks (tmux session collision, GPU occupancy), and starts it under tmux; `fleet.sh poll` and `fleet.sh fetch` replace the Worker-updates handshake and the muni-disk RESULTS/ drop — `fetch` pulls and verifies (`tar -tzf`) before you trust it. Machine facts worth knowing: BM1's 31 GB RAM ceiling, why Protein-Hunter still routes off BM5, and which machines have BindCraft 2.
 
 ### Phase 2 — Monitor
 
@@ -552,9 +559,7 @@ Don't let the campaign drift past these. The wet-lab cost dominates total projec
 - `references/tools/README.md` — cross-method bias matrix, philosophy, file index
 - `references/learnings.md` — empirical campaign lessons (formerly §9), distilled from 2VDY and earlier
 - `references/evaluation.md` — local cross-engine refold + iPSAE merge + ranking recipe (refolders called as code on Spark)
-- `references/lab-deploy.md` — direct-deploy playbook: driving BM1/BM2/BM4 over plain LAN SSH (`tools/fleet.sh probe|status|launch|poll|fetch`) when this machine has that reachability, instead of a handoff doc
-- `references/clara-deploy.md` — direct-deploy playbook: driving the Clara cluster over `ssh clara` (pre-flight → deploy → submit → monitor → package → transfer) when this machine has SSH access, instead of handing off to a separate worker
-- `tools/fleet.sh` — the LAN fleet driver script (probe|status|launch|poll|fetch); `docs/PLAN_fleet_orchestration.md` has the design rationale behind it
+- The LAN fleet driver script (`tools/fleet.sh`, probe|status|launch|poll|fetch), its design rationale and the two direct-deploy playbooks (`lab-deploy.md` for BM1/BM2/BM4, `clara-deploy.md` for Clara) are **not in this repository** — all four are archived off-repo on the lab share
 - `CLAUDE.local.md` (repo root, machine-local / gitignored) — whether *this* machine has direct Clara SSH and/or LAN SSH to BM1/BM2/BM4, and the access setup for each (VPN, DNS pin, key, alias). Also `docs/local/*-Manual.md` when present: the full Clara/Slurm per-tool operating manuals
 - `references/autosize.md` — the `binder-compare autosize` adaptive sampling loop (equal-N per tool, budget caps, ESMFold2 gate); how the target-analyst dossier sets `--n-target`/`--tier`/`tools`
 - **Sibling skills** (the campaign lifecycle): `binderscout-target-analyst` (research a target → dossier, upstream), `binderscout-evaluator` (refold → two-stage rank → affinity → QC), `binderscout-wetlab` (plan + maturation, closes the loop), `binderscout-worker` (per-machine execution)

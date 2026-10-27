@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+> **Note on paths in older entries.** On 2026-10-27 a set of internal lab documents —
+> both repository diaries, the `docs/PLAN_*` / `docs/INVESTIGATION_*` planning records,
+> `docs/completed_plans.md`, `docs/plans.md`, the two skill deploy playbooks and the
+> `tools/fleet.sh` fleet driver — was removed from this repository and archived off-repo
+> on the lab share. Entries below still name them, because they record what happened at
+> the time; those paths no longer resolve in the tree.
+
 ## [Unreleased]
 
 ### Fixed (for 2.0.1)
@@ -1115,7 +1122,7 @@ Two traps recorded so they are not rediscovered:
 - **Do not switch to `best-of-n` to make it affordable.** It costs ~1 AF2 call per sample only because `best_of_n_search.py` / `single_pass_generation.py` never call `compute_reward_from_samples` — the reward is post-hoc ranking. MCTS was adopted on 2VDY because it beat best-of-n **10× at iPTM ≥ 0.85 in a third of the wall clock**. Under MCTS the reward is backpropagated into node statistics, so CPU-vs-GPU floats change the search *trajectory*, not just the ordering.
 - **Do not expect identical designs from any two machines.** `generate.py:596` deliberately enables TF32, there is no `use_deterministic_algorithms` / `cudnn.deterministic` / `CUBLAS_WORKSPACE_CONFIG` anywhere, and a 400-step SDE amplifies the drift. Bit-identity holds only for same box + same stack + same config — and even there `dataloader.batch_size` alone changes the designs at a fixed seed, so `seed=X` is not a sufficient provenance record.
 
-Reopens only if a CUDA jaxlib for aarch64/sm_121 appears, or if a GPU-native reward replaces AF2 (`rf3` is installed on Spark and PC's rf3 folding reward is commented out at `binder_generate.yaml:194-213` — a different objective, so a new experiment, not parity). `install/install_aarch.sh` now refuses with the real reason and the numbers; the full verdict is in `docs/plans.md`.
+Reopens only if a CUDA jaxlib for aarch64/sm_121 appears, or if a GPU-native reward replaces AF2 (`rf3` is installed on Spark and PC's rf3 folding reward is commented out at `binder_generate.yaml:194-213` — a different objective, so a new experiment, not parity). `install/install_aarch.sh` now refuses with the real reason and the numbers; the full verdict was recorded in `docs/plans.md`.
 ### Fixed (2026-07-29 — the candidates shortlist described designs that do not exist)
 
 Both defects were found by a reader comparing `candidates.csv` against `metrics.csv` on the shipped CALCA top-50 pool, and both are *internally* consistent per file — which is why review missed them. Every figure below is measured on that pool (350 designs, 7 tools) and on the 2VDY combined pool (350 designs, 7 tools).

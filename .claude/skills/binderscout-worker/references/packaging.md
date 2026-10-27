@@ -2,6 +2,10 @@
 
 Once a run finishes (success or failure), you package the outputs. **Assignment mode** (Clara, non-LAN machines): transfer the tarball to muni-disk yourself, as before. **Driven mode** (BM1/BM2/BM4, launched via `tools/fleet.sh` from BM5): package locally and leave it in the run dir — BM5 pulls it with `fleet.sh fetch` and archives a copy to muni-disk itself; you don't push. This file's naming convention and per-tool recipes are unchanged either way — only the transfer leg differs (see "Transfer" below).
 
+> **`tools/fleet.sh` is no longer in this repository** — it and the `lab-deploy.md`
+> playbook are archived off-repo on the lab share. Fetch the driver from there before
+> using the driven-mode commands below, or transfer by plain `rsync`/`scp`.
+
 ## Naming convention
 
 ```
@@ -215,7 +219,7 @@ Leave the tarball where you packaged it, in the run dir on the worker machine �
 tools/fleet.sh fetch <machine> <remote-dir>/<TARGET>_<tool>_<machine>.tar.gz ~/eval_workdir/<TARGET>/
 ```
 
-This runs `rsync -s -a --partial` and, for a `.tar.gz`, verifies the archive with `tar -tzf` before declaring success — a corrupt or partial transfer dies loudly (`fetch` refuses to report success) rather than silently landing a bad file. BM5 then archives one copy to muni-disk RESULTS/ itself; that copy — not your worker-side tarball — is what closes the campaign record. See `binderscout-orchestrator/references/lab-deploy.md` §3.5.
+This runs `rsync -s -a --partial` and, for a `.tar.gz`, verifies the archive with `tar -tzf` before declaring success — a corrupt or partial transfer dies loudly (`fetch` refuses to report success) rather than silently landing a bad file. BM5 then archives one copy to muni-disk RESULTS/ itself; that copy — not your worker-side tarball — is what closes the campaign record.
 
 You still append the completion-entry to PROGRESS.md (below) — driven mode doesn't change who owns that record, only who does the muni-disk write.
 

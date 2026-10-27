@@ -550,8 +550,8 @@ All of these land on `eight_tool`:
   `importlib.metadata.version("binder-comparison")`. It stays `0.1.0`;
   `binderscout --version` and `binder-compare --version` legitimately differ,
   and the docs say so.
-- The prose `v0.7.0` markers in `CLAUDE.md`, `docs/completed_plans.md` and
-  four skill reference files become `1.1.0`.
+- The prose `v0.7.0` markers in `CLAUDE.md`, `docs/completed_plans.md` (since
+  removed from this repo) and four skill reference files become `1.1.0`.
 - `REFOLD_CODE_TOKEN = "BinderScout"` is **not** touched — historical design
   codes like `CALCA-BinderScout-16` parse against it. Nor is
   `binder-compare hits --version`, which stays a free-text operator field.
