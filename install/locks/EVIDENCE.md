@@ -17,7 +17,7 @@ of `install/locks/` is to stop guessing.
 | **Protein-Hunter** | `bindmaster_protein_hunter.txt` | **ran, produced designs** | `summary_high_iptm.csv` + `summary_all_runs.csv` written |
 | **Proteina-Complexa** | `proteina-complexa.txt` | **installed; import fixed, generation not yet re-run** | Its campaign run died at stage 1 on BUG-20 (`atomworks` 3.0.0 removed `AtomSelectionStack`). After pinning `atomworks==2.2.1`, `proteinfoundation.utils.pdb_utils` imports cleanly. **A full generate has not been run since.** |
 | **RFD3** | `bindmaster_rfd3.txt` | **installed and loading; design not yet re-run** | Its run died at input validation on BUG-21 (the contig said `A1-118`, the target is numbered `A17-134`) — a configurator bug, not an environment fault. Checkpoint registry and ProteinMPNN resolve. **A design run has not been re-attempted.** |
-| **Mosaic** | `mosaic.uv.lock` | **installed; not run in this campaign** | Skipped by `run_all.sh` because it needs interactive input (BUG-15). The lock is the venv that the Boltz-2 refold runs out of, which *is* exercised below. |
+| **Mosaic** | `mosaic.uv.lock` | **ran, produced designs** — after the lock had to be corrected | The first capture of this lock was taken from an install that had never *run* a design, and it pinned `esm2quinox==0.2.0`, which crashes Mosaic's ESM2 prior with `KeyError: 'b'` (BUG-24). Re-pinned to `0.1.0` and re-vendored; Mosaic then optimised with the prior active. **This row is why this file exists** — see the note below. |
 
 ## Evaluator
 
@@ -56,3 +56,14 @@ of `install/locks/` is to stop guessing.
    requires `atomworks==3.0.4`; `proteina-complexa` requires `2.2.1` and breaks on
    3.0.0. A single global pin would have broken one of them — which is why these are
    per-env files and not one repo-wide list.
+
+3. **A lock captured from an un-run install can pin a broken version.** This file's
+   first version said Mosaic was "installed; not run in this campaign". That was
+   true, and it was the whole exposure: `install/locks/mosaic.uv.lock` recorded
+   `esm2quinox==0.2.0` — a version under which Mosaic cannot complete a single
+   optimisation step (BUG-24). The env installed cleanly and passed `import mosaic`;
+   nothing short of a design run could have caught it. So read the Status column as
+   a confidence level, not a formality: **"installed" means the pins are untested,
+   and untested pins have now been wrong once.** The remaining "installed"-only rows
+   are `binder-eval-esmfold2` (since exercised by a 1003-sequence refold) and the
+   Proteina-Complexa / RFD3 re-runs.

@@ -1386,10 +1386,40 @@ install_mosaic() {
         bash -c "cd '${MOSAIC_DIR}' && uv sync ${sync_flags}" \
         || { print_fail "uv sync failed for Mosaic — if --locked, refresh install/locks/mosaic.uv.lock"; return 1; }
 
+    # `uv sync` PRUNES: it removes anything from .venv that the lock does not list.
+    # install_evaluator() injects two packages into this venv afterwards with
+    # `uv pip install` — binder-compare[boltz2] (the whole Boltz-2 refold stage runs
+    # out of here) and fair-esm (Mosaic's ESM2 expressibility prior) — and neither is
+    # in the lock. So re-running `install.sh --tool mosaic` on a complete install
+    # silently uninstalled both: `evaluate.sh` then failed to find binder-compare, and
+    # Mosaic designed without the ESM prior. Observed, not theorised — a plain
+    # `uv sync --locked` here reported "Uninstalled 3 packages: binder-comparison,
+    # fair-esm, esm2quinox". Re-inject them when the Evaluator was already wired to
+    # this venv, so the tool-order dependency survives a single-tool re-run.
+    if [[ -f "${EVALUATOR_DIR}/envs/mosaic_venv_path" ]]; then
+        print_step "Restoring Evaluator packages pruned from the Mosaic venv by uv sync"
+        run_logged "re-install binder-compare into Mosaic venv" \
+            uv pip install --python "${MOSAIC_DIR}/.venv/bin/python" -q -e "${EVALUATOR_DIR}[boltz2]" \
+            || print_warn "Could not restore binder-compare — re-run: install.sh --tool evaluator"
+        run_logged "re-install fair-esm into Mosaic venv" \
+            uv pip install --python "${MOSAIC_DIR}/.venv/bin/python" -q fair-esm \
+            || print_warn "Could not restore fair-esm — Mosaic will run without the ESM2 prior"
+    fi
+
     # Smoke test
     smoke_test "import mosaic" \
         "${MOSAIC_DIR}/.venv/bin/python" -c "import mosaic; print('OK')" \
         || return 1
+
+    # The ESM2 prior is the one Mosaic loss that imports a third-party token table,
+    # and esm2quinox 0.2.0 silently changed its keys (BUG-24). `import mosaic` above
+    # does not touch it, so assert the SYMBOL the loss actually indexes — the same
+    # lesson as _pin_complexa_atomworks(): an import that never reaches the broken
+    # attribute is not a test.
+    smoke_test "esm2quinox alphabet has the keys Mosaic's ESM prior indexes" \
+        "${MOSAIC_DIR}/.venv/bin/python" -c \
+        "from esm2quinox._esm2 import _alphabet as a; assert len(a) == 33, len(a); [a[k] for k in ('b', 'e', 'm')]; print('OK')" \
+        || print_warn "esm2quinox alphabet mismatch — Mosaic will crash in the ESM prior (BUG-24); refresh install/locks/mosaic.uv.lock"
 
     # Example
     if [[ "${SKIP_EXAMPLES}" == false ]]; then

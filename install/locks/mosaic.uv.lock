@@ -397,7 +397,7 @@ name = "cffi"
 version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "implementation_name != 'PyPy' or (extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-cuda') or (extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-tpu') or (extra == 'group-6-mosaic-jax-cuda' and extra == 'group-6-mosaic-jax-tpu')" },
+    { name = "pycparser", marker = "(implementation_name != 'PyPy' and sys_platform != 'emscripten') or (implementation_name == 'PyPy' and extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-cuda') or (implementation_name == 'PyPy' and extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-tpu') or (implementation_name == 'PyPy' and extra == 'group-6-mosaic-jax-cuda' and extra == 'group-6-mosaic-jax-tpu') or (sys_platform == 'emscripten' and extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-cuda') or (sys_platform == 'emscripten' and extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-tpu') or (sys_platform == 'emscripten' and extra == 'group-6-mosaic-jax-cuda' and extra == 'group-6-mosaic-jax-tpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9e/ef/008a1939e372c06329a3fce4279c02f328488f3526744906eeec3da7ad5f/cffi-2.1.1.tar.gz", hash = "sha256:dd31f52ea1086513bb9df30f8fcee9b8918323ae067a3d5b78bc826a000712be", size = 530807, upload-time = "2026-08-03T21:21:18.939Z" }
 wheels = [
@@ -698,16 +698,16 @@ wheels = [
 
 [[package]]
 name = "esm2quinox"
-version = "0.2.0"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "equinox" },
     { name = "jax" },
     { name = "jaxtyping" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e4/87/d48d18a1faa94ee4560f14cfc559413fcfc610854c29af897bcf9fb91cf9/esm2quinox-0.2.0.tar.gz", hash = "sha256:12c11632f0b3efd3e3a4f94b031efb3f50f010f8fcbddd9a95b38da716bbb983", size = 12413, upload-time = "2025-06-05T16:58:32.254Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/06/69/65579ba4d7d8a63b914bee4d260455edc8b1a48b2b264b69c9fca97a849e/esm2quinox-0.1.0.tar.gz", hash = "sha256:23c28797e634bf510934759c4ddb7bcb367c7337d845901856e85749c661fa7f", size = 12017, upload-time = "2025-02-03T22:21:20.112Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bc/34/b72aeafa3521e42e300117c1d1cb749a6db534ae88d9c5b28c1dd054001a/esm2quinox-0.2.0-py3-none-any.whl", hash = "sha256:ac89d44ba1e141a60de1a76e10b345fab70d629d7c438031a76f53bd405fc244", size = 17089, upload-time = "2025-06-05T16:58:30.771Z" },
+    { url = "https://files.pythonhosted.org/packages/17/e3/002ab367c9b903dbaaad031e9e422698a620edae773ba87c822c96a3e648/esm2quinox-0.1.0-py3-none-any.whl", hash = "sha256:9221b156c4b96b9f77eac8eabd8923b06f6931e64d28fdf7279755a29cbead16", size = 16677, upload-time = "2025-02-03T22:21:18.78Z" },
 ]
 
 [[package]]
@@ -2575,7 +2575,7 @@ name = "pyzmq"
 version = "27.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "implementation_name == 'pypy' or (extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-cuda') or (extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-tpu') or (extra == 'group-6-mosaic-jax-cuda' and extra == 'group-6-mosaic-jax-tpu')" },
+    { name = "cffi", marker = "(implementation_name == 'pypy' and sys_platform != 'emscripten') or (implementation_name != 'pypy' and extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-cuda') or (implementation_name != 'pypy' and extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-tpu') or (implementation_name != 'pypy' and extra == 'group-6-mosaic-jax-cuda' and extra == 'group-6-mosaic-jax-tpu') or (sys_platform == 'emscripten' and extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-cuda') or (sys_platform == 'emscripten' and extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-tpu') or (sys_platform == 'emscripten' and extra == 'group-6-mosaic-jax-cuda' and extra == 'group-6-mosaic-jax-tpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e7/8d/5b3d5631c2f4b4b8862f64cd0c9eb777b5710eeb5125b4be8dd0a200a4c0/pyzmq-27.2.0.tar.gz", hash = "sha256:54d4259d1bfae24ecdb5ca79f7acc2eac6c286a02d6a0ae617797cb45f0726d3", size = 292316, upload-time = "2026-08-20T19:08:21.19Z" }
 wheels = [
@@ -2862,8 +2862,8 @@ name = "starlette"
 version = "1.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio" },
-    { name = "typing-extensions" },
+    { name = "anyio", marker = "sys_platform != 'emscripten' or (extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-cuda') or (extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-tpu') or (extra == 'group-6-mosaic-jax-cuda' and extra == 'group-6-mosaic-jax-tpu')" },
+    { name = "typing-extensions", marker = "sys_platform != 'emscripten' or (extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-cuda') or (extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-tpu') or (extra == 'group-6-mosaic-jax-cuda' and extra == 'group-6-mosaic-jax-tpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/48/bb/3d8757f21e9a53d9035c9eb039a777047139a16bfdbedfc7a58241c3d914/starlette-1.10.0.tar.gz", hash = "sha256:b8399098d4c1e3522734f7235dc79b1fc967f96cf139c81e0fa30479e0685f9b", size = 2734356, upload-time = "2026-10-24T15:04:12.342Z" }
 wheels = [
@@ -3165,8 +3165,8 @@ name = "uvicorn"
 version = "0.54.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click" },
-    { name = "h11" },
+    { name = "click", marker = "sys_platform != 'emscripten' or (extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-cuda') or (extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-tpu') or (extra == 'group-6-mosaic-jax-cuda' and extra == 'group-6-mosaic-jax-tpu')" },
+    { name = "h11", marker = "sys_platform != 'emscripten' or (extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-cuda') or (extra == 'group-6-mosaic-jax-cpu' and extra == 'group-6-mosaic-jax-tpu') or (extra == 'group-6-mosaic-jax-cuda' and extra == 'group-6-mosaic-jax-tpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/da/34/30e9280707135d2cfc589dfff3cb796bd07a3aeb1a3e415ba09dd89d7bb4/uvicorn-0.54.0.tar.gz", hash = "sha256:a2e33cbfaa0306f8e6b0c13e0cb89d7d7a2da3e62b90c66e18c33d9807b28620", size = 112283, upload-time = "2026-09-25T06:52:37.601Z" }
 wheels = [

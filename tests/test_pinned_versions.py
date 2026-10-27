@@ -54,6 +54,27 @@ class TestEveryConstraintsCallHasAFile:
         assert "LOCKS_DIR}/mosaic.uv.lock" in INSTALL_TEXT
         assert "--locked" in INSTALL_TEXT
 
+    def test_mosaic_lock_pins_the_esm2quinox_alphabet_that_mosaic_reads(self):
+        """BUG-24. Mosaic's losses/esm.py does `from esm2quinox._esm2 import _alphabet`
+        and then indexes it with "b"/"e"/"m", one-hotting to a hardcoded width of 33.
+
+        esm2quinox 0.1.0 is a 33-entry dict keyed exactly that way. 0.2.0 rewrote it
+        as 32 entries keyed by symbol ("^", "$", "#"), so the ESM2 expressibility
+        prior dies with KeyError: 'b' inside the jitted loss — on the first
+        optimisation step, after the model and MSA have loaded. Mosaic declares only
+        `esm2quinox>=0.1.0`, so a fresh install takes 0.2.0 and every Mosaic run
+        fails. The first vendored lock pinned 0.2.0: it was captured from an install
+        that had never been *run* (see EVIDENCE.md), which is exactly the gap that
+        file exists to record.
+        """
+        lock = (LOCKS / "mosaic.uv.lock").read_text()
+        block = re.search(r'name = "esm2quinox"\nversion = "([^"]+)"', lock)
+        assert block, "esm2quinox is no longer in the Mosaic lock — did the loss change?"
+        assert block.group(1).startswith("0.1."), (
+            f"Mosaic lock pins esm2quinox {block.group(1)}; its esm.py needs the "
+            "33-entry 0.1.x alphabet keyed 'b'/'e'/'m' (BUG-24)"
+        )
+
 
 class TestConstraintsExcludeTheClassesThatBreakResolution:
     """Both exclusions were found by `pip install --dry-run`, not by reasoning."""

@@ -8,6 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Mosaic could not complete a single optimisation step on any install after
+  2025-06-05.** `losses/esm.py` imports `esm2quinox`'s private `_alphabet` and
+  indexes it with `"b"`/`"e"`/`"m"`, one-hotting to a hardcoded width of 33.
+  esm2quinox 0.2.0 rewrote that table as 32 entries keyed by symbol, so the ESM2
+  expressibility prior died with `KeyError: 'b'` inside the jitted loss — after the
+  model and MSA had loaded, on the first batch. Mosaic asks only for
+  `esm2quinox>=0.1.0`. Re-pinned to `0.1.0` in the vendored `install/locks/mosaic.uv.lock`
+  (`Mosaic/` is gitignored and recloned, so its own `pyproject.toml` is not a durable
+  place for this); 216 of 217 packages unchanged. `install_mosaic()` now asserts the
+  alphabet's **symbols and width** rather than trusting `import mosaic`, which never
+  reaches this loss. Note the first vendored lock pinned the *broken* version,
+  because it was captured from an install that had never run a design — exactly the
+  gap `install/locks/EVIDENCE.md` records.
+
+- **`install.sh --tool mosaic` on a complete install silently broke the Evaluator.**
+  `uv sync` prunes whatever the lock does not list, and `install_evaluator()` injects
+  `binder-compare[boltz2]` — the env the entire Boltz-2 refold runs out of — plus
+  `fair-esm` into that venv afterwards. Re-syncing uninstalled both: `evaluate.sh`
+  then could not find `binder-compare`, and Mosaic quietly designed without the ESM
+  prior. `install_mosaic()` now re-injects both when the Evaluator is already wired
+  to the venv, so the cross-tool ordering survives a single-tool re-run.
+
 - **Proteina-Complexa was dead on arrival on any install after 2026-10-05.**
   Upstream's `env/build_uv_env.sh` installs `atomworks` with no version, and
   atomworks 3.0.0 deleted `AtomSelectionStack`, which `pdb_utils.py` imports at
