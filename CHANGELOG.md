@@ -13,7 +13,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Fixed (for 2.0.1)
+## [2.0.2] — 2026-10-27
+
+### Added
+
+- **RFD4-Proteina as the ninth design tool** (IPD x NVIDIA latent-reasoning diffusion), wired
+  through all three modules: `install/install.sh --tool rfd4`, a configurator step that generates
+  `run_rfd4.sh` from `binderscout_examples/run_rfd4.sh.template`, and an `RFD4Extractor` reachable
+  as `binder-compare extract --rfd4`. It produces backbone **and** sequence in one pass, so there
+  is no MPNN step. **x86_64 only and opt-in — deliberately not in `--tool all`.** aarch64 is
+  refused outright rather than labelled unvalidated, because upstream's own
+  `scripts/setup_venv.sh` exits 1 on any non-x86_64 host. The code is BSD-3; **the weights licence
+  has not been verified here**, so the installer says so rather than implying it is cleared.
+- The configurator derives RFD4's preserved segment from the mmCIF `label_seq_id` column, which is
+  what RFD4 resolves contigs against. Author numbering silently names different residues — a stock
+  5O45 is `A18-132` by author and `2-116` by label — and that cost two failed jobs before it was
+  understood. An mmCIF-less (`.pdb`) target is refused at configure time rather than converted.
+
+### Removed
+
+- **73 files of internal lab material and research data, from the tree *and* from all published
+  history** (`git filter-repo`, force-pushed across `master`, `v1.1.x`, `v2.0.x` and all ten
+  tags): both repository diaries, the `docs/PLAN_*` / `docs/INVESTIGATION_*` planning records,
+  `docs/plans.md`, `docs/completed_plans.md`, the `docs/data/` benchmark sets, the two skill
+  deploy playbooks and `tools/fleet.sh`. Several of those carried **unpublished designed binder
+  sequences next to their targets**. The diaries were not deleted but moved: they live on the lab
+  share at `Project-01-BINDMASTER/REPO_DIARY/`, and `.gitignore` now blocks `DIARY_*.md`.
+  A rewrite does not undo publication — it only stops future casual access.
+
+### Changed
+
+- `docs/INVESTIGATION_RANKING_DISCREPANCY.md` is republished in sanitized form at the same path:
+  statistics, methods and conclusions kept, campaign name, target sequence and run paths removed.
+  The path is unchanged on purpose, because `core/schema.py`, `comparison/scoring.py` and
+  `extractors/boltzgen.py` cite it as the evidence for the ranking.
+- 48 references across 26 surviving files were retired. Where a citation carried the claim a
+  reader needs, the claim is now inline and only the pointer is gone. `CHANGELOG.md` and
+  `STAGES.md` keep their entries verbatim, with one note at the top, because they are historical
+  records.
+
+## [2.0.1] — 2026-10-15
+
+### Fixed
 
 - **A space inside a design id no longer yields mis-named structures with exit 0.** The binder id is a FASTA header's first whitespace token, so `>CALCA-Protein Hunter-01` became `CALCA-Protein` for all twelve such designs; their structures were written as `CALCA-Protein_af3.pdb` and `__2`..`__6` in file order, and none carried its own id (metrics CSVs were unaffected - they join on sequence). The three `refold-*` commands now refuse such a header before any GPU time is spent (`header_binder_id`), and `write_fasta` (so `extract` and `parse-seqs`) writes ids with whitespace replaced by `_`.
 

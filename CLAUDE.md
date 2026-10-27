@@ -4,7 +4,11 @@
 
 BinderScout is a unified toolkit for GPU-accelerated **protein binder design**. It wraps nine independent design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3, RFD4-Proteina) behind a single CLI (`binderscout`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders. BindCraft 2 is a rewrite, not a new version of BindCraft: it does not replace it, and the two coexist as separate tools in separate environments.
 
-**Current status: `v2.0.0`, tagged 2026-10-04 on the `v2.0.x` branch.** Shipped to the fleet
+**Current status: `v2.0.2`, tagged 2026-10-27 on the `v2.0.x` branch** (2.0.0 was tagged
+2026-10-04; 2.0.1 on 10-15). 2.0.2 adds RFD4-Proteina as the ninth tool and purges the
+internal lab material from the tree *and* the published history — **every commit SHA and
+tag below `v2.0.2` changed on 2026-10-27, so an older clone must be re-cloned, not pulled.**
+Shipped to the fleet
 only — **not published**, and deliberately **not merged to `master`**, which stays frozen at
 1.0.3. `v2.0.x` is the working branch: all work on these machines lands there, never on `master`
 or `v1.1.x`.
