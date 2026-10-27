@@ -158,7 +158,8 @@ BindMaster/
 │   ├── docs/                   ← pipeline reference, analysis notes
 │   └── envs/                   ← conda env specs (binder-eval, binder-eval-af3 [gated weights])
 ├── .claude/
-│   └── skills/                 ← Claude Code skills (bindmaster-orchestrator, bindmaster-worker)
+│   └── skills/                 ← Claude Code skills (target-analyst, orchestrator, worker,
+│                                 evaluator, wetlab) — see "Running with Claude Code"
 ├── scripts/                    ← helper install scripts (PXDesign)
 ├── tests/                      ← unit + integration tests
 ├── docs/                       ← development plans, completed plans, environments reference, scientific notes
@@ -662,10 +663,32 @@ Not defects — behaviour that will surprise you if you have not met it.
   targets. It ranks binder-vs-non-binder confidence, never affinity among binders.
   See Part U in [CHANGELOG.md](CHANGELOG.md).
 
+### Running with Claude Code
+
+BinderScout ships five [Claude Code](https://claude.com/claude-code) skills under
+`.claude/skills/`. Open the repository in Claude Code and they load automatically —
+describe what you want in plain language instead of assembling the CLI calls yourself.
+They cover the campaign end to end, each handing off to the next:
+
+| Skill | What it does | Say something like |
+|---|---|---|
+| `bindmaster-target-analyst` | Researches the target before any compute is spent — literature, known binders, pockets, epitopes, PTM sites — then runs the geometric difficulty analysis and proposes hotspots, binder lengths, per-tool N and a gate tier | *"analyse PD-L1 before we start"* |
+| `bindmaster-orchestrator` | Plans the campaign, picks which tool suits the target, writes the run directory, dispatches to this machine, an HPC cluster or a LAN fleet, and tracks `PROGRESS.md` across machines | *"start a campaign on PD-L1"*, *"what should we run next"* |
+| `bindmaster-worker` | The per-machine execution layer: pre-flight checks, env setup, job submission, monitoring the per-tool source-of-truth files, packaging results | *"run the assignment"*, *"check progress on BM2"* |
+| `bindmaster-evaluator` | Cross-engine refold (Boltz-2 + AF3 + ESMFold2), the iPTM consensus ranking, the HTML/CSV report, interface-energy affinity ranking, and monomer/fold QC | *"rank the designs"*, *"which are the best"* |
+| `bindmaster-wetlab` | Turns ranked designs into an order: codon-optimised gene FASTA, expression conditions, a BLI/SPR/FIDA test panel and controls — then plans the next maturation round from the binding data | *"prepare the wet-lab plan"*, *"we got Kd results — what next"* |
+
+The skills carry the operational knowledge that is tedious to rediscover: which tool
+fits which target, what the ranking metrics do and do not mean, and the failure modes
+behind the caveats above. They are the recommended way to run a campaign.
+
+They are not required — see below.
+
 ### Running without an LLM
 
 The executable pipeline has **no runtime LLM dependency** — the `.claude/skills/`
-packages are an operating manual, not a requirement. Two gaps affect scripted use:
+packages are an operating manual, not a requirement. Every step above is a plain
+CLI call documented in this README. Two gaps affect scripted use:
 
 - ~~**The configurator has no headless mode.**~~ **Fixed:** every wizard run now writes
   `runs/<name>/config.json`, and `configurator --config <file>` regenerates a run

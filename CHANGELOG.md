@@ -8,6 +8,78 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **RFD3 silently produced unfoldable backbones when no hotspots were configured —
+  and the first fix for it made that worse.** The configurator emitted
+  `infer_ori_strategy: hotspots` unconditionally, with the comment "COM falls back
+  when select_hotspots is empty". That comment was false:
+  `infer_ori_from_hotspots` opens with
+  `assert "is_atom_level_hotspot" in atom_array.get_annotation_categories()`, and
+  `com` is a separate key reached only by asking for it — so with no hotspots every
+  RFD3 run died in the dataloader. Falling back to `com` cleared the crash and was
+  **strictly worse**: centring on the whole fixed motif's centre of mass seeds every
+  diffused atom at the target's centre, so the binder nucleates inside the target and
+  grows as an extended coil, with `n_chainbreaks=0` so every downstream guard passes.
+  Measured on CBG/2VDY (2026-09-16, 304 backbones lost) and reproduced on PD-L1
+  (2026-10-27: ten 89-residue binders at Rg 16.8–19.6 Å against a 118-residue target
+  at 14.0 Å). The configurator now **refuses at configure time**, before any GPU is
+  committed, naming both remedies (set `hotspots`/`rfd3_hotspots`, or disable RFD3).
+  `bindmaster_examples/run_rfd3.sh.template` carried the same false claim and is
+  corrected. Hotspots are optional for the other six tools; RFD3 requires them.
+
+- **Proteina-Complexa produced no sequences, and reported success.** Two independent
+  faults. (1) The harvest searched `outputs/<run_name>` and any directory named
+  `evaluation_results`; at the pinned commit the design pipeline writes to
+  `inference/<config>_<task>_<run>/`, so it found nothing. (2) On finding nothing it
+  printed a warning and `sys.exit(0)`, so `run_all.sh` counted the step as passed,
+  the Evaluator logged "Proteina-Complexa: no CSV found", and the tool vanished from
+  the pool. Discovery now searches `inference/` first and keeps the old paths as
+  fallbacks, and a design step that yields no designs exits non-zero. The identical
+  silent `exit(0)` in the PXDesign harvest is fixed too.
+
+- **Proteina-Complexa could not resolve a custom target at all.** `++targets_dict=<path>`
+  is force-added by Hydra and never loaded — upstream reads
+  `configs/targets/targets_dict.yaml` — and the pipeline config interpolates
+  `hotspot_residues` unconditionally, so a target entry without it fails even once
+  found. Both are now satisfied when the run directory is generated.
+
+- **Mosaic's ESM2 prior: `dm-haiku` 0.0.14+ cannot run beside jax 0.4.29.** haiku
+  calls `jax.core.take_current_trace`, absent from the jax that upstream's
+  `build_uv_env.sh` deliberately installs for colabdesign/AF2. This one defeats
+  dependency resolution rather than losing to it: from 0.0.14 haiku declares jax only
+  as an optional extra (`jax>=0.11.0; extra == "jax"`), so plain `dm-haiku` carries no
+  jax requirement and every resolver reports a valid install that cannot import.
+  `HAIKU_VERSION="0.0.13"` is pinned and asserted by importing *through* colabdesign.
+
+- **RFD3 needs the same `atomworks` as Proteina-Complexa.** 3.0.0 moved
+  `extra_fields`/`build_assembly` off `parse_atom_array()` into a `PrepareConfig`
+  object and rejects leftover kwargs, which rfd3's pinned `input_parsing.py` still
+  passes — `TypeError: Unexpected keyword arguments`. `ATOMWORKS_VERSION` is now one
+  constant serving both envs, enforced in the conda env by `_pin_rfd3_atomworks()`,
+  which asserts the *signature* rather than the version string. This retires the
+  earlier claim that the two envs needed different atomworks versions; see
+  `install/locks/EVIDENCE.md`.
+
+- **`evaluate.sh` detected the AF3 env but never its weights.** AF3's weights are
+  gated and can only be placed by the user, so the realistic path — env installed,
+  weights absent — refolded through Boltz-2 and ESMFold2 for hours and then died in
+  the AF3 step. The weights are now resolved up front, with the same search order as
+  `refold_af3.py`, degrading to a 2-engine run immediately and printing where to get
+  them.
+
+- **The retired AF3 ">=100 GB GPU" figure still told users to skip the third engine.**
+  `evaluate.sh:47`, `evaluate.sh:313` ("so on most hosts only Boltz-2 + ESMFold2 run")
+  and `docs/walkthrough_and_dataflow.html` still carried it, while `CLAUDE.md`
+  records the measurement that retired it (4,430 MiB on an RTX 3090). Since that text
+  sits exactly where the engine count is computed, it framed a 2-engine run — which
+  fails the default 3-engine gate for every design — as the unavoidable norm.
+
+### Added
+
+- **README: "Running with Claude Code".** The repository ships five skills
+  (`target-analyst`, `orchestrator`, `worker`, `evaluator`, `wetlab`) covering a
+  campaign end to end, and the README previously named two of them in a directory
+  listing and otherwise only explained how to run *without* them.
+
 - **Mosaic's ESM2 expressibility prior had never once run.** `losses/esm.py` imports
   `esm2quinox`'s private `_alphabet` and indexes it with `"b"`/`"e"`/`"m"`,
   one-hotting to a hardcoded width of 33. esm2quinox 0.2.0 (2025-06-05) rewrote that

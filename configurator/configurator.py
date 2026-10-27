@@ -2167,8 +2167,11 @@ else:
         print(f'  Found {{len(rows)}} sequences from CIF files (fallback)')
 
 if not rows:
-    print('WARNING: No binder sequences extracted', file=sys.stderr)
-    sys.exit(0)
+    # Non-zero for the same reason as the Proteina-Complexa harvest: a design step
+    # that yields no designs must not report success, or the tool vanishes from the
+    # pool with nothing but a warning buried in the log.
+    print('ERROR: No binder sequences extracted', file=sys.stderr)
+    sys.exit(1)
 
 out_csv = pxd_dir / 'sequences.csv'
 with open(out_csv, 'w', newline='') as f:
@@ -2611,15 +2614,26 @@ from pathlib import Path
 pc_dir = Path('$RUN_DIR/proteina_complexa')
 run_name = '{cfg["name"]}'
 
-# Find evaluation result CSVs from Complexa outputs
+# Find the directory Complexa actually wrote its designs into.
+#
+# This used to try only `outputs/<run_name>`, then rglob for a directory literally
+# named `evaluation_results`. At PROTEINA_COMPLEXA_COMMIT neither exists: the design
+# pipeline writes to `inference/<config_name>_<task_name>_<run_name>/`, holding
+# top_samples_*.csv plus one subdirectory per design with its .pdb. So the harvest
+# found nothing, printed a warning, and exited 0 — the step reported "design
+# complete" with no sequences.csv, and the Evaluator then logged
+# "Proteina-Complexa: no CSV found" and silently dropped the tool from the pool.
+# Search `inference/` first and keep the old paths as fallbacks for other revisions.
 rows = []
-eval_dir = Path('outputs') / run_name
-if not eval_dir.exists():
-    # Try finding in complexa's default output location
-    for p in Path('.').rglob('evaluation_results'):
-        if run_name in str(p):
-            eval_dir = p
-            break
+candidates = []
+for base in (Path('inference'), Path('outputs')):
+    if base.is_dir():
+        candidates += [p for p in sorted(base.iterdir()) if p.is_dir() and run_name in p.name]
+candidates += [Path('outputs') / run_name]
+candidates += [p for p in Path('.').rglob('evaluation_results') if run_name in str(p)]
+eval_dir = next((p for p in candidates if p.is_dir()), Path('outputs') / run_name)
+if eval_dir.is_dir():
+    print('  Reading Complexa outputs from ' + str(eval_dir))
 
 # Strategy 1: Parse evaluation_results CSVs
 for csv_path in sorted(eval_dir.rglob('*.csv')) if eval_dir.exists() else []:
@@ -2682,8 +2696,16 @@ if not rows:
         print(f'  Found {{len(rows)}} sequences from PDB files (fallback)')
 
 if not rows:
-    print('WARNING: No binder sequences extracted from Proteina-Complexa', file=sys.stderr)
-    sys.exit(0)
+    # Exit NON-ZERO. This was `sys.exit(0)`, so a run that generated backbones but
+    # harvested nothing printed one warning and reported success: run_all.sh counted
+    # the step as passed, the Evaluator logged "no CSV found" and dropped the tool,
+    # and the campaign report simply had no Proteina-Complexa column. A design step
+    # that produces no designs is a failure, and run_all.sh is built to carry on
+    # past a failed step and name it at the end.
+    print('ERROR: No binder sequences extracted from Proteina-Complexa', file=sys.stderr)
+    print('       Looked under: ' + str(eval_dir), file=sys.stderr)
+    print('       If Complexa wrote elsewhere, the harvest globs in this script need updating.', file=sys.stderr)
+    sys.exit(1)
 
 out_csv = pc_dir / 'sequences.csv'
 with open(out_csv, 'w', newline='') as f:
@@ -2817,6 +2839,52 @@ def write_run_rfd3(path: Path, cfg: dict):
     # rfd3's parsing.canonicalize_() will treat each as a token-level hotspot.
     select_hotspots_str = ",".join(f"{primary_chain}{r}" for r in hotspot_list) if hotspot_list else ""
 
+    # RFD3 REQUIRES hotspots. Refuse to generate a run without them.
+    #
+    # Two wrong answers were tried here before this one:
+    #
+    #  1. Emit `infer_ori_strategy: hotspots` unconditionally, with the comment
+    #     "COM falls back when select_hotspots is empty". That comment was false --
+    #     rfd3/utils/inference.py::infer_ori_from_hotspots opens with
+    #     `assert "is_atom_level_hotspot" in atom_array.get_annotation_categories()`
+    #     and `com` is a SEPARATE key in INFER_ORI_STRATEGIES_TO_FUNCTIONS, reached
+    #     only by asking for it. With no hotspots the annotation never exists, so
+    #     every run died in the dataloader (BUG-27).
+    #
+    #  2. Fall back to `infer_ori_strategy: com` when no hotspots are configured.
+    #     That "fixed" the crash and made the output WORSE THAN USELESS: centring on
+    #     the whole fixed motif's centre of mass seeds every diffused binder atom at
+    #     the target's centre, so the binder nucleates inside the target and grows as
+    #     an extended coil. Measured on CBG/2VDY (2026-09-16, 304 backbones lost):
+    #     binder Rg 23.1 A vs 10.9 A, DSSP helix 0.27 vs 0.85, PPII 0.23 vs 0.001 --
+    #     and n_chainbreaks stays 0, so EVERY downstream guard passes. Reproduced on
+    #     PDL1 2026-10-27: ten 89-residue binders at Rg 16.8-19.6 A against a
+    #     118-residue target at 14.0 A. See CLAUDE.md "infer_ori_strategy is
+    #     LOAD-BEARING".
+    #
+    # A silent generator of unfoldable backbones is the worst of the three outcomes,
+    # so fail here -- at configure time, before any GPU is committed -- and say what
+    # to do about it. Hotspots are optional for the other six tools; this one needs
+    # them, and that is a fact about RFD3, not a gap in the wizard.
+    if not select_hotspots_str:
+        print_fail("RFD3 needs hotspot residues and none are configured.")
+        print(
+            "  Without them RFD3 centres the binder on the whole target's centre of\n"
+            "  mass and silently produces extended coils that pass every quality gate\n"
+            "  (measured: Rg 23.1 A vs 10.9 A, helix 0.27 vs 0.85). It is not safe to\n"
+            "  guess a default, so this run is refused rather than wasted.\n"
+            "\n"
+            "  Fix either way:\n"
+            '    * set hotspots for the campaign, e.g.  "hotspots": "A56,A115,A123"\n'
+            '      (or "rfd3_hotspots" to scope them to RFD3 alone), then re-run; or\n'
+            '    * disable RFD3 for this campaign:  "rfd3": false  in tools_enabled.\n'
+            "\n"
+            "  The bindmaster-target-analyst skill proposes hotspots for a target if\n"
+            "  you do not have them yet."
+        )
+        sys.exit(1)
+    rfd3_ori_strategy = "hotspots"
+
     # Author numbering, read from the file RFD3 will actually load — not 1..N.
     target_contig = rfd3_target_contig(target_pdb, primary_chain, target_len)
 
@@ -2917,7 +2985,7 @@ cat > "$INPUTS_YAML" <<INPUTSEOF
 {name}:
   input: $TARGET_PDB
   contig: "{target_contig},/0,{min_len}-{max_len}"
-  infer_ori_strategy: hotspots{("  # COM falls back when select_hotspots is empty" if not select_hotspots_str else "")}{(chr(10) + '  select_hotspots: "' + select_hotspots_str + '"') if select_hotspots_str else ""}
+  infer_ori_strategy: {rfd3_ori_strategy}{(chr(10) + '  select_hotspots: "' + select_hotspots_str + '"') if select_hotspots_str else ""}
 INPUTSEOF
 
 echo "=== RFD3 backbone diffusion for {name} ==="

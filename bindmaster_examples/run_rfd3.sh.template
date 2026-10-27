@@ -24,9 +24,15 @@
 #                        drop to 4 if longer or smaller GPU)
 #   {{MPNN_SAMPLES}}     ProteinMPNN samples per backbone (5 = best-of-5)
 #   {{MPNN_TEMPERATURE}} ProteinMPNN sampling temperature (0.1 = field default)
-#   {{SELECT_HOTSPOTS_LINE}}  Either an empty string, or a line of the form
-#                        '  select_hotspots: "A15,A18,A22"'. infer_ori_strategy above
-#                        needs hotspots to aim at; with none it falls back to target COM.
+#   {{SELECT_HOTSPOTS_LINE}}  A line of the form '  select_hotspots: "A15,A18,A22"'.
+#                        REQUIRED, never empty. infer_ori_strategy: hotspots needs
+#                        hotspots to aim at, and there is NO safe fallback: with none,
+#                        rfd3 centres the binder on the whole target's centre of mass
+#                        and silently emits extended coils that pass every gate
+#                        (Rg 23.1 A vs 10.9 A, helix 0.27 vs 0.85 -- CBG/2VDY
+#                        2026-09-16, reproduced on PDL1 2026-10-27). The configurator
+#                        refuses to generate an RFD3 run with no hotspots; if you fill
+#                        this template by hand, do the same.
 
 set -euo pipefail
 

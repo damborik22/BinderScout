@@ -52,10 +52,17 @@ of `install/locks/` is to stop guessing.
    straight over it. The superseded cu121 wheel's orphaned `nvidia_*_cu12` dist-infos
    were still sitting beside the cu13 set. The installer now names what actually runs.
 
-2. **Two envs need *different* versions of the same package.** `bindmaster_rfd3`
-   requires `atomworks==3.0.4`; `proteina-complexa` requires `2.2.1` and breaks on
-   3.0.0. A single global pin would have broken one of them — which is why these are
-   per-env files and not one repo-wide list.
+2. ~~**Two envs need *different* versions of the same package.**~~ **Retracted.**
+   This said `bindmaster_rfd3` requires `atomworks==3.0.4` while `proteina-complexa`
+   requires `2.2.1`, and offered it as the justification for per-env files. It was
+   wrong, and wrong in the way finding 3 describes: 3.0.4 was merely what `rc-foundry`
+   had *installed* in an env whose design run had never completed. Once RFD3 actually
+   ran, atomworks 3.x aborted it — 3.0.0 moved `extra_fields`/`build_assembly` off
+   `parse_atom_array()` and rejects leftover kwargs, which rfd3's pinned code still
+   passes. **Both envs need `2.2.1`**, for two unrelated reasons, and `ATOMWORKS_VERSION`
+   is now one constant serving both. Per-env files are still right — the envs differ
+   in dozens of other packages, and two run different Pythons — but this was not the
+   example that showed it.
 
 3. **A lock captured from an un-run install can pin a broken version.** This file's
    first version said Mosaic was "installed; not run in this campaign". That was

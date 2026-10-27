@@ -68,7 +68,7 @@ cytoolz==1.2.0
 debugpy==1.8.22
 decorator==5.3.1
 deepdiff==9.1.0
-dm-haiku==0.0.17
+dm-haiku==0.0.13
 dm-tree==0.1.8
 einops==0.8.2
 einx==0.4.3

@@ -56,7 +56,27 @@ PROTEINA_COMPLEXA_DIR="${BINDMASTER_DIR}/Proteina-Complexa"
 # A fresh install therefore died at Proteina's generate step with
 # `ImportError: cannot import name 'AtomSelectionStack'` — and the old smoke test
 # (`import proteinfoundation`) never touches pdb_utils, so the env reported healthy.
+#
+# The SAME version is required by RFD3, for a different reason. atomworks 3.0.0 also
+# moved `extra_fields` / `build_assembly` off parse_atom_array()'s signature into a
+# PrepareConfig object and started rejecting leftover kwargs, while rfd3's pinned
+# inference/input_parsing.py still passes them directly — so 3.x aborts every RFD3
+# run with `TypeError: Unexpected keyword arguments: ['extra_fields',
+# 'build_assembly']`. Verified on the wheels: 2.2.1 has both parameters, 3.0.0+ have
+# neither. One constant serves both envs.
 ATOMWORKS_VERSION="2.2.1"
+# dm-haiku is pinned for Proteina-Complexa because haiku 0.0.14+ uses
+# `jax.core.take_current_trace`, which does not exist in the jax 0.4.29 that
+# upstream's build_uv_env.sh deliberately installs for colabdesign/AF2.
+#
+# This one DEFEATS dependency resolution rather than losing to it: from 0.0.14 on,
+# dm-haiku declares jax only as an OPTIONAL EXTRA (`jax>=0.11.0; extra == "jax"`),
+# so plain `dm-haiku` carries no jax requirement at all. pip and uv therefore place
+# haiku 0.0.17 next to jax 0.4.29 and report a perfectly valid resolution, which
+# then cannot import. No constraints file, `--dry-run`, or resolver check can catch
+# that; only running the code does. 0.0.13 is the last release requiring jax
+# directly (`jax>=0.4.28`) and the last without take_current_trace.
+HAIKU_VERSION="0.0.13"
 # uv is pinned because it IS the resolver for Mosaic and Proteina-Complexa: it
 # produced install/locks/mosaic.uv.lock, and a lock is only reproducible under the
 # uv that reads it. This is the version that built both working venvs.
@@ -2294,6 +2314,56 @@ _pin_complexa_atomworks() {
     "${py}" -c "from atomworks.io.utils.selection import AtomSelectionStack" 2>/dev/null \
         || { print_fail "atomworks ${ATOMWORKS_VERSION} has no AtomSelectionStack — Proteina-Complexa cannot generate"; return 1; }
     print_ok "atomworks ${ATOMWORKS_VERSION} provides AtomSelectionStack"
+
+    # dm-haiku, same treatment, same reason: upstream installs colabdesign, which
+    # pulls dm-haiku unpinned, and then pins jax DOWN to 0.4.29 on the next lines.
+    local have_hk
+    have_hk="$("${py}" -c "import importlib.metadata as m; print(m.version('dm-haiku'))" 2>/dev/null || true)"
+    if [[ "${have_hk}" == "${HAIKU_VERSION}" ]]; then
+        print_ok "dm-haiku already pinned to ${HAIKU_VERSION}"
+    else
+        print_step "Pinning dm-haiku ${have_hk:-<absent>} -> ${HAIKU_VERSION}"
+        run_logged "Pinning dm-haiku==${HAIKU_VERSION}" \
+            "${HOME}/.local/bin/uv" pip install --python "${py}" -q "dm-haiku==${HAIKU_VERSION}" \
+            || { print_fail "Could not pin dm-haiku==${HAIKU_VERSION}"; return 1; }
+    fi
+
+    # Import haiku THROUGH colabdesign: that is the path generate.py takes, and the
+    # failure was a module-level attribute lookup in haiku/_src/dot.py, so a version
+    # check would have passed while the run still died.
+    "${py}" -c "from colabdesign.af.model import mk_af_model" 2>/dev/null \
+        || { print_fail "colabdesign cannot import under dm-haiku ${HAIKU_VERSION} / jax $("${py}" -c 'import jax;print(jax.__version__)' 2>/dev/null) — Proteina-Complexa cannot generate"; return 1; }
+    print_ok "colabdesign + dm-haiku ${HAIKU_VERSION} import cleanly"
+}
+
+# RFD3 needs the same atomworks as Proteina-Complexa, for an unrelated reason (see
+# ATOMWORKS_VERSION). Its env is conda, not a uv venv, so it gets its own helper.
+_pin_rfd3_atomworks() {
+    local py="${CONDA_BASE}/envs/bindmaster_rfd3/bin/python"
+    [[ -x "${py}" ]] || { print_warn "No bindmaster_rfd3 env — skipping atomworks pin"; return 0; }
+
+    local have
+    have="$("${py}" -c "import importlib.metadata as m; print(m.version('atomworks'))" 2>/dev/null || true)"
+    if [[ "${have}" != "${ATOMWORKS_VERSION}" ]]; then
+        print_step "Pinning atomworks ${have:-<absent>} -> ${ATOMWORKS_VERSION} (RFD3)"
+        run_logged "Pinning atomworks==${ATOMWORKS_VERSION} (RFD3)" \
+            "${py}" -m pip install -q "atomworks==${ATOMWORKS_VERSION}" \
+            || { print_fail "Could not pin atomworks==${ATOMWORKS_VERSION} in bindmaster_rfd3"; return 1; }
+    else
+        print_ok "atomworks already pinned to ${ATOMWORKS_VERSION} (RFD3)"
+    fi
+
+    # Assert the SIGNATURE rfd3 actually calls, not the version string. 3.x keeps the
+    # function and silently drops these two parameters, so `import atomworks` and a
+    # version check both pass while every design run dies in the dataloader.
+    "${py}" -c "
+import inspect, sys
+from atomworks.io.parser import parse_atom_array
+p = inspect.signature(parse_atom_array).parameters
+sys.exit(0 if ('extra_fields' in p and 'build_assembly' in p) else 1)
+" 2>/dev/null \
+        || { print_fail "atomworks ${ATOMWORKS_VERSION} parse_atom_array lacks extra_fields/build_assembly — RFD3 cannot design"; return 1; }
+    print_ok "atomworks ${ATOMWORKS_VERSION} parse_atom_array accepts extra_fields/build_assembly"
 }
 
 _write_proteina_complexa_shortcut() {
@@ -2363,6 +2433,10 @@ install_rfd3() {
         "${CONDA_CMD}" run -n bindmaster_rfd3 \
         pip install -q "${CONSTRAINTS[@]}" "rc-foundry[mpnn]==0.1.9" \
         || print_warn "rc-foundry[mpnn] install failed — MPNN redesign step may not work"
+
+    # rc-foundry pulls atomworks unpinned, and 3.x drops the parse_atom_array
+    # parameters rfd3 passes. Re-pin after both extras are in, so neither can win.
+    _pin_rfd3_atomworks || return 1
 
     # Download RFD3 weights to a shared location inside BindMaster
     mkdir -p "${FOUNDRY_WEIGHTS_DIR}"

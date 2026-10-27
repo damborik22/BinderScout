@@ -145,3 +145,44 @@ class TestNoCommitIsLeftAsHEAD:
         assert "mmseqs.com/latest/" not in code
         assert "mmseqs.com/foldseek/foldseek-linux" not in code
         assert "astral.sh/uv/install.sh" not in code
+
+
+class TestTheTwoPinsFoundByRunningTheToolsNotByImporting:
+    """BUG-26 and BUG-28. Both envs installed cleanly and passed `import`; both
+    aborted the moment a design actually ran. The pins live in install.sh, so these
+    guard the constants rather than the locks."""
+
+    def test_atomworks_is_one_constant_for_both_envs(self):
+        """RFD3 needs 2.2.1 because 3.0.0 moved extra_fields/build_assembly off
+        parse_atom_array(); Proteina-Complexa needs it because 3.0.0 deleted
+        AtomSelectionStack. EVIDENCE.md once claimed they needed DIFFERENT versions —
+        that was the installed version mistaken for the required one."""
+        m = re.search(r'^ATOMWORKS_VERSION="([^"]+)"', INSTALL_TEXT, re.M)
+        assert m, "ATOMWORKS_VERSION is gone"
+        assert m.group(1) == "2.2.1", f"expected 2.2.1, got {m.group(1)}"
+        # Both envs must be re-pinned AFTER their upstream installers run.
+        assert "_pin_complexa_atomworks" in INSTALL_TEXT
+        assert "_pin_rfd3_atomworks" in INSTALL_TEXT
+        for lock in ("proteina-complexa.txt", "bindmaster_rfd3.txt"):
+            assert pins(LOCKS / lock).get("atomworks") == "2.2.1", lock
+
+    def test_dm_haiku_stays_below_the_jax_core_api_change(self):
+        """dm-haiku 0.0.14+ calls jax.core.take_current_trace, absent from the
+        jax 0.4.29 that Proteina-Complexa's upstream installer pins for colabdesign.
+        From 0.0.14 haiku declares jax only as an OPTIONAL EXTRA, so no resolver
+        reports a conflict — a constraints file alone cannot catch this."""
+        m = re.search(r'^HAIKU_VERSION="([^"]+)"', INSTALL_TEXT, re.M)
+        assert m, "HAIKU_VERSION is gone"
+        assert m.group(1).startswith("0.0.1"), m.group(1)
+        major, minor, patch = (int(x) for x in m.group(1).split("."))
+        assert (major, minor, patch) <= (0, 0, 13), (
+            f"dm-haiku {m.group(1)} needs jax >= 0.6; this env pins jax 0.4.29 (BUG-26)"
+        )
+        assert pins(LOCKS / "proteina-complexa.txt").get("dm-haiku") == m.group(1)
+
+    def test_pins_are_verified_by_symbol_or_signature_not_version_string(self):
+        """Every pin in this file exists because a version check passed while the
+        run still died. Each must be asserted against the thing that broke."""
+        assert "AtomSelectionStack" in INSTALL_TEXT
+        assert "extra_fields" in INSTALL_TEXT and "build_assembly" in INSTALL_TEXT
+        assert "from colabdesign.af.model import mk_af_model" in INSTALL_TEXT

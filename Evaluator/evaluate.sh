@@ -44,9 +44,10 @@
 #   --min-engines N        how many independent engines must have refolded a design for it
 #                          to be eligible for the ranking (default 3 = all of Boltz-2 / AF3 /
 #                          ESMFold2; floor 2). Designs below the gate are ranked LAST, not
-#                          dropped. On a host without AF3 — the common case, it needs >100 GB
-#                          of GPU memory — only two engines run and the default gate fails
-#                          EVERY design, so this script says so up front and names the flag.
+#                          dropped. On a host without AF3 — which usually means the gated
+#                          weights were never placed, NOT a GPU limit; AF3 fits a 24 GB card
+#                          in our size regime — only two engines run and the default gate
+#                          fails EVERY design, so this script says so up front and names the flag.
 #                          The gate is never lowered automatically: that would make two
 #                          operators with the same designs produce different rankings
 #                          depending on what happens to be installed.
@@ -231,6 +232,34 @@ if [[ $SKIP_AF3 -eq 0 ]]; then
     fi
 fi
 
+# The env is not enough: AF3's weights are gated by DeepMind, so the installer can
+# neither bundle nor fetch them — it only PRINTS where to put them, at the end of a
+# long install. Detecting the env but not the weights meant a pool refolded through
+# Boltz-2 and ESMFold2 for hours and only then died in the AF3 step on
+# FileNotFoundError. Resolve the weights up front, with the same search order as
+# refold_af3.py (--model-dir > $AF3_MODEL_DIR > ~/.alphafold3/models > ~/af3_models
+# > /opt/alphafold3/models), and degrade to a 2-engine run NOW rather than in hour 3.
+if [[ $SKIP_AF3 -eq 0 ]]; then
+    _af3_models=""
+    for _cand in "${AF3_MODEL_DIR:-}" "${HOME}/.alphafold3/models" "${HOME}/af3_models" /opt/alphafold3/models; do
+        [[ -n "$_cand" && -d "$_cand" ]] || continue
+        if [[ -n "$(ls -A "$_cand" 2>/dev/null)" ]]; then _af3_models="$_cand"; break; fi
+    done
+    if [[ -z "$_af3_models" ]]; then
+        echo "[note] '${AF3_ENV}' is installed but no AF3 weights were found — AF3 will be skipped."
+        echo "        Searched: \$AF3_MODEL_DIR, ~/.alphafold3/models, ~/af3_models, /opt/alphafold3/models"
+        echo "        The weights are gated and are NOT shipped with this repo. Request access at"
+        echo "        https://github.com/google-deepmind/alphafold3, then place af3.bin in one of the"
+        echo "        paths above (or export AF3_MODEL_DIR=/path/to/models) and re-run."
+        echo "        Skipping now rather than failing after the Boltz-2/ESMFold2 refolds."
+        echo ""
+        SKIP_AF3=1
+    else
+        echo "[note] AF3 weights found: ${_af3_models}"
+        echo ""
+    fi
+fi
+
 # Auto-detect ESMFold2 availability unless user skipped it
 if [[ $SKIP_ESMFOLD2 -eq 0 ]]; then
     if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${ESMFOLD2_ENV}"; then
@@ -281,8 +310,12 @@ fi
 
 # --- Cross-engine gate vs. the engines that will actually run ---------------
 # The ranking gates on how many INDEPENDENT engines refolded each design (default 3).
-# AF3 needs >100 GB of GPU memory, so on most hosts only Boltz-2 + ESMFold2 run and
-# every design fails a gate of 3 — ranked last, with an empty top of the list. The
+# Where AF3 is absent only Boltz-2 + ESMFold2 run, and every design fails a gate of 3
+# — ranked last, with an empty top of the list. That absence is almost always the
+# gated weights (see the check above), NOT a hardware limit: AF3 peaks at ~4.4 GB for
+# a ~260-token complex and runs on a 24 GB card, measured 2026-08-14 on an RTX 3090.
+# The retired ">100 GB" figure was preallocation misread as working set; it used to be
+# quoted right here, which made a 2-engine run look like the unavoidable norm. The
 # report warns after the fact; by then the GPU time is already spent, so say it here.
 # Deliberately NOT auto-lowered: the gate is part of what the ranking means, and
 # silently deriving it from the local install would make two operators with the same

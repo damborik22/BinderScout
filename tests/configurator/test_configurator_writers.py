@@ -1408,3 +1408,80 @@ class TestCfgKeysAreChecked:
         )
         with pytest.raises(SystemExit):
             conf.load_run_config(cfgfile)
+
+
+class TestRfd3RefusesWithoutHotspots:
+    """RFD3 must FAIL LOUDLY with no hotspots, never pick a strategy for the user.
+
+    The regression this guards is a fix that was worse than the bug. The writer first
+    emitted `infer_ori_strategy: hotspots` unconditionally, which aborted the run in
+    rfd3's dataloader (`Atom array must contain 'is_atom_level_hotspot' annotation`).
+    "Fixing" that by falling back to `com` removed the crash and silently produced
+    unfoldable backbones: centring on the whole motif's centre of mass seeds every
+    diffused atom at the target's centre, so the binder grows as an extended coil
+    while `n_chainbreaks` stays 0 and every downstream gate passes. Measured on
+    CBG/2VDY (binder Rg 23.1 A vs 10.9 A, DSSP helix 0.27 vs 0.85) and reproduced on
+    PD-L1 (ten 89-residue binders at Rg 16.8-19.6 A, target 118 residues at 14.0 A).
+
+    So there are two ways to regress, and both are tested: emitting `com`, and
+    emitting `hotspots` with nothing to aim at.
+    """
+
+    @staticmethod
+    def _cfg_without_hotspots(base_cfg):
+        cfg = dict(base_cfg)
+        cfg["hotspots"] = ""
+        cfg.pop("rfd3_hotspots", None)
+        return cfg
+
+    def test_exits_nonzero_when_no_hotspots(self, base_cfg, tmp_path):
+        script = tmp_path / "run_rfd3.sh"
+        with pytest.raises(SystemExit) as exc:
+            conf.write_run_rfd3(script, self._cfg_without_hotspots(base_cfg))
+        assert exc.value.code != 0, "a refusal must be a non-zero exit"
+
+    def test_refusal_names_both_remedies(self, base_cfg, tmp_path, capsys):
+        script = tmp_path / "run_rfd3.sh"
+        with pytest.raises(SystemExit):
+            conf.write_run_rfd3(script, self._cfg_without_hotspots(base_cfg))
+        out = capsys.readouterr()
+        text = out.out + out.err
+        assert "hotspot" in text.lower()
+        # The user must be told how to proceed, not just that it failed.
+        assert "rfd3_hotspots" in text or "hotspots" in text
+        assert "false" in text, "must offer disabling RFD3 as the other way out"
+
+    def test_writes_no_script_when_it_refuses(self, base_cfg, tmp_path):
+        """A half-written script is worse than none: run_all.sh would still call it."""
+        script = tmp_path / "run_rfd3.sh"
+        with pytest.raises(SystemExit):
+            conf.write_run_rfd3(script, self._cfg_without_hotspots(base_cfg))
+        assert not script.exists()
+
+    def test_never_emits_com_strategy(self, base_cfg, tmp_path):
+        """With hotspots present the strategy is `hotspots`; `com` must never appear."""
+        script = tmp_path / "run_rfd3.sh"
+        conf.write_run_rfd3(script, base_cfg)
+        content = script.read_text()
+        assert "infer_ori_strategy: hotspots" in content
+        assert "infer_ori_strategy: com" not in content
+
+    def test_emitted_strategy_always_has_hotspots_to_aim_at(self, base_cfg, tmp_path):
+        """`infer_ori_strategy: hotspots` without a select_hotspots line is the
+        original BUG-27 crash. If one is emitted, so must the other be."""
+        script = tmp_path / "run_rfd3.sh"
+        conf.write_run_rfd3(script, base_cfg)
+        content = script.read_text()
+        if "infer_ori_strategy: hotspots" in content:
+            assert "select_hotspots:" in content
+            # and it must be non-empty
+            assert 'select_hotspots: ""' not in content
+
+    def test_template_does_not_promise_a_com_fallback(self):
+        """The example template carried the same false claim the writer did."""
+        tpl = Path(__file__).resolve().parents[2] / "bindmaster_examples" / "run_rfd3.sh.template"
+        if not tpl.exists():
+            pytest.skip("template not present")
+        text = tpl.read_text().lower()
+        assert "falls back to target com" not in text
+        assert "falls back to com" not in text

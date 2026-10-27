@@ -36,7 +36,7 @@ antlr4-python3-runtime==4.9.3
 anyio==4.15.1
 assertpy==1.1
 asttokens==3.0.2
-atomworks==3.0.4
+atomworks==2.2.1
 attrs==26.1.0
 beartype==0.23.1
 biotite==1.6.0
