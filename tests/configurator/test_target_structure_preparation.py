@@ -441,3 +441,99 @@ class TestSequenceAndCoordinatesAgreeAfterGeneration:
         assert from_coords == cfg["target_sequence"]
         # And the bound peptide the PDB fixture carries in chain B is gone.
         assert conf.extract_sequence_from_pdb(str(cfg["target_pdb"]), "B") is None
+
+
+RCSB_CIF = Path(__file__).resolve().parents[2] / "PXDesign" / "examples" / "5o45.cif"
+
+# --- Three things the adversarial review of the BUG-16 fix found ------------
+
+
+def test_an_unselected_chain_of_the_other_case_is_dropped_not_silently_kept(tmp_path):
+    """PDB chain ids are case-sensitive, and folding them kept a chain for free.
+
+    `available_chains()` lists "A" and "a" separately, so a user can select either.
+    With the chain column `.upper()`ed on both sides, selecting "A" wrote chain `a`
+    out verbatim as well, reported `dropped_chains == {}` and printed "kept chain(s)
+    A" over it -- so a second chain sat in the target the designers read while the
+    report said nothing was dropped. Lowercase ids are routine in deposits with
+    more than 26 chains.
+    """
+    src = tmp_path / "two_cases.pdb"
+    src.write_text(
+        "ATOM      1  CA  GLY A   1      0.000   0.000   0.000  1.00  0.00           C\n"
+        "ATOM      2  CA  ALA A   2      1.000   0.000   0.000  1.00  0.00           C\n"
+        "ATOM      3  CA  TRP a   1      2.000   0.000   0.000  1.00  0.00           C\n"
+        "ATOM      4  CA  TYR a   2      3.000   0.000   0.000  1.00  0.00           C\n"
+        "END\n"
+    )
+    dest = tmp_path / "prepared.pdb"
+    report = conf.prepare_target_pdb(src, dest, "A", "GA")
+
+    assert report is not None
+    body = [ln for ln in dest.read_text().splitlines() if ln[:4] == "ATOM"]
+    assert {ln[21] for ln in body} == {"A"}, "chain 'a' was written into the prepared target"
+    assert len(body) == 2
+    assert report["dropped_chains"] == {"a": 2}, f"chain 'a' not reported as dropped: {report}"
+    assert conf.extract_sequence_from_pdb(str(dest), "A") == "GA"
+
+
+def test_a_modified_polymer_residue_is_reported_as_a_gap_not_just_a_ligand(tmp_path):
+    """MSE is a polymer residue written as HETATM; dropping it holes the backbone.
+
+    Selenomethionine is the standard SAD-phasing substitution and appears in a
+    large share of crystal structures. Counting it among the ligands is accurate
+    but not enough: the kept chain now has a gap at that residue, and
+    `rfd3_target_contig` emits one more range per gap. The sequence agrees either
+    way (extract_sequence_from_pdb is ATOM-only), which is exactly why nothing
+    downstream raises -- so preparation has to say it.
+    """
+    src = tmp_path / "mse.pdb"
+    src.write_text(
+        "ATOM      1  CA  GLY A   1      0.000   0.000   0.000  1.00  0.00           C\n"
+        "HETATM    2  CA  MSE A   2      1.000   0.000   0.000  1.00  0.00           C\n"
+        "ATOM      3  CA  ALA A   3      2.000   0.000   0.000  1.00  0.00           C\n"
+        "END\n"
+    )
+    report = conf.prepare_target_pdb(src, tmp_path / "prepared.pdb", "A", "GA")
+
+    assert report is not None
+    assert report["chain_gaps"] == {"A": ["MSE 2"]}, f"the gap was not reported: {report}"
+    # A real ligand must NOT be reported as a gap: no CA, so it is not polymer.
+    src2 = tmp_path / "ligand.pdb"
+    src2.write_text(
+        "ATOM      1  CA  GLY A   1      0.000   0.000   0.000  1.00  0.00           C\n"
+        "HETATM    2  C1  9KK A 201      1.000   0.000   0.000  1.00  0.00           C\n"
+        "END\n"
+    )
+    report2 = conf.prepare_target_pdb(src2, tmp_path / "prepared2.pdb", "A", "G")
+    assert report2["ligands"] == {"9KK": 1}
+    assert report2["chain_gaps"] == {}, "a ligand with no CA was reported as a backbone gap"
+
+
+def test_the_construct_backstop_reads_the_cif_when_the_pdb_was_converted_from_one(tmp_path):
+    """The backstop was inert on the default RCSB download format.
+
+    `prepare_target_pdb` read SEQADV out of the PDB it was handed -- which, for a
+    CIF target, is a file `cif_to_pdb_atoms` had just written from _atom_site
+    records and therefore carries no SEQADV at all. So the one mechanism designed
+    to catch "the sequence trim missed the tag" could never fire on exactly the
+    input where the trim can be missed: a headless replay, a hand-written config,
+    or a user who declines the Step 3 prompt with a CIF target.
+    """
+    if not RCSB_CIF.exists():
+        pytest.skip("PXDesign/examples/5o45.cif not present (PXDesign is gitignored)")
+    raw = tmp_path / "raw.pdb"
+    assert conf.cif_to_pdb_atoms(str(RCSB_CIF), str(raw))
+    untrimmed = conf.extract_sequence_from_pdb(str(raw), "A")
+
+    without = conf.prepare_target_pdb(raw, tmp_path / "a.pdb", "A", untrimmed)
+    assert without is not None
+    with_cif = conf.prepare_target_pdb(raw, tmp_path / "b.pdb", "A", untrimmed, annotation_src=RCSB_CIF)
+    assert with_cif is not None
+
+    assert without["construct_kept"] == {}, "fixture precondition: the converted PDB has no SEQADV"
+    kept = with_cif["construct_kept"].get("A", [])
+    assert len(kept) == 11, f"expected the depositor's eleven construct residues, got {kept}"
+    # Author numbering, because that is how the prepared file is numbered and what
+    # the entry page shows: 5O45's tag is A135-A145.
+    assert kept[0] == "135" and kept[-1] == "145", kept

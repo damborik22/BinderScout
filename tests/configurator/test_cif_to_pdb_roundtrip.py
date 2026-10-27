@@ -70,3 +70,69 @@ def test_the_sign_of_a_full_width_coordinate_survives(tmp_path):
     assert line[17:20] == "GLY"
     assert line[21] == "A"
     assert line[22:26].strip() == "1"
+
+
+# A real RCSB download whose two numbering schemes differ: chain A is author 17-145
+# and label 1-129, and its C-terminal His-tag is author 135-145.
+RCSB_CIF = Path(__file__).resolve().parents[2] / "PXDesign" / "examples" / "5o45.cif"
+
+
+def test_the_converted_pdb_carries_author_numbering(tmp_path):
+    """A hotspot is a number read off the PDB entry page, i.e. AUTHOR numbering.
+
+    The converter wrote `label_seq_id`, so on any entry whose schemes differ every
+    hotspot resolved to a different residue -- for 5O45, 16 off, which lands A115
+    inside the expression tag. After the altLoc fix it did so while looking
+    authoritative, because `pdb_chain_residue_numbers` returned a non-empty list
+    for the first time instead of falling back to 1-based indexing into the
+    sequence.
+    """
+    if not RCSB_CIF.exists():
+        import pytest
+
+        pytest.skip("PXDesign/examples/5o45.cif not present (PXDesign is gitignored)")
+    out = tmp_path / "converted.pdb"
+    assert conf.cif_to_pdb_atoms(str(RCSB_CIF), str(out))
+
+    scheme = conf.cif_chain_numbering(str(RCSB_CIF), "A")
+    assert scheme["auth_lo"] != scheme["label_lo"], "this fixture no longer exercises the bug"
+
+    nums = conf.pdb_chain_residue_numbers(str(out), "A")
+    assert nums, "no residue numbers in the converted file"
+    assert (nums[0], nums[-1]) == (scheme["auth_lo"], scheme["auth_hi"]), (
+        f"converted file is numbered {nums[0]}-{nums[-1]}; the author numbering a user reads "
+        f"off the entry page is {scheme['auth_lo']}-{scheme['auth_hi']}"
+    )
+    # ...and the sequence must still come back whole, i.e. renumbering lost nothing.
+    assert len(conf.extract_sequence_from_pdb(str(out), "A")) == scheme["n_residues"]
+
+
+def test_an_insertion_code_survives_the_conversion(tmp_path):
+    """Author numbering can carry insertion codes; column 27 must hold them.
+
+    Without this the two residues 52 and 52A collapse onto one key and the second
+    silently disappears from every consumer that reads (resSeq, iCode).
+    """
+    cif = tmp_path / "ins.cif"
+    cif.write_text(
+        "data_test\n"
+        "loop_\n"
+        "_atom_site.group_PDB\n"
+        "_atom_site.label_atom_id\n"
+        "_atom_site.label_comp_id\n"
+        "_atom_site.label_asym_id\n"
+        "_atom_site.label_seq_id\n"
+        "_atom_site.auth_seq_id\n"
+        "_atom_site.pdbx_PDB_ins_code\n"
+        "_atom_site.Cartn_x\n"
+        "_atom_site.Cartn_y\n"
+        "_atom_site.Cartn_z\n"
+        "ATOM CA GLY A 1 52 ? 0.000 0.000 0.000\n"
+        "ATOM CA ALA A 2 52 A 1.000 0.000 0.000\n"
+        "ATOM CA TRP A 3 53 ? 2.000 0.000 0.000\n"
+    )
+    out = tmp_path / "ins.pdb"
+    assert conf.cif_to_pdb_atoms(str(cif), str(out))
+    lines = [ln for ln in out.read_text().splitlines() if ln[:4] == "ATOM"]
+    assert [(ln[22:26].strip(), ln[26].strip()) for ln in lines] == [("52", ""), ("52", "A"), ("53", "")]
+    assert conf.extract_sequence_from_pdb(str(out), "A") == "GAW", "a residue was lost to a key collision"

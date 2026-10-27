@@ -964,6 +964,36 @@ def _cif_seqdif_construct(text: str, chain_id: str) -> dict[int, str]:
     return flagged
 
 
+def _cif_seqdif_construct_by_auth(text: str, chain_id: str) -> dict[tuple[str, str], str]:
+    """(auth_seq_num, ins_code) -> mon_id for chain_id's construct-flagged seq-dif rows.
+
+    The same rows as _cif_seqdif_construct, keyed the way a PDB file numbers residues
+    instead of by entity index, so prepare_target_pdb can compare them against the
+    residues it is about to keep. `_struct_ref_seq_dif` carries both numbers side by
+    side (on 5O45: seq_num 119-129 against pdbx_auth_seq_num 135-145), so no mapping
+    has to be reconstructed.
+
+    This exists because the SEQADV backstop in prepare_target_pdb could only ever read
+    a PDB header, and for mmCIF input it was handed a file this module had just written
+    from _atom_site records -- which carries no SEQADV by construction. The backstop
+    was therefore inert on the DEFAULT RCSB download format, i.e. on exactly the input
+    where the sequence trim can be missed (a headless replay, a hand-written config, or
+    a user who declines the prompt).
+    """
+    flagged: dict[tuple[str, str], str] = {}
+    for row in _cif_loop_rows(text, "_struct_ref_seq_dif"):
+        if row.get("pdbx_pdb_strand_id", "").upper() != chain_id.upper():
+            continue
+        if not any(a in row.get("details", "").upper() for a in _CONSTRUCT_ANNOTATIONS):
+            continue
+        num = row.get("pdbx_auth_seq_num", "").strip("'\"")
+        if not num or num in (".", "?"):
+            continue
+        ins = row.get("pdbx_pdb_ins_code", "").strip("'\"")
+        flagged[(num, "" if ins in ("", ".", "?") else ins[:1])] = row.get("mon_id", "").upper()
+    return flagged
+
+
 def _terminal_construct_span(flagged: set, n: int) -> tuple[int, int]:
     """[start, end) of an n-residue sequence to KEEP, given 0-based construct positions.
 
@@ -1126,6 +1156,16 @@ def available_chains(path: str) -> list[str]:
     return seen
 
 
+def _cif_int(row: list[str], col: dict[str, int], name: str) -> int | None:
+    """An integer mmCIF column, or None when absent/unset ("." and "?" are both unset)."""
+    if name not in col:
+        return None
+    try:
+        return int(row[col[name]].strip("'\""))
+    except (ValueError, IndexError):
+        return None
+
+
 def cif_to_pdb_atoms(cif_path: str, pdb_path: str) -> bool:
     """Convert mmCIF to a minimal PDB file using _atom_site records.
 
@@ -1178,13 +1218,41 @@ def cif_to_pdb_atoms(cif_path: str, pdb_path: str) -> bool:
             comp_id = row[col["label_comp_id"]].strip("'\"")
             chain = row[col["label_asym_id"]].strip("'\"")
             try:
-                seq_id = int(row[col["label_seq_id"]])
+                # A row with no parseable label_seq_id is not a polymer residue
+                # (ligands and waters carry "."), and this converter writes the
+                # target's polymer only -- so that check stays the gate.
+                int(row[col["label_seq_id"]])
                 x = float(row[col["cartn_x"]])
                 y = float(row[col["cartn_y"]])
                 z = float(row[col["cartn_z"]])
             except (ValueError, IndexError):
                 i += n_cols
                 continue
+            # NUMBER THE OUTPUT IN AUTHOR NUMBERING, falling back to label.
+            #
+            # This file is what prepare_target_pdb reads, what the hotspot resolver
+            # reads through pdb_chain_residue_numbers, and what rfd3_target_contig
+            # reads. A hotspot is a number the user copied off the PDB entry page,
+            # i.e. AUTHOR numbering -- and on a stock RCSB entry the two schemes
+            # differ routinely (5O45's chain A is auth 17-145 against label 1-129).
+            # Writing label numbering here made every one of those resolve 16
+            # residues off, pointing a hotspot at a different residue, and after the
+            # altLoc fix it did so while LOOKING authoritative, because
+            # pdb_chain_residue_numbers returned a non-empty list for the first time
+            # instead of falling back to 1-based indexing.
+            #
+            # cif_chain_numbering() reads both schemes and _rfd4_preserved_segment
+            # warns when they disagree -- but RFD4 resolves its contig against the
+            # mmCIF's own label column and so keeps reading the UNCONVERTED file;
+            # that gotcha is unaffected by what this converter writes.
+            seq_id = _cif_int(row, col, "auth_seq_id")
+            if seq_id is None:
+                seq_id = int(row[col["label_seq_id"]])
+            ins = ""
+            if "pdbx_pdb_ins_code" in col:
+                raw_ins = row[col["pdbx_pdb_ins_code"]].strip("'\"")
+                if raw_ins not in ("", ".", "?"):
+                    ins = raw_ins[:1]
             # Element symbol (optional)
             elem = col.get("type_symbol")
             elem_str = row[elem].strip("'\"").upper()[:2] if elem is not None else atom_name[0]
@@ -1217,7 +1285,7 @@ def cif_to_pdb_atoms(cif_path: str, pdb_path: str) -> bool:
             # +123.456), and it would have silently defeated prepare_target_pdb below,
             # which reads this converted PDB for a CIF target.
             line = (
-                f"{record}{serial:5d} {atom_field} {comp_id:>3s} {chain[0]:1s}{seq_id:4d}    "
+                f"{record}{serial:5d} {atom_field} {comp_id:>3s} {chain[0]:1s}{seq_id:4d}{ins:1s}   "
                 f"{x:8.3f}{y:8.3f}{z:8.3f}{occ:6.2f}{bfac:6.2f}          {elem_str:>2s}  "
             )
             atom_lines.append(line)
@@ -1279,7 +1347,13 @@ def _pdb_chain_ca_residues(lines: list[str], chain_id: str) -> tuple[list[tuple[
             continue
         if line[12:16].strip() != "CA":
             continue
-        if line[21].strip().upper() != chain_id.upper():
+        # EXACT chain match, not case-folded. PDB chain IDs are case-sensitive and
+        # available_chains() offers both cases separately, so folding them here made a
+        # file with chains "A" and "a" keep BOTH while the report said it dropped
+        # nothing -- and where their residue numbers do not collide, chain `a`'s
+        # residues entered chain A's key list as if they were chain A's. Deposits with
+        # more than 26 chains routinely use lowercase ids.
+        if line[21].strip() != chain_id:
             continue
         if line[16].strip() not in ("", "A"):
             continue
@@ -1297,7 +1371,9 @@ def _ter_record(serial: int, atom_line: str) -> str:
     return f"TER   {serial:>5}      {atom_line[17:20]} {atom_line[21]}{atom_line[22:27]}"
 
 
-def prepare_target_pdb(src_pdb: Path, dest_pdb: Path, chains: str, target_sequence: str) -> dict | None:
+def prepare_target_pdb(
+    src_pdb: Path, dest_pdb: Path, chains: str, target_sequence: str, annotation_src: Path | None = None
+) -> dict | None:
     """Write dest_pdb holding only the target: selected chains, no ligands, no waters.
 
     A stock RCSB file is not a target. On 5O45 (PD-L1) the deposited coordinates carry
@@ -1329,7 +1405,9 @@ def prepare_target_pdb(src_pdb: Path, dest_pdb: Path, chains: str, target_sequen
             break
         lines.append(line)
 
-    wanted = [c.strip().upper() for c in (chains or "A").split(",") if c.strip()] or ["A"]
+    # Chain ids keep the case the user chose from available_chains() -- see the note
+    # in _pdb_chain_ca_residues about why folding them is not safe.
+    wanted = [c.strip() for c in (chains or "A").split(",") if c.strip()] or ["A"]
     keep: set[tuple[str, tuple[str, str]]] = set()
     kept: dict[str, int] = {}
     construct_kept: dict[str, list[str]] = {}
@@ -1352,6 +1430,13 @@ def prepare_target_pdb(src_pdb: Path, dest_pdb: Path, chains: str, target_sequen
         # cloning artifact / linker, the sequence trim missed it — say so rather than
         # ship it as designable surface.
         flagged = _pdb_seqadv_construct(lines, cid)
+        # For mmCIF input, src_pdb is the file cif_to_pdb_atoms just wrote and has no
+        # SEQADV at all, so the depositor's annotation has to come from the CIF itself.
+        if not flagged and annotation_src is not None and annotation_src.suffix.lower() in (".cif", ".mmcif"):
+            try:
+                flagged = _cif_seqdif_construct_by_auth(annotation_src.read_text(errors="replace"), cid)
+            except OSError:
+                flagged = {}
         still = [f"{k[0]}{k[1]}" for k in keys if k in flagged]
         if still:
             construct_kept[cid] = still
@@ -1362,6 +1447,7 @@ def prepare_target_pdb(src_pdb: Path, dest_pdb: Path, chains: str, target_sequen
         return None
 
     dropped_chains: dict[str, int] = {}
+    chain_gaps: dict[str, list[str]] = {}
     trimmed = 0
     waters = 0
     ligands: dict[str, int] = {}
@@ -1369,7 +1455,7 @@ def prepare_target_pdb(src_pdb: Path, dest_pdb: Path, chains: str, target_sequen
     for line in lines:
         if line[:4] not in ("ATOM", "HETA") or len(line) < 27:
             continue
-        cid = line[21].strip().upper()
+        cid = line[21].strip()
         res = line[17:20].strip().upper()
         key = (line[22:26].strip(), line[26].strip())
         if (line[:4], cid, key, res) in seen_res:
@@ -1380,6 +1466,16 @@ def prepare_target_pdb(src_pdb: Path, dest_pdb: Path, chains: str, target_sequen
                 waters += 1
             else:
                 ligands[res] = ligands.get(res, 0) + 1
+                # A HETATM with a CA in a chain we are KEEPING is not a ligand: it is a
+                # modified polymer residue (MSE above all -- selenomethionine, the
+                # standard SAD-phasing substitution and present in a large share of
+                # crystal structures; also MLY/SEP/CSO). Dropping it leaves a HOLE in
+                # the kept backbone, and rfd3_target_contig then splits the contig into
+                # one more range per hole. The sequence agrees with the structure either
+                # way (extract_sequence_from_pdb is ATOM-only, so target_sequence omits
+                # it too), which is why nothing downstream errors -- so say it here.
+                if cid in wanted and line[12:16].strip() == "CA":
+                    chain_gaps.setdefault(cid, []).append(f"{res} {key[0]}{key[1]}")
         elif (cid, key) not in keep:
             if cid in wanted:
                 trimmed += 1
@@ -1405,7 +1501,7 @@ def prepare_target_pdb(src_pdb: Path, dest_pdb: Path, chains: str, target_sequen
             continue
         if line[16].strip() not in ("", "A"):
             continue
-        cid = line[21].strip().upper()
+        cid = line[21].strip()
         if (cid, (line[22:26].strip(), line[26].strip())) not in keep:
             continue
         if current_chain is not None and cid != current_chain:
@@ -1430,6 +1526,7 @@ def prepare_target_pdb(src_pdb: Path, dest_pdb: Path, chains: str, target_sequen
         "ligands": ligands,
         "trim_failed": trim_failed,
         "construct_kept": construct_kept,
+        "chain_gaps": chain_gaps,
     }
 
 
@@ -1454,6 +1551,13 @@ def report_target_preparation(report: dict, dest_pdb: Path) -> None:
         print_ok(f"  Dropped {report['waters']} water(s) and {sum(report['ligands'].values())} heteroatom residue(s)")
         if ligands:
             print(f"    ({ligands})")
+    for cid, residues in (report.get("chain_gaps") or {}).items():
+        shown = ", ".join(residues[:8]) + (", …" if len(residues) > 8 else "")
+        print_warn(f"  Chain {cid} loses {len(residues)} MODIFIED residue(s) with the heteroatoms: {shown}")
+        print("    These are polymer residues written as HETATM (MSE is selenomethionine), so the")
+        print("    kept backbone now has a gap at each one and the RFD3 contig gains a range per")
+        print("    gap. The sequence matches the structure either way. If the gap matters for this")
+        print("    target, prepare the structure by hand and point the run at that file.")
     for cid, residues in (report.get("construct_kept") or {}).items():
         shown = ", ".join(residues[:12]) + (", …" if len(residues) > 12 else "")
         print_warn(f"  Chain {cid} KEEPS {len(residues)} residue(s) the depositor flagged as construct: {shown}")
@@ -4698,7 +4802,16 @@ def generate(cfg: dict, tools_enabled: dict):
         shutil.copy2(src_struct, raw_pdb)
 
     if raw_pdb is not None:
-        report = prepare_target_pdb(raw_pdb, dest_pdb, cfg.get("chains", "A"), cfg.get("target_sequence", "") or "")
+        # annotation_src is the ORIGINAL download: for a CIF target, raw_pdb is a file
+        # this module wrote from _atom_site records and the depositor's construct
+        # annotation survives only in the CIF.
+        report = prepare_target_pdb(
+            raw_pdb,
+            dest_pdb,
+            cfg.get("chains", "A"),
+            cfg.get("target_sequence", "") or "",
+            annotation_src=src_struct,
+        )
         if report is None:
             print_warn(f"Could not prepare {raw_pdb.name} — no amino-acid residues found in the selected chain(s).")
             print("  Copying the structure through unchanged: bound ligands, waters and any")
