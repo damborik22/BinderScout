@@ -41,7 +41,6 @@ working.
 
 from __future__ import annotations
 
-import os
 import re
 import warnings
 from pathlib import Path
@@ -49,7 +48,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..core.schema import ExtractedBinder, NativeMetrics
-from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
+from .base import SequenceExtractor, disambiguate_ids, resolve_single_match, shared_sequence_prefix
 
 # Try the configurator-aggregated form first, then the NVIDIA native output.
 _CSV_CANDIDATES = [
@@ -247,7 +246,7 @@ class ProteinaComplexaExtractor(SequenceExtractor):
                 )
         elif len(ok) >= 2:
             # Every row of a run embeds the same target, so the pool reveals it.
-            lcp = os.path.commonprefix(ok)
+            lcp = shared_sequence_prefix(ok)
             if _MIN_INFERRED_TARGET_LEN <= len(lcp) < min(len(d) for d in ok):
                 prefix_len = len(lcp)
                 warnings.warn(

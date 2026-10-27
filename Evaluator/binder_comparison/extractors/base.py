@@ -12,6 +12,26 @@ from ..comparison.tool_classification import DEFAULT_EXTRACTOR_METADATA, Extract
 from ..core.schema import ExtractedBinder
 
 
+def shared_sequence_prefix(seqs: list[str]) -> str:
+    """Longest common leading substring of ``seqs``, or "" if there is none.
+
+    Deliberately not ``os.path.commonprefix``: that is a path function being
+    borrowed for residue strings. It happens to compare character by character,
+    which is what we want here, but it is documented as comparing path
+    components, it is flagged by linters on non-path input, and it is deprecated
+    as of Python 3.15. Spelling the three lines out keeps the intent — "how much
+    target prefix do these binder sequences share" — legible at the call site.
+    """
+    if not seqs:
+        return ""
+    out: list[str] = []
+    for chars in zip(*seqs):
+        if len(set(chars)) != 1:
+            break
+        out.append(chars[0])
+    return "".join(out)
+
+
 def resolve_single_match(matches: list[Path], *, tool: str, what: str, input_dir: Path) -> Path:
     """Return the one match, or refuse to guess between several.
 

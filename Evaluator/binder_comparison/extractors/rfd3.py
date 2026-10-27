@@ -28,14 +28,13 @@ versions sometimes start emitting fields directly in the CSV.
 from __future__ import annotations
 
 import json
-import os
 import warnings
 from pathlib import Path
 
 import pandas as pd
 
 from ..core.schema import ExtractedBinder, NativeMetrics
-from .base import SequenceExtractor, disambiguate_ids, resolve_single_match
+from .base import SequenceExtractor, disambiguate_ids, resolve_single_match, shared_sequence_prefix
 
 _CSV_CANDIDATES = ["sequences.csv", "results.csv", "designs.csv", "rfd3_designs.csv", "summary.csv"]
 _SEQUENCE_COLS = ("sequence", "Sequence", "designed_sequence", "binder_sequence")
@@ -225,7 +224,7 @@ class RFD3Extractor(SequenceExtractor):
 
         seqs = [s.strip().upper() for _, entries in entries_by_file for _, s in entries]
         seqs = [s for s in seqs if self._validate_sequence(s)]
-        shared = os.path.commonprefix(seqs) if len(seqs) >= 2 else ""
+        shared = shared_sequence_prefix(seqs) if len(seqs) >= 2 else ""
         if _MIN_SHARED_TARGET_PREFIX <= len(shared) < min((len(s) for s in seqs), default=0):
             warnings.warn(
                 f"RFD3: all {len(seqs)} FASTA sequences under {input_dir} share a "

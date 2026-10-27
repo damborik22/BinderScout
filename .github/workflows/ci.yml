@@ -42,7 +42,10 @@ jobs:
         with:
           python-version: "3.10"
       - name: Install ruff
-        run: pip install ruff
+        # Pinned deliberately. Unpinned, a new ruff release adds a rule and CI
+        # goes red on code nobody touched — RUF071 did exactly that. Bump this
+        # on purpose, with the fixes in the same commit.
+        run: pip install ruff==0.17.3
       - name: Lint
         run: ruff check .
       - name: Format check
