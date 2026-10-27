@@ -150,11 +150,19 @@ def test_evaluate_sh_parser_accepts_the_run_sh_invocation(tmp_path: Path) -> Non
 # --- Cross-engine gate vs. the engines that actually run ----------------------
 
 
-def _run_evaluate_sh(tmp_path: Path, envs: list[str], argv: list[str]):
+def _run_evaluate_sh(tmp_path: Path, envs: list[str], argv: list[str], *, af3_weights=True):
     """Drive evaluate.sh's real parser with a stub conda reporting *envs*.
 
     Everything past argument parsing shells out through the stub, so this exercises
     engine auto-detection and the gate warning only — no conda env, no GPU.
+
+    `af3_weights` controls whether AF3's gated model parameters appear to be present.
+    It has to be controlled explicitly: evaluate.sh counts AF3 as an engine only when
+    BOTH its conda env and its weights are found, and the weight search falls back to
+    `$HOME/.alphafold3/models`. Without pinning both, these tests pass on a developer
+    box that happens to have the weights and fail on CI, which is exactly what
+    happened. HOME is redirected into tmp_path either way so the real home can never
+    decide the outcome.
     """
     sandbox = tmp_path / "Evaluator"
     (sandbox / "envs").mkdir(parents=True, exist_ok=True)
@@ -170,7 +178,18 @@ def _run_evaluate_sh(tmp_path: Path, envs: list[str], argv: list[str]):
     sequences = tmp_path / "seqs.fasta"
     sequences.write_text(">b1\nMKTAYIAKQRQ\n")
 
-    env = {**os.environ, "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"}
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(exist_ok=True)
+    models = tmp_path / "af3_models"
+    models.mkdir(exist_ok=True)
+    if af3_weights:
+        (models / "af3.bin").write_text("stub")
+    env = {
+        **os.environ,
+        "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(fake_home),
+        "AF3_MODEL_DIR": str(models),
+    }
     proc = subprocess.run(
         [
             "bash",
@@ -195,9 +214,14 @@ def _run_evaluate_sh(tmp_path: Path, envs: list[str], argv: list[str]):
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
 class TestMinEnginesGate:
     """The ranking gates on how many independent engines refolded each design (default
-    3). AF3 needs >100 GB of GPU memory, so most hosts run only two — and every design
-    then fails the gate, leaving a report whose whole shortlist is ineligible. There was
-    no way to say otherwise: evaluate.sh had no --min-engines passthrough at all.
+    3). A host missing one engine fails the gate for EVERY design, leaving a report
+    whose whole shortlist is ineligible, and there was no way to say otherwise:
+    evaluate.sh had no --min-engines passthrough at all.
+
+    The reason a host is usually short an engine is AF3's GATED WEIGHTS, not its memory
+    footprint: AF3 peaks around 4.4 GB for a ~260-token complex and runs on a 24 GB
+    card (measured 2026-08-14, RTX 3090). This docstring used to assert the retired
+    ">100 GB of GPU memory" figure as fact.
     """
 
     _TWO: ClassVar = ["binder-eval", "binder-eval-af3", "binder-eval-esmfold2"]
@@ -248,3 +272,54 @@ class TestMinEnginesGate:
     def test_rejects_a_gate_below_the_floor_or_non_numeric(self, tmp_path, bad):
         out = _run_evaluate_sh(tmp_path, self._TWO, ["--min-engines", bad])
         assert "Error: --min-engines" in out
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+class TestAf3WeightsPreflight:
+    """The AF3 conda env being present does not mean AF3 can run.
+
+    AF3's model parameters are gated by DeepMind: the installer can neither bundle nor
+    download them, it only prints where to put them. So "env installed, weights never
+    placed" is the ordinary state of a fresh install, and evaluate.sh used to detect
+    only the env — refolding through Boltz-2 and ESMFold2 for hours before dying in
+    the AF3 step on FileNotFoundError.
+
+    These also pin the machine-independence that was missing: the weight search falls
+    back to `$HOME/.alphafold3/models`, so without controlling HOME these tests pass
+    on a box that has the weights and fail on CI.
+    """
+
+    _WITH_AF3: ClassVar = ["binder-eval", "binder-eval-af3", "binder-eval-esmfold2"]
+
+    def test_af3_is_skipped_when_the_weights_are_absent(self, tmp_path):
+        out = _run_evaluate_sh(tmp_path, self._WITH_AF3, [], af3_weights=False)
+        assert "no AF3 weights were found" in out
+        assert "AF3 will be skipped" in out
+
+    def test_the_skip_message_says_how_to_get_the_weights(self, tmp_path):
+        out = _run_evaluate_sh(tmp_path, self._WITH_AF3, [], af3_weights=False)
+        assert "github.com/google-deepmind/alphafold3" in out
+        assert "AF3_MODEL_DIR" in out
+
+    def test_missing_weights_drop_the_engine_count(self, tmp_path):
+        """The whole point: the pool is short an engine, and the operator is told
+        BEFORE the refolds rather than after."""
+        out = _run_evaluate_sh(tmp_path, self._WITH_AF3, [], af3_weights=False)
+        assert "needs at least 2 engines" in out or "engine(s) will run" in out
+        assert "[step 1" not in out.split("no AF3 weights were found")[0], (
+            "the weights check must run before any refold step starts"
+        )
+
+    def test_present_weights_keep_af3_in_the_count(self, tmp_path):
+        out = _run_evaluate_sh(tmp_path, self._WITH_AF3, [], af3_weights=True)
+        assert "AF3 weights found" in out
+        assert "no AF3 weights were found" not in out
+
+    def test_weights_are_never_sought_in_the_repo(self):
+        """They are gated and must not be committed; the search paths are all outside
+        the tree, so a clone can never accidentally ship them."""
+        text = EVALUATE_SH.read_text()
+        start = text.index("no AF3 weights were found") - 2000
+        block = text[max(0, start) : text.index("no AF3 weights were found") + 500]
+        assert "alphafold3/models" in block
+        assert "$REPO" not in block and "BINDMASTER_DIR" not in block
