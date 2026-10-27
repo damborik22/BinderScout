@@ -10,7 +10,9 @@ Usage:
 """
 
 import argparse
+import ast
 import datetime as _dt
+import difflib
 import json
 import os
 import re
@@ -2697,6 +2699,53 @@ print(f'  -> {{len(rows)}} binder sequences written to {{out_csv}}')
     path.chmod(0o755)
 
 
+def rfd3_target_contig(target_pdb: Path, chain_id: str, target_len: int) -> str:
+    """The preserved-target half of an RFD3 contig, in the structure's OWN numbering.
+
+    RFD3 resolves contig components against the atom array's author numbering, so a
+    hardcoded "A1-<len>" only works when the file happens to start at residue 1. It
+    usually does not: the prepared PDL1 target runs A17-A134, and `A1-118` aborted the
+    whole run with `[component=A1] Residue A1 not found in atom array.` — a hard
+    ValidationError before the first diffusion step, so no partial output either.
+
+    Numbering gaps (unmodelled loops) get their own range, because a single span across
+    a gap names residues that are equally absent from the atom array.
+
+    Falls back to "<chain>1-<target_len>" only when the file cannot be read at all;
+    that is the historical behaviour and is right for a 1-based file.
+    """
+    try:
+        lines = target_pdb.read_text(errors="replace").splitlines()
+    except OSError as exc:
+        print_warn(f"  Could not read {target_pdb} for the RFD3 contig ({exc}) — assuming 1-based numbering.")
+        return f"{chain_id}1-{target_len}"
+
+    keys, _seq = _pdb_chain_ca_residues(lines, chain_id)
+    if not keys:
+        print_warn(f"  No CA atoms for chain {chain_id} in {target_pdb.name} — assuming 1-based numbering.")
+        return f"{chain_id}1-{target_len}"
+
+    if any(icode for _resseq, icode in keys):
+        # A numeric range cannot address 52 vs 52A, and RFD3's contig grammar has no
+        # syntax for insertion codes. Say so rather than emit a range that silently
+        # covers the wrong residue count.
+        print_warn(f"  Chain {chain_id} has insertion codes — the RFD3 contig ignores them; check its residue count.")
+
+    nums = sorted({int(resseq) for resseq, _icode in keys if resseq.lstrip("-").isdigit()})
+    if not nums:
+        return f"{chain_id}1-{target_len}"
+
+    spans: list[tuple[int, int]] = [(nums[0], nums[0])]
+    for n in nums[1:]:
+        if n == spans[-1][1] + 1:
+            spans[-1] = (spans[-1][0], n)
+        else:
+            spans.append((n, n))
+    if len(spans) > 1:
+        print_warn(f"  Chain {chain_id} numbering has {len(spans) - 1} gap(s) — contig emitted as {len(spans)} ranges.")
+    return ",".join(f"{chain_id}{lo}-{hi}" for lo, hi in spans)
+
+
 def write_run_rfd3(path: Path, cfg: dict):
     """Generate run_rfd3.sh — two-stage RFD3 (backbone diffusion) + ProteinMPNN (sequences).
 
@@ -2768,6 +2817,9 @@ def write_run_rfd3(path: Path, cfg: dict):
     # rfd3's parsing.canonicalize_() will treat each as a token-level hotspot.
     select_hotspots_str = ",".join(f"{primary_chain}{r}" for r in hotspot_list) if hotspot_list else ""
 
+    # Author numbering, read from the file RFD3 will actually load — not 1..N.
+    target_contig = rfd3_target_contig(target_pdb, primary_chain, target_len)
+
     name = cfg["name"]
 
     settings_block = _settings_json_block(
@@ -2785,7 +2837,7 @@ def write_run_rfd3(path: Path, cfg: dict):
     "length": {target_len},
     "primary_chain": "{primary_chain}\"""",
         design_params_inner=f"""
-    "contig": "{primary_chain}1-{target_len},/0,{min_len}-{max_len}",
+    "contig": "{target_contig},/0,{min_len}-{max_len}",
     "binder_min_length": {min_len},
     "binder_max_length": {max_len},
     "n_designs": {n_designs},
@@ -2864,13 +2916,13 @@ set -u
 cat > "$INPUTS_YAML" <<INPUTSEOF
 {name}:
   input: $TARGET_PDB
-  contig: "{primary_chain}1-{target_len},/0,{min_len}-{max_len}"
+  contig: "{target_contig},/0,{min_len}-{max_len}"
   infer_ori_strategy: hotspots{("  # COM falls back when select_hotspots is empty" if not select_hotspots_str else "")}{(chr(10) + '  select_hotspots: "' + select_hotspots_str + '"') if select_hotspots_str else ""}
 INPUTSEOF
 
 echo "=== RFD3 backbone diffusion for {name} ==="
 echo "  Target:        $TARGET_PDB"
-echo "  Contig:        {primary_chain}1-{target_len},/0,{min_len}-{max_len}"
+echo "  Contig:        {target_contig},/0,{min_len}-{max_len}"
 echo "  Hotspots:      {select_hotspots_str or "(none)"}"
 echo "  Designs:       {n_designs}  (batch_size={batch_size} x n_batches={n_batches} = {batch_size * n_batches})"
 echo "  Diffusion:     T={diffusion_steps}, step_scale={step_scale}"
@@ -3503,6 +3555,75 @@ def _default_pxdesign_mode(tools_enabled: dict, cfg: dict | None = None) -> None
     print("  what the other six tools mean by 'enabled'. Set pxdesign_output_dir to import.")
 
 
+def known_cfg_keys() -> frozenset[str]:
+    """Every cfg key this module actually reads, recovered from its own source.
+
+    Derived rather than hand-listed so it cannot drift: a hand list is how
+    `pxdesign_n_samples` and `bindcraft_n_designs` came to be siblings with
+    different suffixes in the first place.
+    """
+    keys: set[str] = set()
+    try:
+        tree = ast.parse(Path(__file__).read_text())
+    except (OSError, SyntaxError):
+        return frozenset()
+
+    for node in ast.walk(tree):
+        # cfg["key"] / cfg.get("key")
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "cfg":
+            if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+                keys.add(node.slice.value)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "cfg"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            keys.add(node.args[0].value)
+    return frozenset(keys)
+
+
+def check_cfg_keys(cfg: dict, path: Path) -> None:
+    """Refuse a config carrying a key this version does not read.
+
+    A silently ignored key is the worst outcome available here, because the value
+    the user wrote is replaced by a default that is nowhere in their config. The PDL1
+    campaign config carried `pxdesign_n_designs: 1` — plausible, since
+    `bindcraft_n_designs` is real — but the writer reads `pxdesign_n_samples`, so the
+    key was dropped and PXDesign ran its **1000**-sample default. That is ~1000x the
+    requested GPU work, and the only symptom was 1000 of 1003 sequences arriving at
+    the evaluator, hours later.
+
+    Fatal rather than a warning: this path is `--config`, i.e. unattended by design,
+    so a warning scrolls past into a log nobody reads until the GPU bill arrives.
+    Keys starting with `_` are exempt — `_comment` is written by this very module and
+    is meant to be inert.
+    """
+    known = known_cfg_keys()
+    if not known:  # AST parse of our own source failed; nothing to check against
+        return
+
+    unknown = sorted(k for k in cfg if k not in known and not k.startswith("_"))
+    if not unknown:
+        return
+
+    print_fail(f"{path.name} has {len(unknown)} key(s) this version does not read:")
+    for key in unknown:
+        # Three candidates, not one: edit distance ranks `pxdesign_chains` above
+        # `pxdesign_n_samples` for `pxdesign_n_designs`, so the single best guess is
+        # not reliably the right one. Let the reader pick.
+        close = difflib.get_close_matches(key, sorted(known), n=3, cutoff=0.5)
+        hint = f"  — did you mean {', '.join(repr(c) for c in close)}?" if close else ""
+        print(f"    {key!r} = {cfg[key]!r}{hint}")
+    print_warn("  An unread key is not a no-op: the built-in default is used instead.")
+    print_warn("  Fix the spelling, or delete the key to accept the default deliberately.")
+    sys.exit(1)
+
+
 def load_run_config(path: Path) -> tuple[dict, dict]:
     """Read a config.json back into (cfg, tools_enabled).
 
@@ -3525,6 +3646,7 @@ def load_run_config(path: Path) -> tuple[dict, dict]:
 
     cfg = dict(payload["cfg"])
     tools_enabled = dict(payload["tools_enabled"])
+    check_cfg_keys(cfg, Path(path))
     _default_pxdesign_mode(tools_enabled, cfg)
 
     for key in ("run_dir", "target_pdb", "target_pdb_src"):

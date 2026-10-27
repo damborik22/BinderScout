@@ -16,6 +16,9 @@ BINDMASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHORTCUTS_DIR="${BINDMASTER_DIR}/bin"
 LOCAL_CONDA_DIR="${BINDMASTER_DIR}/conda"
 LOG_FILE="${BINDMASTER_DIR}/install.log"
+# Captured version sets for every env, one file per env, plus Mosaic's uv.lock.
+# See install/locks/*.txt for provenance; _constraints() below consumes them.
+LOCKS_DIR="${BINDMASTER_DIR}/install/locks"
 
 BINDCRAFT_DIR="${BINDMASTER_DIR}/BindCraft"
 BOLTZGEN_DIR="${BINDMASTER_DIR}/BoltzGen"
@@ -23,7 +26,7 @@ MOSAIC_DIR="${BINDMASTER_DIR}/Mosaic"
 EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
 
 # Pinned commits for reproducible installs (x86_64 clones only; aarch64 uses bundled)
-BINDCRAFT_COMMIT="7cd4ace"
+BINDCRAFT_COMMIT="7cd4ace1b7407adf66a50dfefa47de2270f5e4a9"
 # PyRosetta is pinned HERE, next to BINDCRAFT_COMMIT, because the two must agree:
 # BindCraft's own install_bindcraft.sh does an unpinned `pip install pyrosetta`, and
 # the 2026.29 quarterly changed InterfaceAnalyzerMover.set_interface() from taking a
@@ -33,15 +36,39 @@ BINDCRAFT_COMMIT="7cd4ace"
 # line to this version; _patch_bindcraft_pyrosetta() migrates the call site.
 PYROSETTA_VERSION="2026.29+releasequarterly.80a0635615"
 PYROSETTA_FIND_LINKS="https://west.rosettacommons.org/pyrosetta/quarterly/release.cxx11thread.serialization"
-BOLTZGEN_COMMIT="da0f092"
-MOSAIC_COMMIT="82593a8"
+BOLTZGEN_COMMIT="da0f092069edc2514fe2300ca4987eba813ec4fe"
+MOSAIC_COMMIT="82593a8a14c84c1a62c708a9610b7715697baff9"
 
 PXDESIGN_REPO="https://github.com/bytedance/PXDesign.git"
-PXDESIGN_COMMIT="HEAD"
+# Was the literal string "HEAD", so two installs a week apart got different code
+# while every other tool here was pinned. This is the commit that produced 1000
+# designs against PDL1 on 2026-10-27.
+PXDESIGN_COMMIT="f788441313c84c3074fe9596ac2433f96b15c763"
 PXDESIGN_DIR="${BINDMASTER_DIR}/PXDesign"
 PROTEINA_COMPLEXA_REPO="https://github.com/NVIDIA-Digital-Bio/proteina-complexa.git"
-PROTEINA_COMPLEXA_COMMIT="HEAD"
+PROTEINA_COMPLEXA_COMMIT="8fc6f5c85b38a2585ffaac555e708576dc4e8533"
 PROTEINA_COMPLEXA_DIR="${BINDMASTER_DIR}/Proteina-Complexa"
+# atomworks is pinned HERE, next to PROTEINA_COMPLEXA_COMMIT, for the same reason
+# PyRosetta is pinned next to BINDCRAFT_COMMIT: upstream's env/build_uv_env.sh does
+# an unpinned `uv pip install "atomworks[ml,openbabel,dev]"`, and atomworks 3.0.0
+# (2026-10-05) DELETED AtomSelectionStack, which pdb_utils.py:51 imports at module
+# level. Bisected on the wheels: 2.2.1 has the class, 3.0.0 and later do not.
+# A fresh install therefore died at Proteina's generate step with
+# `ImportError: cannot import name 'AtomSelectionStack'` — and the old smoke test
+# (`import proteinfoundation`) never touches pdb_utils, so the env reported healthy.
+ATOMWORKS_VERSION="2.2.1"
+# uv is pinned because it IS the resolver for Mosaic and Proteina-Complexa: it
+# produced install/locks/mosaic.uv.lock, and a lock is only reproducible under the
+# uv that reads it. This is the version that built both working venvs.
+UV_VERSION="0.11.7"
+# foldseek and mmseqs2 ship as static binaries from mmseqs.com, which versions by
+# git commit rather than release number. The download URLs used to be
+# mmseqs.com/foldseek/... and mmseqs.com/latest/... -- rolling, so every install
+# got a different binary with nothing recording which. These are the commits in
+# the working Proteina-Complexa install; the archive URL for each returns the
+# tarball whose binary self-reports that same commit.
+FOLDSEEK_COMMIT="463739e0014a1549a527de589102cde98f802f37"
+MMSEQS_COMMIT="d1e110c3daf8c4b41eaa71281f80c4fc3617953f"
 PROTEIN_HUNTER_REPO="https://github.com/yehlincho/Protein-Hunter.git"
 PROTEIN_HUNTER_COMMIT="d4bd9515882c2aa81e97f3d3bf7f42247a9fe80c"
 PROTEIN_HUNTER_DIR="${BINDMASTER_DIR}/Protein-Hunter"
@@ -884,6 +911,43 @@ PYEOF
     print_ok "Patched BindCraft set_interface for PyRosetta >= 2026.29"
 }
 
+# Set the global CONSTRAINTS array to pip's `-c <file>` flags for env $1, or to
+# empty when that env has no captured constraints. Each install_* function calls
+# this once near its top and then splices "${CONSTRAINTS[@]}" into its pip lines.
+#
+# Why a constraints file and not a version on every pip line: install.sh names a
+# couple of dozen packages, but the envs hold 115-176 distributions each. The
+# unnamed remainder is where all three of this repo's dependency outages came from
+# (BUG-14 pyrosetta, BUG-20 atomworks, the RUF071 ruff failure), and no realistic
+# number of inline pins reaches it. A constraints file also cannot accidentally
+# INSTALL something — it only restricts versions pip was already going to resolve —
+# so an over-complete file is harmless and needs no edit when a dependency is dropped.
+#
+# Degrading to empty rather than failing is deliberate: a user on a branch without
+# install/locks/ should still be able to install, just unpinned.
+CONSTRAINTS=()
+_constraints() {
+    local env_name="$1"
+    local file="${LOCKS_DIR}/${env_name}.txt"
+    if [[ "${ARCH}" != "x86_64" ]]; then
+        # Every lock here was captured on x86_64. Applying it on aarch64 would pin
+        # +cu121/+cu124 local versions that have no aarch64 wheel, so the install
+        # would fail outright -- and install_aarch.sh deliberately uses different
+        # versions (torch 2.10.0+cu130, jax 0.6.2). Capture aarch64 locks on an
+        # aarch64 box rather than reusing these.
+        CONSTRAINTS=()
+        print_warn "${ARCH}: skipping x86_64 constraints for ${env_name} (unpinned)."
+        return 0
+    fi
+    if [[ -f "${file}" ]]; then
+        CONSTRAINTS=(-c "${file}")
+        print_ok "Constraining ${env_name} to install/locks/${env_name}.txt"
+    else
+        CONSTRAINTS=()
+        print_warn "No captured constraints for ${env_name} — installing unpinned."
+    fi
+}
+
 # Pin PyRosetta inside BindCraft's own installer. Patching their line is the
 # robust option: install_bindcraft.sh CREATES the conda env itself (:59) and only
 # then pip-installs, so there is no env to pre-install a pinned wheel into. Their
@@ -950,11 +1014,30 @@ install_bindcraft() {
     fi
 
     # Delegate to BindCraft's own installer
+    #
+    # Constraints reach it through PIP_CONSTRAINT rather than a --c flag, because
+    # the pip calls are inside THEIR script: install_bindcraft.sh creates the conda
+    # env and pip-installs within it, and BindCraft/ is gitignored and recloned
+    # above, so any edit we make there is neither committable nor durable (the same
+    # trap that makes Mosaic/pyproject.toml pins pointless). pip reads
+    # PIP_CONSTRAINT from the environment for every invocation in the subshell, so
+    # one export pins all of them without touching their file. Their conda specs
+    # stay loose — PIP_CONSTRAINT does not reach conda, and that remains the one
+    # unpinned surface in this env.
+    #
+    # The pyrosetta line is still sed-patched separately (_pin_bindcraft_pyrosetta):
+    # it predates this and is the version that must agree with the DockingPartners
+    # source patch, so it is pinned where a reader will look for it (BUG-14).
     if ! env_exists BindCraft; then
         print_step "Running BindCraft install script (conda env + AlphaFold2 weights)"
         print_warn "This will take 45-90 min — follow progress with:  tail -f ${LOG_FILE}"
+        local _bc_constraint=""
+        if [[ "${ARCH}" == "x86_64" && -f "${LOCKS_DIR}/BindCraft.txt" ]]; then
+            _bc_constraint="export PIP_CONSTRAINT='${LOCKS_DIR}/BindCraft.txt'; "
+            print_ok "Constraining BindCraft's pip installs to install/locks/BindCraft.txt"
+        fi
         run_logged "Installing BindCraft (conda packages + AlphaFold2 weights)" \
-            bash -c "export PATH='${CONDA_BASE}/bin:${PATH}'; cd '${BINDCRAFT_DIR}' && bash install_bindcraft.sh --cuda '${CUDA_VERSION}' --pkg_manager conda" \
+            bash -c "${_bc_constraint}export PATH='${CONDA_BASE}/bin:${PATH}'; cd '${BINDCRAFT_DIR}' && bash install_bindcraft.sh --cuda '${CUDA_VERSION}' --pkg_manager conda" \
             || { print_fail "BindCraft install script failed"; return 1; }
     fi
 
@@ -1082,6 +1165,7 @@ PYEOF
 
 install_boltzgen() {
     print_step "Installing BoltzGen"
+    _constraints "BoltzGen"
     ensure_conda_in_path
 
     # Clone
@@ -1134,17 +1218,27 @@ install_boltzgen() {
     if [[ "${ARCH}" == "aarch64" ]]; then
         run_logged "Installing PyTorch (aarch64, from PyPI)" \
             "${CONDA_CMD}" run -n BoltzGen \
-            pip install torch==2.5.1 \
+            pip install "${CONSTRAINTS[@]}" torch==2.5.1 \
             || { print_fail "Failed to install PyTorch"; return 1; }
     else
-        run_logged "Installing PyTorch cu121 (x86_64)" \
+        # torch 2.14.1 from PyPI, NOT 2.5.1 from the cu121 index -- and the change is
+        # a correction, not an upgrade. The old line claimed a cu121 pin that never
+        # held: the editable `pip install -e BoltzGen` below resolves BoltzGen's own
+        # `torch>=2.4.1` with no constraint and upgraded straight over it. The live
+        # env that ran the PDL1 campaign is torch 2.14.1+cu130 from plain PyPI,
+        # installed in the same pip run as boltzgen itself -- with the superseded
+        # cu121 wheel's orphaned nvidia_*_cu12 dist-infos still beside the cu13 set
+        # as the fingerprint. So this names what actually runs. 2.14.1 does not exist
+        # on the cu121 index, which is why --index-url has to go with it; the PyPI
+        # wheel bundles CUDA 13 and needs a 580+ driver.
+        run_logged "Installing PyTorch (x86_64, PyPI cu13 wheel)" \
             "${CONDA_CMD}" run -n BoltzGen \
-            pip install torch==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121 \
+            pip install "${CONSTRAINTS[@]}" torch==2.14.1 \
             || { print_fail "Failed to install PyTorch"; return 1; }
     fi
     run_logged "Installing BoltzGen package" \
         "${CONDA_CMD}" run -n BoltzGen \
-        pip install -e "${BOLTZGEN_DIR}" \
+        pip install "${CONSTRAINTS[@]}" -e "${BOLTZGEN_DIR}" \
         || { print_fail "Failed to install BoltzGen package"; return 1; }
 
     # Smoke test
@@ -1234,8 +1328,11 @@ install_mosaic() {
     print_step "Checking for uv package manager"
     if ! command -v uv &>/dev/null; then
         print_warn "uv not found — installing via official installer"
-        curl -LsSf https://astral.sh/uv/install.sh | sh \
-            || { print_fail "Failed to install uv"; return 1; }
+        # Versioned installer URL, not the floating one: uv is the resolver that
+        # produced install/locks/mosaic.uv.lock, and `uv sync --locked` is only as
+        # reproducible as the uv that reads the lock.
+        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh \
+            || { print_fail "Failed to install uv ${UV_VERSION}"; return 1; }
         export PATH="${HOME}/.local/bin:${PATH}"
         # Add to .bashrc if not already there
         if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
@@ -1261,11 +1358,33 @@ install_mosaic() {
             || print_warn "Offline-MSA patch failed to apply — offline target MSA disabled"
     fi
 
+    # Install our captured lock BEFORE syncing. Upstream mosaic ships no uv.lock at
+    # MOSAIC_COMMIT, so a bare `uv sync` re-resolved the whole graph from floating
+    # specs every run and wrote a lock as a byproduct — nothing about a working
+    # Mosaic venv was reproducible. Mosaic/ is also gitignored and recloned above,
+    # so the lock cannot live there; it is vendored under install/locks/ and copied
+    # in. 217 packages including every git dependency's commit, which is why this
+    # covers far more than pinning Mosaic/pyproject.toml could — and `==` pins in
+    # that pyproject would make --locked fail anyway.
+    local mosaic_lock="${LOCKS_DIR}/mosaic.uv.lock"
+    local sync_flags="--group jax-cuda"
+    if [[ -f "${mosaic_lock}" ]]; then
+        cp "${mosaic_lock}" "${MOSAIC_DIR}/uv.lock" \
+            || { print_fail "Could not install Mosaic uv.lock"; return 1; }
+        sync_flags="${sync_flags} --locked"
+        print_ok "Using captured Mosaic lock (install/locks/mosaic.uv.lock)"
+    else
+        print_warn "No captured Mosaic lock — uv will re-resolve (unpinned)."
+    fi
+
     # Create virtual environment with JAX CUDA support
-    print_step "Running uv sync --group jax-cuda (creates .venv/ inside Mosaic/)"
-    run_logged "Setting up Mosaic venv (uv sync --group jax-cuda)" \
-        bash -c "cd '${MOSAIC_DIR}' && uv sync --group jax-cuda" \
-        || { print_fail "uv sync failed for Mosaic"; return 1; }
+    print_step "Running uv sync ${sync_flags} (creates .venv/ inside Mosaic/)"
+    # --locked FAILS rather than silently re-resolving when the lock disagrees with
+    # pyproject.toml. That is the point: a mismatch means upstream moved, and that
+    # calls for a deliberate lock refresh, not a quietly different install.
+    run_logged "Setting up Mosaic venv (uv sync ${sync_flags})" \
+        bash -c "cd '${MOSAIC_DIR}' && uv sync ${sync_flags}" \
+        || { print_fail "uv sync failed for Mosaic — if --locked, refresh install/locks/mosaic.uv.lock"; return 1; }
 
     # Smoke test
     smoke_test "import mosaic" \
@@ -1348,6 +1467,7 @@ EOF
 
 install_evaluator() {
     print_step "Installing Evaluator"
+    _constraints "binder-eval"
     ensure_conda_in_path
 
     # Mosaic must be installed first — we use its venv for Boltz-2
@@ -1409,7 +1529,7 @@ install_evaluator() {
             || { print_fail "Failed to create binder-eval conda env"; return 1; }
     fi
     run_logged "Installing binder-compare into binder-eval" \
-        "${CONDA_CMD}" run -n binder-eval pip install -q -e "${EVALUATOR_DIR}[report]" \
+        "${CONDA_CMD}" run -n binder-eval pip install -q "${CONSTRAINTS[@]}" -e "${EVALUATOR_DIR}[report]" \
         || { print_fail "Failed to install binder-compare into binder-eval"; return 1; }
 
     # (AF2 and Protenix refolding have both been removed; the binder-eval-af2
@@ -1448,6 +1568,7 @@ EOF
 
 install_pxdesign() {
     print_step "Installing PXDesign"
+    _constraints "bindmaster_pxdesign"
 
     # Clone PXDesign
     if [[ -d "${PXDESIGN_DIR}" ]]; then
@@ -1492,7 +1613,7 @@ install_pxdesign() {
 
     # Install PXDesign
     run_logged "Installing PXDesign (pip)" \
-        "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -e "${PXDESIGN_DIR}" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q "${CONSTRAINTS[@]}" -e "${PXDESIGN_DIR}" \
         || { print_fail "Failed to install PXDesign"; return 1; }
 
     # Install Protenix (PXDesign-specific fork) and PXDesignBench
@@ -1509,30 +1630,32 @@ install_pxdesign() {
     # PXDesign setup.py has install_requires commented out; install deps from requirements.txt
     if [[ -f "${PXDESIGN_DIR}/requirements.txt" ]]; then
         run_logged "Installing PXDesign requirements" \
-            "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q -r "${PXDESIGN_DIR}/requirements.txt" \
+            "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q "${CONSTRAINTS[@]}" -r "${PXDESIGN_DIR}/requirements.txt" \
             || print_warn "Some PXDesign deps failed — may need manual install"
     fi
     # click is needed by pxdesign CLI but not in requirements.txt
     run_logged "Installing PXDesign CLI deps" \
-        "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q click \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign pip install -q "${CONSTRAINTS[@]}" click \
         || print_warn "Failed to install click — pxdesign CLI may not work"
 
     # requirements.txt pins torch==2.3.1 (CPU-only from PyPI); reinstall with CUDA
     run_logged "Reinstalling PyTorch with CUDA ${CUDA_VERSION}" \
         "${CONDA_CMD}" run -n bindmaster_pxdesign \
-        pip install torch --force-reinstall --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION//./}" \
+        # 2.6.0 with no local version, so the cu${CUDA_VERSION} index supplies its own
+        # +cuXXX build. No constraints file here, for the --index-url reason above.
+        pip install "torch==2.6.0" --force-reinstall --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION//./}" \
         || print_warn "PyTorch CUDA reinstall failed — GPU may not work"
 
     # ColabDesign from GitHub (PyPI version 1.1.1 too old, missing 'weights' param)
     run_logged "Installing ColabDesign from GitHub" \
         "${CONDA_CMD}" run -n bindmaster_pxdesign \
-        pip install --no-cache-dir "git+https://github.com/sokrypton/ColabDesign.git" \
+        pip install --no-cache-dir "${CONSTRAINTS[@]}" "git+https://github.com/sokrypton/ColabDesign.git" \
         || print_warn "ColabDesign install failed — AF2 eval may not work"
 
     # Upgrade deepspeed for PyTorch 2.x compatibility
     run_logged "Upgrading deepspeed" \
         "${CONDA_CMD}" run -n bindmaster_pxdesign \
-        pip install -q "deepspeed>=0.18" \
+        pip install -q "${CONSTRAINTS[@]}" "deepspeed>=0.18" \
         || print_warn "deepspeed upgrade failed"
 
     # Pin dm-haiku + JAX with CUDA12 plugin so AF2 (ColabDesign) runs on GPU.
@@ -1896,7 +2019,9 @@ _install_complexa_tools() {
         print_step "Installing foldseek"
         local tmp_dir
         tmp_dir="$(mktemp -d)"
-        if curl -fsSL "https://mmseqs.com/foldseek/foldseek-linux-avx2.tar.gz" \
+        # Exact-commit archive URL, not the rolling one. `foldseek version` on the
+        # archived tarball reports this commit, checked by download.
+        if curl -fsSL "https://mmseqs.com/archive/${FOLDSEEK_COMMIT}/foldseek-linux-avx2.tar.gz" \
                 | tar xz -C "${tmp_dir}" 2>/dev/null; then
             cp "${tmp_dir}/foldseek/bin/foldseek" "${venv_bin}/foldseek"
             chmod +x "${venv_bin}/foldseek"
@@ -1914,7 +2039,9 @@ _install_complexa_tools() {
         print_step "Installing mmseqs2"
         local tmp_dir
         tmp_dir="$(mktemp -d)"
-        if curl -fsSL "https://mmseqs.com/latest/mmseqs-linux-avx2.tar.gz" \
+        # /latest/ literally served a different binary on every install. Same
+        # archive form as foldseek; `mmseqs version` on it reports this commit.
+        if curl -fsSL "https://mmseqs.com/archive/${MMSEQS_COMMIT}/mmseqs-linux-avx2.tar.gz" \
                 | tar xz -C "${tmp_dir}" 2>/dev/null; then
             cp "${tmp_dir}/mmseqs/bin/mmseqs" "${venv_bin}/mmseqs"
             chmod +x "${venv_bin}/mmseqs"
@@ -2006,8 +2133,11 @@ install_proteina_complexa() {
     print_step "Checking for uv package manager"
     if ! command -v uv &>/dev/null; then
         print_warn "uv not found — installing via official installer"
-        curl -LsSf https://astral.sh/uv/install.sh | sh \
-            || { print_fail "Failed to install uv"; return 1; }
+        # Versioned installer URL, not the floating one: uv is the resolver that
+        # produced install/locks/mosaic.uv.lock, and `uv sync --locked` is only as
+        # reproducible as the uv that reads the lock.
+        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh \
+            || { print_fail "Failed to install uv ${UV_VERSION}"; return 1; }
         export PATH="${HOME}/.local/bin:${PATH}"
         if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
             echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
@@ -2061,6 +2191,11 @@ install_proteina_complexa() {
             || { print_fail "uv sync failed for Proteina-Complexa"; return 1; }
     fi
 
+    # Pin atomworks AFTER the upstream build. Unlike BindCraft (whose installer
+    # creates its own conda env, so the pin has to be sed'd into their script),
+    # build_uv_env.sh leaves a venv behind that we can simply correct in place.
+    _pin_complexa_atomworks || return 1
+
     # Initialize and download checkpoints
     print_step "Initializing Proteina-Complexa"
     if [[ -x "${PROTEINA_COMPLEXA_DIR}/.venv/bin/complexa" ]]; then
@@ -2091,9 +2226,12 @@ install_proteina_complexa() {
     # Configure .env with correct local paths
     _write_complexa_env
 
-    # Smoke test
+    # Smoke test. `import proteinfoundation` alone is NOT enough: the package
+    # __init__ pulls in nothing, so it stayed green through the whole atomworks 3.x
+    # breakage above. Import the module that actually broke.
     smoke_test "Proteina-Complexa import check" \
-        "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" -c "import proteinfoundation; print('OK')" \
+        "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" -c \
+        "import proteinfoundation, proteinfoundation.utils.pdb_utils; print('OK')" \
         || return 1
 
     # Shortcut
@@ -2102,6 +2240,30 @@ install_proteina_complexa() {
     print_ok "Shortcut installed at ${SHORTCUTS_DIR}/complexa"
 
     print_ok "Proteina-Complexa installation complete"
+}
+
+# Force atomworks back to the version Proteina-Complexa's pinned code compiles
+# against. Idempotent: re-running when already correct is a no-op.
+_pin_complexa_atomworks() {
+    local py="${PROTEINA_COMPLEXA_DIR}/.venv/bin/python"
+    [[ -x "${py}" ]] || { print_warn "No Proteina-Complexa venv — skipping atomworks pin"; return 0; }
+
+    local have
+    have="$("${py}" -c "import importlib.metadata as m; print(m.version('atomworks'))" 2>/dev/null || true)"
+    if [[ "${have}" == "${ATOMWORKS_VERSION}" ]]; then
+        print_ok "atomworks already pinned to ${ATOMWORKS_VERSION}"
+    else
+        print_step "Pinning atomworks ${have:-<absent>} -> ${ATOMWORKS_VERSION}"
+        run_logged "Pinning atomworks==${ATOMWORKS_VERSION}" \
+            "${HOME}/.local/bin/uv" pip install --python "${py}" -q \
+            "atomworks[ml,openbabel]==${ATOMWORKS_VERSION}" \
+            || { print_fail "Could not pin atomworks==${ATOMWORKS_VERSION}"; return 1; }
+    fi
+
+    # Verify the symbol, not just the version number — this is the thing that broke.
+    "${py}" -c "from atomworks.io.utils.selection import AtomSelectionStack" 2>/dev/null \
+        || { print_fail "atomworks ${ATOMWORKS_VERSION} has no AtomSelectionStack — Proteina-Complexa cannot generate"; return 1; }
+    print_ok "atomworks ${ATOMWORKS_VERSION} provides AtomSelectionStack"
 }
 
 _write_proteina_complexa_shortcut() {
@@ -2136,6 +2298,7 @@ EOF
 
 install_rfd3() {
     print_step "Installing RFD3 (foundry)"
+    _constraints "bindmaster_rfd3"
 
     # Conda env: Py 3.12 + PyTorch 2.2+ (CUDA 12.x)
     if env_exists bindmaster_rfd3; then
@@ -2150,19 +2313,25 @@ install_rfd3() {
     # PyTorch (CUDA 12.1 wheels — works for 12.1–12.8 host drivers)
     run_logged "Installing PyTorch (CUDA 12.1)" \
         "${CONDA_CMD}" run -n bindmaster_rfd3 \
-        pip install -q "torch>=2.2" "torchvision" "torchaudio" --index-url https://download.pytorch.org/whl/cu121 \
+        # Versions inline, and NO constraints file on this line. --index-url REPLACES
+        # PyPI, and download.pytorch.org carries only torch and its CUDA siblings at
+        # the versions it chooses -- so a constrained fsspec/setuptools that the index
+        # does not serve turns torch's own dependency into ResolutionImpossible
+        # (observed on all three CUDA-index lines). The three versions below are the
+        # ones in the working env, and the wheels are live on the cu121 index.
+        pip install -q "torch==2.5.1" "torchvision==0.20.1" "torchaudio==2.5.1" --index-url https://download.pytorch.org/whl/cu121 \
         || { print_fail "Failed to install PyTorch"; return 1; }
 
     # foundry + rfd3 extra (PyPI package name is `rc-foundry`)
     run_logged "Installing rc-foundry[rfd3] ${FOUNDRY_COMMIT}" \
         "${CONDA_CMD}" run -n bindmaster_rfd3 \
-        pip install -q "rc-foundry[rfd3]==0.1.9" \
+        pip install -q "${CONSTRAINTS[@]}" "rc-foundry[rfd3]==0.1.9" \
         || { print_fail "Failed to install rc-foundry"; return 1; }
 
     # Also install MPNN extra for post-diffusion sequence design (ProteinMPNN + LigandMPNN)
     run_logged "Installing rc-foundry[mpnn]" \
         "${CONDA_CMD}" run -n bindmaster_rfd3 \
-        pip install -q "rc-foundry[mpnn]==0.1.9" \
+        pip install -q "${CONSTRAINTS[@]}" "rc-foundry[mpnn]==0.1.9" \
         || print_warn "rc-foundry[mpnn] install failed — MPNN redesign step may not work"
 
     # Download RFD3 weights to a shared location inside BindMaster
@@ -2225,6 +2394,7 @@ EOF
 
 install_protein_hunter() {
     print_step "Installing Protein-Hunter"
+    _constraints "bindmaster_protein_hunter"
 
     # Clone at pinned commit
     if [[ -d "${PROTEIN_HUNTER_DIR}" ]]; then
@@ -2251,13 +2421,19 @@ install_protein_hunter() {
     # Install PyTorch (matches upstream setup.sh expectations: torch>=2.2 with CUDA)
     run_logged "Installing PyTorch (CUDA 12.1)" \
         "${CONDA_CMD}" run -n bindmaster_protein_hunter \
-        pip install -q "torch>=2.2" "torchvision" "torchaudio" --index-url https://download.pytorch.org/whl/cu121 \
+        # Versions inline, and NO constraints file on this line. --index-url REPLACES
+        # PyPI, and download.pytorch.org carries only torch and its CUDA siblings at
+        # the versions it chooses -- so a constrained fsspec/setuptools that the index
+        # does not serve turns torch's own dependency into ResolutionImpossible
+        # (observed on all three CUDA-index lines). The three versions below are the
+        # ones in the working env, and the wheels are live on the cu121 index.
+        pip install -q "torch==2.5.1" "torchvision==0.20.1" "torchaudio==2.5.1" --index-url https://download.pytorch.org/whl/cu121 \
         || { print_fail "Failed to install PyTorch"; return 1; }
 
     # Install vendored Boltz_PH + upstream deps
     run_logged "Installing Protein-Hunter Python deps" \
         "${CONDA_CMD}" run -n bindmaster_protein_hunter bash -c \
-        "cd '${PROTEIN_HUNTER_DIR}' && pip install -q -e './boltz_ph' && pip install -q matplotlib seaborn prody py3Dmol pyyaml ml_collections biopython modelcif jaxtyping pandera logmd==0.1.45 pyrosetta-installer" \
+        "cd '${PROTEIN_HUNTER_DIR}' && pip install -q ${CONSTRAINTS[*]} -e './boltz_ph' && pip install -q ${CONSTRAINTS[*]} matplotlib seaborn prody py3Dmol pyyaml ml_collections biopython modelcif jaxtyping pandera logmd==0.1.45 pyrosetta-installer" \
         || print_warn "Some Protein-Hunter deps failed — may need manual follow-up"
 
     # PyRosetta (required by boltz_ph.design at import time)
@@ -2270,7 +2446,7 @@ install_protein_hunter() {
     # Install chai-lab (from sokrypton fork pinned by Protein-Hunter upstream)
     run_logged "Installing Chai-1 (sokrypton fork)" \
         "${CONDA_CMD}" run -n bindmaster_protein_hunter \
-        pip install -q "git+https://github.com/sokrypton/chai-lab.git" \
+        pip install -q "${CONSTRAINTS[@]}" "git+https://github.com/sokrypton/chai-lab.git" \
         || print_warn "chai-lab install failed — only the Boltz-2 edition of Protein-Hunter will work"
 
     # Protein-Hunter vendors LigandMPNN source in-repo and downloads weights into model_params/.
@@ -2467,6 +2643,7 @@ AF3EOF
 
 install_esmfold2() {
     print_step "Installing ESMFold2 refolder (binder-eval-esmfold2 env)"
+    _constraints "binder-eval-esmfold2"
     ensure_conda_in_path
 
     # Evaluator dir must exist (bundled in monorepo)
@@ -2495,22 +2672,28 @@ install_esmfold2() {
     # + biohub's `esm` SDK (ESMFold2InputBuilder + the ProteinInput/StructurePredictionInput
     # dataclasses) + gemmi for CIF→PDB. refold_esmfold2.py imports exactly these.
     local _torch_index="https://download.pytorch.org/whl/cu124"
-    [[ "$(uname -m)" == "aarch64" ]] && _torch_index="https://download.pytorch.org/whl/cu130"
+    # Pinned on x86_64 to the version this env refolded with; left floating on
+    # aarch64, where the cu130 index carries a different (and untested here) set.
+    local _torch_spec="torch==2.6.0"
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+        _torch_index="https://download.pytorch.org/whl/cu130"
+        _torch_spec="torch"
+    fi
     run_logged "Installing torch (${_torch_index##*/}) into binder-eval-esmfold2" \
-        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q --index-url "$_torch_index" torch \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q --index-url "$_torch_index" "$_torch_spec" \
         || { print_fail "Failed to install torch into binder-eval-esmfold2"; return 1; }
     run_logged "Installing transformers + gemmi + safetensors into binder-eval-esmfold2" \
-        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'transformers>=4.50' gemmi safetensors \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q "${CONSTRAINTS[@]}" 'transformers>=4.50' gemmi safetensors \
         || { print_fail "Failed to install transformers/gemmi/safetensors into binder-eval-esmfold2"; return 1; }
     # biohub/esm: ESMFold2InputBuilder + chain dataclasses. Pinned commit per the HF model
     # card (no PyPI release yet). If this 404s/changes upstream, update the ref in the yml header too.
     run_logged "Installing biohub esm SDK into binder-eval-esmfold2" \
-        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q 'esm @ git+https://github.com/Biohub/esm.git@c94ed8d' \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q "${CONSTRAINTS[@]}" 'esm @ git+https://github.com/Biohub/esm.git@c94ed8d' \
         || { print_fail "Failed to install biohub esm SDK (check network / git access)"; return 1; }
 
     # Install binder-compare into the env so 'binder-compare refold-esmfold2' works
     run_logged "Installing binder-compare into binder-eval-esmfold2" \
-        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q -e "${EVALUATOR_DIR}[report]" \
+        "${CONDA_CMD}" run -n binder-eval-esmfold2 pip install -q "${CONSTRAINTS[@]}" -e "${EVALUATOR_DIR}[report]" \
         || { print_fail "Failed to install binder-compare into binder-eval-esmfold2"; return 1; }
 
     # Smoke test — just the CLI parses (no weights needed for --help)

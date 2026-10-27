@@ -1296,3 +1296,115 @@ class TestBoltzgenBudgetIsResolvedInOnePlace:
         """Resolving it to a silent 1 would turn an incomplete config into one binder."""
         with pytest.raises(KeyError):
             conf.boltzgen_budget({})
+
+
+def _ca_pdb(chain: str, residues: list[tuple[int, str]]) -> str:
+    """Minimal CA-only PDB. residues is a list of (resSeq, iCode)."""
+    out = []
+    for i, (resseq, icode) in enumerate(residues, start=1):
+        out.append(
+            f"ATOM  {i:5d}  CA  ALA {chain}{resseq:4d}{icode:1s}   0.000   0.000   0.000  1.00  0.00           C"
+        )
+    return "\n".join(out) + "\n"
+
+
+class TestRfd3TargetContig:
+    """RFD3 resolves contig components against the file's OWN author numbering.
+
+    A hardcoded A1-<len> aborted a whole PDL1 run before the first diffusion step:
+    `[component=A1] Residue A1 not found in atom array` (the prepared target is A17-134).
+    """
+
+    def test_uses_the_files_author_numbering_not_one_based(self, tmp_path):
+        pdb = tmp_path / "t.pdb"
+        pdb.write_text(_ca_pdb("A", [(n, " ") for n in range(17, 135)]))
+        assert conf.rfd3_target_contig(pdb, "A", 118) == "A17-134"
+
+    def test_a_one_based_file_is_unchanged(self, tmp_path):
+        pdb = tmp_path / "t.pdb"
+        pdb.write_text(_ca_pdb("A", [(n, " ") for n in range(1, 11)]))
+        assert conf.rfd3_target_contig(pdb, "A", 10) == "A1-10"
+
+    def test_a_numbering_gap_becomes_two_ranges(self, tmp_path):
+        """One span across an unmodelled loop names residues that are equally absent."""
+        pdb = tmp_path / "t.pdb"
+        pdb.write_text(_ca_pdb("A", [(n, " ") for n in [5, 6, 7, 20, 21]]))
+        assert conf.rfd3_target_contig(pdb, "A", 5) == "A5-7,A20-21"
+
+    def test_only_the_requested_chain_counts(self, tmp_path):
+        pdb = tmp_path / "t.pdb"
+        pdb.write_text(_ca_pdb("A", [(3, " "), (4, " ")]) + _ca_pdb("B", [(90, " "), (91, " ")]))
+        assert conf.rfd3_target_contig(pdb, "B", 2) == "B90-91"
+
+    def test_an_unreadable_target_falls_back_to_one_based(self, tmp_path):
+        assert conf.rfd3_target_contig(tmp_path / "absent.pdb", "A", 42) == "A1-42"
+
+    def test_a_chain_with_no_ca_atoms_falls_back_to_one_based(self, tmp_path):
+        pdb = tmp_path / "t.pdb"
+        pdb.write_text(_ca_pdb("A", [(1, " ")]))
+        assert conf.rfd3_target_contig(pdb, "Z", 9) == "Z1-9"
+
+    def test_the_generated_script_and_settings_agree(self, base_cfg, tmp_path):
+        """The YAML rfd3 reads, the banner and settings.json must not drift apart."""
+        pdb = tmp_path / "target_renum.pdb"
+        pdb.write_text(_ca_pdb("A", [(n, " ") for n in range(17, 27)]))
+        base_cfg["target_pdb"] = pdb
+        script = tmp_path / "run_rfd3.sh"
+        conf.write_run_rfd3(script, base_cfg)
+        content = script.read_text()
+        assert content.count("A17-26,/0,") == 3
+        assert "A1-10" not in content
+
+
+class TestCfgKeysAreChecked:
+    """An unread cfg key silently substitutes a default for the value the user wrote.
+
+    `pxdesign_n_designs: 1` in the PDL1 campaign config was dropped (the writer reads
+    `pxdesign_n_samples`), so PXDesign ran its 1000-sample default — ~1000x the
+    requested work, visible only as 1000 of 1003 sequences reaching the evaluator.
+    """
+
+    def test_the_real_keys_are_recognised(self):
+        known = conf.known_cfg_keys()
+        for key in ("name", "run_dir", "n_designs", "pxdesign_n_samples", "bindcraft_n_designs"):
+            assert key in known, key
+
+    def test_the_scanner_found_a_plausible_number_of_keys(self):
+        """A collapse to ~0 would make check_cfg_keys silently inert."""
+        assert len(conf.known_cfg_keys()) > 40
+
+    def test_the_offending_key_is_not_quietly_accepted(self, tmp_path, capsys):
+        with pytest.raises(SystemExit) as exc:
+            conf.check_cfg_keys({"name": "t", "pxdesign_n_designs": 1}, tmp_path / "config.json")
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert "pxdesign_n_designs" in out
+        assert "pxdesign_n_samples" in out  # the right key is among the suggestions
+
+    def test_a_config_of_only_real_keys_passes(self, tmp_path):
+        conf.check_cfg_keys({"name": "t", "n_designs": 1, "min_length": 60}, tmp_path / "config.json")
+
+    def test_underscore_keys_stay_inert(self, tmp_path):
+        """_comment is written by this module and is meant to be ignored."""
+        conf.check_cfg_keys({"name": "t", "_comment": "hi"}, tmp_path / "config.json")
+
+    def test_load_run_config_rejects_it_before_generating_anything(self, tmp_path):
+        target = tmp_path / "t.pdb"
+        target.write_text("ATOM\n")
+        cfgfile = tmp_path / "config.json"
+        cfgfile.write_text(
+            json.dumps(
+                {
+                    "config_version": 1,
+                    "cfg": {
+                        "name": "t",
+                        "run_dir": str(tmp_path / "run"),
+                        "target_pdb_src": str(target),
+                        "pxdesign_n_designs": 1,
+                    },
+                    "tools_enabled": {"pxdesign": True, "pxdesign_local": True},
+                }
+            )
+        )
+        with pytest.raises(SystemExit):
+            conf.load_run_config(cfgfile)

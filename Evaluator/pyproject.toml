@@ -8,14 +8,20 @@ version = "0.1.0"
 description = "Evaluate protein binder sequences by independent refolding with Boltz-2, AlphaFold 3 and ESMFold2 — sequences in, ranked interface metrics out."
 requires-python = ">=3.10"
 dependencies = [
-    "numpy>=1.24",
-    "pandas>=2.0",
-    "matplotlib>=3.7",
+    # Ceilings, not == pins: this pyproject is editable-installed into FOUR envs
+    # across two Python versions (binder-eval and binder-eval-af3 on 3.10,
+    # binder-eval-esmfold2 and Mosaic/.venv on 3.12), so a hard pin to any one
+    # env's version downgrades the others. Each ceiling is the first release
+    # beyond everything verified working here; see install/locks/*.txt for the
+    # exact per-env versions.
+    "numpy>=1.24,<2.6",
+    "pandas>=2.0,<3.2",
+    "matplotlib>=3.7,<3.12",
     # refolding/target_msa.py imports requests at MODULE level (not lazily), and
     # every engine now calls prepare_target_msa() up front, so it is a hard runtime
     # dependency. biopython and gemmi are deliberately NOT here: both are imported
     # inside functions, behind guards that keep their modules importable without them.
-    "requests>=2.28",
+    "requests>=2.28,<2.35",
 ]
 
 [project.optional-dependencies]
@@ -26,7 +32,9 @@ boltz2 = [
 ]
 # Full installation (for the report step only — no heavy ML deps)
 report = [
-    "jinja2>=3.0",
+    # Hard pin is safe here, unlike the base deps above: jinja2 is only in the
+    # [report] extra, and every env that installs that extra is on 3.1.6.
+    "jinja2==3.1.6",
 ]
 # Everything for the report env
 all = [

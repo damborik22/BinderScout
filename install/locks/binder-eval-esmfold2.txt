@@ -1,0 +1,129 @@
+# binder-eval-esmfold2 — pip constraints, captured from the working installation.
+#
+# NOT hand-written and NOT hand-maintained: regenerate, do not edit.
+#
+#   <repo>/conda/envs/binder-eval-esmfold2/bin/python -I install/locks/generate.py \
+#     > install/locks/binder-eval-esmfold2.txt
+#
+# What this is for: install.sh names only a couple of dozen packages explicitly,
+# while each env holds 115-176 distributions. The unnamed remainder is where all
+# three of this repo's dependency outages came from — BUG-14 (pyrosetta 2026.29
+# changed set_interface), BUG-20 (atomworks 3.0.0 deleted AtomSelectionStack) and
+# the RUF071 CI failure (ruff 0.17 added a rule) — and no realistic number of
+# inline pins reaches it. So the transitive set is pinned here too.
+#
+# Consumed as `pip install -c install/locks/binder-eval-esmfold2.txt ...`. A constraints file
+# restricts resolution without installing anything, so an entry the install never
+# asks for is simply ignored. That makes the file safe to be over-complete, and
+# means it needs no edit when install.sh drops a dependency.
+#
+# Deliberately ABSENT, both because they make resolution impossible rather than
+# reproducible (see generate.py for the evidence):
+#   * nvidia-*                 torch pins these itself, differently per index
+#   * setuptools / wheel / pip --index-url replaces PyPI, which does not serve them
+# CUDA local-version labels (+cu121, ...) are stripped for the same reason;
+# pyrosetta keeps its label, where the label is the build identity.
+#
+# Which run this env is evidence for: see install/locks/EVIDENCE.md.
+#
+accelerate==1.15.0
+annotated-doc==0.0.5
+anyio==4.15.1
+asttokens==3.0.2
+attrs==26.1.0
+biopython==1.88
+biotite==2.0.0
+biotraj==1.2.2
+boto3==1.43.119
+botocore==1.43.119
+brotli==1.2.1
+certifi==2026.10.23
+charset-normalizer==3.5.2
+click==8.5.0
+cloudpathlib==0.26.0
+cloudpickle==3.1.2
+comm==0.2.3
+contourpy==1.4.0
+cycler==0.12.1
+dna_features_viewer==3.1.5
+einops==0.8.2
+executing==2.3.0
+filelock==3.32.3
+fonttools==4.67.0
+fsspec==2026.7.0
+gemmi==0.7.5
+h11==0.16.0
+hf-xet==1.7.0
+httpcore2==2.16.0
+httpcore==1.0.9
+httpx2==2.16.0
+httpx==0.28.1
+huggingface_hub==0.36.2
+idna==3.20
+ipython==9.17.1
+ipython_pygments_lexers==1.1.1
+ipywidgets==8.1.9
+jedi==0.20.1
+Jinja2==3.1.6
+jmespath==1.1.0
+joblib==1.6.0
+jupyterlab_widgets==3.0.17
+kiwisolver==1.5.1
+markdown-it-py==4.2.0
+MarkupSafe==3.0.3
+matplotlib-inline==0.2.2
+matplotlib==3.11.2
+mdurl==0.1.2
+mpmath==1.3.0
+msgpack-numpy==0.4.8
+msgpack==1.2.4
+narwhals==2.27.1
+networkx==3.6.1
+numpy==2.5.4
+packaging==26.3
+pandas==3.1.0
+parso==0.8.7
+pexpect==4.9.0
+pillow==13.0.0
+prompt_toolkit==3.0.53
+psutil==7.2.2
+ptyprocess==0.7.0
+pure_eval==0.2.4
+py3Dmol==2.5.5
+pydssp==0.9.1
+Pygments==2.21.0
+pygtrie==2.6.2
+pyparsing==3.3.3
+python-dateutil==2.9.0.post0
+PyYAML==6.0.3
+rdkit==2026.9.1
+regex==2026.9.29
+requests==2.34.2
+rich==15.0.0
+s3transfer==0.19.3
+safetensors==0.8.0
+scikit-learn==1.9.1
+scipy==1.18.1
+shellingham==1.5.4
+six==1.17.0
+stack-data==0.6.3
+sympy==1.13.1
+tenacity==9.2.1
+threadpoolctl==3.7.0
+tokenizers==0.22.2
+torch==2.6.0
+tqdm==4.70.1
+traitlets==5.16.1
+triton==3.2.0
+truststore==0.10.5
+typer==0.27.3
+typing_extensions==4.16.0
+urllib3==2.8.0
+wcwidth==0.9.4
+widgetsnbextension==4.0.16
+zstd==1.5.7.2
+
+# Not constrainable (editable or VCS installs) — pinned elsewhere:
+#   binder-comparison==0.1.0  # <repo>/Evaluator
+#   esm==3.3.0  # https://github.com/Biohub/esm.git@c94ed8d763bbd7088b296949e5b401e8ea12073a
+#   transformers==4.57.6  # https://github.com/Biohub/transformers.git@3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf

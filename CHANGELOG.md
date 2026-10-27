@@ -6,6 +6,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Proteina-Complexa was dead on arrival on any install after 2026-10-05.**
+  Upstream's `env/build_uv_env.sh` installs `atomworks` with no version, and
+  atomworks 3.0.0 deleted `AtomSelectionStack`, which `pdb_utils.py` imports at
+  module level. Generation aborted at stage 1 with `ImportError`. Bisected on the
+  wheels: present in 2.2.1, gone from 3.0.0. `ATOMWORKS_VERSION="2.2.1"` now sits
+  beside `PROTEINA_COMPLEXA_COMMIT`, re-pinned after upstream's build script runs,
+  and verified by importing the **symbol** rather than reading a version number.
+  The old smoke test (`import proteinfoundation`) touched nothing and stayed green
+  through the whole breakage; it now imports `proteinfoundation.utils.pdb_utils`.
+
+- **RFD3 aborted on any target not numbered from residue 1.** The configurator
+  hardcoded `contig: "<chain>1-<len>"`, but RFD3 resolves contigs against the atom
+  array's author numbering. The prepared PDL1 target is `A17-134`, so `A1` named a
+  residue that does not exist and the run died in prevalidation with
+  `ComponentValidationError`. New `rfd3_target_contig()` reads the chain's real CA
+  residue numbers from the file RFD3 will load; numbering gaps become separate
+  ranges, insertion codes warn, and all three emission sites (YAML, banner,
+  `settings.json`) now share one computed value so they cannot drift.
+
+- **An unrecognised key in a `--config` replay was silently ignored.** A config
+  saying `pxdesign_n_designs: 1` got PXDesign's 1000-sample default, because the
+  writer reads `pxdesign_n_samples` — and then fed 1000 extra binders to three
+  refold engines. `check_cfg_keys()` now makes any unread cfg key fatal before
+  anything is written, with near-miss suggestions; the valid-key set is recovered
+  from the module's own AST rather than hand-listed.
+
+- **CI was red on `master` before any of this**, and not from our code: the ruff
+  job did an unpinned `pip install ruff`, and 0.17's new RUF071 flagged two
+  `os.path.commonprefix` calls on amino-acid sequences. Replaced with a
+  `shared_sequence_prefix()` helper that says what the callers mean (and avoids a
+  function deprecated in Python 3.15 regardless).
+
+### Changed
+
+- **Everything verified working is now pinned, by capture rather than by hand.**
+  `install/locks/` holds a pip constraints file per environment, generated from the
+  live installs by `install/locks/generate.py`, plus Mosaic's `uv.lock` (upstream
+  ships none at `MOSAIC_COMMIT`, so a bare `uv sync` re-resolved the whole graph
+  every install). This reaches the 86–219 distributions per env that inline pins
+  never did — where all three of this project's dependency outages came from.
+  Also pinned: `PXDESIGN_COMMIT` and `PROTEINA_COMPLEXA_COMMIT` (both were the
+  literal `"HEAD"`), the three short SHAs expanded to full, `uv` 0.11.7, the
+  foldseek/mmseqs2 download URLs (`mmseqs.com/latest/` served a different binary
+  every time), shellcheck 0.11.0 as a checksummed static binary, the six CI test
+  deps, the GitHub Actions to commit SHAs, and the runner images to `ubuntu-24.04`.
+  `install/locks/EVIDENCE.md` records which pins a completed run backs and which
+  only a successful install does.
+
+- **BoltzGen's PyTorch pin now names what actually runs.** `install.sh` claimed
+  `torch==2.5.1+cu121`, but the editable `pip install -e BoltzGen` on the next line
+  resolves BoltzGen's unconstrained `torch>=2.4.1` and upgraded over it — the live
+  env is torch 2.14.1 from PyPI. Corrected to `torch==2.14.1` without the cu121
+  index. Upper bounds added to `Evaluator/pyproject.toml` (ceilings, not `==`: it
+  is editable-installed into four envs across two Python versions).
+
 ## [1.0.5] — 2026-09-23
 
 ### Fixed

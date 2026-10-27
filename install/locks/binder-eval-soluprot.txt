@@ -1,0 +1,28 @@
+# binder-eval-soluprot — pip constraints, captured from the working installation.
+#
+# THE ONE FILE HERE THAT generate.py CANNOT PRODUCE. This env is Python 3.7
+# (SoluProt's scikit-learn 0.20.x pickle will not predict() under 0.21+), and
+# importlib.metadata did not exist until 3.8. So this list was read directly from
+# the env's *.dist-info / *.egg-info directory names. To refresh:
+#
+#   ls conda/envs/binder-eval-soluprot/lib/python3.7/site-packages/ \
+#     | grep -E '\.(dist-info|egg-info)$'
+#
+# and normalise to name==version, dropping setuptools/wheel/pip for the same
+# reason generate.py does.
+#
+# Note scikit-learn is 0.20.1 here. CLAUDE.md documents 0.20.4 for the aarch64
+# path, which source-builds it; the x86 path resolves 0.20.1. Both run SoluProt.
+#
+# Which run this env is evidence for: see install/locks/EVIDENCE.md.
+#
+biopython==1.74
+colorama==0.4.6
+numpy==1.21.6
+pandas==1.3.5
+python-dateutil==2.9.0
+pytz==2024.2
+scikit-learn==0.20.1
+scipy==1.7.3
+six==1.16.0
+tqdm==4.67.1

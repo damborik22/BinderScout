@@ -1,0 +1,52 @@
+# binder-eval — pip constraints, captured from the working installation.
+#
+# NOT hand-written and NOT hand-maintained: regenerate, do not edit.
+#
+#   <repo>/conda/envs/binder-eval/bin/python -I install/locks/generate.py \
+#     > install/locks/binder-eval.txt
+#
+# What this is for: install.sh names only a couple of dozen packages explicitly,
+# while each env holds 115-176 distributions. The unnamed remainder is where all
+# three of this repo's dependency outages came from — BUG-14 (pyrosetta 2026.29
+# changed set_interface), BUG-20 (atomworks 3.0.0 deleted AtomSelectionStack) and
+# the RUF071 CI failure (ruff 0.17 added a rule) — and no realistic number of
+# inline pins reaches it. So the transitive set is pinned here too.
+#
+# Consumed as `pip install -c install/locks/binder-eval.txt ...`. A constraints file
+# restricts resolution without installing anything, so an entry the install never
+# asks for is simply ignored. That makes the file safe to be over-complete, and
+# means it needs no edit when install.sh drops a dependency.
+#
+# Deliberately ABSENT, both because they make resolution impossible rather than
+# reproducible (see generate.py for the evidence):
+#   * nvidia-*                 torch pins these itself, differently per index
+#   * setuptools / wheel / pip --index-url replaces PyPI, which does not serve them
+# CUDA local-version labels (+cu121, ...) are stripped for the same reason;
+# pyrosetta keeps its label, where the label is the build identity.
+#
+# Which run this env is evidence for: see install/locks/EVIDENCE.md.
+#
+certifi==2026.10.23
+charset-normalizer==3.5.2
+contourpy==1.3.2
+cycler==0.12.1
+fonttools==4.65.0
+idna==3.20
+Jinja2==3.1.6
+kiwisolver==1.5.1
+MarkupSafe==3.0.4
+matplotlib==3.10.9
+numpy==2.2.6
+packaging==26.3
+pandas==2.3.3
+pillow==12.3.0
+pyparsing==3.3.3
+python-dateutil==3.0.0
+pytz==2026.5
+requests==2.34.2
+six==1.17.0
+tzdata==2026.5
+urllib3==2.8.0
+
+# Not constrainable (editable or VCS installs) — pinned elsewhere:
+#   binder-comparison==0.1.0  # <repo>/Evaluator

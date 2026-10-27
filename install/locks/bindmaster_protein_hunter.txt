@@ -1,0 +1,181 @@
+# bindmaster_protein_hunter — pip constraints, captured from the working installation.
+#
+# NOT hand-written and NOT hand-maintained: regenerate, do not edit.
+#
+#   <repo>/conda/envs/bindmaster_protein_hunter/bin/python -I install/locks/generate.py \
+#     > install/locks/bindmaster_protein_hunter.txt
+#
+# What this is for: install.sh names only a couple of dozen packages explicitly,
+# while each env holds 115-176 distributions. The unnamed remainder is where all
+# three of this repo's dependency outages came from — BUG-14 (pyrosetta 2026.29
+# changed set_interface), BUG-20 (atomworks 3.0.0 deleted AtomSelectionStack) and
+# the RUF071 CI failure (ruff 0.17 added a rule) — and no realistic number of
+# inline pins reaches it. So the transitive set is pinned here too.
+#
+# Consumed as `pip install -c install/locks/bindmaster_protein_hunter.txt ...`. A constraints file
+# restricts resolution without installing anything, so an entry the install never
+# asks for is simply ignored. That makes the file safe to be over-complete, and
+# means it needs no edit when install.sh drops a dependency.
+#
+# Deliberately ABSENT, both because they make resolution impossible rather than
+# reproducible (see generate.py for the evidence):
+#   * nvidia-*                 torch pins these itself, differently per index
+#   * setuptools / wheel / pip --index-url replaces PyPI, which does not serve them
+# CUDA local-version labels (+cu121, ...) are stripped for the same reason;
+# pyrosetta keeps its label, where the label is the build identity.
+#
+# Which run this env is evidence for: see install/locks/EVIDENCE.md.
+#
+absl-py==2.5.1
+aiobotocore==3.10.0
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.5
+aioitertools==0.13.0
+aiosignal==1.4.0
+annotated-types==0.8.0
+antipickle==0.2.0
+antlr4-python3-runtime==4.9.3
+anyio==4.15.1
+ase==3.29.0
+async-timeout==5.0.1
+attrs==26.1.0
+beartype==0.23.1
+biopython==1.84
+boltz==2.2.1
+botocore==1.43.117
+certifi==2026.10.23
+cffi==2.1.1
+charset-normalizer==3.5.2
+chembl-structure-pipeline==1.2.2
+click==8.1.7
+cloudpickle==3.1.2
+contourpy==1.3.2
+cryptography==50.0.2
+cycler==0.12.1
+db-dtypes==1.9.0
+decorator==5.3.1
+dm-tree==0.1.8
+docker-pycreds==0.4.0
+einops==0.8.0
+einx==0.3.0
+exceptiongroup==1.3.1
+fairscale==0.4.13
+filelock==3.32.3
+fonttools==4.65.0
+frozendict==2.4.7
+frozenlist==1.8.0
+fsspec==2026.9.0
+gcsfs==2026.10.1
+gemmi==0.6.5
+gitdb==4.0.12
+GitPython==3.2.1
+google-api-core==2.43.0
+google-auth-oauthlib==1.5.0
+google-auth==2.62.0
+google-cloud-bigquery==3.46.2
+google-cloud-core==2.8.0
+google-cloud-storage-control==1.17.0
+google-cloud-storage==3.17.1
+google-crc32c==1.9.0
+google-resumable-media==2.11.0
+googleapis-common-protos==1.76.0
+grpc-google-iam-v1==0.14.6
+grpcio-status==1.85.0
+grpcio==1.85.0
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+hydra-core==1.3.2
+idna==3.20
+ihm==2.12
+jaxtyping==0.3.7
+Jinja2==3.1.6
+jmespath==1.1.0
+joblib==1.6.0
+kiwisolver==1.5.1
+lightning-utilities==0.15.3
+llvmlite==0.44.0
+logmd==0.1.45
+markdown-it-py==4.2.0
+MarkupSafe==3.0.3
+mashumaro==3.14
+matplotlib==3.10.9
+mdurl==0.1.2
+ml_collections==1.1.0
+modelcif==1.2
+mpmath==1.3.0
+msgpack==1.2.4
+multidict==7.1.0
+mypy_extensions==1.1.0
+networkx==3.4.2
+numba==0.61.0
+numpy==1.26.4
+oauthlib==4.0.0
+omegaconf==2.3.1
+OpenMM==8.6.1
+opentelemetry-api==1.45.1
+packaging==26.3
+pandas-gbq==0.35.3
+pandas==2.3.3
+pandera==0.35.0
+pillow==12.3.0
+platformdirs==4.12.4
+ProDy==2.6.1
+propcache==0.5.4
+proto-plus==1.29.0
+protobuf==7.36.2
+psutil==7.2.2
+py3Dmol==2.5.5
+pyarrow==25.0.1
+pyasn1==0.6.4
+pyasn1_modules==0.4.2
+pycparser==3.11
+pydantic==2.14.1
+pydantic_core==2.50.1
+pydata-google-auth==1.9.1
+Pygments==2.21.0
+pyparsing==3.1.1
+pyrosetta-installer==0.1.2
+pyrosetta==2026.39+release.49e05e797c
+python-dateutil==2.9.0.post0
+pytorch-lightning==2.5.0
+pytz==2026.5
+PyYAML==6.0.2
+rdkit==2024.9.6
+requests-oauthlib==2.0.0
+requests==2.34.2
+rich==15.0.0
+s3fs==2026.9.0
+scikit-learn==1.6.1
+scipy==1.13.1
+seaborn==0.13.2
+sentry-sdk==2.73.0
+setproctitle==1.3.8
+shellingham==1.5.4
+six==1.17.0
+smmap==5.0.3
+sympy==1.13.1
+threadpoolctl==3.7.0
+tmtools==0.3.0
+torch==2.5.1
+torchaudio==2.5.1
+torchmetrics==1.9.0
+torchvision==0.20.1
+tqdm==4.70.1
+triton==3.1.0
+typeguard==4.6.0
+typer==0.15.4
+types-requests==2.33.0.20261006
+typing-inspect==0.9.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+tzdata==2026.5
+urllib3==2.8.0
+wadler_lindig==0.1.8
+wandb==0.18.7
+wrapt==2.5.1
+yarl==1.25.1
+
+# Not constrainable (editable or VCS installs) — pinned elsewhere:
+#   boltz==2.2.1  # <repo>/Protein-Hunter/boltz_ph
+#   chai_lab==0.6.1  # https://github.com/sokrypton/chai-lab.git@e0b45d4786bf4e64309ab86b67c87971b6998775
