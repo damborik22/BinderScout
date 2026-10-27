@@ -29,6 +29,12 @@ CYAN = "\033[0;36m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
+# How to spell the CLI in a hint we print. A fresh clone has no `binderscout`
+# shortcut -- the installer is what creates it -- so a hint that says
+# "run: binderscout install" hands that user a command that exits 127. Resolved
+# once at import, the same way binderscout.py's own USAGE does it.
+_INVOKE = "binderscout" if shutil.which("binderscout") else "./binderscout.py"
+
 
 def print_step(msg):
     print(f"\n{CYAN}{BOLD}▶ {msg}{RESET}")
@@ -657,20 +663,20 @@ def _cif_atom_site_seq(text: str) -> str | None:
     return None
 
 
-def extract_sequence_from_cif(cif_path: str, chain_id: str) -> str | None:
-    """Extract amino-acid sequence for chain_id from a CIF/mmCIF file.
+def _cif_chain_ca_residues(text: str, chain_id: str) -> tuple[list[int], str]:
+    """Ordered label_seq_ids and the 1-letter sequence of chain_id's CA atoms in a CIF.
 
-    Returns a 1-letter string, or None on failure.
+    The mmCIF counterpart of _pdb_chain_ca_residues: element i of the id list is residue
+    i of the returned sequence, so a per-residue annotation keyed on label_seq_id can be
+    mapped onto a position in the extracted sequence. ([], "") when the chain has no CA
+    records (or the file has no _atom_site loop at all).
+
+    This is the reader extract_sequence_from_cif already had, lifted out rather than
+    copied, so the construct-annotation path and the sequence path cannot disagree about
+    which residues a chain has. It is deliberately NOT folded into cif_chain_numbering(),
+    which answers a different question (the label-vs-author numbering RANGE for the RFD4
+    contig) and reads a column this one does not.
     """
-    try:
-        text = Path(cif_path).expanduser().read_text(errors="replace")
-    except OSError:
-        return None
-
-    # _atom_site CA records for the requested chain FIRST: this is the only branch that can
-    # honour chain_id. _entity_poly is chain-agnostic (it returns the longest entity), so trying
-    # it first silently discarded the user's chain answer for every mmCIF that has one — i.e.
-    # essentially every structure downloaded from the PDB.
     tokens = _cif_tokenize(text)
     i = 0
     while i < len(tokens):
@@ -707,12 +713,32 @@ def extract_sequence_from_cif(cif_path: str, chain_id: str) -> str | None:
                     i += n_cols
                     continue
                 resname = row[col["label_comp_id"]].strip("'\"")
-                key = (ch, resnum)
-                if key not in seen:
-                    seen[key] = AA3TO1.get(resname, "X")
+                if resnum not in seen:
+                    seen[resnum] = AA3TO1.get(resname, "X")
             i += n_cols
         if seen:
-            return "".join(seen[k] for k in sorted(seen))
+            ids = sorted(seen)
+            return ids, "".join(seen[k] for k in ids)
+    return [], ""
+
+
+def extract_sequence_from_cif(cif_path: str, chain_id: str) -> str | None:
+    """Extract amino-acid sequence for chain_id from a CIF/mmCIF file.
+
+    Returns a 1-letter string, or None on failure.
+    """
+    try:
+        text = Path(cif_path).expanduser().read_text(errors="replace")
+    except OSError:
+        return None
+
+    # _atom_site CA records for the requested chain FIRST: this is the only branch that can
+    # honour chain_id. _entity_poly is chain-agnostic (it returns the longest entity), so trying
+    # it first silently discarded the user's chain answer for every mmCIF that has one — i.e.
+    # essentially every structure downloaded from the PDB.
+    _ids, seq_from_atoms = _cif_chain_ca_residues(text, chain_id)
+    if seq_from_atoms:
+        return seq_from_atoms
 
     # No CA records for that chain (or no _atom_site at all — e.g. a sequence-only mmCIF).
     # _entity_poly is the last resort, but it cannot honour chain_id, so say so rather than
@@ -811,6 +837,257 @@ def extract_sequence_from_structure(path: str, chain_id: str) -> str | None:
     if p.suffix.lower() in (".cif", ".mmcif"):
         return extract_sequence_from_cif(str(p), chain_id)
     return extract_sequence_from_pdb(str(p), chain_id)
+
+
+# ─── Expression-tag detection ────────────────────────────────────────────────
+#
+# A stock RCSB entry is the CONSTRUCT that was crystallised, not the biological target.
+# 5O45 (PD-L1) carries eleven extra residues on chain A — AAALE + His6 — and in the
+# extracted sequence they are indistinguishable from the protein. Left in, they become
+# designable surface AND are baked into the target-MSA cache key (the target sequence's
+# SHA-256, shared by every refold engine), so a "hit" can be designed against a cloning
+# linker that does not exist in vivo.
+#
+# The depositor already said which residues those are, per residue, by hand, at
+# deposition time: SEQADV in a PDB file, _struct_ref_seq_dif in an mmCIF. That is
+# authoritative. A regex over the sequence is a guess, and guessing the LINKER cannot
+# work in general — real constructs use AAALE, LE (an XhoI site), GSGS, ENLYFQG (TEV),
+# LVPRGS (thrombin), GGGGS repeats — which is exactly how a [GSAL]{0,3} character class
+# stops at the 'E' of AAALE on 5O45 and trims 6 of 11 residues.
+
+# Free-text annotations treated as "this residue is construct, not protein".
+# ACCEPTED: EXPRESSION TAG, CLONING ARTIFACT, LINKER — all three describe sequence added
+# in order to express or purify the protein, i.e. sequence that is not in the organism.
+# NOT accepted: CONFLICT, VARIANT, ENGINEERED MUTATION, MICROHETEROGENEITY, INSERTION,
+# DELETION, SEE REMARK 999. The first four are real residues of the (possibly mutated)
+# protein that was crystallised; INSERTION/DELETION record a difference from the
+# reference database entry — an isoform, a renumbering — not added sequence. Dropping
+# any of them would change the protein rather than undo the construct.
+_CONSTRUCT_ANNOTATIONS = ("EXPRESSION TAG", "CLONING ARTIFACT", "LINKER")
+
+# FALLBACK ONLY, for files that carry no per-residue annotation (a predicted structure, a
+# hand-built PDB, a pasted sequence). The linker beside a poly-His run is matched by NAME
+# — the forms that actually occur: 5O45's AAALE, LE from an XhoI site, GS/GGGGS repeats,
+# ENLYFQG for TEV, LVPRGS for thrombin, pET's SSGLVPRGS.
+#
+# "Up to five residues of anything" was tried first and is WRONG, which is worth
+# recording: with no annotation to lean on, a pattern cannot tell a 0-residue linker from
+# a 5-residue one, so `[A-Z]{0,5}H{6,10}$` trims five residues of native protein off a
+# plain His6 tag (…ITVKVNAPY|HHHHHH became …ITVK). Linkers of arbitrary composition are
+# exactly what the SEQADV / _struct_ref_seq_dif path above is for; a named list is the
+# most a guess can honestly offer, and the prompt shows the residues so the user can see
+# whether more should go.
+_HIS_LINKER_BEFORE = r"(?:AAALE|ENLYFQ[GS]|SSGLVPRGS|LVPR[GS]{1,2}|(?:GGGGS)+|(?:GS)+|LE|[GSAL]{0,3})"
+_HIS_LINKER_AFTER = r"(?:ENLYFQ[GS]|LVPRGS|(?:GGGGS)+|[GSAL]{0,4})"
+_TAG_PATTERNS = [
+    ("His6/His8", re.compile(_HIS_LINKER_BEFORE + r"H{5,10}$")),
+    ("His6 (N-term)", re.compile(r"^M?" + _HIS_LINKER_BEFORE + r"H{5,10}" + _HIS_LINKER_AFTER)),
+    ("Strep-II", re.compile(r"WSHPQFEK$")),
+    ("FLAG", re.compile(r"DYKDDDDK$")),
+    ("Myc", re.compile(r"EQKLISEEDL$")),
+]
+
+
+def _pdb_seqadv_construct(lines: list[str], chain_id: str) -> dict[tuple[str, str], str]:
+    """(resSeq, iCode) -> resName for chain_id's SEQADV records annotated as construct.
+
+    SEQADV is fixed-column (1-based): resName 13-15, chainID 17, seqNum 19-22, iCode 23,
+    and the free-text conflict field 50-70, which is where "EXPRESSION TAG" lives.
+    """
+    flagged: dict[tuple[str, str], str] = {}
+    for line in lines:
+        if line[:6] != "SEQADV" or len(line) < 50:
+            continue
+        if line[16].strip().upper() != chain_id.upper():
+            continue
+        note = line[49:70].strip().upper()
+        if not any(a in note for a in _CONSTRUCT_ANNOTATIONS):
+            continue
+        flagged[(line[18:22].strip(), line[22].strip())] = line[12:15].strip().upper()
+    return flagged
+
+
+def _cif_loop_rows(text: str, category: str) -> list[dict]:
+    """Rows of the `loop_` whose columns belong to `category` (e.g. "_struct_ref_seq_dif").
+
+    Only the loop_ form is read. A category with exactly one row is written as plain
+    key-value pairs instead and returns []; one annotated residue is not a tag run worth
+    trimming, and the pattern fallback still sees the sequence.
+    """
+    tokens = _cif_tokenize(text)
+    prefix = category.lower() + "."
+    i = 0
+    while i < len(tokens):
+        if tokens[i].lower() != "loop_":
+            i += 1
+            continue
+        i += 1
+        cols: list = []
+        while i < len(tokens) and tokens[i].startswith("_"):
+            cols.append(tokens[i].lower())
+            i += 1
+        if not cols or not cols[0].startswith(prefix):
+            continue
+        names = [c.split(".", 1)[1] for c in cols]
+        n_cols = len(cols)
+        rows: list[dict] = []
+        while i + n_cols <= len(tokens):
+            if tokens[i].lower() == "loop_" or (tokens[i].startswith("_") and "." in tokens[i]):
+                break
+            rows.append(dict(zip(names, tokens[i : i + n_cols], strict=False)))
+            i += n_cols
+        return rows
+    return []
+
+
+def _cif_seqdif_construct(text: str, chain_id: str) -> dict[int, str]:
+    """label_seq_id -> mon_id for chain_id's _struct_ref_seq_dif rows annotated as construct.
+
+    The mmCIF equivalent of SEQADV: `details` carries the same free text (lower-cased by
+    convention — 'expression tag'), `seq_num` is the entity sequence index, which is the
+    numbering _cif_chain_ca_residues orders by, and `pdbx_pdb_strand_id` names the chain.
+
+    Caveat, and why the caller cross-checks residue names: pdbx_pdb_strand_id is the
+    AUTHOR chain id while _atom_site.label_asym_id (what the sequence extractor filters
+    on) is the label chain id, and those are not the same namespace in every entry.
+    """
+    flagged: dict[int, str] = {}
+    for row in _cif_loop_rows(text, "_struct_ref_seq_dif"):
+        if row.get("pdbx_pdb_strand_id", "").upper() != chain_id.upper():
+            continue
+        if not any(a in row.get("details", "").upper() for a in _CONSTRUCT_ANNOTATIONS):
+            continue
+        try:
+            flagged[int(row["seq_num"])] = row.get("mon_id", "").upper()
+        except (KeyError, ValueError):
+            continue
+    return flagged
+
+
+def _terminal_construct_span(flagged: set, n: int) -> tuple[int, int]:
+    """[start, end) of an n-residue sequence to KEEP, given 0-based construct positions.
+
+    ONLY a contiguous run at the N- and/or C-terminus is removed. An interior annotation
+    is NOT a tag: it is a point mutation, an engineered variant or a numbering conflict —
+    a real residue of the chain that was crystallised — and excising it would splice two
+    distant stretches of the protein together, corrupting the sequence and putting it
+    permanently out of step with the coordinates (and with every hotspot number the user
+    typed). A purification tag sits at a terminus by construction, so restricting the
+    trim to the termini costs nothing and makes the interior case impossible rather than
+    merely unlikely.
+    """
+    start = 0
+    while start < n and start in flagged:
+        start += 1
+    if start == n:  # every residue flagged: not a tag, and emptying the chain is never right
+        return 0, n
+    end = n
+    while end > start and end - 1 in flagged:
+        end -= 1
+    return start, end
+
+
+def _annotated_construct_span(seq: str, struct_path: str, chain_id: str) -> tuple[int, int, str, int] | None:
+    """(start, end, evidence, n_interior) from the deposited file's own annotation.
+
+    `seq[start:end]` is the biological target. None means this file carries no usable
+    construct annotation for this chain and the caller should fall back to the pattern
+    guess.
+    """
+    p = Path(struct_path).expanduser()
+    try:
+        text = p.read_text(errors="replace")
+    except OSError:
+        return None
+
+    if p.suffix.lower() in (".cif", ".mmcif"):
+        cif_ids, chain_seq = _cif_chain_ca_residues(text, chain_id)
+        ids: list = list(cif_ids)
+        flagged: dict = _cif_seqdif_construct(text, chain_id)
+        source = "_struct_ref_seq_dif"
+    else:
+        lines = text.splitlines()
+        ids, chain_seq = _pdb_chain_ca_residues(lines, chain_id)
+        flagged = _pdb_seqadv_construct(lines, chain_id)
+        source = "SEQADV"
+
+    # The annotation is per RESIDUE, so it can only be applied to the exact residue list
+    # the sequence was extracted from. If the two disagree, hand over rather than guess
+    # at an offset.
+    if not flagged or chain_seq != seq:
+        return None
+
+    positions = {i for i, rid in enumerate(ids) if rid in flagged}
+    # The annotated residue NAME must agree with the residue about to be dropped. This is
+    # what makes the mmCIF path safe despite the author/label chain-id namespaces above:
+    # if the two ids denote different chains the names do not line up, and the annotation
+    # is refused rather than applied to the wrong residues.
+    for i in sorted(positions):
+        if seq[i] != AA3TO1.get(flagged[ids[i]], "X"):
+            rid = "".join(ids[i]) if isinstance(ids[i], tuple) else str(ids[i])
+            print_warn(f"{p.name}: {source} residue {rid} does not match chain {chain_id} — annotation ignored.")
+            return None
+
+    start, end = _terminal_construct_span(positions, len(seq))
+    if (start, end) == (0, len(seq)):
+        return None
+    interior = len(positions - set(range(start)) - set(range(end, len(seq))))
+    return start, end, f"the depositor's own {source} records in {p.name}", interior
+
+
+def _offer_tag_trim(seq: str, start: int, end: int, label: str, evidence: str, interior: int = 0) -> str:
+    """Report a detected construct region, say where the evidence came from, and ask."""
+    n_dropped = start + (len(seq) - end)
+    print()
+    print_warn(f"{label} detected — {n_dropped} residue(s) of {len(seq)}:")
+    if start:
+        print(f"    N-terminal: {seq[:start]}…")
+    if end < len(seq):
+        print(f"    C-terminal: …{seq[end:]}")
+    print(f"  Evidence: {evidence}")
+    print("  Leaving it in makes the tag a designable epitope and is baked into the")
+    print("  cached target MSA, so designs may bind something that does not exist.")
+    if interior:
+        print(f"  {interior} further annotated residue(s) are INTERIOR and are KEPT — an interior")
+        print("  annotation is a point mutation or a conflict, not added sequence.")
+    if not ask_yn(f"  Trim {n_dropped} residues?", default=True):
+        print_warn("Keeping the tag — make sure that is what you want.")
+        return seq
+    trimmed = seq[start:end]
+    print_ok(f"Trimmed to {len(trimmed)} aa")
+    print("  The structure is trimmed to match when the run folder is generated")
+    print("  (target/<name>.pdb); the untouched deposited file is kept beside it.")
+    print("  Keep hotspots off the trimmed residues in Step 3.")
+    return trimmed
+
+
+def warn_expression_tags(seq: str, struct_path: str | None = None, chain_id: str = "") -> str:
+    """Offer to trim expression-tag residues from an extracted target sequence.
+
+    Priority: the deposited file's own per-residue annotation (PDB SEQADV / mmCIF
+    _struct_ref_seq_dif), then — only if the file carries none — a sequence pattern.
+    Always asks, because a genuine poly-histidine stretch in a real protein would be a
+    false positive, and always says WHICH of the two found it: one is the depositor's
+    statement of fact about their own construct, the other is a guess.
+    """
+    if struct_path and chain_id:
+        annotated = _annotated_construct_span(seq, struct_path, chain_id)
+        if annotated:
+            start, end, evidence, interior = annotated
+            return _offer_tag_trim(seq, start, end, "Expression-tag residues", evidence, interior)
+
+    guess = "a sequence pattern — a GUESS; this file carries no per-residue tag annotation."
+    for label, pat in _TAG_PATTERNS:
+        m = pat.search(seq)
+        if not m or not m.group(0):
+            continue
+        start, end = (m.end(), len(seq)) if m.start() == 0 else (0, m.start())
+        if start >= end:
+            continue  # a pattern that claims the whole chain is a false positive, not a tag
+        trimmed = _offer_tag_trim(seq, start, end, f"Possible {label} expression tag", guess)
+        if trimmed != seq:
+            return trimmed
+    return seq
 
 
 def available_chains(path: str) -> list[str]:
@@ -931,8 +1208,16 @@ def cif_to_pdb_atoms(cif_path: str, pdb_path: str) -> bool:
                 atom_field = f" {atom_name:<3s}"
             else:
                 atom_field = f"{atom_name:<4s}"
+            # The space between atom_field and comp_id is the altLoc column (17). Without
+            # it every field from resName on sat one column left of where the PDB format
+            # puts it, so this project's own extract_sequence_from_pdb read the chain ID
+            # out of the residue number and returned None for the converted file, and
+            # available_chains() returned [] for essentially every mmCIF. It also ate the
+            # sign of any coordinate filling all eight columns (-123.456 came back
+            # +123.456), and it would have silently defeated prepare_target_pdb below,
+            # which reads this converted PDB for a CIF target.
             line = (
-                f"{record}{serial:5d} {atom_field}{comp_id:>3s} {chain[0]:1s}{seq_id:4d}    "
+                f"{record}{serial:5d} {atom_field} {comp_id:>3s} {chain[0]:1s}{seq_id:4d}    "
                 f"{x:8.3f}{y:8.3f}{z:8.3f}{occ:6.2f}{bfac:6.2f}          {elem_str:>2s}  "
             )
             atom_lines.append(line)
@@ -950,6 +1235,236 @@ def cif_to_pdb_atoms(cif_path: str, pdb_path: str) -> bool:
             f.write(line + "\n")
         f.write("END\n")
     return True
+
+
+# ─── Target structure preparation ────────────────────────────────────────────
+
+# Header records copied through to the prepared file. Everything else is dropped,
+# because every other record names an atom, residue or chain that preparation may
+# have removed: SEQRES, LINK, SSBOND, CISPEP, HELIX, SHEET, SITE, HET/HETNAM/FORMUL,
+# CONECT, ANISOU, MASTER, and COMPND (which lists the chains by name).
+#
+# SEQRES is DROPPED, not regenerated. With no SEQRES every parser we feed derives the
+# sequence from the ATOM records, so header and coordinates cannot disagree; a
+# regenerated SEQRES is a second, hand-rolled source of truth whose first off-by-one
+# reintroduces the exact crash this preparation exists to avoid — BoltzGen builds its
+# entities from SEQRES and then indexes `entity.subchains[0]`
+# (BoltzGen/src/boltzgen/data/parse/pdb_parser.py:39), so a SEQRES declaring 129
+# residues against 118 surviving ATOM records dies with `IndexError: list index out of
+# range`. It also keeps a dropped His-tag from being recoverable out of the header
+# after its atoms are gone. Targets that come in through the "provide a sequence" path
+# already reach the tools without SEQRES, so this is not a new shape of input.
+_PDB_HEADER_KEEP = ("HEADER", "TITLE ", "CRYST1")
+
+_WATER_RESIDUES = ("HOH", "DOD", "WAT")
+
+
+def _pdb_chain_ca_residues(lines: list[str], chain_id: str) -> tuple[list[tuple[str, str]], str]:
+    """Ordered (resSeq, iCode) keys and the 1-letter sequence of chain_id's CA atoms.
+
+    Mirrors extract_sequence_from_pdb: element i of the key list is residue i of the
+    returned sequence, so selecting residues by these keys keeps the prepared structure
+    and cfg["target_sequence"] in step.
+
+    Takes already-read lines rather than a path, because prepare_target_pdb reads the
+    source once and then rewrites it; extract_sequence_from_pdb and
+    pdb_chain_residue_numbers stay as they are, since they are path-based and do not
+    filter altLoc the way a structure being rewritten must.
+    """
+    keys: list[tuple[str, str]] = []
+    seq: list[str] = []
+    seen: set = set()
+    for line in lines:
+        if line[:4] != "ATOM" or len(line) < 27:
+            continue
+        if line[12:16].strip() != "CA":
+            continue
+        if line[21].strip().upper() != chain_id.upper():
+            continue
+        if line[16].strip() not in ("", "A"):
+            continue
+        key = (line[22:26].strip(), line[26].strip())
+        if key in seen:
+            continue
+        seen.add(key)
+        keys.append(key)
+        seq.append(AA3TO1.get(line[17:20].strip().upper(), "X"))
+    return keys, "".join(seq)
+
+
+def _ter_record(serial: int, atom_line: str) -> str:
+    """TER for the last kept atom of a chain, in fixed PDB columns."""
+    return f"TER   {serial:>5}      {atom_line[17:20]} {atom_line[21]}{atom_line[22:27]}"
+
+
+def prepare_target_pdb(src_pdb: Path, dest_pdb: Path, chains: str, target_sequence: str) -> dict | None:
+    """Write dest_pdb holding only the target: selected chains, no ligands, no waters.
+
+    A stock RCSB file is not a target. On 5O45 (PD-L1) the deposited coordinates carry
+    chain A's His6 purification tag AND chain B, an 8-residue inhibitor peptide bound in
+    the very epitope a binder has to reach — so BindCraft, RFD3's contigs and BoltzGen's
+    `file:` entity were all designing against an occupied site. Trimming the tag out of
+    the SEQUENCE (which the wizard offers in Step 3) does not touch the coordinates, and
+    run_rfd3.sh recovers each binder as `best_full[len(target_sequence):]`, so sequence
+    and coordinates disagreeing is not cosmetic: it glues the leftover tag onto every
+    delivered binder with no error at any step.
+
+    Residue numbering is deliberately NOT renumbered: hotspot residue numbers the user
+    gave in Step 3 refer to the deposited numbering and must keep resolving.
+
+    Returns a report dict for the caller to print, or None when nothing survived (a
+    structure with no CA atoms in the selected chains) — dest_pdb is then not written
+    and the caller falls back to copying the source verbatim.
+    """
+    try:
+        raw = src_pdb.read_text(errors="replace").splitlines()
+    except OSError:
+        return None
+
+    # First model only: an NMR ensemble would otherwise fold every model's atoms into
+    # one chain, which is both wrong and a chain the sequence extractor cannot explain.
+    lines: list[str] = []
+    for line in raw:
+        if line[:6] == "ENDMDL":
+            break
+        lines.append(line)
+
+    wanted = [c.strip().upper() for c in (chains or "A").split(",") if c.strip()] or ["A"]
+    keep: set[tuple[str, tuple[str, str]]] = set()
+    kept: dict[str, int] = {}
+    construct_kept: dict[str, list[str]] = {}
+    trim_failed = ""
+    for idx, cid in enumerate(wanted):
+        keys, seq = _pdb_chain_ca_residues(lines, cid)
+        # The first chain is the one cfg["target_sequence"] was extracted from, so it is
+        # the only one a sequence trim can speak about. warn_expression_tags only ever
+        # removes a prefix or a suffix, so the trimmed sequence is a contiguous
+        # substring and its offset identifies exactly which residues to drop.
+        if idx == 0 and target_sequence and seq and target_sequence != seq:
+            off = seq.find(target_sequence)
+            if off >= 0:
+                keys = keys[off : off + len(target_sequence)]
+            else:
+                trim_failed = cid
+        # Backstop for the class of bug this whole path exists for: the deposited file
+        # already names its construct residues, and we are reading those lines anyway.
+        # If any residue we are about to KEEP is SEQADV-flagged as an expression tag /
+        # cloning artifact / linker, the sequence trim missed it — say so rather than
+        # ship it as designable surface.
+        flagged = _pdb_seqadv_construct(lines, cid)
+        still = [f"{k[0]}{k[1]}" for k in keys if k in flagged]
+        if still:
+            construct_kept[cid] = still
+        kept[cid] = len(keys)
+        keep.update((cid, k) for k in keys)
+
+    if not keep:
+        return None
+
+    dropped_chains: dict[str, int] = {}
+    trimmed = 0
+    waters = 0
+    ligands: dict[str, int] = {}
+    seen_res: set = set()
+    for line in lines:
+        if line[:4] not in ("ATOM", "HETA") or len(line) < 27:
+            continue
+        cid = line[21].strip().upper()
+        res = line[17:20].strip().upper()
+        key = (line[22:26].strip(), line[26].strip())
+        if (line[:4], cid, key, res) in seen_res:
+            continue
+        seen_res.add((line[:4], cid, key, res))
+        if line[:4] == "HETA":
+            if res in _WATER_RESIDUES:
+                waters += 1
+            else:
+                ligands[res] = ligands.get(res, 0) + 1
+        elif (cid, key) not in keep:
+            if cid in wanted:
+                trimmed += 1
+            else:
+                dropped_chains[cid] = dropped_chains.get(cid, 0) + 1
+
+    out: list[str] = [line.rstrip() for line in lines if line[:6] in _PDB_HEADER_KEEP]
+    out.append("REMARK 999 PREPARED BY BINDERSCOUT CONFIGURATOR - THIS IS NOT THE DEPOSITED FILE")
+    out.append("REMARK 999 KEPT CHAIN(S): " + ", ".join(f"{c} ({n} RESIDUES)" for c, n in kept.items()))
+    if dropped_chains:
+        out.append(
+            "REMARK 999 DROPPED CHAIN(S): " + ", ".join(f"{c} ({n} RESIDUES)" for c, n in dropped_chains.items())
+        )
+    out.append(f"REMARK 999 DROPPED {trimmed} TRIMMED RESIDUE(S), {waters} WATER(S), {sum(ligands.values())} HETERO")
+    out.append("REMARK 999 SEQRES/LINK/CONECT/ANISOU OMITTED - SEQUENCE DERIVES FROM THE ATOM RECORDS")
+    out.append(f"REMARK 999 UNTOUCHED SOURCE KEPT ALONGSIDE AS {src_pdb.name.upper()}")
+
+    serial = 0
+    current_chain = None
+    last_kept = None
+    for line in lines:
+        if line[:4] != "ATOM" or len(line) < 27:
+            continue
+        if line[16].strip() not in ("", "A"):
+            continue
+        cid = line[21].strip().upper()
+        if (cid, (line[22:26].strip(), line[26].strip())) not in keep:
+            continue
+        if current_chain is not None and cid != current_chain:
+            serial += 1
+            out.append(_ter_record(serial, last_kept))
+        current_chain = cid
+        serial += 1
+        out.append(f"{line[:6]}{serial:>5}{line[11:].rstrip()}")
+        last_kept = line
+    if last_kept is not None:
+        serial += 1
+        out.append(_ter_record(serial, last_kept))
+    out.append("END")
+
+    dest_pdb.parent.mkdir(parents=True, exist_ok=True)
+    dest_pdb.write_text("\n".join(out) + "\n")
+    return {
+        "kept": kept,
+        "dropped_chains": dropped_chains,
+        "trimmed": trimmed,
+        "waters": waters,
+        "ligands": ligands,
+        "trim_failed": trim_failed,
+        "construct_kept": construct_kept,
+    }
+
+
+def report_target_preparation(report: dict, dest_pdb: Path) -> None:
+    """Say out loud what preparation changed — silence here is how BUG-16 stayed hidden."""
+    kept = ", ".join(f"{c} ({n} aa)" for c, n in report["kept"].items())
+    print_ok(f"Prepared target structure {dest_pdb.name} — kept chain(s) {kept}")
+    empty = [c for c, n in report["kept"].items() if not n]
+    if empty:
+        print_warn(f"  Selected chain(s) {', '.join(empty)} have no amino-acid residues in this file.")
+    if report["dropped_chains"]:
+        dropped = ", ".join(f"{c} ({n} res)" for c, n in report["dropped_chains"].items())
+        print_warn(f"  Dropped unselected chain(s): {dropped}")
+        print("    A chain left in the file is part of the target as far as every design tool")
+        print("    is concerned — a bound inhibitor peptide or a second copy of the protein")
+        print("    occupies the epitope the binder has to reach.")
+    if report["trimmed"]:
+        print_ok(f"  Dropped {report['trimmed']} residue(s) so the coordinates match target_sequence")
+        print("    (the trimmed expression tag; hotspot numbering is unchanged).")
+    if report["waters"] or report["ligands"]:
+        ligands = ", ".join(f"{n}×{res}" for res, n in sorted(report["ligands"].items()))
+        print_ok(f"  Dropped {report['waters']} water(s) and {sum(report['ligands'].values())} heteroatom residue(s)")
+        if ligands:
+            print(f"    ({ligands})")
+    for cid, residues in (report.get("construct_kept") or {}).items():
+        shown = ", ".join(residues[:12]) + (", …" if len(residues) > 12 else "")
+        print_warn(f"  Chain {cid} KEEPS {len(residues)} residue(s) the depositor flagged as construct: {shown}")
+        print("    SEQADV marks these as an expression tag / cloning artifact / linker — not part")
+        print("    of the biological target. They stay designable surface and go into the shared")
+        print("    target-MSA cache key. Re-run and accept the tag trim in Step 3, or keep")
+        print("    hotspots off them on purpose.")
+    if report["trim_failed"]:
+        print_warn(f"  cfg['target_sequence'] is not a contiguous part of chain {report['trim_failed']} as built.")
+        print("    No residues were trimmed from it, so sequence and coordinates may disagree.")
+    print(f"  The untouched source is kept alongside it in {dest_pdb.parent}")
 
 
 def parse_hotspots(hotspot_str: str) -> list:
@@ -989,10 +1504,11 @@ def print_tree(run_dir: Path, tools_enabled: dict, cfg: dict | None = None):
     print(f"\n  {BOLD}{name}/{RESET}")
     print(f"  ├── {CYAN}target/{RESET}")
     if is_cif:
-        print("  │   ├── <target>.cif")
-        print("  │   └── <target>.pdb  (converted)")
+        print("  │   ├── <target>.cif  (untouched source)")
+        print("  │   ├── <target>_original.pdb  (converted, untouched)")
     else:
-        print("  │   └── <target>.pdb")
+        print("  │   ├── <target>_original.pdb  (untouched source)")
+    print("  │   └── <target>.pdb  (prepared: selected chains only, no ligands/waters)")
     if tools_enabled.get("mosaic"):
         print(f"  ├── {CYAN}mosaic/{RESET}")
         print("  │   └── hallucinate.py")
@@ -1212,7 +1728,7 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
         print_fail(f"Mosaic template has drifted: {MOSAIC_HALLUCINATE_SRC}")
         print_warn("  Its BINDERSCOUT PARAMETERS block does not match what the configurator injects.")
         print_warn("  Most likely the Mosaic checkout predates a template change — re-run")
-        print_warn("  `binderscout install --tool mosaic`, or point MOSAIC_HALLUCINATE_SRC at the")
+        print_warn(f"  `{_INVOKE} install --tool mosaic`, or point MOSAIC_HALLUCINATE_SRC at the")
         print_warn("  repo copy in binderscout_examples/.")
         sys.exit(1)
 
@@ -1227,7 +1743,7 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
         sys.exit(1)
     if old_ss not in content:
         print_fail(f"Mosaic template has drifted: no SS_BIAS line in {MOSAIC_HALLUCINATE_SRC}")
-        print_warn("  Re-run `binderscout install --tool mosaic`, or point")
+        print_warn(f"  Re-run `{_INVOKE} install --tool mosaic`, or point")
         print_warn("  MOSAIC_HALLUCINATE_SRC at the repo copy in binderscout_examples/.")
         sys.exit(1)
     content = content.replace(old_ss, f'SS_BIAS = {ss_bias!r}  # "none" | "helix" | "compact" | "helix+compact"', 1)
@@ -2642,6 +3158,58 @@ fi
     path.chmod(0o755)
 
 
+def rfd3_target_contig(target_pdb: Path, chain_id: str, target_len: int) -> str:
+    """The preserved-target half of an RFD3 contig, in the structure's OWN numbering.
+
+    RFD3 resolves contig components against the atom array's author numbering, so a
+    hardcoded "A1-<len>" only works when the file happens to start at residue 1. It
+    usually does not: the prepared PDL1 target runs A17-A134, and `A1-118` aborted the
+    whole run with `[component=A1] Residue A1 not found in atom array.` — a hard
+    ValidationError raised in prevalidation, before the first diffusion step, so there
+    is no partial output to salvage either.
+
+    Numbering gaps (unmodelled loops) get their own range, because a single span across
+    a gap names residues that are equally absent from the atom array.
+
+    Reads the chain's CA records with _pdb_chain_ca_residues — the same reader
+    prepare_target_pdb selects residues with, so the contig and the prepared structure
+    cannot disagree about which residues chain_id has.
+
+    Falls back to "<chain>1-<target_len>" only when the file cannot be read at all;
+    that is the historical behaviour and is right for a 1-based file.
+    """
+    try:
+        lines = target_pdb.read_text(errors="replace").splitlines()
+    except OSError as exc:
+        print_warn(f"  Could not read {target_pdb} for the RFD3 contig ({exc}) — assuming 1-based numbering.")
+        return f"{chain_id}1-{target_len}"
+
+    keys, _seq = _pdb_chain_ca_residues(lines, chain_id)
+    if not keys:
+        print_warn(f"  No CA atoms for chain {chain_id} in {target_pdb.name} — assuming 1-based numbering.")
+        return f"{chain_id}1-{target_len}"
+
+    if any(icode for _resseq, icode in keys):
+        # A numeric range cannot address 52 vs 52A, and RFD3's contig grammar has no
+        # syntax for insertion codes. Say so rather than emit a range that silently
+        # covers the wrong residue count.
+        print_warn(f"  Chain {chain_id} has insertion codes — the RFD3 contig ignores them; check its residue count.")
+
+    nums = sorted({int(resseq) for resseq, _icode in keys if resseq.lstrip("-").isdigit()})
+    if not nums:
+        return f"{chain_id}1-{target_len}"
+
+    spans: list[tuple[int, int]] = [(nums[0], nums[0])]
+    for n in nums[1:]:
+        if n == spans[-1][1] + 1:
+            spans[-1] = (spans[-1][0], n)
+        else:
+            spans.append((n, n))
+    if len(spans) > 1:
+        print_warn(f"  Chain {chain_id} numbering has {len(spans) - 1} gap(s) — contig emitted as {len(spans)} ranges.")
+    return ",".join(f"{chain_id}{lo}-{hi}" for lo, hi in spans)
+
+
 def write_run_rfd3(path: Path, cfg: dict):
     """Generate run_rfd3.sh — two-stage RFD3 (backbone diffusion) + ProteinMPNN (sequences).
 
@@ -2736,6 +3304,11 @@ def write_run_rfd3(path: Path, cfg: dict):
     # rfd3's parsing.canonicalize_() will treat each as a token-level hotspot.
     select_hotspots_str = ",".join(f"{primary_chain}{r}" for r in hotspot_list) if hotspot_list else ""
 
+    # Author numbering, read from the file RFD3 will actually load — not 1..N. One value
+    # feeds all three emission sites below (settings.json, the inputs YAML, the banner),
+    # which previously carried three copies of the same format string.
+    target_contig = rfd3_target_contig(target_pdb, primary_chain, target_len)
+
     name = cfg["name"]
 
     settings_block = _settings_json_block(
@@ -2753,7 +3326,7 @@ def write_run_rfd3(path: Path, cfg: dict):
     "length": {target_len},
     "primary_chain": "{primary_chain}\"""",
         design_params_inner=f"""
-    "contig": "{primary_chain}1-{target_len},/0,{min_len}-{max_len}",
+    "contig": "{target_contig},/0,{min_len}-{max_len}",
     "binder_min_length": {min_len},
     "binder_max_length": {max_len},
     "n_designs": {n_designs},
@@ -2832,13 +3405,13 @@ set -u
 cat > "$INPUTS_YAML" <<INPUTSEOF
 {name}:
   input: $TARGET_PDB
-  contig: "{primary_chain}1-{target_len},/0,{min_len}-{max_len}"
+  contig: "{target_contig},/0,{min_len}-{max_len}"
   infer_ori_strategy: hotspots{("  # COM falls back when select_hotspots is empty" if not select_hotspots_str else "")}{(chr(10) + '  select_hotspots: "' + select_hotspots_str + '"') if select_hotspots_str else ""}
 INPUTSEOF
 
 echo "=== RFD3 backbone diffusion for {name} ==="
 echo "  Target:        $TARGET_PDB"
-echo "  Contig:        {primary_chain}1-{target_len},/0,{min_len}-{max_len}"
+echo "  Contig:        {target_contig},/0,{min_len}-{max_len}"
 echo "  Hotspots:      {select_hotspots_str or "(none)"}"
 echo "  Designs:       {n_designs}  (batch_size={batch_size} x n_batches={n_batches} = {batch_size * n_batches})"
 echo "  Diffusion:     T={diffusion_steps}, step_scale={step_scale}"
@@ -3935,7 +4508,7 @@ def _missing_tool_assets(cfg: dict, tools_enabled: dict) -> list[tuple[str, Path
     if tools_enabled.get("bindcraft"):
         for src_dir, stem in ((FILTERS_DIR, cfg.get("filter_preset")), (ADVANCED_DIR, cfg.get("advanced_preset"))):
             if stem and not (src_dir / f"{stem}.json").is_file():
-                missing.append(("BindCraft", src_dir / f"{stem}.json", "binderscout install --tool bindcraft"))
+                missing.append(("BindCraft", src_dir / f"{stem}.json", f"{_INVOKE} install --tool bindcraft"))
 
     # Ask the venv, NOT MOSAIC_HALLUCINATE_SRC. That constant now prefers the template
     # in binderscout_examples/, which is tracked in this repo and therefore ALWAYS exists —
@@ -3944,14 +4517,14 @@ def _missing_tool_assets(cfg: dict, tools_enabled: dict) -> list[tuple[str, Path
     # from (the repo's, always present) versus whether the tool can actually run (the uv
     # venv, which only the installer creates, and which run_mosaic.sh requires).
     if tools_enabled.get("mosaic") and not MOSAIC_VENV.is_dir():
-        missing.append(("Mosaic", MOSAIC_VENV, "binderscout install --tool mosaic"))
+        missing.append(("Mosaic", MOSAIC_VENV, f"{_INVOKE} install --tool mosaic"))
 
     if tools_enabled.get("boltzgen") and cfg.get("boltzgen_mode") == "nanobody":
         for name in NANOBODY_SCAFFOLD_NAMES:
             for ext in (".yaml", ".cif"):
                 src = NANOBODY_SCAFFOLDS_SRC / f"{name}{ext}"
                 if not src.is_file():
-                    missing.append(("BoltzGen (nanobody mode)", src, "binderscout install --tool boltzgen"))
+                    missing.append(("BoltzGen (nanobody mode)", src, f"{_INVOKE} install --tool boltzgen"))
 
     return missing
 
@@ -4099,23 +4672,41 @@ def generate(cfg: dict, tools_enabled: dict):
 
     src_struct = Path(cfg["target_pdb_src"]).expanduser().resolve()
     src_ext = src_struct.suffix.lower()
+    # <name>.pdb is the PREPARED target every tool reads; the verbatim source is kept
+    # beside it as <name>_original.pdb (and, for CIF input, the untouched .cif) so
+    # preparation never destroys the only copy of the deposited coordinates.
+    dest_pdb = run_dir / "target" / f"{cfg['name']}.pdb"
+    raw_pdb: Path | None = run_dir / "target" / f"{cfg['name']}_original.pdb"
     if src_ext in (".cif", ".mmcif"):
         # Copy the original CIF
         dest_cif = run_dir / "target" / f"{cfg['name']}{src_ext}"
         shutil.copy2(src_struct, dest_cif)
         # Convert to PDB for tools that need it
-        dest_pdb = run_dir / "target" / f"{cfg['name']}.pdb"
-        if cif_to_pdb_atoms(str(src_struct), str(dest_pdb)):
-            print_ok(f"Converted CIF → PDB: {dest_pdb.name}")
+        if cif_to_pdb_atoms(str(src_struct), str(raw_pdb)):
+            print_ok(f"Converted CIF → PDB: {raw_pdb.name}")
         else:
             print_warn("CIF→PDB conversion failed — some tools may not work with CIF input.")
+            raw_pdb = None
             dest_pdb = dest_cif  # fallback: point at CIF
-        cfg["target_pdb"] = dest_pdb
+        # NOTE: cfg["target_cif"] is the UNPREPARED source, and write_rfd4_input_yaml
+        # reads it (RFD4 resolves its contig against the mmCIF label_seq_id, which a
+        # .pdb does not carry). So RFD4 still sees any bound ligand or tag in the
+        # coordinates; preparing an mmCIF needs an mmCIF writer this stdlib-only file
+        # does not have. Out of scope here, and worth fixing separately.
         cfg["target_cif"] = dest_cif
     else:
-        dest_pdb = run_dir / "target" / f"{cfg['name']}.pdb"
-        shutil.copy2(src_struct, dest_pdb)
-        cfg["target_pdb"] = dest_pdb
+        shutil.copy2(src_struct, raw_pdb)
+
+    if raw_pdb is not None:
+        report = prepare_target_pdb(raw_pdb, dest_pdb, cfg.get("chains", "A"), cfg.get("target_sequence", "") or "")
+        if report is None:
+            print_warn(f"Could not prepare {raw_pdb.name} — no amino-acid residues found in the selected chain(s).")
+            print("  Copying the structure through unchanged: bound ligands, waters and any")
+            print("  purification tag in the coordinates will be visible to every design tool.")
+            shutil.copy2(raw_pdb, dest_pdb)
+        else:
+            report_target_preparation(report, dest_pdb)
+    cfg["target_pdb"] = dest_pdb
 
     if tools_enabled.get("bindcraft"):
         write_bindcraft_target(run_dir / "bindcraft" / "target_settings.json", cfg)
@@ -4262,7 +4853,7 @@ def _handle_sequence_input(run_dir: Path) -> str:
     else:
         method = "alphafold"
         print_warn("Mosaic not installed — local Boltz-2 prediction unavailable.")
-        print(f"  Install with: {CYAN}binderscout install --tool mosaic{RESET}")
+        print(f"  Install with: {CYAN}{_INVOKE} install --tool mosaic{RESET}")
         print()
 
     if "boltz" in method.lower():
@@ -4368,6 +4959,10 @@ def wizard():
     primary_chain = chains.split(",")[0].strip()
     target_sequence = extract_sequence_from_structure(target_pdb_src, primary_chain)
     if target_sequence:
+        # The file and chain go with the sequence: the depositor's own SEQADV /
+        # _struct_ref_seq_dif records name the construct residues exactly, and a pattern
+        # over the sequence alone cannot (5O45's AAALE linker defeats any character class).
+        target_sequence = warn_expression_tags(target_sequence, target_pdb_src, primary_chain)
         preview = target_sequence[:50] + ("..." if len(target_sequence) > 50 else "")
         print_ok(f"Auto-extracted sequence for chain {primary_chain}: {preview} ({len(target_sequence)} aa)")
     else:
@@ -4400,7 +4995,7 @@ def wizard():
     def _tag(key):
         if installed.get(key):
             return f"{GREEN}installed{RESET}"
-        return f"{RED}NOT installed — run: binderscout install{RESET}"
+        return f"{RED}NOT installed — run: {_INVOKE} install{RESET}"
 
     print(f"  {BOLD}Mosaic{RESET}    [{_tag('mosaic')}]")
     use_mosaic = ask_yn("  Enable Mosaic?", default=False)

@@ -842,3 +842,72 @@ class TestTmProtIsControllable:
         script = tmp_path / "run_evaluate.sh"
         conf.write_run_evaluate(script, base_cfg, _ALL_TOOLS)
         assert "--skip-tmprot" in script.read_text()
+
+
+def _ca_pdb(chain: str, residues: list[tuple[int, str]]) -> str:
+    """Minimal CA-only PDB. residues is a list of (resSeq, iCode)."""
+    out = []
+    for i, (resseq, icode) in enumerate(residues, start=1):
+        out.append(
+            f"ATOM  {i:5d}  CA  ALA {chain}{resseq:4d}{icode:1s}   0.000   0.000   0.000  1.00  0.00           C"
+        )
+    return "\n".join(out) + "\n"
+
+
+class TestRfd3TargetContig:
+    """RFD3 resolves contig components against the file's OWN author numbering.
+
+    A hardcoded A1-<len> aborted a whole PDL1 run before the first diffusion step:
+    `[component=A1] Residue A1 not found in atom array` (the prepared target is A17-134).
+    Author numbering rarely starts at 1 — construct cropping, tag removal and keeping
+    UniProt numbering all shift it — so the hardcoded form only *passed* on the unusual
+    1-based files.
+    """
+
+    def test_uses_the_files_author_numbering_not_one_based(self, tmp_path):
+        pdb = tmp_path / "t.pdb"
+        pdb.write_text(_ca_pdb("A", [(n, " ") for n in range(17, 135)]))
+        assert conf.rfd3_target_contig(pdb, "A", 118) == "A17-134"
+
+    def test_a_one_based_file_is_unchanged(self, tmp_path):
+        pdb = tmp_path / "t.pdb"
+        pdb.write_text(_ca_pdb("A", [(n, " ") for n in range(1, 11)]))
+        assert conf.rfd3_target_contig(pdb, "A", 10) == "A1-10"
+
+    def test_a_numbering_gap_becomes_two_ranges(self, tmp_path):
+        """One span across an unmodelled loop names residues that are equally absent."""
+        pdb = tmp_path / "t.pdb"
+        pdb.write_text(_ca_pdb("A", [(n, " ") for n in [5, 6, 7, 20, 21]]))
+        assert conf.rfd3_target_contig(pdb, "A", 5) == "A5-7,A20-21"
+
+    def test_only_the_requested_chain_counts(self, tmp_path):
+        pdb = tmp_path / "t.pdb"
+        pdb.write_text(_ca_pdb("A", [(3, " "), (4, " ")]) + _ca_pdb("B", [(90, " "), (91, " ")]))
+        assert conf.rfd3_target_contig(pdb, "B", 2) == "B90-91"
+
+    def test_an_unreadable_target_falls_back_to_one_based(self, tmp_path):
+        assert conf.rfd3_target_contig(tmp_path / "absent.pdb", "A", 42) == "A1-42"
+
+    def test_a_chain_with_no_ca_atoms_falls_back_to_one_based(self, tmp_path):
+        pdb = tmp_path / "t.pdb"
+        pdb.write_text(_ca_pdb("A", [(1, " ")]))
+        assert conf.rfd3_target_contig(pdb, "Z", 9) == "Z1-9"
+
+    def test_insertion_codes_are_announced_not_swallowed(self, tmp_path, capsys):
+        """The contig grammar cannot express 52A, so the emitted range covers fewer
+        residues than the chain has. Saying so is the only honest option available."""
+        pdb = tmp_path / "t.pdb"
+        pdb.write_text(_ca_pdb("A", [(52, " "), (52, "A"), (53, " ")]))
+        assert conf.rfd3_target_contig(pdb, "A", 3) == "A52-53"
+        assert "insertion codes" in capsys.readouterr().out
+
+    def test_the_generated_script_and_settings_agree(self, base_cfg, tmp_path):
+        """The YAML rfd3 reads, the banner and settings.json must not drift apart."""
+        pdb = tmp_path / "target_renum.pdb"
+        pdb.write_text(_ca_pdb("A", [(n, " ") for n in range(17, 27)]))
+        base_cfg["target_pdb"] = pdb
+        script = tmp_path / "run_rfd3.sh"
+        conf.write_run_rfd3(script, base_cfg)
+        content = script.read_text()
+        assert content.count("A17-26,/0,") == 3
+        assert "A1-10" not in content
