@@ -9,6 +9,33 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 > **Renamed from *BindMaster*.** This project was developed under the internal working name *BindMaster* and is now being released as **BinderScout**. The codebase still uses `bindmaster` in many places — the CLI command (`bindmaster install`, `bindmaster configure`, `bindmaster evaluate`), several conda env names (`bindmaster_pxdesign`, `bindmaster_protein_hunter`, `bindmaster_rfd3`), file and directory names (`bindmaster_examples/`, `bindmaster.py`), and environment variables (`BINDMASTER_*`). These are equivalent to the new name and will be migrated incrementally; functional behavior is unchanged. The GitHub remote is now `damborik22/BinderScout` (the old `damborik22/BindMaster` URL redirects).
 
+> ### Recommended: run BinderScout through Claude Code
+>
+> This repository ships five [Claude Code](https://claude.com/claude-code) skills that
+> drive the whole pipeline — target research, campaign planning, per-machine execution,
+> cross-engine evaluation and the wet-lab handoff. **Open the repo in Claude Code and
+> describe what you want**; the skills load automatically and assemble the CLI calls,
+> the run directory and the right per-tool parameters for you.
+>
+> ```
+> cd ~/BinderScout && claude
+> > analyse PD-L1, then run a campaign with 10 designs per tool and rank the results
+> ```
+>
+> Every step is a documented CLI command and the pipeline has **no runtime LLM
+> dependency**, so nothing here is locked behind it — but the tools have a lot of
+> sharp edges (per-tool hotspot requirements, gated AF3 weights, cross-engine gates,
+> engine-specific metric biases), and the skills carry the knowledge of which ones
+> matter when. See [Running with Claude Code](#running-with-claude-code).
+
+> ### Use `master`
+>
+> **`master` is the only branch expected to be fully functional.** It is also where
+> active development happens, and it supports both x86_64 and aarch64. Every other
+> branch — currently `v1.1.x` and `v2.0.x` — is a development or maintenance line, may
+> be mid-refactor, and is not guaranteed to install or run end to end. Unless you were
+> pointed at one deliberately, clone `master` (the default).
+
 ---
 
 ## Components
@@ -499,21 +526,31 @@ project directory. To remove everything: `rm -rf BindMaster/`.
 
 ## Platform / branch
 
-| Branch | Platform | Installer |
+**Clone `master`.** It carries both installers and is the only branch expected to be
+fully functional:
+
+| Platform | Installer | Status |
 |---|---|---|
-| `master` | x86_64 Linux + NVIDIA GPU | `install/install.sh` |
-| `aarch64` | NVIDIA DGX Spark / Grace-Hopper | `install/install_aarch.sh` |
+| x86_64 Linux + NVIDIA GPU | `install/install.sh` | the tested configuration — all seven tools and three refold engines are exercised here |
+| NVIDIA DGX Spark / Grace-Hopper (aarch64) | `install/install_aarch.sh` | supported, with the caveats in [aarch64 notes](#aarch64-notes). Its version pins are **not** captured in `install/locks/` — those are x86_64 captures and `_constraints()` refuses to apply them on another architecture |
 
 ```bash
-# x86_64
-git clone https://github.com/damborik22/BinderScout.git
-
-# aarch64 / DGX Spark
-git clone -b aarch64 https://github.com/damborik22/BinderScout.git
+git clone https://github.com/damborik22/BinderScout.git ~/BinderScout
+cd ~/BinderScout
+./bindmaster.py install        # the `bindmaster` shortcut only exists after this
+# or: bash install/install.sh          (x86_64)
+#     bash install/install_aarch.sh    (aarch64 / DGX Spark)
 ```
 
-Both branches: `./bindmaster.py install` (the `bindmaster` shortcut only exists after that
-first run) or `bash install/install.sh`.
+There is **no separate `aarch64` branch** — aarch64 support lives on `master` next to
+the x86_64 installer. Earlier revisions of this section advertised
+`git clone -b aarch64 …`, which fails: no such branch exists on the remote.
+
+### Other branches
+
+`v1.1.x` and `v2.0.x` are maintenance/development lines: neither is guaranteed to
+install or run end to end, and work lands on `master` first. Use `master` unless you
+were pointed at one of them deliberately.
 
 ### aarch64 notes
 
