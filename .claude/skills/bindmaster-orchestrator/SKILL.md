@@ -1,13 +1,13 @@
 ---
 name: bindmaster-orchestrator
-description: Use this skill when planning, dispatching, and evaluating a BindMaster binder-design campaign. Triggers include any mention of orchestrating a binder campaign, deciding which design tool to run on which target, writing kickoff docs for compute nodes, deploying or checking jobs directly on the Clara (CIIRC) cluster or the LAN fleet (BM1/BM2/BM4) over ssh, managing PROGRESS.md state across machines, or running the cross-engine refold + iPSAE merge after results return. Use whenever the user says "let's start a campaign on <target>", "what should we run next", "which tool fits this target", "deploy/run/check a job on Clara or BM1/BM2/BM4", "merge the results", "evaluate the pool", or refers to BindMaster, ApoE4 binders, CBG binders, 2VDY, or similar binder-design contexts. When this machine has direct ssh access to Clara and/or the LAN fleet, the orchestrator can deploy and monitor those jobs itself (see references/clara-deploy.md and references/lab-deploy.md); otherwise it hands off to the sibling skill `bindmaster-worker` which handles the per-machine execution layer.
+description: Use this skill when planning, dispatching, and evaluating a BindMaster binder-design campaign. Triggers include any mention of orchestrating a binder campaign, deciding which design tool to run on which target, writing kickoff docs for compute nodes, deploying or checking jobs directly on an HPC cluster or a LAN fleet of GPU nodes over ssh, managing PROGRESS.md state across machines, or running the cross-engine refold + iPSAE merge after results return. Use whenever the user says "let's start a campaign on <target>", "what should we run next", "which tool fits this target", "deploy/run/check a job on the cluster or a fleet node", "merge the results", "evaluate the pool", or refers to BindMaster, ApoE4 binders, CBG binders, 2VDY, or similar binder-design contexts. When this machine has direct ssh access to the HPC cluster and/or the LAN fleet, the orchestrator can deploy and monitor those jobs itself; otherwise it hands off to the sibling skill `bindmaster-worker` which handles the per-machine execution layer.
 ---
 
 # BindMaster Campaign Orchestration — SKILL base
 
-**Audience:** an AI agent acting as the *orchestrator* of a BindMaster binder-design campaign — typically running on Spark. The orchestrator coordinates work across multiple compute nodes (BM1, BM2, BM4, Clara, others as available); each worker is either a Claude Code instance reading the assignment locally, a remote session driven by the orchestrator over VPN/SSH, or a human. This skill is meta — for per-tool engine principles see `references/tools/`, for empirical campaign lessons see `references/learnings.md`, for the local cross-engine refold + iPSAE merge recipe see `references/evaluation.md`, and for the worker-side operational playbook see the sibling skill `bindmaster-worker`.
+**Audience:** an AI agent acting as the *orchestrator* of a BindMaster binder-design campaign — typically running on Spark. The orchestrator coordinates work across multiple compute nodes (fleet nodes, an HPC cluster, others as available); each worker is either a Claude Code instance reading the assignment locally, a remote session driven by the orchestrator over VPN/SSH, or a human. This skill is meta — for per-tool engine principles see `references/tools/`, for empirical campaign lessons see `references/learnings.md`, for the local cross-engine refold + iPSAE merge recipe see `references/evaluation.md`, and for the worker-side operational playbook see the sibling skill `bindmaster-worker`.
 
-When this machine has direct LAN SSH to BM1/BM2/BM4 (no VPN, same subnet — as BM5 does), the orchestrator can drive those machines itself via `tools/fleet.sh` (`probe|status|launch|poll|fetch`), the same direct-deploy collapse of orchestrator/worker roles described below for Clara. See `references/lab-deploy.md`.
+When this machine has direct LAN SSH to the fleet nodes (no VPN, same subnet), the orchestrator can drive those machines itself over SSH — the same direct-deploy collapse of orchestrator/worker roles described below for the HPC cluster.
 
 **When you read this:** at the start of any campaign session, after `MEMORY.md`, before touching the run dirs. It encodes patterns that took a full campaign (2VDY / human CBG, May 2026) to learn.
 
@@ -22,8 +22,8 @@ When this machine has direct LAN SSH to BM1/BM2/BM4 (no VPN, same subnet — as 
 
 A campaign is a **swarm of independent design jobs** running on compute nodes that don't share filesystems with each other. Dispatch happens in one of two modes:
 
-- **Direct-deploy over SSH** — when the orchestrator machine has plain SSH reachability to a compute node (LAN, no VPN gate; or a VPN already up), it drives that node itself: deploy scripts, launch, monitor, fetch results, all inside its own session, no separate worker. This is the primary mode now for BM1/BM2/BM4 (`tools/fleet.sh probe|status|launch|poll|fetch` over the lab LAN — `references/lab-deploy.md`) and for Clara once `ssh clara` is wired up (`references/clara-deploy.md`).
-- **Handoff-doc model** — the fallback, still live for any machine the orchestrator can't SSH into directly: a human-operated box, a machine outside the lab LAN, or Clara before its key is set up. Coordination runs through two shared artifacts on muni-disk:
+- **Direct-deploy over SSH** — when the orchestrator machine has plain SSH reachability to a compute node (LAN, no VPN gate; or a VPN already up), it drives that node itself: deploy scripts, launch, monitor, fetch results, all inside its own session, no separate worker. Use this for fleet nodes on the LAN and for the HPC cluster once `ssh <cluster>` is wired up.
+- **Handoff-doc model** — the fallback, still live for any machine the orchestrator can't SSH into directly: a human-operated box, a machine outside the lab LAN, or a cluster before its key is set up. Coordination runs through two shared artifacts on the shared storage:
   - **`RESULTS/PROGRESS.md`** — the single source of truth for "what's done / running / queued / failed."
   - **`CLUSTER/<tool>_<machine>_SETTINGS.md`** — kickoffs you write and worker Claudes (or remote sessions) execute.
 
@@ -33,16 +33,16 @@ A campaign is a **swarm of independent design jobs** running on compute nodes th
 
 Even in direct-deploy mode, still write the kickoff doc in `CLUSTER/` for any campaign-significant run — it's the durable record of *why* and *how*. PROGRESS.md stays the state dashboard either way; §3.5 covers who owns which section when the orchestrator is playing both roles.
 
-**muni-disk's role has changed.** With BM1/BM2/BM4 sharing a subnet with BM5 (no VPN, no NAT), muni-disk is no longer the coordination substrate for LAN work — it's the **archive of record**. Results are pulled straight to BM5 over LAN (`fleet.sh fetch`), refolded locally, and only then pushed to muni-disk as the durable copy. Clara-bound work, and any machine outside the LAN, still coordinates through muni-disk more directly, per `clara-deploy.md`.
+**The shared storage's role.** With fleet nodes sharing a subnet with the orchestrator (no VPN, no NAT), the shared storage is not the coordination substrate for LAN work — it's the **archive of record**. Results are pulled straight to the orchestrator machine over LAN, refolded locally, and only then pushed to the shared storage as the durable copy. HPC-cluster work, and any machine outside the LAN, coordinates through the shared storage more directly.
 
-**The orchestrator runs on Spark (or any workstation with the refold envs).** The canonical cross-engine refold trio — Boltz-2, AlphaFold 3, and ESMFold2 — all have their conda envs on Spark; refolding is done locally as code, not dispatched as jobs. (Protenix refolding was retired — Part J reverted; PXDesign still uses Protenix internally as a design tool, that's unrelated.) Design tools that need bigger GPUs or specific architectures run on remote workers (BM1, BM2, BM4, Clara, …) and ship results back — over LAN to BM5 for the fleet machines, or to muni-disk for Clara / non-LAN machines.
+**The orchestrator runs on Spark (or any workstation with the refold envs).** The canonical cross-engine refold trio — Boltz-2, AlphaFold 3, and ESMFold2 — all have their conda envs on Spark; refolding is done locally as code, not dispatched as jobs. (Protenix refolding was retired — Part J reverted; PXDesign still uses Protenix internally as a design tool, that's unrelated.) Design tools that need bigger GPUs or specific architectures run on remote workers (fleet nodes, the HPC cluster, …) and ship results back — over LAN to the orchestrator machine for fleet nodes, or to the shared storage for cluster / non-LAN machines.
 
-**Dispatch to Clara can be direct, but the access model is deliberately manual — not an always-on tunnel.** Standing policy (decided 2026-07-27): **the VPN tunnel is the only gate.** A human starts the CIIRC VPN by hand every time; it is gateway-timed and drops on its own after roughly a working day, and nothing holds it open automatically — no systemd unit, no stored password, no sudo for the agent. The Clara key is deliberately **passphrase-less**, so there is no `ssh-add` step and no key-side time window: Clara is reachable exactly while the tunnel is up and unreachable the moment it drops. Because the key file is therefore readable by anything running as `<BM5_USER>`, the Clara-side `authorized_keys` options carry the real protection — applied 2026-07-27 as `restrict,pty,expiry-time="20270727"` (verified: `-R` refused, `-L` carries no traffic, interactive PTY still works). **No `from=` restriction**: BM5 reaches Clara through the VPN, so the source address Clara sees is a pool address (<CIIRC_VPN_POOL>) that is reassigned per session and shared with other CIIRC users — pinning it would be both fragile and weak. When the tunnel is up and `ssh clara "true"` succeeds, "dispatch a job to Clara" does **not** have to mean writing a handoff doc and waiting for a separate worker — the orchestrator can drive Clara itself over SSH, running the full worker loop (pre-flight → deploy scripts → submit → monitor → package → transfer) remotely inside its own session. The orchestrator and worker roles collapse into one operator for Clara-bound work. Whether *this* machine has that access, and the exact machine-specific setup (VPN, DNS pin, key, alias), lives in the repo-root `CLAUDE.local.md`; the operational playbook is `references/clara-deploy.md`. If `ssh clara` isn't set up here, fall back to the handoff-doc model above.
+**Dispatch to the HPC cluster can be direct, but the access model should be deliberately manual — not an always-on tunnel.** Recommended policy: **the VPN tunnel (if any) is the only gate.** A human starts the VPN by hand each time; nothing holds it open automatically — no systemd unit, no stored password, no sudo for the agent. Use a dedicated SSH key for the cluster and restrict it on the cluster side via `authorized_keys` options (e.g. `restrict,pty,expiry-time="<date>"`), since a passphrase-less key file is readable by anything running as the orchestrator's user. When the tunnel is up and `ssh <cluster> "true"` succeeds, "dispatch a job to the cluster" does **not** have to mean writing a handoff doc and waiting for a separate worker — the orchestrator can drive the cluster itself over SSH, running the full worker loop (pre-flight → deploy scripts → submit → monitor → package → transfer) remotely inside its own session. The orchestrator and worker roles collapse into one operator for cluster-bound work. Whether *this* machine has that access, and the exact machine-specific setup (VPN, DNS pin, key, alias), belongs in a machine-local, gitignored note (e.g. `CLAUDE.local.md`). If `ssh <cluster>` isn't set up here, fall back to the handoff-doc model above.
 
 **The orchestrator's job is:**
 1. Read PROGRESS.md and CLUSTER/ to know the current state.
 2. Decide what to run next (which tools on which machines, what settings).
-3. Draft per-machine assignments in CLUSTER/ — and, for Clara or the LAN fleet when this machine has direct SSH, deploy and run them itself (`references/clara-deploy.md`, `references/lab-deploy.md`).
+3. Draft per-machine assignments in CLUSTER/ — and, for the HPC cluster or LAN fleet when this machine has direct SSH, deploy and run them itself.
 4. Track work as it lands, merge worker updates into PROGRESS.md.
 5. After results return, run cross-engine refold + iPSAE merge locally on Spark (see `references/evaluation.md`).
 6. Recognize when to kill, scale, pivot, or stop.
@@ -59,7 +59,7 @@ Even in direct-deploy mode, still write the kickoff doc in `CLUSTER/` for any ca
 A mature 2VDY-style campaign has this layout. Reuse it for new targets.
 
 ```
-muni-disk/.../<TARGET>/
+<shared-storage>/.../<TARGET>/
 ├── PDB/                                       ← input structures (.pdb, .cif)
 ├── CLUSTER/                                   ← assignments to workers
 │   ├── <TARGET>_<tool>_<machine>_SETTINGS.md  ← kickoff per tool-machine pair
@@ -77,7 +77,6 @@ On Spark (the orchestrator's home):
 ```
 ~/dev/BindMaster/                              ← cloned repo
 ~/dev/BindMaster/bindmaster (CLI on $PATH)     ← unified entrypoint: `bindmaster install|configure|evaluate`
-~/dev/BindMaster/tools/fleet.sh                ← drives BM1/BM2/BM4 directly over LAN SSH (probe|status|launch|poll|fetch)
 ~/.claude/skills/bindmaster-orchestrator/      ← this skill
 ~/.claude/skills/bindmaster-worker/            ← sibling skill (used when Spark drives a remote worker)
 Mosaic/.venv/                                  ← Boltz-2 refold env (also hosts `binder-compare`)
@@ -94,7 +93,7 @@ The three CLI verbs that matter campaign-side:
 - `bindmaster configure` — interactive wizard, steps 1–7 (step 6 expands into per-tool sub-steps 6a–6g), ~80 prompts. `--config <file>` replays a saved `runs/<name>/config.json` with no prompts. Workers use it to translate an assignment into a run dir; orchestrator rarely needs it directly. `bindmaster configure --status` lists runs and completion state, `--archive <run>` tars a run dir.
 - `bindmaster evaluate <subcommand> …` — a **passthrough** to the `binder-compare` CLI. It takes a SUBCOMMAND, not a run directory: `bindmaster evaluate <dir>` is rejected by argparse, and there are no `--refold` / `--target` / `--metric` / `--top` flags. The canonical entry point for Phase 3' below is the generated script `bash runs/<name>/run_evaluate.sh`, which drives `Evaluator/evaluate.sh` (that is where `--min-engines`, `--skip-<engine>` and the SoluProt pre-filter live).
 
-On each worker machine (BM1, BM2, BM4, Clara, others):
+On each worker machine (<node1>, <node2>, <node3>, the HPC cluster, others):
 
 ```
 ~/dev/BindMaster/                              ← cloned repo
@@ -129,11 +128,11 @@ The "Last updated" line is meta: every time you edit PROGRESS, replace the times
 
 | Tool | Machine | Status | Designs | Notes |
 |---|---|---|---|---|
-| **BindCraft (tuned)** | Clara L40S | ✅ done (SLURM 100040, 2026-05-22) | **10 accepts** | wall, settings, packaging file, top metrics, key gotchas, link to kickoff |
+| **BindCraft (tuned)** | cluster L40S | ✅ done (SLURM <jobid>, 2026-05-22) | **10 accepts** | wall, settings, packaging file, top metrics, key gotchas, link to kickoff |
 
 **Required cells per row:**
 - **Tool**: name + variant in bold (e.g. "BindCraft (tuned)", "Proteina-Complexa (MCTS)")
-- **Machine**: where it ran (BM2, Clara H200, Spark, …)
+- **Machine**: where it ran (<node2>, cluster H200, Spark, …)
 - **Status**: one icon — `✅` done, `🔄` running, `⏳` queued, `❌` failed/killed, `⏸` paused. Add SLURM ID, date.
 - **Designs**: yield count + quality at key thresholds, packaging filename
 - **Notes**: compute hours, key settings, the *why* of any non-obvious choice, link to the kickoff doc in CLUSTER/
@@ -151,7 +150,7 @@ The "Last updated" line is meta: every time you edit PROGRESS, replace the times
 
 ### 3.4 PROGRESS.md anti-patterns
 
-- **Stale sections.** If you change BM2 from "hotspots on" to "hotspots off", grep the whole doc and update every mention. The header "Key design settings" table at the bottom went stale during the 2VDY campaign — confused everyone re-reading the doc.
+- **Stale sections.** If you change <node2> from "hotspots on" to "hotspots off", grep the whole doc and update every mention. The header "Key design settings" table at the bottom went stale during the 2VDY campaign — confused everyone re-reading the doc.
 - **Hand-wavy yields.** "Many designs" is useless; "22 accepted, 236 rejected, 22% of MPNN candidates accept" is actionable.
 - **Missing the "why."** Every settings choice (length cap, hotspots, threshold) should have a one-clause rationale in Notes.
 - **Conflating scoring engines.** "iPTM 0.85" means different things in PH (Boltz-2+MSA) and PC (AF2-multimer). Always say which engine. (See `references/tools/README.md` cross-method bias matrix.)
@@ -173,9 +172,9 @@ File structure:
 ---
 ## Worker updates (append-only, orchestrator merges on next read)
 
-### 2026-05-24 14:23 — Clara L40S — BindCraft tuned
-🔄 → ✅ | SLURM 100040 done. 10 accepts, 2.7 h wall.
-Packaged: 2VDY_BindCraft_Clara.tar.gz at RESULTS/.
+### 2026-05-24 14:23 — cluster L40S — BindCraft tuned
+🔄 → ✅ | SLURM <jobid> done. 10 accepts, 2.7 h wall.
+Packaged: <TARGET>_BindCraft_<node>.tar.gz at RESULTS/.
 Compute: 27.5 GPU-h on L40S.
 New error: <if any>.
 New lesson: <if any>.
@@ -219,9 +218,9 @@ Worker side (the per-machine Claude, the orchestrator driving a remote session, 
 2. Set up: source env, register target, generate sbatch/run script.
 3. Submit. Append a started-entry to PROGRESS.md "Worker updates" with SLURM ID and 🔄.
 
-**Direct-deploy shortcut (Clara).** When this machine has `ssh clara` access, the orchestrator performs the worker-side steps above itself over SSH — deploy the scripts (`scp` or heredoc), submit, monitor, package, transfer — without a separate worker or a Worker-updates handshake (you own both role's PROGRESS.md sections). Full loop, command patterns, and direct-deploy-specific failure modes: `references/clara-deploy.md`. Still write the kickoff doc in `CLUSTER/` for any campaign-significant run (durable record of why/how), then execute it yourself.
+**Direct-deploy shortcut (HPC cluster).** When this machine has `ssh <cluster>` access, the orchestrator performs the worker-side steps above itself over SSH — deploy the scripts (`scp` or heredoc), submit, monitor, package, transfer — without a separate worker or a Worker-updates handshake (you own both roles' PROGRESS.md sections). Still write the kickoff doc in `CLUSTER/` for any campaign-significant run (durable record of why/how), then execute it yourself.
 
-**Direct-deploy shortcut (LAN fleet).** When this machine has direct LAN SSH to BM1/BM2/BM4 (no VPN, same subnet — as BM5 does), the same collapse applies: `tools/fleet.sh launch <machine> <job> <remote-dir> <script>` ships the script, runs two admission checks (tmux session collision, GPU occupancy), and starts it under tmux; `fleet.sh poll` and `fleet.sh fetch` replace the Worker-updates handshake and the muni-disk RESULTS/ drop — `fetch` pulls and verifies (`tar -tzf`) before you trust it. Full loop, machine facts (BM1's 31 GB RAM ceiling, BM5's aarch64 Protein-Hunter block), and failure modes: `references/lab-deploy.md`.
+**Direct-deploy shortcut (LAN fleet).** When this machine has direct LAN SSH to the fleet nodes (no VPN, same subnet), the same collapse applies: ship the script, check admission first (tmux session name collision, GPU occupancy), start it under tmux, poll it, and pull the results archive back over LAN — this replaces the Worker-updates handshake and the shared-storage RESULTS/ drop. Verify the archive (`tar -tzf`) before you trust it. Mind per-node limits (e.g. a node's RAM ceiling, or an aarch64 node that cannot run Protein-Hunter).
 
 ### Phase 2 — Monitor
 
@@ -231,7 +230,7 @@ Orchestrator's monitoring is **state-level**, not progress-level:
 
 - Read the PROGRESS.md "Worker updates" section on each session. Merge new entries (§3.5).
 - If a run goes silent for >1 day past its expected completion, ask the user to check.
-- If the orchestrator is also driving a remote session on a worker (direct-deploy mode — Clara over VPN, or the LAN fleet over plain SSH), it can check at coarse intervals (every few hours), and only report milestones to the user (first accept, halfway, completion, crash).
+- If the orchestrator is also driving a remote session on a worker (direct-deploy mode — an HPC cluster over VPN, or the LAN fleet over plain SSH), it can check at coarse intervals (every few hours), and only report milestones to the user (first accept, halfway, completion, crash).
 
 Per-stage chatter (BindCraft "Stage 2 Softmax", PC checkpoint counters) belongs in the worker's monitor stream, not in your conversation with the user. Configure Monitor filters narrowly — see the `feedback_monitor_verbosity.md` memory.
 
@@ -242,14 +241,14 @@ When a run finishes (whether success, failure, or planned kill):
 1. **Verify outputs.** Use the source-of-truth files per tool. Don't trust `ls Accepted/` for BindCraft — it always has 4 empty subdirs even with zero accepts; count rows in `final_design_stats.csv` instead. The worker skill's per-tool playbooks list source-of-truth files for each.
 2. **Compute the deliverable metrics:** accepts vs target, top-tail at standard thresholds, length distribution, wall-clock vs expected. Compare to other runs of the same tool.
 3. **Package** as `<TARGET>_<tool>_<machine>.tar.gz` (or `.zip`). Include the full run dir for evidence; for very large outputs offer a `_final` subset alongside the `_full`.
-4. **Move to RESULTS/.** Worker handles SCP/rsync, or `fleet.sh fetch` for LAN fleet jobs. Clara transfers ride the CIIRC VPN; on BM5 that tunnel is split-tunnel and muni-disk stays reachable throughout, so no VPN switch is needed there — on machines where switching genuinely is required, the worker announces it (§8).
+4. **Move to RESULTS/.** Worker handles SCP/rsync (or pulls the archive over LAN for fleet jobs). If the cluster transfer rides a VPN, check whether it is split-tunnel (shared storage and the Claude API both stay reachable) — on machines where switching genuinely is required, the worker announces it (§8).
 5. **Worker appends to PROGRESS.md** — `🔄 → ✅` or `❌`, packaging filename, final numbers, errors, lessons (§3.5).
 6. **Orchestrator merges on next read** — integrates worker entry into canonical sections.
-7. **Don't delete the worker-side copy** until the user confirms the muni-disk archive is readable.
+7. **Don't delete the worker-side copy** until the user confirms the shared archive is readable.
 
 **Phase 3.5 — Per-tool unification (orchestrator-local, on Spark).**
 
-If a tool ran in multiple sessions across machines or configs (BindCraft on 2VDY ran 8 productive sessions across BM2, Clara L40S ×3, Clara H200 ×2, 2VDY_0002, Clara 109936), the cross-engine refold cannot ingest those archives separately — they must be consolidated and re-ranked by the tool's **native** primary criterion (see `references/learnings.md` learning 13 for the per-tool lookup). Two outputs:
+If a tool ran in multiple sessions across machines or configs (BindCraft on 2VDY ran 8 productive sessions across <node2>, cluster L40S ×3, cluster H200 ×2, 2VDY_0002, a cluster job), the cross-engine refold cannot ingest those archives separately — they must be consolidated and re-ranked by the tool's **native** primary criterion (see `references/learnings.md` learning 13 for the per-tool lookup). Two outputs:
 
 - **D1 — per-sequence ranked CSV**: every accept (every MPNN entry for BindCraft, every id_gen for PC, …) sorted by the tool's native primary metric desc.
 - **D2 — per-backbone ranked CSV**: 1 best entry per unique trajectory (deduplicate by `(source_run, trajectory_id)`). **D2 is the canonical input to the cross-engine refold's "top N per tool" step.**
@@ -277,7 +276,7 @@ Multiple machines running the **same** tool with the **same** settings, on diffe
 - The tool's yield is bottlenecked by exploration, not by config
 - We have an unproven config that needs to be validated against statistical noise
 
-Example: BindCraft tuned ran on BM2, BM4, Clara L40S, Spark — same V2/V4 preset, four independent seed pools.
+Example: BindCraft tuned ran on <node2>, <node3>, cluster L40S, Spark — same V2/V4 preset, four independent seed pools.
 
 ### 5.2 A/B test (different configs, same target)
 
@@ -285,7 +284,7 @@ Two parallel runs differing in *one* knob. Decisive about which config to keep. 
 - A reasonable-looking config has unknown yield on this target
 - You can't predict ahead of time which knob value will win
 
-Example: Clara L40S ran V2+V4 (100040) and V1+default (100039) side-by-side on the same target. 10 accepts vs 0 accepts settled the question decisively in 3 days.
+Example: cluster L40S ran V2+V4 (<jobid>) and V1+default (<jobid>) side-by-side on the same target. 10 accepts vs 0 accepts settled the question decisively in 3 days.
 
 **Important**: have a kill criterion BEFORE launching the A/B. Otherwise the losing arm runs forever ("might yet produce one!"). Pre-commit to "kill if 0 accepts after N trajectories or T days."
 
@@ -293,7 +292,7 @@ Example: Clara L40S ran V2+V4 (100040) and V1+default (100039) side-by-side on t
 
 Same tool + same config, but x86 vs aarch64 (or different CUDA archs). Floating-point ordering differs, so trajectory dynamics diverge and the accepted-design population is partially distinct.
 
-Example: BindCraft tuned on x86 (Clara L40S) vs aarch64 (Spark GB10 — Blackwell, not GH200). Hypothesis: ~30-50% of accepts are arch-specific.
+Example: BindCraft tuned on x86 (cluster L40S) vs aarch64 (Spark GB10 — Blackwell, not GH200). Hypothesis: ~30-50% of accepts are arch-specific.
 
 Cost: one new install on the unusual arch, plus the campaign-specific install gotchas (CLAUDE.md aarch64 section).
 
@@ -309,7 +308,7 @@ This is high-EV when you have a "we got median 0.15, top 0.85 but only 1" proble
 
 You have empirical evidence (a prior run, possibly old, that produced a high-quality result with a specific config). Reproduce that config on fresh machines to harvest more samples from the same regime.
 
-Example: 2VDY_0002 (Feb 2026) produced 1 BindCraft accept at iPTM 0.90 with `default_filters + default_4stage_multimer_hardtarget`. Spark and Clara L40S are now queued to reproduce that preset combo, target 5 accepts each.
+Example: 2VDY_0002 (Feb 2026) produced 1 BindCraft accept at iPTM 0.90 with `default_filters + default_4stage_multimer_hardtarget`. Spark and cluster L40S are now queued to reproduce that preset combo, target 5 accepts each.
 
 Honest-pushback corollary: **Don't extrapolate yield linearly from a single observation.** The 0002 result was 1/415 rejected — that yield rate is the floor of statistical confidence, not the ceiling.
 
@@ -319,12 +318,12 @@ Pre-commit. Examples that worked on 2VDY:
 
 - "Kill V1+default if <1 accept after 60 trajectories and tuned has ≥3."
 - "Kill PC beam-search if 0 PDB outputs after 24h (the wedge mode)."
-- "Kill BindCraft if process RSS >50 GB (JAX leak — BM4 was killed by the kernel at 58 GB after 9 days)."
+- "Kill BindCraft if process RSS >50 GB (JAX leak — <node3> was killed by the kernel at 58 GB after 9 days)."
 - "Kill any run if it exceeds 2× its initial wall-clock budget without finishing."
 
 Document the kill criterion in the kickoff doc, not just in your head.
 
-**Sharpen for A/B siblings:** the soft form ("kill if 0 after N trajectories") let Clara H200 100953 burn 6.6 days for 0 accepts because the sibling-A/B signal was already decisive at day 2 (Clara L40S 100039 sibling: 0/60 on the same defaults preset). Better criterion form for paired A/B: **"if the sibling has ≥ K accepts at time T and yours has 0, kill at T."** The point of the A/B is to test the hypothesis, not to wait for asymptotic data. K=3, T=2d is a reasonable default for BindCraft-class yields.
+**Sharpen for A/B siblings:** the soft form ("kill if 0 after N trajectories") let cluster H200 <jobid> burn 6.6 days for 0 accepts because the sibling-A/B signal was already decisive at day 2 (cluster L40S <jobid> sibling: 0/60 on the same defaults preset). Better criterion form for paired A/B: **"if the sibling has ≥ K accepts at time T and yours has 0, kill at T."** The point of the A/B is to test the hypothesis, not to wait for asymptotic data. K=3, T=2d is a reasonable default for BindCraft-class yields.
 
 ### 5.7 Hotspots-on probe (named pattern)
 
@@ -347,7 +346,7 @@ The pattern:
 | PH (Protein-Hunter) | ✓ (target side) | did not test on 2VDY |
 | RFD3 | ✓ (contig) | did not test on 2VDY |
 | Mosaic | ✗ (no API) | gradient hallucination only |
-| BindCraft AF2 hallucination | ✓ (`target_hotspot_residues` field) | **broke trajectory pLDDT on 2VDY** — 10/10 BM2 trajectories failed pre-MPNN, BM4 ran 9 days with hotspots ON and got 0/203 accepts. Scattered hotspots across distant secondary-structure elements can't all be satisfied by AF2 gradient hallucination. Hotspots ON is target-dependent for BindCraft. |
+| BindCraft AF2 hallucination | ✓ (`target_hotspot_residues` field) | **broke trajectory pLDDT on 2VDY** — 10/10 <node2> trajectories failed pre-MPNN, <node3> ran 9 days with hotspots ON and got 0/203 accepts. Scattered hotspots across distant secondary-structure elements can't all be satisfied by AF2 gradient hallucination. Hotspots ON is target-dependent for BindCraft. |
 
 Rule: don't extrapolate hotspot-on success from one tool to another. Each tool has its own coupling between the hotspot constraint and the search dynamics.
 
@@ -383,7 +382,7 @@ iPTM from Boltz-2 (with target MSA) ≠ iPTM from AF2-multimer. Empirically on 2
 
 ### 6.4 Negative results are evidence
 
-`2VDY-Clara-BindCraft-defaults-100039.zip` packaged a 0-accept run intentionally — it's evidence that V1+default doesn't work on this target. Keep these archives. Future campaigns benefit from knowing what failed.
+`<TARGET>-<cluster>-BindCraft-defaults-<jobid>.zip` packaged a 0-accept run intentionally — it's evidence that V1+default doesn't work on this target. Keep these archives. Future campaigns benefit from knowing what failed.
 
 ### 6.5 When to spawn a new machine vs. stretch the current one
 
@@ -398,7 +397,7 @@ Try low-risk, low-compute experiments first. The 2VDY ordering ended up being:
 2. RFD3 (cluster CLI traps but fits 24 GB)
 3. BindCraft tuned (multiple machines)
 4. BoltzGen (slow but reliable)
-5. PH + PC + Mosaic on Clara H200 (need 80+ GB)
+5. PH + PC + Mosaic on cluster H200 (need 80+ GB)
 6. BindCraft hardtarget variant (high-quality / low-yield specialty)
 7. PC MCTS, BindCraft Spark (architectural / algorithmic diversity)
 
@@ -427,7 +426,7 @@ Workers don't see your conversation history. They have:
 - The CLUSTER/ assignment doc you wrote
 - PROGRESS.md (read-only for context; append-only to Worker updates section)
 
-The worker may be a local Claude on the compute node, an orchestrator-driven remote session (direct-deploy — Clara over VPN, or the LAN fleet over plain SSH), or a human. The assignment doc is the contract regardless. The sibling `bindmaster-worker` skill handles the operational playbook on the worker side.
+The worker may be a local Claude on the compute node, an orchestrator-driven remote session (direct-deploy — an HPC cluster over VPN, or the LAN fleet over plain SSH), or a human. The assignment doc is the contract regardless. The sibling `bindmaster-worker` skill handles the operational playbook on the worker side.
 
 Assignment doc structure (repeat from §4.1 for emphasis — this is the hand-off contract):
 
@@ -489,8 +488,8 @@ Routine ops you can do without confirming (orchestrator side):
 
 Always pause and ask before:
 - **Killing a running job** (`scancel`, `kill`). Irreversible — even if it looks stuck. Could be 2 minutes from finishing.
-- **Deleting any run dir or archive.** Lustre is 3 PB; muni-disk is large. Disk space is never the reason to delete.
-- **Switching VPNs — scope this, don't assume it's needed.** On BM5, the CIIRC tunnel is split-tunnel (routes only `<CIIRC_ROUTE_A>` + `<CIIRC_ROUTE_B>`) — muni-disk and the Claude API both stay reachable with it up, so there's no Clara↔MUNI exclusivity to manage on this machine; holding the CIIRC tunnel up while also working muni-disk or the LAN fleet is fine. Don't assume the same on a different orchestrator machine — confirm split-tunnel behavior first, and if a real switch is needed there, announce it explicitly: "I need to switch from X VPN to Y VPN to do Z."
+- **Deleting any run dir or archive.** Cluster storage is large; the shared archive is large. Disk space is never the reason to delete.
+- **Switching VPNs — scope this, don't assume it's needed.** If the cluster VPN is split-tunnel (routes only the cluster subnets), the shared storage and the Claude API both stay reachable with it up, so there is no exclusivity to manage; holding the tunnel up while also working the shared storage or the LAN fleet is fine. Don't assume the same on a different orchestrator machine — confirm split-tunnel behavior first, and if a real switch is needed there, announce it explicitly: "I need to switch from X VPN to Y VPN to do Z."
 - **Changing campaign-level parameters mid-run.** If user said target=50 and you want to drop to 30, ask.
 - **Spending >24 H200-hours on a single new experiment** without prior agreement.
 - **Force-pushing or amending shared commits.**
@@ -545,10 +544,7 @@ Don't let the campaign drift past these. The wet-lab cost dominates total projec
 - `references/tools/README.md` — cross-method bias matrix, philosophy, file index
 - `references/learnings.md` — empirical campaign lessons (formerly §9), distilled from 2VDY and earlier
 - `references/evaluation.md` — local cross-engine refold + iPSAE merge + ranking recipe (refolders called as code on Spark)
-- `references/lab-deploy.md` — direct-deploy playbook: driving BM1/BM2/BM4 over plain LAN SSH (`tools/fleet.sh probe|status|launch|poll|fetch`) when this machine has that reachability, instead of a handoff doc
-- `references/clara-deploy.md` — direct-deploy playbook: driving the Clara cluster over `ssh clara` (pre-flight → deploy → submit → monitor → package → transfer) when this machine has SSH access, instead of handing off to a separate worker
-- `tools/fleet.sh` — the LAN fleet driver script (probe|status|launch|poll|fetch); `docs/PLAN_fleet_orchestration.md` has the design rationale behind it
-- `CLAUDE.local.md` (repo root, machine-local / gitignored) — whether *this* machine has direct Clara SSH and/or LAN SSH to BM1/BM2/BM4, and the access setup for each (VPN, DNS pin, key, alias). Also `docs/local/*-Manual.md` when present: the full Clara/Slurm per-tool operating manuals
+- `CLAUDE.local.md` (repo root, machine-local / gitignored, optional) — whether *this* machine has direct SSH to the HPC cluster and/or LAN fleet nodes, and the access setup for each (VPN, DNS pin, key, alias).
 - `references/autosize.md` — the `binder-compare autosize` adaptive sampling loop (equal-N per tool, budget caps, ESMFold2 gate); how the target-analyst dossier sets `--n-target`/`--tier`/`tools`
 - **Sibling skills** (the campaign lifecycle): `bindmaster-target-analyst` (research a target → dossier, upstream), `bindmaster-evaluator` (refold → two-stage rank → affinity → QC), `bindmaster-wetlab` (plan + maturation, closes the loop), `bindmaster-worker` (per-machine execution)
 - `CLAUDE.md` (BindMaster repo root) — codebase reference, design decisions, conventions, per-tool gotchas

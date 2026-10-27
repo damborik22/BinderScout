@@ -24,6 +24,15 @@ EVALUATOR_DIR="${BINDMASTER_DIR}/Evaluator"
 
 # Pinned commits for reproducible installs (x86_64 clones only; aarch64 uses bundled)
 BINDCRAFT_COMMIT="7cd4ace"
+# PyRosetta is pinned HERE, next to BINDCRAFT_COMMIT, because the two must agree:
+# BindCraft's own install_bindcraft.sh does an unpinned `pip install pyrosetta`, and
+# the 2026.29 quarterly changed InterfaceAnalyzerMover.set_interface() from taking a
+# str to requiring a core::pose::DockingPartners. Pinned code against a floating
+# dependency meant a fresh install produced ZERO designs — every trajectory died in
+# score_interface() after ~8 min of GPU. _pin_bindcraft_pyrosetta() rewrites their
+# line to this version; _patch_bindcraft_pyrosetta() migrates the call site.
+PYROSETTA_VERSION="2026.29+releasequarterly.80a0635615"
+PYROSETTA_FIND_LINKS="https://west.rosettacommons.org/pyrosetta/quarterly/release.cxx11thread.serialization"
 BOLTZGEN_COMMIT="da0f092"
 MOSAIC_COMMIT="82593a8"
 
@@ -247,8 +256,11 @@ print_fail() {
 
 # run_logged [--retries N] <label> <command...>
 # Runs a verbose command showing only a spinner on the terminal.
-# All output is written to LOG_FILE only. On failure the last 30 lines
-# are printed to the terminal for diagnosis.
+# Output is appended to LOG_FILE *as it is produced*, so the `tail -f install.log`
+# the banners tell the user to run actually shows progress during the 45-90 min
+# steps. On failure the last 30 lines of THIS step are printed for diagnosis.
+# Without a TTY (nohup / ssh / tmux send-keys / CI) a heartbeat line is printed
+# every 2 min, because the spinner goes to /dev/tty and is invisible there.
 # Optional --retries N retries the command up to N times with linear backoff.
 run_logged() {
     local retries=1
@@ -257,18 +269,23 @@ run_logged() {
     fi
     local label="$1"
     shift
-    local tmpfile
-    tmpfile=$(mktemp)
 
     # Check once whether /dev/tty is usable (not available in non-TTY containers)
     local has_tty=false
     { true >/dev/tty; } 2>/dev/null && has_tty=true
 
+    # Where this step begins in the log, so the on-failure tail shows only this
+    # step. Output is no longer buffered through a temp file, so retries leave a
+    # cumulative log — more useful for debugging a flaky step, not less.
+    local start_line
+    # NB: 2>/dev/null comes BEFORE the input redirect — redirections are applied
+    # left to right, so the other order lets bash's own "No such file" reach the
+    # terminal on the very first call, when the log does not exist yet.
+    start_line=$(( $(wc -l 2>/dev/null < "${LOG_FILE}" || echo 0) + 1 ))
+
     local rc=0
     for attempt in $(seq 1 "${retries}"); do
-        # shellcheck disable=SC2188
-        > "${tmpfile}"   # truncate on each attempt
-        "$@" >> "${tmpfile}" 2>&1 &
+        "$@" >> "${LOG_FILE}" 2>&1 &
         local pid=$!
 
         local frames='/-\|'
@@ -280,6 +297,19 @@ run_logged() {
                 (( i++ ))
             done
             printf "\r\033[K" >/dev/tty   # clear spinner line
+        else
+            # Poll at 1 s so a short command still returns promptly; speak up
+            # only every 2 min so a long step does not flood the log.
+            local waited=0
+            while kill -0 "${pid}" 2>/dev/null; do
+                sleep 1
+                (( waited++ ))
+                if (( waited >= 120 )); then
+                    waited=0
+                    kill -0 "${pid}" 2>/dev/null && \
+                        echo "  … still running: ${label} ($(date +%H:%M))"
+                fi
+            done
         fi
         wait "${pid}"
         rc=$?
@@ -291,15 +321,11 @@ run_logged() {
         fi
     done
 
-    cat "${tmpfile}" >> "${LOG_FILE}" 2>/dev/null
-
     if [[ ${rc} -eq 0 ]]; then
-        rm -f "${tmpfile}"
         print_ok "${label}"
     else
         echo -e "${RED}  Last output:${RESET}"
-        tail -30 "${tmpfile}" | sed 's/^/  /'
-        rm -f "${tmpfile}"
+        tail -n +"${start_line}" "${LOG_FILE}" 2>/dev/null | tail -30 | sed 's/^/  /'
         print_fail "${label}"
     fi
     return ${rc}
@@ -553,6 +579,48 @@ _check_system_conda_writable() {
     return 1
 }
 
+# ─── Install State Markers ───────────────────────────────────────────────────
+# A tool's marker file exists if and only if its install function ran to
+# completion. The is_*_installed probes below cannot tell "finished" from "died
+# halfway": conda creates the env directory at the START of the solve and leaves
+# it behind on failure, so a failed install reported itself as installed and the
+# error only surfaced hours later, mid-GPU-run, as a bare ModuleNotFoundError.
+#
+# The marker is cleared before each (re)install and written only on success, so a
+# failed or interrupted install leaves NO marker. One file per tool, named by the
+# canonical lowercase key (bindcraft, boltzgen, mosaic, evaluator, pxdesign,
+# proteina_complexa, protein_hunter, rfd3, esmfold2, soluprot, af3); content is
+# one line, "<ISO-8601 timestamp>\t<short git sha>". configurator.py reads the
+# same directory and treats its absence as "no markers", not as an error.
+INSTALL_STATE_DIR="${BINDMASTER_DIR}/.install_state"
+
+# mark_tool_installed <canonical tool key>
+mark_tool_installed() {
+    mkdir -p "${INSTALL_STATE_DIR}" || return 0
+    printf '%s\t%s\n' "$(date -Is)" \
+        "$(git -C "${BINDMASTER_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+        > "${INSTALL_STATE_DIR}/$1"
+}
+
+# clear_tool_mark <canonical tool key>
+clear_tool_mark() {
+    rm -f "${INSTALL_STATE_DIR}/$1"
+}
+
+# is_tool_marked <canonical tool key>
+is_tool_marked() {
+    [[ -f "${INSTALL_STATE_DIR}/$1" ]]
+}
+
+# _install_step <canonical tool key> <install function>
+# Clears the marker, runs the install, and writes the marker only if it
+# succeeded — the whole contract for one tool, so every tool gets it identically.
+_install_step() {
+    clear_tool_mark "$1"
+    "$2" || return 1
+    mark_tool_installed "$1"
+}
+
 # ─── Install Status Checks ────────────────────────────────────────────────────
 
 is_bindcraft_installed() {
@@ -587,15 +655,34 @@ is_proteina_complexa_installed() {
     [[ -d "${PROTEINA_COMPLEXA_DIR}" ]] && [[ -d "${PROTEINA_COMPLEXA_DIR}/.venv" ]]
 }
 
+is_af3_installed() {
+    [[ -d "${AF3_DIR}" ]] && env_exists binder-eval-af3
+}
+
+is_esmfold2_installed() {
+    env_exists binder-eval-esmfold2
+}
+
+is_soluprot_installed() {
+    # USEARCH as well as the env: the env is created before the source build, so
+    # an env-only probe reports a failed USEARCH build as a working SoluProt.
+    env_exists binder-eval-soluprot && [[ -x "${SOLUPROT_DIR}/usearch.x86_64" ]]
+}
+
 # print_tool_status
-# Shows installed/not-installed for each tool.
+# Shows installed/not-installed for each tool. Covers all eleven tools the
+# installer can build, so the table matches the [n/N] step count it then prints.
 print_tool_status() {
     echo ""
     echo -e "${BOLD}=== Installed Tools ===${RESET}"
     local _status _icon
-    for _tool in BindCraft BoltzGen Mosaic Evaluator PXDesign Proteina_Complexa; do
-        local _fn="is_${_tool,,}_installed"
-        if "${_fn}" 2>/dev/null; then
+    for _tool in BindCraft BoltzGen Mosaic Evaluator PXDesign Proteina_Complexa \
+                 Protein_Hunter RFD3 AF3 ESMFold2 SoluProt; do
+        local _key="${_tool,,}"
+        local _fn="is_${_key}_installed"
+        # The marker is authoritative (it means "install finished successfully");
+        # the probe is the fallback for installs made before markers existed.
+        if is_tool_marked "${_key}" || "${_fn}" 2>/dev/null; then
             _icon="${GREEN}✓${RESET}"; _status="installed"
         else
             _icon="${RED}✗${RESET}"; _status="not installed"
@@ -751,6 +838,72 @@ _fix_target_settings() {
     fi
 }
 
+# Migrate BindCraft's single InterfaceAnalyzerMover.set_interface() call site to
+# the PyRosetta >= 2026.29 API. Post-install patching of third-party code follows
+# the precedent of _patch_boltzgen() and install/patches/mosaic-offline-msa.patch.
+# The fallback keeps the old string form working on older PyRosetta, so the patch
+# is safe even on an env that predates the pin. Idempotent: DockingPartners in the
+# file means it is already patched (note the fallback line still contains the
+# original `iam.set_interface("A_B")`, so that alone cannot be the guard).
+_patch_bindcraft_pyrosetta() {
+    local f="${BINDCRAFT_DIR}/functions/pyrosetta_utils.py"
+    [[ -f "${f}" ]] || return 0
+    if grep -q 'DockingPartners' "${f}"; then
+        print_ok "BindCraft set_interface already patched for PyRosetta >= 2026.29"
+        return 0
+    fi
+    if ! grep -q 'iam.set_interface("A_B")' "${f}"; then
+        print_warn "Could not find iam.set_interface(\"A_B\") in pyrosetta_utils.py — left unpatched"
+        return 0
+    fi
+    python3 - "${f}" << 'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+src = path.read_text()
+# The call sits inside score_interface(), so the block carries that body indent.
+src = src.replace(
+    '    iam.set_interface("A_B")',
+    '    # PyRosetta >= 2026.29 requires DockingPartners instead of a plain string.\n'
+    '    try:\n'
+    '        from pyrosetta.rosetta.core.pose import DockingPartners\n'
+    '        iam.set_interface(DockingPartners.docking_partners_from_string("A_B"))\n'
+    '    except ImportError:\n'
+    '        iam.set_interface("A_B")  # PyRosetta < 2026.29',
+    1,
+)
+path.write_text(src)
+PYEOF
+    # Verify rather than trust the heredoc's exit status: without this patch every
+    # trajectory dies in score_interface(), so a silent miss costs GPU-hours.
+    if ! grep -q 'DockingPartners' "${f}"; then
+        print_fail "Failed to patch set_interface in ${f} — BindCraft would produce zero designs"
+        return 1
+    fi
+    print_ok "Patched BindCraft set_interface for PyRosetta >= 2026.29"
+}
+
+# Pin PyRosetta inside BindCraft's own installer. Patching their line is the
+# robust option: install_bindcraft.sh CREATES the conda env itself (:59) and only
+# then pip-installs, so there is no env to pre-install a pinned wheel into. Their
+# `python -c "import pyrosetta"` check on the next line still guards the result.
+_pin_bindcraft_pyrosetta() {
+    local f="${BINDCRAFT_DIR}/install_bindcraft.sh"
+    [[ -f "${f}" ]] || return 0
+    if grep -qF "pyrosetta==${PYROSETTA_VERSION}" "${f}"; then
+        print_ok "BindCraft installer already pinned to pyrosetta ${PYROSETTA_VERSION}"
+        return 0
+    fi
+    if ! grep -qE '^pip install pyrosetta --find-links' "${f}"; then
+        print_warn "Could not find the unpinned pyrosetta line in install_bindcraft.sh — left as-is"
+        return 0
+    fi
+    sed -i "s|^pip install pyrosetta --find-links .*|pip install \"pyrosetta==${PYROSETTA_VERSION}\" --find-links ${PYROSETTA_FIND_LINKS}|" "${f}" \
+        || { print_warn "Failed to pin pyrosetta in install_bindcraft.sh"; return 0; }
+    print_ok "Pinned pyrosetta==${PYROSETTA_VERSION} in BindCraft's installer"
+}
+
 install_bindcraft() {
     print_step "Installing BindCraft"
     ensure_conda_in_path
@@ -779,6 +932,11 @@ install_bindcraft() {
     # Fix Colab paths in target settings
     _fix_target_settings
 
+    # Pin PyRosetta before their installer runs, and migrate the one call site
+    # whose API it changed. Both are idempotent and safe on an existing clone.
+    _pin_bindcraft_pyrosetta
+    _patch_bindcraft_pyrosetta || return 1
+
     # Remove existing conda env if present
     if env_exists BindCraft; then
         print_warn "Conda environment 'BindCraft' already exists."
@@ -794,7 +952,7 @@ install_bindcraft() {
     # Delegate to BindCraft's own installer
     if ! env_exists BindCraft; then
         print_step "Running BindCraft install script (conda env + AlphaFold2 weights)"
-        print_warn "This will take 45-90 min — full output in install.log"
+        print_warn "This will take 45-90 min — follow progress with:  tail -f ${LOG_FILE}"
         run_logged "Installing BindCraft (conda packages + AlphaFold2 weights)" \
             bash -c "export PATH='${CONDA_BASE}/bin:${PATH}'; cd '${BINDCRAFT_DIR}' && bash install_bindcraft.sh --cuda '${CUDA_VERSION}' --pkg_manager conda" \
             || { print_fail "BindCraft install script failed"; return 1; }
@@ -805,6 +963,23 @@ install_bindcraft() {
         "${CONDA_CMD}" run -n BindCraft \
         python -c "from colabdesign import mk_af_model; print('OK')" \
         || return 1
+
+    # Exercise the patched set_interface() call before any GPU work. score_interface()
+    # runs only AFTER a full ~8 min trajectory, so an API mismatch otherwise burns
+    # GPU indefinitely and yields zero designs; here it fails in seconds.
+    smoke_test "pyrosetta set_interface API" \
+        "${CONDA_CMD}" run -n BindCraft python -c "
+import pyrosetta
+from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
+pyrosetta.init('-mute all')
+iam = InterfaceAnalyzerMover()
+try:
+    from pyrosetta.rosetta.core.pose import DockingPartners
+    iam.set_interface(DockingPartners.docking_partners_from_string('A_B'))
+except ImportError:
+    iam.set_interface('A_B')
+print('OK')" \
+        || { print_fail "PyRosetta API mismatch — BindCraft would produce zero designs"; return 1; }
 
     # Example
     if [[ "${SKIP_EXAMPLES}" == false ]]; then
@@ -1547,7 +1722,7 @@ LNEOF
     # This activate.d hook sets CPATH (preserving existing) and CUTLASS_PATH
     # whenever the env is activated, with CONDA_BACKUP_ for clean deactivation.
     # Permanent fix for the protenix+DS4Sci JIT trap that bit the ApoE4
-    # BinderScout / PXDesign-BM4 campaign 2026-05-27 / 2026-05-28.
+    # BinderScout / PXDesign campaign 2026-05-27 / 2026-05-28.
     print_step "Setting up CUDA-header CPATH + CUTLASS_PATH activate.d hook"
 
     # Clone CUTLASS v3.5.1 (header-only, ~150 MB) if not already present.
@@ -2203,7 +2378,7 @@ install_af3() {
 
     # Install AlphaFold 3 from source. The "alphafold3" PyPI package is an unrelated
     # stub (v0.0.x) — the genuine DeepMind AF3 ships only via its repo (source build)
-    # or Docker. Recipe (verified on Clara H200, 2026-07-15):
+    # or Docker. Recipe (verified on an H200 cluster node, 2026-07-15):
     #   clone (pinned) -> pip install (pulls jax==0.9.1 + gemmi + deps, builds C++)
     #   -> build_data (generates the CCD chemical_component_sets.pickle AF3 needs).
     if [[ -d "${AF3_DIR}/.git" ]]; then
@@ -2444,8 +2619,12 @@ _build_usearch_v12() {
     for t in git make g++ gcc; do
         if ! command -v "${t}" >/dev/null 2>&1; then
             print_warn "USEARCH build needs git + make + gcc/g++ (missing: ${t})."
-            print_warn "  Install a toolchain and re-run, or place a 'usearch.x86_64' binary at"
+            print_warn "  With root:    sudo apt-get install -y git make g++"
+            print_warn "  Without root: ${CONDA_CMD} create -y -n bindmaster_build -c conda-forge make gxx_linux-64"
+            print_warn "                then activate it and re-run --tool soluprot."
+            print_warn "  Or place a prebuilt 'usearch.x86_64' binary at"
             print_warn "  ${SOLUPROT_DIR}/usearch.x86_64 (or 'usearch' on PATH)."
+            print_warn "  SoluProt is OPTIONAL — ranking works without it."
             return 1
         fi
     done
@@ -2650,6 +2829,10 @@ SOLUPROTEOF
 
 uninstall_tool() {
     local tool="${1,,}"
+    # A removed tool must not keep its install-state marker. Cleared up front: if the
+    # removal then fails the tool is in an unknown state, which must not read as
+    # "installed successfully". Marker keys use underscores, these names hyphens.
+    clear_tool_mark "${tool//-/_}"
     case "${tool}" in
         bindcraft)
             print_step "Uninstalling BindCraft"
@@ -2827,6 +3010,30 @@ preflight() {
             print_warn "Could not reach pypi.org in 10 s — downloads may fail (proxy? offline?)."
         fi
     fi
+
+    # Toolchain — only the tools that compile from source need it (SoluProt builds
+    # USEARCH v12). Three `command -v` calls, checked here because a stock Ubuntu
+    # Server image has no `make` and `--tool all` otherwise spent ~57 min getting to
+    # step 10/10 before reporting a one-second fact.
+    if [[ "${DO_SOLUPROT}" == true ]]; then
+        local _missing=() _bin
+        for _bin in git make g++; do
+            command -v "${_bin}" &>/dev/null || _missing+=("${_bin}")
+        done
+        if (( ${#_missing[@]} )); then
+            print_fail "SoluProt needs a C/C++ toolchain to build USEARCH v12 (missing: ${_missing[*]})"
+            print_warn "  With root:    sudo apt-get install -y git make g++"
+            print_warn "  Without root: get them from conda-forge into a build env —"
+            print_warn "                  ${CONDA_CMD} create -y -n bindmaster_build -c conda-forge make gxx_linux-64"
+            print_warn "                  conda activate bindmaster_build    # then re-run this installer"
+            print_warn "  Or skip it:   SoluProt is an OPTIONAL pre-refold solubility filter. Ranking"
+            print_warn "                does not use it and is not blocked by its absence. Install the"
+            print_warn "                other tools with --tool <tool>, and add SoluProt later with"
+            print_warn "                --tool soluprot once a toolchain is available."
+            return 1
+        fi
+        print_ok "Toolchain: git, make, g++ present"
+    fi
     return 0
 }
 
@@ -2956,17 +3163,17 @@ main() {
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
 
-    [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; install_bindcraft || failed_tools+=("BindCraft"); }
-    [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
-    [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
-    [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
-    [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}";      install_rfd3      || failed_tools+=("RFD3"); }
-    [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
-    [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
-    [[ "${DO_PROTEIN_HUNTER}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Protein-Hunter${RESET}"; install_protein_hunter || failed_tools+=("Protein-Hunter"); }
-    [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
-    [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
-    [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; install_soluprot || failed_tools+=("SoluProt"); }
+    [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; _install_step bindcraft install_bindcraft || failed_tools+=("BindCraft"); }
+    [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  _install_step boltzgen install_boltzgen || failed_tools+=("BoltzGen");  }
+    [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    _install_step mosaic install_mosaic || failed_tools+=("Mosaic");    }
+    [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; _install_step evaluator install_evaluator || failed_tools+=("Evaluator"); }
+    [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}";      _install_step rfd3 install_rfd3 || failed_tools+=("RFD3"); }
+    [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  _install_step pxdesign install_pxdesign || failed_tools+=("PXDesign"); }
+    [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; _install_step proteina_complexa install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
+    [[ "${DO_PROTEIN_HUNTER}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Protein-Hunter${RESET}"; _install_step protein_hunter install_protein_hunter || failed_tools+=("Protein-Hunter"); }
+    [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; _install_step af3 install_af3 || failed_tools+=("AF3"); }
+    [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; _install_step esmfold2 install_esmfold2 || failed_tools+=("ESMFold2"); }
+    [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; _install_step soluprot install_soluprot || failed_tools+=("SoluProt"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"
@@ -2976,6 +3183,12 @@ main() {
         print_ok "All selected tools installed successfully."
     else
         print_fail "The following tools failed to install: ${failed_tools[*]}"
+        # A lone red line for SoluProt reads as "the whole install is broken". It is
+        # an optional pre-refold filter, so say so rather than let the user guess.
+        if [[ " ${failed_tools[*]} " == *" SoluProt "* ]]; then
+            print_warn "  SoluProt is OPTIONAL — the pipeline ranks designs without it."
+            print_warn "  Add it later with: bindmaster install --tool soluprot"
+        fi
     fi
 
     # Example results (separate from installation)

@@ -5,7 +5,7 @@ dlopened, ``resolve_mem_fraction`` fell back to *system RAM* as the pool size.
 That reading passes the unified-memory test by construction (pool == ram), so an
 UNKNOWN pool was always classified as unified and handed the 40 GiB OS floor.
 
-On BM2 (24 GB RTX 3090, 62.7 GiB host RAM) the Mosaic uv venv cannot load
+On a 24 GB RTX 3090 host (, 62.7 GiB host RAM) the Mosaic uv venv cannot load
 libcudart, so the policy resolved "unified 62.7 GiB", took the OS floor, and
 returned 0.362 — which JAX then applied to the *card*, giving Boltz-2 8.5 GiB of
 23.6. Boltz-2 OOMed at 9 GB and it read as "this target is too big for a 24 GB
@@ -32,7 +32,7 @@ def pool(monkeypatch):
 
 class TestDiscreteCardIsNotMistakenForUnified:
     def test_cudart_unavailable_falls_back_to_nvidia_smi_not_system_ram(self, pool):
-        """The exact BM2 case: no libcudart, 24 GB card, 62.7 GiB host RAM."""
+        """The exact 24 GB RTX 3090 case: no libcudart, 24 GB card, 62.7 GiB host RAM."""
         pool(0.0, 24.0, 62.7)
 
         frac, why = mp.resolve_mem_fraction(24.0)
@@ -62,7 +62,7 @@ class TestDiscreteCardIsNotMistakenForUnified:
 
 class TestUnifiedMemoryStillKeepsTheOSFloor:
     def test_gb10_keeps_forty_gib_for_the_os(self, pool):
-        """BM5: cudaMemGetInfo total == system RAM. Over-reserving here rebooted the box."""
+        """GB10 node: cudaMemGetInfo total == system RAM. Over-reserving here rebooted the box."""
         pool(121.7, 0.0, 121.7)
 
         frac, why = mp.resolve_mem_fraction(24.0)

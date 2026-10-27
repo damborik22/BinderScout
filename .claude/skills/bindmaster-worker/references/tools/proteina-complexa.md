@@ -92,7 +92,7 @@ JAX AF2 reward model recompiles per unique sequence length on the first sample o
 
 ```bash
 cd ~/runs/<TARGET>-<machine>-proteina-complexa/
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_ProteinaComplexa_<machine>.tar.gz \
+tar czf <shared-storage>/<TARGET>/RESULTS/<TARGET>_ProteinaComplexa_<machine>.tar.gz \
     outputs/<run_name>/generate/ \
     outputs/<run_name>/filter/ \
     outputs/<run_name>/evaluate/ \
@@ -105,7 +105,7 @@ tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_ProteinaComplexa_<machine>.tar.gz \
 For `_final`:
 
 ```bash
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_ProteinaComplexa_<machine>_final.tar.gz \
+tar czf <shared-storage>/<TARGET>/RESULTS/<TARGET>_ProteinaComplexa_<machine>_final.tar.gz \
     outputs/<run_name>/analyze/ \
     outputs/<run_name>/filter/successful/ \
     outputs/<run_name>/.hydra/

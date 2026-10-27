@@ -80,7 +80,7 @@ Workers can either leave `.fa` files raw (recommended for consistency) or pre-pr
 
 ```bash
 cd ~/runs/<TARGET>-<machine>-rfd3/
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_RFD3_<machine>.tar.gz \
+tar czf <shared-storage>/<TARGET>/RESULTS/<TARGET>_RFD3_<machine>.tar.gz \
     out_dir/ \
     mpnn_out/ \
     inputs/<TARGET>.json \
@@ -90,7 +90,7 @@ tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_RFD3_<machine>.tar.gz \
 For `_final`:
 
 ```bash
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_RFD3_<machine>_final.tar.gz \
+tar czf <shared-storage>/<TARGET>/RESULTS/<TARGET>_RFD3_<machine>_final.tar.gz \
     out_dir/ \
     mpnn_out/ \
     inputs/<TARGET>.json

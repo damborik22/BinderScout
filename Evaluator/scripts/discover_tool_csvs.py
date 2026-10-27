@@ -5,7 +5,7 @@ Scans one or more base directories for known per-tool output file patterns
 and emits ``--tool-csv NAME=PATH`` flags on stdout (one flag per line, ready
 to be appended to a bash arg array).
 
-When multiple candidates match a tool (e.g. BM4 Mosaic + BM2 Mosaic), the
+When multiple candidates match a tool (e.g. two nodes' Mosaic runs), the
 **most recently modified** file wins — so a fresh re-run of a tool naturally
 overrides an older one.
 
@@ -50,7 +50,7 @@ _TOOL_PATTERNS: dict[str, list[str]] = {
 # We emit `--tool-pdb-dir tool=<dir>` so the report's per-tool 3D viewer can
 # load the tool's *original* design structures instead of falling back to
 # refolded ones. Mosaic has no native PDBs (TOP_K=0). RFD3 / Protein-Hunter
-# PDBs typically live on BM1 and aren't copied to BM5; the refold viewer
+# PDBs typically live on one node and aren't copied to the refold host; the refold viewer
 # handles those cases.
 _TOOL_PDB_DIR_PATTERNS: dict[str, list[str]] = {
     "bindcraft": [

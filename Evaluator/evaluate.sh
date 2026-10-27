@@ -32,7 +32,7 @@
 #                          another, with staggered starts. Requires the CUDA MPS ceiling
 #                          (tools/gpu_mem_guard.sh) and refuses to run without it, because
 #                          concurrency without a hard per-client cap is exactly what took
-#                          BM5 down. Per-engine output goes to $OUTPUT/refold_<engine>.log.
+#                          the GB10 node down. Per-engine output goes to $OUTPUT/refold_<engine>.log.
 #   --stagger N            seconds between concurrent engine starts (default: 30). The
 #                          measured peak is the simultaneous COLD START -- all engines
 #                          preallocating at once -- not steady state.
@@ -89,13 +89,20 @@ done
 #     platforms that are instances of gpu are present", wrote empty rows, and
 #     still exited 0 -- silently removing a whole engine from consensus_iptm_mean
 #     and from the >=3-engine gate.
-# Measured 2026-08-20 on BM5: with it unset both engines report ['gpu'] and fold
+# Measured 2026-08-20 on the GB10 node: with it unset both engines report ['gpu'] and fold
 # correctly (AF3 iptm 0.8900, Boltz-2 17.2 GiB on-GPU).  Do not re-add it.
 # A machine that genuinely cannot run JAX on GPU can still export it externally;
 # evaluate.sh inherits the environment.
 if [[ "$(uname -m)" == "aarch64" ]]; then
     export TORCH_CUDA_ARCH_LIST="12.0"
 fi
+
+# Every step here is a Python child whose stdout is a pipe or a log file, so Python
+# block-buffers it while tracebacks go out on unbuffered stderr. The step log then
+# reads as if the child crashed BEFORE it started -- the SoluProt USEARCH traceback
+# printed above "[filter-soluprot] loaded 3 sequence(s)". Exported once so every
+# child invocation below (engines, report, the inline filter) stays chronological.
+export PYTHONUNBUFFERED=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -242,6 +249,34 @@ if [[ $SKIP_SOLUPROT -eq 0 ]]; then
         echo ""
         SKIP_SOLUPROT=1
     fi
+fi
+
+# USEARCH is built from source as a separate install step, so the env can exist
+# while the binary does not (a partially failed install). Probed BEFORE the step
+# because the only other symptom is a ~12-line FileNotFoundError traceback plus a
+# red `ERROR conda.cli.main_run` mid-evaluation -- the screen is optional and the
+# run does continue, but it reads like a crash. Mirrors _resolve_usearch in
+# binder_comparison/refolding/soluprot_runner.py (same four locations, same order,
+# and `exists()` not `-x`): keep the two in agreement.
+find_usearch () {
+    local dir="${SOLUPROT_HOME:-}"
+    [[ -e "$dir" ]] || dir="$SCRIPT_DIR/tools/soluprot"
+    [[ -n "${SOLUPROT_USEARCH:-}" && -e "${SOLUPROT_USEARCH}" ]] && return 0
+    [[ -e "$dir/usearch.$(uname -m)" ]] && return 0
+    [[ -e "$dir/usearch" ]] && return 0
+    command -v usearch >/dev/null 2>&1
+}
+
+if [[ $SKIP_SOLUPROT -eq 0 ]] && ! find_usearch; then
+    echo "[note] USEARCH not found — SoluProt solubility screen will be skipped."
+    if [[ -n "${SOLUPROT_USEARCH:-}" ]]; then
+        # An explicit override that points at nothing is a typo, not a missing install.
+        echo "        (\$SOLUPROT_USEARCH is '${SOLUPROT_USEARCH}', which does not exist)"
+    else
+        echo "        (build it with: bindmaster install --tool soluprot; ranking is unaffected)"
+    fi
+    echo ""
+    SKIP_SOLUPROT=1
 fi
 
 # --- Cross-engine gate vs. the engines that will actually run ---------------
@@ -412,7 +447,7 @@ fi
 # On unified-memory hosts (GB10 / DGX Spark) the GPU pool IS system RAM:
 # cudaMemGetInfo total == SC_PHYS_PAGES == 121.7 GiB. An engine sizing itself as a
 # fraction of "device total" therefore reserves a fraction of the WHOLE MACHINE and
-# starves the kernel -- that is what hard-rebooted BM5 on 2026-08-18.
+# starves the kernel -- that is what hard-rebooted the GB10 node on 2026-08-18.
 #
 # Each engine also computes its own absolute-GiB fraction
 # (binder_comparison.refolding.memory_policy), but that is COOPERATIVE. The hard
@@ -471,7 +506,7 @@ engine_esmfold2 () {
 }
 
 # --- engine result guards ---------------------------------------------------
-# 2026-09-16 ESMFold2 died on Clara with a TypeError from an unpinned model
+# 2026-09-16 ESMFold2 died on the HPC cluster with a TypeError from an unpinned model
 # revision, wrote 0 rows, and evaluate.sh printed REFOLD_DONE and exited 0 -- an
 # entire engine contributing nothing to a >=3-engine gate, invisibly. An engine
 # that exits 0 and writes nothing is the same failure wearing a success code

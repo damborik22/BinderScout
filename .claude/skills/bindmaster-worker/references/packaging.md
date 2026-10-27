@@ -1,6 +1,6 @@
 # Packaging + Transfer to RESULTS/
 
-Once a run finishes (success or failure), you package the outputs. **Assignment mode** (Clara, non-LAN machines): transfer the tarball to muni-disk yourself, as before. **Driven mode** (BM1/BM2/BM4, launched via `tools/fleet.sh` from BM5): package locally and leave it in the run dir — BM5 pulls it with `fleet.sh fetch` and archives a copy to muni-disk itself; you don't push. This file's naming convention and per-tool recipes are unchanged either way — only the transfer leg differs (see "Transfer" below).
+Once a run finishes (success or failure), you package the outputs. **Assignment mode** (HPC cluster, non-LAN machines): transfer the tarball to the shared archive yourself, as before. **Driven mode** (<node1>/<node2>/<node3>, launched from the orchestrator machine): package locally and leave it in the run dir — the orchestrator machine pulls it (rsync, integrity-verified) and archives a copy to the shared archive itself; you don't push. This file's naming convention and per-tool recipes are unchanged either way — only the transfer leg differs (see "Transfer" below).
 
 ## Naming convention
 
@@ -13,11 +13,11 @@ Once a run finishes (success or failure), you package the outputs. **Assignment 
 Examples:
 
 ```
-2VDY_BindCraft_Clara.tar.gz
-2VDY_BoltzGen_BM4.tar.gz
-2VDY_BoltzGen_BM4_final.tar.gz          ← curated, only Accepted/ + key CSVs
+<TARGET>_BindCraft_<node>.tar.gz
+2VDY_BoltzGen_<node>.tar.gz
+2VDY_BoltzGen_<node>_final.tar.gz          ← curated, only Accepted/ + key CSVs
 ApoE4_RFD3_Spark.tar.gz
-CALCA_ProteinHunter_BM2.tar.gz
+CALCA_ProteinHunter_<node>.tar.gz
 ```
 
 The orchestrator's evaluator parses these filenames to attribute designs back to their source tool + machine in the merged `summary.csv`. **Don't deviate from this naming.**
@@ -45,7 +45,7 @@ When unsure, err toward inclusion. Disk is cheap; lost evidence is expensive.
 
 ## Per-tool packaging recipes
 
-The commands below write straight to `/path/to/RESULTS/` — that's the **assignment-mode** convention (muni-disk mounted or VPN-reachable). **In driven mode** (BM1/BM2/BM4), tar to a local path instead — anywhere under the run dir works, e.g. `~/runs/<TARGET>-<machine>-<tool>/<TARGET>_<tool>_<machine>.tar.gz` — and leave it there for BM5 to pull with `fleet.sh fetch` (see "Transfer", below). Everything else about these recipes — what's included, the naming convention — is identical either way.
+The commands below write straight to `/path/to/RESULTS/` — that's the **assignment-mode** convention (the shared archive mounted or VPN-reachable). **In driven mode** (<node1>/<node2>/<node3>), tar to a local path instead — anywhere under the run dir works, e.g. `~/runs/<TARGET>-<machine>-<tool>/<TARGET>_<tool>_<machine>.tar.gz` — and leave it there for the orchestrator machine to pull (see "Transfer", below). Everything else about these recipes — what's included, the naming convention — is identical either way.
 
 ### BindCraft
 
@@ -182,60 +182,60 @@ The `mpnn_out/` directory contains the `.fa` files with N sequences per backbone
 
 ## Transfer
 
-### Driven mode (BM1/BM2/BM4, launched via `tools/fleet.sh`)
+### Driven mode (<node1>/<node2>/<node3>, launched)
 
-Leave the tarball where you packaged it, in the run dir on the worker machine — you don't push to muni-disk yourself. BM5 (playing the orchestrator role here) pulls it:
+Leave the tarball where you packaged it, in the run dir on the worker machine — you don't push to the shared archive yourself. The orchestrator machine (playing the orchestrator role here) pulls it:
 
 ```bash
-tools/fleet.sh fetch <machine> <remote-dir>/<TARGET>_<tool>_<machine>.tar.gz ~/eval_workdir/<TARGET>/
+rsync -s -a --partial <fleet-node>:<remote-dir>/<TARGET>_<tool>_<machine>.tar.gz ~/eval_workdir/<TARGET>/ && tar -tzf ~/eval_workdir/<TARGET>/<TARGET>_<tool>_<machine>.tar.gz >/dev/null
 ```
 
-This runs `rsync -s -a --partial` and, for a `.tar.gz`, verifies the archive with `tar -tzf` before declaring success — a corrupt or partial transfer dies loudly (`fetch` refuses to report success) rather than silently landing a bad file. BM5 then archives one copy to muni-disk RESULTS/ itself; that copy — not your worker-side tarball — is what closes the campaign record. See `bindmaster-orchestrator/references/lab-deploy.md` §3.5.
+This runs `rsync -s -a --partial` and, for a `.tar.gz`, verifies the archive with `tar -tzf` before declaring success — a corrupt or partial transfer dies loudly (the fetch should refuse to report success) rather than silently landing a bad file. The orchestrator machine then archives one copy to the shared archive RESULTS/ itself; that copy — not your worker-side tarball — is what closes the campaign record.
 
-You still append the completion-entry to PROGRESS.md (below) — driven mode doesn't change who owns that record, only who does the muni-disk write.
+You still append the completion-entry to PROGRESS.md (below) — driven mode doesn't change who owns that record, only who does the shared archive write.
 
-### Assignment mode (Clara, non-LAN machines)
+### Assignment mode (HPC cluster, non-LAN machines)
 
-#### If muni-disk is mounted directly
+#### If the shared archive is mounted directly
 
 ```bash
-cp <TARGET>_<tool>_<machine>.tar.gz /path/to/muni-disk/<TARGET>/RESULTS/
+cp <TARGET>_<tool>_<machine>.tar.gz /path/to/<shared-storage>/<TARGET>/RESULTS/
 ```
 
 Verify the copy:
 
 ```bash
-ls -la /path/to/muni-disk/<TARGET>/RESULTS/<TARGET>_<tool>_<machine>.tar.gz
+ls -la /path/to/<shared-storage>/<TARGET>/RESULTS/<TARGET>_<tool>_<machine>.tar.gz
 # Check the file size matches
 ```
 
-#### If muni-disk needs VPN switching (Clara → MUNI)
+#### If the shared archive needs VPN switching (cluster → storage)
 
 **Announce the VPN switch in PROGRESS.md Worker updates first:**
 
 ```markdown
-### 2026-MM-DD HH:MM — Clara L40S — BindCraft tuned
+### 2026-MM-DD HH:MM — cluster L40S — BindCraft tuned
 🔄 → packaging | Run complete, packaging tarball locally.
-VPN: switching from Clara-VPN to MUNI-VPN to transfer.
+VPN: switching from cluster VPN to storage VPN to transfer.
 ```
 
-Then do the switch, transfer, and switch back if you need Clara access for anything else:
+Then do the switch, transfer, and switch back if you need the HPC cluster access for anything else:
 
 ```bash
-# disconnect Clara VPN
-# connect MUNI VPN
-scp <TARGET>_<tool>_<machine>.tar.gz user@muni-disk-host:/path/to/<TARGET>/RESULTS/
+# disconnect the HPC cluster VPN
+# connect storage VPN
+scp <TARGET>_<tool>_<machine>.tar.gz user@<storage-host>:/path/to/<TARGET>/RESULTS/
 # (or rsync -avP)
-ssh user@muni-disk-host "ls -la /path/to/<TARGET>/RESULTS/<TARGET>_<tool>_<machine>.tar.gz"
+ssh user@<storage-host> "ls -la /path/to/<TARGET>/RESULTS/<TARGET>_<tool>_<machine>.tar.gz"
 # verify size matches local
 
-# disconnect MUNI VPN
-# (reconnect Clara VPN only if you need ongoing Clara access)
+# disconnect storage VPN
+# (reconnect the HPC cluster VPN only if you need ongoing the HPC cluster access)
 ```
 
 ### Verifying transfer integrity
 
-Driven mode: `fleet.sh fetch` already verifies `.tar.gz` integrity automatically with `tar -tzf` (see above) — no manual step needed. The checksum flow below is for assignment-mode scp/rsync transfers.
+Driven mode: The orchestrator's fetch step should verify `.tar.gz` integrity automatically with `tar -tzf` (see above) — no manual step needed. The checksum flow below is for assignment-mode scp/rsync transfers.
 
 For large tarballs, checksum-verify:
 
@@ -243,8 +243,8 @@ For large tarballs, checksum-verify:
 # Locally
 md5sum <TARGET>_<tool>_<machine>.tar.gz
 
-# On muni-disk (after transfer)
-ssh user@muni-disk-host "md5sum /path/to/<TARGET>/RESULTS/<TARGET>_<tool>_<machine>.tar.gz"
+# On the shared storage (after transfer)
+ssh user@<storage-host> "md5sum /path/to/<TARGET>/RESULTS/<TARGET>_<tool>_<machine>.tar.gz"
 
 # Match → transfer good
 ```
@@ -253,21 +253,21 @@ Not always necessary, but cheap insurance for >10 GB archives.
 
 ## Don't delete the worker-side copy yet
 
-Until the muni-disk archive is confirmed readable and complete. The worker-side run dir is your local backup until the campaign closes — this holds in both modes, just who does the confirming differs.
+Until the shared archive is confirmed readable and complete. The worker-side run dir is your local backup until the campaign closes — this holds in both modes, just who does the confirming differs.
 
 Pattern that works (assignment mode):
-1. Transfer tarball to muni-disk.
+1. Transfer tarball to the shared archive.
 2. Append completion-entry to PROGRESS.md Worker updates.
 3. Wait for the orchestrator to merge and confirm.
 4. Only after that confirmation, optionally delete the worker-side run dir (with user OK).
 
 Pattern that works (driven mode):
 1. Package locally; leave the tarball in the run dir.
-2. Append completion-entry to PROGRESS.md Worker updates, noting it's ready for `fleet.sh fetch`.
-3. Wait for BM5 to fetch (`tar -tzf`-verified) and archive to muni-disk.
+2. Append completion-entry to PROGRESS.md Worker updates, noting it's ready for the orchestrator to fetch.
+3. Wait for the orchestrator machine to fetch (`tar -tzf`-verified) and archive to the shared archive.
 4. Only after that confirmation, optionally delete the worker-side run dir (with user OK).
 
-If disk space pressure is real, *move* the tarball locally to a "delete-pending" subdirectory rather than deleting outright — gives a recovery window if the muni-disk copy is bad.
+If disk space pressure is real, *move* the tarball locally to a "delete-pending" subdirectory rather than deleting outright — gives a recovery window if the shared copy is bad.
 
 ## Append the completion-entry to PROGRESS.md
 
@@ -283,7 +283,7 @@ Packaged: <TARGET>_<tool>_<machine>.tar.gz (<size>) at RESULTS/.
 [Optional] New lesson: <one sentence candidate for learnings.md>.
 ```
 
-**Driven mode:** replace `SLURM <id>` with the tmux job name, and replace "Packaged: ... at RESULTS/" with "Packaged: ... in `<remote-dir>`, ready for `fleet.sh fetch`" — the RESULTS/ path is only accurate once BM5 has archived its own fetched copy there.
+**Driven mode:** replace `SLURM <id>` with the tmux job name, and replace "Packaged: ... at RESULTS/" with "Packaged: ... in `<remote-dir>`, ready for the orchestrator to fetch" — the RESULTS/ path is only accurate once the orchestrator machine has archived its own fetched copy there.
 
 For failures (❌) or planned kills:
 

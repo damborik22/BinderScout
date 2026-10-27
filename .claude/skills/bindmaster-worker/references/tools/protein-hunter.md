@@ -60,7 +60,7 @@ Cycle-iterative design has lower peak memory than gradient-based hallucination t
 
 ```bash
 cd ~/runs/<TARGET>-<machine>-protein-hunter/
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_ProteinHunter_<machine>.tar.gz \
+tar czf <shared-storage>/<TARGET>/RESULTS/<TARGET>_ProteinHunter_<machine>.tar.gz \
     protein_hunter/<name>/high_iptm_yaml/ \
     protein_hunter/<name>/high_iptm_cif/ \
     protein_hunter/<name>/summary_high_iptm.csv \

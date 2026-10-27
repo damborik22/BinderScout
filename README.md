@@ -124,7 +124,7 @@ flowchart TB
     end
 
     subgraph Artifacts["Per-run artifacts"]
-        Runs["runs/&lt;name&gt;/\n├── target/\n├── &lt;tool&gt;/        # one per enabled tool\n│   └── settings.json\n├── evaluate/\n│   ├── sequences.fasta\n│   ├── sequences_native_metrics.csv\n│   ├── boltz2_results.csv\n│   ├── af3_results.csv           (opt)\n│   ├── esmfold2_results.csv      (opt)\n│   ├── soluprot_results.csv      (opt)\n│   └── report/\n│       ├── metrics.csv\n│       ├── top20_candidates.csv\n│       ├── top20_structures/\n│       └── report.html\n├── run_&lt;tool&gt;.sh\n├── run_evaluate.sh\n└── run_all.sh"]:::arti
+        Runs["runs/&lt;name&gt;/\n├── target/\n├── &lt;tool&gt;/        # one per enabled tool\n│   └── settings.json\n├── evaluate/\n│   ├── sequences.fasta\n│   ├── sequences_native_metrics.csv\n│   ├── boltz2_results.csv\n│   ├── af3_results.csv           (opt)\n│   ├── esmfold2_results.csv      (opt)\n│   ├── soluprot_results.csv      (opt)\n│   └── report/\n│       ├── metrics.csv\n│       ├── candidates.csv\n│       ├── top30_candidates.csv\n│       ├── top30_slim.html\n│       ├── top30_slim.csv\n│       ├── top20_structures/\n│       └── report.html\n├── run_&lt;tool&gt;.sh\n├── run_evaluate.sh\n└── run_all.sh"]:::arti
     end
 
     InstallSh -->|creates| GenEnvs
@@ -181,9 +181,12 @@ Tool directories (`BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-C
 git clone https://github.com/damborik22/BinderScout.git ~/BinderScout
 cd ~/BinderScout
 
-# 2. Install tools
-bindmaster install             # interactive menu
-bindmaster install --tool all  # install everything
+# 2. Install tools — on a fresh clone call the script directly: the `bindmaster`
+#    shortcut does not exist yet, because the installer is what creates it
+./bindmaster.py install             # interactive menu
+./bindmaster.py install --tool all  # install everything
+#    This also installs a `bindmaster` shortcut into ~/.local/bin (on PATH by
+#    default), so every command below can use the short form.
 
 # 3. Configure a run
 bindmaster configure
@@ -211,9 +214,10 @@ bindmaster evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bind
 ## `bindmaster` CLI reference
 
 ```
-bindmaster install   [--tool bindcraft|boltzgen|mosaic|pxdesign|proteina-complexa|protein-hunter|rfd3|all]
+bindmaster install   [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|all]
                      [--tool af3|soluprot]             # extra evaluator engines (esmfold2 ships in --tool all)
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
+                     [--skip-preflight] [--force]
 bindmaster configure [options passed through to configurator.py]
 bindmaster evaluate  <binder-compare args>             # passthrough, e.g. run / extract / report / autosize
 bindmaster --help
@@ -221,19 +225,25 @@ bindmaster --help
 
 ### `bindmaster install`
 
+On a fresh clone use `./bindmaster.py install …` — the `bindmaster` shortcut is created by
+the first run of the installer (see [Quick start](#quick-start)).
+
 Options:
 
 | Flag | Description |
 |---|---|
 | `--tool all\|bindcraft\|boltzgen\|mosaic\|pxdesign\|proteina-complexa\|protein-hunter\|rfd3` | Which design tool(s) to install. Omit for interactive menu. |
+| `--tool evaluator` | Evaluator pipeline only — the `binder-eval` conda env and the `binder-compare` CLI (already in `--tool all`). This is the one to use when someone else ran the designs and you only want to refold, rank and report them. |
 | `--tool esmfold2` | ESMFold2 refolder — **default** (already in `--tool all`); lightweight, no gated weights; also the `autosize` gate. Listed here for explicit re-install. |
 | `--tool af3\|soluprot` | Extra evaluator tools (not in `--tool all`). `af3` = AlphaFold 3 v3.0.2 (gated weights — canonical cross-check). `soluprot` = solubility screen (x86 needs the SoluProt + USEARCH downloads; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it source-builds scikit-learn 0.20.4 + USEARCH v12 and uses the `--no_tmhmm` model). |
 | `--cuda VERSION` | CUDA version for conda package resolution (default: 12.4) |
 | `--skip-examples` | Do not prompt to run bundled examples after install |
+| `--skip-preflight` | Skip the disk / GPU / network checks run before downloading |
 | `--standalone` | Force local Miniforge3 install (no system conda needed) |
 | `--system-conda` | Use existing system conda instead of local install |
 | `--uninstall` | Remove tool environments, directories, and shortcuts |
 | `--yes` / `-y` | Non-interactive mode (accept all defaults) |
+| `--force` | Let `--yes` accept the destructive prompts too: re-clones tool repos and re-creates conda envs, **DELETING what is there — including `BindCraft/params/*.npz`, ~4 GB of AF2 weights**. Only for recovering a half-built environment. |
 
 ### `bindmaster configure`
 
@@ -322,7 +332,16 @@ binder-compare run --mosaic runs/PDL1/mosaic --bindcraft runs/PDL1/bindcraft \
 
 The configurator-generated `runs/<name>/run_evaluate.sh` wraps `Evaluator/evaluate.sh`, which auto-detects the installed engines and drives the whole thing.
 
-Report output lands in `…/evaluate/report/` — `report.html`, `metrics.csv`, and `top20_candidates.csv`.
+Report output lands in `…/evaluate/report/`:
+
+| File | Contents |
+|---|---|
+| `report.html` | The full report — plots, tables, per-engine comparisons |
+| `metrics.csv` | All metrics, every row (the files below collapse duplicate designs to one representative) |
+| `top30_candidates.csv` | The shortlist: top 30 distinct designs with sequences. **This is the file to script against** |
+| `top30_slim.html` / `top30_slim.csv` | Decision-metrics tables — overall plus per-tool, all-metric roll-ups |
+| `candidates.csv` | Per-tool native top-20 + refold top-50, with sequences |
+| `top20_structures/` | Top-20 refolded complexes as PDB, plus a PyMOL session to load them |
 
 #### `Evaluator/evaluate.sh` — the orchestrator's own flags
 
@@ -492,7 +511,8 @@ git clone https://github.com/damborik22/BinderScout.git
 git clone -b aarch64 https://github.com/damborik22/BinderScout.git
 ```
 
-Both branches: `bindmaster install` or `bash install/install.sh`.
+Both branches: `./bindmaster.py install` (the `bindmaster` shortcut only exists after that
+first run) or `bash install/install.sh`.
 
 ### aarch64 notes
 

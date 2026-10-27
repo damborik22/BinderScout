@@ -4,7 +4,7 @@ Run these checks in order before touching the run script. If any fails, append a
 
 ## 1. Read and validate the assignment
 
-**Driven mode (BM1/BM2/BM4 via `tools/fleet.sh`):** there's no `CLUSTER/` doc — read the run script `fleet.sh launch` will ship (or already shipped) instead; it carries the same settings a `CLUSTER/` doc's "Setup / install" section would. The rest of this checklist (§2-5, §7-9) still applies; §6 (muni-disk reachability) does not.
+**Driven mode (<node1>/<node2>/<node3>):** there's no `CLUSTER/` doc — read the run script the orchestrator will ship (or already shipped) instead; it carries the same settings a `CLUSTER/` doc's "Setup / install" section would. The rest of this checklist (§2-5, §7-9) still applies; §6 (the shared archive reachability) does not.
 
 Open `CLUSTER/<TARGET>_<tool>_<machine>_SETTINGS.md`. Confirm it has:
 
@@ -57,9 +57,9 @@ Check:
 
 If memory class is below what the assignment needs, that's a pre-flight failure. The orchestrator may have made an assumption that doesn't hold; report it.
 
-### 3.1 GPU-busy floor (BM1/BM2/BM4)
+### 3.1 GPU-busy floor (<node1>/<node2>/<node3>)
 
-When checking "is the GPU actually free" before a manual launch on one of the LAN machines, apply the same >512 MiB floor `tools/fleet.sh` uses (`GPU_BUSY_MIB`) — small desktop-integration processes ride the GPU permanently on these boxes and don't count as busy. Confirmed on BM4: a ~6 MiB `snapd-desktop-integration` process and, at times, a ~294 MiB `rustdesk` process are both always-on and both correctly ignored by the floor. A check without the floor will conclude the machine is busy when it isn't.
+When checking "is the GPU actually free" before a manual launch on one of the LAN machines, apply the same >512 MiB floor the orchestrator's launcher uses (`GPU_BUSY_MIB`) — small desktop-integration processes ride the GPU permanently on these boxes and don't count as busy. Confirmed on <node3>: a ~6 MiB `snapd-desktop-integration` process and, at times, a ~294 MiB `rustdesk` process are both always-on and both correctly ignored by the floor. A check without the floor will conclude the machine is busy when it isn't.
 
 ```bash
 nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits \
@@ -67,7 +67,7 @@ nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits \
 # empty output = actually idle
 ```
 
-`fleet.sh launch` applies this floor automatically when you go through it (driven mode); apply it by hand if you're checking GPU occupancy on a LAN machine outside `fleet.sh`.
+The orchestrator's launcher applies this floor automatically when you go through it (driven mode); apply it by hand if you're checking GPU occupancy on a LAN machine outside the orchestrator's launcher.
 
 ### 3.2 RAM class (LAN machines — GPU memory and system RAM are different budgets)
 
@@ -75,17 +75,17 @@ nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits \
 free -g | awk '/^Mem:/{print $2}'   # total installed RAM, not free/available
 ```
 
-BM1 has **31 GB** total RAM against BM2/BM4's 62 GB. The BindCraft JAX RSS leak (§ below, and `troubleshooting.md` §4.4) killed BM4 at 58 GB after nine days; on BM1 the same run OOMs far sooner, before it produces meaningful yield. **Do not route long BindCraft runs to BM1** — short jobs or non-BindCraft tools are fine there.
+<node1> has **31 GB** total RAM against <node2>/<node3>'s 62 GB. The BindCraft JAX RSS leak (§ below, and `troubleshooting.md` §4.4) killed <node3> at 58 GB after nine days; on <node1> the same run OOMs far sooner, before it produces meaningful yield. **Do not route long BindCraft runs to <node1>** — short jobs or non-BindCraft tools are fine there.
 
 ### 3.3 `PYTORCH_CUDA_ALLOC_CONF` (LAN machines, RFD3)
 
-All three x86 LAN boxes are 24 GB Ampere, so `export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` is mandatory before `rfd3 design` (fragmentation OOM — see `troubleshooting.md` §4.2). `fleet.sh launch` exports this automatically for every driven-mode job. If you're hand-starting a job — assignment mode, or a manual session outside `fleet.sh` — set it yourself.
+All three x86 LAN boxes are 24 GB Ampere, so `export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` is mandatory before `rfd3 design` (fragmentation OOM — see `troubleshooting.md` §4.2). The orchestrator's launcher exports this automatically for every driven-mode job. If you're hand-starting a job — assignment mode, or a manual session outside the orchestrator's launcher — set it yourself.
 
 ## 4. Verify disk space
 
 ```bash
 df -h ~/runs                # local scratch
-df -h /path/to/muni-disk    # output destination (if mounted)
+df -h /path/to/<shared-storage>    # output destination (if mounted)
 ```
 
 Budget guide per tool (rough):
@@ -116,30 +116,30 @@ If the pinned SHA doesn't exist locally even after fetch, the orchestrator may h
 
 If the repo has uncommitted changes locally, that's a worker-side mess; ask before stashing or discarding.
 
-## 6. Verify muni-disk reachable
+## 6. Verify the shared archive is reachable
 
-This check applies to **assignment mode** — Clara, or any machine reading a `CLUSTER/` doc directly. **Skip it for driven-mode LAN jobs** (BM1/BM2/BM4 launched via `tools/fleet.sh` from BM5): the run script arrives by direct SSH push, not a `CLUSTER/` read, and results are pulled back by `fleet.sh fetch` and archived to muni-disk by BM5 itself — the worker machine never touches muni-disk in that flow. See `bindmaster-orchestrator/references/lab-deploy.md`.
+This check applies to **assignment mode** — the HPC cluster, or any machine reading a `CLUSTER/` doc directly. **Skip it for driven-mode LAN jobs** (<node1>/<node2>/<node3> launched from the orchestrator machine): the run script arrives by direct SSH push, not a `CLUSTER/` read, and results are pulled back by the orchestrator and archived to the shared archive by the orchestrator machine itself — the worker machine never touches the shared archive in that flow.
 
 For assignment mode, either it's mounted:
 
 ```bash
-ls /path/to/muni-disk/<TARGET>/CLUSTER/   # should show your assignment
+ls /path/to/<shared-storage>/<TARGET>/CLUSTER/   # should show your assignment
 ```
 
 Or it needs the right VPN:
 
 ```bash
-# After connecting to MUNI VPN:
-ls /path/to/muni-disk/<TARGET>/CLUSTER/
+# After connecting to storage VPN:
+ls /path/to/<shared-storage>/<TARGET>/CLUSTER/
 ```
 
 **Which machines need which:**
-- **Clara** needs the MUNI VPN to reach XBay — VPN-only access (see `troubleshooting.md` §8).
-- **BM1/BM2/BM4** are on the university LAN and mount muni-disk **directly, no VPN**. If one of them is ever run in assignment mode (rather than driven mode) and needs to read a `CLUSTER/` doc, it should already be reachable without switching anything.
+- **The HPC cluster** needs the storage VPN to reach shared storage — VPN-only access (see `troubleshooting.md` §8).
+- **<node1>/<node2>/<node3>** are on the lab LAN and mount the shared archive **directly, no VPN**. If one of them is ever run in assignment mode (rather than driven mode) and needs to read a `CLUSTER/` doc, it should already be reachable without switching anything.
 
-If not reachable and you're on Clara, you may be on the wrong VPN. Switch and re-check.
+If not reachable and you're on the HPC cluster, you may be on the wrong VPN. Switch and re-check.
 
-**Note for VPN switching:** if you need to switch VPN (Clara-VPN ↔ MUNI-VPN), announce it in a PROGRESS.md Worker updates entry first. The orchestrator may be relying on your current VPN for monitoring. This doesn't apply to BM1/BM2/BM4 — they need no VPN at all.
+**Note for VPN switching:** if you need to switch VPN (cluster VPN ↔ storage VPN), announce it in a PROGRESS.md Worker updates entry first. The orchestrator may be relying on your current VPN for monitoring. This doesn't apply to <node1>/<node2>/<node3> — they need no VPN at all.
 
 ## 7. Tool-specific cache verification
 
@@ -203,7 +203,7 @@ Confirm tool-specific aarch64 ports:
   file ~/dev/BindMaster/BindCraft/functions/DAlphaBall.gcc
   ```
 - **Proteina-Complexa:** NOT yet ported. Refuse the assignment if it landed here by mistake; ask the orchestrator.
-- **Protein-Hunter:** permanently blocked on aarch64, not just "not yet ported" — PyRosetta has no aarch64 wheels. Refuse if this machine is BM5/Spark; route to BM1/BM2/BM4 or Clara instead.
+- **Protein-Hunter:** permanently blocked on aarch64, not just "not yet ported" — PyRosetta has no aarch64 wheels. Refuse if this machine is the orchestrator machine (aarch64 Spark); route to <node1>/<node2>/<node3> or an HPC cluster instead.
 - **RFD3:** should work via foundry; the `mpnn` console-script needs ARM64-built wheels.
 - **PXDesign:** install patches handle Blackwell sm_120; verify they were applied (see `troubleshooting.md`).
 

@@ -115,7 +115,7 @@ def resolve_mem_fraction(
     # NEVER fall back to system RAM here.  A RAM-derived "pool" passes the unified
     # test below *by construction* (pool == ram), so an UNKNOWN pool was always
     # classified as unified and handed the OS floor.  On a discrete card that is the
-    # wrong number entirely: BM2 (24 GB RTX 3090, 62.7 GiB RAM) could not dlopen
+    # wrong number entirely: a 24 GB RTX 3090 host (, 62.7 GiB RAM) could not dlopen
     # libcudart from the Mosaic venv, resolved "unified 62.7 GiB", applied the 40 GiB
     # floor for a fraction of 0.362, and JAX then took 0.362 of the *card* -- 8.5 GiB
     # of 23.6 -- so Boltz-2 OOMed at 9 GB and it read as "this target is too big".

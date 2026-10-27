@@ -118,12 +118,12 @@ while [[ $# -gt 0 ]]; do
                     # jaxlib for aarch64, so the AF2 reward — the only reward in the composite —
                     # runs on CPU at ~320 s/call vs <=2.46 s on an H200. The production MCTS recipe
                     # costs 3300 AF2 calls per 100-design replicate, i.e. 12.2 days here vs 2.25 h.
-                    # See docs/plans.md "Proteina-Complexa on aarch64 (DGX Spark) — NOT VIABLE".
                     echo -e "${RED}Proteina-Complexa is deprecated on aarch64 (DGX Spark): not viable, not broken.${RESET}"
                     echo -e "${YELLOW}  No CUDA jaxlib for aarch64 → the AF2 reward runs on CPU (~320 s/call vs 2.5 s on H200).${RESET}"
                     echo -e "${YELLOW}  The production MCTS recipe needs 3300 AF2 calls per 100-design replicate:${RESET}"
-                    echo -e "${YELLOW}    12.2 days here vs 2.25 h on one H200. Run Proteina-Complexa on x86 (Clara / BM1-BM4).${RESET}"
-                    echo -e "${YELLOW}  Details + what would reopen it: docs/plans.md.${RESET}"
+                    echo -e "${YELLOW}    12.2 days here vs 2.25 h on one H200. Run Proteina-Complexa on x86 hardware.${RESET}"
+                    echo -e "${YELLOW}  Reopens only if a CUDA jaxlib for aarch64/sm_121 appears, or if a${RESET}"
+                    echo -e "${YELLOW}  GPU-native reward replaces the CPU-bound AF2 reward.${RESET}"
                     exit 1 ;;
                 af3|alphafold3|alphafold)
                     DO_AF3=true ;;
@@ -975,7 +975,7 @@ install_bindcraft() {
     # its aarch64 conda PyRosetta, are unchanged).  It also still exposes the
     # deprecated jax.lib.xla_bridge.get_backend that ColabDesign's clear_mem()
     # calls, so ColabDesign needs no patch.
-    # Measured on BM5 (GB10), 120aa target + 40aa binder, AF2 fwd+bwd:
+    # Measured on a GB10 node, 120aa target + 40aa binder, AF2 fwd+bwd:
     #   0.4.34 + bf16 disabled : 5.40 s/iter   (the only way to make 0.4.34 run)
     #   0.6.2  + bf16 enabled  : 2.39 s/iter   (2.3x faster, and half the memory)
     print_step "Installing JAX 0.6.2 with CUDA 12 plugins (PyPI)"
@@ -1649,7 +1649,7 @@ PATCHEOF
     # the eval subprocess aborts (SIGABRT) with
     #     LLVM ERROR: Cannot select: nxv4bf16 = AArch64ISD::UINT_TO_FP_MERGE_PASSTHRU
     # and pxdbench then reads the empty output file and dies on a JSONDecodeError
-    # that says nothing about the real cause.  Bisected on BM5: bf16 on = abort,
+    # that says nothing about the real cause.  Bisected on a GB10 node: bf16 on = abort,
     # bf16 off = AF2 completes on CPU in 89 s.  x86 is unaffected, so this patch
     # lives only in the aarch64 installer.
     run_logged "Patching pxdbench AF2 eval (no bf16 on aarch64)" \

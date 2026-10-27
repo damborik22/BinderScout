@@ -20,6 +20,10 @@ conda/
 # Local shortcuts (standalone mode)
 bin/
 
+# Per-tool install-success markers written by install.sh and read by the
+# configurator. Machine-local state, one file per tool, never shared.
+.install_state/
+
 # Installer logs — ephemeral, can be large.
 # NOT `install*.log`: that glob has no slash, so git matches it against the
 # basename, and `install*` requires the name to START with "install".
@@ -82,3 +86,50 @@ Evaluator/tools/soluprot/usearch12-src/
 
 # superpowers SDD scratch workspace
 .superpowers/
+
+# ── User campaign data: never commit research output to this public repo ──
+# The documented workflow (see the orchestrator/worker skills) produces result
+# packages, a cross-machine PROGRESS.md and per-machine assignment docs. None of
+# those belong in git: a public repo is not a data store, and designed binder
+# sequences are unpublished IP. Added 2026-10-27 after an audit found real
+# campaign data committed under docs/data/.
+RESULTS/
+CLUSTER/
+PROGRESS.md
+
+# Scheduler and run logs (only *install*.log was covered before)
+slurm-*.out
+slurm-*.err
+*.err
+
+# Structure, sequence and array data. Design outputs and target structures are
+# the two things most likely to be committed by accident — a user drops a .pdb
+# at the repo root, or an evaluate/ report dir lands outside runs/.
+*.pdb
+*.cif
+*.cif.gz
+*.a3m
+*.npz
+*.fasta
+*.fa
+
+# …but the bundled upstream SoluProt training data IS tracked, and test or
+# example fixtures must stay committable. Negate only the data extensions above
+# — a blanket "!tests/**" would also un-ignore __pycache__/ (ignored at the top
+# of this file), and a plain `pytest` run would then be staged by `git add -A`.
+!Evaluator/tools/soluprot/data/**
+!tests/**/*.pdb
+!tests/**/*.cif
+!tests/**/*.a3m
+!tests/**/*.npz
+!tests/**/*.fasta
+!tests/**/*.fa
+!bindmaster_examples/**/*.pdb
+!bindmaster_examples/**/*.cif
+!bindmaster_examples/**/*.fasta
+!bindmaster_examples/**/*.fa
+
+# docs/data/ was where the audited leak actually lived (benchmark CSVs carrying
+# designed binder + target sequences). Ignore it wholesale; un-ignore a specific
+# file deliberately if genuinely-public reference data ever belongs in the docs.
+docs/data/

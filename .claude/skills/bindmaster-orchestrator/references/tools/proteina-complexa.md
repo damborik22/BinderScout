@@ -34,7 +34,7 @@ Three model variants on NGC, each with its own (model + autoencoder) checkpoint 
 - **NVIDIA license.** Open Model License Agreement for the model weights (Apache 2.0 for the code itself). Review terms for commercial use.
 - **JAX recompilation overhead.** AF2 reward model uses JAX; first sample of an eval job pays ~20s build + compile cost (subsequent samples ~1–5s). Recompiles once per unique sequence length.
 - **`dssp` and `sc` binaries not bundled.** Must be obtained from FreeBindCraft repo or built locally.
-- **aarch64 not yet ported.** Per BindMaster CLAUDE.md known issues: "Proteina-Complexa: Not yet ported to aarch64. See `docs/plans.md` for the porting plan." Needs PyTorch Geometric + torchtext aarch64 wheel patches (same approach as Mosaic).
+- **aarch64 deprecated — not viable, not broken.** Upstream installs and generates fine, but no CUDA `jaxlib` exists for aarch64, so the AF2 reward (the only member of the composite) runs on CPU at ~320 s/call vs ≤2.46 s on an H200 — the production MCTS recipe needs 3300 AF2 calls per 100-design replicate, i.e. ~12 days vs ~2 h. Run it on x86. PyTorch Geometric / torchtext were **not** the blocker.
 - **tmol install fragile.** Some Python 3.12 setups hit llvmlite/numba version conflicts (workaround documented in README).
 
 ## Pick when

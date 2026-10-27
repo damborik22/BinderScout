@@ -36,7 +36,7 @@ For Boltz-2-based tools (Protein-Hunter, BoltzGen, Mosaic): if the target is in 
 
 If a target's hotspots span multiple distant regions (different secondary-structure elements, different chain regions), BindCraft's AF2 hallucination may not be able to satisfy all of them simultaneously.
 
-**2VDY example:** Four hotspot clusters — N-term helix (15–22), central sheet (232–242), pocket lid (260–267), C-term helix (366–371). With hotspots ON: BM2 10/10 trajectories failed pre-MPNN; BM4 ran 9 days with 0/203 accepted (every MPNN sequence failed AF2 cross-val on the V2 interface PAE filters). Same V2+V4 preset with hotspots OFF: BM2 22 accepts, Clara L40S 10 accepts.
+**2VDY example:** Four hotspot clusters — N-term helix (15–22), central sheet (232–242), pocket lid (260–267), C-term helix (366–371). With hotspots ON: <node2> 10/10 trajectories failed pre-MPNN; <node3> ran 9 days with 0/203 accepted (every MPNN sequence failed AF2 cross-val on the V2 interface PAE filters). Same V2+V4 preset with hotspots OFF: <node2> 22 accepts, cluster L40S 10 accepts.
 
 **Generalization rule:** Hotspots clustered on one face (single binding pocket on one side) → hotspots-ON is fine. Hotspots spanning the protein → run BindCraft no-hotspots and let the trajectory find the binding mode unguided. Cross-engine refold at the end filters on actual interface metrics anyway.
 
@@ -125,10 +125,10 @@ Format: `"Compute: <wall> GPU-time on <node-id>."` Wrap up the campaign with a t
 
 The `~/BindMaster/bin/<tool>` shortcuts work interactively but break under SLURM / nohup / any non-TTY shell, in two distinct ways:
 
-- **`mamba run` wrappers** (e.g. `rfd3`) materialize a `/tmp/mambaXXXX` script whose `exec --` line dies on some bash builds: `exec: --: invalid option` (Clara Rocky 9.6 / bash 5.1.8; ApoE4 SLURM 119818 died in 1 s).
+- **`mamba run` wrappers** (e.g. `rfd3`) materialize a `/tmp/mambaXXXX` script whose `exec --` line dies on some bash builds: `exec: --: invalid option` (the HPC cluster Rocky 9.6 / bash 5.1.8; ApoE4 SLURM <jobid> died in 1 s).
 - **Interactive wrappers** (e.g. `boltzgen`) `source` conda, `cd`, print a banner, then `exec bash` with **no `$@` relay** — under SLURM stdin closes, the wrapper exits rc=0 with zero work (ApoE4 119820 silent no-op).
 
-**Fix:** after `conda activate <env>`, call **`"$CONDA_PREFIX/bin/<tool>"`** (absolute env binary, bypasses the PATH-shadowing wrapper). Note `conda activate` does not guarantee the env bin precedes `~/BindMaster/bin` in PATH — verified on Clara that `which rfd3` still resolved to the wrapper post-activate. `$CONDA_PREFIX/bin/<tool>` is unambiguous.
+**Fix:** after `conda activate <env>`, call **`"$CONDA_PREFIX/bin/<tool>"`** (absolute env binary, bypasses the PATH-shadowing wrapper). Note `conda activate` does not guarantee the env bin precedes `~/BindMaster/bin` in PATH — verified on the HPC cluster that `which rfd3` still resolved to the wrapper post-activate. `$CONDA_PREFIX/bin/<tool>` is unambiguous.
 
 **Applies to tool entries:** `tools/rfd3.md`, `tools/boltzgen.md`, and any tool whose run script calls the tool by bare name. The configurator's `write_run_*` functions should emit `"$CONDA_PREFIX/bin/<tool>"`.
 

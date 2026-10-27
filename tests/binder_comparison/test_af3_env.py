@@ -33,7 +33,7 @@ def build_env():
 def default_fraction():
     """The pool-aware default, computed the same way the script computes it.
 
-    Deliberately NOT a hard-coded "0.8": that constant is what rebooted BM5, and
+    Deliberately NOT a hard-coded "0.8": that constant is what rebooted the GB10 node, and
     _build_af3_env was changed to derive the fraction from the real pool. Asserting
     0.8 here made these tests pass on a discrete card and fail on a unified-memory
     host (GB10 resolves 12 GiB / 121.7 GiB = 0.099) — i.e. it asserted the bug.

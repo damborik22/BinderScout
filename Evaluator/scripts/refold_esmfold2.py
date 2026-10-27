@@ -41,12 +41,12 @@ _MODEL_IDS: dict[str, str] = {
 # tagged `main` on the day it installed, so two nodes in the same campaign can fold
 # with different weights and nothing anywhere says so.
 #
-# It is not hypothetical: Clara installed on 2026-09-16 and got 69869f737bef, whose
+# It is not hypothetical: the HPC cluster installed on 2026-09-16 and got 69869f737bef, whose
 # config nests `architectures`/`model_type` inside `structure_head` (30 keys). The
 # pinned transformers 4.57.6 DiffusionStructureHeadConfig rejects those, so the run
 # died with `TypeError: ... unexpected keyword argument 'architectures'` — and
 # evaluate.sh swallowed it and printed REFOLD_DONE with exit 0, contributing an
-# entire engine of nothing to a 3-engine gate. BM5, installed earlier, had
+# entire engine of nothing to a 3-engine gate. the GB10 node, installed earlier, had
 # 8fc3ff471022 (12 clean keys) and worked.
 #
 # 8fc3ff471022 is the revision every validated result in this project was produced

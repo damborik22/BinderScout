@@ -3,11 +3,16 @@
 > **Status: ✅ COMPLETE (staged 2026-07-25, finished 2026-07-28).** All 4,442 designs
 > refolded by all three engines (Boltz-2 + AF3 + ESMFold2), 100 % coverage, zero failures.
 > Verdict in §5–§10. One code change shipped (`f63e18b`, Stage-1 screen retired).
-> Data + scripts: `~/dev/cao_refold/` (gitignored — see §10 for what is reproducible where).
+> Data + scripts live outside the repo (gitignored) — see §10 for what is reproducible where.
 >
 > **Headline:** metric choice is a solved-and-closed question — nothing beats what we already
 > ship, and *selecting* a metric from labelled data does worse. The apparent 0.56 ceiling is
 > mostly **label censoring**, not a weak screen: on label-clean positives it is **0.73**.
+
+> **Sanitized public version.** The analysis, statistics and conclusions below are exactly as
+> measured. The Cao 2022 inputs are public and re-downloadable; the comparator pools from our
+> own campaigns (the Adaptyv and de novo BindCraft refolds) are from unpublished internal work,
+> so their per-design identifiers, sequences and raw tables are not included here.
 
 ---
 
@@ -127,32 +132,32 @@ prefixes, matching the `EGFRc`/`EGFRn` constructs.
 constructs, no UniProt guesswork. SARS-CoV-2 RBD has affinity data but no construct in the
 tarball and only 61 binders; excluded.
 
-**Execution split** (Clara lacks an ESMFold2 env; Spark lacks the H200s):
+**Execution split** (the HPC cluster had no ESMFold2 env; the aarch64 fleet node has no H200):
 
 | engine | host | job |
 |---|---|---|
-| Boltz-2 | Clara H200 | `cao_boltz2.sbatch`, `--array=0-11` (one task per target) |
-| AF3 | Clara H200 | `cao_af3.sbatch`, `--array=0-11` |
-| ESMFold2 | Spark GB10 | `run_esm_spark.sh` (sequential, `--model full`) |
+| Boltz-2 | HPC cluster, H200 | `cao_boltz2.sbatch`, `--array=0-11` (one task per target) |
+| AF3 | HPC cluster, H200 | `cao_af3.sbatch`, `--array=0-11` |
+| ESMFold2 | aarch64 fleet node | sequential run, `--model full` |
 
 **Prerequisites handled:**
-- Clara compute nodes have no internet → target MSAs pre-fetched on the login node into
+- The cluster's compute nodes have no internet → target MSAs pre-fetched on the login node into
   `~/.cache/bindmaster/target_msa/`; array submission is chained to wait for it
   (`chain_submit.sh`).
-- Clara's `binder-eval` env was missing `requests` (needed by `target_msa`) — installed.
-- The Mosaic offline-MSA patch was already applied on Clara (it is **required**; without it
+- The cluster's `binder-eval` env was missing `requests` (needed by `target_msa`) — installed.
+- The Mosaic offline-MSA patch was already applied there (it is **required**; without it
   Boltz-2 dies with `TargetChain unexpected keyword argument 'msa_path'` — see
   `install/patches/mosaic-offline-msa.patch`).
 
 Complexes are 141–488 tokens, far below any memory ceiling and ~⅓ the size of the Adaptyv
-run, so this is cheaper per fold than the Promera benchmark.
+run, so this is cheaper per fold than our previous large-scale benchmark.
 
 ## 4. What it will answer
 
 1. **Which metric/combination actually screens best**, with 12 targets and ~2,000 binders —
    enough power to resolve differences that were noise at 5 targets. Scored as **macro-AUC
-   across targets** (pooling across targets with different binder rates is what produced the
-   `promera_plddt` artifact).
+   across targets** (pooling across targets with different binder rates is what produced an
+   earlier, since-retracted pLDDT artifact).
 2. **Whether metric choice transfers** — re-testing the ρ = −0.107 result against a
    third, much larger dataset. If rankings still don't transfer at this scale, the screen is
    genuinely saturated and no combination work is worth doing.
@@ -167,16 +172,16 @@ run, so this is cheaper per fold than the Promera benchmark.
 
 | engine | host | result |
 |---|---|---|
-| Boltz-2 | Clara H200, array `cao_boltz2` | 4,442 / 4,442 |
-| ESMFold2 | Spark GB10, `run_esm_spark.sh --model full` | 4,442 / 4,442, zero errors |
-| AF3 | Clara H200, array `153471` | 4,442 / 4,442, all 12 tasks `COMPLETED 0:0` |
+| Boltz-2 | HPC cluster H200, array `cao_boltz2` | 4,442 / 4,442 |
+| ESMFold2 | aarch64 fleet node, sequential `--model full` | 4,442 / 4,442, zero errors |
+| AF3 | HPC cluster H200, array `<jobid>` | 4,442 / 4,442, all 12 tasks `COMPLETED 0:0` |
 
 **Every design has all three engines — 100 % coverage, zero NaN.** This makes every
 engine comparison perfectly matched, which no previous benchmark of ours achieved.
 
-Two excluded designs: `scarlet-raven-snow` and `radiant-shark-iron` carry a `:` in the
-sequence, which kills the DataLoader and truncates the whole chunk. Excluded; the 220
-innocent designs in their chunks were refolded separately.
+Two designs from the public library were excluded: their sequence field carries a `:`, which
+kills the DataLoader and truncates the whole chunk. Excluded; the 220 innocent designs in
+their chunks were refolded separately.
 
 **Metrics were recomputed from the PAE matrices using the shipped code path**
 (`binder_comparison.comparison.scoring.add_{boltz_,}ipsae_from_pae_files` /
@@ -252,13 +257,13 @@ over-retaining clean labels.)
 | Adaptyv | 0.68–0.72 | |
 | de novo BindCraft | **0.72–0.78** | **not 0.91** — see below |
 
-**The "0.91" was a Simpson artifact and must not be quoted [V].** Traced to
-`~/dev/denovo_refold/denovo_esm_results.csv` and reproduced exactly: pooled `esm_iptm`
-**0.9058** over 66 designs / 2 targets — PD1 **0.9096** (13 binders / 40 non) pooled with
-PD-L1 **0.6364** (11 binders / **2** non). **Macro over the two targets = 0.7730**; pooling
-inflated it **+0.1328**, the exact trap this project's own macro-over-pooled rule forbids.
-On the larger 7-target ESMFold2 run (`runs/denovo_lengthtest`, 110 designs) macro is 0.7191.
-Memory `reference_denovo_bindcraft_replication.md` was corrected.
+**The "0.91" was a Simpson artifact and must not be quoted [V].** Traced to the de novo
+ESMFold2 results table (an unpublished internal run) and reproduced exactly: pooled `esm_iptm`
+**0.9058** over 66 designs / 2 targets — one target **0.9096** (13 binders / 40 non) pooled
+with a second at **0.6364** (11 binders / **2** non). **Macro over the two targets = 0.7730**;
+pooling inflated it **+0.1328**, the exact trap this project's own macro-over-pooled rule
+forbids. On the larger 7-target ESMFold2 run (110 designs) macro is 0.7191. The internal
+reference note recording that replication was corrected.
 
 ### 6.4 The residual gap is design regime
 
@@ -456,8 +461,9 @@ Recorded so they are not re-derived **[✗]**:
 - **Whether the screen holds at the top of a ranking** — the top-50 analysis had ~10 % power.
   Not disproved, untested.
 
-**Data location.** `runs/` is gitignored, so nothing here is in the repo. Archived to MUNI at
-`Project-01-BINDMASTER/EVALUATOR/cao_partU_2026-07/` — the merged table, the per-engine
-augmented CSVs, `cao_lib.py`, every analysis script, and the assembled 654k-design master.
-Deliberately **not** archived: the 2.4 GB of ESMFold2 structures and the 234 MB source
-tarball (re-downloadable from the URL in §2).
+**Data location.** `runs/` is gitignored, so nothing here is in the repo. The merged table,
+the per-engine augmented CSVs, `cao_lib.py`, every analysis script and the assembled
+654k-design master were archived to the shared archive outside the repo and are not published.
+Deliberately **not** archived: the 2.4 GB of ESMFold2 structures and the 234 MB source tarball
+(re-downloadable from the URL in §2). Everything Cao-side is reproducible from that public
+tarball with the scripts named above; the Adaptyv and de novo comparator pools are not public.

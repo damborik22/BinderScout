@@ -18,7 +18,7 @@ def resolve_single_match(matches: list[Path], *, tool: str, what: str, input_dir
     Every extractor used to resolve a multi-hit glob with ``matches[0]`` — raw
     filesystem order, no warning. Pointed at a parent directory that holds N
     replicates, that silently keeps ONE of them: measured 96 of 4804 rows on the
-    ApoE4-iso PC-v3 pool and 100 of 500 on a Clara run, and on an ordinary
+    ApoE4-iso PC-v3 pool and 100 of 500 on a cluster run, and on an ordinary
     multi-variant run dir it picked ``bindcraft_variant_a`` out of four and
     discarded a whole 700-design BoltzGen pool. The result is a wrong-but-nonzero
     pool, which passes every downstream guard including ``--allow-empty`` and then

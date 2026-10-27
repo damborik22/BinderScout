@@ -25,7 +25,7 @@ per-PDB-id lookup when a local run isn't set up.
 
 ## HotSpot Wizard (Loschmidt — functional pocket/tunnel residues)
 
-[HotSpot Wizard 3](https://loschmidt.chemi.muni.cz/hotspotwizard/) (our lab) takes a **PDB or a
+[HotSpot Wizard 3](https://loschmidt.chemi.muni.cz/hotspotwizard/) takes a **PDB or a
 sequence** and integrates pocket detection (**CASTp**), access tunnels (**CAVER**), catalytic
 sites (Catalytic Site Atlas), and conservation (**Rate4Site**) into hotspot lists. Its
 **functional hotspots** — residues lining the **active-site pocket** and **access tunnels** — are

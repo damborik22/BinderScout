@@ -226,7 +226,7 @@ class ProteinaComplexaExtractor(SequenceExtractor):
 
         ``aatype`` is the WHOLE COMPLEX: ``target + binder + poly-alanine pad``.
         Measured on three production runs — 2VDY (1000 designs, 500-509 aa against
-        a 389-aa target), ApoE4/Clara (100 designs, 298-305 aa against 185 aa) and
+        a 389-aa target), a cluster run (100 designs, 298-305 aa against 185 aa) and
         ApoE4-iso PC-v3 (4804/4804 rows carrying the 141-aa target as an exact
         prefix). Refolding that unstripped feeds the engines a target+binder fusion
         against the same target, and every iPTM computed from it is meaningless.

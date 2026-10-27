@@ -14,7 +14,7 @@ import uuid
 # `NVRM: Out of memory` on 2026-08-19.  See binder_comparison.refolding.memory_policy
 # and docs/PLAN_bm5_unified_memory.md.  Override with BOLTZ2_XLA_MEM_FRACTION.
 #
-# MEASURED 2026-08-20 on BM5 (GB10, 121.7 GiB unified), PREALLOCATE=false under an
+# MEASURED 2026-08-20 on a GB10 node (121.7 GiB unified), PREALLOCATE=false under an
 # MPS cap.  Demand is FLAT across our size regime -- 273 tokens and 340 tokens both peak
 # at 17.19 GiB -- so it is dominated by fixed cost, not by N^2.  24 GiB is ~1.4x that and
 # is verified to complete a 340-token refold.  (The "18.9 GB" figure in circulation was

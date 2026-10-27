@@ -145,7 +145,7 @@ In templates already.
 
 ### 4.4 JAX RSS leak (BindCraft long runs)
 
-**Symptom (BindCraft):** process RSS grows monotonically over days. The 2VDY campaign's BM4 hit 58 GB RSS after 9 days; killed by the kernel.
+**Symptom (BindCraft):** process RSS grows monotonically over days. The 2VDY campaign's <node3> hit 58 GB RSS after 9 days; killed by the kernel.
 
 **Detection:** monitor RSS periodically:
 
@@ -308,23 +308,23 @@ Falling back to policy: 'reinit'
 
 ## 8. Per-machine known issues
 
-### Clara
+### HPC cluster
 
-- VPN-only access to muni-disk (need MUNI VPN). VPN switches require announcement in PROGRESS.md.
+- VPN-only access to the shared archive (need storage VPN). VPN switches require announcement in PROGRESS.md.
 - L40S nodes have 48 GB — fine for most tools at moderate target sizes. H200 nodes are the 141 GB option.
 - SLURM partition: confirm in the assignment.
 
-### BM2 / BM4
+### <node2> / <node3>
 
-- Local lab workstations, direct muni-disk mount usually. No VPN dance.
+- Local lab workstations, direct the shared archive mount usually. No VPN dance.
 - 24 GB GPUs (3090-class) — has the BindCraft length ceilings documented above.
-- BM4's 2VDY BindCraft RSS leak was the kernel killing the process at ~58 GB.
+- <node3>'s 2VDY BindCraft RSS leak was the kernel killing the process at ~58 GB.
 
 ### Spark (DGX Spark)
 
 - aarch64 — only some tools ported. Don't accept assignments for Proteina-Complexa here yet.
 - Hosts the AF3 v3.0.2 refolder (`binder-eval-af3` env), the Boltz-2 refolder (`Mosaic/.venv`), and the Protenix refolder (`bindmaster_pxdesign`) for the orchestrator's local cross-engine refold. If Spark is also doing worker duty, be careful not to clash refolder runs with worker design runs on the same GPU.
-- VPN routing: Spark may route to Clara via a "VPN-on-Spark" mode if configured — that's primarily for orchestrator-driven remote sessions, not worker-side runs.
+- VPN routing: Spark may route to the HPC cluster via a "VPN-on-Spark" mode if configured — that's primarily for orchestrator-driven remote sessions, not worker-side runs.
 
 ---
 

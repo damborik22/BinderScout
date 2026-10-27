@@ -333,7 +333,7 @@ class TestProteinaComplexaBinderIsolation:
     """F44(a): the NVIDIA-native ``aatype`` column encodes the WHOLE COMPLEX.
 
     Measured on three production runs: 2VDY (1000 designs, 500-509 aa against a
-    389-aa target), ApoE4/Clara (100 designs, 298-305 aa against 185 aa) and
+    389-aa target), a cluster run (100 designs, 298-305 aa against 185 aa) and
     ApoE4-iso PC-v3 (4804/4804 rows carrying the 141-aa target as an exact
     prefix). The decoded string is ``target + binder + poly-alanine padding``;
     unstripped it is refolded against the very target it already contains, and
@@ -437,7 +437,7 @@ class TestExtractorFileDiscovery:
     """F44(b): every extractor resolved a multi-match glob with ``matches[0]``.
 
     Measured: pointing extract at PC-v3's parent kept 96 of 4804 rows (one
-    filesystem-order replicate) and at a Clara run 100 of 500; on a normal
+    filesystem-order replicate) and at a cluster run 100 of 500; on a normal
     multi-variant run dir BindCraft's ``final_design_stats.csv`` has 4 matches and
     BoltzGen's ``sorted()[-1]`` silently discarded a 700-design pool. A
     wrong-but-nonzero pool passes every downstream guard, so ambiguity must stop

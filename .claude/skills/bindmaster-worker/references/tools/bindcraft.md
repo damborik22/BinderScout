@@ -64,7 +64,7 @@ See `packaging.md` for the canonical recipe. Quick version:
 
 ```bash
 cd ~/runs/<TARGET>-<machine>-bindcraft/
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_BindCraft_<machine>.tar.gz \
+tar czf <shared-storage>/<TARGET>/RESULTS/<TARGET>_BindCraft_<machine>.tar.gz \
     Accepted/ \
     final_design_stats.csv \
     MPNN_design_stats.csv \
@@ -78,7 +78,7 @@ tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_BindCraft_<machine>.tar.gz \
 For a curated `_final` subset (faster for orchestrator to inspect):
 
 ```bash
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_BindCraft_<machine>_final.tar.gz \
+tar czf <shared-storage>/<TARGET>/RESULTS/<TARGET>_BindCraft_<machine>_final.tar.gz \
     Accepted/Ranked/ final_design_stats.csv target_settings.json
 ```
 

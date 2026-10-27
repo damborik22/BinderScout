@@ -359,7 +359,7 @@ def _run_single(
 
 # Absolute reserve, in GiB, that the default fraction aims for.
 #
-# MEASURED 2026-08-20 on BM5 (GB10, 121.7 GiB unified): a 340-token complex
+# MEASURED 2026-08-20 on a GB10 node (121.7 GiB unified): a 340-token complex
 # (PD-L1 220 aa + 120 aa binder) peaks at 7,759 MiB of GPU and 14.1 GiB of total host
 # footprint, and completes under an 8 GiB MPS cap (iptm 0.9100).  12 GiB is ~1.5x that.
 #
@@ -368,7 +368,7 @@ def _run_single(
 # unshareable for no benefit; the hard ceiling is now the MPS per-client cap
 # (tools/gpu_mem_guard.sh), not this number.  Override with AF3_XLA_MEM_FRACTION.
 _AF3_TARGET_RESERVE_GIB = 12.0
-# Never leave a unified-memory host less than this.  40, not 24: the 2026-08-18 BM5
+# Never leave a unified-memory host less than this.  40, not 24: the 2026-08-18
 # reboot happened with ~24 GB nominally free, so 24 is a measured FAILURE point, not a
 # safe floor.  On a 121 GB GB10 this caps the reserve at 81 GB.
 _AF3_MIN_OS_GIB = 40.0
@@ -383,7 +383,7 @@ def _default_mem_fraction() -> str:
     do.  The previous hard-coded 0.8 was written assuming a ~96 GB pool ("~77 GB on
     Spark"); on a 121 GB GB10 it reserves 97 GB and leaves the OS 24 GB.
 
-    Cost of getting this wrong, observed 2026-08-18 on BM5: AF3 preallocated 99,960 MiB,
+    Cost of getting this wrong, observed 2026-08-18 on the GB10 node: AF3 preallocated 99,960 MiB,
     the kernel logged `NVRM: Out of memory [NV_ERR_NO_MEMORY]` every ~65 s for nine
     minutes, and the box hard-rebooted after 22 days of uptime, killing the run.
 
@@ -461,7 +461,7 @@ def _build_af3_env(parent_env) -> dict[str, str]:
     inherited ``XLA_CLIENT_MEM_FRACTION`` is forwarded (not discarded) so the operator's
     intent survives the rename.  Precedence: ``AF3_XLA_MEM_FRACTION`` >
     ``XLA_CLIENT_MEM_FRACTION`` > ``XLA_PYTHON_CLIENT_MEM_FRACTION`` > a pool-aware
-    default (see ``_default_mem_fraction``; was a hard-coded 0.8, which rebooted BM5).
+    default (see ``_default_mem_fraction``; was a hard-coded 0.8, which rebooted the GB10 node).
 
     Revisit if a jax upgrade ever drops the legacy name — see docs/PLAN_af3_v304_upgrade.md.
     """

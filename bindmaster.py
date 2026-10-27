@@ -18,10 +18,17 @@ Usage:
 
 import os
 import platform
+import shutil
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
+
+# How to invoke this CLI *on this machine right now*. On a fresh clone the
+# `bindmaster` shortcut does not exist yet (it is written by the first real
+# sub-command), so printing `bindmaster install …` in USAGE would hand the user
+# a command that is `command not found`.
+_INVOKE = "bindmaster" if shutil.which("bindmaster") else "./bindmaster.py"
 
 BOLD = "\033[1m"
 CYAN = "\033[0;36m"
@@ -32,11 +39,11 @@ RESET = "\033[0m"
 USAGE = f"""{BOLD}BindMaster{RESET} — GPU-accelerated protein binder design toolkit
 
 {BOLD}Usage:{RESET}
-  bindmaster                                                    Interactive menu (TUI)
-  bindmaster install   [--tool all|<tool>] [--cuda VERSION] [--skip-examples]   (--help for the tool list)
-  bindmaster configure [options passed through]
-  bindmaster evaluate  <binder-compare args>   (e.g. run --mosaic DIR --target-seq SEQ -o OUT)
-  bindmaster --help
+  {_INVOKE}                                                    Interactive menu (TUI)
+  {_INVOKE} install   [--tool all|<tool>] [--cuda VERSION] [--skip-examples]   (--help for the tool list)
+  {_INVOKE} configure [options passed through]
+  {_INVOKE} evaluate  <binder-compare args>   (e.g. run --mosaic DIR --target-seq SEQ -o OUT)
+  {_INVOKE} --help
 
 {BOLD}Commands:{RESET}
   {CYAN}(no args){RESET}  Launch interactive menu — install, configure, run, evaluate
@@ -83,6 +90,13 @@ def _install_bindmaster_shortcut() -> None:
         if not home_shortcut.exists() or target_line not in home_shortcut.read_text():
             home_shortcut.write_text(shortcut_content)
             home_shortcut.chmod(0o755)
+            # This is the copy that makes the bare `bindmaster` command work, so it is the
+            # one worth reporting — BindMaster/bin/ above is normally NOT on PATH.
+            if str(home_bin) in os.environ.get("PATH", "").split(os.pathsep):
+                hint = "  — you can now run `bindmaster …`"
+            else:
+                hint = f'  — not on PATH yet:  export PATH="{home_bin}:$PATH"'
+            print(f"{GREEN}✓{RESET} Shortcut installed: {home_shortcut}{hint}")
     except OSError:
         pass  # ~/.local/bin not writable — BindMaster/bin/ is the primary location
 

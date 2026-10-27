@@ -18,6 +18,7 @@ import datetime as _dt
 import json
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -339,8 +340,31 @@ def run(args: argparse.Namespace) -> None:
     df = compute_consensus_iptm(df)
     df = compute_consensus_ipsae(df)
     min_engines = getattr(args, "min_engines", None) or MIN_ENGINES_DEFAULT
-    df = rank_designs(df, min_engines=min_engines)
+    # rank_designs reports a cross-engine shortfall with warnings.warn, which reaches the
+    # operator as a raw UserWarning carrying this file's path, a line number and a line of
+    # source — it reads as an internal error rather than the actionable notice it is. Catch
+    # that one and re-pitch it on the [rank] channel below; the warn stays in rank_designs
+    # for library callers (tests/binder_comparison/test_scoring.py asserts on it). Every
+    # other warning raised in there is re-raised untouched.
+    with warnings.catch_warnings(record=True) as rank_warnings:
+        warnings.simplefilter("always")
+        df = rank_designs(df, min_engines=min_engines)
     print(f"[report] Ranking by consensus_iptm_mean (cross-engine gate: min {min_engines} engines)")
+    for entry in rank_warnings:
+        if not str(entry.message).startswith("[rank] no design was refolded by"):
+            warnings.warn_explicit(entry.message, entry.category, entry.filename, entry.lineno)
+            continue
+        n_covered = pd.to_numeric(df["consensus_iptm_n"], errors="coerce")
+        best_coverage = int(n_covered.max()) if n_covered.notna().any() else 0
+        print(
+            f"[rank] WARNING: no design was refolded by {min_engines}+ engines "
+            f"(best coverage in this pool: {best_coverage})."
+        )
+        print("[rank]          Ranking is ordered by consensus_iptm_mean, but NO design cleared the cross-engine gate.")
+        print(
+            f"[rank]          Run the missing engine(s), or lower the gate with "
+            f"--min-engines {max(MIN_ENGINES_FLOOR, best_coverage)}."
+        )
 
     # Item 9: wet-lab-ready badge (SoluProt-passes + agreement_count >= 2 +
     # min binder pLDDT >= 0.50 + no FAILED RUN). Advisory only — the rank is

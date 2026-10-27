@@ -220,11 +220,37 @@ AA3TO1 = {
 
 # ─── Install detection ───────────────────────────────────────────────────────
 
+# install/install.sh writes one marker file per tool here, named by the tool's
+# canonical lowercase key, only AFTER that tool's install function has fully
+# succeeded — and removes it again at the start of a re-install. Its existence is the
+# only thing that separates "finished" from "died halfway": conda creates an env
+# directory (and its bin/python symlink) at the START of solving and leaves both
+# behind when the install fails, so a directory probe reports a failed install as
+# `installed` forever and the user only finds out when the GPU run dies on a
+# ModuleNotFoundError.
+INSTALL_STATE_DIR = BINDMASTER_DIR / ".install_state"
+
+# `bindmaster` is a shortcut created BY the installer, so on a fresh clone the bare
+# command does not resolve yet and printing it as a hint sends the user nowhere.
+# Same check bindmaster.py makes for its own usage block.
+_INVOKE = "bindmaster" if shutil.which("bindmaster") else str(BINDMASTER_DIR / "bindmaster.py")
+
+
+def _marked(key: str) -> bool:
+    """True if install.sh recorded a successful install of `key`."""
+    return (INSTALL_STATE_DIR / key).is_file()
+
 
 def detect_installs() -> dict:
     """
-    BindCraft / BoltzGen: check for their conda env directory.
-    Mosaic: check for the uv venv python binary.
+    A tool counts as installed when install/install.sh left a success marker for it
+    (see INSTALL_STATE_DIR).
+
+    The old probes — conda env directory, venv python binary, weights file — are kept
+    as a fallback for environments installed before markers existed, but only while no
+    marker directory exists at all: they cannot tell a finished install from a failed
+    one, so once the installer has started recording successes they must not be
+    allowed to override it. A missing marker directory is "no markers", not an error.
     """
 
     def _env_exists(name: str) -> bool:
@@ -232,18 +258,27 @@ def detect_installs() -> dict:
             return False
         return (CONDA_ENVS_DIR / name).is_dir()
 
+    markers = INSTALL_STATE_DIR.is_dir()
+
+    def _installed(key: str, probe: bool) -> bool:
+        return _marked(key) if markers else probe
+
     return {
-        "bindcraft": _env_exists("BindCraft"),
-        "boltzgen": _env_exists("BoltzGen"),
-        "mosaic": (MOSAIC_VENV / "bin" / "python").exists(),
-        "evaluator": ((EVALUATOR_DIR / "evaluate.sh").exists() and _env_exists("binder-eval")),
-        "pxdesign_local": _env_exists("bindmaster_pxdesign"),
-        "proteina_complexa": (PROTEINA_COMPLEXA_VENV / "bin" / "python").exists(),
-        "rfd3": _env_exists("bindmaster_rfd3") and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
-        "protein_hunter": _env_exists("bindmaster_protein_hunter") and PROTEIN_HUNTER_DIR.exists(),
-        "af3": _env_exists("binder-eval-af3"),
-        "esmfold2": _env_exists("binder-eval-esmfold2"),
-        "soluprot": _env_exists("binder-eval-soluprot"),
+        "bindcraft": _installed("bindcraft", _env_exists("BindCraft")),
+        "boltzgen": _installed("boltzgen", _env_exists("BoltzGen")),
+        "mosaic": _installed("mosaic", (MOSAIC_VENV / "bin" / "python").exists()),
+        "evaluator": _installed("evaluator", (EVALUATOR_DIR / "evaluate.sh").exists() and _env_exists("binder-eval")),
+        "pxdesign_local": _installed("pxdesign", _env_exists("bindmaster_pxdesign")),
+        "proteina_complexa": _installed("proteina_complexa", (PROTEINA_COMPLEXA_VENV / "bin" / "python").exists()),
+        "rfd3": _installed(
+            "rfd3", _env_exists("bindmaster_rfd3") and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists()
+        ),
+        "protein_hunter": _installed(
+            "protein_hunter", _env_exists("bindmaster_protein_hunter") and PROTEIN_HUNTER_DIR.exists()
+        ),
+        "af3": _installed("af3", _env_exists("binder-eval-af3")),
+        "esmfold2": _installed("esmfold2", _env_exists("binder-eval-esmfold2")),
+        "soluprot": _installed("soluprot", _env_exists("binder-eval-soluprot")),
     }
 
 
@@ -652,6 +687,48 @@ def extract_sequence_from_structure(path: str, chain_id: str) -> str | None:
     if p.suffix.lower() in (".cif", ".mmcif"):
         return extract_sequence_from_cif(str(p), chain_id)
     return extract_sequence_from_pdb(str(p), chain_id)
+
+
+# Purification tags of the construct that was crystallised. A stock RCSB entry usually
+# carries one, and it is indistinguishable from the target in the extracted sequence.
+_TAG_PATTERNS = [
+    ("His6/His8", re.compile(r"(?:[GSAL]{0,3}H{5,10})$")),
+    ("His6 (N-term)", re.compile(r"^(?:M?[GSAL]{0,3}H{5,10}[GSAL]{0,4})")),
+    ("Strep-II", re.compile(r"WSHPQFEK$")),
+    ("FLAG", re.compile(r"DYKDDDDK$")),
+    ("Myc", re.compile(r"EQKLISEEDL$")),
+]
+
+
+def warn_expression_tags(seq: str) -> str:
+    """Offer to trim common expression tags from an extracted target sequence.
+
+    The tag is in the crystal because the construct was tagged; it is not part of the
+    biological target. Left in, its residues become a designable epitope AND are baked
+    into the target-MSA cache key (keyed on the target sequence's SHA-256 and shared by
+    every refold engine), so a "hit" can be designed against something that does not
+    exist. A genuine poly-histidine stretch in a real protein would be a false
+    positive, so always ask rather than trim silently.
+    """
+    for label, pat in _TAG_PATTERNS:
+        m = pat.search(seq)
+        if not m:
+            continue
+        print()
+        print_warn(f"Possible {label} expression tag detected: …{m.group(0)}")
+        print("  This is almost certainly a construct artifact, not part of the target.")
+        print("  Leaving it in makes the tag a designable epitope and is baked into the")
+        print("  cached target MSA, so designs may bind something that does not exist.")
+        if ask_yn(f"  Trim {len(m.group(0))} residues?", default=True):
+            trimmed = (seq[: m.start()] + seq[m.end() :]) if m.start() else seq[m.end() :]
+            print_ok(f"Trimmed to {len(trimmed)} aa")
+            print_warn("Only the SEQUENCE was trimmed — the structure file still contains these residues.")
+            print("  Tools that read the coordinates (BindCraft, RFD3 contigs) therefore still see")
+            print("  the tag. Delete those residues from the structure too if you want them gone")
+            print("  everywhere, and keep hotspots off them in Step 3.")
+            return trimmed
+        print_warn("Keeping the tag — make sure that is what you want.")
+    return seq
 
 
 def cif_to_pdb_atoms(cif_path: str, pdb_path: str) -> bool:
@@ -2273,7 +2350,7 @@ export FOUNDRY_CHECKPOINT_DIRS="$WEIGHTS_DIR"
 # Avoid VRAM fragmentation on 24 GB cards: with diffusion_batch_size=10 and
 # low_memory_mode=true, peak live allocation is ~15 GiB but PyTorch reserves
 # another ~6 GiB unallocated, pushing the next 3 GiB allocation over the cliff
-# mid-run (BM4 RTX 3090 OOMed on its 7th batch on the 2VDY run).
+# mid-run (a 24 GB RTX 3090 node OOMed on its 7th batch on the 2VDY run).
 # expandable_segments lets the allocator hand back reserved-but-unallocated
 # memory instead of fragmenting forever.
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -2835,6 +2912,17 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     primary = cfg.get("primary_engine", "boltz")
     lines += [
         f"    --primary-engine {primary} \\",
+    ]
+
+    # Emitted ONLY when the operator chose it (wizard prompt, or by hand in
+    # config.json). Absent means evaluate.sh keeps the default gate of 3 — the gate is
+    # never derived from the engines this host happens to have, because that would make
+    # two operators with the same designs produce different rankings.
+    min_engines = cfg.get("min_engines")
+    if min_engines:
+        lines.append(f"    --min-engines {min_engines} \\")
+
+    lines += [
         "    --resume",
         "",
     ]
@@ -3316,10 +3404,23 @@ def wizard():
         )
     ).expanduser()
 
-    if run_dir.exists():
+    # A bare .exists() is true for FILES too, and the prompt above asked for a path —
+    # pasting the target .pdb here used to be accepted, warned about as a "folder",
+    # offered a meaningless "Overwrite?", and then crash generate() with
+    # NotADirectoryError after all ~80 answers had been given. Catch it while the
+    # user can still fix it for free.
+    if run_dir.exists() and not run_dir.is_dir():
         print()
-        print_warn(f"Run folder already exists: {run_dir}")
-        if not ask_yn("  Overwrite?", default=False):
+        print_fail(f"Not a directory: {run_dir}")
+        print("  The run folder must be a directory (or a new path).")
+        print("  Did you paste the target structure path by mistake?")
+        sys.exit(1)
+
+    if run_dir.is_dir() and any(run_dir.iterdir()):
+        print()
+        print_warn(f"Run folder already exists and is not empty: {run_dir}")
+        print("  Existing files with the same names will be replaced; others are left alone.")
+        if not ask_yn("  Continue?", default=False):
             print("  Aborted.")
             sys.exit(0)
 
@@ -3348,6 +3449,7 @@ def wizard():
     primary_chain = chains.split(",")[0].strip()
     target_sequence = extract_sequence_from_structure(target_pdb_src, primary_chain)
     if target_sequence:
+        target_sequence = warn_expression_tags(target_sequence)
         preview = target_sequence[:50] + ("..." if len(target_sequence) > 50 else "")
         print_ok(f"Auto-extracted sequence for chain {primary_chain}: {preview} ({len(target_sequence)} aa)")
 
@@ -3368,7 +3470,7 @@ def wizard():
     def _tag(key):
         if installed.get(key):
             return f"{GREEN}installed{RESET}"
-        return f"{RED}NOT installed — run: bindmaster install{RESET}"
+        return f"{RED}NOT installed — run: {_INVOKE} install{RESET}"
 
     print(f"  {BOLD}Mosaic{RESET}    [{_tag('mosaic')}]")
     use_mosaic = ask_yn("  Enable Mosaic?", default=False)
@@ -3397,6 +3499,7 @@ def wizard():
     # ── Refolding engine selection ──
     use_boltz = use_af3 = use_esmfold2 = False
     primary_engine = "boltz"
+    min_engines = None
     if use_evaluator:
         print(f"  {BOLD}Refolding engines for evaluation{RESET}")
         engines_available = []
@@ -3441,6 +3544,28 @@ def wizard():
                 primary_engine = selected[idx]
             else:
                 primary_engine = selected[0]
+
+            # The cross-engine gate defaults to 3 and is NEVER lowered automatically —
+            # deriving it from whatever happens to be installed would make two operators
+            # with the same designs produce different rankings (CLAUDE.md). But running
+            # fewer engines than the gate means no design can clear it and the shortlist
+            # comes back empty with no error, which is exactly what the documented
+            # one-command path does on any host without the gated AF3 weights. So ask
+            # once, here, and record the answer in config.json — the gate stays an
+            # explicit, reproducible, auditable decision.
+            if len(selected) == 2:
+                print()
+                print_warn("Only 2 refold engines selected, but the cross-engine gate defaults to 3.")
+                print("  With the default, every design fails the gate and you get no ranked shortlist.")
+                print("  Lowering it ranks on the engines you have — but rankings are then only")
+                print("  comparable to other runs using the same number of engines.")
+                if ask_yn("    Set --min-engines 2 in run_evaluate.sh?", default=True):
+                    min_engines = 2
+            elif len(selected) == 1:
+                print()
+                print_warn("Only 1 refold engine selected — a cross-engine consensus needs at least 2.")
+                print("  The gate cannot be met at all, so the ranked shortlist will be empty.")
+                print("  Enable AF3 or ESMFold2 as a second engine to get a ranked report.")
 
     # ── SoluProt solubility screen (filter, not engine) ──
     # Sits before the refold engines — when --soluprot-filter is on, designs
@@ -3522,6 +3647,10 @@ def wizard():
         "use_af3": use_af3,
         "use_esmfold2": use_esmfold2,
         "primary_engine": primary_engine,
+        # None = leave the cross-engine gate at its default of 3. Set only by the
+        # explicit prompt above (or by hand in config.json) — never derived from what
+        # happens to be installed.
+        "min_engines": min_engines,
         "use_soluprot": use_soluprot,
         "soluprot_threshold": soluprot_threshold,
         "soluprot_filter": soluprot_filter,
@@ -4075,6 +4204,12 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except EOFError:
+        # Piped/redirected stdin or a Ctrl-D at a prompt. Used to dump an EOFError
+        # traceback, which reads as "the software is broken" to a non-programmer.
+        print(f"\n\n  {YELLOW}No more input.{RESET} The wizard needs an interactive terminal.")
+        print(f"  For scripted use see:  {CYAN}{_INVOKE} configure --config <config.json>{RESET}")
+        sys.exit(1)
     except KeyboardInterrupt:
         print(f"\n\n  {YELLOW}Interrupted.{RESET} Some files may have been partially written.")
         sys.exit(1)

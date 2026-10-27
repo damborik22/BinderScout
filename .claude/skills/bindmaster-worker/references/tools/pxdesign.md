@@ -49,7 +49,7 @@ Modern GPU (A100/H100/H200) recommended for the bf16 + DeepSpeed Evo Attention k
 
 ```bash
 cd ~/runs/<TARGET>-<machine>-pxdesign/
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_PXDesign_<machine>.tar.gz \
+tar czf <shared-storage>/<TARGET>/RESULTS/<TARGET>_PXDesign_<machine>.tar.gz \
     design_outputs/<task_name>/ \
     <task_name>.yaml \
     run.sh *.out
@@ -58,7 +58,7 @@ tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_PXDesign_<machine>.tar.gz \
 For `_final`:
 
 ```bash
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_PXDesign_<machine>_final.tar.gz \
+tar czf <shared-storage>/<TARGET>/RESULTS/<TARGET>_PXDesign_<machine>_final.tar.gz \
     design_outputs/<task_name>/summary.csv \
     design_outputs/<task_name>/<top-N-design-ids>/ \
     <task_name>.yaml

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # preflight.sh — REQUIRED before launching any job on a fleet machine.
 #
-# WHY THIS EXISTS (2026-08-16): 16 MPNN workers were launched on BM5 sized off
+# WHY THIS EXISTS (2026-08-16): 16 MPNN workers were launched on the GB10 node sized off
 # their 339 MiB *GPU* footprint. Actual host RSS was 3.1 GB each = 42.6 GB. The
 # box fell from 115 GB available to 24 GB and killed 3 of the 4 arms of a
 # running reproducibility experiment, which had declared FLOOR_GB=25 inside its
@@ -86,7 +86,7 @@ cmd_measure () {
     # Reports BOTH peak RSS and the MemAvailable drop, and plans on the LARGER.
     #
     # RSS alone is not safe on Spark: JAX preallocates unified memory that never
-    # appears in RSS. Observed 2026-08-16 on BM5 -- fold_monomers.py showed
+    # appears in RSS. Observed 2026-08-16 on the GB10 node -- fold_monomers.py showed
     # 8.5 GB RSS while MemAvailable fell to 15 GB of 121 GB. Sizing a worker
     # count off RSS there would understate the footprint by ~10x.
     [ $# -ge 1 ] || { echo "measure needs a command"; return 2; }

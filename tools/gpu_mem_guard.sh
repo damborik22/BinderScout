@@ -5,7 +5,7 @@
 # WHY THIS EXISTS (2026-08-18/19): on GB10 `cudaMemGetInfo` reports
 # total == SC_PHYS_PAGES == 121.69 GiB. Every allocator knob in JAX and PyTorch
 # is a *fraction of device total*, so JAX's default 0.75 reserves 91 GB of the
-# machine's own RAM. That hard-rebooted BM5 once (AF3 at 0.8 -> 97.4 GiB) and
+# machine's own RAM. That hard-rebooted the GB10 node once (AF3 at 0.8 -> 97.4 GiB) and
 # nearly again the next day (Boltz-2 at the 0.75 default -> 91.3 GiB).
 #
 # cgroups DO NOT help: measured here, 12 GiB of cudaMalloc inside an 8 GiB

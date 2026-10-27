@@ -9,7 +9,7 @@ Usage:
     binder-compare epitope \\
         --hotspots "A15,A18,A19,A22,A232,A240,A242,A260,A263,A264,A267,A366,A368,A371" \\
         --metrics  report/top30_candidates.csv \\
-        --structures-dir runs/2VDY-BM1/refold_boltz2/ \\
+        --structures-dir runs/<campaign>-<node>/refold_boltz2/ \\
         -o epitope.csv
 
 Then pass the result to ``binder-compare report --epitope-results epitope.csv``.

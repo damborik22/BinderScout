@@ -66,7 +66,7 @@ The `filtering` step is fast (~15 s) and re-runnable without redesigning — use
 
 ```bash
 cd ~/runs/<TARGET>-<machine>-boltzgen/
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_BoltzGen_<machine>.tar.gz \
+tar czf <shared-storage>/<TARGET>/RESULTS/<TARGET>_BoltzGen_<machine>.tar.gz \
     final_ranked_designs/ \
     intermediate_designs_inverse_folded/refold_cif/ \
     intermediate_designs_inverse_folded/aggregate_metrics_analyze.csv \
@@ -78,7 +78,7 @@ tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_BoltzGen_<machine>.tar.gz \
 For `_final` subset (BoltzGen's full output can be 50+ GB — the `_final` is often what the orchestrator actually wants for quick inspection):
 
 ```bash
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_BoltzGen_<machine>_final.tar.gz \
+tar czf <shared-storage>/<TARGET>/RESULTS/<TARGET>_BoltzGen_<machine>_final.tar.gz \
     final_ranked_designs/final_<budget>_designs/ \
     final_ranked_designs/final_designs_metrics_<budget>.csv \
     final_ranked_designs/results_overview.pdf \
