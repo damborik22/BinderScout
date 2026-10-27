@@ -610,20 +610,14 @@ def _cif_atom_site_seq(text: str) -> str | None:
     return None
 
 
-def extract_sequence_from_cif(cif_path: str, chain_id: str) -> str | None:
-    """Extract amino-acid sequence for chain_id from a CIF/mmCIF file.
+def _cif_chain_ca_residues(text: str, chain_id: str) -> tuple[list[int], str]:
+    """Ordered label_seq_ids and the 1-letter sequence of chain_id's CA atoms in a CIF.
 
-    Returns a 1-letter string, or None on failure.
+    The mmCIF counterpart of _pdb_chain_ca_residues: element i of the id list is residue
+    i of the returned sequence, so a per-residue annotation keyed on label_seq_id can be
+    mapped onto a position in the extracted sequence. ([], "") when the chain has no CA
+    records (or the file has no _atom_site loop at all).
     """
-    try:
-        text = Path(cif_path).expanduser().read_text(errors="replace")
-    except OSError:
-        return None
-
-    # _atom_site CA records for the requested chain FIRST: this is the only branch that can
-    # honour chain_id. _entity_poly is chain-agnostic (it returns the longest entity), so trying
-    # it first silently discarded the user's chain answer for every mmCIF that has one — i.e.
-    # essentially every structure downloaded from the PDB.
     tokens = _cif_tokenize(text)
     i = 0
     while i < len(tokens):
@@ -660,12 +654,32 @@ def extract_sequence_from_cif(cif_path: str, chain_id: str) -> str | None:
                     i += n_cols
                     continue
                 resname = row[col["label_comp_id"]].strip("'\"")
-                key = (ch, resnum)
-                if key not in seen:
-                    seen[key] = AA3TO1.get(resname, "X")
+                if resnum not in seen:
+                    seen[resnum] = AA3TO1.get(resname, "X")
             i += n_cols
         if seen:
-            return "".join(seen[k] for k in sorted(seen))
+            ids = sorted(seen)
+            return ids, "".join(seen[k] for k in ids)
+    return [], ""
+
+
+def extract_sequence_from_cif(cif_path: str, chain_id: str) -> str | None:
+    """Extract amino-acid sequence for chain_id from a CIF/mmCIF file.
+
+    Returns a 1-letter string, or None on failure.
+    """
+    try:
+        text = Path(cif_path).expanduser().read_text(errors="replace")
+    except OSError:
+        return None
+
+    # _atom_site CA records for the requested chain FIRST: this is the only branch that can
+    # honour chain_id. _entity_poly is chain-agnostic (it returns the longest entity), so trying
+    # it first silently discarded the user's chain answer for every mmCIF that has one — i.e.
+    # essentially every structure downloaded from the PDB.
+    _ids, seq_from_atoms = _cif_chain_ca_residues(text, chain_id)
+    if seq_from_atoms:
+        return seq_from_atoms
 
     # No CA records for that chain (or no _atom_site at all — e.g. a sequence-only mmCIF).
     # _entity_poly is the last resort, but it cannot honour chain_id, so say so rather than
@@ -689,45 +703,254 @@ def extract_sequence_from_structure(path: str, chain_id: str) -> str | None:
     return extract_sequence_from_pdb(str(p), chain_id)
 
 
-# Purification tags of the construct that was crystallised. A stock RCSB entry usually
-# carries one, and it is indistinguishable from the target in the extracted sequence.
+# ─── Expression-tag detection ────────────────────────────────────────────────
+#
+# A stock RCSB entry is the CONSTRUCT that was crystallised, not the biological target.
+# 5O45 (PD-L1) carries eleven extra residues on chain A — AAALE + His6 — and in the
+# extracted sequence they are indistinguishable from the protein. Left in, they become
+# designable surface AND are baked into the target-MSA cache key (the target sequence's
+# SHA-256, shared by every refold engine), so a "hit" can be designed against a cloning
+# linker that does not exist in vivo.
+#
+# The depositor already said which residues those are, per residue, by hand, at
+# deposition time: SEQADV in a PDB file, _struct_ref_seq_dif in an mmCIF. That is
+# authoritative. A regex over the sequence is a guess, and guessing the LINKER cannot
+# work in general — real constructs use AAALE, LE (an XhoI site), GSGS, ENLYFQG (TEV),
+# LVPRGS (thrombin), GGGGS repeats — which is exactly how the original [GSAL]{0,3}
+# character class stopped at the 'E' of AAALE on 5O45 and trimmed 6 of 11 residues.
+
+# Free-text annotations treated as "this residue is construct, not protein".
+# ACCEPTED: EXPRESSION TAG, CLONING ARTIFACT, LINKER — all three describe sequence added
+# in order to express or purify the protein, i.e. sequence that is not in the organism.
+# NOT accepted: CONFLICT, VARIANT, ENGINEERED MUTATION, MICROHETEROGENEITY, INSERTION,
+# DELETION, SEE REMARK 999. The first four are real residues of the (possibly mutated)
+# protein that was crystallised; INSERTION/DELETION record a difference from the
+# reference database entry — an isoform, a renumbering — not added sequence. Dropping
+# any of them would change the protein rather than undo the construct.
+_CONSTRUCT_ANNOTATIONS = ("EXPRESSION TAG", "CLONING ARTIFACT", "LINKER")
+
+# FALLBACK ONLY, for files that carry no per-residue annotation (a predicted structure, a
+# hand-built PDB, a pasted sequence). The linker beside a poly-His run is matched by NAME
+# — the forms that actually occur: 5O45's AAALE, LE from an XhoI site, GS/GGGGS repeats,
+# ENLYFQG for TEV, LVPRGS for thrombin, pET's SSGLVPRGS.
+#
+# "Up to five residues of anything" was tried first and is WRONG, which is worth
+# recording: with no annotation to lean on, a pattern cannot tell a 0-residue linker from
+# a 5-residue one, so `[A-Z]{0,5}H{6,10}$` trims five residues of native protein off a
+# plain His6 tag (…ITVKVNAPY|HHHHHH became …ITVK). Linkers of arbitrary composition are
+# exactly what the SEQADV / _struct_ref_seq_dif path above is for; a named list is the
+# most a guess can honestly offer, and the prompt shows the residues so the user can see
+# whether more should go.
+_HIS_LINKER_BEFORE = r"(?:AAALE|ENLYFQ[GS]|SSGLVPRGS|LVPR[GS]{1,2}|(?:GGGGS)+|(?:GS)+|LE|[GSAL]{0,3})"
+_HIS_LINKER_AFTER = r"(?:ENLYFQ[GS]|LVPRGS|(?:GGGGS)+|[GSAL]{0,4})"
 _TAG_PATTERNS = [
-    ("His6/His8", re.compile(r"(?:[GSAL]{0,3}H{5,10})$")),
-    ("His6 (N-term)", re.compile(r"^(?:M?[GSAL]{0,3}H{5,10}[GSAL]{0,4})")),
+    ("His6/His8", re.compile(_HIS_LINKER_BEFORE + r"H{5,10}$")),
+    ("His6 (N-term)", re.compile(r"^M?" + _HIS_LINKER_BEFORE + r"H{5,10}" + _HIS_LINKER_AFTER)),
     ("Strep-II", re.compile(r"WSHPQFEK$")),
     ("FLAG", re.compile(r"DYKDDDDK$")),
     ("Myc", re.compile(r"EQKLISEEDL$")),
 ]
 
 
-def warn_expression_tags(seq: str) -> str:
-    """Offer to trim common expression tags from an extracted target sequence.
+def _pdb_seqadv_construct(lines: list[str], chain_id: str) -> dict[tuple[str, str], str]:
+    """(resSeq, iCode) -> resName for chain_id's SEQADV records annotated as construct.
 
-    The tag is in the crystal because the construct was tagged; it is not part of the
-    biological target. Left in, its residues become a designable epitope AND are baked
-    into the target-MSA cache key (keyed on the target sequence's SHA-256 and shared by
-    every refold engine), so a "hit" can be designed against something that does not
-    exist. A genuine poly-histidine stretch in a real protein would be a false
-    positive, so always ask rather than trim silently.
+    SEQADV is fixed-column (1-based): resName 13-15, chainID 17, seqNum 19-22, iCode 23,
+    and the free-text conflict field 50-70, which is where "EXPRESSION TAG" lives.
     """
+    flagged: dict[tuple[str, str], str] = {}
+    for line in lines:
+        if line[:6] != "SEQADV" or len(line) < 50:
+            continue
+        if line[16].strip().upper() != chain_id.upper():
+            continue
+        note = line[49:70].strip().upper()
+        if not any(a in note for a in _CONSTRUCT_ANNOTATIONS):
+            continue
+        flagged[(line[18:22].strip(), line[22].strip())] = line[12:15].strip().upper()
+    return flagged
+
+
+def _cif_loop_rows(text: str, category: str) -> list[dict]:
+    """Rows of the `loop_` whose columns belong to `category` (e.g. "_struct_ref_seq_dif").
+
+    Only the loop_ form is read. A category with exactly one row is written as plain
+    key-value pairs instead and returns []; one annotated residue is not a tag run worth
+    trimming, and the pattern fallback still sees the sequence.
+    """
+    tokens = _cif_tokenize(text)
+    prefix = category.lower() + "."
+    i = 0
+    while i < len(tokens):
+        if tokens[i].lower() != "loop_":
+            i += 1
+            continue
+        i += 1
+        cols: list = []
+        while i < len(tokens) and tokens[i].startswith("_"):
+            cols.append(tokens[i].lower())
+            i += 1
+        if not cols or not cols[0].startswith(prefix):
+            continue
+        names = [c.split(".", 1)[1] for c in cols]
+        n_cols = len(cols)
+        rows: list[dict] = []
+        while i + n_cols <= len(tokens):
+            if tokens[i].lower() == "loop_" or (tokens[i].startswith("_") and "." in tokens[i]):
+                break
+            rows.append(dict(zip(names, tokens[i : i + n_cols])))
+            i += n_cols
+        return rows
+    return []
+
+
+def _cif_seqdif_construct(text: str, chain_id: str) -> dict[int, str]:
+    """label_seq_id -> mon_id for chain_id's _struct_ref_seq_dif rows annotated as construct.
+
+    The mmCIF equivalent of SEQADV: `details` carries the same free text (lower-cased by
+    convention — 'expression tag'), `seq_num` is the entity sequence index, which is the
+    numbering _cif_chain_ca_residues orders by, and `pdbx_pdb_strand_id` names the chain.
+
+    Caveat, and why the caller cross-checks residue names: pdbx_pdb_strand_id is the
+    AUTHOR chain id while _atom_site.label_asym_id (what the sequence extractor filters
+    on) is the label chain id, and those are not the same namespace in every entry.
+    """
+    flagged: dict[int, str] = {}
+    for row in _cif_loop_rows(text, "_struct_ref_seq_dif"):
+        if row.get("pdbx_pdb_strand_id", "").upper() != chain_id.upper():
+            continue
+        if not any(a in row.get("details", "").upper() for a in _CONSTRUCT_ANNOTATIONS):
+            continue
+        try:
+            flagged[int(row["seq_num"])] = row.get("mon_id", "").upper()
+        except (KeyError, ValueError):
+            continue
+    return flagged
+
+
+def _terminal_construct_span(flagged: set, n: int) -> tuple[int, int]:
+    """[start, end) of an n-residue sequence to KEEP, given 0-based construct positions.
+
+    ONLY a contiguous run at the N- and/or C-terminus is removed. An interior annotation
+    is NOT a tag: it is a point mutation, an engineered variant or a numbering conflict —
+    a real residue of the chain that was crystallised — and excising it would splice two
+    distant stretches of the protein together, corrupting the sequence and putting it
+    permanently out of step with the coordinates (and with every hotspot number the user
+    typed). A purification tag sits at a terminus by construction, so restricting the
+    trim to the termini costs nothing and makes the interior case impossible rather than
+    merely unlikely.
+    """
+    start = 0
+    while start < n and start in flagged:
+        start += 1
+    if start == n:  # every residue flagged: not a tag, and emptying the chain is never right
+        return 0, n
+    end = n
+    while end > start and end - 1 in flagged:
+        end -= 1
+    return start, end
+
+
+def _annotated_construct_span(seq: str, struct_path: str, chain_id: str) -> tuple[int, int, str, int] | None:
+    """(start, end, evidence, n_interior) from the deposited file's own annotation.
+
+    `seq[start:end]` is the biological target. None means this file carries no usable
+    construct annotation for this chain and the caller should fall back to the pattern
+    guess.
+    """
+    p = Path(struct_path).expanduser()
+    try:
+        text = p.read_text(errors="replace")
+    except OSError:
+        return None
+
+    if p.suffix.lower() in (".cif", ".mmcif"):
+        cif_ids, chain_seq = _cif_chain_ca_residues(text, chain_id)
+        ids: list = list(cif_ids)
+        flagged: dict = _cif_seqdif_construct(text, chain_id)
+        source = "_struct_ref_seq_dif"
+    else:
+        lines = text.splitlines()
+        ids, chain_seq = _pdb_chain_ca_residues(lines, chain_id)
+        flagged = _pdb_seqadv_construct(lines, chain_id)
+        source = "SEQADV"
+
+    # The annotation is per RESIDUE, so it can only be applied to the exact residue list
+    # the sequence was extracted from. If the two disagree, hand over rather than guess
+    # at an offset.
+    if not flagged or chain_seq != seq:
+        return None
+
+    positions = {i for i, rid in enumerate(ids) if rid in flagged}
+    # The annotated residue NAME must agree with the residue about to be dropped. This is
+    # what makes the mmCIF path safe despite the author/label chain-id namespaces above:
+    # if the two ids denote different chains the names do not line up, and the annotation
+    # is refused rather than applied to the wrong residues.
+    for i in sorted(positions):
+        if seq[i] != AA3TO1.get(flagged[ids[i]], "X"):
+            rid = "".join(ids[i]) if isinstance(ids[i], tuple) else str(ids[i])
+            print_warn(f"{p.name}: {source} residue {rid} does not match chain {chain_id} — annotation ignored.")
+            return None
+
+    start, end = _terminal_construct_span(positions, len(seq))
+    if (start, end) == (0, len(seq)):
+        return None
+    interior = len(positions - set(range(start)) - set(range(end, len(seq))))
+    return start, end, f"the depositor's own {source} records in {p.name}", interior
+
+
+def _offer_tag_trim(seq: str, start: int, end: int, label: str, evidence: str, interior: int = 0) -> str:
+    """Report a detected construct region, say where the evidence came from, and ask."""
+    n_dropped = start + (len(seq) - end)
+    print()
+    print_warn(f"{label} detected — {n_dropped} residue(s) of {len(seq)}:")
+    if start:
+        print(f"    N-terminal: {seq[:start]}…")
+    if end < len(seq):
+        print(f"    C-terminal: …{seq[end:]}")
+    print(f"  Evidence: {evidence}")
+    print("  Leaving it in makes the tag a designable epitope and is baked into the")
+    print("  cached target MSA, so designs may bind something that does not exist.")
+    if interior:
+        print(f"  {interior} further annotated residue(s) are INTERIOR and are KEPT — an interior")
+        print("  annotation is a point mutation or a conflict, not added sequence.")
+    if not ask_yn(f"  Trim {n_dropped} residues?", default=True):
+        print_warn("Keeping the tag — make sure that is what you want.")
+        return seq
+    trimmed = seq[start:end]
+    print_ok(f"Trimmed to {len(trimmed)} aa")
+    print("  The structure is trimmed to match when the run folder is generated")
+    print("  (target/<name>.pdb); the untouched deposited file is kept beside it.")
+    print("  Keep hotspots off the trimmed residues in Step 3.")
+    return trimmed
+
+
+def warn_expression_tags(seq: str, struct_path: str | None = None, chain_id: str = "") -> str:
+    """Offer to trim expression-tag residues from an extracted target sequence.
+
+    Priority: the deposited file's own per-residue annotation (PDB SEQADV / mmCIF
+    _struct_ref_seq_dif), then — only if the file carries none — a sequence pattern.
+    Always asks, because a genuine poly-histidine stretch in a real protein would be a
+    false positive, and always says WHICH of the two found it: one is the depositor's
+    statement of fact about their own construct, the other is a guess.
+    """
+    if struct_path and chain_id:
+        annotated = _annotated_construct_span(seq, struct_path, chain_id)
+        if annotated:
+            start, end, evidence, interior = annotated
+            return _offer_tag_trim(seq, start, end, "Expression-tag residues", evidence, interior)
+
+    guess = "a sequence pattern — a GUESS; this file carries no per-residue tag annotation."
     for label, pat in _TAG_PATTERNS:
         m = pat.search(seq)
-        if not m:
+        if not m or not m.group(0):
             continue
-        print()
-        print_warn(f"Possible {label} expression tag detected: …{m.group(0)}")
-        print("  This is almost certainly a construct artifact, not part of the target.")
-        print("  Leaving it in makes the tag a designable epitope and is baked into the")
-        print("  cached target MSA, so designs may bind something that does not exist.")
-        if ask_yn(f"  Trim {len(m.group(0))} residues?", default=True):
-            trimmed = (seq[: m.start()] + seq[m.end() :]) if m.start() else seq[m.end() :]
-            print_ok(f"Trimmed to {len(trimmed)} aa")
-            print_warn("Only the SEQUENCE was trimmed — the structure file still contains these residues.")
-            print("  Tools that read the coordinates (BindCraft, RFD3 contigs) therefore still see")
-            print("  the tag. Delete those residues from the structure too if you want them gone")
-            print("  everywhere, and keep hotspots off them in Step 3.")
+        start, end = (m.end(), len(seq)) if m.start() == 0 else (0, m.start())
+        if start >= end:
+            continue  # a pattern that claims the whole chain is a false positive, not a tag
+        trimmed = _offer_tag_trim(seq, start, end, f"Possible {label} expression tag", guess)
+        if trimmed != seq:
             return trimmed
-        print_warn("Keeping the tag — make sure that is what you want.")
     return seq
 
 
@@ -813,8 +1036,13 @@ def cif_to_pdb_atoms(cif_path: str, pdb_path: str) -> bool:
                 atom_field = f" {atom_name:<3s}"
             else:
                 atom_field = f"{atom_name:<4s}"
+            # The space between atom_field and comp_id is the altLoc column (17). Without
+            # it every field from resName on was one column left of where the PDB format
+            # puts it, so this project's own extract_sequence_from_pdb read the chain ID
+            # out of the residue number and returned None for the converted file — and
+            # prepare_target_pdb below would find no residues to keep in a CIF target.
             line = (
-                f"{record}{serial:5d} {atom_field}{comp_id:>3s} {chain[0]:1s}{seq_id:4d}    "
+                f"{record}{serial:5d} {atom_field} {comp_id:>3s} {chain[0]:1s}{seq_id:4d}    "
                 f"{x:8.3f}{y:8.3f}{z:8.3f}{occ:6.2f}{bfac:6.2f}          {elem_str:>2s}  "
             )
             atom_lines.append(line)
@@ -832,6 +1060,228 @@ def cif_to_pdb_atoms(cif_path: str, pdb_path: str) -> bool:
             f.write(line + "\n")
         f.write("END\n")
     return True
+
+
+# ─── Target structure preparation ────────────────────────────────────────────
+
+# Header records copied through to the prepared file. Everything else is dropped,
+# because every other record names an atom, residue or chain that preparation may
+# have removed: SEQRES, LINK, SSBOND, CISPEP, HELIX, SHEET, SITE, HET/HETNAM/FORMUL,
+# CONECT, ANISOU, MASTER, and COMPND (which lists the chains by name).
+#
+# SEQRES is DROPPED, not regenerated. With no SEQRES every parser we feed derives the
+# sequence from the ATOM records, so header and coordinates cannot disagree; a
+# regenerated SEQRES is a second, hand-rolled source of truth whose first off-by-one
+# reintroduces the exact crash this preparation exists to avoid — BoltzGen builds its
+# entities from SEQRES and then indexes `entity.subchains[0]`
+# (BoltzGen/src/boltzgen/data/parse/pdb_parser.py:39), so a SEQRES declaring 129
+# residues against 118 surviving ATOM records dies with `IndexError: list index out of
+# range`. It also keeps a dropped His-tag from being recoverable out of the header
+# after its atoms are gone. Targets that come in through the "provide a sequence" path
+# already reach the tools without SEQRES, so this is not a new shape of input.
+_PDB_HEADER_KEEP = ("HEADER", "TITLE ", "CRYST1")
+
+_WATER_RESIDUES = ("HOH", "DOD", "WAT")
+
+
+def _pdb_chain_ca_residues(lines: list[str], chain_id: str) -> tuple[list[tuple[str, str]], str]:
+    """Ordered (resSeq, iCode) keys and the 1-letter sequence of chain_id's CA atoms.
+
+    Mirrors extract_sequence_from_pdb: element i of the key list is residue i of the
+    returned sequence, so selecting residues by these keys keeps the prepared structure
+    and cfg["target_sequence"] in step.
+    """
+    keys: list[tuple[str, str]] = []
+    seq: list[str] = []
+    seen: set = set()
+    for line in lines:
+        if line[:4] != "ATOM" or len(line) < 27:
+            continue
+        if line[12:16].strip() != "CA":
+            continue
+        if line[21].strip().upper() != chain_id.upper():
+            continue
+        if line[16].strip() not in ("", "A"):
+            continue
+        key = (line[22:26].strip(), line[26].strip())
+        if key in seen:
+            continue
+        seen.add(key)
+        keys.append(key)
+        seq.append(AA3TO1.get(line[17:20].strip().upper(), "X"))
+    return keys, "".join(seq)
+
+
+def _ter_record(serial: int, atom_line: str) -> str:
+    """TER for the last kept atom of a chain, in fixed PDB columns."""
+    return f"TER   {serial:>5}      {atom_line[17:20]} {atom_line[21]}{atom_line[22:27]}"
+
+
+def prepare_target_pdb(src_pdb: Path, dest_pdb: Path, chains: str, target_sequence: str) -> dict | None:
+    """Write dest_pdb holding only the target: selected chains, no ligands, no waters.
+
+    A stock RCSB file is not a target. On 5O45 (PD-L1) the deposited coordinates carry
+    chain A's His6 purification tag AND chain B, an 8-residue inhibitor peptide bound in
+    the very epitope a binder has to reach — so BindCraft, RFD3's contigs and BoltzGen's
+    `file:` entity were all designing against an occupied site. Trimming the tag out of
+    the SEQUENCE (which the wizard already offers) does not touch the coordinates.
+
+    Residue numbering is deliberately NOT renumbered: hotspot residue numbers the user
+    gave in Step 3 refer to the deposited numbering and must keep resolving.
+
+    Returns a report dict for the caller to print, or None when nothing survived (a
+    structure with no CA atoms in the selected chains) — dest_pdb is then not written
+    and the caller falls back to copying the source verbatim.
+    """
+    try:
+        raw = src_pdb.read_text(errors="replace").splitlines()
+    except OSError:
+        return None
+
+    # First model only: an NMR ensemble would otherwise fold every model's atoms into
+    # one chain, which is both wrong and a chain the sequence extractor cannot explain.
+    lines: list[str] = []
+    for line in raw:
+        if line[:6] == "ENDMDL":
+            break
+        lines.append(line)
+
+    wanted = [c.strip().upper() for c in (chains or "A").split(",") if c.strip()] or ["A"]
+    keep: set[tuple[str, tuple[str, str]]] = set()
+    kept: dict[str, int] = {}
+    construct_kept: dict[str, list[str]] = {}
+    trim_failed = ""
+    for idx, cid in enumerate(wanted):
+        keys, seq = _pdb_chain_ca_residues(lines, cid)
+        # The first chain is the one cfg["target_sequence"] was extracted from, so it is
+        # the only one a sequence trim can speak about. warn_expression_tags only ever
+        # removes a prefix or a suffix, so the trimmed sequence is a contiguous
+        # substring and its offset identifies exactly which residues to drop.
+        if idx == 0 and target_sequence and seq and target_sequence != seq:
+            off = seq.find(target_sequence)
+            if off >= 0:
+                keys = keys[off : off + len(target_sequence)]
+            else:
+                trim_failed = cid
+        # Backstop for the class of bug this whole path exists for: the deposited file
+        # already names its construct residues, and we are reading those lines anyway.
+        # If any residue we are about to KEEP is SEQADV-flagged as an expression tag /
+        # cloning artifact / linker, the sequence trim missed it — say so rather than
+        # ship it as designable surface.
+        flagged = _pdb_seqadv_construct(lines, cid)
+        still = [f"{k[0]}{k[1]}" for k in keys if k in flagged]
+        if still:
+            construct_kept[cid] = still
+        kept[cid] = len(keys)
+        keep.update((cid, k) for k in keys)
+
+    if not keep:
+        return None
+
+    dropped_chains: dict[str, int] = {}
+    trimmed = 0
+    waters = 0
+    ligands: dict[str, int] = {}
+    seen_res: set = set()
+    for line in lines:
+        if line[:4] not in ("ATOM", "HETA") or len(line) < 27:
+            continue
+        cid = line[21].strip().upper()
+        res = line[17:20].strip().upper()
+        key = (line[22:26].strip(), line[26].strip())
+        if (line[:4], cid, key, res) in seen_res:
+            continue
+        seen_res.add((line[:4], cid, key, res))
+        if line[:4] == "HETA":
+            if res in _WATER_RESIDUES:
+                waters += 1
+            else:
+                ligands[res] = ligands.get(res, 0) + 1
+        elif (cid, key) not in keep:
+            if cid in wanted:
+                trimmed += 1
+            else:
+                dropped_chains[cid] = dropped_chains.get(cid, 0) + 1
+
+    out: list[str] = [line.rstrip() for line in lines if line[:6] in _PDB_HEADER_KEEP]
+    out.append("REMARK 999 PREPARED BY BINDMASTER CONFIGURATOR - THIS IS NOT THE DEPOSITED FILE")
+    out.append("REMARK 999 KEPT CHAIN(S): " + ", ".join(f"{c} ({n} RESIDUES)" for c, n in kept.items()))
+    if dropped_chains:
+        out.append(
+            "REMARK 999 DROPPED CHAIN(S): " + ", ".join(f"{c} ({n} RESIDUES)" for c, n in dropped_chains.items())
+        )
+    out.append(f"REMARK 999 DROPPED {trimmed} TRIMMED RESIDUE(S), {waters} WATER(S), {sum(ligands.values())} HETERO")
+    out.append("REMARK 999 SEQRES/LINK/CONECT/ANISOU OMITTED - SEQUENCE DERIVES FROM THE ATOM RECORDS")
+    out.append(f"REMARK 999 UNTOUCHED SOURCE KEPT ALONGSIDE AS {src_pdb.name.upper()}")
+
+    serial = 0
+    current_chain = None
+    last_kept = None
+    for line in lines:
+        if line[:4] != "ATOM" or len(line) < 27:
+            continue
+        if line[16].strip() not in ("", "A"):
+            continue
+        cid = line[21].strip().upper()
+        if (cid, (line[22:26].strip(), line[26].strip())) not in keep:
+            continue
+        if current_chain is not None and cid != current_chain:
+            serial += 1
+            out.append(_ter_record(serial, last_kept))
+        current_chain = cid
+        serial += 1
+        out.append(f"{line[:6]}{serial:>5}{line[11:].rstrip()}")
+        last_kept = line
+    if last_kept is not None:
+        serial += 1
+        out.append(_ter_record(serial, last_kept))
+    out.append("END")
+
+    dest_pdb.parent.mkdir(parents=True, exist_ok=True)
+    dest_pdb.write_text("\n".join(out) + "\n")
+    return {
+        "kept": kept,
+        "dropped_chains": dropped_chains,
+        "trimmed": trimmed,
+        "waters": waters,
+        "ligands": ligands,
+        "trim_failed": trim_failed,
+        "construct_kept": construct_kept,
+    }
+
+
+def report_target_preparation(report: dict, dest_pdb: Path) -> None:
+    """Say out loud what preparation changed — silence here is how BUG-16 stayed hidden."""
+    kept = ", ".join(f"{c} ({n} aa)" for c, n in report["kept"].items())
+    print_ok(f"Prepared target structure {dest_pdb.name} — kept chain(s) {kept}")
+    empty = [c for c, n in report["kept"].items() if not n]
+    if empty:
+        print_warn(f"  Selected chain(s) {', '.join(empty)} have no amino-acid residues in this file.")
+    if report["dropped_chains"]:
+        dropped = ", ".join(f"{c} ({n} res)" for c, n in report["dropped_chains"].items())
+        print_warn(f"  Dropped unselected chain(s): {dropped}")
+        print("    A chain left in the file is part of the target as far as every design tool")
+        print("    is concerned — a bound inhibitor peptide or a second copy of the protein")
+        print("    occupies the epitope the binder has to reach.")
+    if report["trimmed"]:
+        print_ok(f"  Dropped {report['trimmed']} residue(s) so the coordinates match target_sequence")
+        print("    (the trimmed expression tag; hotspot numbering is unchanged).")
+    if report["waters"] or report["ligands"]:
+        ligands = ", ".join(f"{n}×{res}" for res, n in sorted(report["ligands"].items()))
+        print_ok(f"  Dropped {report['waters']} water(s) and {sum(report['ligands'].values())} heteroatom residue(s)")
+        if ligands:
+            print(f"    ({ligands})")
+    for cid, residues in (report.get("construct_kept") or {}).items():
+        shown = ", ".join(residues[:12]) + (", …" if len(residues) > 12 else "")
+        print_warn(f"  Chain {cid} KEEPS {len(residues)} residue(s) the depositor flagged as construct: {shown}")
+        print("    SEQADV marks these as an expression tag / cloning artifact / linker — not part")
+        print("    of the biological target. They stay designable surface and go into the shared")
+        print("    target-MSA cache key. Re-run and accept the tag trim in Step 3, or keep")
+        print("    hotspots off them on purpose.")
+    if report["trim_failed"]:
+        print_warn(f"  cfg['target_sequence'] is not a contiguous part of chain {report['trim_failed']} as built.")
+        print("    No residues were trimmed from it, so sequence and coordinates may disagree.")
+    print(f"  The untouched source is kept alongside it in {dest_pdb.parent}")
 
 
 def parse_hotspots(hotspot_str: str) -> list:
@@ -871,10 +1321,11 @@ def print_tree(run_dir: Path, tools_enabled: dict, cfg: dict | None = None):
     print(f"\n  {BOLD}{name}/{RESET}")
     print(f"  ├── {CYAN}target/{RESET}")
     if is_cif:
-        print("  │   ├── <target>.cif")
-        print("  │   └── <target>.pdb  (converted)")
+        print("  │   ├── <target>.cif  (untouched source)")
+        print("  │   ├── <target>_original.pdb  (converted, untouched)")
     else:
-        print("  │   └── <target>.pdb")
+        print("  │   ├── <target>_original.pdb  (untouched source)")
+    print("  │   └── <target>.pdb  (prepared: selected chains only, no ligands/waters)")
     if tools_enabled.get("mosaic"):
         print(f"  ├── {CYAN}mosaic/{RESET}")
         print("  │   └── hallucinate.py")
@@ -931,6 +1382,53 @@ def copy_bindcraft_preset(src_dir: Path, stem: str, dest: Path):
     shutil.copy2(src_dir / f"{stem}.json", dest)
 
 
+# BoltzGen over-generates and then filters down to --budget, so the intermediate pool
+# is a real knob — but it defaulted to a flat 10 000 and was never reconciled with the
+# number of designs the user asked for. An `n_designs: 1` smoke test therefore carried
+# `--num_designs 10000`: measured on an RTX 3090, 1000 dataloader steps at ~53 s/step,
+# ETA 14 h 53 m, for one requested design, while every other tool honoured the count.
+# Scale the pool with the request, with a floor so filtering still has something to
+# filter, and keep cfg["boltzgen_intermediate"] as the explicit override.
+_BOLTZGEN_INTERMEDIATE_FLOOR = 50
+_BOLTZGEN_INTERMEDIATE_PER_DESIGN = 100
+# Same 3090 measurement: 10 000 designs in ~14 h 53 m ≈ 5.35 s of GPU time each.
+_BOLTZGEN_SECONDS_PER_DESIGN = 5.35
+
+
+def boltzgen_intermediate_default(n_designs: int) -> int:
+    """Intermediate pool implied by a requested design count."""
+    return max(_BOLTZGEN_INTERMEDIATE_FLOOR, _BOLTZGEN_INTERMEDIATE_PER_DESIGN * int(n_designs))
+
+
+def boltzgen_budget(cfg: dict) -> int:
+    """BoltzGen --budget: the per-tool override when set, else the global design count.
+
+    One resolver, because there were two answers. `--budget`, settings.json's "budget"
+    and the YAML's documented run line all read cfg["n_designs"] directly and ignored
+    cfg["boltzgen_budget"] — the per-tool override the wizard prompts for — while the
+    intermediate-pool derivation did consult it. A wizard run with budget 20 over a
+    global n_designs of 10 therefore generated a pool sized for 20 and a --budget of 10.
+    cfg["n_designs"] is indexed, not .get(): the fallback has to exist, and preflight
+    reporting a missing key beats silently designing one binder.
+    """
+    return int(cfg.get("boltzgen_budget") or cfg["n_designs"])
+
+
+def boltzgen_intermediate(cfg: dict) -> int:
+    """BoltzGen --num_designs: the explicit override when set, else derived from the count."""
+    override = cfg.get("boltzgen_intermediate")
+    if override:
+        return int(override)
+    return boltzgen_intermediate_default(boltzgen_budget(cfg))
+
+
+def boltzgen_cost_note(n_intermediate: int) -> str:
+    """ "10,000 intermediate designs (~15 h on one 24 GB GPU)" — the GPU bill, before it is paid."""
+    hours = n_intermediate * _BOLTZGEN_SECONDS_PER_DESIGN / 3600
+    span = f"~{round(hours * 60)} min" if hours < 1 else f"~{hours:.0f} h"
+    return f"{n_intermediate:,} intermediate designs ({span} on one 24 GB GPU)"
+
+
 def write_boltzgen_yaml(path: Path, cfg: dict):
     """
     Generate a BoltzGen design-specification YAML.
@@ -951,8 +1449,8 @@ def write_boltzgen_yaml(path: Path, cfg: dict):
         "#   boltzgen run config.yaml \\",
         "#       --output outputs/ \\",
         "#       --protocol protein-anything \\",
-        f"#       --num_designs {cfg['boltzgen_intermediate']} \\",
-        f"#       --budget {cfg.get('boltzgen_budget', cfg['n_designs'])}",
+        f"#       --num_designs {boltzgen_intermediate(cfg)} \\",
+        f"#       --budget {boltzgen_budget(cfg)}",
         "",
         "entities:",
     ]
@@ -1236,8 +1734,8 @@ def write_run_boltzgen(path: Path, cfg: dict):
         design_params_inner=f"""
     "mode": "{cfg.get("boltzgen_mode", "protein")}",
     "protocol": "protein-anything",
-    "num_designs": {cfg["boltzgen_intermediate"]},
-    "budget": {cfg["n_designs"]},
+    "num_designs": {boltzgen_intermediate(cfg)},
+    "budget": {boltzgen_budget(cfg)},
     "min_binder_length": {cfg.get("boltzgen_min_length", cfg["min_length"])},
     "max_binder_length": {cfg.get("boltzgen_max_length", cfg["max_length"])},
     "use_kernels": false,
@@ -1290,8 +1788,8 @@ echo "  Settings persisted: $SETTINGS_DIR/settings.json"
 "$CONDA_PREFIX/bin/boltzgen" run "$CONFIG" \\
     --output "$OUTPUT_DIR" \\
     --protocol protein-anything \\
-    --num_designs {cfg["boltzgen_intermediate"]} \\
-    --budget {cfg["n_designs"]} \\
+    --num_designs {boltzgen_intermediate(cfg)} \\
+    --budget {boltzgen_budget(cfg)} \\
     --use_kernels false
 """
     )
@@ -1874,20 +2372,22 @@ def write_run_all(path: Path, cfg: dict, tools_enabled: dict):
 
     if tools_enabled.get("mosaic"):
         lines += [
-            "# Mosaic is interactive — run it separately before the pipeline:",
-            '#   bash "$RUN_DIR/run_mosaic.sh"',
-            "# Then re-run this script. It will skip Mosaic if designs.csv already exists.",
-            "# Missing Mosaic output is a WARNING, not a failure: this block used to `exit 1`,",
-            "# and because it is emitted first that aborted the whole run before BoltzGen,",
-            "# BindCraft, PXDesign, Proteina-Complexa, RFD3 or Protein-Hunter had started —",
-            "# even though `bash runs/<name>/run_all.sh` is the documented one-command path.",
-            'echo "=== Step: Mosaic ==="',
+            "# Mosaic runs unattended like every other tool. This block used to SKIP it with a",
+            '# "needs interactive input" warning, so the documented one-command path silently',
+            "# ran 6 of 7 tools — in exactly the context where nobody is watching. It needs no",
+            "# stdin: run_mosaic.sh runs mosaic/hallucinate.py, whose every parameter (target",
+            "# sequence and PDB, N_DESIGNS, TOP_K, MIN/MAX_LENGTH, LENGTH_STEP, EPITOPE_IDX) is",
+            "# injected by write_mosaic_hallucinate at generation time. There is no input(),",
+            "# no prompt and no stdin read anywhere in it or in the template it comes from.",
+            "# Re-running this script is cheap for Mosaic: a finished designs.csv is reused.",
+            # The banner lives in the skip branch only: run_tool() echoes
+            # "=== Step: $label ===" itself, so echoing it here too printed the Mosaic
+            # header twice in an unattended log while the other six printed it once.
             'if [[ -f "$RUN_DIR/mosaic/designs.csv" ]]; then',
-            '    echo "  Mosaic designs.csv found — skipping interactive run."',
+            '    echo "=== Step: Mosaic ==="',
+            '    echo "  Mosaic designs.csv found — already done, skipping."',
             "else",
-            '    echo "  WARNING: Mosaic needs interactive input and is being SKIPPED." >&2',
-            "    echo \"           Run 'bash $RUN_DIR/run_mosaic.sh' separately, then re-run this\" >&2",
-            '    echo "           script to include its designs. Continuing with the other tools." >&2',
+            '    run_tool "Mosaic" "$RUN_DIR/run_mosaic.sh" "$RUN_DIR/mosaic/designs.csv"',
             "fi",
             "",
         ]
@@ -2970,6 +3470,39 @@ def write_run_config(path: Path, cfg: dict, tools_enabled: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 
+def _default_pxdesign_mode(tools_enabled: dict, cfg: dict | None = None) -> None:
+    """`pxdesign: True` with no mode key: INFER the mode from the evidence, then default.
+
+    PXDesign is the one tool with a MODE on top of its switch — local run vs. importing
+    someone else's results — and each half is gated on a different key (`pxdesign_local`
+    for the generator, `pxdesign` + cfg["pxdesign_output_dir"] for write_run_evaluate's
+    import branch). Only the wizard's mode prompt sets those keys, so a headless
+    `--config` that enabled the tool the obvious way got no run_pxdesign.sh while the
+    summary still listed PXDesign as enabled.
+
+    Defaulting unconditionally to local, though, broke the other hand-written shape:
+    `{pxdesign: true}` plus cfg["pxdesign_output_dir"] is unambiguously an IMPORT, and
+    forcing it to local mode then hard-failed preflight on local mode's required keys
+    (pxdesign_binder_length) — a config that used to work. So look at cfg first:
+    pxdesign_output_dir is read only by the import path, and local mode never sets it.
+    An explicit mode key still wins, and the wizard always sets all three, so this stays
+    a no-op there.
+    """
+    if not tools_enabled.get("pxdesign"):
+        return
+    if tools_enabled.get("pxdesign_local") or tools_enabled.get("pxdesign_import"):
+        return
+    if cfg and cfg.get("pxdesign_output_dir"):
+        tools_enabled["pxdesign_import"] = True
+        print_warn("pxdesign enabled without a mode — inferring IMPORT (pxdesign_import).")
+        print("  Evidence: cfg['pxdesign_output_dir'] is set, and only import mode reads it.")
+        return
+    tools_enabled["pxdesign_local"] = True
+    print_warn("pxdesign enabled without a mode — inferring a LOCAL run (pxdesign_local).")
+    print("  Evidence: no cfg['pxdesign_output_dir'] to import from, and a local run is")
+    print("  what the other six tools mean by 'enabled'. Set pxdesign_output_dir to import.")
+
+
 def load_run_config(path: Path) -> tuple[dict, dict]:
     """Read a config.json back into (cfg, tools_enabled).
 
@@ -2992,6 +3525,7 @@ def load_run_config(path: Path) -> tuple[dict, dict]:
 
     cfg = dict(payload["cfg"])
     tools_enabled = dict(payload["tools_enabled"])
+    _default_pxdesign_mode(tools_enabled, cfg)
 
     for key in ("run_dir", "target_pdb", "target_pdb_src"):
         if cfg.get(key):
@@ -3015,10 +3549,20 @@ def cmd_from_config(config_path: str, run_now: bool) -> None:
     cfg, tools_enabled = load_run_config(Path(config_path))
     run_dir = Path(cfg["run_dir"])
 
+    # Before the summary, not just before generate(): the summary itself resolves the
+    # BoltzGen budget out of cfg, so an incomplete config has to be a preflight message
+    # here rather than a KeyError traceback. generate() calls preflight again; it only
+    # prints on failure, so the repeat is free.
+    preflight(cfg, tools_enabled)
+
     print_step(f"Generating run folder from {config_path}")
     print(f"  Run folder: {run_dir}")
     enabled = [label for _k, _s, label, _d in enabled_tools(tools_enabled)]
     print(f"  Tools:      {', '.join(enabled) if enabled else '(none)'}")
+    if tools_enabled.get("boltzgen"):
+        # Same pre-GPU cost line the wizard preview prints — this path had no summary at
+        # all, and it is the path where `n_designs: 1` met a flat --num_designs 10000.
+        print(f"  BoltzGen:   {boltzgen_cost_note(boltzgen_intermediate(cfg))}")
     if tools_enabled.get("evaluator"):
         print("  Evaluator:  enabled")
 
@@ -3085,8 +3629,11 @@ def _missing_tool_assets(cfg: dict, tools_enabled: dict) -> list[tuple[str, Path
 # this map from the writer sources.
 REQUIRED_CFG_KEYS: dict[str, tuple[str, ...]] = {
     "bindcraft": ("chains", "hotspots", "max_length", "min_length", "n_designs", "target_pdb"),
+    # No "boltzgen_intermediate": it is now derived from n_designs when absent
+    # (boltzgen_intermediate()), so a config that omits it gets a pool sized to the
+    # request instead of a flat 10 000 — and requiring it would force every headless
+    # config to restate the value the derivation exists to supply.
     "boltzgen": (
-        "boltzgen_intermediate",
         "chains",
         "hotspots",
         "max_length",
@@ -3121,6 +3668,67 @@ def _missing_cfg_keys(cfg: dict, tools_enabled: dict) -> list[tuple[str, str]]:
     return missing
 
 
+# The tools_enabled keys generate() gates a run-script writer on. Identical to
+# TOOL_SEQUENCE's keys today; the pair exists so that a drift between the list the UI
+# calls "enabled" and the key the generator actually branches on is reportable BEFORE a
+# single file is written. PXDesign shipped for a while with the generator on
+# "pxdesign_local" while the summary keyed on "pxdesign", so a run advertised a tool it
+# had written no script for. Kept honest by tests/configurator/test_configurator_writers.py,
+# which re-derives the keys generate() branches on from its own source.
+_SCRIPT_WRITER_KEYS = frozenset(
+    {
+        "bindcraft",
+        "boltzgen",
+        "mosaic",
+        "pxdesign_local",
+        "proteina_complexa",
+        "rfd3",
+        "protein_hunter",
+    }
+)
+
+
+def _tools_without_a_generator(tools_enabled: dict) -> list[tuple[str, str, str]]:
+    """(label, tools_enabled key, script) for enabled tools generate() would not write.
+
+    Knowable before any file exists, which is the point: the post-write check below
+    could only report the same fact after both config.json writes, leaving a half-built
+    run directory for the user to clean up.
+    """
+    return [
+        (label, key, script)
+        for key, script, label, _subdir in enabled_tools(tools_enabled)
+        if key not in _SCRIPT_WRITER_KEYS
+    ]
+
+
+def verify_enabled_tools_generated(run_dir: Path, tools_enabled: dict) -> None:
+    """Every tool reported as enabled must have left its run script behind.
+
+    Defence in depth behind preflight's _tools_without_a_generator(), which asks the
+    same question up front from the key registry. This one asks the filesystem after
+    the fact, so a generator branch that exists but silently writes nothing (a writer
+    that returns early, a path built wrong) is still caught.
+    """
+    missing = [
+        (label, script)
+        for _key, script, label, _subdir in enabled_tools(tools_enabled)
+        if not (run_dir / script).is_file()
+    ]
+    if not missing:
+        return
+
+    print()
+    print_fail("This run is incomplete — tools are reported as enabled but have no run script:")
+    for label, script in missing:
+        print(f"    {RED}✗{RESET} {label}    (expected: {run_dir / script})")
+    print()
+    print("    That is a configurator bug, not a problem with your config: the generator")
+    print("    gates this tool on a different key than the enabled-tools list does.")
+    print()
+    sys.exit(1)
+
+
 def preflight(cfg: dict, tools_enabled: dict) -> None:
     """Refuse to start generating unless every enabled tool can be generated.
 
@@ -3130,11 +3738,20 @@ def preflight(cfg: dict, tools_enabled: dict) -> None:
     """
     assets = _missing_tool_assets(cfg, tools_enabled)
     keys = _missing_cfg_keys(cfg, tools_enabled)
-    if not assets and not keys:
+    ungenerated = _tools_without_a_generator(tools_enabled)
+    if not assets and not keys and not ungenerated:
         return
 
     print()
     print_fail("Cannot generate this run — fix the following first:")
+    if ungenerated:
+        print()
+        print(f"  {BOLD}Tools reported as enabled that the generator has no writer for:{RESET}")
+        for label, key, script in ungenerated:
+            print(f"    {RED}✗{RESET} {label}    (key {key!r}, would never write {script})")
+        print()
+        print("    That is a configurator bug, not a problem with your config: the generator")
+        print("    gates this tool on a different key than the enabled-tools list does.")
     if assets:
         print()
         print(f"  {BOLD}Enabled tools that are not installed:{RESET}")
@@ -3177,23 +3794,36 @@ def generate(cfg: dict, tools_enabled: dict):
 
     src_struct = Path(cfg["target_pdb_src"]).expanduser().resolve()
     src_ext = src_struct.suffix.lower()
+    # <name>.pdb is the PREPARED target every tool reads; the verbatim source is kept
+    # beside it as <name>_original.pdb (and, for CIF input, the untouched .cif) so
+    # preparation never destroys the only copy of the deposited coordinates.
+    dest_pdb = run_dir / "target" / f"{cfg['name']}.pdb"
+    raw_pdb: Path | None = run_dir / "target" / f"{cfg['name']}_original.pdb"
     if src_ext in (".cif", ".mmcif"):
         # Copy the original CIF
         dest_cif = run_dir / "target" / f"{cfg['name']}{src_ext}"
         shutil.copy2(src_struct, dest_cif)
         # Convert to PDB for tools that need it
-        dest_pdb = run_dir / "target" / f"{cfg['name']}.pdb"
-        if cif_to_pdb_atoms(str(src_struct), str(dest_pdb)):
-            print_ok(f"Converted CIF → PDB: {dest_pdb.name}")
+        if cif_to_pdb_atoms(str(src_struct), str(raw_pdb)):
+            print_ok(f"Converted CIF → PDB: {raw_pdb.name}")
         else:
             print_warn("CIF→PDB conversion failed — some tools may not work with CIF input.")
+            raw_pdb = None
             dest_pdb = dest_cif  # fallback: point at CIF
-        cfg["target_pdb"] = dest_pdb
         cfg["target_cif"] = dest_cif
     else:
-        dest_pdb = run_dir / "target" / f"{cfg['name']}.pdb"
-        shutil.copy2(src_struct, dest_pdb)
-        cfg["target_pdb"] = dest_pdb
+        shutil.copy2(src_struct, raw_pdb)
+
+    if raw_pdb is not None:
+        report = prepare_target_pdb(raw_pdb, dest_pdb, cfg.get("chains", "A"), cfg.get("target_sequence", "") or "")
+        if report is None:
+            print_warn(f"Could not prepare {raw_pdb.name} — no amino-acid residues found in the selected chain(s).")
+            print("  Copying the structure through unchanged: bound ligands, waters and any")
+            print("  purification tag in the coordinates will be visible to every design tool.")
+            shutil.copy2(raw_pdb, dest_pdb)
+        else:
+            report_target_preparation(report, dest_pdb)
+    cfg["target_pdb"] = dest_pdb
 
     if tools_enabled.get("bindcraft"):
         write_bindcraft_target(run_dir / "bindcraft" / "target_settings.json", cfg)
@@ -3242,6 +3872,8 @@ def generate(cfg: dict, tools_enabled: dict):
     # `configurator.py --config` and machine-readable without re-running the wizard.
     write_run_config(run_dir / CONFIG_FILENAME, cfg, tools_enabled)
 
+    verify_enabled_tools_generated(run_dir, tools_enabled)
+
 
 # ─── Pipeline runner ──────────────────────────────────────────────────────────
 
@@ -3256,7 +3888,7 @@ def run_pipeline(cfg: dict, tools_enabled: dict):
     # "Run the pipeline now?" silently ran nothing for RFD3 or Protein-Hunter, and
     # the Evaluator then reported on an empty pool.
     for _key, script, label, _subdir in enabled_tools(tools_enabled):
-        print_step(f"Running {label}" + ("  (interactive — you will be prompted below)" if _key == "mosaic" else ""))
+        print_step(f"Running {label}")
         rc = subprocess.run(["bash", str(run_dir / script)]).returncode
         if rc == 0:
             print_ok(f"{label} completed")
@@ -3449,7 +4081,10 @@ def wizard():
     primary_chain = chains.split(",")[0].strip()
     target_sequence = extract_sequence_from_structure(target_pdb_src, primary_chain)
     if target_sequence:
-        target_sequence = warn_expression_tags(target_sequence)
+        # The file and chain go with the sequence: the depositor's own SEQADV /
+        # _struct_ref_seq_dif records name the construct residues exactly, and a pattern
+        # over the sequence alone cannot (5O45's AAALE linker defeats any character class).
+        target_sequence = warn_expression_tags(target_sequence, target_pdb_src, primary_chain)
         preview = target_sequence[:50] + ("..." if len(target_sequence) > 50 else "")
         print_ok(f"Auto-extracted sequence for chain {primary_chain}: {preview} ({len(target_sequence)} aa)")
 
@@ -3642,7 +4277,7 @@ def wizard():
         "filter_preset": "default_filters",
         "advanced_preset": "default_4stage_multimer",
         "boltzgen_mode": "protein",
-        "boltzgen_intermediate": 10000,
+        "boltzgen_intermediate": boltzgen_intermediate_default(n_designs),
         "use_boltz": use_boltz,
         "use_af3": use_af3,
         "use_esmfold2": use_esmfold2,
@@ -3708,10 +4343,16 @@ def wizard():
         cfg["boltzgen_max_length"] = int(
             ask("  Max binder length", default=max_length, validator=validate_int(min_val=1, max_val=500))
         )
+        # Default scaled to the budget just entered, not a flat 10 000 — see
+        # boltzgen_intermediate(). The cost is stated before the prompt because this one
+        # answer is the whole GPU bill for the tool.
+        bg_intermediate_default = boltzgen_intermediate_default(cfg["boltzgen_budget"])
+        print("  BoltzGen over-generates, then filters down to the budget above.")
+        print(f"  Default pool for a budget of {cfg['boltzgen_budget']}: {boltzgen_cost_note(bg_intermediate_default)}")
         cfg["boltzgen_intermediate"] = int(
             ask(
-                "  Intermediate designs (--num_designs, recommended: 10 000)",
-                default=10000,
+                "  Intermediate designs (--num_designs)",
+                default=bg_intermediate_default,
                 validator=validate_int(min_val=1),
             )
         )
@@ -3943,13 +4584,18 @@ def wizard():
     if use_boltzgen:
         bg_min = cfg.get("boltzgen_min_length", min_length)
         bg_max = cfg.get("boltzgen_max_length", max_length)
-        bg_n = cfg.get("boltzgen_budget", n_designs)
+        bg_n = boltzgen_budget(cfg)
         mode_label = "nanobody CDR redesign" if cfg["boltzgen_mode"] == "nanobody" else "de-novo protein"
         print(
             f"  {CYAN}BoltzGen{RESET}:      {mode_label}  |  "
             f"length={bg_min}–{bg_max}  budget={bg_n}  "
-            f"intermediate={cfg['boltzgen_intermediate']:,}"
+            f"intermediate={boltzgen_intermediate(cfg):,}"
         )
+        # The intermediate pool IS the BoltzGen runtime, and it is the one number here
+        # that can turn a one-design smoke test into an overnight job. Say the cost now,
+        # while it is still a prompt away, the way Evaluator/evaluate.sh warns before it
+        # spends GPU time rather than reporting it afterwards.
+        print(f"  {CYAN}BoltzGen cost{RESET}: {boltzgen_cost_note(boltzgen_intermediate(cfg))}")
     if use_mosaic:
         mo_min = cfg.get("mosaic_min_length", min_length)
         mo_max = cfg.get("mosaic_max_length", max_length)
@@ -4018,8 +4664,6 @@ def wizard():
 
     # ── Step 9: Run now? ──────────────────────────────────────────────────────
     print()
-    if use_mosaic:
-        print_warn("Mosaic requires interactive input and will run first.")
     if use_boltzgen:
         print_warn("BoltzGen downloads ~6 GB of weights on first run.")
     if use_evaluator:
