@@ -608,7 +608,7 @@ _stage_bindcraft2_source() {
     case "${BINDCRAFT2_SOURCE}" in
         *.git|git@*|https://*|http://*)
             command -v git >/dev/null 2>&1 || { print_fail "git not found; cannot clone ${BINDCRAFT2_SOURCE}"; return 1; }
-            run_logged "Cloning BindCraft 2" \
+            run_logged --retries 3 "Cloning BindCraft 2" \
                 git clone --quiet "${BINDCRAFT2_SOURCE}" "${staging}/src" || return 1
             if [[ "${BINDCRAFT2_COMMIT}" != "HEAD" ]]; then
                 run_logged "Pinning BindCraft 2 to ${BINDCRAFT2_COMMIT}" \
@@ -1047,7 +1047,7 @@ select_tools_interactive() {
         echo ""
     }
 
-    local choice j any
+    local choice j any stdin_closed=false
     while true; do
         _print_menu
         if ! read -rp "  > " choice; then
@@ -1061,6 +1061,7 @@ select_tools_interactive() {
             if [[ "${any}" == true ]]; then
                 echo ""
                 print_warn "stdin closed -- proceeding with the tools selected above."
+                stdin_closed=true
                 break
             fi
             echo ""
@@ -1101,7 +1102,16 @@ select_tools_interactive() {
         [[ "${m_sel[$i]}" == true ]] && echo -e "    ${GREEN}✓${RESET} ${m_name[$i]}"
     done
 
-    confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
+    # With stdin closed, confirm() reads EOF and returns 1 -- so the branch above
+    # announced "proceeding with the tools selected above" and the installer then
+    # printed "Aborted." and exited 0, having installed nothing. A zero exit over
+    # no work is the failure mode this release exists to remove, and the EOF branch
+    # was added for exactly this path. The selection above IS the confirmation here.
+    if [[ "${stdin_closed}" == true ]]; then
+        print_warn "stdin closed -- taking the selection above as confirmed."
+    else
+        confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
+    fi
 
     # Explicit, and load-bearing. Without it the function's exit status is that
     # of the last `[[ ... ]] && echo`, which is 1 whenever the LAST tool in the
@@ -1264,6 +1274,48 @@ _fix_advanced_settings() {
 
 # ─── BindCraft ────────────────────────────────────────────────────────────────
 
+# Migrate BindCraft's single set_interface() call site for PyRosetta >= 2026.29,
+# which requires a DockingPartners object instead of a plain string. Same body as
+# install.sh's copy; idempotent, and safe on an already-patched clone.
+_patch_bindcraft_pyrosetta() {
+    local f="${BINDCRAFT_DIR}/functions/pyrosetta_utils.py"
+    [[ -f "${f}" ]] || return 0
+    if grep -q 'DockingPartners' "${f}"; then
+        print_ok "BindCraft set_interface already patched for PyRosetta >= 2026.29"
+        return 0
+    fi
+    if ! grep -q 'iam.set_interface("A_B")' "${f}"; then
+        print_warn "Could not find iam.set_interface(\"A_B\") in pyrosetta_utils.py — left unpatched"
+        return 0
+    fi
+    python3 - "${f}" << 'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+src = path.read_text()
+# The call sits inside score_interface(), so the block carries that body indent.
+src = src.replace(
+    '    iam.set_interface("A_B")',
+    '    # PyRosetta >= 2026.29 requires DockingPartners instead of a plain string.\n'
+    '    try:\n'
+    '        from pyrosetta.rosetta.core.pose import DockingPartners\n'
+    '        iam.set_interface(DockingPartners.docking_partners_from_string("A_B"))\n'
+    '    except ImportError:\n'
+    '        iam.set_interface("A_B")  # PyRosetta < 2026.29',
+    1,
+)
+path.write_text(src)
+PYEOF
+    # Verify rather than trust the heredoc's exit status: without this patch every
+    # trajectory dies in score_interface(), so a silent miss costs GPU-hours.
+    if ! grep -q 'DockingPartners' "${f}"; then
+        print_fail "Failed to patch set_interface in ${f} — BindCraft would produce zero designs"
+        return 1
+    fi
+    print_ok "Patched BindCraft set_interface for PyRosetta >= 2026.29"
+}
+
 install_bindcraft() {
     print_step "Installing BindCraft (aarch64 / CUDA ${CUDA_VERSION})"
     ensure_conda_in_path
@@ -1289,6 +1341,14 @@ install_bindcraft() {
     fi
 
     _fix_target_settings
+    # Migrate the one call site whose API PyRosetta 2026.29 changed. Unlike x86 we
+    # do NOT pin the version: PyRosetta comes from the graylab CONDA channel here
+    # (install.sh pip-installs it from a find-links index), and that channel does
+    # not publish the same version strings, so a pin copied across would simply fail
+    # to solve. The patch is the portable half and it is what repairs the failure --
+    # which matters because verify_tool()'s BindCraft arm tells the operator to
+    # "re-run the installer", and before this there was nothing here to re-run.
+    _patch_bindcraft_pyrosetta || return 1
     _install_bindcraft_binaries_aarch64
     _install_af2_params || return 1
     _fix_advanced_settings
@@ -1932,7 +1992,7 @@ install_evaluator() {
         || print_warn "fair-esm install failed — Mosaic will run without the ESM2 prior"
     # Pre-cache the ESM2-150M weights (~566 MB) so offline compute nodes need no
     # download at design time (cached under ~/.cache/torch/hub/checkpoints). Non-fatal.
-    run_logged "pre-fetch ESM2-150M weights" \
+    run_logged --retries 3 "pre-fetch ESM2-150M weights" \
         "${MOSAIC_VENV}/bin/python" -c "import esm; esm.pretrained.esm2_t30_150M_UR50D()" \
         || print_warn "ESM2-150M weight prefetch failed — provision it offline or design runs without the prior"
 
@@ -2021,7 +2081,7 @@ install_pxdesign() {
     if [[ -d "${PXDESIGN_DIR}" ]]; then
         print_ok "PXDesign already cloned at ${PXDESIGN_DIR}"
     else
-        run_logged "Cloning PXDesign" \
+        run_logged --retries 3 "Cloning PXDesign" \
             git clone "${PXDESIGN_REPO}" "${PXDESIGN_DIR}" \
             || { print_fail "Failed to clone PXDesign"; return 1; }
         if [[ "${PXDESIGN_COMMIT}" != "HEAD" ]]; then
@@ -2369,7 +2429,7 @@ install_af3() {
     elif [[ -e "${AF3_DIR}" ]]; then
         print_fail "${AF3_DIR} exists but is not a git repo — remove it and retry."; return 1
     else
-        run_logged "Cloning alphafold3" \
+        run_logged --retries 3 "Cloning alphafold3" \
             git clone "${AF3_REPO}" "${AF3_DIR}" \
             || { print_fail "Failed to clone alphafold3 (network / GitHub access?)"; return 1; }
         run_logged "Pinning alphafold3 to ${AF3_COMMIT}" \
@@ -2669,7 +2729,7 @@ install_protein_hunter() {
     if [[ -d "${PROTEIN_HUNTER_DIR}" ]]; then
         print_ok "Protein-Hunter already cloned at ${PROTEIN_HUNTER_DIR}"
     else
-        run_logged "Cloning Protein-Hunter" \
+        run_logged --retries 3 "Cloning Protein-Hunter" \
             git clone --depth 50 "${PROTEIN_HUNTER_REPO}" "${PROTEIN_HUNTER_DIR}" \
             || { print_fail "Failed to clone Protein-Hunter"; return 1; }
         git -C "${PROTEIN_HUNTER_DIR}" checkout "${PROTEIN_HUNTER_COMMIT}" --quiet \
@@ -3384,7 +3444,7 @@ _build_usearch_v12() {
     done
     local src_dir="${SOLUPROT_DIR}/usearch12-src"
     rm -rf "${src_dir}"
-    run_logged "Cloning ${USEARCH12_REPO}" \
+    run_logged --retries 3 "Cloning ${USEARCH12_REPO}" \
         git clone --depth 1 "${USEARCH12_REPO}" "${src_dir}" \
         || { print_warn "git clone of ${USEARCH12_REPO} failed"; return 1; }
     # The generated Makefile hardcodes 'ccache g++'; override CC/CXX. -march=native
@@ -3436,14 +3496,14 @@ install_proteina_complexa() {
     # because this repo has already once declared aarch64 support on the strength
     # of `jax reports gpu` plus a successful import, and been wrong.
     if ! command -v uv &>/dev/null && [[ ! -x "${HOME}/.local/bin/uv" ]]; then
-        run_logged "Installing uv ${UV_VERSION}" bash -c "curl -fsSL https://astral.sh/uv/${UV_VERSION}/install.sh | sh" \
+        run_logged --retries 3 "Installing uv ${UV_VERSION}" bash -c "curl -fsSL https://astral.sh/uv/${UV_VERSION}/install.sh | sh" \
             || { print_fail "uv install failed"; return 1; }
     fi
     local UV="${HOME}/.local/bin/uv"
     command -v uv &>/dev/null && UV="$(command -v uv)"
 
     if [[ ! -d "${PROTEINA_COMPLEXA_DIR}" ]]; then
-        run_logged "Cloning Proteina-Complexa" \
+        run_logged --retries 3 "Cloning Proteina-Complexa" \
             git clone --depth 50 "${PROTEINA_COMPLEXA_REPO}" "${PROTEINA_COMPLEXA_DIR}" \
             || { print_fail "Clone failed"; return 1; }
         if [[ "${PROTEINA_COMPLEXA_COMMIT}" != "HEAD" ]]; then
@@ -3775,15 +3835,23 @@ install_tmprot() {
         "${CONDA_CMD}" run -n binder-eval-tmprot python -c "import tmprot" \
         || return 1
 
-    cat > "${SHORTCUTS_DIR}/tmprot" <<TMPROTEOF
-#!/usr/bin/env bash
-# BinderScout shortcut: TmProt melting-temperature screen.
-# With args -> binder-compare screen-tmprot; without -> a shell in the env.
+    # CONDA_CMD is resolved through shortcut_conda() into the preamble, exactly as
+    # the other five shortcuts do it: detect_conda prefers mamba, `mamba run` has
+    # no --live-stream, and this heredoc used to be UNQUOTED -- so ${CONDA_CMD}
+    # expanded at generation time to the mamba path and `tmprot <args>` died with
+    # "exec: --: invalid option". Preamble + quoted body is what fixes it.
+    {
+        echo "#!/usr/bin/env bash"
+        echo "# BinderScout shortcut: TmProt melting-temperature screen."
+        echo "# With args -> binder-compare screen-tmprot; without -> a shell in the env."
+        echo "CONDA_CMD=\"$(shortcut_conda)\""
+    } > "${SHORTCUTS_DIR}/tmprot"
+    cat >> "${SHORTCUTS_DIR}/tmprot" << 'TMPROTEOF'
 set -euo pipefail
-if [[ \$# -eq 0 ]]; then
+if [ "$#" -eq 0 ]; then
     exec "${CONDA_CMD}" run --live-stream -n binder-eval-tmprot bash
 else
-    exec "${CONDA_CMD}" run --live-stream -n binder-eval-tmprot binder-compare screen-tmprot "\$@"
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-tmprot binder-compare screen-tmprot "$@"
 fi
 TMPROTEOF
     chmod +x "${SHORTCUTS_DIR}/tmprot"

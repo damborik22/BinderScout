@@ -121,19 +121,27 @@ def test_the_default_refold_engine_is_selectable_and_on_by_default(path):
 def test_weight_downloads_are_retried(path):
     """A transient DNS failure cost RFD3 its entire checkpoint on 2026-09-23.
 
-    Every run_logged step whose label mentions downloading must carry --retries;
+    Every run_logged step that goes to the NETWORK must carry --retries;
     build/compile steps deliberately must not, because retrying a deterministic
     compile failure only hides the error.
+
+    Matching on "download" alone was not enough: it is the label of five steps and
+    the behaviour of many more. `Cloning <repo>` is a network fetch under a label
+    that says nothing about downloading, and every clone in both installers was
+    unretried while the test stayed green -- including the one that fetches
+    Proteina-Complexa and the aarch64-only ESM2 weight pre-fetch. So match the
+    network VERBS, not the word.
     """
     if not path.exists():
         pytest.skip(f"{path.name} not present")
     src = path.read_text()
+    network = re.compile(r'"[^"]*(?:[Dd]ownload|Clon(?:e|ing)|pre-fetch|[Ff]etching|curl|wget)')
     unretried = [
         line.strip()
         for line in src.splitlines()
-        if "run_logged " in line and "--retries" not in line and re.search(r'"[^"]*[Dd]ownload', line)
+        if "run_logged " in line and "--retries" not in line and network.search(line)
     ]
-    assert not unretried, "download steps without --retries:\n  " + "\n  ".join(unretried)
+    assert not unretried, "network steps without --retries:\n  " + "\n  ".join(unretried)
 
 
 @pytest.mark.parametrize("path", INSTALLERS, ids=lambda p: p.name)
@@ -198,3 +206,30 @@ def test_shortcuts_are_generated_against_an_interpreter_that_supports_their_flag
         "Use $(shortcut_conda) so --live-stream is valid."
     )
     assert "shortcut_conda()" in src, "shortcut_conda() helper is gone but --live-stream is still emitted"
+
+    # The check above only sees a preamble that bakes in the WRONG interpreter. A
+    # shortcut with NO preamble at all was invisible to it: TmProt's heredoc was
+    # unquoted, so ${CONDA_CMD} expanded at generation time to whatever
+    # detect_conda picked -- mamba -- and the file matched neither pattern. So
+    # check per shortcut instead. A shortcut's generation region is its enclosing
+    # FUNCTION (not the span since the previous chmod, which for the first one
+    # swallows shortcut_conda()'s own doc comment and its mention of the flag).
+    fn_starts = [m.start() for m in re.finditer(r"^[A-Za-z_][A-Za-z0-9_]*\(\) \{", src, re.M)]
+    # Match the EMITTED assignment, not the bare word: a prose mention of
+    # shortcut_conda() in a nearby comment would otherwise satisfy this.
+    emits_resolved = re.compile(r'CONDA_CMD=\\?"\$\(shortcut_conda\)')
+    streaming, unresolved = 0, []
+    for m in re.finditer(r'chmod \+x "\$\{SHORTCUTS_DIR\}/([a-z0-9_.-]+)"', src):
+        begin = max([o for o in fn_starts if o < m.start()] or [0])
+        region = src[begin : m.end()]
+        if "--live-stream" not in region:
+            continue
+        streaming += 1
+        if not emits_resolved.search(region):
+            unresolved.append(m.group(1))
+    assert streaming, f"{path.name}: no --live-stream shortcut found -- did the generation shape change?"
+    assert not unresolved, (
+        f"{path.name}: shortcut(s) {unresolved} use `conda run --live-stream` without resolving "
+        "the interpreter via shortcut_conda() -- on a Miniforge box CONDA_CMD is mamba, which has "
+        "no such flag, so the shortcut dies on every argument with 'exec: --: invalid option'"
+    )

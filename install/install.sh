@@ -35,12 +35,22 @@ BINDCRAFT_COMMIT="7cd4ace"
 PYROSETTA_VERSION="2026.29+releasequarterly.80a0635615"
 PYROSETTA_FIND_LINKS="https://west.rosettacommons.org/pyrosetta/quarterly/release.cxx11thread.serialization"
 BOLTZGEN_COMMIT="da0f092"
-# What the BoltzGen env actually runs. The old value was torch==2.5.1+cu121 from the
-# cu121 index, and it was a lie: `pip install -e BoltzGen` on the very next step
-# resolves BoltzGen's own unconstrained `torch>=2.4.1` and upgraded straight over it,
-# leaving the cu121 wheel's orphaned nvidia_*_cu12 dist-infos beside the cu13 set as
-# the fingerprint. Naming the resolved version is half the fix; the other half is
-# passing it to the editable install too, so the pin cannot be re-resolved away.
+# The old value was torch==2.5.1+cu121 from the cu121 index, and it was a lie:
+# `pip install -e BoltzGen` on the very next step resolves BoltzGen's own
+# unconstrained `torch>=2.4.1` and upgraded straight over it, leaving the cu121
+# wheel's orphaned nvidia_*_cu12 dist-infos beside the cu13 set as the fingerprint
+# (24 cu12 against 8 cu13 in this box's env -- the diagnosis is reproduced here).
+# Naming a version is half the fix; the other half is passing it to the editable
+# install too, so the pin cannot be re-resolved away.
+#
+# PROVENANCE OF THIS DIGIT, because an earlier comment here claimed it was "what the
+# BoltzGen env actually runs" and that is NOT true on this branch: 2.14.1 is what the
+# 1.0.x box ran. The live envs on this fleet are torch 2.11.0+cu130 (x86, BM4) and
+# 2.10.0+cu130 (BM5, pinned separately by install_aarch.sh). So a `--tool boltzgen`
+# re-run against this pin is a three-minor UPGRADE of a working env, not a
+# restatement of it -- deliberate, because the alternative is naming a digit that
+# differs per box, but it has not been exercised end to end here.
+# Carried over from master with it: the PyPI cu13 wheel needs a 580+ driver.
 BOLTZGEN_TORCH_VERSION="2.14.1"
 MOSAIC_COMMIT="82593a8"
 # esm2quinox is pinned HERE, next to MOSAIC_COMMIT, for the same reason PyRosetta is
@@ -609,7 +619,7 @@ _stage_bindcraft2_source() {
     case "${BINDCRAFT2_SOURCE}" in
         *.git|git@*|https://*|http://*)
             command -v git >/dev/null 2>&1 || { print_fail "git not found; cannot clone ${BINDCRAFT2_SOURCE}"; return 1; }
-            run_logged "Cloning BindCraft 2" \
+            run_logged --retries 3 "Cloning BindCraft 2" \
                 git clone --quiet "${BINDCRAFT2_SOURCE}" "${staging}/src" || return 1
             if [[ "${BINDCRAFT2_COMMIT}" != "HEAD" ]]; then
                 run_logged "Pinning BindCraft 2 to ${BINDCRAFT2_COMMIT}" \
@@ -1260,21 +1270,48 @@ install_bindcraft() {
 
     # Exercise the patched set_interface() call BEFORE any GPU work. score_interface()
     # runs only after a full ~8 min trajectory, so an API mismatch otherwise burns GPU
-    # indefinitely and yields zero designs; here it fails in seconds. This calls the
-    # mover, rather than importing something and inferring -- the import was always
-    # fine, it was the call that raised TypeError.
-    smoke_test "pyrosetta set_interface API" \
-        "${CONDA_CMD}" run -n BindCraft python -c "
+    # indefinitely and yields zero designs; here it fails in seconds.
+    #
+    # This executes the call site as it ACTUALLY EXISTS in pyrosetta_utils.py. The
+    # first version of this check re-implemented the patch's own try/except inline,
+    # which made it a tautology: it passed against a new-API PyRosetta whether or not
+    # the file had been patched -- so the one path that really fails, _patch_bindcraft_
+    # pyrosetta's "could not find the call site" branch (which returns 0), still
+    # reached the GPU. Reading the statement back out of the file is what closes that.
+    local _pyrosetta_smoke
+    _pyrosetta_smoke=$(cat <<'PYSMOKE'
+import ast
+import pathlib
+import sys
+import textwrap
+
 import pyrosetta
 from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
-pyrosetta.init('-mute all')
+
+path = pathlib.Path(sys.argv[1])
+src = path.read_text()
+# The enclosing FUNCTION-BODY statement that mentions set_interface: the whole
+# try/except after patching, the bare call before it. Taking the function-body
+# statement rather than the innermost node matters -- the innermost is the call
+# alone, and executing that without the `from ... import DockingPartners` beside
+# it would fail for a reason the real call site has not got.
+stmt = None
+for fn in (n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)):
+    for node in fn.body:
+        seg = ast.get_source_segment(src, node, padded=True) or ""
+        if "set_interface" in seg:
+            stmt = seg
+if stmt is None:
+    sys.exit("no set_interface call site found in " + str(path))
+pyrosetta.init("-mute all")
 iam = InterfaceAnalyzerMover()
-try:
-    from pyrosetta.rosetta.core.pose import DockingPartners
-    iam.set_interface(DockingPartners.docking_partners_from_string('A_B'))
-except ImportError:
-    iam.set_interface('A_B')
-print('OK')" \
+exec(compile(textwrap.dedent(stmt), str(path), "exec"), {"iam": iam})
+print("OK")
+PYSMOKE
+)
+    smoke_test "pyrosetta set_interface API (BindCraft's own call site)" \
+        "${CONDA_CMD}" run -n BindCraft \
+        python -c "${_pyrosetta_smoke}" "${BINDCRAFT_DIR}/functions/pyrosetta_utils.py" \
         || { print_fail "PyRosetta API mismatch — BindCraft would produce zero designs"; return 1; }
 
     # Example
@@ -1837,7 +1874,7 @@ install_pxdesign() {
     if [[ -d "${PXDESIGN_DIR}" ]]; then
         print_ok "PXDesign already cloned at ${PXDESIGN_DIR}"
     else
-        run_logged "Cloning PXDesign" \
+        run_logged --retries 3 "Cloning PXDesign" \
             git clone "${PXDESIGN_REPO}" "${PXDESIGN_DIR}" \
             || { print_fail "Failed to clone PXDesign"; return 1; }
         if [[ "${PXDESIGN_COMMIT}" != "HEAD" ]]; then
@@ -2150,7 +2187,7 @@ LNEOF
     if [[ -d "${CUTLASS_DIR}/include/cutlass" ]]; then
         print_ok "CUTLASS already present at ${CUTLASS_DIR}"
     else
-        run_logged "Cloning NVIDIA CUTLASS v3.5.1 (header-only)" \
+        run_logged --retries 3 "Cloning NVIDIA CUTLASS v3.5.1 (header-only)" \
             git clone --depth 1 --branch v3.5.1 \
             https://github.com/NVIDIA/cutlass.git "${CUTLASS_DIR}" \
             || print_warn "CUTLASS clone failed — DS4Sci_EvoformerAttention JIT will not work"
@@ -3093,7 +3130,7 @@ install_protein_hunter() {
     if [[ -d "${PROTEIN_HUNTER_DIR}" ]]; then
         print_ok "Protein-Hunter already cloned at ${PROTEIN_HUNTER_DIR}"
     else
-        run_logged "Cloning Protein-Hunter" \
+        run_logged --retries 3 "Cloning Protein-Hunter" \
             git clone --depth 50 "${PROTEIN_HUNTER_REPO}" "${PROTEIN_HUNTER_DIR}" \
             || { print_fail "Failed to clone Protein-Hunter"; return 1; }
         git -C "${PROTEIN_HUNTER_DIR}" checkout "${PROTEIN_HUNTER_COMMIT}" --quiet \
@@ -3253,7 +3290,7 @@ install_af3() {
     elif [[ -e "${AF3_DIR}" ]]; then
         print_fail "${AF3_DIR} exists but is not a git repo — remove it and retry."; return 1
     else
-        run_logged "Cloning alphafold3" \
+        run_logged --retries 3 "Cloning alphafold3" \
             git clone "${AF3_REPO}" "${AF3_DIR}" \
             || { print_fail "Failed to clone alphafold3 (network / GitHub access?)"; return 1; }
         run_logged "Pinning alphafold3 to ${AF3_COMMIT}" \
@@ -3580,7 +3617,7 @@ _build_usearch_v12() {
     done
     local src_dir="${SOLUPROT_DIR}/usearch12-src"
     rm -rf "${src_dir}"
-    run_logged "Cloning ${USEARCH12_REPO}" \
+    run_logged --retries 3 "Cloning ${USEARCH12_REPO}" \
         git clone --depth 1 "${USEARCH12_REPO}" "${src_dir}" \
         || { print_warn "git clone of ${USEARCH12_REPO} failed"; return 1; }
     # The generated Makefile hardcodes 'ccache g++'; override CC/CXX. Static
@@ -3665,15 +3702,23 @@ install_tmprot() {
         "${CONDA_CMD}" run -n binder-eval-tmprot python -c "import tmprot" \
         || return 1
 
-    cat > "${SHORTCUTS_DIR}/tmprot" <<TMPROTEOF
-#!/usr/bin/env bash
-# BinderScout shortcut: TmProt melting-temperature screen.
-# With args -> binder-compare screen-tmprot; without -> a shell in the env.
+    # CONDA_CMD is resolved through shortcut_conda() into the preamble, exactly as
+    # the other five shortcuts do it: detect_conda prefers mamba, `mamba run` has
+    # no --live-stream, and this heredoc used to be UNQUOTED -- so ${CONDA_CMD}
+    # expanded at generation time to the mamba path and `tmprot <args>` died with
+    # "exec: --: invalid option". Preamble + quoted body is what fixes it.
+    {
+        echo "#!/usr/bin/env bash"
+        echo "# BinderScout shortcut: TmProt melting-temperature screen."
+        echo "# With args -> binder-compare screen-tmprot; without -> a shell in the env."
+        echo "CONDA_CMD=\"$(shortcut_conda)\""
+    } > "${SHORTCUTS_DIR}/tmprot"
+    cat >> "${SHORTCUTS_DIR}/tmprot" << 'TMPROTEOF'
 set -euo pipefail
-if [[ \$# -eq 0 ]]; then
+if [ "$#" -eq 0 ]; then
     exec "${CONDA_CMD}" run --live-stream -n binder-eval-tmprot bash
 else
-    exec "${CONDA_CMD}" run --live-stream -n binder-eval-tmprot binder-compare screen-tmprot "\$@"
+    exec "${CONDA_CMD}" run --live-stream -n binder-eval-tmprot binder-compare screen-tmprot "$@"
 fi
 TMPROTEOF
     chmod +x "${SHORTCUTS_DIR}/tmprot"
