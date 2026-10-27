@@ -19,8 +19,15 @@ from pathlib import Path
 
 import pytest
 
+# Both installers. install_aarch.sh was NOT in this list, and the suite was green with
+# its five-entry menu and its infinite stdin-closed loop both live -- the green suite was
+# the evidence of the gap. On DGX Spark the documented default install therefore could
+# not select ESMFold2 at all, which left two refold engines against the report's default
+# three-engine gate, so every design was ranked last and nothing said so until report
+# time.
 INSTALLERS = [
     Path(__file__).resolve().parents[1] / "install" / "install.sh",
+    Path(__file__).resolve().parents[1] / "install" / "install_aarch.sh",
 ]
 
 
@@ -88,6 +95,25 @@ def test_tool_status_is_not_a_second_hardcoded_list(path):
     assert "TOOL_REGISTRY" in body.group(0), (
         "print_tool_status() no longer reads TOOL_REGISTRY — it has grown its "
         "own tool list again, which is how six of twelve tools went missing"
+    )
+
+
+@pytest.mark.parametrize("path", INSTALLERS, ids=lambda p: p.name)
+def test_the_default_refold_engine_is_selectable_and_on_by_default(path):
+    """ESMFold2 is the DEFAULT refold engine and the report's gate wants three.
+
+    An installer whose menu cannot offer it produces an evaluator with two engines
+    against `--min-engines 3`, which ranks every design last — and says so only at
+    report time, after every refold has been paid for. install_aarch.sh's menu could
+    not offer it at all; it listed BindCraft, BoltzGen, Mosaic, Evaluator, PXDesign.
+    """
+    if not path.exists():
+        pytest.skip(f"{path.name} not present")
+    rows = {row[1]: row for row in _registry(path.read_text())}
+    assert "ESMFold2" in rows, f"{path.name}'s menu cannot offer ESMFold2"
+    assert rows["ESMFold2"][3] == "true", (
+        f"{path.name} defaults ESMFold2 OFF in the interactive menu, so the documented "
+        "default install (no --tool) yields two refold engines against a 3-engine gate"
     )
 
 

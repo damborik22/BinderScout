@@ -53,8 +53,17 @@ BINDCRAFT2_SOURCE="${BINDCRAFT2_SOURCE:-$BINDCRAFT2_REPO}"   # --bc2-source, env
 BINDCRAFT2_COMMIT="${BINDCRAFT2_COMMIT:-v1.0.1}"   # only consulted for a git source
 
 PROTEINA_COMPLEXA_REPO="${PROTEINA_COMPLEXA_REPO:-https://github.com/NVIDIA-Digital-Bio/proteina-complexa.git}"
-PROTEINA_COMPLEXA_COMMIT="${PROTEINA_COMPLEXA_COMMIT:-HEAD}"
+# Was the literal "HEAD", so two installs a week apart got different code while every
+# other tool here was pinned. Same commit as install.sh: the one install/patches/pc_*.py
+# were written against and verified to re-apply byte-identically.
+PROTEINA_COMPLEXA_COMMIT="${PROTEINA_COMPLEXA_COMMIT:-32b71ae1d9a8767414eae3921cf35969430db82f}"
 PROTEINA_COMPLEXA_DIR="${BINDERSCOUT_DIR}/Proteina-Complexa"
+# atomworks is pinned HERE, next to PROTEINA_COMPLEXA_COMMIT, because upstream's
+# env build installs it unpinned and atomworks 3.0.0 (2026-10-05) DELETED
+# AtomSelectionStack, which src/proteinfoundation/utils/pdb_utils.py imports at module
+# level -- so a fresh install dies at the first generate step. The digit is a ceiling
+# below 3.0.0, not the claim: _pin_complexa_atomworks() asserts the SYMBOL.
+ATOMWORKS_VERSION="2.2.1"
 
 TMPROT_REPO="https://github.com/loschmidt/TmProt.git"
 TMPROT_BRANCH="tmprot-development"
@@ -70,9 +79,20 @@ TMPROT_DIR="${BINDERSCOUT_DIR}/TmProt"
 BINDCRAFT_COMMIT="7cd4ace"
 BOLTZGEN_COMMIT="da0f092"
 MOSAIC_COMMIT="82593a8"
+# esm2quinox is pinned HERE, next to MOSAIC_COMMIT, because Mosaic asks for
+# `esm2quinox>=0.1.0` with no ceiling and 0.2.0 rewrote the private token table that
+# mosaic/losses/esm.py indexes: 32 entries keyed "^"/"$"/"#" instead of 33 keyed
+# "b"/"e"/"m", against a hardcoded one-hot width of 33. The ESM2 expressibility prior is
+# on by default, so a fresh resolve dies with KeyError: 'b' inside the jitted loss, on
+# the first optimisation step. _pin_mosaic_esm2quinox() caps it before uv resolves.
+ESM2QUINOX_VERSION="0.1.0"
+# uv is pinned because it IS the resolver that builds the Mosaic, BindCraft 2 and
+# Proteina-Complexa venvs here. Only used when uv is ABSENT; a box that has uv keeps it.
+UV_VERSION="0.11.7"
 
 PXDESIGN_REPO="https://github.com/bytedance/PXDesign.git"
-PXDESIGN_COMMIT="HEAD"
+# Was the literal "HEAD" -- see PROTEINA_COMPLEXA_COMMIT above.
+PXDESIGN_COMMIT="f788441313c84c3074fe9596ac2433f96b15c763"
 PXDESIGN_DIR="${BINDERSCOUT_DIR}/PXDesign"
 PROTEIN_HUNTER_REPO="https://github.com/yehlincho/Protein-Hunter.git"
 PROTEIN_HUNTER_COMMIT="d4bd9515882c2aa81e97f3d3bf7f42247a9fe80c"
@@ -120,6 +140,7 @@ SKIP_PREFLIGHT=false
 FORCE=false      # --force: allow --yes to accept DESTRUCTIVE prompts (reclone / env re-create)
 UNINSTALL_MODE=false
 VERIFY_ONLY=false        # --verify: audit what is on disk, install nothing
+REPAIR_MODE=false        # --repair: audit, then re-install only what is broken
 TOOL_SPECIFIED=false
 TOOL_ALL=false         # --tool all was given; uninstall widens this to every optional add-on   # set to true when --tool is passed on CLI
 STANDALONE="auto"      # auto | true | false — controls local Miniforge install
@@ -156,6 +177,43 @@ DO_TMPROT=false         # opt-in: sequence-only melting-temperature screen. GPL-
                         # and installed editable rather than vendored. Advisory only -- it has
                         # no filter mode, because Tm predictors are out of domain on hyperstable
                         # de novo miniproteins.
+
+# The one list, mirroring install.sh's. Every per-tool loop below derives from it,
+# in install order.
+#
+# It arrives here because this file's menu and status table were still the ORIGINAL
+# five-place versions -- `local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator"
+# "PXDesign")` -- long after install.sh grew to fourteen tools. On DGX Spark the
+# documented default install (`binderscout install`, no --tool) therefore could not
+# select ESMFold2 AT ALL, and ESMFold2 is the DEFAULT refold engine: the resulting
+# evaluator had two engines against a 3-engine gate, so every design was ranked last
+# and the operator found out at report time, after paying for every refold. Both
+# detectors already existed here (verify_tool) and were simply never called.
+#
+# Format: DO_ flag | display name | install function | menu default | description
+#
+# The menu defaults are the aarch64 ones, not install.sh's. ESMFold2 is ON because it
+# is the DEFAULT refold engine. RFD3 is OFF here although install.sh defaults it ON --
+# it is unvalidated on this hardware. AF3 is OFF (weights gated by DeepMind),
+# BindCraft 2 OFF (hosting-restricted licence), RFD4-Proteina OFF (install_rfd4
+# refuses on this platform), and Proteina-Complexa / Protein-Hunter OFF (installable
+# but unvalidated end to end here). Each of those is a deliberate opt-in.
+TOOL_REGISTRY=(
+    "DO_BINDCRAFT|BindCraft|install_bindcraft|true|Binder design via AlphaFold2 (conda, Python 3.10, jax 0.6.2 for sm_121)"
+    "DO_BOLTZGEN|BoltzGen|install_boltzgen|true|Structure generation with Boltz-1 (conda, Python 3.12, cu130 wheels, ~6 GB download)"
+    "DO_MOSAIC|Mosaic|install_mosaic|true|JAX-based protein design with Marimo notebooks (uv venv; esmj excluded on aarch64)"
+    "DO_EVALUATOR|Evaluator|install_evaluator|true|Evaluate binders: refold, ranked report (requires Mosaic)"
+    "DO_PXDESIGN|PXDesign|install_pxdesign|false|Protenix-based de novo binder design (conda, aarch64 post-install patches)"
+    "DO_RFD3|RFD3|install_rfd3|false|RFD3 / foundry -- all-atom diffusion (conda); UNVALIDATED on aarch64 hardware"
+    "DO_RFD4|RFD4-Proteina|install_rfd4|false|RFD4-Proteina -- NOT installable on aarch64; the entry exists for --verify and --uninstall"
+    "DO_PROTEINA_COMPLEXA|Proteina-Complexa|install_proteina_complexa|false|NVIDIA flow matching + test-time compute (uv venv); runs here, throughput UNMEASURED"
+    "DO_BINDCRAFT2|BindCraft 2|install_bindcraft2|false|AF2 hallucination rewritten for JAX, no PyRosetta (uv venv; ~7.4 min/trajectory here)"
+    "DO_PROTEIN_HUNTER|Protein-Hunter|install_protein_hunter|false|Boltz/Chai hallucination: protein/cyclic/ligand/DNA/RNA binders (conda; PyRosetta from graylab conda)"
+    "DO_AF3|AF3|install_af3|false|AlphaFold 3 refold engine -- needs gated weights from DeepMind (conda)"
+    "DO_ESMFOLD2|ESMFold2|install_esmfold2|true|DEFAULT refold engine -- the cross-engine gate needs 3 engines (conda)"
+    "DO_SOLUPROT|SoluProt|install_soluprot|false|Sequence-only E. coli solubility screen, pre-refold (conda, Python 3.7; source-builds USEARCH)"
+    "DO_TMPROT|TmProt|install_tmprot|false|Sequence-only melting-temperature screen, advisory only (conda; GPL-3.0, not redistributed)"
+)
 
 # ─── Argument Parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -254,6 +312,10 @@ while [[ $# -gt 0 ]]; do
             VERIFY_ONLY=true
             shift
             ;;
+        --repair)
+            REPAIR_MODE=true
+            shift
+            ;;
         --standalone)
             STANDALONE=true
             shift
@@ -339,6 +401,8 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
                 repos and re-creates conda envs, DELETING what is there —
                 including BindCraft/params/*.npz (~4 GB of AF2 weights).
   --verify      Check what is actually on disk for the selected tools and exit.
+  --repair      Same audit, then re-install only the tools that failed it, and
+                verify again. Far cheaper than --force, which rebuilds everything.
   --standalone  Force local Miniforge3 install into BinderScout/conda/ (server-friendly).
                 All envs and shortcuts stay inside the project directory.
   --system-conda
@@ -614,6 +678,28 @@ _stage_bindcraft2_source() {
 # from unwritable system conda installations.
 env_exists() {
     [[ -d "${CONDA_BASE}/envs/$1" ]]
+}
+
+# shortcut_conda
+# The interpreter the generated shortcuts are built against.
+#
+# detect_conda PREFERS mamba for solving, which is right -- it is far faster.
+# But `mamba run` has no --live-stream, and every generated shortcut uses it, so
+# each one died on any argument with "exec: --: invalid option" -- including the
+# exact usage printed in its own banner. Dropping the flag is not free either:
+# without it `conda run` buffers all output until the command exits, which is
+# unusable for a design run that prints progress for hours.
+#
+# Miniforge ships conda alongside mamba, so shortcuts use conda and keep
+# streaming. Falls back to CONDA_CMD if no conda sits beside it.
+#
+# Ported from install.sh, which fixed this and pinned it with
+# tests/test_installer_tool_registry.py; that test only ever looked at install.sh,
+# so this file kept emitting all five shortcuts against ${CONDA_CMD}.
+shortcut_conda() {
+    local sibling
+    sibling="$(dirname "${CONDA_CMD}")/conda"
+    if [[ -x "${sibling}" ]]; then printf '%s' "${sibling}"; else printf '%s' "${CONDA_CMD}"; fi
 }
 
 # resolve_env_names
@@ -892,14 +978,20 @@ is_pxdesign_installed() {
 print_tool_status() {
     echo ""
     echo -e "${BOLD}=== Installed Tools ===${RESET}"
-    local _status _icon
-    for _tool in BindCraft BoltzGen Mosaic Evaluator PXDesign; do
-        if "is_${_tool,,}_installed" 2>/dev/null; then
-            _icon="${GREEN}✓${RESET}"; _status="installed"
+    # Driven by TOOL_REGISTRY, and reporting USABLE rather than merely present.
+    # The old version here hardcoded FIVE names (BindCraft, BoltzGen, Mosaic,
+    # Evaluator, PXDesign), so nine of fourteen tools never appeared under a
+    # heading that claims to list installed tools -- including ESMFold2, the
+    # default refold engine. verify_tool() already existed in this file and was
+    # simply never called from here.
+    local spec tool flag
+    for spec in "${TOOL_REGISTRY[@]}"; do
+        IFS='|' read -r flag tool _fn _dflt _desc <<< "${spec}"
+        if verify_tool "${tool}" 2>/dev/null; then
+            printf "  %b  %-20s  %s\n" "${GREEN}✓${RESET}" "${tool}" "installed"
         else
-            _icon="${RED}✗${RESET}"; _status="not installed"
+            printf "  %b  %-20s  %s\n" "${RED}✗${RESET}" "${tool}" "not installed"
         fi
-        printf "  %b  %-12s  %s\n" "${_icon}" "${_tool}" "${_status}"
     done
     echo ""
 }
@@ -909,98 +1001,116 @@ print_tool_status() {
 # DO_BINDCRAFT / DO_BOLTZGEN / DO_MOSAIC based on user choices.
 
 select_tools_interactive() {
-    # Default: all selected
-    local sel_bc=true
-    local sel_bg=true
-    local sel_mo=true
-    local sel_ev=true
-    local sel_pxd=false
+    # Driven entirely by TOOL_REGISTRY, as install.sh's menu already is. This used
+    # to be the ORIGINAL five-place version -- the sel_* scalars, three parallel
+    # arrays, a literal `for i in 0 1 2 3 4`, one case arm per tool, the
+    # select-all and select-none lines, the empty-selection guard, the DO_*
+    # handoff and a block of `[[ "$DO_X" == true ]] && echo` lines that
+    # advertised AF3, RFD3, Proteina-Complexa, ESMFold2, SoluProt and TmProt
+    # although this code path could never set any of their flags. So nine tools
+    # were unselectable, and the damaging one was ESMFold2, the DEFAULT refold
+    # engine: a menu-driven install on DGX Spark produced an evaluator with two
+    # engines against its own default three-engine gate, which ranks every
+    # design last and says so only at report time.
+    local -a m_flag=() m_name=() m_desc=() m_sel=() m_state=()
+    local spec flag name dflt desc
+    for spec in "${TOOL_REGISTRY[@]}"; do
+        IFS='|' read -r flag name _fn dflt desc <<< "${spec}"
+        m_flag+=("${flag}"); m_name+=("${name}"); m_desc+=("${desc}"); m_sel+=("${dflt}")
+    done
+    local n=${#m_flag[@]}
 
-    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "PXDesign")
-    local descs=(
-        "Binder design via AlphaFold2 (conda, Python 3.10)"
-        "Structure generation with Boltz-1 (conda, Python 3.12)"
-        "JAX-based protein design with Marimo notebooks (uv venv)"
-        "Evaluate binders: refold with Boltz-2 (+ AF3, ESMFold2 if installed), ranked report (requires Mosaic)"
-        "Protenix-based de novo binder design (conda)"
-    )
+    # Probe install state ONCE -- the menu re-prints on every keystroke, and
+    # verify_tool starts a python interpreter per tool.
+    local i
+    for (( i = 0; i < n; i++ )); do
+        if verify_tool "${m_name[$i]}" 2>/dev/null; then
+            m_state+=("${GREEN}installed${RESET}")
+        else
+            m_state+=("${YELLOW}not installed${RESET}")
+        fi
+    done
 
-    # Check current install state once (avoid repeated conda calls in the loop)
-    local inst_bc inst_bg inst_mo inst_ev inst_pxd
-    is_bindcraft_installed && inst_bc="${GREEN}installed${RESET}" || inst_bc="${YELLOW}not installed${RESET}"
-    is_boltzgen_installed  && inst_bg="${GREEN}installed${RESET}" || inst_bg="${YELLOW}not installed${RESET}"
-    is_mosaic_installed    && inst_mo="${GREEN}installed${RESET}" || inst_mo="${YELLOW}not installed${RESET}"
-    is_evaluator_installed && inst_ev="${GREEN}installed${RESET}" || inst_ev="${YELLOW}not installed${RESET}"
-    is_pxdesign_installed  && inst_pxd="${GREEN}installed${RESET}" || inst_pxd="${YELLOW}not installed${RESET}"
-    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev" "$inst_pxd")
-
-    # Helper: print current state
     _print_menu() {
         echo ""
         echo -e "${BOLD}${CYAN}  Select tools to install${RESET}"
         echo -e "  Type a number to toggle selection, then press Enter when done."
         echo ""
-        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_pxd")
-        for i in 0 1 2 3 4; do
-            local box
-            if [[ "${states[$i]}" == true ]]; then
-                box="${GREEN}[x]${RESET}"
-            else
-                box="${RED}[ ]${RESET}"
-            fi
-            printf "    %d)  %b  ${BOLD}%-12s${RESET}  %-35b  %s\n" \
-                $((i+1)) "$box" "${tools[$i]}" "${inst_states[$i]}" "${descs[$i]}"
+        local j box
+        for (( j = 0; j < n; j++ )); do
+            if [[ "${m_sel[$j]}" == true ]]; then box="${GREEN}[x]${RESET}"; else box="${RED}[ ]${RESET}"; fi
+            printf "    %2d)  %b  ${BOLD}%-20s${RESET}  %-35b  %s\n" \
+                $((j+1)) "${box}" "${m_name[$j]}" "${m_state[$j]}" "${m_desc[$j]}"
         done
         echo ""
         echo -e "  ${YELLOW}a${RESET}) Select all   ${YELLOW}n${RESET}) Select none   ${YELLOW}Enter${RESET} to confirm"
         echo ""
     }
 
+    local choice j any
     while true; do
         _print_menu
-        read -rp "  > " choice
+        if ! read -rp "  > " choice; then
+            # stdin is closed. Every further read returns immediately with an
+            # empty choice, so the "no tools selected" branch below would
+            # `continue` into an infinite loop -- which it did: piping
+            # `n` then EOF spun this menu forever, printing the same line.
+            # A human at a TTY never meets this; a script or CI job does.
+            any=false
+            for (( j = 0; j < n; j++ )); do [[ "${m_sel[$j]}" == true ]] && any=true; done
+            if [[ "${any}" == true ]]; then
+                echo ""
+                print_warn "stdin closed -- proceeding with the tools selected above."
+                break
+            fi
+            echo ""
+            print_fail "stdin closed with no tools selected -- nothing to install."
+            echo -e "  Pass ${BOLD}--tool <name>${RESET} (or ${BOLD}--tool all${RESET}) for a non-interactive install."
+            return 1
+        fi
         case "${choice,,}" in
-            1) [[ "$sel_bc" == true ]] && sel_bc=false || sel_bc=true ;;
-            2) [[ "$sel_bg" == true ]] && sel_bg=false || sel_bg=true ;;
-            3) [[ "$sel_mo" == true ]] && sel_mo=false || sel_mo=true ;;
-            4) [[ "$sel_ev" == true ]] && sel_ev=false || sel_ev=true ;;
-            5) [[ "$sel_pxd" == true ]] && sel_pxd=false || sel_pxd=true ;;
-            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true;  sel_pxd=true  ;;
-            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false; sel_pxd=false ;;
+            a) for (( j = 0; j < n; j++ )); do m_sel[$j]=true;  done ;;
+            n) for (( j = 0; j < n; j++ )); do m_sel[$j]=false; done ;;
             "")
-                # Confirm: at least one must be selected
-                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false && "$sel_pxd" == false ]]; then
+                any=false
+                for (( j = 0; j < n; j++ )); do [[ "${m_sel[$j]}" == true ]] && any=true; done
+                if [[ "${any}" == false ]]; then
                     echo -e "  ${RED}No tools selected. Select at least one.${RESET}"
                     continue
                 fi
                 break
                 ;;
-            *) echo -e "  ${RED}Invalid input. Enter 1–5, a, n, or press Enter.${RESET}" ;;
+            *)
+                if [[ "${choice}" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= n )); then
+                    j=$((choice - 1))
+                    [[ "${m_sel[$j]}" == true ]] && m_sel[$j]=false || m_sel[$j]=true
+                else
+                    echo -e "  ${RED}Invalid input. Enter 1-${n}, a, n, or press Enter.${RESET}"
+                fi
+                ;;
         esac
     done
 
-    DO_BINDCRAFT="$sel_bc"
-    DO_BOLTZGEN="$sel_bg"
-    DO_MOSAIC="$sel_mo"
-    DO_EVALUATOR="$sel_ev"
-    DO_PXDESIGN="$sel_pxd"
+    for (( i = 0; i < n; i++ )); do
+        printf -v "${m_flag[$i]}" '%s' "${m_sel[$i]}"
+    done
 
     echo ""
     echo -e "  ${BOLD}Installing:${RESET}"
-    [[ "$DO_BINDCRAFT" == true ]] && echo -e "    ${GREEN}✓${RESET} BindCraft"
-    [[ "$DO_BOLTZGEN"  == true ]] && echo -e "    ${GREEN}✓${RESET} BoltzGen"
-    [[ "$DO_MOSAIC"    == true ]] && echo -e "    ${GREEN}✓${RESET} Mosaic"
-    [[ "$DO_EVALUATOR" == true ]] && echo -e "    ${GREEN}✓${RESET} Evaluator"
-    [[ "$DO_PXDESIGN"  == true ]] && echo -e "    ${GREEN}✓${RESET} PXDesign"
-    [[ "$DO_AF3"       == true ]] && echo -e "    ${YELLOW}✓ AlphaFold 3 (opt-in; weights required)${RESET}"
-    [[ "$DO_RFD3"      == true ]] && echo -e "    ${GREEN}✓${RESET} RFD3 (opt-in; unvalidated on aarch64)"
-    [[ "$DO_PROTEINA_COMPLEXA" == true ]] && echo -e "    ${GREEN}✓${RESET} Proteina-Complexa (opt-in; jax 0.6.2 GPU path, unvalidated end-to-end)"
-    [[ "$DO_ESMFOLD2"  == true ]] && echo -e "    ${GREEN}✓${RESET} ESMFold2 (default refolder)"
-    [[ "$DO_SOLUPROT"  == true ]] && echo -e "    ${GREEN}✓${RESET} SoluProt (opt-in solubility screen; aarch64 via source build)"
-    [[ "$DO_TMPROT"    == true ]] && echo -e "    ${GREEN}✓${RESET} TmProt (opt-in Tm screen, advisory; GPL-3.0, cloned not vendored)"
-    echo ""
+    for (( i = 0; i < n; i++ )); do
+        [[ "${m_sel[$i]}" == true ]] && echo -e "    ${GREEN}✓${RESET} ${m_name[$i]}"
+    done
 
     confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
+
+    # Explicit, and load-bearing. Without it the function's exit status is that
+    # of the last `[[ ... ]] && echo`, which is 1 whenever the LAST tool in the
+    # registry is unselected -- the default, since TmProt is opt-in. The old
+    # menu had the same shape and it never mattered, because nobody checked the
+    # return. Adding `select_tools_interactive || exit 1` at the call site (to
+    # honour the EOF refusal above) would otherwise turn that latent quirk into
+    # "the interactive installer always exits 1 and installs nothing".
+    return 0
 }
 
 # ─── BindCraft helpers ────────────────────────────────────────────────────────
@@ -1576,6 +1686,30 @@ EOF
 # Patch Mosaic/pyproject.toml for aarch64:
 #   esmj has no aarch64 wheel — add the platform_machine exclusion.
 # Safe to call on an already-patched file (idempotent).
+# Put a ceiling on esm2quinox in the CLONE's pyproject.toml, before uv resolves it.
+# Mosaic/ is gitignored and recloned by the installer, so nothing committed here can
+# reach that file any other way -- same situation as BindCraft's installer, same
+# mechanism (_pin_bindcraft_pyrosetta), and the reason this is not fixed upstream in a
+# vendored pyproject. Patching before the resolve rather than downgrading after it
+# keeps the venv self-consistent, so a later `uv sync` cannot quietly undo it.
+_pin_mosaic_esm2quinox() {
+    local f="${MOSAIC_DIR}/pyproject.toml"
+    [[ -f "${f}" ]] || return 0
+    if grep -qF "esm2quinox==${ESM2QUINOX_VERSION}" "${f}"; then
+        print_ok "Mosaic already pinned to esm2quinox ${ESM2QUINOX_VERSION}"
+        return 0
+    fi
+    if ! grep -qE '"esm2quinox[><=~]' "${f}"; then
+        print_warn "No esm2quinox requirement in Mosaic's pyproject.toml — left as-is"
+        return 0
+    fi
+    sed -i "s|\"esm2quinox[^\"]*\"|\"esm2quinox==${ESM2QUINOX_VERSION}\"|" "${f}" \
+        || { print_fail "Could not pin esm2quinox in ${f}"; return 1; }
+    grep -qF "esm2quinox==${ESM2QUINOX_VERSION}" "${f}" \
+        || { print_fail "Failed to pin esm2quinox in ${f} — the ESM2 prior would crash on batch 1"; return 1; }
+    print_ok "Pinned esm2quinox==${ESM2QUINOX_VERSION} in Mosaic's pyproject.toml"
+}
+
 _patch_mosaic_pyproject() {
     local toml="${MOSAIC_DIR}/pyproject.toml"
     [[ -f "${toml}" ]] || { print_warn "pyproject.toml not found at ${toml}"; return 0; }
@@ -1619,8 +1753,8 @@ install_mosaic() {
 
     if ! command -v uv &>/dev/null; then
         print_warn "uv not found — installing via official installer"
-        curl -LsSf https://astral.sh/uv/install.sh | sh \
-            || { print_fail "Failed to install uv"; return 1; }
+        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh \
+            || { print_fail "Failed to install uv ${UV_VERSION}"; return 1; }
         export PATH="${HOME}/.local/bin:${PATH}"
         if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
             echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
@@ -1633,6 +1767,9 @@ install_mosaic() {
     print_ok "uv: $(command -v uv)"
 
     _patch_mosaic_pyproject
+
+    # Cap esm2quinox before the resolve -- see ESM2QUINOX_VERSION (BUG-24).
+    _pin_mosaic_esm2quinox || return 1
 
     # Offline-MSA support: re-apply TargetChain.msa_path patch (upstream lacks it;
     # our refolds + hallucination template need it). Idempotent.
@@ -1647,8 +1784,35 @@ install_mosaic() {
         bash -c "cd '${MOSAIC_DIR}' && uv sync --group jax-cuda" \
         || { print_fail "uv sync failed for Mosaic"; return 1; }
 
+    # `uv sync` PRUNES: it removes anything in .venv that the resolve does not list.
+    # install_evaluator() injects two packages into this venv afterwards with
+    # `uv pip install` -- binder-compare[boltz2] (the whole Boltz-2 refold stage runs
+    # out of here) and fair-esm (Mosaic's ESM2 expressibility prior) -- and neither is a
+    # Mosaic dependency. So re-running the installer for Mosaic alone on an otherwise
+    # complete install silently uninstalled both: evaluate.sh then could not find
+    # binder-compare, and Mosaic designed without the ESM prior -- not an error, just
+    # worse binders. Re-inject them only when the Evaluator was already wired to this
+    # venv, i.e. when there is something to restore.
+    if [[ -f "${EVALUATOR_DIR}/envs/mosaic_venv_path" ]]; then
+        print_step "Restoring Evaluator packages pruned from the Mosaic venv by uv sync"
+        run_logged "re-install binder-compare into Mosaic venv" \
+            uv pip install --python "${MOSAIC_DIR}/.venv/bin/python" -q -e "${EVALUATOR_DIR}[boltz2]" \
+            || print_warn "Could not restore binder-compare — re-run: install_aarch.sh --tool evaluator"
+        run_logged "re-install fair-esm into Mosaic venv" \
+            uv pip install --python "${MOSAIC_DIR}/.venv/bin/python" -q fair-esm \
+            || print_warn "Could not restore fair-esm — Mosaic will run without the ESM2 prior"
+    fi
+
     smoke_test "import mosaic" \
         "${MOSAIC_DIR}/.venv/bin/python" -c "import mosaic; print('OK')" || return 1
+
+    # The ESM2 prior is the one Mosaic loss that indexes a third-party token table, and
+    # `import mosaic` never reaches it -- the same blind spot that let the atomworks
+    # breakage ship. Assert the symbols AND the width the loss hardcodes.
+    smoke_test "esm2quinox alphabet has the keys and width Mosaic's ESM prior indexes" \
+        "${MOSAIC_DIR}/.venv/bin/python" -c \
+        "from esm2quinox._esm2 import _alphabet as a; assert len(a) == 33, len(a); [a[k] for k in ('b', 'e', 'm')]; print('OK')" \
+        || { print_fail "esm2quinox has the wrong token table — Mosaic's default ESM2 prior dies on its first optimisation step"; return 1; }
 
     if [[ "${SKIP_EXAMPLES}" == false ]]; then
         print_step "Mosaic example"
@@ -2122,7 +2286,7 @@ PATCHEOF
 
     # Download weights if script exists
     if [[ -f "${PXDESIGN_DIR}/download_tool_weights.sh" ]]; then
-        run_logged "Downloading PXDesign weights" \
+        run_logged --retries 3 "Downloading PXDesign weights" \
             bash -c "cd '${PXDESIGN_DIR}' && bash download_tool_weights.sh" \
             || print_warn "PXDesign weights download failed — download manually later"
     else
@@ -2267,7 +2431,7 @@ _write_af3_shortcut() {
         echo "# BinderScout AF3 shortcut — runs 'binder-compare refold-af3 ...' in the"
         echo "# binder-eval-af3 env. With no args: opens an interactive env shell."
         echo ""
-        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "CONDA_CMD=\"$(shortcut_conda)\""
     } > "${SHORTCUTS_DIR}/af3"
     cat >> "${SHORTCUTS_DIR}/af3" << 'AF3EOF'
 
@@ -2336,8 +2500,8 @@ install_bindcraft2() {
     print_step "Checking for uv package manager"
     if ! command -v uv &>/dev/null; then
         print_warn "uv not found — installing via official installer"
-        curl -LsSf https://astral.sh/uv/install.sh | sh \
-            || { print_fail "Failed to install uv"; return 1; }
+        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh \
+            || { print_fail "Failed to install uv ${UV_VERSION}"; return 1; }
         export PATH="${HOME}/.local/bin:${PATH}"
         if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
             echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
@@ -2564,7 +2728,7 @@ install_protein_hunter() {
 
     local ph_mpnn_dir="${PROTEIN_HUNTER_DIR}/LigandMPNN/model_params"
     if [[ ! -d "${ph_mpnn_dir}" ]] && [[ -f "${PROTEIN_HUNTER_DIR}/LigandMPNN/get_model_params.sh" ]]; then
-        run_logged "Downloading LigandMPNN weights (Protein-Hunter)" \
+        run_logged --retries 3 "Downloading LigandMPNN weights (Protein-Hunter)" \
             bash -c "cd '${PROTEIN_HUNTER_DIR}/LigandMPNN' && bash get_model_params.sh ./model_params" \
             || print_warn "LigandMPNN weights download failed — download manually"
     fi
@@ -2607,7 +2771,7 @@ _write_protein_hunter_shortcut() {
         echo ""
         echo "PROTEIN_HUNTER_ENV=\"${PROTEIN_HUNTER_ENV}\""
         echo "PROTEIN_HUNTER_DIR=\"${PROTEIN_HUNTER_DIR}\""
-        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "CONDA_CMD=\"$(shortcut_conda)\""
         echo "BINDERSCOUT_DIR=\"${BINDERSCOUT_DIR}\""
     } > "${SHORTCUTS_DIR}/protein-hunter"
     cat >> "${SHORTCUTS_DIR}/protein-hunter" << 'EOF'
@@ -2686,7 +2850,7 @@ install_rfd3() {
     if [[ -n "$(ls -A "${FOUNDRY_WEIGHTS_DIR}" 2>/dev/null)" ]]; then
         print_ok "Foundry weights dir already populated at ${FOUNDRY_WEIGHTS_DIR}"
     else
-        run_logged "Downloading RFD3 weights (~2.5 GB)" \
+        run_logged --retries 3 "Downloading RFD3 weights (~2.5 GB)" \
             "${CONDA_CMD}" run -n "${RFD3_ENV}" \
             foundry install rfd3 --checkpoint-dir "${FOUNDRY_WEIGHTS_DIR}" \
             || print_warn "RFD3 weight download failed — retry: conda run -n ${RFD3_ENV} foundry install rfd3 --checkpoint-dir ${FOUNDRY_WEIGHTS_DIR}"
@@ -2694,7 +2858,7 @@ install_rfd3() {
 
     # ProteinMPNN weights are NOT bundled with rfd3 (foundry install rfd3 fetches only
     # rfd3_latest.ckpt) — the MPNN sequence-design stage needs this ~7 MB file.
-    run_logged "Downloading ProteinMPNN weights (~7 MB)" \
+    run_logged --retries 3 "Downloading ProteinMPNN weights (~7 MB)" \
         "${CONDA_CMD}" run -n "${RFD3_ENV}" \
         foundry install proteinmpnn --checkpoint-dir "${FOUNDRY_WEIGHTS_DIR}" \
         || print_warn "ProteinMPNN weight download failed — 'mpnn' will not run until it is fetched"
@@ -2717,7 +2881,7 @@ _write_rfd3_shortcut() {
         echo "# RFD3 shortcut — runs 'rfd3 design ...' in the RFD3 conda env."
         echo "# With no args: opens an interactive env shell."
         echo ""
-        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "CONDA_CMD=\"$(shortcut_conda)\""
         echo "RFD3_ENV=\"${RFD3_ENV}\""
         echo "FOUNDRY_WEIGHTS_DIR=\"${FOUNDRY_WEIGHTS_DIR}\""
     } > "${SHORTCUTS_DIR}/rfd3"
@@ -2914,7 +3078,7 @@ _write_esmfold2_shortcut() {
         echo "# BinderScout ESMFold2 shortcut — runs 'binder-compare refold-esmfold2 ...' in the"
         echo "# binder-eval-esmfold2 env. With no args: opens an interactive env shell."
         echo ""
-        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "CONDA_CMD=\"$(shortcut_conda)\""
     } > "${SHORTCUTS_DIR}/esmfold2"
     cat >> "${SHORTCUTS_DIR}/esmfold2" << 'ESMFOLD2EOF'
 
@@ -3272,7 +3436,7 @@ install_proteina_complexa() {
     # because this repo has already once declared aarch64 support on the strength
     # of `jax reports gpu` plus a successful import, and been wrong.
     if ! command -v uv &>/dev/null && [[ ! -x "${HOME}/.local/bin/uv" ]]; then
-        run_logged "Installing uv" bash -c "curl -fsSL https://astral.sh/uv/install.sh | sh" \
+        run_logged "Installing uv ${UV_VERSION}" bash -c "curl -fsSL https://astral.sh/uv/${UV_VERSION}/install.sh | sh" \
             || { print_fail "uv install failed"; return 1; }
     fi
     local UV="${HOME}/.local/bin/uv"
@@ -3427,9 +3591,28 @@ SHIMPY
     fi
 
     # Blocker 4/5 and the rest of the manual recipe.
-    run_logged "Installing biotite 1.6.0 + graphein + atomworks" \
-        "${PCPIP[@]}" "biotite==1.6.0" graphein atomworks \
-        || print_warn "biotite/graphein/atomworks install failed — some PC paths may not import"
+    run_logged "Installing biotite 1.6.0 + graphein" \
+        "${PCPIP[@]}" "biotite==1.6.0" graphein \
+        || print_warn "biotite/graphein install failed — some PC paths may not import"
+
+    # atomworks is PINNED and its failure is FATAL, unlike the two above. It used to be
+    # installed unpinned on this line with only a print_warn, and atomworks 3.0.0
+    # (2026-10-05) deleted AtomSelectionStack, which
+    # src/proteinfoundation/utils/pdb_utils.py imports at module level -- so every fresh
+    # install from that date died at the first generate step with
+    # `ImportError: cannot import name 'AtomSelectionStack'`, having reported success.
+    # No extras, exactly as the unpinned line had none: `atomworks[openbabel]` would
+    # resolve the plain `openbabel` sdist and compile the whole C++ toolkit here, which
+    # is what the openbabel-wheel step below exists to avoid.
+    run_logged "Installing atomworks==${ATOMWORKS_VERSION}" \
+        "${PCPIP[@]}" "atomworks==${ATOMWORKS_VERSION}" \
+        || { print_fail "Could not install atomworks==${ATOMWORKS_VERSION} — Proteina-Complexa cannot generate"; return 1; }
+    # Assert the SYMBOL, not the version number — the symbol is what disappeared, and a
+    # version check would pass on any future release that drops it again.
+    "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" -c \
+        "from atomworks.io.utils.selection import AtomSelectionStack" 2>/dev/null \
+        || { print_fail "atomworks ${ATOMWORKS_VERSION} has no AtomSelectionStack — Proteina-Complexa cannot generate"; return 1; }
+    print_ok "atomworks ${ATOMWORKS_VERSION} provides AtomSelectionStack"
 
     # openbabel is a HARD requirement even for protein-only binder design, despite the
     # name of the module that pulls it in. `gen_dataset.py:15` imports
@@ -3500,6 +3683,18 @@ try:
     print("  colabdesign imports")
 except Exception as exc:  # pragma: no cover
     print(f"  FAIL: colabdesign does not import: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+# `import proteinfoundation` is NOT a check: that package's __init__ imports nothing, so
+# it stayed green through the whole atomworks 3.x breakage. pdb_utils is the module that
+# actually broke -- it imports AtomSelectionStack at module level and uses it for every
+# contig -- so import THAT.
+try:
+    import proteinfoundation.utils.pdb_utils  # noqa: F401
+
+    print("  proteinfoundation.utils.pdb_utils imports")
+except Exception as exc:  # pragma: no cover
+    print(f"  FAIL: proteinfoundation.utils.pdb_utils does not import: {exc}", file=sys.stderr)
     sys.exit(1)
 SMOKE
     then
@@ -3649,7 +3844,7 @@ install_soluprot() {
         print_ok "SoluProt distribution already present at ${SOLUPROT_DIR}"
     else
         print_step "Downloading SoluProt 1.0 from Loschmidt Lab"
-        if ! run_logged "Downloading soluprot.zip" \
+        if ! run_logged --retries 3 "Downloading soluprot.zip" \
             curl -fsSL -o "${zip_path}" "${SOLUPROT_ZIP_URL}"; then
             print_fail "Failed to download SoluProt from Loschmidt Lab."
             print_warn "  Manual download: https://loschmidt.chemi.muni.cz/soluprot/?page=download"
@@ -3734,7 +3929,7 @@ _write_soluprot_shortcut() {
         echo "# binder-eval env (Python 3.10+), shelling out to the Python 3.7 binder-eval-soluprot"
         echo "# env for SoluProt itself. With no args: opens a shell in the SoluProt env."
         echo ""
-        echo "CONDA_CMD=\"${CONDA_CMD}\""
+        echo "CONDA_CMD=\"$(shortcut_conda)\""
         echo "export SOLUPROT_HOME=\"${SOLUPROT_DIR}\""
     } > "${SHORTCUTS_DIR}/soluprot"
     cat >> "${SHORTCUTS_DIR}/soluprot" << 'SOLUPROTEOF'
@@ -3866,8 +4061,29 @@ verify_tool() {
     VERIFY_REASON=""
     case "${tool,,}" in
         bindcraft)
-            (( $(_count_glob "${BINDCRAFT_DIR}"/params/*.npz) >= 5 )) \
-                || VERIFY_REASON="no AF2 .npz parameters under ${BINDCRAFT_DIR}/params" ;;
+            # Five .npz files were the whole check, and they are not evidence BindCraft
+            # can produce a design. PyRosetta 2026.29 changed
+            # InterfaceAnalyzerMover.set_interface() from accepting a str to requiring
+            # DockingPartners, and score_interface() runs only AFTER a full trajectory --
+            # so an env with the new PyRosetta and an unpatched call site burned ~8
+            # GPU-minutes per trajectory, wrote header-only stats CSVs, and was reported
+            # "installed" by this very function. The probe reads both sides and passes
+            # when they AGREE: either the installed mover still takes a string, or the
+            # call site has been migrated.
+            if (( $(_count_glob "${BINDCRAFT_DIR}"/params/*.npz) < 5 )); then
+                VERIFY_REASON="no AF2 .npz parameters under ${BINDCRAFT_DIR}/params"
+            elif [[ ! -f "${BINDCRAFT_DIR}/functions/pyrosetta_utils.py" ]]; then
+                VERIFY_REASON="no ${BINDCRAFT_DIR}/functions/pyrosetta_utils.py — the clone is incomplete"
+            elif ! _env_python_ok BindCraft "import pyrosetta"; then
+                VERIFY_REASON="pyrosetta does not import in the BindCraft env (every trajectory dies in score_interface)"
+            elif ! _env_python_ok BindCraft "
+import pathlib, sys
+from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover as M
+doc = M.set_interface.__doc__ or ''
+src = pathlib.Path('${BINDCRAFT_DIR}/functions/pyrosetta_utils.py').read_text()
+sys.exit(0 if (': str' in doc or 'DockingPartners' in src) else 1)"; then
+                VERIFY_REASON="BindCraft's score_interface still passes a string to InterfaceAnalyzerMover.set_interface(), which this PyRosetta rejects -- every trajectory would die after its GPU work. Re-run the installer for bindcraft"
+            fi ;;
         "bindcraft 2"|bindcraft2)
             [[ -x "${BINDCRAFT2_DIR}/.venv/bin/python" ]] \
                 || VERIFY_REASON="no venv at ${BINDCRAFT2_DIR}/.venv" ;;
@@ -3875,8 +4091,17 @@ verify_tool() {
             _env_python_ok BoltzGen "import torch" \
                 || VERIFY_REASON="torch does not import in the BoltzGen env" ;;
         mosaic)
-            [[ -x "${MOSAIC_DIR}/.venv/bin/python" ]] \
-                || VERIFY_REASON="no venv at ${MOSAIC_DIR}/.venv" ;;
+            # The existence of an interpreter was the whole check, so Mosaic reported
+            # usable on a venv whose default-enabled ESM2 prior dies on batch 1:
+            # esm2quinox 0.2.0 rewrote the token table mosaic/losses/esm.py indexes with
+            # "b"/"e"/"m" against a hardcoded one-hot width of 33. Assert the symbols and
+            # the width, which is what the loss actually reads.
+            if [[ ! -x "${MOSAIC_DIR}/.venv/bin/python" ]]; then
+                VERIFY_REASON="no venv at ${MOSAIC_DIR}/.venv"
+            elif ! ( cd / && "${MOSAIC_DIR}/.venv/bin/python" -c \
+                    "from esm2quinox._esm2 import _alphabet as a; assert len(a) == 33, len(a); [a[k] for k in ('b', 'e', 'm')]" ) >/dev/null 2>&1; then
+                VERIFY_REASON="esm2quinox in ${MOSAIC_DIR}/.venv does not have the 33-entry token table keyed 'b'/'e'/'m' that Mosaic's default ESM2 prior indexes -- the first optimisation step would raise KeyError. Re-run the installer for mosaic"
+            fi ;;
         evaluator)
             if ! _env_python_ok binder-eval "import binder_comparison"; then
                 VERIFY_REASON="binder_comparison does not import in binder-eval"
@@ -3969,32 +4194,19 @@ verify_tool() {
     [[ -z "${VERIFY_REASON}" ]]
 }
 
-# aarch64 has no TOOL_REGISTRY (install.sh's drives its interactive menu), so the
-# flag/label pairs are listed here. Keep in step with print_tool_status.
+# Verify every selected tool. Appends broken ones to the named array.
+# Returns 1 if anything is broken, so callers can gate on it.
 verify_selected_tools() {
-    local -n __vst_out="$1"   # a nameref sharing a caller's variable name makes
-                              # bash refuse with "circular name reference"
+    # The nameref parameter must not share a name with any caller's variable or
+    # bash refuses with "circular name reference" and silently leaves the array
+    # empty -- which looked exactly like "nothing was broken".
+    local -n __vst_out="$1"
     local any=false
     echo ""
     echo -e "${BOLD}=== Verifying installed tools ===${RESET}"
-    local spec flag tool
-    for spec in \
-        "DO_BINDCRAFT|BindCraft" \
-        "DO_BINDCRAFT2|BindCraft 2" \
-        "DO_BOLTZGEN|BoltzGen" \
-        "DO_MOSAIC|Mosaic" \
-        "DO_EVALUATOR|Evaluator" \
-        "DO_PXDESIGN|PXDesign" \
-        "DO_PROTEINA_COMPLEXA|Proteina-Complexa" \
-        "DO_PROTEIN_HUNTER|Protein-Hunter" \
-        "DO_RFD3|RFD3" \
-        "DO_RFD4|RFD4-Proteina" \
-        "DO_AF3|AF3" \
-        "DO_ESMFOLD2|ESMFold2" \
-        "DO_SOLUPROT|SoluProt" \
-        "DO_TMPROT|TmProt"
-    do
-        IFS='|' read -r flag tool <<< "${spec}"
+    local spec tool flag
+    for spec in "${TOOL_REGISTRY[@]}"; do
+        IFS='|' read -r flag tool _fn _dflt _desc <<< "${spec}"
         [[ "${!flag}" == true ]] || continue
         if verify_tool "${tool}"; then
             printf "  %b  %-20s %s\n" "${GREEN}✓${RESET}" "${tool}" "usable"
@@ -4005,6 +4217,28 @@ verify_selected_tools() {
         fi
     done
     [[ "${any}" == false ]]
+}
+
+# Re-install only the tools that failed verification, then verify again.
+# Ported from install.sh so that `--repair` means the same thing on both
+# platforms: the README and CLAUDE.md document the flag without an arch caveat,
+# and before this that documented command hit this file's catch-all arm and
+# exited 1 on every DGX Spark.
+repair_tools() {
+    local -n __rt_todo="$1"   # see the nameref note in verify_selected_tools
+    local spec tool flag fn repaired=()
+    echo ""
+    echo -e "${BOLD}=== Repairing ${#__rt_todo[@]} tool(s) ===${RESET}"
+    for spec in "${TOOL_REGISTRY[@]}"; do
+        IFS='|' read -r flag tool fn _dflt _desc <<< "${spec}"
+        local wanted=false t
+        for t in "${__rt_todo[@]}"; do [[ "${t}" == "${tool}" ]] && wanted=true; done
+        [[ "${wanted}" == true ]] || continue
+        echo -e "\n${BOLD}Repairing ${tool}${RESET}"
+        if "${fn}"; then repaired+=("${tool}"); else print_warn "${tool}: repair attempt failed"; fi
+    done
+    (( ${#repaired[@]} )) && print_ok "Re-ran: ${repaired[*]}"
+    return 0
 }
 
 # _write_cli_shortcut
@@ -4053,7 +4287,7 @@ main() {
             print_fail "--uninstall requires --tool <tool|all>"
             exit 1
         fi
-        select_tools_interactive
+        select_tools_interactive || exit 1
     fi
 
     # --verify: report what is actually on disk and stop. Runs before preflight
@@ -4063,7 +4297,7 @@ main() {
         verify_selected_tools _broken && { echo ""; print_ok "All selected tools verified usable."; exit 0; }
         echo ""
         print_fail "Unusable: ${_broken[*]}"
-        echo -e "  Re-run the installer for just these tools to repair them."
+        echo -e "  Re-run with ${BOLD}--repair${RESET} to re-install just these."
         exit 1
     fi
 
@@ -4071,6 +4305,23 @@ main() {
     # and before any download. Uninstall skips it — it frees space, not consumes it.
     if [[ "${UNINSTALL_MODE}" != true ]]; then
         preflight || exit 1
+    fi
+
+    # ── Repair mode ──────────────────────────────────────────────────────────
+    if [[ "${REPAIR_MODE}" == true ]]; then
+        local _broken=()
+        if verify_selected_tools _broken; then
+            echo ""; print_ok "Nothing to repair — all selected tools verified usable."; exit 0
+        fi
+        repair_tools _broken
+        local _still=()
+        if verify_selected_tools _still; then
+            echo ""; print_ok "Repair complete — all selected tools verified usable."; exit 0
+        fi
+        echo ""
+        print_fail "Still unusable after repair: ${_still[*]}"
+        echo -e "  Full log: ${LOG_FILE}"
+        exit 1
     fi
 
     # ── Uninstall mode ───────────────────────────────────────────────────────

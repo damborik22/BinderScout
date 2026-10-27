@@ -24,15 +24,65 @@ EVALUATOR_DIR="${BINDERSCOUT_DIR}/Evaluator"
 
 # Pinned commits for reproducible installs (x86_64 clones only; aarch64 uses bundled)
 BINDCRAFT_COMMIT="7cd4ace"
+# PyRosetta is pinned HERE, next to BINDCRAFT_COMMIT, because the two must agree:
+# BindCraft's own install_bindcraft.sh does an unpinned `pip install pyrosetta`, and
+# the 2026.29 quarterly changed InterfaceAnalyzerMover.set_interface() from taking a
+# str to requiring a core::pose::DockingPartners. Pinned code against a floating
+# dependency meant a fresh install produced ZERO designs -- every trajectory died in
+# score_interface() after ~8 min of GPU, with header-only stats CSVs.
+# _pin_bindcraft_pyrosetta() rewrites their line to this version;
+# _patch_bindcraft_pyrosetta() migrates the call site, back-compatibly.
+PYROSETTA_VERSION="2026.29+releasequarterly.80a0635615"
+PYROSETTA_FIND_LINKS="https://west.rosettacommons.org/pyrosetta/quarterly/release.cxx11thread.serialization"
 BOLTZGEN_COMMIT="da0f092"
+# What the BoltzGen env actually runs. The old value was torch==2.5.1+cu121 from the
+# cu121 index, and it was a lie: `pip install -e BoltzGen` on the very next step
+# resolves BoltzGen's own unconstrained `torch>=2.4.1` and upgraded straight over it,
+# leaving the cu121 wheel's orphaned nvidia_*_cu12 dist-infos beside the cu13 set as
+# the fingerprint. Naming the resolved version is half the fix; the other half is
+# passing it to the editable install too, so the pin cannot be re-resolved away.
+BOLTZGEN_TORCH_VERSION="2.14.1"
 MOSAIC_COMMIT="82593a8"
+# esm2quinox is pinned HERE, next to MOSAIC_COMMIT, for the same reason PyRosetta is
+# pinned next to BINDCRAFT_COMMIT. Mosaic asks for `esm2quinox>=0.1.0` with no ceiling,
+# and 0.2.0 rewrote the private token table that mosaic/losses/esm.py indexes: 32
+# entries keyed "^"/"$"/"#" instead of 33 keyed "b"/"e"/"m", against a hardcoded
+# one-hot width of 33. The ESM2 expressibility prior is on by default, so a fresh
+# resolve dies with KeyError: 'b' inside the jitted loss -- on the first optimisation
+# step, after the model and the MSA have loaded. _pin_mosaic_esm2quinox() puts the
+# ceiling into the clone's pyproject.toml before uv resolves it.
+ESM2QUINOX_VERSION="0.1.0"
+# uv is pinned because it IS the resolver that builds the Mosaic, BindCraft 2,
+# Proteina-Complexa and RFD4 venvs. An unpinned resolver makes every pin downstream of
+# it provisional. This is the version that built all four working venvs on the x86 box
+# these installs were exercised on. It is only ever used when uv is ABSENT: a box that
+# already has uv keeps it. RFD4 additionally pins uv 0.13.4 *inside* its own venv for
+# --torch-backend, which this does not touch.
+UV_VERSION="0.11.7"
 
 PXDESIGN_REPO="https://github.com/bytedance/PXDesign.git"
-PXDESIGN_COMMIT="HEAD"
+# Was the literal string "HEAD", so two installs a week apart got different code
+# while every other tool here was pinned.
+PXDESIGN_COMMIT="f788441313c84c3074fe9596ac2433f96b15c763"
 PXDESIGN_DIR="${BINDERSCOUT_DIR}/PXDesign"
 PROTEINA_COMPLEXA_REPO="https://github.com/NVIDIA-Digital-Bio/proteina-complexa.git"
-PROTEINA_COMPLEXA_COMMIT="HEAD"
+# Was "HEAD" as well -- see PXDESIGN_COMMIT. This is the commit in the working checkout
+# that install/patches/pc_*.py were written against and verified to re-apply
+# byte-identically; those patches do not exist on the 1.0.x line, so its digit does not
+# transfer here.
+PROTEINA_COMPLEXA_COMMIT="32b71ae1d9a8767414eae3921cf35969430db82f"
 PROTEINA_COMPLEXA_DIR="${BINDERSCOUT_DIR}/Proteina-Complexa"
+# atomworks is pinned HERE, next to PROTEINA_COMPLEXA_COMMIT, for the same reason as
+# above: upstream's env/build_uv_env.sh does an unpinned
+# `uv pip install "atomworks[ml,openbabel,dev]"`, and atomworks 3.0.0 (2026-10-05)
+# DELETED AtomSelectionStack, which src/proteinfoundation/utils/pdb_utils.py imports at
+# module level. So every install from that date on died at the first generate step with
+# `ImportError: cannot import name 'AtomSelectionStack'` -- while the old smoke test
+# (`import proteinfoundation`) never touched pdb_utils and reported the env healthy.
+# The digit is a ceiling below 3.0.0, not the claim: 2.2.1 is the version a completed
+# generate run used, 2.2.0 is what this lab's box carries, and both provide the class.
+# _pin_complexa_atomworks() asserts the SYMBOL, which is what actually has to hold.
+ATOMWORKS_VERSION="2.2.1"
 PROTEIN_HUNTER_REPO="https://github.com/yehlincho/Protein-Hunter.git"
 PROTEIN_HUNTER_COMMIT="d4bd9515882c2aa81e97f3d3bf7f42247a9fe80c"
 PROTEIN_HUNTER_DIR="${BINDERSCOUT_DIR}/Protein-Hunter"
@@ -1078,6 +1128,76 @@ _fix_target_settings() {
     fi
 }
 
+# Migrate BindCraft's single InterfaceAnalyzerMover.set_interface() call site to the
+# PyRosetta >= 2026.29 API. Post-install patching of third-party code follows the
+# precedent of _patch_boltzgen() and install/patches/mosaic-offline-msa.patch, and is
+# the only durable option: BindCraft/ is gitignored and recloned, so nothing committed
+# here can reach it. The fallback keeps the old string form working on older PyRosetta,
+# so the patch is safe on an env that predates the pin. Idempotent: DockingPartners in
+# the file means already patched (the fallback line still contains the original
+# `iam.set_interface("A_B")`, so that alone cannot be the guard).
+#
+# This repo already knew the API had moved -- Evaluator/scripts/interface_qc.py
+# monkeypatches the same call -- but only on the EVAL path, never on the design path.
+_patch_bindcraft_pyrosetta() {
+    local f="${BINDCRAFT_DIR}/functions/pyrosetta_utils.py"
+    [[ -f "${f}" ]] || return 0
+    if grep -q 'DockingPartners' "${f}"; then
+        print_ok "BindCraft set_interface already patched for PyRosetta >= 2026.29"
+        return 0
+    fi
+    if ! grep -q 'iam.set_interface("A_B")' "${f}"; then
+        print_warn "Could not find iam.set_interface(\"A_B\") in pyrosetta_utils.py — left unpatched"
+        return 0
+    fi
+    python3 - "${f}" << 'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+src = path.read_text()
+# The call sits inside score_interface(), so the block carries that body indent.
+src = src.replace(
+    '    iam.set_interface("A_B")',
+    '    # PyRosetta >= 2026.29 requires DockingPartners instead of a plain string.\n'
+    '    try:\n'
+    '        from pyrosetta.rosetta.core.pose import DockingPartners\n'
+    '        iam.set_interface(DockingPartners.docking_partners_from_string("A_B"))\n'
+    '    except ImportError:\n'
+    '        iam.set_interface("A_B")  # PyRosetta < 2026.29',
+    1,
+)
+path.write_text(src)
+PYEOF
+    # Verify rather than trust the heredoc's exit status: without this patch every
+    # trajectory dies in score_interface(), so a silent miss costs GPU-hours.
+    if ! grep -q 'DockingPartners' "${f}"; then
+        print_fail "Failed to patch set_interface in ${f} — BindCraft would produce zero designs"
+        return 1
+    fi
+    print_ok "Patched BindCraft set_interface for PyRosetta >= 2026.29"
+}
+
+# Pin PyRosetta inside BindCraft's own installer. Patching their line is the robust
+# option: install_bindcraft.sh CREATES the conda env itself and only then pip-installs,
+# so there is no env to pre-install a pinned wheel into. Their
+# `python -c "import pyrosetta"` check on the next line still guards the result.
+_pin_bindcraft_pyrosetta() {
+    local f="${BINDCRAFT_DIR}/install_bindcraft.sh"
+    [[ -f "${f}" ]] || return 0
+    if grep -qF "pyrosetta==${PYROSETTA_VERSION}" "${f}"; then
+        print_ok "BindCraft installer already pinned to pyrosetta ${PYROSETTA_VERSION}"
+        return 0
+    fi
+    if ! grep -qE '^pip install pyrosetta --find-links' "${f}"; then
+        print_warn "Could not find the unpinned pyrosetta line in install_bindcraft.sh — left as-is"
+        return 0
+    fi
+    sed -i "s|^pip install pyrosetta --find-links .*|pip install \"pyrosetta==${PYROSETTA_VERSION}\" --find-links ${PYROSETTA_FIND_LINKS}|" "${f}" \
+        || { print_warn "Failed to pin pyrosetta in install_bindcraft.sh"; return 0; }
+    print_ok "Pinned pyrosetta==${PYROSETTA_VERSION} in BindCraft's installer"
+}
+
 install_bindcraft() {
     print_step "Installing BindCraft"
     ensure_conda_in_path
@@ -1106,6 +1226,11 @@ install_bindcraft() {
     # Fix Colab paths in target settings
     _fix_target_settings
 
+    # Pin PyRosetta before their installer runs, and migrate the one call site whose
+    # API it changed. Both are idempotent and safe on an existing clone.
+    _pin_bindcraft_pyrosetta
+    _patch_bindcraft_pyrosetta || return 1
+
     # Remove existing conda env if present
     if env_exists BindCraft; then
         print_warn "Conda environment 'BindCraft' already exists."
@@ -1132,6 +1257,25 @@ install_bindcraft() {
         "${CONDA_CMD}" run -n BindCraft \
         python -c "from colabdesign import mk_af_model; print('OK')" \
         || return 1
+
+    # Exercise the patched set_interface() call BEFORE any GPU work. score_interface()
+    # runs only after a full ~8 min trajectory, so an API mismatch otherwise burns GPU
+    # indefinitely and yields zero designs; here it fails in seconds. This calls the
+    # mover, rather than importing something and inferring -- the import was always
+    # fine, it was the call that raised TypeError.
+    smoke_test "pyrosetta set_interface API" \
+        "${CONDA_CMD}" run -n BindCraft python -c "
+import pyrosetta
+from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
+pyrosetta.init('-mute all')
+iam = InterfaceAnalyzerMover()
+try:
+    from pyrosetta.rosetta.core.pose import DockingPartners
+    iam.set_interface(DockingPartners.docking_partners_from_string('A_B'))
+except ImportError:
+    iam.set_interface('A_B')
+print('OK')" \
+        || { print_fail "PyRosetta API mismatch — BindCraft would produce zero designs"; return 1; }
 
     # Example
     if [[ "${SKIP_EXAMPLES}" == false ]]; then
@@ -1283,22 +1427,28 @@ install_boltzgen() {
     # Install packages
         # NOTE: plain PyPI torch is CPU-ONLY on Linux aarch64. This branch is
         # unreachable now (the arch guard above exits first) and is kept only so
-        # the override path does something defined. Use install_aarch.sh.
+        # the override path does something defined -- so it shares the x86 pin
+        # rather than naming a second version nobody runs. Use install_aarch.sh.
     print_step "Installing PyTorch and BoltzGen"
     if [[ "${ARCH}" == "aarch64" ]]; then
         run_logged "Installing PyTorch (aarch64, from PyPI)" \
             "${CONDA_CMD}" run -n BoltzGen \
-            pip install torch==2.5.1 \
+            pip install "torch==${BOLTZGEN_TORCH_VERSION}" \
             || { print_fail "Failed to install PyTorch"; return 1; }
     else
-        run_logged "Installing PyTorch cu121 (x86_64)" \
+        run_logged "Installing PyTorch (x86_64, PyPI wheel)" \
             "${CONDA_CMD}" run -n BoltzGen \
-            pip install torch==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121 \
+            pip install "torch==${BOLTZGEN_TORCH_VERSION}" \
             || { print_fail "Failed to install PyTorch"; return 1; }
     fi
+    # The torch pin is REPEATED here on purpose. BoltzGen's pyproject declares
+    # `torch>=2.4.1` with no ceiling, so this editable install re-resolves torch and
+    # used to upgrade straight over the line above -- which is why install.sh named a
+    # version nobody had run since it was written. Naming it in the same resolve is what
+    # makes the pin hold.
     run_logged "Installing BoltzGen package" \
         "${CONDA_CMD}" run -n BoltzGen \
-        pip install -e "${BOLTZGEN_DIR}" \
+        pip install -e "${BOLTZGEN_DIR}" "torch==${BOLTZGEN_TORCH_VERSION}" \
         || { print_fail "Failed to install BoltzGen package"; return 1; }
 
     # Smoke test
@@ -1363,6 +1513,30 @@ EOF
 
 # ─── Mosaic ───────────────────────────────────────────────────────────────────
 
+# Put a ceiling on esm2quinox in the CLONE's pyproject.toml, before uv resolves it.
+# Mosaic/ is gitignored and recloned by the installer, so nothing committed here can
+# reach that file any other way -- same situation as BindCraft's installer, same
+# mechanism (_pin_bindcraft_pyrosetta), and the reason this is not fixed upstream in a
+# vendored pyproject. Patching before the resolve rather than downgrading after it
+# keeps the venv self-consistent, so a later `uv sync` cannot quietly undo it.
+_pin_mosaic_esm2quinox() {
+    local f="${MOSAIC_DIR}/pyproject.toml"
+    [[ -f "${f}" ]] || return 0
+    if grep -qF "esm2quinox==${ESM2QUINOX_VERSION}" "${f}"; then
+        print_ok "Mosaic already pinned to esm2quinox ${ESM2QUINOX_VERSION}"
+        return 0
+    fi
+    if ! grep -qE '"esm2quinox[><=~]' "${f}"; then
+        print_warn "No esm2quinox requirement in Mosaic's pyproject.toml — left as-is"
+        return 0
+    fi
+    sed -i "s|\"esm2quinox[^\"]*\"|\"esm2quinox==${ESM2QUINOX_VERSION}\"|" "${f}" \
+        || { print_fail "Could not pin esm2quinox in ${f}"; return 1; }
+    grep -qF "esm2quinox==${ESM2QUINOX_VERSION}" "${f}" \
+        || { print_fail "Failed to pin esm2quinox in ${f} — the ESM2 prior would crash on batch 1"; return 1; }
+    print_ok "Pinned esm2quinox==${ESM2QUINOX_VERSION} in Mosaic's pyproject.toml"
+}
+
 install_mosaic() {
     print_step "Installing Mosaic"
 
@@ -1388,8 +1562,8 @@ install_mosaic() {
     print_step "Checking for uv package manager"
     if ! command -v uv &>/dev/null; then
         print_warn "uv not found — installing via official installer"
-        curl -LsSf https://astral.sh/uv/install.sh | sh \
-            || { print_fail "Failed to install uv"; return 1; }
+        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh \
+            || { print_fail "Failed to install uv ${UV_VERSION}"; return 1; }
         export PATH="${HOME}/.local/bin:${PATH}"
         # Add to .bashrc if not already there
         if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
@@ -1415,16 +1589,49 @@ install_mosaic() {
             || print_warn "Offline-MSA patch failed to apply — offline target MSA disabled"
     fi
 
+    # Cap esm2quinox before the resolve — see ESM2QUINOX_VERSION (BUG-24).
+    _pin_mosaic_esm2quinox || return 1
+
     # Create virtual environment with JAX CUDA support
     print_step "Running uv sync --group jax-cuda (creates .venv/ inside Mosaic/)"
     run_logged "Setting up Mosaic venv (uv sync --group jax-cuda)" \
         bash -c "cd '${MOSAIC_DIR}' && uv sync --group jax-cuda" \
         || { print_fail "uv sync failed for Mosaic"; return 1; }
 
+    # `uv sync` PRUNES: it removes anything in .venv that the resolve does not list.
+    # install_evaluator() injects two packages into this venv afterwards with
+    # `uv pip install` -- binder-compare[boltz2] (the whole Boltz-2 refold stage runs
+    # out of here) and fair-esm (Mosaic's ESM2 expressibility prior) -- and neither is a
+    # Mosaic dependency. So re-running the installer for Mosaic alone on an otherwise
+    # complete install silently uninstalled both: evaluate.sh then could not find
+    # binder-compare, and Mosaic designed without the ESM prior -- not an error, just
+    # worse binders. Observed, not theorised: the re-sync printed "Uninstalled 3
+    # packages: binder-comparison, fair-esm, esm2quinox". Re-inject them only when the
+    # Evaluator was already wired to this venv, i.e. when there is something to restore.
+    if [[ -f "${EVALUATOR_DIR}/envs/mosaic_venv_path" ]]; then
+        print_step "Restoring Evaluator packages pruned from the Mosaic venv by uv sync"
+        run_logged "re-install binder-compare into Mosaic venv" \
+            uv pip install --python "${MOSAIC_DIR}/.venv/bin/python" -q -e "${EVALUATOR_DIR}[boltz2]" \
+            || print_warn "Could not restore binder-compare — re-run: install.sh --tool evaluator"
+        run_logged "re-install fair-esm into Mosaic venv" \
+            uv pip install --python "${MOSAIC_DIR}/.venv/bin/python" -q fair-esm \
+            || print_warn "Could not restore fair-esm — Mosaic will run without the ESM2 prior"
+    fi
+
     # Smoke test
     smoke_test "import mosaic" \
         "${MOSAIC_DIR}/.venv/bin/python" -c "import mosaic; print('OK')" \
         || return 1
+
+    # The ESM2 prior is the one Mosaic loss that indexes a third-party token table, and
+    # `import mosaic` never reaches it -- the same blind spot that let the atomworks
+    # breakage ship. So assert the symbols AND the width the loss hardcodes: 0.2.0 is
+    # 32 entries keyed "^"/"$"/"#", and either half alone would miss a future table
+    # that keeps the keys and changes the size.
+    smoke_test "esm2quinox alphabet has the keys and width Mosaic's ESM prior indexes" \
+        "${MOSAIC_DIR}/.venv/bin/python" -c \
+        "from esm2quinox._esm2 import _alphabet as a; assert len(a) == 33, len(a); [a[k] for k in ('b', 'e', 'm')]; print('OK')" \
+        || { print_fail "esm2quinox has the wrong token table — Mosaic's default ESM2 prior dies on its first optimisation step"; return 1; }
 
     # Example
     if [[ "${SKIP_EXAMPLES}" == false ]]; then
@@ -2193,6 +2400,33 @@ ENVEOF
     fi
 }
 
+# Force atomworks back below the version that deleted the class Proteina-Complexa's
+# pinned code imports. Unlike BindCraft (whose installer creates its own conda env, so
+# the pin has to be sed'd into their script), env/build_uv_env.sh leaves a venv behind
+# that we can correct in place. Idempotent: re-running when already correct is a no-op.
+_pin_complexa_atomworks() {
+    local py="${PROTEINA_COMPLEXA_DIR}/.venv/bin/python"
+    [[ -x "${py}" ]] || { print_warn "No Proteina-Complexa venv — skipping atomworks pin"; return 0; }
+
+    local have
+    have="$("${py}" -c "import importlib.metadata as m; print(m.version('atomworks'))" 2>/dev/null || true)"
+    if [[ "${have}" == "${ATOMWORKS_VERSION}" ]]; then
+        print_ok "atomworks already pinned to ${ATOMWORKS_VERSION}"
+    else
+        print_step "Pinning atomworks ${have:-<absent>} -> ${ATOMWORKS_VERSION}"
+        run_logged "Pinning atomworks==${ATOMWORKS_VERSION}" \
+            uv pip install --python "${py}" -q \
+            "atomworks[ml,openbabel]==${ATOMWORKS_VERSION}" \
+            || { print_fail "Could not pin atomworks==${ATOMWORKS_VERSION}"; return 1; }
+    fi
+
+    # Assert the SYMBOL, not the version number — the symbol is what disappeared, and a
+    # version check would pass on any future release that drops it again.
+    "${py}" -c "from atomworks.io.utils.selection import AtomSelectionStack" 2>/dev/null \
+        || { print_fail "atomworks ${ATOMWORKS_VERSION} has no AtomSelectionStack — Proteina-Complexa cannot generate"; return 1; }
+    print_ok "atomworks ${ATOMWORKS_VERSION} provides AtomSelectionStack"
+}
+
 install_proteina_complexa() {
     print_step "Installing Proteina-Complexa"
 
@@ -2220,8 +2454,8 @@ install_proteina_complexa() {
     print_step "Checking for uv package manager"
     if ! command -v uv &>/dev/null; then
         print_warn "uv not found — installing via official installer"
-        curl -LsSf https://astral.sh/uv/install.sh | sh \
-            || { print_fail "Failed to install uv"; return 1; }
+        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh \
+            || { print_fail "Failed to install uv ${UV_VERSION}"; return 1; }
         export PATH="${HOME}/.local/bin:${PATH}"
         if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
             echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
@@ -2274,6 +2508,9 @@ install_proteina_complexa() {
             bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && uv sync" \
             || { print_fail "uv sync failed for Proteina-Complexa"; return 1; }
     fi
+
+    # Pin atomworks AFTER the upstream build, which installs it unpinned.
+    _pin_complexa_atomworks || return 1
 
     # Initialize and download checkpoints
     print_step "Initializing Proteina-Complexa"
@@ -2332,9 +2569,13 @@ install_proteina_complexa() {
     # Configure .env with correct local paths
     _write_complexa_env
 
-    # Smoke test
-    smoke_test "Proteina-Complexa import check" \
-        "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" -c "import proteinfoundation; print('OK')" \
+    # Smoke test. `import proteinfoundation` alone is NOT enough: that package's
+    # __init__ imports nothing, so it stayed green through the whole atomworks 3.x
+    # breakage — the env reported healthy with its central code path dead. Import the
+    # module that actually broke.
+    smoke_test "Proteina-Complexa import check (incl. pdb_utils)" \
+        "${PROTEINA_COMPLEXA_DIR}/.venv/bin/python" -c \
+        "import proteinfoundation, proteinfoundation.utils.pdb_utils; print('OK')" \
         || return 1
 
     # Shortcut
@@ -2428,8 +2669,8 @@ install_bindcraft2() {
     print_step "Checking for uv package manager"
     if ! command -v uv &>/dev/null; then
         print_warn "uv not found — installing via official installer"
-        curl -LsSf https://astral.sh/uv/install.sh | sh \
-            || { print_fail "Failed to install uv"; return 1; }
+        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh \
+            || { print_fail "Failed to install uv ${UV_VERSION}"; return 1; }
         export PATH="${HOME}/.local/bin:${PATH}"
         if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
             echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
@@ -2708,8 +2949,8 @@ install_rfd4() {
     print_step "Checking for uv package manager"
     if ! command -v uv &>/dev/null; then
         print_warn "uv not found — installing via official installer"
-        curl -LsSf https://astral.sh/uv/install.sh | sh \
-            || { print_fail "Failed to install uv"; return 1; }
+        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh \
+            || { print_fail "Failed to install uv ${UV_VERSION}"; return 1; }
         export PATH="${HOME}/.local/bin:${PATH}"
         if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
             echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
@@ -3900,8 +4141,29 @@ verify_tool() {
     VERIFY_REASON=""
     case "${tool,,}" in
         bindcraft)
-            (( $(_count_glob "${BINDCRAFT_DIR}"/params/*.npz) >= 5 )) \
-                || VERIFY_REASON="no AF2 .npz parameters under ${BINDCRAFT_DIR}/params" ;;
+            # Five .npz files were the whole check, and they are not evidence BindCraft
+            # can produce a design. PyRosetta 2026.29 changed
+            # InterfaceAnalyzerMover.set_interface() from accepting a str to requiring
+            # DockingPartners, and score_interface() runs only AFTER a full trajectory --
+            # so an env with the new PyRosetta and an unpatched call site burned ~8
+            # GPU-minutes per trajectory, wrote header-only stats CSVs, and was reported
+            # "installed" by this very function. The probe reads both sides and passes
+            # when they AGREE: either the installed mover still takes a string, or the
+            # call site has been migrated.
+            if (( $(_count_glob "${BINDCRAFT_DIR}"/params/*.npz) < 5 )); then
+                VERIFY_REASON="no AF2 .npz parameters under ${BINDCRAFT_DIR}/params"
+            elif [[ ! -f "${BINDCRAFT_DIR}/functions/pyrosetta_utils.py" ]]; then
+                VERIFY_REASON="no ${BINDCRAFT_DIR}/functions/pyrosetta_utils.py — the clone is incomplete"
+            elif ! _env_python_ok BindCraft "import pyrosetta"; then
+                VERIFY_REASON="pyrosetta does not import in the BindCraft env (every trajectory dies in score_interface)"
+            elif ! _env_python_ok BindCraft "
+import pathlib, sys
+from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover as M
+doc = M.set_interface.__doc__ or ''
+src = pathlib.Path('${BINDCRAFT_DIR}/functions/pyrosetta_utils.py').read_text()
+sys.exit(0 if (': str' in doc or 'DockingPartners' in src) else 1)"; then
+                VERIFY_REASON="BindCraft's score_interface still passes a string to InterfaceAnalyzerMover.set_interface(), which this PyRosetta rejects -- every trajectory would die after its GPU work. Re-run the installer for bindcraft"
+            fi ;;
         "bindcraft 2"|bindcraft2)
             [[ -x "${BINDCRAFT2_DIR}/.venv/bin/python" ]] \
                 || VERIFY_REASON="no venv at ${BINDCRAFT2_DIR}/.venv" ;;
@@ -3909,8 +4171,17 @@ verify_tool() {
             _env_python_ok BoltzGen "import torch" \
                 || VERIFY_REASON="torch does not import in the BoltzGen env" ;;
         mosaic)
-            [[ -x "${MOSAIC_DIR}/.venv/bin/python" ]] \
-                || VERIFY_REASON="no venv at ${MOSAIC_DIR}/.venv" ;;
+            # The existence of an interpreter was the whole check, so Mosaic reported
+            # usable on a venv whose default-enabled ESM2 prior dies on batch 1:
+            # esm2quinox 0.2.0 rewrote the token table mosaic/losses/esm.py indexes with
+            # "b"/"e"/"m" against a hardcoded one-hot width of 33. Assert the symbols and
+            # the width, which is what the loss actually reads.
+            if [[ ! -x "${MOSAIC_DIR}/.venv/bin/python" ]]; then
+                VERIFY_REASON="no venv at ${MOSAIC_DIR}/.venv"
+            elif ! ( cd / && "${MOSAIC_DIR}/.venv/bin/python" -c \
+                    "from esm2quinox._esm2 import _alphabet as a; assert len(a) == 33, len(a); [a[k] for k in ('b', 'e', 'm')]" ) >/dev/null 2>&1; then
+                VERIFY_REASON="esm2quinox in ${MOSAIC_DIR}/.venv does not have the 33-entry token table keyed 'b'/'e'/'m' that Mosaic's default ESM2 prior indexes -- the first optimisation step would raise KeyError. Re-run the installer for mosaic"
+            fi ;;
         evaluator)
             if ! _env_python_ok binder-eval "import binder_comparison"; then
                 VERIFY_REASON="binder_comparison does not import in binder-eval"
