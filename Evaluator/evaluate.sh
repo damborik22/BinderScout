@@ -477,7 +477,7 @@ fi
 # Each engine also computes its own absolute-GiB fraction
 # (binder_comparison.refolding.memory_policy), but that is COOPERATIVE. The hard
 # ceiling is a CUDA MPS per-client limit; cgroups do not contain NVIDIA allocations
-# on driver 580.x (measured). See docs/PLAN_bm5_unified_memory.md.
+# on driver 580.x (measured).
 GUARD="$SCRIPT_DIR/../tools/gpu_mem_guard.sh"
 MPS_ACTIVE=0
 MPS_WE_STARTED=0
@@ -717,24 +717,30 @@ if (( ${#TOOL_ROOTS[@]} )); then
         echo "  [note] discover_tool_csvs.py not found at $_discover — no native tool CSVs attached."
     fi
 fi
-# RFD3 is a diffusion model and emits NO quality score of its own, so its native
-# block would otherwise be ordered by mpnn_sequence_recovery -- a sequence proxy
-# with no binding signal. Rank it instead by the Boltz-2 fold-back, which is the
-# field-standard recipe (diffusion gives geometry, the fold-back gives the rank)
-# and costs NO extra GPU here: it re-reads the boltz2 results this run already
-# produced. --only-tool is load-bearing: the report treats a --tool-csv file as
-# that tool's whole ranked list, so an unfiltered selection would file every
-# tool's designs under RFD3. Appended after discovery so it wins.
-if [[ -f "$BOLTZ2_CSV" ]] && grep -q "source=rfd3" "$SEQUENCES" 2>/dev/null; then
-    RFD3_RANK="$OUTPUT/rfd3_native_rank.csv"
-    if conda run -n binder-eval binder-compare prefilter \
-        --boltz2-results "$BOLTZ2_CSV" --sequences "$SEQUENCES" \
-        --only-tool rfd3 --metric ipsae_min -o "$RFD3_RANK" >/dev/null 2>&1; then
-        REPORT_ARGS+=(--tool-csv "rfd3=$RFD3_RANK")
-        echo "  RFD3 native rank from the Boltz-2 fold-back → $(basename "$RFD3_RANK")"
-    else
-        echo "  [note] RFD3 fold-back ranking failed — its native block falls back to sequence recovery."
-    fi
+# RFD3 and RFD4-Proteina are diffusion models that emit NO quality score of their
+# own, so their native blocks would otherwise be ordered by mpnn_sequence_recovery
+# (RFD3 -- a sequence proxy with no binding signal) or by nothing at all (RFD4
+# writes structures and no table, and its metrics block is disabled at generation).
+# Rank them instead by the Boltz-2 fold-back, which is the field-standard recipe
+# (diffusion gives geometry, the fold-back gives the rank) and costs NO extra GPU
+# here: it re-reads the boltz2 results this run already produced. --only-tool is
+# load-bearing: the report treats a --tool-csv file as that tool's whole ranked
+# list, so an unfiltered selection would file every tool's designs under one name.
+# Appended after discovery so it wins.
+if [[ -f "$BOLTZ2_CSV" ]]; then
+    for _diffusion_tool in rfd3 rfd4; do
+        grep -q "source=$_diffusion_tool" "$SEQUENCES" 2>/dev/null || continue
+        _diffusion_rank="$OUTPUT/${_diffusion_tool}_native_rank.csv"
+        if conda run -n binder-eval binder-compare prefilter \
+            --boltz2-results "$BOLTZ2_CSV" --sequences "$SEQUENCES" \
+            --tool "$_diffusion_tool" --only-tool "$_diffusion_tool" \
+            --metric ipsae_min -o "$_diffusion_rank" >/dev/null 2>&1; then
+            REPORT_ARGS+=(--tool-csv "$_diffusion_tool=$_diffusion_rank")
+            echo "  ${_diffusion_tool} native rank from the Boltz-2 fold-back → $(basename "$_diffusion_rank")"
+        else
+            echo "  [note] ${_diffusion_tool} fold-back ranking failed — its native block falls back to no ordering."
+        fi
+    done
 fi
 REPORT_ARGS+=(--primary-engine "$PRIMARY_ENGINE")
 if [[ -n "$MIN_ENGINES" ]]; then

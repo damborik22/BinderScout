@@ -110,6 +110,8 @@ _TOOL_LINKS = {
     "proteina_complexa": "https://github.com/NVIDIA-Digital-Bio/proteina-complexa",
     # RFD3 — RFdiffusion3 / foundry
     "rfd3": "https://github.com/RosettaCommons/RFdiffusion",
+    # RFD4-Proteina — RFdiffusion4 / Proteina all-atom generator
+    "rfd4": "https://github.com/RosettaCommons/RFD4-Proteina",
     # Protein-Hunter — Cho et al. 2025, bioRxiv preprint
     "protein_hunter": "https://doi.org/10.1101/2025.10.10.681530",
 }
@@ -171,6 +173,7 @@ _HTML_TEMPLATE = """\
   .tool-pxdesign           {{ color: #7B1FA2; font-weight: bold; }}
   .tool-proteina_complexa  {{ color: #6D4C41; font-weight: bold; }}
   .tool-rfd3               {{ color: #D84315; font-weight: bold; }}
+  .tool-rfd4               {{ color: #AD1457; font-weight: bold; }}
   .tool-protein_hunter     {{ color: #00838F; font-weight: bold; }}
   .stat-table td {{ text-align: right; font-variant-numeric: tabular-nums; }}
   .stat-table th:first-child, .stat-table td:first-child {{ text-align: left; white-space: nowrap; }}
@@ -351,6 +354,7 @@ _TOOL_COLOURS_NGL = {
     "bindcraft2": "#1565C0",
     "proteina_complexa": "#00897B",
     "rfd3": "#D84315",
+    "rfd4": "#AD1457",
     "protein_hunter": "#00838F",
     "unknown": "#9E9E9E",
 }

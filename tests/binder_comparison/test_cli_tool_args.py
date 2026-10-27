@@ -25,6 +25,7 @@ _ALL_TOOLS = {
     "proteina_complexa",
     "protein_hunter",
     "rfd3",
+    "rfd4",
 }
 
 
@@ -82,7 +83,7 @@ class TestExtractAndRunAgreeOnTools:
             "run.py should build the extract command from the shared table, "
             "not a hand-written if-chain that can fall behind"
         )
-        assert len(TOOL_FLAGS) == 8
+        assert len(TOOL_FLAGS) == 9
 
 
 class TestZeroYieldIsAnError:

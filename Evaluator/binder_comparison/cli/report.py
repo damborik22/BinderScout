@@ -682,6 +682,7 @@ _TOOL_COLOURS_PYMOL = {
     "bindcraft2": "density",
     "proteina_complexa": "teal",
     "rfd3": "tv_orange",
+    "rfd4": "magenta",
     "protein_hunter": "cyan",
 }
 
@@ -693,6 +694,7 @@ _TOOL_DISPLAY_PYMOL = {
     "bindcraft2": "BindCraft 2",
     "proteina_complexa": "Proteina-Complexa",
     "rfd3": "RFD3",
+    "rfd4": "RFD4-Proteina",
     "protein_hunter": "Protein-Hunter",
 }
 

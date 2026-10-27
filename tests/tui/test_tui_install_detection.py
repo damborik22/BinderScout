@@ -63,6 +63,7 @@ def test_no_marker_points_at_a_path_that_cannot_exist(key, label, marker):
         "PXDesign",
         "Proteina-Complexa",
         "Protein-Hunter",
+        "RFD4-Proteina",
         "weights",
     }
     assert top in known, f"{label}: marker {marker!r} is not under an installer-created directory"

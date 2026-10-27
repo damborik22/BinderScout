@@ -45,6 +45,7 @@ TOOL_CODE_SLUGS = {
     "pxdesign": "PXDesign",
     "protein_hunter": "ProteinHunter",
     "rfd3": "RFDiffusion3",
+    "rfd4": "RFD4Proteina",
 }
 
 #: Section-B designs are coded against the pipeline, not a single tool.

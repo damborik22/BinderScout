@@ -52,6 +52,9 @@ TOOL_SEQUENCE: list[tuple[str, str, str]] = [
     # by `foundry install rfd3` is what run_rfd3.sh actually needs.
     ("rfd3", "RFD3", "weights/foundry/rfd3_latest.ckpt"),
     ("protein_hunter", "Protein-Hunter", "Protein-Hunter/boltz_ph/design.py"),
+    # The checkout IS the installation (uv venv beside it), so the console script
+    # is the marker — the clone alone does not mean `rfd4-generate` resolves.
+    ("rfd4", "RFD4-Proteina", "RFD4-Proteina/.venv/bin/rfd4-generate"),
 ]
 
 

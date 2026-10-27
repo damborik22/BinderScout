@@ -269,7 +269,7 @@ class TestHotspotsToEpitopeIdx:
         assert conf.hotspots_to_epitope_idx(cfg) is None
 
 
-# ── All seven tools reachable from every UI surface ───────────────────────────
+# ── Every design tool reachable from every UI surface ─────────────────────────
 
 
 _ALL_TOOLS = {
@@ -281,6 +281,7 @@ _ALL_TOOLS = {
     "proteina_complexa": True,
     "rfd3": True,
     "protein_hunter": True,
+    "rfd4": True,
     "evaluator": True,
 }
 
@@ -302,6 +303,7 @@ class TestToolSequenceCoverage:
             "proteina_complexa",
             "rfd3",
             "protein_hunter",
+            "rfd4",
         }
 
     def test_enabled_tools_preserves_execution_order(self):
@@ -682,6 +684,7 @@ class TestRequiredCfgKeysStayInSyncWithTheWriters:
         "proteina_complexa": ("write_run_proteina_complexa",),
         "rfd3": ("write_run_rfd3",),
         "protein_hunter": ("write_run_protein_hunter",),
+        "rfd4": ("write_rfd4_input_yaml", "write_run_rfd4"),
         "evaluator": ("write_run_evaluate",),
     }
 

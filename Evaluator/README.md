@@ -163,7 +163,8 @@ Reads native output directories for each supported tool, extracts sequences and 
 deduplicates, and writes a combined FASTA with `binder_id` and `source` tags.
 
 Supported inputs: `--bindcraft`, `--bindcraft2`, `--boltzgen`, `--mosaic`, `--pxdesign`,
-`--proteina-complexa`, `--protein-hunter`, `--rfd3` — all eight, on both `extract` and `run`.
+`--proteina-complexa`, `--protein-hunter`, `--rfd3`, `--rfd4` — all nine, on both `extract`
+and `run`.
 
 A requested directory that yields 0 sequences is an error (`--allow-empty` to override),
 so a mistyped path cannot silently shrink the pool before hours of GPU refolding.

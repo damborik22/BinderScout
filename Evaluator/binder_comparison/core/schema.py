@@ -22,6 +22,7 @@ if TYPE_CHECKING:
         "mosaic",
         "pxdesign",
         "rfd3",
+        "rfd4",
         "proteina_complexa",
         "protein_hunter",
         "unknown",

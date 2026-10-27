@@ -1,8 +1,8 @@
 #!/bin/bash
 # BinderScout Installer
 # Installs BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa,
-# Protein-Hunter, RFD3, and/or the Evaluator. AF3 and ESMFold2 are opt-in
-# (--tool af3 / --tool esmfold2).
+# Protein-Hunter, RFD3, and/or the Evaluator. AF3, ESMFold2 and RFD4-Proteina
+# are opt-in (--tool af3 / --tool esmfold2 / --tool rfd4).
 #
 # Usage:
 #   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|af3|esmfold2|all] [--cuda VERSION] [--skip-examples] [--yes] [--force]
@@ -51,6 +51,34 @@ FOUNDRY_REPO="https://github.com/RosettaCommons/foundry.git"
 FOUNDRY_COMMIT="v0.1.9"
 FOUNDRY_DIR="${BINDERSCOUT_DIR}/Foundry"
 FOUNDRY_WEIGHTS_DIR="${BINDERSCOUT_DIR}/weights/foundry"
+
+# RFD4-Proteina (RosettaCommons + NVIDIA). Code is BSD-3. Installed EDITABLE
+# into a .venv beside its own checkout, so that directory is permanent: moving
+# or deleting it breaks `rfd4-generate` — the same posture as BindCraft 2.
+#
+# The WEIGHTS LICENCE HAS NOT BEEN VERIFIED. They come from the public
+# nvidia/RFD4-Proteina Hugging Face repo (no token needed), pinned to the same
+# revision upstream's own configs/inference.yaml names, and nothing of them is
+# committed here — the AF3-weights posture. Read the model card's terms before
+# any publication or commercial use; this installer does not clear them.
+RFD4_DIR="${BINDERSCOUT_DIR}/RFD4-Proteina"
+RFD4_REPO="https://github.com/RosettaCommons/RFD4-Proteina.git"
+RFD4_COMMIT="aaccdd2ad0720c180468df5f9cf037a713d403e5"
+# HF_HOME for the pinned model, so the 1.7 GB download lands inside the repo
+# (gitignored by `weights/`) instead of a shared ~/.cache nobody can account for.
+RFD4_WEIGHTS_DIR="${BINDERSCOUT_DIR}/weights/rfd4"
+RFD4_HF_REPO="nvidia/RFD4-Proteina"
+RFD4_HF_REVISION="a06e2509c7033b010fc43614e9fd840303588502"
+RFD4_WEIGHTS_BYTES=1742660596
+RFD4_WEIGHTS_SHA256="5b549dd61adb2f6c6b5cb95bda13f40f5e31556b4e6c755edc0ca6f011c68fb0"
+# Upstream's scripts/setup_venv.sh installs with --torch-backend cu132. Our one
+# tested install used cu130, because the driver there reported CUDA 13.0 (and
+# upstream's own Dockerfile uses cu130 too). This is a DEVIATION from upstream,
+# recorded rather than hidden; override it on a host whose driver is newer.
+# Not derived from --cuda: that is a conda package-resolution version, not a
+# driver version, and defaults to 12.4 here.
+RFD4_TORCH_BACKEND="${RFD4_TORCH_BACKEND:-cu130}"
+
 # AlphaFold 3 (DeepMind, Evaluator refolding). NOT a real PyPI package — the
 # "alphafold3" name on PyPI is an unrelated stub (v0.0.x). Installed from the
 # official repo (pinned); refold_af3.py resolves run_alphafold.py at ${AF3_DIR}
@@ -112,6 +140,8 @@ DO_PXDESIGN=false
 DO_PROTEINA_COMPLEXA=false
 DO_PROTEIN_HUNTER=false
 DO_RFD3=false
+DO_RFD4=false           # opt-in via --tool rfd4: new here, validated on ONE x86 node with
+                        # ONE 4-design run, and its weights licence is unverified
 DO_AF3=false            # opt-in via --tool af3 (runs on 24 GB GPUs; gated weights not bundled)
 DO_ESMFOLD2=false       # default refold engine (included in --tool all; lightweight, no gated weights)
 DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen; needs a C/C++ toolchain for the USEARCH v12 source build)
@@ -140,6 +170,7 @@ TOOL_REGISTRY=(
     "DO_MOSAIC|Mosaic|install_mosaic|true|JAX-based protein design with Marimo notebooks (uv venv)"
     "DO_EVALUATOR|Evaluator|install_evaluator|true|Evaluate binders: refold, ranked report (requires Mosaic)"
     "DO_RFD3|RFD3|install_rfd3|true|RFD3 / foundry -- all-atom diffusion for protein + ligand + NA binders (conda)"
+    "DO_RFD4|RFD4-Proteina|install_rfd4|false|RFD4-Proteina -- flow-matching binder generation, x86_64 only (uv venv; weights licence unverified)"
     "DO_PXDESIGN|PXDesign|install_pxdesign|false|Protenix-based de novo binder design (conda)"
     "DO_PROTEINA_COMPLEXA|Proteina-Complexa|install_proteina_complexa|false|NVIDIA flow matching + test-time compute binder design (uv venv)"
     "DO_PROTEIN_HUNTER|Protein-Hunter|install_protein_hunter|false|Boltz/Chai hallucination: protein/cyclic/ligand/DNA/RNA binders (conda)"
@@ -186,6 +217,8 @@ while [[ $# -gt 0 ]]; do
                     DO_EVALUATOR=true ;;
                 rfd3|foundry)
                     DO_RFD3=true ;;
+                rfd4|rfd4-proteina|rfd4_proteina)
+                    DO_RFD4=true ;;
                 pxdesign)
                     DO_PXDESIGN=true ;;
                 proteina-complexa|proteina_complexa|complexa)
@@ -202,7 +235,7 @@ while [[ $# -gt 0 ]]; do
                 soluprot|solu|solubility)
                     DO_SOLUPROT=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, bindcraft2, boltzgen, mosaic, evaluator, pxdesign, proteina-complexa, protein-hunter, rfd3, af3, esmfold2, soluprot, tmprot${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, bindcraft2, boltzgen, mosaic, evaluator, pxdesign, proteina-complexa, protein-hunter, rfd3, rfd4, af3, esmfold2, soluprot, tmprot${RESET}"
                     exit 1
                     ;;
             esac
@@ -276,6 +309,17 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes] [--force]
                                        that directory permanent. Reuses the AF2
                                        parameters already on the machine instead of
                                        downloading another 5.3 GB.
+                  rfd4|rfd4-proteina   RFD4-Proteina — the ninth design tool, x86_64 ONLY
+                                       (upstream's own setup_venv.sh refuses any other
+                                       architecture, and the pinned wheels are x86 cu13).
+                                       Opt-in, NOT in --tool all: it is new here,
+                                       validated by ONE 4-design run on ONE node, and
+                                       its WEIGHTS LICENCE IS UNVERIFIED — the BSD-3
+                                       licence covers the code only. Installs editable
+                                       into RFD4-Proteina/.venv, which makes that
+                                       directory permanent, and fetches 1.7 GB of
+                                       weights from the public nvidia/RFD4-Proteina
+                                       Hugging Face repo at a pinned revision.
                   af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
                                        runs on 24 GB GPUs for ~200-400-token
                                        complexes (~4.4 GB peak, measured);
@@ -2599,6 +2643,202 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/rfd3"
 }
 
+# ─── RFD4-Proteina (RosettaCommons + NVIDIA) ─────────────────────────────────
+# Flow-matching binder generation. Installed the way BindCraft 2 is: EDITABLE
+# into a .venv beside its own checkout, so RFD4-Proteina/ IS the installation.
+#
+# x86_64 only, and not by our choice: upstream's own scripts/setup_venv.sh
+# refuses any other architecture ("The native CUDA 13 dependency profile
+# currently supports Linux x86_64 only"), and the pinned set is torch
+# 2.14.1+cu130 plus cu13 ops wheels. install_aarch.sh refuses it for that reason.
+
+# _rfd4_weights_file
+# The one model file, at the deterministic HF-cache path for the pinned
+# revision. rfd4-generate resolves the model from this cache by repo id +
+# revision (upstream configs/inference.yaml), so HF_HOME has to point here at
+# run time — which is what bin/rfd4 exports.
+_rfd4_weights_file() {
+    printf '%s\n' "${RFD4_WEIGHTS_DIR}/hub/models--${RFD4_HF_REPO//\//--}/snapshots/${RFD4_HF_REVISION}/model.safetensors"
+}
+
+# True when the pinned model file is present, complete, and the one that was
+# tested. Presence alone is not enough: the download is 1.7 GB over the network
+# and a truncated snapshot file still exists, and the model is resolved by
+# revision at run time, so wrong bytes under the right path is a silent
+# substitution. This is the RFD3 lesson — `rfd3 --help` answered green against
+# an EMPTY weights dir — applied to the one artefact RFD4 cannot run without.
+_rfd4_weights_match() {
+    local f size got
+    f="$(_rfd4_weights_file)"
+    [[ -f "${f}" ]] || { print_fail "  missing: ${f}"; return 1; }
+    size="$(stat -c %s "${f}" 2>/dev/null)"
+    if [[ "${size}" != "${RFD4_WEIGHTS_BYTES}" ]]; then
+        print_fail "  ${f} is ${size} bytes, expected ${RFD4_WEIGHTS_BYTES} (truncated download?)"
+        return 1
+    fi
+    got="$(sha256sum "${f}" | cut -d' ' -f1)"
+    [[ "${got}" == "${RFD4_WEIGHTS_SHA256}" ]] && return 0
+    print_fail "  ${f} sha256 ${got} != pinned ${RFD4_WEIGHTS_SHA256}"
+    return 1
+}
+
+install_rfd4() {
+    print_step "Installing RFD4-Proteina"
+
+    # Clone + pin. The pin is load-bearing: it is the only commit this
+    # installer has ever been run against.
+    if [[ -d "${RFD4_DIR}" ]]; then
+        print_warn "Directory ${RFD4_DIR} already exists."
+        if confirm_destructive "Remove and reclone RFD4-Proteina?"; then
+            rm -rf "${RFD4_DIR}" || { print_fail "Failed to remove ${RFD4_DIR}"; return 1; }
+        else
+            print_warn "Skipping reclone; using existing checkout."
+        fi
+    fi
+    if [[ ! -d "${RFD4_DIR}" ]]; then
+        run_logged --retries 3 "Cloning RFD4-Proteina" \
+            git clone --quiet "${RFD4_REPO}" "${RFD4_DIR}" \
+            || { print_fail "Failed to clone RFD4-Proteina"; return 1; }
+        run_logged "Pinning RFD4-Proteina to ${RFD4_COMMIT:0:7}" \
+            git -C "${RFD4_DIR}" checkout --quiet "${RFD4_COMMIT}" \
+            || { print_fail "Could not pin RFD4-Proteina to ${RFD4_COMMIT}"; return 1; }
+    fi
+
+    # Ensure uv is available
+    print_step "Checking for uv package manager"
+    if ! command -v uv &>/dev/null; then
+        print_warn "uv not found — installing via official installer"
+        curl -LsSf https://astral.sh/uv/install.sh | sh \
+            || { print_fail "Failed to install uv"; return 1; }
+        export PATH="${HOME}/.local/bin:${PATH}"
+        if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
+            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
+            print_ok "Added ~/.local/bin to PATH in ~/.bashrc"
+        fi
+    fi
+    command -v uv &>/dev/null || { print_fail "uv still not found after install; check PATH"; return 1; }
+    print_ok "uv is available: $(command -v uv)"
+
+    if [[ -x "${RFD4_DIR}/.venv/bin/python" ]]; then
+        print_ok "RFD4-Proteina venv already exists — skipping creation"
+    else
+        # Upstream pins >=3.12,<=3.12.10, and uv fetches that interpreter when
+        # the machine has none in range. Deliberately NOT a separate
+        # `uv python install` first: on the box this was installed on, that step
+        # only warned that it could not link ~/.local/bin/python3.12 (which it
+        # left alone), and `uv venv` downloads what it needs by itself.
+        run_logged "Creating RFD4-Proteina venv (Python >=3.12,<=3.12.10)" \
+            uv venv --clear --python ">=3.12,<=3.12.10" "${RFD4_DIR}/.venv" \
+            || { print_fail "Failed to create ${RFD4_DIR}/.venv"; return 1; }
+    fi
+
+    # Upstream pins uv 0.13.4 INSIDE the venv and then installs with that uv,
+    # because --torch-backend is what selects the CUDA wheel index and an older
+    # host uv does not have the flag at all. Skipping this is how an install
+    # lands on plain PyPI torch, which resolves cleanly and then runs nothing.
+    run_logged "Pinning uv 0.13.4 inside the venv" \
+        uv pip install --python "${RFD4_DIR}/.venv/bin/python" "uv==0.13.4" \
+        || { print_fail "Could not install uv 0.13.4 into ${RFD4_DIR}/.venv"; return 1; }
+
+    # Build-time torch constraint, read from upstream's own pyproject so it
+    # cannot drift: source-built dependencies have to compile against the same
+    # torch the runtime resolves.
+    local torch_pin constraint
+    torch_pin="$("${RFD4_DIR}/.venv/bin/python" -c \
+        "import tomllib; print(next(d for d in tomllib.load(open('${RFD4_DIR}/pyproject.toml','rb'))['project']['dependencies'] if d.startswith('torch')))")" \
+        || { print_fail "Could not read the torch pin from ${RFD4_DIR}/pyproject.toml"; return 1; }
+    constraint="$(mktemp)"
+    printf '%s\n' "${torch_pin}" > "${constraint}"
+
+    # env -u CONDA_PREFIX -u VIRTUAL_ENV: this installer activates conda for
+    # almost everything, and uv resolves a target environment from those before
+    # it falls back to ./.venv — so without it the whole ~7.6 GB set can land in
+    # an unrelated conda env. --python states the interpreter regardless.
+    run_logged "Installing RFD4-Proteina (editable, all-cuda13, torch ${RFD4_TORCH_BACKEND})" \
+        env -u CONDA_PREFIX -u VIRTUAL_ENV \
+            bash -c "cd '${RFD4_DIR}' && .venv/bin/uv pip install --python .venv/bin/python --build-constraint '${constraint}' --torch-backend '${RFD4_TORCH_BACKEND}' -e '.[all-cuda13]'" \
+        || { rm -f "${constraint}"; print_fail "RFD4-Proteina install failed — see ${LOG_FILE}"; return 1; }
+    rm -f "${constraint}"
+
+    # Weights. Public HF repo, no token needed, pinned to the revision
+    # upstream's own configs/inference.yaml names — so prefetching here gets
+    # exactly what a run would otherwise fetch on first use.
+    print_warn "RFD4-Proteina's WEIGHTS LICENCE HAS NOT BEEN VERIFIED."
+    print_warn "  The BSD-3 licence covers the CODE only. Read the terms on"
+    print_warn "  https://huggingface.co/${RFD4_HF_REPO} before any publication or commercial use."
+    mkdir -p "${RFD4_WEIGHTS_DIR}"
+    run_logged --retries 3 "Downloading RFD4 weights (1.7 GB, revision ${RFD4_HF_REVISION:0:7})" \
+        env HF_HOME="${RFD4_WEIGHTS_DIR}" "${RFD4_DIR}/.venv/bin/hf" \
+            download "${RFD4_HF_REPO}" config.json model.safetensors \
+            --revision "${RFD4_HF_REVISION}" \
+        || { print_fail "RFD4 weight download failed — retry: HF_HOME=${RFD4_WEIGHTS_DIR} ${RFD4_DIR}/.venv/bin/hf download ${RFD4_HF_REPO} config.json model.safetensors --revision ${RFD4_HF_REVISION}"; return 1; }
+
+    # The cu130 override and the build constraint both change what gets
+    # resolved, so assert the 218-package set is still internally consistent
+    # rather than assuming upstream's pin held.
+    smoke_test "RFD4 dependency set is consistent (uv pip check)" \
+        env -u CONDA_PREFIX -u VIRTUAL_ENV \
+            "${RFD4_DIR}/.venv/bin/uv" pip check --python "${RFD4_DIR}/.venv/bin/python" \
+        || { print_fail "RFD4-Proteina has an inconsistent dependency set"; return 1; }
+
+    # `import rfd4_proteina` and `rfd4-generate --help` BOTH pass on a GPU-less
+    # login node with no weights present at all (measured), so neither is a
+    # check — that is the same "green while the tool cannot generate" shape this
+    # installer already got wrong for RFD3. What they cannot see is a CPU-only
+    # torch, which is what you get if --torch-backend did not apply.
+    # torch.version.cuda is a property of the WHEEL, so it answers without a
+    # driver; torch.cuda.is_available() is NOT (it was False on the machine this
+    # was installed on, correctly) and is deliberately not asserted here.
+    smoke_test "RFD4 imports and its torch is a CUDA build" \
+        "${RFD4_DIR}/.venv/bin/python" -c \
+            'import sys, torch, rfd4_proteina; print(rfd4_proteina.__file__, torch.__version__, torch.version.cuda); sys.exit(0 if torch.version.cuda else 1)' \
+        || { print_fail "RFD4-Proteina does not import, or its torch has no CUDA build"; return 1; }
+
+    smoke_test "RFD4 weights are the pinned revision (size + sha256)" \
+        _rfd4_weights_match \
+        || { print_fail "RFD4-Proteina weights are missing or not the tested model"; return 1; }
+
+    _write_rfd4_shortcut
+
+    print_ok "RFD4-Proteina installation complete"
+    print_ok "  Usage: rfd4 inputs=input.yaml num_replicates=4 batch_size=1 out_dir=./runs/<name>"
+    print_warn "  Validated by ONE 4-design run on ONE x86 node. Treat the first campaign as a test,"
+    print_warn "  and check the weights licence (above) before relying on any output."
+}
+
+_write_rfd4_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# RFD4-Proteina shortcut — runs 'rfd4-generate ...' from its own venv."
+        echo "# With no args: opens an interactive shell with that venv on PATH."
+        echo ""
+        echo "RFD4_DIR=\"${RFD4_DIR}\""
+        echo "RFD4_WEIGHTS_DIR=\"${RFD4_WEIGHTS_DIR}\""
+    } > "${SHORTCUTS_DIR}/rfd4"
+    cat >> "${SHORTCUTS_DIR}/rfd4" << 'EOF'
+
+# The model is resolved from the HF cache by repo id + revision, so HF_HOME has
+# to name the cache the installer filled or a run re-downloads 1.7 GB — or, on
+# an allocated node with no outbound network, fails. HF_HUB_OFFLINE defaults to
+# 1 for the same reason: the pinned revision is already there, so a hub lookup
+# mid-allocation is a stall, not a feature. Set HF_HUB_OFFLINE=0 to allow it.
+export HF_HOME="${RFD4_WEIGHTS_DIR}"
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+
+if [[ $# -eq 0 ]]; then
+    echo "RFD4-Proteina (${RFD4_DIR})"
+    echo "Weights: ${RFD4_WEIGHTS_DIR}"
+    echo "Example:"
+    echo "  rfd4 inputs=input.yaml num_replicates=4 batch_size=1 out_dir=./runs/smoke"
+    exec env PATH="${RFD4_DIR}/.venv/bin:${PATH}" bash
+fi
+
+exec "${RFD4_DIR}/.venv/bin/rfd4-generate" "$@"
+EOF
+    chmod +x "${SHORTCUTS_DIR}/rfd4"
+}
+
 # ─── Protein-Hunter ──────────────────────────────────────────────────────────
 # Cho et al. (2025) bioRxiv 10.1101/2025.10.10.681530 — Boltz-2/Chai-1 structure
 # hallucination for protein / cyclic-peptide / small-molecule / DNA / RNA binders.
@@ -3512,6 +3752,15 @@ uninstall_tool() {
             [[ -d "${FOUNDRY_DIR}" ]] && { rm -rf "${FOUNDRY_DIR}"; print_ok "Removed ${FOUNDRY_DIR}"; }
             print_ok "RFD3 uninstalled"
             ;;
+        rfd4|rfd4-proteina|rfd4_proteina)
+            print_step "Uninstalling RFD4-Proteina"
+            rm -f "${SHORTCUTS_DIR}/rfd4"
+            # The venv lives inside the checkout (editable install), so removing
+            # the directory removes the environment with it.
+            [[ -d "${RFD4_DIR}" ]] && { rm -rf "${RFD4_DIR}"; print_ok "Removed ${RFD4_DIR}"; }
+            [[ -d "${RFD4_WEIGHTS_DIR}" ]] && { rm -rf "${RFD4_WEIGHTS_DIR}"; print_ok "Removed ${RFD4_WEIGHTS_DIR}"; }
+            print_ok "RFD4-Proteina uninstalled"
+            ;;
         bindcraft2|bc2|"bindcraft 2")
             print_step "Uninstalling BindCraft 2"
             rm -f "${SHORTCUTS_DIR}/bindcraft2"
@@ -3677,6 +3926,21 @@ verify_tool() {
             elif (( $(_count_glob "${FOUNDRY_WEIGHTS_DIR}"/*.pt) < 1 )); then
                 VERIFY_REASON="no ProteinMPNN .pt in ${FOUNDRY_WEIGHTS_DIR} — run: foundry install proteinmpnn"
             fi ;;
+        rfd4|rfd4-proteina)
+            # Cheap on purpose: this runs once per tool every time the menu
+            # re-prints. The sha256 lives in the install-time smoke test; here
+            # the byte count is enough to catch a truncated download.
+            local _rfd4_w _rfd4_sz
+            _rfd4_w="$(_rfd4_weights_file)"
+            if [[ ! -x "${RFD4_DIR}/.venv/bin/rfd4-generate" ]]; then
+                VERIFY_REASON="no rfd4-generate in ${RFD4_DIR}/.venv — the checkout IS the installation (editable), so it must stay where it was installed"
+            elif [[ ! -f "${_rfd4_w}" ]]; then
+                VERIFY_REASON="no model.safetensors for revision ${RFD4_HF_REVISION:0:7} under ${RFD4_WEIGHTS_DIR} — run: HF_HOME=${RFD4_WEIGHTS_DIR} ${RFD4_DIR}/.venv/bin/hf download ${RFD4_HF_REPO} config.json model.safetensors --revision ${RFD4_HF_REVISION}"
+            else
+                _rfd4_sz="$(stat -c %s "${_rfd4_w}" 2>/dev/null)"
+                [[ "${_rfd4_sz}" == "${RFD4_WEIGHTS_BYTES}" ]] \
+                    || VERIFY_REASON="RFD4 model.safetensors is ${_rfd4_sz} bytes, expected ${RFD4_WEIGHTS_BYTES} (truncated download?)"
+            fi ;;
         pxdesign)
             _env_python_ok "${PXDESIGN_ENV}" "import torch" \
                 || VERIFY_REASON="torch does not import in ${PXDESIGN_ENV}" ;;
@@ -3804,6 +4068,7 @@ preflight() {
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && need=$(( need + 8 ))
     [[ "${DO_PROTEIN_HUNTER}" == true ]]    && need=$(( need + 8 ))   # vendored Boltz-2 + Chai-1
     [[ "${DO_RFD3}"      == true ]]         && need=$(( need + 6 ))   # rfd3_latest.ckpt ~2.5 GB
+    [[ "${DO_RFD4}"      == true ]]         && need=$(( need + 11 ))  # 7.6 GB venv + 1.7 GB weights + 188 MB clone
     [[ "${DO_BINDCRAFT2}" == true ]]        && need=$(( need + 12 ))  # jax+cuda wheels; AF2 params reused, not re-downloaded
     [[ "${DO_AF3}"       == true ]]         && need=$(( need + 6 ))
     [[ "${DO_ESMFOLD2}"  == true ]]         && need=$(( need + 6 ))
@@ -3947,6 +4212,7 @@ main() {
             DO_ESMFOLD2=true
             DO_SOLUPROT=true
             DO_TMPROT=true
+            DO_RFD4=true
         fi
 
         # Driven by TOOL_REGISTRY, so a tool cannot be installable with no
@@ -4043,6 +4309,7 @@ main() {
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && (( total++ ))
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && (( total++ ))
     [[ "${DO_RFD3}"      == true ]] && (( total++ ))
+    [[ "${DO_RFD4}"      == true ]] && (( total++ ))
     [[ "${DO_BINDCRAFT2}" == true ]] && (( total++ ))
     [[ "${DO_AF3}"       == true ]] && (( total++ ))
     [[ "${DO_ESMFOLD2}"  == true ]] && (( total++ ))
@@ -4060,6 +4327,7 @@ main() {
     [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
     [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}";      install_rfd3      || failed_tools+=("RFD3"); }
+    [[ "${DO_RFD4}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD4-Proteina${RESET}"; install_rfd4  || failed_tools+=("RFD4-Proteina"); }
     [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Protein-Hunter${RESET}"; install_protein_hunter || failed_tools+=("Protein-Hunter"); }
@@ -4110,6 +4378,7 @@ main() {
     [[ "${DO_MOSAIC}"    == true ]] && echo -e "  ${GREEN}mosaic${RESET}     — open Mosaic shell"
     [[ "${DO_EVALUATOR}" == true ]] && echo -e "  ${GREEN}evaluate${RESET}   — launch evaluation wizard"
     [[ "${DO_RFD3}"      == true ]] && echo -e "  ${GREEN}rfd3${RESET}       — run RFD3 design / open env shell"
+    [[ "${DO_RFD4}"      == true && -x "${SHORTCUTS_DIR}/rfd4" ]] && echo -e "  ${GREEN}rfd4${RESET}       — run RFD4-Proteina generation / open venv shell"
     [[ "${DO_BINDCRAFT2}" == true && -x "${SHORTCUTS_DIR}/bindcraft2" ]] && echo -e "  ${GREEN}bindcraft2${RESET} — run BindCraft 2 design / open env shell"
     [[ "${DO_PXDESIGN}"  == true ]] && echo -e "  ${GREEN}pxdesign${RESET}   — open PXDesign shell"
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && echo -e "  ${GREEN}complexa${RESET}   — open Proteina-Complexa shell"

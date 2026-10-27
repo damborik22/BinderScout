@@ -11,6 +11,9 @@ Each generative tool has its own bias that head-to-head comparisons mask:
   than letting the noise drag down the pool aggregates.
 * RFD3's native metric is ProteinMPNN sequence recovery — a self-
   consistency score for the backbone, not interface quality.
+* RFD4-Proteina has NO native metric: it writes structures and no table,
+  and its own metrics block is disabled at generation. An absent score
+  must read as absent rather than as a zero.
 * Protein-Hunter's default pool comes from ``summary_high_iptm.csv``
   (already iPTM + %X-filtered). Comparing its mean iPTM to other tools'
   unfiltered pools inflates Protein-Hunter's standing. Surface the
@@ -169,6 +172,21 @@ TOOL_CLASSIFICATION: dict[str, ToolClassification] = {
             "ProteinMPNN sequence recovery — measures backbone self-consistency, "
             "NOT interface quality. Treat as a fold-stability sanity check; the "
             "interface signal comes entirely from the cross-engine refold."
+        ),
+        convergence_check=None,
+    ),
+    "rfd4": ToolClassification(
+        tool_name="rfd4",
+        display_name="RFD4-Proteina",
+        modality="all-atom diffusion",
+        pool_pre_filtered_default=False,
+        source_csv_default=None,
+        native_metric_interpretation=(
+            "NONE. RFD4-Proteina writes one mmCIF per sample and no table at all, and its "
+            "own metrics block is disabled at generation (it needs AF2/AF3 environments "
+            "that are not installed), so there is no design-time score to report. The "
+            "interface signal comes entirely from the cross-engine refold; evaluate.sh "
+            "gives it the Boltz-2 fold-back native rank, as it does for RFD3."
         ),
         convergence_check=None,
     ),

@@ -44,6 +44,11 @@ def test_the_example_replays(tmp_path, monkeypatch):
     enabled = {k for k, v in tools.items() if v is True}
     assert "evaluator" in enabled
     design_tools = {k for k, _s, _l, _d in conf.TOOL_SEQUENCE}
+    # RFD4 is out: it reads the target as mmCIF (upstream takes .cif/.cif.gz/.bcif
+    # only) and resolves its contig against the mmCIF label_seq_id, while this
+    # example ships examples/CALCA/target.pdb. Enabling it here would make the
+    # shipped example refuse to generate. Ship a CALCA .cif to close the gap.
+    design_tools -= {"rfd4"}
     missing = design_tools - enabled
     assert not missing, f"the smoke test no longer exercises every design tool: missing {sorted(missing)}"
 

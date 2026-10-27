@@ -146,6 +146,10 @@ PXDESIGN_DIR = BINDERSCOUT_DIR / "PXDesign"
 PROTEINA_COMPLEXA_DIR = BINDERSCOUT_DIR / "Proteina-Complexa"
 PROTEINA_COMPLEXA_VENV = PROTEINA_COMPLEXA_DIR / ".venv"
 PROTEIN_HUNTER_DIR = BINDERSCOUT_DIR / "Protein-Hunter"
+# RFD4-Proteina installs editable into a uv venv beside its own checkout, like
+# Mosaic and BindCraft 2 — there is no conda env to activate.
+RFD4_DIR = BINDERSCOUT_DIR / "RFD4-Proteina"
+RFD4_VENV = RFD4_DIR / ".venv"
 FOUNDRY_WEIGHTS_DIR = BINDERSCOUT_DIR / "weights" / "foundry"
 # Pre-MPNN backbone-geometry gate (config-correctness check, not a quality filter).
 RFD3_GATE = BINDERSCOUT_DIR / "tools" / "rfd3_gate.py"
@@ -211,6 +215,7 @@ TOOL_SEQUENCE: list[tuple[str, str, str, str]] = [
     ("proteina_complexa", "run_proteina_complexa.sh", "Proteina-Complexa", "proteina_complexa"),
     ("rfd3", "run_rfd3.sh", "RFD3", "rfd3"),
     ("protein_hunter", "run_protein_hunter.sh", "Protein-Hunter", "protein_hunter"),
+    ("rfd4", "run_rfd4.sh", "RFD4-Proteina", "rfd4"),
 ]
 
 
@@ -305,6 +310,9 @@ def detect_installs() -> dict:
         # distinguishes a finished install from a staged-but-unbuilt checkout.
         "bindcraft2": (BINDCRAFT2_VENV / "bin" / "bindcraft").exists(),
         "rfd3": _env_exists(rfd3_env) and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
+        # The console script, not the checkout: RFD4-Proteina is installed editable
+        # into its own venv, so the clone exists before anything is importable.
+        "rfd4": (RFD4_VENV / "bin" / "rfd4-generate").exists(),
         # An env directory is not an install: BM5 carried a `binderscout_protein_hunter`
         # env for months that held only pip and setuptools — no PyRosetta, no boltz_ph —
         # and this probe reported the tool as ready. Look for PyRosetta, which is the
@@ -717,6 +725,83 @@ def extract_sequence_from_cif(cif_path: str, chain_id: str) -> str | None:
             f"Check the length before continuing."
         )
         return seq
+    return None
+
+
+def cif_chain_numbering(cif_path: str, chain_id: str) -> dict | None:
+    """Residue numbering of `chain_id` in an mmCIF, in BOTH numbering schemes.
+
+    Returns {"label_lo", "label_hi", "n_residues", "auth_lo", "auth_hi"} for the
+    chain's CA records, or None when `chain_id` matches no `label_asym_id`.
+    `auth_lo` / `auth_hi` are None when the file carries no `auth_seq_id` column.
+
+    Why both are read: RFD4-Proteina resolves a contig's `res_id` against the
+    mmCIF `label_seq_id`, never `auth_seq_id` (upstream
+    `docs/reference/yaml-json.md`, "contig tokens"), and on a structure taken
+    from the PDB the two numberings routinely differ. That is a hard failure
+    rather than a silent one, and it cost two queued GPU jobs on the PD-L1 /
+    TrkA pool run of 2026-10-23: `Preserved segment 'A18-132' runs outside chain
+    A, whose residues are 2-116`, and `Preserved segment 'A282-382' matched no
+    atoms in the input structure`. So the configurator takes the range from the
+    label column and names the difference, instead of letting a user rediscover
+    it from a job log.
+
+    Chains are matched on `label_asym_id`, the same column
+    `extract_sequence_from_cif` matches, so the chain answer means one thing
+    across the wizard.
+    """
+    try:
+        text = Path(cif_path).expanduser().read_text(errors="replace")
+    except OSError:
+        return None
+
+    tokens = _cif_tokenize(text)
+    i = 0
+    while i < len(tokens):
+        if tokens[i].lower() != "loop_":
+            i += 1
+            continue
+        i += 1
+        cols: list = []
+        while i < len(tokens) and tokens[i].startswith("_"):
+            cols.append(tokens[i].lower())
+            i += 1
+        if not any(c.startswith("_atom_site.") for c in cols):
+            continue
+        col = {c.split(".", 1)[1]: idx for idx, c in enumerate(cols)}
+        if not {"label_atom_id", "label_asym_id", "label_seq_id"}.issubset(col):
+            continue
+        n_cols = len(cols)
+        label_ids: list[int] = []
+        auth_ids: list[int] = []
+        while i < len(tokens):
+            if tokens[i].lower() == "loop_" or (tokens[i].startswith("_") and "." in tokens[i]):
+                break
+            if i + n_cols > len(tokens):
+                break
+            row = tokens[i : i + n_cols]
+            i += n_cols
+            if row[col["label_atom_id"]].strip("'\"") != "CA":
+                continue
+            if row[col["label_asym_id"]].strip("'\"").upper() != chain_id.upper():
+                continue
+            try:
+                label_ids.append(int(row[col["label_seq_id"]]))
+            except ValueError:
+                continue
+            if "auth_seq_id" in col:
+                try:
+                    auth_ids.append(int(row[col["auth_seq_id"]]))
+                except ValueError:
+                    pass
+        if label_ids:
+            return {
+                "label_lo": min(label_ids),
+                "label_hi": max(label_ids),
+                "n_residues": len(set(label_ids)),
+                "auth_lo": min(auth_ids) if auth_ids else None,
+                "auth_hi": max(auth_ids) if auth_ids else None,
+            }
     return None
 
 
@@ -2036,6 +2121,12 @@ def write_run_all(path: Path, cfg: dict, tools_enabled: dict):
             "",
         ]
 
+    if tools_enabled.get("rfd4"):
+        lines += [
+            'run_tool "RFD4-Proteina" "$RUN_DIR/run_rfd4.sh" "$RUN_DIR/rfd4/sequences.csv"',
+            "",
+        ]
+
     if tools_enabled.get("evaluator"):
         lines += [
             'echo "=== Step: Evaluator ==="',
@@ -3207,6 +3298,328 @@ PYEOF
     path.chmod(0o755)
 
 
+# Reads the generated structures and writes the design pool. Kept out of the
+# f-string in write_run_rfd4 so its braces need no doubling; it takes everything
+# it needs from argv.
+_RFD4_EXTRACT_PY = """
+python3 - "$GEN_DIR" "$RFD4_OUT" "$TARGET_CHAIN" <<'PYEOF'
+import csv
+import sys
+from pathlib import Path
+
+gen_dir, out_dir, target_chain = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+Q = "'" + chr(34)  # mmCIF values may be quoted either way
+
+AA3TO1 = {
+    'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C', 'GLN': 'Q', 'GLU': 'E',
+    'GLY': 'G', 'HIS': 'H', 'ILE': 'I', 'LEU': 'L', 'LYS': 'K', 'MET': 'M', 'PHE': 'F',
+    'PRO': 'P', 'SER': 'S', 'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V', 'MSE': 'M',
+}
+
+
+def ca_chains(path):
+    # {chain: sequence} from the mmCIF _atom_site CA records, in file order.
+    cols, chains, seen_rows = [], {}, False
+    with path.open(errors='replace') as fh:
+        for raw in fh:
+            line = raw.strip()
+            if line.startswith('_atom_site.'):
+                cols.append(line.split('.', 1)[1].split()[0].lower())
+                continue
+            if not cols:
+                continue
+            if not line or line.startswith(('#', '_', 'loop_', 'data_')):
+                if seen_rows:
+                    break
+                continue
+            row = line.split()
+            if len(row) != len(cols):
+                continue
+            seen_rows = True
+            rec = dict(zip(cols, row))
+            if rec.get('label_atom_id', '').strip(Q) != 'CA':
+                continue
+            chain = (rec.get('label_asym_id') or rec.get('auth_asym_id') or '').strip(Q)
+            res = rec.get('label_comp_id', '').strip(Q).upper()
+            chains.setdefault(chain, []).append(AA3TO1.get(res, 'X'))
+    return {c: ''.join(v) for c, v in chains.items()}
+
+
+rows, problems = [], []
+for cif in sorted(gen_dir.rglob('*_generated.cif')):
+    chains = ca_chains(cif)
+    present = ','.join(sorted(chains)) or 'none'
+    if target_chain not in chains:
+        problems.append((cif.name, 'preserved target chain %s absent; chains present: %s'
+                         % (target_chain, present)))
+        continue
+    binders = [(c, s) for c, s in chains.items() if c != target_chain and s]
+    if len(binders) != 1:
+        problems.append((cif.name, '%d designed chains besides %s; chains present: %s'
+                         % (len(binders), target_chain, present)))
+        continue
+    chain, seq = binders[0]
+    if set(seq) <= {'X'}:
+        problems.append((cif.name, 'chain %s holds no canonical residues' % chain))
+        continue
+    rows.append({
+        'design_id': 'rfd4_' + cif.name[: -len('_generated.cif')],
+        'sequence': seq,
+        'length': len(seq),
+        'binder_chain': chain,
+        'structure': str(cif),
+        'source': 'rfd4',
+    })
+
+for cif_name, why in problems:
+    print('  WARN: %s: %s' % (cif_name, why), file=sys.stderr)
+
+if not rows:
+    print('ERROR: no binder sequences could be read from %s' % gen_dir, file=sys.stderr)
+    sys.exit(1)
+
+with (out_dir / 'sequences.csv').open('w', newline='') as fh:
+    w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+    w.writeheader()
+    w.writerows(rows)
+with (out_dir / 'sequences.fasta').open('w') as fh:
+    for r in rows:
+        fh.write('>%s  length=%d  source=rfd4\\n%s\\n' % (r['design_id'], r['length'], r['sequence']))
+
+lengths = sorted(r['length'] for r in rows)
+print('  -> %d binder sequences (length %d-%d) -> %s/sequences.csv'
+      % (len(rows), lengths[0], lengths[-1], out_dir))
+if problems:
+    print('  %d of %d structures skipped (see the WARN lines above)'
+          % (len(problems), len(rows) + len(problems)))
+PYEOF
+"""
+
+
+def _rfd4_preserved_segment(cfg: dict) -> tuple[Path, str, int, int]:
+    """(mmCIF, chain, lo, hi) for the contig's preserved target segment, in label_seq_id.
+
+    RFD4 resolves a contig's residue ids against the mmCIF `label_seq_id`. This
+    returns the range read from that column, and says so when the chain's author
+    numbering differs: a user who typed "18-132" off the PDB entry page needs to
+    know why the generated contig reads `A2-116` for the same residues.
+    """
+    chain = cfg.get("chains", "A").split(",")[0].strip()
+    cif = cfg.get("target_cif")
+    if not cif:
+        raise RuntimeError(
+            "RFD4: no mmCIF target. Upstream accepts .cif, .cif.gz and .bcif only, and the "
+            "contig resolves against the mmCIF label_seq_id, which a .pdb does not carry. "
+            "Re-run `binderscout configure` with the .cif/.mmcif for this structure, or "
+            "disable RFD4 for this run."
+        )
+    info = cif_chain_numbering(str(cif), chain)
+    if info is None:
+        raise RuntimeError(
+            f"RFD4: chain {chain!r} has no CA records in {Path(cif).name}. The contig's "
+            f"preserved segment names its chain by the mmCIF label_asym_id; correct "
+            f"cfg['chains'] (currently {cfg.get('chains', 'A')!r})."
+        )
+    lo, hi = info["label_lo"], info["label_hi"]
+    if info["auth_lo"] is not None and (info["auth_lo"], info["auth_hi"]) != (lo, hi):
+        print_warn(
+            f"Chain {chain} is numbered {info['auth_lo']}-{info['auth_hi']} by the author "
+            f"(auth_seq_id) but {lo}-{hi} in label_seq_id. RFD4 resolves the contig against "
+            f"label_seq_id, so the generated contig preserves {chain}{lo}-{hi} — the same "
+            f"{info['n_residues']} residues, named the way RFD4 reads them."
+        )
+    return Path(cif).resolve(), chain, lo, hi
+
+
+def write_rfd4_input_yaml(path: Path, cfg: dict) -> None:
+    """Write the RFD4 condition spec (one design task) for this run.
+
+    Mirrors the two specs that produced the PD-L1 / TrkA pool (690 designs,
+    2026-10-23): a binder length range, a chain break, then the preserved target
+    segment, plus the conditions that hold the target's backbone rigid
+    (`C_CRDGRP`) and give the model its sequence (`C_SEQ`).
+
+    No hotspot conditioning is written. RFD4 does support it (`C_HOT`, upstream
+    `docs/reference/yaml-json.md`), but nothing in this project has run it, so
+    the wizard's hotspot answer is not used by this tool.
+    """
+    target_cif, chain, lo, hi = _rfd4_preserved_segment(cfg)
+    min_len = int(cfg.get("rfd4_min_length", cfg.get("min_length", 60)))
+    max_len = int(cfg.get("rfd4_max_length", cfg.get("max_length", 100)))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"""\
+# RFD4-Proteina condition spec — generated by BinderScout Configurator.
+# Run it with: rfd4-generate inputs=<this file> num_replicates=N out_dir=DIR '~metrics'
+{cfg["name"]}:
+  input: {target_cif}
+  # "<lo>-<hi>" = designed binder length range, "/0" = chain break,
+  # "{chain}{lo}-{hi}" = preserved target segment.
+  # Those residue ids are label_seq_id, which is what RFD4 resolves a contig
+  # against (NOT auth_seq_id). A range in author numbering is rejected outright:
+  # "Preserved segment 'A18-132' runs outside chain A, whose residues are 2-116".
+  contig: "{min_len}-{max_len}, /0, {chain}{lo}-{hi}"
+  conditions:
+    C_CRDGRP:
+      1:
+        - select: "sel('{chain}/*/*/[N,CA,C,O]') and not has_nan_coord()"
+    C_SEQ:
+      true:
+        - select: "sel('{chain}')"
+"""
+    )
+
+
+def write_run_rfd4(path: Path, cfg: dict):
+    """Generate run_rfd4.sh — RFD4-Proteina flow-matching binder generation.
+
+    Mirrors binderscout_examples/run_rfd4.sh.template. Three things shape it:
+
+      - RFD4 lives in a uv venv beside its own checkout (editable install), so
+        there is nothing to `conda activate`.
+      - `'~metrics'` is REQUIRED, not an optimisation: it removes RFD4's native
+        metrics block, which runs AF2/AF3 oracles out of environments this
+        install does not create. Every logged run passed it.
+      - Sequence and structure are designed together, so there is no MPNN pass —
+        the design pool is read back out of the generated mmCIFs.
+
+    The contig and the input structure are read back out of the spec file at run
+    time rather than restated here: the spec is editable after generation, and
+    settings.json has to record the run that actually ran.
+    """
+    run_dir = cfg["run_dir"]
+    name = cfg["name"]
+    target_seq = cfg.get("target_sequence", "")
+    primary_chain = cfg.get("chains", "A").split(",")[0].strip()
+    n_designs = int(cfg.get("rfd4_n_designs", cfg.get("n_designs", 50)))
+    seed = int(cfg.get("rfd4_seed", 1))
+
+    settings_block = _settings_json_block(
+        tool="rfd4-proteina",
+        settings_dir_var="RFD4_OUT",
+        conda_env="(uv venv: RFD4-Proteina/.venv)",
+        version_dict_inner="""
+    "binderscout_git_sha": "$GIT_SHA",
+    "binderscout_git_branch": "$GIT_BRANCH",
+    "rfd4_repo_git_sha": "$RFD4_SHA",
+    "rfd4_pkg_version": "$RFD4_VER\"""",
+        target_dict_inner=f"""
+    "name": "{name}",
+    "cif": "${{INPUT_CIF:-unknown}}",
+    "sequence": "{target_seq}",
+    "length": {len(target_seq)},
+    "preserved_chain": "{primary_chain}\"""",
+        design_params_inner=f"""
+    "input_spec": "$INPUT_YAML",
+    "contig": "${{CONTIG:-unknown}}",
+    "num_replicates": {n_designs},
+    "batch_size": 1,
+    "seed": {seed},
+    "native_metrics": "removed (~metrics)\"""",
+        extra_env_inner=(
+            f'\nRFD4_SHA=$(git -C "{RFD4_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")'
+            '\nRFD4_VER=$("$RFD4_PY" -c'
+            " 'import importlib.metadata;print(importlib.metadata.version(\"rfd4-proteina\"))'"
+            ' 2>/dev/null || echo "unknown")'
+        ),
+    )
+
+    content = (
+        f"""\
+#!/usr/bin/env bash
+# Run RFD4-Proteina for {name}
+# Generated by BinderScout Configurator (mirrors binderscout_examples/run_rfd4.sh.template).
+#
+# One stage: rfd4-generate reads the condition spec written beside this script
+# and writes one mmCIF per design, holding the preserved target plus the designed
+# binder on its own chain. Sequence and structure are designed together, so there
+# is no separate sequence-design pass.
+set -euo pipefail
+
+RUN_DIR="{run_dir}"
+RFD4_REPO="{RFD4_DIR}"
+RFD4_BIN="$RFD4_REPO/.venv/bin/rfd4-generate"
+RFD4_PY="$RFD4_REPO/.venv/bin/python"
+RFD4_OUT="$RUN_DIR/rfd4"
+INPUT_YAML="$RFD4_OUT/input.yaml"
+GEN_DIR="$RFD4_OUT/generate"
+TARGET_CHAIN="{primary_chain}"
+
+mkdir -p "$GEN_DIR"
+
+if [[ ! -x "$RFD4_BIN" ]]; then
+    echo "ERROR: RFD4-Proteina is not installed at $RFD4_REPO" >&2
+    echo "       binderscout install --tool rfd4" >&2
+    exit 1
+fi
+if [[ ! -f "$INPUT_YAML" ]]; then
+    echo "ERROR: $INPUT_YAML is missing -- regenerate this run with 'binderscout configure'." >&2
+    exit 1
+fi
+
+# Read the spec back instead of restating it: it is editable after generation.
+# awk rather than `grep | head`, so nothing can trip `set -o pipefail`.
+CONTIG=$(awk -F'"' '/^  contig: /{{print $2; exit}}' "$INPUT_YAML")
+INPUT_CIF=$(awk '/^  input: /{{sub(/^  input: /, ""); print; exit}}' "$INPUT_YAML")
+if [[ -z "$CONTIG" || -z "$INPUT_CIF" ]]; then
+    echo "ERROR: $INPUT_YAML carries no contig / input line." >&2
+    exit 1
+fi
+if [[ ! -f "$INPUT_CIF" ]]; then
+    echo "ERROR: input structure $INPUT_CIF (named in $INPUT_YAML) does not exist." >&2
+    exit 1
+fi
+"""
+        + settings_block
+        + f"""
+echo "=== RFD4-Proteina generation for {name} ==="
+echo "  Spec:        $INPUT_YAML"
+echo "  Input mmCIF: $INPUT_CIF"
+echo "  Contig:      $CONTIG"
+echo "  Designs:     {n_designs} (num_replicates, batch_size=1, seed={seed})"
+echo "  Hotspots:    not applied (the conditions written are C_CRDGRP + C_SEQ only)"
+# Measured on one L40S, 2026-10-23: 330 designs in 1652 s -- 5.0 s/design including
+# ~24 s of startup -- GPU peak 3119 MiB for a 101 aa target and 60-100 aa binders.
+echo "  Cost:        ~5 s/design, ~3.1 GiB GPU peak measured on an L40S"
+echo ""
+
+# '~metrics' is LOAD-BEARING and is quoted. It removes RFD4's native metrics
+# block, which runs AF2/AF3 oracles out of environments this install does not
+# create; the run fails without it. The quotes stop the shell touching the '~'.
+"$RFD4_BIN" \\
+    inputs="$INPUT_YAML" \\
+    num_replicates={n_designs} \\
+    batch_size=1 \\
+    seed={seed} \\
+    out_dir="$GEN_DIR" \\
+    '~metrics'
+
+# RFD4 writes one <id>_generated.cif per design, inside a run-named directory of
+# its own choosing under out_dir (".../inference_samples/<id>/"). Found rather
+# than spelled out, because that middle component is RFD4's to pick.
+echo ""
+echo "=== Reading binder sequences out of the generated structures ==="
+mapfile -t GENERATED < <(find "$GEN_DIR" -name '*_generated.cif' -size +0c | sort)
+if (( ${{#GENERATED[@]}} == 0 )); then
+    echo "ERROR: rfd4-generate exited 0 but wrote no non-empty *_generated.cif under" >&2
+    echo "       $GEN_DIR -- nothing was designed. Check the output above." >&2
+    exit 1
+fi
+echo "  found ${{#GENERATED[@]}} structures"
+"""
+        + _RFD4_EXTRACT_PY
+        + """
+echo ""
+echo "=== RFD4-Proteina design complete ==="
+echo "  Structures:       $GEN_DIR"
+echo "  Aggregated CSV:   $RFD4_OUT/sequences.csv"
+echo "  Aggregated FASTA: $RFD4_OUT/sequences.fasta"
+"""
+    )
+    path.write_text(content)
+    path.chmod(0o755)
+
+
 def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     """Generate run_evaluate.sh — calls Evaluator/evaluate.sh with the right paths."""
     run_dir = cfg["run_dir"]
@@ -3243,6 +3656,11 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         # rfd3/outputs/ handed it an empty directory, so a completed RFD3 run (23 h GPU on the
         # documented 2VDY campaign) contributed zero designs to the report, silently.
         design_dirs.append(("--rfd3", str(run_dir / "rfd3")))
+    if tools_enabled.get("rfd4"):
+        # run_rfd4.sh writes rfd4/sequences.csv + sequences.fasta next to the generated
+        # mmCIFs; the extractor reads the structures, so point it at rfd4/ and let it
+        # rglob *_generated.cif. Same lesson as the RFD3 comment above.
+        design_dirs.append(("--rfd4", str(run_dir / "rfd4")))
 
     # Build the evaluate.sh invocation
     eval_sh = EVALUATOR_DIR / "evaluate.sh"
@@ -3570,6 +3988,10 @@ REQUIRED_CFG_KEYS: dict[str, tuple[str, ...]] = {
     "pxdesign_local": ("pxdesign_binder_length", "target_pdb"),
     "proteina_complexa": ("target_pdb",),
     "rfd3": ("target_pdb",),
+    # Nothing here: RFD4's one requirement is that the target is an mmCIF, and
+    # that is a property of target_pdb_src rather than a missing key, so
+    # preflight() checks it separately and can say what to do about it.
+    "rfd4": (),
     # Only what write_run_bindcraft2 reads as cfg["literal"]; everything else is
     # cfg.get() with a default, so a headless --config need not carry it.
     "bindcraft2": ("target_pdb",),
@@ -3596,6 +4018,26 @@ def _missing_cfg_keys(cfg: dict, tools_enabled: dict) -> list[tuple[str, str]]:
     return missing
 
 
+def _rfd4_target_format_problem(cfg: dict, tools_enabled: dict) -> str | None:
+    """Why RFD4 cannot use this target, or None.
+
+    RFD4 reads the target as mmCIF and resolves its contig against the mmCIF
+    `label_seq_id` — a column a PDB file does not have. Said here rather than at
+    write time so the run is refused before any of it is generated.
+    """
+    if not tools_enabled.get("rfd4"):
+        return None
+    src = Path(cfg.get("target_pdb_src", ""))
+    if src.suffix.lower() in (".cif", ".mmcif"):
+        return None
+    return (
+        f"RFD4-Proteina reads the target as mmCIF (upstream accepts .cif, .cif.gz and "
+        f".bcif only) and resolves its contig against the mmCIF label_seq_id, which a "
+        f".pdb does not carry. This run's target is {src.name or '(none set)'}. Supply the "
+        f".cif/.mmcif for this structure, or disable RFD4 for this run."
+    )
+
+
 def preflight(cfg: dict, tools_enabled: dict) -> None:
     """Refuse to start generating unless every enabled tool can be generated.
 
@@ -3605,7 +4047,8 @@ def preflight(cfg: dict, tools_enabled: dict) -> None:
     """
     assets = _missing_tool_assets(cfg, tools_enabled)
     keys = _missing_cfg_keys(cfg, tools_enabled)
-    if not assets and not keys:
+    rfd4_format = _rfd4_target_format_problem(cfg, tools_enabled)
+    if not assets and not keys and not rfd4_format:
         return
 
     print()
@@ -3624,6 +4067,10 @@ def preflight(cfg: dict, tools_enabled: dict) -> None:
         print()
         print("    Every wizard run writes a complete config to runs/<name>/config.json —")
         print("    copy that and edit values rather than writing one from scratch.")
+    if rfd4_format:
+        print()
+        print(f"  {BOLD}Target structure format:{RESET}")
+        print(f"    {RED}✗{RESET} {rfd4_format}")
     print()
     sys.exit(1)
 
@@ -3712,6 +4159,11 @@ def generate(cfg: dict, tools_enabled: dict):
     if tools_enabled.get("protein_hunter"):
         (run_dir / "protein_hunter").mkdir(parents=True, exist_ok=True)
         write_run_protein_hunter(run_dir / "run_protein_hunter.sh", cfg)
+
+    if tools_enabled.get("rfd4"):
+        (run_dir / "rfd4").mkdir(parents=True, exist_ok=True)
+        write_rfd4_input_yaml(run_dir / "rfd4" / "input.yaml", cfg)
+        write_run_rfd4(run_dir / "run_rfd4.sh", cfg)
 
     if tools_enabled.get("evaluator"):
         write_run_evaluate(run_dir / "run_evaluate.sh", cfg, tools_enabled)
@@ -3973,6 +4425,8 @@ def wizard():
     use_protein_hunter = ask_yn("  Enable Protein-Hunter (Boltz-2 / Chai-1 hallucination)?", default=False)
     print(f"  {BOLD}RFD3{RESET} [{_tag('rfd3')}]")
     use_rfd3 = ask_yn("  Enable RFD3 (RosettaCommons foundry diffusion + ProteinMPNN)?", default=False)
+    print(f"  {BOLD}RFD4-Proteina{RESET} [{_tag('rfd4')}]")
+    use_rfd4 = ask_yn("  Enable RFD4-Proteina (flow matching, sequence + structure, mmCIF target)?", default=False)
     print(f"  {BOLD}Evaluator{RESET} [{_tag('evaluator')}]")
     use_evaluator = ask_yn("  Enable cross-evaluation (refolding + ranked report)?", default=False)
 
@@ -4076,6 +4530,7 @@ def wizard():
         "proteina_complexa": use_proteina_complexa,
         "protein_hunter": use_protein_hunter,
         "rfd3": use_rfd3,
+        "rfd4": use_rfd4,
         "evaluator": use_evaluator,
         "use_boltz": use_boltz,
         "use_af3": use_af3,
@@ -4375,6 +4830,25 @@ def wizard():
             ask("  Number of backbone designs", default=n_designs, validator=validate_int(min_val=1, max_val=10000))
         )
 
+    if use_rfd4:
+        print_step("Step 6i — RFD4-Proteina settings")
+        print(f"  {YELLOW}Per-tool overrides (Enter = keep global default):{RESET}")
+        cfg["rfd4_min_length"] = int(
+            ask("  Min binder length", default=min_length, validator=validate_int(min_val=10, max_val=500))
+        )
+        cfg["rfd4_max_length"] = int(
+            ask("  Max binder length", default=max_length, validator=validate_int(min_val=10, max_val=500))
+        )
+        # One design per replicate, measured at ~5 s and ~3.1 GiB on an L40S.
+        cfg["rfd4_n_designs"] = int(
+            ask(
+                "  Number of designs (num_replicates; ~5 s each on an L40S)",
+                default=n_designs,
+                validator=validate_int(min_val=1, max_val=10000),
+            )
+        )
+        cfg["rfd4_seed"] = int(ask("  Random seed", default=1, validator=validate_int(min_val=0, max_val=2**31 - 1)))
+
     if use_bindcraft2:
         print_step("Step 6h — BindCraft 2 settings")
         bc2_modality_idx, _ = ask_choice(
@@ -4546,6 +5020,13 @@ def wizard():
             f"designs={r_n}  batch={cfg.get('rfd3_batch_size', 10)}  "
             f"mpnn_samples={cfg.get('rfd3_mpnn_samples', 5)}"
         )
+    if use_rfd4:
+        print(
+            f"  {CYAN}RFD4-Proteina{RESET}: "
+            f"length={cfg.get('rfd4_min_length', min_length)}–{cfg.get('rfd4_max_length', max_length)}  "
+            f"designs={cfg.get('rfd4_n_designs', n_designs)}  seed={cfg.get('rfd4_seed', 1)}  "
+            f"contig numbering=label_seq_id"
+        )
     if use_protein_hunter:
         ph_min = cfg.get("protein_hunter_min_length", min_length)
         ph_max = cfg.get("protein_hunter_max_length", max_length)
@@ -4670,6 +5151,8 @@ def cmd_status():
             tools.append("RFD3")
         if (run_dir / "run_protein_hunter.sh").exists():
             tools.append("Protein-Hunter")
+        if (run_dir / "run_rfd4.sh").exists():
+            tools.append("RFD4-Proteina")
         if (run_dir / "run_evaluate.sh").exists():
             tools.append("Evaluator")
         if not tools:

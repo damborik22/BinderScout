@@ -25,6 +25,7 @@ TOOL_COLOURS = {
     "pxdesign": "#9C27B0",  # purple
     "proteina_complexa": "#795548",  # brown
     "rfd3": "#D84315",  # deep-orange
+    "rfd4": "#AD1457",  # magenta
     "protein_hunter": "#00838F",  # teal-cyan
     "unknown": "#9E9E9E",  # grey
 }
@@ -40,6 +41,7 @@ _TOOL_DISPLAY = {
     "bindcraft2": "BindCraft 2",
     "proteina_complexa": "Proteina-Complexa",
     "rfd3": "RFD3",
+    "rfd4": "RFD4-Proteina",
     "protein_hunter": "Protein-Hunter",
 }
 
@@ -1001,6 +1003,7 @@ _ENGINE_BAR_LABEL = {
     "proteina_complexa": "Proteina-C",
     "protein_hunter": "Protein-Hunter",
     "rfd3": "RFD3",
+    "rfd4": "RFD4",
     # The canonical key the extractor actually tags designs with. Only the two
     # sub-variants were listed, so a plain BoltzGen pool matched neither.
     "boltzgen": "BoltzGen",

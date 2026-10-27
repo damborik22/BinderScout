@@ -38,6 +38,11 @@ TOOL_FLAGS: list[tuple[str, str, str]] = [
         "Protein-Hunter output directory (containing summary_high_iptm.csv)",
     ),
     ("--rfd3", "rfd3", "RFD3 / foundry output directory (containing sequences.csv)"),
+    (
+        "--rfd4",
+        "rfd4",
+        "RFD4-Proteina output directory (containing inference_samples/*/*_generated.cif; no CSV)",
+    ),
 ]
 
 TOOL_DESTS: tuple[str, ...] = tuple(dest for _flag, dest, _help in TOOL_FLAGS)

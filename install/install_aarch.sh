@@ -23,6 +23,16 @@ BOLTZGEN_DIR="${BINDERSCOUT_DIR}/BoltzGen"
 MOSAIC_DIR="${BINDERSCOUT_DIR}/Mosaic"
 EVALUATOR_DIR="${BINDERSCOUT_DIR}/Evaluator"
 FOUNDRY_WEIGHTS_DIR="${BINDERSCOUT_DIR}/weights/foundry"
+
+# RFD4-Proteina. NOT installable on this platform (install_rfd4 refuses — see
+# there for why). These paths exist only so --verify and --uninstall can name
+# the tool on a tree copied from an x86 box, and so verify_tool() stays
+# byte-identical between the two installers.
+RFD4_DIR="${BINDERSCOUT_DIR}/RFD4-Proteina"
+RFD4_WEIGHTS_DIR="${BINDERSCOUT_DIR}/weights/rfd4"
+RFD4_HF_REPO="nvidia/RFD4-Proteina"
+RFD4_HF_REVISION="a06e2509c7033b010fc43614e9fd840303588502"
+RFD4_WEIGHTS_BYTES=1742660596
 # AlphaFold 3 (DeepMind, Evaluator refolding). NOT a real PyPI package — the
 # "alphafold3" PyPI name is an unrelated stub. Installed from the official repo
 # (pinned); refold_af3.py resolves run_alphafold.py at ${AF3_DIR}. alphafold3/ gitignored.
@@ -129,6 +139,10 @@ DO_PROTEIN_HUNTER=false # opt-in via --tool protein-hunter. PyRosetta comes from
                         # aarch64 hardware, so it is kept out of --tool all.
 DO_RFD3=false           # opt-in via --tool rfd3. Should work (pip-only, no DGL) but is
                         # UNVALIDATED on aarch64 hardware, so it is kept out of --tool all.
+DO_RFD4=false           # NOT installable here: install_rfd4() refuses on this platform.
+                        # The flag exists so --verify and --uninstall can still name the
+                        # tool, and so the two installers do not drift (tests/
+                        # test_installers_do_not_drift.py).
 DO_PROTEINA_COMPLEXA=false  # opt-in via --tool proteina-complexa. Deprecated here until
                         # 2026-09-26: the original reason ("no CUDA jaxlib for aarch64") was
                         # disproved, and the real blocker -- jax 0.4.x cannot compile an
@@ -177,6 +191,10 @@ while [[ $# -gt 0 ]]; do
                     DO_BINDCRAFT2=true ;;
                 rfd3|foundry)
                     DO_RFD3=true ;;
+                rfd4|rfd4-proteina|rfd4_proteina)
+                    # Accepted so that --verify and --uninstall still work for a
+                    # tree copied from an x86 box; install_rfd4() then REFUSES.
+                    DO_RFD4=true ;;
                 protein-hunter|protein_hunter|phunter)
                     DO_PROTEIN_HUNTER=true ;;
                 proteina-complexa|proteina_complexa|complexa)
@@ -284,6 +302,15 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
                   rfd3                 RFD3 / foundry — opt-in on aarch64. Pure pip (no DGL),
                                        so it should work, but it is UNVALIDATED on aarch64
                                        hardware and is therefore not in --tool all.
+                  rfd4                 RFD4-Proteina — the ninth design tool, and NOT
+                                       installable on aarch64: this installer refuses it
+                                       rather than trying. Upstream's own
+                                       scripts/setup_venv.sh exits on any architecture
+                                       other than x86_64, and the pinned wheels (torch
+                                       2.14.1+cu130, cu13 ops) are x86. The name is still
+                                       accepted so --verify and --uninstall can reach a
+                                       tree synced from an x86 box. Install it with
+                                       install/install.sh --tool rfd4 over there.
                   af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
                                        gated AF3 weights you obtain from
                                        https://github.com/google-deepmind/alphafold3
@@ -2714,6 +2741,33 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/rfd3"
 }
 
+# ─── RFD4-Proteina — x86_64 only, refused here ───────────────────────────────
+
+# Same body as install.sh's copy: verify_tool() calls it on both platforms.
+_rfd4_weights_file() {
+    printf '%s\n' "${RFD4_WEIGHTS_DIR}/hub/models--${RFD4_HF_REPO//\//--}/snapshots/${RFD4_HF_REVISION}/model.safetensors"
+}
+
+install_rfd4() {
+    # REFUSE rather than attempt. This is not caution about an unmeasured
+    # platform, it is upstream's own position: scripts/setup_venv.sh exits 1 for
+    # any architecture other than Linux x86_64 ("The native CUDA 13 dependency
+    # profile currently supports Linux x86_64 only"), and the set install.sh
+    # reproduces is torch 2.14.1+cu130 plus cu13 ops wheels from an x86 index.
+    # Nothing of it has been built on aarch64.
+    #
+    # Deliberately NOT offered as "opt-in and unvalidated" either. That label is
+    # how this repo has already been wrong three times about Proteina-Complexa
+    # on this hardware, and it does not make a wheel exist. Promote it only from
+    # a measured aarch64 install, not from a clean import.
+    print_fail "RFD4-Proteina is x86_64 only — not installing it here."
+    echo "    Upstream's own scripts/setup_venv.sh refuses any non-x86_64 architecture,"
+    echo "    and the pinned wheels (torch 2.14.1+cu130, cu13 ops) have never been built"
+    echo "    on aarch64. Install it on an x86_64 box instead:"
+    echo "        bash install/install.sh --tool rfd4"
+    return 1
+}
+
 install_esmfold2() {
     print_step "Installing ESMFold2 refolder (binder-eval-esmfold2 env)"
     ensure_conda_in_path
@@ -2976,6 +3030,17 @@ uninstall_tool() {
             rm -f "${SHORTCUTS_DIR}/rfd3"
             [[ -d "${FOUNDRY_WEIGHTS_DIR}" ]] && { rm -rf "${FOUNDRY_WEIGHTS_DIR}"; print_ok "Removed ${FOUNDRY_WEIGHTS_DIR}"; }
             print_ok "RFD3 uninstalled"
+            ;;
+        rfd4|rfd4-proteina|rfd4_proteina)
+            # install_rfd4 refuses on this platform, so normally there is nothing
+            # here — but a tree synced from an x86 box carries both, and an
+            # "uninstall everything" that leaves 9.3 GB behind is the failure
+            # this table was rewritten to stop.
+            print_step "Uninstalling RFD4-Proteina"
+            rm -f "${SHORTCUTS_DIR}/rfd4"
+            [[ -d "${RFD4_DIR}" ]] && { rm -rf "${RFD4_DIR}"; print_ok "Removed ${RFD4_DIR}"; }
+            [[ -d "${RFD4_WEIGHTS_DIR}" ]] && { rm -rf "${RFD4_WEIGHTS_DIR}"; print_ok "Removed ${RFD4_WEIGHTS_DIR}"; }
+            print_ok "RFD4-Proteina uninstalled"
             ;;
         protein-hunter|protein_hunter|phunter)
             print_step "Uninstalling Protein-Hunter"
@@ -3827,6 +3892,21 @@ verify_tool() {
             elif (( $(_count_glob "${FOUNDRY_WEIGHTS_DIR}"/*.pt) < 1 )); then
                 VERIFY_REASON="no ProteinMPNN .pt in ${FOUNDRY_WEIGHTS_DIR} — run: foundry install proteinmpnn"
             fi ;;
+        rfd4|rfd4-proteina)
+            # Cheap on purpose: this runs once per tool every time the menu
+            # re-prints. The sha256 lives in the install-time smoke test; here
+            # the byte count is enough to catch a truncated download.
+            local _rfd4_w _rfd4_sz
+            _rfd4_w="$(_rfd4_weights_file)"
+            if [[ ! -x "${RFD4_DIR}/.venv/bin/rfd4-generate" ]]; then
+                VERIFY_REASON="no rfd4-generate in ${RFD4_DIR}/.venv — the checkout IS the installation (editable), so it must stay where it was installed"
+            elif [[ ! -f "${_rfd4_w}" ]]; then
+                VERIFY_REASON="no model.safetensors for revision ${RFD4_HF_REVISION:0:7} under ${RFD4_WEIGHTS_DIR} — run: HF_HOME=${RFD4_WEIGHTS_DIR} ${RFD4_DIR}/.venv/bin/hf download ${RFD4_HF_REPO} config.json model.safetensors --revision ${RFD4_HF_REVISION}"
+            else
+                _rfd4_sz="$(stat -c %s "${_rfd4_w}" 2>/dev/null)"
+                [[ "${_rfd4_sz}" == "${RFD4_WEIGHTS_BYTES}" ]] \
+                    || VERIFY_REASON="RFD4 model.safetensors is ${_rfd4_sz} bytes, expected ${RFD4_WEIGHTS_BYTES} (truncated download?)"
+            fi ;;
         pxdesign)
             _env_python_ok "${PXDESIGN_ENV}" "import torch" \
                 || VERIFY_REASON="torch does not import in ${PXDESIGN_ENV}" ;;
@@ -3908,6 +3988,7 @@ verify_selected_tools() {
         "DO_PROTEINA_COMPLEXA|Proteina-Complexa" \
         "DO_PROTEIN_HUNTER|Protein-Hunter" \
         "DO_RFD3|RFD3" \
+        "DO_RFD4|RFD4-Proteina" \
         "DO_AF3|AF3" \
         "DO_ESMFOLD2|ESMFold2" \
         "DO_SOLUPROT|SoluProt" \
@@ -4013,6 +4094,7 @@ main() {
             # these, BindCraft2/, the RFD3 and Protein-Hunter envs, the Complexa venv
             # and the TmProt env all survived and the script still said it was done.
             DO_RFD3=true
+            DO_RFD4=true
             DO_PROTEINA_COMPLEXA=true
             DO_BINDCRAFT2=true
             DO_PROTEIN_HUNTER=true
@@ -4031,6 +4113,7 @@ main() {
             "DO_EVALUATOR|evaluator|Evaluator" \
             "DO_PXDESIGN|pxdesign|PXDesign" \
             "DO_RFD3|rfd3|RFD3" \
+            "DO_RFD4|rfd4|RFD4-Proteina" \
             "DO_PROTEINA_COMPLEXA|proteina-complexa|Proteina-Complexa" \
             "DO_BINDCRAFT2|bindcraft2|BindCraft 2" \
             "DO_PROTEIN_HUNTER|protein-hunter|Protein-Hunter" \
@@ -4114,6 +4197,7 @@ main() {
     [[ "${DO_EVALUATOR}" == true ]] && (( total++ ))
     [[ "${DO_PXDESIGN}"  == true ]] && (( total++ ))
     [[ "${DO_RFD3}"      == true ]] && (( total++ ))
+    [[ "${DO_RFD4}"      == true ]] && (( total++ ))
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && (( total++ ))
     [[ "${DO_BINDCRAFT2}" == true ]] && (( total++ ))
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && (( total++ ))
@@ -4131,6 +4215,9 @@ main() {
     [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
     [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
     [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}"; install_rfd3 || failed_tools+=("RFD3"); }
+    # Always a refusal on this platform (see install_rfd4): it is reached only by
+    # an explicit --tool rfd4, and it lands in failed_tools so the run exits non-zero.
+    [[ "${DO_RFD4}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD4-Proteina${RESET}"; install_rfd4 || failed_tools+=("RFD4-Proteina"); }
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
     # Opt-in on this platform, so an unresolvable source is always a hard failure:
     # nothing reaches this line without an explicit --tool bindcraft2.

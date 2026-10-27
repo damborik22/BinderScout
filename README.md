@@ -17,7 +17,7 @@
 >
 > **For actual work use a released tag instead** — `master` is frozen at
 > **1.0.3**, the validated seven-tool pipeline. `v1.1.x` (1.1.1) adds BindCraft 2
-> as the eighth tool.
+> as the eighth tool. RFD4-Proteina, the ninth, is on `v2.0.x` only.
 >
 > Status and what remains: [`docs/PLAN_2.0_CONCLUSION.md`](docs/PLAN_2.0_CONCLUSION.md)
 > and [`2.0/README.md`](2.0/README.md).
@@ -33,7 +33,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 | Component | What it does | Runs in |
 |---|---|---|
-| `binderscout install` | Installs design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the default refold engine ESMFold2 and the SoluProt solubility screen; BindCraft 2 needs its source handed to `--bc2-source`, and AF3 is a separate `--tool` add (gated weights) | bash |
+| `binderscout install` | Installs design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3; RFD4-Proteina is a separate `--tool rfd4` add, x86_64 only) plus the default refold engine ESMFold2 and the SoluProt solubility screen; BindCraft 2 needs its source handed to `--bc2-source`, and AF3 is a separate `--tool` add (gated weights) | bash |
 | `binderscout configure` | Interactive wizard: target → configs → run scripts | system Python |
 | `binderscout evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by cross-engine iPTM, generate HTML report | conda env `binder-eval` |
 
@@ -49,6 +49,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 | **Proteina-Complexa** | NVIDIA flow matching + inference-time optimisation (best-of-N, beam, MCTS) | uv venv `Proteina-Complexa/.venv` (Python 3.12) | x86_64; aarch64 opt-in since 2026-09-26 (unvalidated) |
 | **Protein-Hunter** | Boltz-2 / Chai-1 hallucination across 6 modalities (protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA) | conda env `binderscout_protein_hunter` (Python 3.10) | x86_64 |
 | **RFD3** | RosettaCommons foundry diffusion (RFdiffusion3 + ProteinMPNN, BSD-3, commercial-use OK) | conda env `binderscout_rfd3` (Python 3.12) | x86_64 + aarch64 |
+| **RFD4-Proteina** | Latent-reasoning diffusion (IPD x NVIDIA). Backbone **and** sequence in one pass, so no MPNN step. Code BSD-3; the **weights licence is unverified** here. Takes an **mmCIF** target only | uv venv at `RFD4-Proteina/.venv` (Python 3.12) | **x86_64 only** — opt-in via `--tool rfd4`, not in `--tool all` |
 
 > Each tool runs in its own isolated environment. Environments must not be mixed.
 
@@ -82,7 +83,7 @@ The evaluator (`binderscout evaluate` / `binder-compare`) runs on top of the des
 | **Boltz-2** | Primary refold engine; ranking reference | `Mosaic/.venv` (rides Mosaic install) | x86_64 + aarch64 | default (with Mosaic) |
 | **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.10) | x86_64 + aarch64 | default (in `--tool all`) |
 | **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.10, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | `--tool af3` (gated weights) |
-| **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); **label only** — neither filters nor re-ranks | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model — see [docs/PLAN_soluprot_integration.md](docs/PLAN_soluprot_integration.md) | in `--tool all` |
+| **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); **label only** — neither filters nor re-ranks | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model | in `--tool all` |
 
 ### Architecture
 
@@ -175,7 +176,7 @@ flowchart TB
     EvaluateSh -->|conda run -n …| EvalEnvs
 ```
 
-Solid blue boxes are the eight design tools' isolated environments; green / yellow boxes are the four evaluator environments (ESMFold2 and SoluProt ship in `--tool all`; AF3 is opt-in via `--tool af3`). The grey panel shows the per-run output layout the configurator generates and `evaluate.sh` fills in.
+Solid blue boxes are the nine design tools' isolated environments; green / yellow boxes are the four evaluator environments (ESMFold2 and SoluProt ship in `--tool all`; AF3 is opt-in via `--tool af3`). The grey panel shows the per-run output layout the configurator generates and `evaluate.sh` fills in.
 
 ---
 
@@ -720,9 +721,9 @@ ls BinderScout/conda/envs/         # shows local envs (standalone mode)
 ## Known issues
 
 A full read-only audit of the repository — purpose, data flow, dependencies, defects,
-non-LLM operability, and GUI options — is at
-**[docs/repo_analysis_2026-07-26.html](docs/repo_analysis_2026-07-26.html)**
-(31 findings with file:line and a suggested fix order).
+non-LLM operability, and GUI options — was carried out on 2026-07-26 (31 findings with
+file:line and a suggested fix order). That document is no longer in this repository; it
+is archived off-repo on the lab share.
 
 Every finding that document raised against the quick-start path (F1, F2, F3, F5, F8,
 F9, F15, F20, F33, F34, F38, F40, F41) has since been fixed, and the tables that

@@ -30,6 +30,7 @@ EXPECTED_TOOLS = [
     ("proteina_complexa", "Proteina-Complexa"),
     ("rfd3", "RFD3"),
     ("protein_hunter", "Protein-Hunter"),
+    ("rfd4", "RFD4-Proteina"),
 ]
 EXPECTED_SUBDIRS = {subdir for subdir, _label in EXPECTED_TOOLS}
 
@@ -62,7 +63,7 @@ def test_only_one_hardcoded_tool_list_in_the_tui():
 
 
 def test_tool_sequence_knows_every_tool():
-    assert len(app.TOOL_SEQUENCE) == 8
+    assert len(app.TOOL_SEQUENCE) == 9
     subdirs = [subdir for subdir, _label, _marker in app.TOOL_SEQUENCE]
     assert set(subdirs) == EXPECTED_SUBDIRS
     assert len(subdirs) == len(set(subdirs)), "duplicate output subdir in TOOL_SEQUENCE"

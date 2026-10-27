@@ -70,6 +70,7 @@ _TOOLCOL = {
     "proteina_complexa": "#10b981",
     "protein_hunter": "#f59e0b",
     "rfd3": "#ec4899",
+    "rfd4": "#0ea5e9",
     # As above: the canonical key was missing while its sub-variants were present.
     "boltzgen": "#f97316",
     "boltzgen_protein": "#14b8a6",

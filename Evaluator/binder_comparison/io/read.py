@@ -341,8 +341,27 @@ def _cif_entity_poly_seq(text: str) -> str | None:
     return None
 
 
+def cif_chain_sequences(path: str | Path) -> dict[str, str]:
+    """``{label_asym_id: 1-letter sequence}`` from an mmCIF's ``_atom_site`` Cα records.
+
+    Needed because one tool writes no table at all: RFD4-Proteina emits one all-atom
+    mmCIF per sample with the designed binder in chain B and the preserved target in
+    chain A, so the only way to read a design is per chain. Shares the tokenizer with
+    :func:`parse_pdb_sequence`'s CIF path rather than carrying a second copy of it.
+    """
+    return _cif_atom_site_chains(Path(path).read_text(errors="replace"))
+
+
 def _cif_atom_site_seq(text: str, path: Path) -> str:
     """Fallback: extract sequence from _atom_site CA records using the tokenizer."""
+    chains = _cif_atom_site_chains(text)
+    if not chains:
+        raise ValueError(f"No sequence found in {path}")
+    return "".join(chains[c] for c in sorted(chains))
+
+
+def _cif_atom_site_chains(text: str) -> dict[str, str]:
+    """Per-chain sequences from the first ``_atom_site`` loop; ``{}`` when there is none."""
     tokens = _cif_tokenize(text)
     i = 0
     while i < len(tokens):
@@ -381,8 +400,11 @@ def _cif_atom_site_seq(text: str, path: Path) -> str:
                     seen[key] = _THREE_TO_ONE.get(resname, "X")
             i += n_cols
         if seen:
-            return "".join(seen[k] for k in sorted(seen))
-    raise ValueError(f"No sequence found in {path}")
+            per_chain: dict[str, list[str]] = {}
+            for key in sorted(seen):
+                per_chain.setdefault(key[0], []).append(seen[key])
+            return {ch: "".join(res) for ch, res in per_chain.items()}
+    return {}
 
 
 def convert_cif_to_pdb(cif_path: str | Path, pdb_path: str | Path) -> Path:

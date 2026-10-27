@@ -32,7 +32,8 @@ BinderScout/
 ```bash
 # Step 1: Extract sequences (any tool combination)
 conda run -n binder-eval binder-compare extract \
-    --bindcraft DIR --bindcraft2 DIR --boltzgen DIR --mosaic DIR --pxdesign DIR -o seqs.fasta
+    --bindcraft DIR --bindcraft2 DIR --boltzgen DIR --mosaic DIR --pxdesign DIR \
+    --rfd3 DIR --rfd4 DIR -o seqs.fasta
 
 # Step 2: Boltz-2 refolding (uses Mosaic uv venv)
 Mosaic/.venv/bin/binder-compare refold-boltz2 \
@@ -64,6 +65,10 @@ bash Evaluator/evaluate.sh \
 - **Append-mode CSVs**: the refold scripts append. If rerun after a partial failure, check for duplicate `run_id` entries. Use `--resume` to skip completed sequences.
 - **Mosaic `is_top` filtering**: Default extracts only `is_top=1` rows (~40 refolded designs instead of all ~800). Use `--all-mosaic-designs` to override.
 - **Mosaic CSV column mismatch**: `designs.csv` can mix two column formats (old 11-col / new 13-col) when multiple workers run. Parser may misalign columns for some workers.
+- **RFD4-Proteina writes NO table**: `--rfd4 DIR` reads structures, not a CSV. `rfd4-generate` emits one uncompressed all-atom mmCIF per sample at `<out_dir>/.../inference_samples/<name>_<i>/<name>_<i>_generated.cif`, with the **binder in chain B and the target in chain A** (RFD3, by contrast, writes `.cif.gz`). Consequences:
+  - **No native metric at all.** Its own metrics block is disabled at generation (it needs AF2/AF3 envs we do not install), so every `native_*` column is blank — blank, not zero. `evaluate.sh` gives RFD4 the same Boltz-2 fold-back native rank it gives RFD3, so its per-tool report block is ordered by a real interface score rather than by nothing.
+  - **A timing run and a production run sit side by side** under one target directory, each with its own `inference_samples/`. The extractor refuses a directory containing more than one of them rather than pooling throwaway designs into the production pool — point `--rfd4` at the specific run.
+  - `binder_id` is `rfd4_<sample dir>` and the generation index is the sample's trailing replicate number, so the pool comes back in generation order (`_10` after `_2`, not before it).
 
 ## Metrics
 

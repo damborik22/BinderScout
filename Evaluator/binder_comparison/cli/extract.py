@@ -24,6 +24,7 @@ from ..extractors import (
     ProteinHunterExtractor,
     PXDesignExtractor,
     RFD3Extractor,
+    RFD4Extractor,
 )
 from ..io.write import write_fasta
 from ._tool_args import add_tool_args
@@ -74,6 +75,11 @@ def run(args: argparse.Namespace) -> None:
         print(f"[extract] RFD3: {args.rfd3}")
         extracted = RFD3Extractor().extract(args.rfd3)
         _take("rfd3", extracted)
+
+    if args.rfd4:
+        print(f"[extract] RFD4-Proteina: {args.rfd4}")
+        extracted = RFD4Extractor().extract(args.rfd4)
+        _take("rfd4", extracted)
 
     if args.proteina_complexa:
         print(f"[extract] Proteina-Complexa: {args.proteina_complexa}")
@@ -151,6 +157,7 @@ def run(args: argparse.Namespace) -> None:
             "mosaic": args.mosaic,
             "pxdesign": args.pxdesign,
             "rfd3": args.rfd3,
+            "rfd4": args.rfd4,
             "proteina_complexa": args.proteina_complexa,
             "protein_hunter": args.protein_hunter,
         }

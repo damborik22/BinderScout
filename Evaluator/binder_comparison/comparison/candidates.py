@@ -76,6 +76,7 @@ TOOL_DISPLAY_NAMES = {
     "pxdesign": "PXDesign",
     "protein_hunter": "Protein Hunter",
     "rfd3": "RFDiffusion3",
+    "rfd4": "RFD4-Proteina",
 }
 
 
@@ -105,6 +106,7 @@ CANONICAL_TOOL_ORDER = [
     "pxdesign",
     "protein_hunter",
     "rfd3",
+    "rfd4",
 ]
 
 CANDIDATES_COLUMNS = [
