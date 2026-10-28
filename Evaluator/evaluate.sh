@@ -520,8 +520,15 @@ gpu_guard_up || true
 # shellcheck disable=SC2046  # cap_env deliberately expands to 0 or 1 words
 engine_boltz2 () {
     local f=""; [[ $RESUME -eq 1 ]] && f="--resume"
+    # --output-dir is NOT optional here. refold-boltz2 defaults it to a CWD-relative
+    # ./refold_boltz2, so every run against every target shared one accumulating
+    # refold_designs.csv -- and its structures. On 2026-10-28 that directory held 1003
+    # rows from earlier pools; resume read them, skipped the entire 65-design PD-L1
+    # pool, and the report ranked designs that were never in it. AF3 and ESMFold2 were
+    # always given a per-run directory; Boltz-2 was the one that was not.
     env $(cap_env "$GPU_CAP_BOLTZ2") "$MOSAIC_VENV/bin/binder-compare" refold-boltz2 \
-        --sequences "$SEQUENCES" --target-seq "$TARGET_SEQ" -o "$BOLTZ2_CSV" $f
+        --sequences "$SEQUENCES" --target-seq "$TARGET_SEQ" -o "$BOLTZ2_CSV" \
+        --output-dir "$OUTPUT/refold_boltz2" $f
 }
 # shellcheck disable=SC2046
 engine_af3 () {
@@ -547,6 +554,31 @@ engine_esmfold2 () {
 # the CSV must actually gain rows.
 csv_rows () { if [[ -f "$1" ]]; then tail -n +2 "$1" | wc -l; else echo 0; fi; }
 
+# 2026-10-28 PD-L1: a row delta is not evidence the POOL was refolded. Boltz-2 resumed
+# off a stale shared CSV, refolded 0 of 65, and the copy of that CSV into place read as
+# "ok -- 1003 new row(s)". Every design in the pool was then missing from the engine the
+# ranking used as primary, and nothing cleared the 3-engine gate. So count the pool
+# sequences the CSV actually carries -- `sequence` is the column every engine writes and
+# the one comparison/merger.py joins on.
+pool_coverage () {   # $1=engine csv  $2=sequences fasta  -> count of pool seqs present
+    [[ -f "$1" && -f "$2" ]] || { echo 0; return; }
+    awk -v FS=, '
+        NR == FNR {
+            if (FNR == 1) { for (i = 1; i <= NF; i++) if ($i == "sequence") col = i; next }
+            if (col) { v = $col; gsub(/[ \t\r]/, "", v); if (v != "") seen[toupper(v)] = 1 }
+            next
+        }
+        # `cur` accumulates one (possibly wrapped) FASTA record. It must not share a
+        # name with anything in the CSV pass above: awk variables are global, so a
+        # leftover value counted the last CSV row as a pool hit.
+        /^>/ { if (cur != "" && toupper(cur) in seen) n++; cur = ""; next }
+        { t = $0; gsub(/[ \t\r]/, "", t); cur = cur t }
+        END { if (cur != "" && toupper(cur) in seen) n++; print n + 0 }
+    ' "$1" "$2"
+}
+
+fasta_count () { if [[ -f "$1" ]]; then grep -c '^>' "$1"; else echo 0; fi; }
+
 engine_csv () {
     case "$1" in
         boltz2)   echo "$BOLTZ2_CSV" ;;
@@ -558,7 +590,7 @@ engine_csv () {
 
 # $1=label  $2=csv  $3=rows before  $4=rc
 check_engine_rows () {
-    local name=$1 csv=$2 before=$3 rc=$4 after
+    local name=$1 csv=$2 before=$3 rc=$4 after covered pool
     after=$(csv_rows "$csv")
     if [[ $rc -ne 0 ]]; then
         echo "Error: $name refolding failed (rc=$rc). Refusing to report a partial pool." >&2
@@ -569,7 +601,20 @@ check_engine_rows () {
         echo "       A missing engine silently breaks the cross-engine gate -- aborting." >&2
         return 1
     fi
-    echo "    [$name] ok -- $((after - before)) new row(s)"
+    covered=$(pool_coverage "$csv" "$SEQUENCES")
+    pool=$(fasta_count "$SEQUENCES")
+    if [[ "$covered" -eq 0 ]]; then
+        echo "Error: $name wrote $((after - before)) row(s) to $csv, but NONE of them is a" >&2
+        echo "       design in $SEQUENCES ($pool in the pool)." >&2
+        echo "       Rows from another pool cannot rank this one. Likely a stale CSV or" >&2
+        echo "       structure directory being resumed off -- aborting." >&2
+        return 1
+    fi
+    if [[ "$covered" -lt "$pool" ]]; then
+        echo "    [$name] WARNING -- covers $covered/$pool pool design(s); the rest will fail" >&2
+        echo "               the cross-engine gate." >&2
+    fi
+    echo "    [$name] ok -- $covered/$pool pool design(s), $((after - before)) new row(s)"
     return 0
 }
 

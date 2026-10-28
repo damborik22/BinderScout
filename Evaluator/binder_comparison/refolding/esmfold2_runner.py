@@ -26,6 +26,8 @@ import os
 import sys
 from pathlib import Path
 
+from .resume import completed_sequences, skip_indices_for_pool
+
 
 def run_esmfold2_refold(
     sequences: list[str],
@@ -71,7 +73,13 @@ def run_esmfold2_refold(
 
     skip_indices: set[int] = set()
     if resume and output_csv.exists():
-        skip_indices = _load_completed_indices(output_csv)
+        done = completed_sequences(output_csv)
+        skip_indices = skip_indices_for_pool(sequences, done)
+        if done and not skip_indices:
+            print(
+                f"[esmfold2] Resuming — {len(done)} binder(s) in the existing CSV, none of them "
+                "in this pool; refolding all of it"
+            )
         if skip_indices:
             print(f"[esmfold2] Resuming — skipping {len(skip_indices)} already-completed binders")
 
@@ -104,27 +112,6 @@ def run_esmfold2_refold(
 
     _absolutize_csv_paths(output_csv, output_dir, ["cif", "pdb", "pae_file"])
     print(f"[esmfold2] Results → {output_csv}")
-
-
-def _load_completed_indices(csv_path: Path) -> set[int]:
-    if not csv_path.exists():
-        return set()
-    try:
-        import csv
-
-        indices: set[int] = set()
-        with csv_path.open() as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                idx_val = row.get("idx")
-                if idx_val is not None:
-                    try:
-                        indices.add(int(idx_val))
-                    except ValueError:
-                        continue
-        return indices
-    except Exception:
-        return set()
 
 
 def _absolutize_csv_paths(csv_path: Path, base_dir: Path, path_cols: list[str]) -> None:

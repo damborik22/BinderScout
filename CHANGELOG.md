@@ -8,6 +8,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Boltz-2 refolded none of the pool, reported success, and the report ranked
+  another pool's designs.** Four faults in one chain, all found on the PD-L1 run of
+  2026-10-28. (1) `engine_boltz2` was the only engine `evaluate.sh` invoked without
+  `--output-dir`, so `refold-boltz2` used its CWD-relative default
+  `./refold_boltz2` — one accumulating `refold_designs.csv` and structure directory
+  shared by every run against every target. It held 1003 rows from earlier pools.
+  (2) `--resume` keyed its skip set on each row's positional `idx`, which is a
+  position in *one* invocation's FASTA, not an identity; 1003 stale rows therefore
+  marked indices 1–1003 complete and covered all 65 designs in the pool. Boltz-2
+  printed `Resuming — skipping 1003 already-completed binders`, `Processed 0
+  binder(s)`, and exited 0. (3) The per-engine guard compared row counts before and
+  after, and the runner's copy of the stale CSV into place read as
+  `[Boltz-2] ok -- 1003 new row(s)` — a row delta is not evidence the pool was
+  refolded. (4) `merge_refold_results` outer-joined the engine CSVs and only
+  *attached* FASTA metadata afterwards, so all 1068 sequences reached `metrics.csv`:
+  the 1003 off-pool designs entered the near-duplicate collapse, the diversity
+  families and the Top-30, and `boltz_pae_ipsae_min` — the primary ranking column —
+  was computed over designs that were never in the campaign. Exit code 0, a full
+  `report.html`, and zero of 65 designs with the three engines the gate asks for.
+  Fixes: `evaluate.sh` passes `--output-dir "$OUTPUT/refold_boltz2"`; resume is keyed
+  on the binder sequence via a single shared `refolding/resume.py` (the three runners
+  each carried a private copy of the positional rule); the guard counts how many pool
+  sequences the CSV actually carries, aborting at zero and warning below full
+  coverage; and the merge treats the `--sequences` FASTA as the universe, dropping
+  off-pool rows with a warning that names the count. The 1003-row cache was archived
+  before removal, not deleted.
+
 - **RFD3 silently produced unfoldable backbones when no hotspots were configured —
   and the first fix for it made that worse.** The configurator emitted
   `infer_ori_strategy: hotspots` unconditionally, with the comment "COM falls back

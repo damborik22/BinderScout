@@ -81,8 +81,38 @@ def merge_refold_results(
             )
 
     if sequences_fasta:
+        merged = _restrict_to_pool(merged, sequences_fasta)
         merged = _attach_fasta_metadata(merged, sequences_fasta)
     return merged
+
+
+def _restrict_to_pool(df: pd.DataFrame, fasta_path: str | Path) -> pd.DataFrame:
+    """Drop engine rows whose sequence is not in *fasta_path*.
+
+    The FASTA is the pool being reported on, so it is the universe — an engine CSV
+    may legitimately hold more (it accumulates across runs; `--resume` depends on
+    that). Those extra rows must not be ranked.
+
+    2026-10-28 PD-L1: Boltz-2's CSV came from a shared directory and held 1003
+    designs from earlier pools, none of them among the 65 being reported. The outer
+    join carried all 1068 into `metrics.csv`, the off-pool rows were collapsed into
+    the diversity families and the Top-30, and `boltz_pae_ipsae_min` — the primary
+    ranking column — was computed over designs that were never in the campaign.
+    """
+    pool = {seq.strip().upper() for _, seq in read_fasta(fasta_path) if seq.strip()}
+    if not pool or "sequence" not in df.columns:
+        return df
+
+    in_pool = df["sequence"].astype(str).str.strip().str.upper().isin(pool)
+    n_off = int((~in_pool).sum())
+    if n_off:
+        warnings.warn(
+            f"[merger] {n_off} refold row(s) are not in {fasta_path} and were dropped from "
+            f"the report ({int(in_pool.sum())} of {len(pool)} pool design(s) kept). An engine "
+            "CSV holding another pool's designs usually means a stale output directory.",
+            stacklevel=2,
+        )
+    return df[in_pool].reset_index(drop=True)
 
 
 def _load_engine(path: str | Path, prefix: str) -> pd.DataFrame:
