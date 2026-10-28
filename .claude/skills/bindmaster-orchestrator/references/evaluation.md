@@ -121,16 +121,38 @@ agreement_count = sum(1 for engine in available_engines if engine.ipsae_min > ip
 
 Threshold 0.61 is the per-engine "pass" cutoff (and the same number that goes into `agreement_count`).
 
-**The orchestrator's ranking:**
+**The orchestrator's ranking** (THE ranking, Part U — `comparison.scoring.rank_designs`):
 
-1. Primary sort: `agreement_count` **descending** (3 > 2 > 1 > 0)
-2. Secondary sort: chosen ipsae_min aggregator **descending** (typically `mean(ipsae_min across engines)` or `min(ipsae_min across engines)`; campaign choice)
+1. **Cross-engine gate:** only designs with `consensus_iptm_n >= --min-engines` (default 3,
+   floor 2) are eligible. Ineligible rows are ranked last, not dropped — see
+   `passes_engine_gate`.
+2. **Sort:** `consensus_iptm_mean` **descending** — the mean refold iPTM over the engines
+   that scored the design. Ties break on `consensus_iptm_n`, then `consensus_iptm`, then
+   binder pLDDT.
 
-This produces a single ranked CSV that respects "engine disagreement is signal" while still being deterministic.
+This produces the single `rank` column in `metrics.csv` (1 = best), deterministically.
+
+**`agreement_count` is not the sort, and never was the shipped one.** The ranking this
+section used to prescribe — `agreement_count` first, then an `ipsae_min` aggregator —
+matched no default the evaluator ever ran: pre-Part-U the shipped default was
+`two_stage`, whose primary key was already `consensus_iptm_mean`. No ranking the evaluator
+ever shipped put `agreement_count` first: it was a secondary key in `consensus_iptm` and a
+third key in `adaptyv` (the default before `two_stage`), behind `quality_tier`. Part U
+removed it as
+a sort key entirely: on Cao 2022 (4,442 designs / 12 targets, all three engines on every
+design) it is a flat null — macro-AUC 0.532, 87.2% of designs tied at zero. It remains in
+`metrics.csv` as a diagnostic. `adaptyv_rank` (quality_tier → agreement_count →
+ipsae_min) and `consensus_rank` (max-iptm) went with it; mean-ranking beats max-ranking at
+precision@top-10% 0.92 vs 0.79, and searching 72 candidate metrics under honest nested
+selection scores *worse* (macro-AUC 0.5170) than `consensus_iptm_mean` (0.5552).
+
+**This ranks binder-vs-non-binder confidence, not affinity among binders.** Affinity
+ranking from structure confidence is closed as negative across Part N, Part U, OpenBind
+and SKEMPI — use `comparison.affinity`'s advisory gate-then-density ranker instead.
 
 ---
 
-## 5. Output schema (`summary.csv`)
+## 5. Output schema (`metrics.csv`)
 
 The merged file has one row per design and these columns (subset shown):
 
@@ -150,8 +172,11 @@ boltz_bt_ipsae, boltz_tb_ipsae, boltz_ipsae_min, boltz_iptm_refold, boltz_plddt_
 esmfold2_bt_ipsae, esmfold2_tb_ipsae, esmfold2_ipsae_min, esmfold2_pae_iptm, ...
 af3_bt_ipsae, af3_tb_ipsae, af3_ipsae_min, af3_iptm_refold, ...   # if aarch64
 
-# Cross-method rollup
-agreement_count, ipsae_min_mean, ipsae_min_min, tier   # tier ∈ {High, Medium, Low, Reject}
+# Cross-engine rollup (the ranking lives here)
+consensus_iptm, consensus_iptm_mean, consensus_iptm_min, consensus_iptm_n, consensus_iptm_spread
+consensus_ipsae_min_mean, consensus_ipsae_min_n, consensus_ipsae_min_spread
+passes_engine_gate, rank          # rank 1 = best; see §4
+quality_tier, agreement_count     # diagnostics only — NOT sort keys
 ```
 
 **Column prefixing is load-bearing.** `boltz_*`, `af3_*`, `esmfold2_*` distinguish refolder-source. `mosaic_*`, `bindcraft_*`, `rfd3_*`, etc. distinguish design-tool-source. Don't collapse these — the orchestrator needs the source labels to interpret signal correctly (e.g., `boltz_ipsae_min` on a Mosaic-designed sequence has Boltz-2 self-judging bias; same column on a BindCraft-designed sequence is clean).

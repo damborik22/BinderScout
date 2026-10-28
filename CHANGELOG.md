@@ -125,6 +125,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   sits exactly where the engine count is computed, it framed a 2-engine run — which
   fails the default 3-engine gate for every design — as the unavoidable norm.
 
+- **The published install path could not be pasted, and the skills prescribed a
+  discredited ranking.** A documentation audit of everything a new user or an agent
+  reads before their first run turned up three classes of blocker, all of them
+  user-facing:
+
+  *Commands that fail.* `README.md` and `CONTRIBUTING.md` both told the reader to
+  `git clone …/BinderScout.git` and then `cd BindMaster` — the second command of two
+  published install paths, exiting 1 on a directory that the clone never creates.
+  `rm -rf BindMaster/` (the documented uninstall) removed nothing, and
+  `tail -f ~/BindMaster/install.log` watched a file that does not exist. The
+  rename was carried through every copy-pasteable command, including
+  `Evaluator/README.md`, `Evaluator/install.sh` and `cli/run.py` help text.
+
+  *The retired ">=100 GB" AF3 figure, in its last hiding places.* The README's
+  refolding-engines table measured AF3 at ~4.4 GiB and then closed the same cell
+  with "Full AF3 inference doesn't fit on consumer 24 GB GPUs" — the last sentence
+  is what a reader with a 3090 retains, so they skip the engine and every design
+  then misses the default 3-engine gate. The `bindmaster-orchestrator` skill still
+  described AF3 as "Part K in progress, aarch64 / DGX Spark only" in six places and
+  told an agent that "on x86 clusters, only Boltz-2 + Protenix are available as
+  refolders" — recommending a retired engine and omitting the default one. The two
+  historical CHANGELOG entries that originated the figure now carry retractions.
+
+  *A ranking that was removed in Part U.* `tools/README.md` and `evaluation.md`
+  instructed the orchestrator to sort by `agreement_count` then `ipsae_min`, from a
+  `summary.csv`. That ordering was never an evaluator default — pre-Part-U the default
+  was `two_stage`, already keyed on `consensus_iptm_mean`, and no shipped ranking ever
+  put `agreement_count` first. Part U then removed it as a sort key outright: it is a
+  flat null on Cao 2022 (macro-AUC 0.532, 87.2% tied at zero). The file the skills name
+  is not an evaluator output either. Part U's own changelog entry lists `evaluation.md`
+  under
+  "verified already-correct and left alone", which its text refuted. Both files now
+  carry the real ranking (cross-engine gate, then `consensus_iptm_mean`) and the
+  `metrics.csv` schema, with `agreement_count` labelled a diagnostic.
+
+  Also: `CONTRIBUTING.md` advertised the `binder-eval-af2` env deleted in Part I and
+  omitted five that exist; `docs/environments.md` documented the unsupported
+  `scripts/install_pxdesign.sh` fallback as *the* install command, with torch/CUDA
+  pins matching neither installer; `docs/walkthrough_and_dataflow.html` asserted the
+  retired BUG-15 "Mosaic requires interactive input" behaviour and pinned itself to a
+  commit no longer in this history; and `binder-eval-af3` / `binder-eval-esmfold2`
+  were documented as Python 3.10 against `python=3.12` in both env ymls.
+
 ### Added
 
 - **README: "Running with Claude Code".** The repository ships five skills
@@ -840,6 +883,12 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 
 ### Added (Part K — AF3 v3.0.2 refolder, canonical 2nd engine)
 - **AlphaFold 3 v3.0.2 as the canonical 2nd refolding engine on big-VRAM hardware** (DGX Spark, H200, any host with >100 GB unified or device memory — full AF3 inference does not fit on consumer 24 GB GPUs).
+  > **Retracted 2026-10-28.** The ">=100 GB" figure measured AF3's *preallocated
+  > reservation*, not its working set: with `XLA_PYTHON_CLIENT_PREALLOCATE=true`
+  > JAX grabs a fixed fraction of the pool regardless of need (99,960 MiB observed
+  > on the GB10 node, 2026-08-18). AF3 v3.0.2 peaks at ~4.4 GiB for 258-391-token
+  > complexes (measured on a 24 GB RTX 3090), so any CUDA host runs it in our size
+  > regime; the real gate is the gated weights, not VRAM. See `[Unreleased]`.
 - New CLI: `binder-compare refold-af3` — runs inside the dedicated `binder-eval-af3` conda env (separate from the BindCraft / Mosaic / PXDesign envs so PyTorch + JAX versions don't fight).
 - Schema: `af3_*` columns in `StandardisedMetrics` (iptm, ptm, ranking_score, plddt_binder_mean/min, plddt_target_mean, pae_bt/tb/bb, bt_ipsae, tb_ipsae, ipsae_min). pLDDT rescaled 0-100 → 0-1 on ingest. PAE transposed from AF3 token-order to `[binder|target]` to match Boltz-2.
 - `binder-compare report` gains `--af3-results` flag.
@@ -847,6 +896,9 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 
 ### Added (Part J — Protenix refolder, optional fallback, on `refactor/af3-rfd3-ph`)
 - **Protenix v0.5.0 as optional 3rd refolding engine for smaller GPUs** — ByteDance's open-source AlphaFold 3 reimplementation (~3-4 GB weights auto-downloaded from ByteDance TOS, runs comfortably on 24 GB GPUs). Not part of the canonical Boltz-2 + AF3 pipeline; opt in when AF3 isn't an option.
+  > **Superseded.** Part J was reverted 2026-07-26 — Protenix is not a refolder.
+  > Its premise (that AF3 needed big-VRAM hardware) was retracted above. The
+  > small-GPU third engine is ESMFold2, which is also the default.
 - New CLI: `binder-compare refold-protenix` — runs inside the existing `bindmaster_pxdesign` conda env (no new env needed).
 - New files: `Evaluator/scripts/refold_protenix.py`, `Evaluator/binder_comparison/refolding/protenix_runner.py`, `Evaluator/binder_comparison/cli/refold_protenix.py`.
 - Schema: `protenix_*` columns in `StandardisedMetrics` (iptm, ptm, ranking_score, plddt_binder_mean/min, plddt_target_mean, pae_bt/tb/bb, bt_ipsae, tb_ipsae, ipsae_min). `af3_*` counterparts also reserved for Part K. pLDDT rescaled 0-100 → 0-1 on ingest.

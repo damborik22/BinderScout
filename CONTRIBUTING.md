@@ -14,7 +14,7 @@
 
 ```bash
 git clone https://github.com/damborik22/BinderScout.git
-cd BindMaster
+cd BinderScout
 ```
 
 ### Install tools
@@ -34,8 +34,16 @@ bindmaster install --tool all
 | Mosaic `.venv` (uv) | Mosaic hallucination + Boltz-2 refolding | 3.12 |
 | `bindmaster_pxdesign` | PXDesign (Protenix) | 3.11 |
 | Proteina-Complexa `.venv` (uv) | Flow matching binder design | 3.12 |
+| `bindmaster_protein_hunter` | Protein-Hunter hallucination (Boltz-2 / Chai-1) | 3.10 |
+| `bindmaster_rfd3` | RFD3 (`rc-foundry`) diffusion + ProteinMPNN | 3.12 |
 | `binder-eval` | Evaluator extract + report | 3.10 |
-| `binder-eval-af2` | Evaluator AF2 refolding | 3.10 |
+| `binder-eval-esmfold2` | Evaluator ESMFold2 refolding — **default engine** | 3.12 |
+| `binder-eval-af3` | Evaluator AF3 v3.0.2 refolding — canonical 2nd engine (gated weights, `--tool af3`) | 3.12 |
+| `binder-eval-soluprot` | SoluProt solubility screen (sequence-only, pre-refold) | 3.7 |
+
+Eleven environments; `CLAUDE.md` is the canonical table. There is **no `binder-eval-af2`
+env** — AF2 refolding was deleted in Part I; the installers reference the name only to
+remove legacy pre-refactor installs.
 
 > Each tool/environment is isolated. Never mix packages across environments.
 

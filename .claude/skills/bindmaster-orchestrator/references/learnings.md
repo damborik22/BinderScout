@@ -123,12 +123,12 @@ Format: `"Compute: <wall> GPU-time on <node-id>."` Wrap up the campaign with a t
 ## 9. BindMaster `bin/` wrappers fail non-interactively
 **[Likely portable] [Worker-side]**
 
-The `~/BindMaster/bin/<tool>` shortcuts work interactively but break under SLURM / nohup / any non-TTY shell, in two distinct ways:
+The `~/BinderScout/bin/<tool>` shortcuts work interactively but break under SLURM / nohup / any non-TTY shell, in two distinct ways:
 
 - **`mamba run` wrappers** (e.g. `rfd3`) materialize a `/tmp/mambaXXXX` script whose `exec --` line dies on some bash builds: `exec: --: invalid option` (the HPC cluster Rocky 9.6 / bash 5.1.8; ApoE4 SLURM <jobid> died in 1 s).
 - **Interactive wrappers** (e.g. `boltzgen`) `source` conda, `cd`, print a banner, then `exec bash` with **no `$@` relay** — under SLURM stdin closes, the wrapper exits rc=0 with zero work (ApoE4 119820 silent no-op).
 
-**Fix:** after `conda activate <env>`, call **`"$CONDA_PREFIX/bin/<tool>"`** (absolute env binary, bypasses the PATH-shadowing wrapper). Note `conda activate` does not guarantee the env bin precedes `~/BindMaster/bin` in PATH — verified on the HPC cluster that `which rfd3` still resolved to the wrapper post-activate. `$CONDA_PREFIX/bin/<tool>` is unambiguous.
+**Fix:** after `conda activate <env>`, call **`"$CONDA_PREFIX/bin/<tool>"`** (absolute env binary, bypasses the PATH-shadowing wrapper). Note `conda activate` does not guarantee the env bin precedes `~/BinderScout/bin` in PATH — verified on the HPC cluster that `which rfd3` still resolved to the wrapper post-activate. `$CONDA_PREFIX/bin/<tool>` is unambiguous.
 
 **Applies to tool entries:** `tools/rfd3.md`, `tools/boltzgen.md`, and any tool whose run script calls the tool by bare name. The configurator's `write_run_*` functions should emit `"$CONDA_PREFIX/bin/<tool>"`.
 
@@ -153,7 +153,7 @@ When the goal is "best possible designs" (expensive wet-lab validation downstrea
 **Pattern — decouple the cheap engine from the Spark-locked one:**
 1. Scale up the cheap generator (RFD3 backbones, MPNN best-of-N) + filter cheaply first: geometry (drop chainbreaks/clashes), then a cheap fold.
 2. **ESMFold2-Fast** (`binder-eval-esmfold2`) folds the *complex* and emits `iptm` directly — it is NOT Spark-locked, runs on any idle 24 GB card. Use it as a pre-filter: gate on `iptm` up front (cheap, conventional), keep the top slice (~40%).
-3. Promote only survivors to the expensive Boltz-2 + AF3 + ESMFold2 merge, where `ipsae_min` does the real ranking (`scoring.py` computes `esmfold2_ipsae_min` too; ESMFold2 is reported-not-counted in `agreement_count`).
+3. Promote only survivors to the expensive Boltz-2 + AF3 + ESMFold2 merge, where the cross-engine gate then `consensus_iptm_mean` does the real ranking (Part U; `scoring.py` computes `esmfold2_ipsae_min` too, but `ipsae_min` is a quality tier, not the sort key).
 
 This keeps the Spark refold load flat as the generated pool grows. (ApoE4 2026-05-29: RFD3 v2 = 500 backbones → geometry → MPNN best-of-30 → ESMFold2 iPTM top-40% → cross-engine merge.)
 

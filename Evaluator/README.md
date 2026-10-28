@@ -56,14 +56,14 @@ The Evaluator is bundled inside the BindMaster repository. No separate clone nee
 The Boltz-2 refolding step uses the **Mosaic** uv virtual environment:
 
 ```bash
-cd ~/BindMaster
+cd ~/BinderScout
 bindmaster install --tool mosaic
 ```
 
 ### 2. Install the evaluator environments
 
 ```bash
-cd ~/BindMaster/Evaluator
+cd ~/BinderScout/Evaluator
 bash install.sh
 ```
 

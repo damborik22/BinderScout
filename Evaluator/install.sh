@@ -8,7 +8,7 @@
 #
 # For Boltz-2 refolding the Mosaic environment from the BindMaster installer
 # is used. Mosaic must be installed first:
-#   cd /path/to/BindMaster && bash install/install.sh --tool mosaic
+#   cd /path/to/BinderScout && bash install/install.sh --tool mosaic
 #
 # The additional refolding engines (AF3, ESMFold2) are
 # installed by the main BindMaster installer's `--tool af3` and `--tool esmfold2`
@@ -71,11 +71,11 @@ if [[ -z "$MOSAIC_VENV" ]]; then
     echo "  The Boltz-2 refolding step uses the Mosaic environment"
     echo "  created by the BindMaster installer. Please install it first:"
     echo ""
-    echo "    cd /path/to/BindMaster"
+    echo "    cd /path/to/BinderScout"
     echo "    bash install/install.sh --tool mosaic"
     echo ""
     echo "  Then re-run this script, or set MOSAIC_DIR before running:"
-    echo "    MOSAIC_DIR=/path/to/BindMaster/Mosaic bash install.sh"
+    echo "    MOSAIC_DIR=/path/to/BinderScout/Mosaic bash install.sh"
     echo ""
     exit 1
 fi

@@ -90,12 +90,21 @@
 
 <h1>BinderScout — click-through walkthrough &amp; data flow</h1>
 <p class="sub">
-  Companion to <a href="repo_analysis_2026-07-26.html">the repository analysis</a> · working tree at
-  <code>a600090</code><br>
+  Companion to the 2026-07-26 repository analysis (not in this tree)<br>
   <strong>Part 1</strong> reproduces every interactive screen you actually see — no flags, just menus and
   prompts. <strong>Part 2</strong> traces what each tool writes, what the pipeline takes from it, and what it
-  does with it. All screen text is verbatim from source, with file:line.
+  does with it. Screen text was transcribed verbatim from source at capture time, with file:line.
 </p>
+
+<div class="note">
+  <strong>This is a point-in-time snapshot, not current documentation.</strong> It was captured against a
+  commit (<code>a600090</code>) that no longer exists in this repository's history. Screen text and
+  <code>file:line</code> citations have drifted since, and several of the findings it reports have been fixed
+  — F9 (tools missing from the UI) and the Mosaic "needs interactive input" skip among them. Treat the
+  <strong>data-flow reasoning</strong> in Part 2 as the durable content here, and check any line number
+  against the source before relying on it. For current behaviour see <code>README.md</code> and
+  <code>CLAUDE.md</code>.
+</div>
 
 <div class="toc">
   <strong>Contents</strong>
@@ -467,7 +476,6 @@ below — note <strong><code>Step 6d</code> appears twice and there is no <code>
 <span class="c b">▶ Generating run folder</span>
 <span class="g">✓ Run folder ready: /home/user/BinderScout/runs/CALCA_helix</span>
 
-<span class="y">⚠ Mosaic requires interactive input and will run first.</span>
 <span class="y">⚠ Evaluator runs Boltz-2 refolding (GPU recommended, ~30 min per design).</span>
 <span class="c">Run the pipeline now?</span> [<span class="g">Y</span>/n]: <span class="u">n</span>
 
@@ -479,11 +487,18 @@ below — note <strong><code>Step 6d</code> appears twice and there is no <code>
 </div>
 
 <div class="note gap">
-  <strong>RFD3 vanishes from the UI here.</strong> The run was configured with RFD3 enabled, and
-  <code>generate()</code> does write <code>run_rfd3.sh</code> — but RFD3 appears in neither the preview tree
-  (<code>print_tree</code>, <code>:743</code>) nor the "To run later" list (<code>:3423</code>), and
-  <code>run_pipeline()</code> (<code>:2662</code>) has no branch for it. The same is true of Protein-Hunter;
-  Proteina-Complexa is missing from the tree only. Full matrix in §7. (Finding F9.)
+  <strong>Finding F9 — RFD3 vanished from the UI here — is fixed.</strong> At capture time
+  <code>generate()</code> wrote <code>run_rfd3.sh</code> but RFD3 appeared in neither the preview tree nor the
+  "To run later" list, and <code>run_pipeline()</code> had no branch for it; the same held for Protein-Hunter,
+  and Proteina-Complexa was missing from the tree. Those were four independently maintained if-chains, three
+  of which had fallen behind. Three of those surfaces now iterate one list,
+  <code>TOOL_SEQUENCE</code> (<code>configurator.py:175</code>) — the preview tree
+  (<code>print_tree</code>, <code>:1354</code>), the "To run later" list (<code>:4950</code>) and
+  <code>run_pipeline()</code> (<code>:4159</code>) — so no enabled tool can go unmentioned or unrun.
+  <code>write_run_all()</code> (<code>:2337</code>) is the exception: it still dispatches through a
+  seven-branch <code>if tools_enabled.get(...)</code> chain and touches
+  <code>TOOL_SEQUENCE</code> only for its header comment, so adding a tool still means editing it —
+  guarded by <code>test_run_all_covers_every_enabled_tool</code>. Matrix as captured in §7.
 </div>
 
 <h2 id="run">4 · Walkthrough — run designs</h2>

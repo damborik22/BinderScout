@@ -1,6 +1,6 @@
 # BindMaster Orchestrator — Tool Reference Database
 
-Static knowledge base for the `bindmaster-orchestrator` skill. Each file describes one tool used in BindMaster (six design tools, three refolding/evaluation engines), focused on **orchestration decisions** rather than encyclopedic facts.
+Static knowledge base for the `bindmaster-orchestrator` skill. Each file describes one tool used in BindMaster (seven design tools, three refolding/evaluation engines), focused on **orchestration decisions** rather than encyclopedic facts.
 
 ## Philosophy
 
@@ -8,9 +8,26 @@ This database documents what each tool produces, in the tool's own terms.
 
 The BindMaster evaluator adds `ipsae_min` (DunbrackLab 2025 iPSAE, uniform 10 Å PAE cutoff) as a **method-agnostic cross-method comparator** over the merged design pool. The evaluator sits *alongside* each tool's native ranking — it doesn't override it. Native metrics from each tool (Mosaic's `ranking_loss`, BindCraft's iPTM + Rosetta battery, PXDesign's composite, etc.) are preserved and used as orchestration signals.
 
-Cross-method ranking in `summary.csv`:
-1. **`agreement_count`** (how many engines say `ipsae_min > 0.61`) — primary sort
-2. **`ipsae_min` descending** — secondary sort
+Cross-method ranking in `metrics.csv` (**THE** ranking, Part U — `comparison.scoring.rank_designs`):
+1. **Cross-engine gate** — only designs refolded by `consensus_iptm_n >= --min-engines`
+   (default 3, floor 2) are eligible. Ineligible rows are ranked last, never dropped
+   (`passes_engine_gate`).
+2. **`consensus_iptm_mean` descending** — the mean refold iPTM across available engines.
+   Ties break on `consensus_iptm_n`, then `consensus_iptm`, then binder pLDDT.
+
+The result is the `rank` column (1 = best).
+
+**Do not rank by `agreement_count`.** The ranking this file used to prescribe — it first,
+then `ipsae_min` — matched no default the evaluator ever shipped; pre-Part-U the default
+was `two_stage`, already keyed on `consensus_iptm_mean`. Part U removed `agreement_count`
+as a sort key outright: on Cao 2022 (4,442 designs / 12 targets / all three engines) it is
+a flat null — macro-AUC 0.532 with 87.2% of designs tied at zero. It survives in
+`metrics.csv` as a diagnostic column only. `adaptyv_rank` and `consensus_rank` (max-iptm)
+went with it; mean-ranking beats max-ranking at precision@top-10% 0.92 vs 0.79.
+
+**This ranks binder-vs-non-binder confidence, not affinity among binders.** Affinity
+ranking from structure confidence is closed as negative across four datasets — see
+`comparison.affinity` for the advisory gate-then-density ranker.
 
 Tier classification (4-level, from CLAUDE.md `Evaluation metrics`):
 - **High:** `ipsae_min > 0.80`
@@ -31,7 +48,7 @@ Threshold 0.61 is the agreement threshold (the per-engine "pass" cutoff used in 
 | `mosaic.md` | JAX gradient hallucination over 8 structure predictors. Composable losses, framework not turnkey. | Boltz-2, AF3, AF2 (composable) | **Boltz-2 refold is correlated** |
 | `protein-hunter.md` | Iterative structure-hallucination-within-diffusion. Multi-modal, all-X initial sequence. | Boltz-2 (or Chai-1) | **Boltz-2 refold is correlated** |
 | `proteina-complexa.md` | NVIDIA flow matching + inference-time search. Atom + sidechain + sequence in one pass. | Flow matching (AF2/RF3 rewards) | Independent of Boltz-2, AF3, ESMFold2 |
-| `pxdesign.md` | ByteDance diffusion + Protenix + AF2-IG. 17–82% nanomolar hits across 6/7 therapeutic targets. | Protenix internally | Independent of all three refolders |
+| `pxdesign.md` | ByteDance diffusion + Protenix + AF2-IG. 17–82% nanomolar hits across 6/7 therapeutic targets. | Protenix internally | **AF3 refold is correlated** (Protenix reimplements AF3); clean vs Boltz-2 + ESMFold2 |
 | `rfd3.md` | All-atom diffusion (RFdiffusion3). Atom-level conditioning, side-chain aware, batch generation. | RFD3 (Baker lab) | Independent of Boltz-2, AF3, ESMFold2 |
 
 ### Evaluation / refolding tools
@@ -40,7 +57,8 @@ Threshold 0.61 is the agreement threshold (the per-engine "pass" cutoff used in 
 |---|---|---|---|
 | `boltz2.md` | Primary refolder. AF3-class diffusion + affinity head. Native `[binder\|target]` ordering, pLDDT `[0,1]`. | Stable, default | Correlated with Mosaic / BoltzGen / Protein-Hunter |
 | `protenix.md` | **Retired as a refolder** (Part J reverted 2026-07-26). Background only — PXDesign's internal engine. | Not a refolder | n/a |
-| `alphafold3.md` | Third refolder (Part K in progress). DeepMind native AF3 v3.0.2, aarch64 / DGX Spark only. | In progress, aarch64 only | **Fully independent of every design tool** |
+| `alphafold3.md` | **Canonical 2nd refolder** (Part K, landed). DeepMind native AF3 v3.0.2. Any CUDA host — ~4.4 GiB peak for 258-391 tokens, so a 24 GB card is enough. | Stable; `--tool af3` (gated weights) | Independent of every design tool **except PXDesign** (Protenix internally) |
+| *(no file — see `../evaluation.md`)* | **ESMFold2 — the default refolder**, installed by `--tool all`. Lightweight, no gated weights. Also the source of the `chain_iptm_interface` gate `autosize` uses. | Stable, default | Independent of every design tool |
 
 ## Entry template
 
@@ -51,7 +69,7 @@ Every tool file follows the same structure:
 
 **Engine:** <core model / method, one line>
 **Role:** design | refolding | both
-**Status:** stable | in-progress | aarch64-only
+**Status:** stable | in-progress | opt-in (gated weights)
 **Environment:** <conda env / venv name>
 
 ## Principle
@@ -83,7 +101,8 @@ Every tool file follows the same structure:
 
 ## Cross-method bias matrix
 
-Same-model bias to watch for when interpreting `agreement_count`:
+Same-model bias to watch for when interpreting any per-engine refold column, and when
+a design clears the cross-engine gate on fewer than three engines:
 
 |  | Boltz-2 refold | AF3 refold | ESMFold2 refold |
 |---|---|---|---|
@@ -97,7 +116,7 @@ Same-model bias to watch for when interpreting `agreement_count`:
 
 "Clean" means the refold engine isn't used by that tool during design, so refold signal is structurally independent. "Correlated" means same-model self-judging applies — the refold can't be the only cross-check.
 
-Practical consequence: **AF3 is the only refolder fully independent of every design tool in the pool**, which is why CLAUDE.md positions it as the gold-standard tiebreaker — even though it's aarch64-only and slowest.
+Practical consequence: **ESMFold2 is clean against all seven design tools; AF3 is clean against all but PXDesign** (PXDesign's internal engine is Protenix, an AF3 reimplementation). Boltz-2 is the correlated one, against three tools. No engine is a "tiebreaker" — the ranking's tiebreak chain is `consensus_iptm_n` → `consensus_iptm` → binder pLDDT (`comparison/scoring.py`), not any one engine's opinion. AF3 is the slowest of the three and its weights are gated, but it runs on any CUDA host (~4.4 GiB peak in our size regime), not aarch64 only.
 
 ## Companion content (not in this folder)
 

@@ -164,8 +164,8 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `bindmaster_protein_hunter` | Protein-Hunter | 3.10 | conda | Boltz-2 / Chai-1 hallucination, 6 modalities |
 | `bindmaster_rfd3` | RFD3 (`rc-foundry`) | 3.12 | conda | RosettaCommons foundry diffusion + ProteinMPNN |
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
-| `binder-eval-af3` | AF3 refolder | 3.10 | conda | AlphaFold 3 v3.0.2 refolding — **canonical 2nd engine** (Part K; live on Spark / H200 **and on 24 GB consumer GPUs** — 24 GB consumer GPUs and up) |
-| `binder-eval-esmfold2` | ESMFold2 refolder | 3.10 | conda | **Default refold engine** (biohub) — installed by `--tool all`, auto-detected by `evaluate.sh`; lightweight, no gated weights; feeds `consensus_iptm` + autosize gate |
+| `binder-eval-af3` | AF3 refolder | 3.12 | conda | AlphaFold 3 v3.0.2 refolding — **canonical 2nd engine** (Part K; live on Spark / H200 **and on 24 GB consumer GPUs** — 24 GB consumer GPUs and up) |
+| `binder-eval-esmfold2` | ESMFold2 refolder | 3.12 | conda | **Default refold engine** (biohub) — installed by `--tool all`, auto-detected by `evaluate.sh`; lightweight, no gated weights; feeds `consensus_iptm` + autosize gate |
 | `binder-eval-soluprot` | SoluProt screen | 3.7 | conda | Sequence-only *E. coli* solubility filter (Hon et al. 2021); x86 + aarch64 (aarch64 builds scikit-learn 0.20.4 + USEARCH v12 from source, uses the `--no_tmhmm` model). NOT a refold engine; runs before refolding; `--soluprot-filter` drops sub-threshold designs before any GPU work |
 
 The `bindmaster.py` CLI dispatcher uses `os.execv()` to launch sub-commands in their correct environment — `install` runs in bash, `configure` runs in system Python, and `evaluate` is a **passthrough to the `binder-compare` CLI** run in the `binder-eval` conda env (`bindmaster evaluate <binder-compare args>`). The legacy single-file evaluator (`evaluator_legacy/evaluator.py`, formerly run in the Mosaic `.venv`) is retired and no longer dispatched.
@@ -474,8 +474,8 @@ being encoded there:
 ### Quick start
 
 ```bash
-git clone https://github.com/damborik22/BinderScout.git ~/BindMaster
-cd ~/BindMaster
+git clone https://github.com/damborik22/BinderScout.git ~/BinderScout
+cd ~/BinderScout
 
 ./bindmaster.py install         # interactive menu (auto-detects standalone mode).
                                 # The first command MUST be the script: the `bindmaster`

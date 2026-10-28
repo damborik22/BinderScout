@@ -156,7 +156,7 @@ class StandardisedMetrics:
     target_contact: float | None = None  # Binder-target contacts
     pTMEnergy: float | None = None  # Boltz2 energy proxy (lower better)
 
-    # ---- AlphaFold 3 v3.0.2 values (aarch64 / DGX Spark only; wired in Part K) ----
+    # ---- AlphaFold 3 v3.0.2 values (any CUDA host; gated weights. Part K) ----
     af3_iptm: float | None = None
     af3_ptm: float | None = None
     af3_ranking_score: float | None = None

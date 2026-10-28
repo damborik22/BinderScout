@@ -67,8 +67,8 @@ The evaluator (`bindmaster evaluate` / `binder-compare`) runs on top of the desi
 | Engine / filter | Role | Environment | Platform | Install |
 |---|---|---|---|---|
 | **Boltz-2** | Primary refold engine; ranking reference | `Mosaic/.venv` (rides Mosaic install) | x86_64 + aarch64 | default (with Mosaic) |
-| **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.10) | x86_64 + aarch64 | default (in `--tool all`) |
-| **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.10, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | `--tool af3` (gated weights) |
+| **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.12) | x86_64 + aarch64 | default (in `--tool all`) |
+| **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.12, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | `--tool af3` (gated weights) |
 | **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model — see [docs/PLAN_soluprot_integration.md](docs/PLAN_soluprot_integration.md) | in `--tool all` |
 
 ### Architecture
@@ -145,8 +145,8 @@ flowchart TB
 
     subgraph EvalEnvs["Evaluator-side environments"]
         EnvEv["binder-eval<br/>(conda, py3.10) — extract + report"]:::eng
-        EnvAF3["binder-eval-af3<br/>(conda, py3.10) — AF3 v3.0.2"]:::opt
-        EnvESM["binder-eval-esmfold2<br/>(conda, py3.10) — ESMFold2"]:::opt
+        EnvAF3["binder-eval-af3<br/>(conda, py3.12) — AF3 v3.0.2"]:::opt
+        EnvESM["binder-eval-esmfold2<br/>(conda, py3.12) — ESMFold2"]:::opt
         EnvSP["binder-eval-soluprot<br/>(conda, py3.7) — SoluProt 1.0"]:::opt
     end
 
@@ -343,7 +343,7 @@ choose — see [Ranking metrics](#ranking-metrics) below.
 |---|---|---|---|
 | **Boltz-2** | `binder-compare refold-boltz2` | Mosaic `.venv` | Anywhere with a 24 GB GPU |
 | **ESMFold2** | `binder-compare refold-esmfold2` | `binder-eval-esmfold2` conda | Anywhere — lightweight, no gated weights. The default engine (`--tool all`), and the source of the `chain_iptm_interface` gate `autosize` uses. |
-| **AF3 v3.0.2** | `binder-compare refold-af3` | `binder-eval-af3` conda | Any CUDA host — measured at ~4.4 GiB peak for 258-391 tokens, so a 24 GB card is enough; DGX Spark (aarch64), H200, RTX 3090, etc. Full AF3 inference doesn't fit on consumer 24 GB GPUs. |
+| **AF3 v3.0.2** | `binder-compare refold-af3` | `binder-eval-af3` conda | Any CUDA host — measured at ~4.4 GiB peak for 258-391 tokens, so a 24 GB card is enough; DGX Spark (aarch64), H200, RTX 3090, etc. The gate is the **gated weights**, not VRAM. |
 
 Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). There is **one ranking and no way to select another**: a cross-engine gate (`--min-engines`, default 3) then `consensus_iptm_mean`, emitted as a single `rank` column. `ipsae_min` (DunbrackLab 2025 formula) and `agreement_count` are diagnostic columns — `agreement_count` in particular is a flat null as a screen (macro-AUC 0.532), so do not gate on it. Part U removed the `--rank-by` / `--screen-metric` flags and the `two_stage_rank` / `adaptyv_rank` / `consensus_rank` / `active_rank` columns; see `docs/INVESTIGATION_partU_cao_benchmark.md`. AF3 and ESMFold2 produce token-order PAE which the evaluator transposes to match Boltz-2's `[binder|target]` order.
 
@@ -506,21 +506,21 @@ bash install/install.sh --uninstall --tool all
 
 ### Server / HPC installation (no admin required)
 
-BindMaster works fully standalone — no system conda, no admin, no writes outside the project directory:
+BinderScout works fully standalone — no system conda, no admin, no writes outside the project directory:
 
 ```bash
 git clone https://github.com/damborik22/BinderScout.git
-cd BindMaster
+cd BinderScout
 python3 bindmaster.py install --tool all --yes
 
 # Add to PATH:
 export PATH="$(pwd)/bin:$PATH"
-echo 'export PATH="/path/to/BindMaster/bin:$PATH"' >> ~/.bashrc
+echo 'export PATH="/path/to/BinderScout/bin:$PATH"' >> ~/.bashrc
 ```
 
 The installer auto-detects if system conda is unavailable or read-only and downloads
-Miniforge3 into `BindMaster/conda/`. All environments and shortcuts stay inside the
-project directory. To remove everything: `rm -rf BindMaster/`.
+Miniforge3 into `BinderScout/conda/`. All environments and shortcuts stay inside the
+project directory. To remove everything: `rm -rf BinderScout/`.
 
 ---
 
@@ -611,8 +611,8 @@ Answer **Y** when prompted to remove the existing directory and conda environmen
 ## Monitoring installs
 
 ```bash
-tail -f ~/BindMaster/install.log         # x86_64
-tail -f ~/BindMaster/install_aarch.log   # aarch64
+tail -f ~/BinderScout/install.log         # x86_64
+tail -f ~/BinderScout/install_aarch.log   # aarch64
 ```
 
 ---
