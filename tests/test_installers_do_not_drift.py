@@ -175,6 +175,16 @@ _SHARED_VERIFY_FUNCTIONS = (
     "_af3_full_precision",
     "_count_glob",
     "verify_tool",
+    # run_logged and check_build_toolchain for the same reason, and with receipts.
+    # run_logged's two copies were byte-identical (md5 7c7ecc5f...) through every
+    # change this file has seen, and master then fixed the buffering in install.sh
+    # alone -- which would have left Spark with the blackout the fix exists to
+    # remove, since install_aarch.sh is what `binderscout install` dispatches to
+    # there. check_build_toolchain reads only DO_* flags and ${ARCH}, both defined
+    # identically; what legitimately differs is the TOOLCHAIN_TOOLS table beside it,
+    # which is data and is checked separately.
+    "run_logged",
+    "check_build_toolchain",
 )
 
 

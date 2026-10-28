@@ -40,7 +40,11 @@ REAL_ENVS = {
 }
 
 # Names that appear as placeholders/defaults rather than real instructions.
-IGNORE = {"base", "ENV", "NAME", "X", "$ENV", "${ENV}"}
+# "build-tools" is the operator's OWN throwaway env, suggested by the installers'
+# toolchain remedy for someone with no root: conda-forge's make + gxx into a scratch
+# env they activate before re-running the installer. It is deliberately not a
+# binderscout_* name, precisely so the guard below keeps covering our namespace.
+IGNORE = {"base", "ENV", "NAME", "X", "$ENV", "${ENV}", "build-tools"}
 
 # English that can follow "conda activate"/"conda run -n" in prose. Kept
 # explicit so a real env name can never be excused by a pattern.

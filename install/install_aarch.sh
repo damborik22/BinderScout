@@ -461,18 +461,23 @@ run_logged() {
     fi
     local label="$1"
     shift
-    local tmpfile
-    tmpfile=$(mktemp)
 
     # Check once whether /dev/tty is usable (not available in non-TTY containers)
     local has_tty=false
     { true >/dev/tty; } 2>/dev/null && has_tty=true
 
+    # Where this step begins in the log, so the on-failure tail shows only this
+    # step. Output is no longer buffered through a temp file, so retries leave a
+    # cumulative log — more useful for debugging a flaky step, not less.
+    local start_line
+    # NB: 2>/dev/null comes BEFORE the input redirect — redirections are applied
+    # left to right, so the other order lets bash's own "No such file" reach the
+    # terminal on the very first call, when the log does not exist yet.
+    start_line=$(( $(wc -l 2>/dev/null < "${LOG_FILE}" || echo 0) + 1 ))
+
     local rc=0
     for attempt in $(seq 1 "${retries}"); do
-        # shellcheck disable=SC2188
-        > "${tmpfile}"   # truncate on each attempt
-        "$@" >> "${tmpfile}" 2>&1 &
+        "$@" >> "${LOG_FILE}" 2>&1 &
         local pid=$!
 
         local frames='/-\|'
@@ -484,6 +489,19 @@ run_logged() {
                 (( i++ ))
             done
             printf "\r\033[K" >/dev/tty   # clear spinner line
+        else
+            # Poll at 1 s so a short command still returns promptly; speak up
+            # only every 2 min so a long step does not flood the log.
+            local waited=0
+            while kill -0 "${pid}" 2>/dev/null; do
+                sleep 1
+                (( waited++ ))
+                if (( waited >= 120 )); then
+                    waited=0
+                    kill -0 "${pid}" 2>/dev/null && \
+                        echo "  … still running: ${label} ($(date +%H:%M))"
+                fi
+            done
         fi
         wait "${pid}"
         rc=$?
@@ -495,15 +513,11 @@ run_logged() {
         fi
     done
 
-    cat "${tmpfile}" >> "${LOG_FILE}" 2>/dev/null
-
     if [[ ${rc} -eq 0 ]]; then
-        rm -f "${tmpfile}"
         print_ok "${label}"
     else
         echo -e "${RED}  Last output:${RESET}"
-        tail -30 "${tmpfile}" | sed 's/^/  /'
-        rm -f "${tmpfile}"
+        tail -n +"${start_line}" "${LOG_FILE}" 2>/dev/null | tail -30 | sed 's/^/  /'
         print_fail "${label}"
     fi
     return ${rc}
@@ -1401,7 +1415,7 @@ install_bindcraft() {
     # non-CUDA conda packages here. JAX + CUDA come from PyPI in step 2.
     # PyRosetta is available for aarch64 via the graylab conda channel.
     print_step "Installing conda packages (PyRosetta + scientific libs)"
-    print_warn "This takes 20–40 min — full output in install_aarch.log"
+    print_warn "This takes 20–40 min — follow progress with:  tail -f ${LOG_FILE}"
     run_logged "Installing BindCraft conda packages" \
         "${CONDA_CMD}" install -n BindCraft \
             pip biopython matplotlib scipy seaborn pandas \
@@ -4024,6 +4038,91 @@ SOLUPROTEOF
 # error deep inside install.log, leaving half-built envs behind. Advisory by
 # default for GPU/network (an install can legitimately precede the driver, or run
 # behind a proxy); only disk space aborts, and --skip-preflight bypasses all of it.
+# The tools that compile at install time ON THIS PLATFORM, as "DO_ flag|label|why".
+# aarch64 has two more than x86_64, because PyPI publishes fewer wheels for it --
+# which is the whole reason this list is per-installer rather than shared.
+TOOLCHAIN_TOOLS=(
+    "DO_SOLUPROT|SoluProt|source-builds scikit-learn 0.20.4 AND open-source USEARCH v12"
+    "DO_AF3|AlphaFold 3|pip-builds alphafold3 from the pinned clone, including its C++ extension"
+    "DO_PROTEINA_COMPLEXA|Proteina-Complexa|builds cpdb-protein in its uv venv"
+    "DO_PROTEIN_HUNTER|Protein-Hunter|gemmi 0.6.5 has no aarch64 wheel and builds from its sdist"
+    "DO_BINDCRAFT2|BindCraft 2|biotraj has no aarch64 wheel and compiles here"
+)
+
+# ─── Build toolchain ─────────────────────────────────────────────────────────
+#
+# Some tools COMPILE at install time, so a missing toolchain is fatal for them and
+# irrelevant for everything else. `--tool all` used to spend ~57 min installing nine
+# tools, reach step 10/10, and only then report a one-second fact: SoluProt could not
+# build USEARCH v12 because `make` is absent. A stock Ubuntu Server image has no
+# `make`, so that is the common case, not an edge case -- and the half-failed install
+# that results reads, at the end of an hour, as though everything is broken.
+#
+# Checked against the SELECTED tools, because the answer differs: a `--tool mosaic`
+# install needs no compiler at all and must not be refused for lacking one.
+check_build_toolchain() {
+    local needed=() spec flag label why
+    for spec in "${TOOLCHAIN_TOOLS[@]}"; do
+        IFS='|' read -r flag label why <<< "${spec}"
+        [[ "${!flag}" == true ]] && needed+=("${label} — ${why}")
+    done
+    (( ${#needed[@]} )) || return 0
+
+    # git and make have no substitute. A C/C++ compiler does: conda-forge's
+    # cross-compilers are already how Proteina-Complexa's cpdb-protein builds on a
+    # box with no system gcc, so requiring the system one here would refuse a
+    # configuration that works today.
+    local missing=() bin
+    for bin in git make; do
+        command -v "${bin}" &>/dev/null || missing+=("${bin}")
+    done
+    local cc_found=false cxx_found=false
+    for bin in gcc "${ARCH}-linux-gnu-gcc" "${ARCH}-conda-linux-gnu-gcc"; do
+        command -v "${bin}" &>/dev/null && { cc_found=true; break; }
+    done
+    for bin in g++ "${ARCH}-linux-gnu-g++" "${ARCH}-conda-linux-gnu-g++"; do
+        command -v "${bin}" &>/dev/null && { cxx_found=true; break; }
+    done
+    [[ "${cc_found}" == true ]]  || missing+=("gcc")
+    [[ "${cxx_found}" == true ]] || missing+=("g++")
+
+    if (( ${#missing[@]} == 0 )); then
+        print_ok "Toolchain: git, make and a C/C++ compiler present"
+        return 0
+    fi
+
+    print_fail "Missing build toolchain (${missing[*]}) — these selected tools compile from source:"
+    local item
+    for item in "${needed[@]}"; do
+        echo "    • ${item}"
+    done
+    # conda-forge names its compiler metapackages per platform: gxx_linux-64 on
+    # x86_64, gxx_linux-aarch64 on a Spark. Deriving it matters -- a copy-pasteable
+    # command that cannot resolve is worse than no command, and this is the remedy
+    # for the operator who has no root.
+    local _gxx="gxx_linux-64"
+    [[ "${ARCH}" == "aarch64" ]] && _gxx="gxx_linux-aarch64"
+    print_warn "  With root:    sudo apt-get install -y git make g++"
+    # `build-tools`, deliberately NOT a binderscout_* name: it is the operator's own
+    # throwaway env, not one this installer creates or manages, and
+    # tests/test_referenced_conda_envs_exist.py is right to flag an unbuilt env in
+    # our namespace -- that is how a typo'd env name in a run script gets caught.
+    print_warn "  Without root: get them from conda-forge into a build env —"
+    print_warn "                  ${CONDA_CMD} create -y -n build-tools -c conda-forge make ${_gxx}"
+    print_warn "                  conda activate build-tools       # then re-run this installer"
+    print_warn "  Or install the rest: pass --tool <tool> for the tools above that you can skip,"
+    print_warn "                and add these later once a toolchain is available."
+    # Only when SoluProt is actually one of them: this paragraph printed on a
+    # Protein-Hunter + BindCraft 2 selection too, where it is irrelevant.
+    if [[ "${DO_SOLUPROT}" == true ]]; then
+        print_warn "                SoluProt in particular is an OPTIONAL label — ranking does not"
+        print_warn "                use it and is not blocked by its absence."
+    fi
+    print_warn "  Or override:  --skip-preflight, to try anyway."
+    return 1
+}
+
+
 preflight() {
     [[ "${SKIP_PREFLIGHT}" == true ]] && return 0
     print_step "Preflight checks"
@@ -4065,6 +4164,8 @@ preflight() {
     else
         print_warn "nvidia-smi not found — install will proceed, but the tools need an NVIDIA GPU to run."
     fi
+
+    check_build_toolchain || return 1
 
     if command -v curl &>/dev/null; then
         if curl -fsS --max-time 10 -o /dev/null https://pypi.org/simple/ 2>/dev/null; then
