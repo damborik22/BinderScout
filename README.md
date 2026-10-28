@@ -50,13 +50,13 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 | Tool | What it does | Environment | Platform |
 |---|---|---|---|
-| **BindCraft** | AF2 hallucination + ProteinMPNN + PyRosetta filtering | conda env `BindCraft` (Python 3.10) | x86_64 |
+| **BindCraft** | AF2 hallucination + ProteinMPNN + PyRosetta filtering | conda env `BindCraft` (Python 3.10) | x86_64 + aarch64 |
 | **BoltzGen** | Boltz-1 diffusion structure generation | conda env `BoltzGen` (Python 3.12) | x86_64 + aarch64 |
-| **Mosaic** | JAX / Boltz-2 gradient hallucination | uv venv `Mosaic/.venv` (Python 3.12) | x86_64 |
+| **Mosaic** | JAX / Boltz-2 gradient hallucination | uv venv `Mosaic/.venv` (Python 3.12) | x86_64 + aarch64 (no `esmj` wheel; `torchtext` may fail) |
 | **PXDesign** | Protenix-based de novo design (diffusion + MPNN + AF2 eval) | conda env `bindmaster_pxdesign` (Python 3.11) | x86_64 + aarch64 |
-| **Proteina-Complexa** | NVIDIA flow matching + inference-time optimisation (best-of-N, beam, MCTS) | uv venv `Proteina-Complexa/.venv` (Python 3.12) | x86_64 (aarch64 needs patches) |
-| **Protein-Hunter** | Boltz-2 / Chai-1 hallucination across 6 modalities (protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA) | conda env `bindmaster_protein_hunter` (Python 3.10) | x86_64 |
-| **RFD3** | RosettaCommons foundry diffusion (RFdiffusion3 + ProteinMPNN, BSD-3, commercial-use OK) | conda env `bindmaster_rfd3` (Python 3.12) | x86_64 + aarch64 |
+| **Proteina-Complexa** | NVIDIA flow matching + inference-time optimisation (best-of-N, beam, MCTS) | uv venv `Proteina-Complexa/.venv` (Python 3.12) | x86_64 — **not viable on aarch64**, and not for want of patches: no CUDA `jaxlib` exists for aarch64, so its only reward model (AF2) runs on CPU at ~130× the cost |
+| **Protein-Hunter** | Boltz-2 / Chai-1 hallucination across 6 modalities (protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA) | conda env `bindmaster_protein_hunter` (Python 3.10) | x86_64 — PyRosetta ships no aarch64 wheels |
+| **RFD3** | RosettaCommons foundry diffusion (RFdiffusion3 + ProteinMPNN, BSD-3, commercial-use OK) | conda env `bindmaster_rfd3` (Python 3.12) | x86_64; installs on aarch64 but is **opt-in and unvalidated there** |
 
 > Each tool runs in its own isolated environment. Environments must not be mixed.
 
@@ -68,7 +68,7 @@ The evaluator (`bindmaster evaluate` / `binder-compare`) runs on top of the desi
 |---|---|---|---|---|
 | **Boltz-2** | Primary refold engine; ranking reference | `Mosaic/.venv` (rides Mosaic install) | x86_64 + aarch64 | default (with Mosaic) |
 | **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.12) | x86_64 + aarch64 | default (in `--tool all`) |
-| **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.12, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | default (in `--tool all`; the env builds, the **weights** you request yourself) |
+| **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.12, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | x86_64: in `--tool all` (the env builds, the **weights** you request yourself). aarch64: opt-in via `--tool af3` |
 | **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model | in `--tool all` |
 
 ### Architecture
@@ -556,7 +556,7 @@ fully functional:
 | Platform | Installer | Status |
 |---|---|---|
 | x86_64 Linux + NVIDIA GPU | `install/install.sh` | the tested configuration — all seven tools and three refold engines are exercised here |
-| NVIDIA DGX Spark / Grace-Hopper (aarch64) | `install/install_aarch.sh` | supported, with the caveats in [aarch64 notes](#aarch64-notes). Its version pins are **not** captured in `install/locks/` — those are x86_64 captures and `_constraints()` refuses to apply them on another architecture |
+| NVIDIA DGX Spark / Grace-Hopper (aarch64) | `install/install_aarch.sh` | supported, with the caveats in [aarch64 notes](#aarch64-notes). **For 1.0.6 this path is ported and reviewed, not release-tested on hardware** — its fixes were developed and exercised on the `v2.0.x` line, but no Spark install was run against this tree. Two tools are x86-only for external reasons (Protein-Hunter: no PyRosetta aarch64 wheels; Proteina-Complexa: no CUDA `jaxlib`), so "all seven tools" is an x86_64 statement. Its version pins are **not** captured in `install/locks/` — those are x86_64 captures and `_constraints()` refuses to apply them on another architecture |
 
 ```bash
 git clone https://github.com/damborik22/BinderScout.git ~/BinderScout
@@ -582,7 +582,7 @@ were pointed at one of them deliberately.
 - **BoltzGen**: PyTorch from the **cu130 wheel index**, pinned (`torch==2.10.0+cu130`). Plain PyPI torch is **CPU-only** on aarch64 for the versions we pin — an earlier note here said the opposite, and acting on it silently replaces a working CUDA build with a CPU one.
 - **Mosaic**: `esmj` excluded (no aarch64 wheel). `torchtext` may also fail (no Linux aarch64 wheel).
 - **PXDesign**: Full pipeline works on aarch64 / Blackwell. The installer applies automatic patches for CUDA arch compatibility (sm_120) **and `-std=c++20`** (torch >= 2.9 headers hard-error on c++17, so protenix's fused kernel will not build without it), JSON serialization (`NumpyEncoder`), **`use_bfloat16=False` in the AF2 eval** (jaxlib's AArch64 backend cannot lower a bf16 convert under SVE, so the eval subprocess SIGABRTs and surfaces only as a `JSONDecodeError` on an empty file), and dataloader (`num_workers`) config. PyTorch must come from the **cu130** index; a cu124 build reports `torch.cuda.is_available() == True` and then fails every kernel launch.
-- **Proteina-Complexa**: May need patches — PyTorch Geometric and `torchtext` may lack aarch64 wheels. Core deps (PyTorch 2.7, JAX 0.4.29) are fine. Same approach as Mosaic: mark missing packages with `platform_machine != 'aarch64'` in `pyproject.toml`. **Not wired into `install_aarch.sh`** — `--tool proteina-complexa` there exits with that explanation.
+- **Proteina-Complexa**: **Deprecated on aarch64 — not viable, not broken,** and the reason given here before was wrong. PyG and `torchtext` were never the blocker: Proteina-Complexa imports neither. Upstream installs and *generates* fine on Spark. The blocker is that **no CUDA `jaxlib` exists for aarch64**, so the AF2 reward — the only member of its composite objective — runs on CPU at ~320 s/call against ≤2.46 s on an H200. The production recipe (`mcts`, `n_simulations=8`) fixes the budget at 3,300 AF2 calls per 100-design replicate: **12.2 days on Spark vs 2.25 h on one H200**. Threading does not help — AF2-on-CPU asymptotes at ~4 of 20 cores. Run it on x86. Do **not** "fix" this by switching to `best-of-n`: that is cheap only because it never consults the reward during generation, and MCTS was adopted because it beat best-of-n 10× at iPTM ≥ 0.85 in ⅓ the wall clock. **Not wired into `install_aarch.sh`** — `--tool proteina-complexa` there exits with that explanation.
 - **Protein-Hunter**: **Not supported on aarch64** — PyRosetta has no aarch64 wheels. `install_aarch.sh` rejects `--tool protein-hunter` with that reason.
 - **RFD3**: `install_aarch.sh --tool rfd3` installs it (cu130 torch wheels, `rc-foundry[rfd3,mpnn]`, weights + ProteinMPNN checkpoint into `weights/foundry/`). Opt-in rather than part of `--tool all` because it is **not yet validated on aarch64 hardware**.
 
