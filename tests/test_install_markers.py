@@ -79,9 +79,7 @@ def run_backfill(
         for key, body in preexisting.items():
             (state / key).write_text(body)
 
-    stubs = "\n".join(
-        f"is_{key}_installed() {{ return {0 if key in passing else 1}; }}" for key in TOOL_KEYS
-    )
+    stubs = "\n".join(f"is_{key}_installed() {{ return {0 if key in passing else 1}; }}" for key in TOOL_KEYS)
     script = textwrap.dedent(
         f"""
         set -u
@@ -116,7 +114,7 @@ class TestBackfillClosesTheMigrationGap:
         migration is for; the point is that all nine come back, not just the two
         that happened to be installed through the new installer.
         """
-        working = [k for k in TOOL_KEYS if k not in ()]
+        working = list(TOOL_KEYS)
         written, _ = run_backfill(tmp_path, working)
         for key in ("bindcraft", "boltzgen", "mosaic", "evaluator", "esmfold2"):
             assert key in written, f"{key} works but would still read not-installed"
@@ -188,10 +186,7 @@ class TestBackfillClosesTheMigrationGap:
         Comment lines are stripped first — prose naming these functions is not a call,
         and matching it made this assertion pass or fail on where a comment sat.
         """
-        code = [
-            ln for ln in bash_function("main").splitlines()
-            if not ln.lstrip().startswith("#")
-        ]
+        code = [ln for ln in bash_function("main").splitlines() if not ln.lstrip().startswith("#")]
 
         def line_of(token: str) -> int:
             for i, ln in enumerate(code):
@@ -215,8 +210,8 @@ class TestEveryToolKeyHasAProbe:
     def test_migration_covers_every_key_the_installer_can_mark(self):
         """The migration's list must not fall behind the tools install.sh marks."""
         marked = set(re.findall(r"_install_step\s+(\w+)", INSTALL_TEXT))
-        covered = set(re.search(
-            r"for _key in (.*?); do", bash_function("backfill_install_markers"), re.S
-        ).group(1).split())
+        covered = set(
+            re.search(r"for _key in (.*?); do", bash_function("backfill_install_markers"), re.S).group(1).split()
+        )
         missing = marked - covered - {"$1"}
         assert not missing, f"install.sh marks {sorted(missing)} but the migration skips them"

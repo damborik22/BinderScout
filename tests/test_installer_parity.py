@@ -60,7 +60,7 @@ class TestPyrosettaCallSitePatch:
         text = TEXTS[name]
         assert shell_function(text, "_patch_bindcraft_pyrosetta") is not None, (
             f"{name} does not define _patch_bindcraft_pyrosetta(). BindCraft is pinned "
-            f"at a commit that calls iam.set_interface(\"A_B\"), which PyRosetta 2026.29 "
+            f'at a commit that calls iam.set_interface("A_B"), which PyRosetta 2026.29 '
             f"rejects; without the patch every trajectory dies in score_interface() "
             f"and the run yields zero designs (BUG-14)."
         )
@@ -118,7 +118,7 @@ class TestSharedPins:
         value = assignment(text, var)
         assert value is not None, f"{name} does not set {var}"
         assert value.upper() != "HEAD", (
-            f"{name} sets {var}=\"HEAD\", so two installs on different days get "
+            f'{name} sets {var}="HEAD", so two installs on different days get '
             f"different code while every other tool here is pinned."
         )
 

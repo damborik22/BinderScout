@@ -148,8 +148,9 @@ class TestMarkerKeysMatchTheInstaller:
         written = set(re.findall(r"_install_step\s+([a-z0-9_]+)", installer))
         mark(state, *sorted(written))
         installed = cfg.detect_installs()
-        unread = {k for k in written if not any(
-            (k == dict_key) or (dict_key == "pxdesign_local" and k == "pxdesign")
-            for dict_key in installed
-        )}
+        unread = {
+            k
+            for k in written
+            if not any((k == dict_key) or (dict_key == "pxdesign_local" and k == "pxdesign") for dict_key in installed)
+        }
         assert not unread, f"install.sh marks {sorted(unread)} but detect_installs never reads them"
