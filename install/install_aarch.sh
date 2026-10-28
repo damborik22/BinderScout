@@ -47,6 +47,16 @@ ARCH="$(uname -m)"     # expected: aarch64
 CUDA_VERSION="13.0"    # DGX Spark GB10 (Blackwell, sm_121)
 FOUNDRY_VERSION="0.1.9"   # rc-foundry release pinned for RFD3 (matches install.sh)
 
+# atomworks is pinned for RFD3. rc-foundry installs it UNPINNED, and atomworks 3.0.0
+# (2026-10-05) moved `extra_fields` / `build_assembly` off parse_atom_array()'s
+# signature into a PrepareConfig object and started rejecting leftover kwargs, while
+# rfd3's pinned inference/input_parsing.py still passes them directly -- so 3.x aborts
+# every RFD3 run with `TypeError: Unexpected keyword arguments: ['extra_fields',
+# 'build_assembly']`. Verified on the wheels: 2.2.1 has both parameters, 3.0.0+ have
+# neither. The x86 copy of this constant also serves Proteina-Complexa, which this
+# platform refuses, so only the RFD3 reason applies here.
+ATOMWORKS_VERSION="2.2.1"
+
 # Pre-cached resources: two levels up → Documents/OLD/BindMaster/bindcraft-tools
 _default_tools="$(cd "${BINDMASTER_DIR}" && cd ../../Documents/OLD/BindMaster/bindcraft-tools 2>/dev/null && pwd || true)"
 TOOLS_DIR="${_default_tools}"
@@ -265,8 +275,11 @@ print_fail() {
 
 # run_logged [--retries N] <label> <command...>
 # Runs a verbose command showing only a spinner on the terminal.
-# All output is written to LOG_FILE only. On failure the last 30 lines
-# are printed to the terminal for diagnosis.
+# Output is appended to LOG_FILE *as it is produced*, so the `tail -f install_aarch.log`
+# the banners tell the user to run actually shows progress during the 45-90 min
+# steps. On failure the last 30 lines of THIS step are printed for diagnosis.
+# Without a TTY (nohup / ssh / tmux send-keys / CI) a heartbeat line is printed
+# every 2 min, because the spinner goes to /dev/tty and is invisible there.
 # Optional --retries N retries the command up to N times with linear backoff.
 run_logged() {
     local retries=1
@@ -275,18 +288,23 @@ run_logged() {
     fi
     local label="$1"
     shift
-    local tmpfile
-    tmpfile=$(mktemp)
 
     # Check once whether /dev/tty is usable (not available in non-TTY containers)
     local has_tty=false
     { true >/dev/tty; } 2>/dev/null && has_tty=true
 
+    # Where this step begins in the log, so the on-failure tail shows only this
+    # step. Output is no longer buffered through a temp file, so retries leave a
+    # cumulative log — more useful for debugging a flaky step, not less.
+    local start_line
+    # NB: 2>/dev/null comes BEFORE the input redirect — redirections are applied
+    # left to right, so the other order lets bash's own "No such file" reach the
+    # terminal on the very first call, when the log does not exist yet.
+    start_line=$(( $(wc -l 2>/dev/null < "${LOG_FILE}" || echo 0) + 1 ))
+
     local rc=0
     for attempt in $(seq 1 "${retries}"); do
-        # shellcheck disable=SC2188
-        > "${tmpfile}"   # truncate on each attempt
-        "$@" >> "${tmpfile}" 2>&1 &
+        "$@" >> "${LOG_FILE}" 2>&1 &
         local pid=$!
 
         local frames='/-\|'
@@ -298,6 +316,19 @@ run_logged() {
                 (( i++ ))
             done
             printf "\r\033[K" >/dev/tty   # clear spinner line
+        else
+            # Poll at 1 s so a short command still returns promptly; speak up
+            # only every 2 min so a long step does not flood the log.
+            local waited=0
+            while kill -0 "${pid}" 2>/dev/null; do
+                sleep 1
+                (( waited++ ))
+                if (( waited >= 120 )); then
+                    waited=0
+                    kill -0 "${pid}" 2>/dev/null && \
+                        echo "  … still running: ${label} ($(date +%H:%M))"
+                fi
+            done
         fi
         wait "${pid}"
         rc=$?
@@ -309,15 +340,11 @@ run_logged() {
         fi
     done
 
-    cat "${tmpfile}" >> "${LOG_FILE}" 2>/dev/null
-
     if [[ ${rc} -eq 0 ]]; then
-        rm -f "${tmpfile}"
         print_ok "${label}"
     else
         echo -e "${RED}  Last output:${RESET}"
-        tail -30 "${tmpfile}" | sed 's/^/  /'
-        rm -f "${tmpfile}"
+        tail -n +"${start_line}" "${LOG_FILE}" 2>/dev/null | tail -30 | sed 's/^/  /'
         print_fail "${label}"
     fi
     return ${rc}
@@ -1935,6 +1962,34 @@ AF3EOF
 
 # ─── ESMFold2 (refolder, opt-in) ────────────────────────────────────────────
 
+_pin_rfd3_atomworks() {
+    local py="${CONDA_BASE}/envs/bindmaster_rfd3/bin/python"
+    [[ -x "${py}" ]] || { print_warn "No bindmaster_rfd3 env — skipping atomworks pin"; return 0; }
+
+    local have
+    have="$("${py}" -c "import importlib.metadata as m; print(m.version('atomworks'))" 2>/dev/null || true)"
+    if [[ "${have}" != "${ATOMWORKS_VERSION}" ]]; then
+        print_step "Pinning atomworks ${have:-<absent>} -> ${ATOMWORKS_VERSION} (RFD3)"
+        run_logged "Pinning atomworks==${ATOMWORKS_VERSION} (RFD3)" \
+            "${py}" -m pip install -q "atomworks==${ATOMWORKS_VERSION}" \
+            || { print_fail "Could not pin atomworks==${ATOMWORKS_VERSION} in bindmaster_rfd3"; return 1; }
+    else
+        print_ok "atomworks already pinned to ${ATOMWORKS_VERSION} (RFD3)"
+    fi
+
+    # Assert the SIGNATURE rfd3 actually calls, not the version string. 3.x keeps the
+    # function and silently drops these two parameters, so `import atomworks` and a
+    # version check both pass while every design run dies in the dataloader.
+    "${py}" -c "
+import inspect, sys
+from atomworks.io.parser import parse_atom_array
+p = inspect.signature(parse_atom_array).parameters
+sys.exit(0 if ('extra_fields' in p and 'build_assembly' in p) else 1)
+" 2>/dev/null \
+        || { print_fail "atomworks ${ATOMWORKS_VERSION} parse_atom_array lacks extra_fields/build_assembly — RFD3 cannot design"; return 1; }
+    print_ok "atomworks ${ATOMWORKS_VERSION} parse_atom_array accepts extra_fields/build_assembly"
+}
+
 install_rfd3() {
     print_step "Installing RFD3 (foundry) — aarch64"
     ensure_conda_in_path
@@ -1968,6 +2023,9 @@ install_rfd3() {
         "${CONDA_CMD}" run -n bindmaster_rfd3 \
         pip install -q "rc-foundry[mpnn]==${FOUNDRY_VERSION}" \
         || print_warn "rc-foundry[mpnn] install failed — MPNN redesign step may not work"
+
+    # atomworks arrives UNPINNED with rc-foundry; pin it before the weights download.
+    _pin_rfd3_atomworks || return 1
 
     mkdir -p "${FOUNDRY_WEIGHTS_DIR}"
     if [[ -n "$(ls -A "${FOUNDRY_WEIGHTS_DIR}" 2>/dev/null)" ]]; then
@@ -2560,6 +2618,31 @@ preflight() {
         else
             print_warn "Could not reach pypi.org in 10 s — downloads may fail (proxy? offline?)."
         fi
+    fi
+
+    # Toolchain — only the tools that compile from source need it. On this platform
+    # SoluProt builds BOTH USEARCH v12 and scikit-learn 0.20.4, neither of which has
+    # an aarch64 wheel. Three `command -v` calls, checked here because a stock image
+    # has no `make` and `--tool all` otherwise spends the better part of an hour
+    # getting to the last step before reporting a one-second fact.
+    if [[ "${DO_SOLUPROT}" == true ]]; then
+        local _missing=() _bin
+        for _bin in git make g++; do
+            command -v "${_bin}" &>/dev/null || _missing+=("${_bin}")
+        done
+        if (( ${#_missing[@]} )); then
+            print_fail "SoluProt needs a C/C++ toolchain to build USEARCH v12 and scikit-learn 0.20.4 (missing: ${_missing[*]})"
+            print_warn "  With root:    sudo apt-get install -y git make g++"
+            print_warn "  Without root: get them from conda-forge into a build env —"
+            print_warn "                  ${CONDA_CMD} create -y -n bindmaster_build -c conda-forge make gxx_linux-aarch64"
+            print_warn "                  conda activate bindmaster_build    # then re-run this installer"
+            print_warn "  Or skip it:   SoluProt is an OPTIONAL pre-refold solubility filter. Ranking"
+            print_warn "                does not use it and is not blocked by its absence. Install the"
+            print_warn "                other tools with --tool <tool>, and add SoluProt later with"
+            print_warn "                --tool soluprot once a toolchain is available."
+            return 1
+        fi
+        print_ok "Toolchain: git, make, g++ present"
     fi
     return 0
 }

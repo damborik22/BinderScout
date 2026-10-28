@@ -23,7 +23,12 @@ RESET = "\033[0m"
 
 
 # ── Design tools, in execution order — the single source of truth ────────────
-# (output subdir under runs/<name>/, display label, install marker relative to repo)
+# (output subdir under runs/<name>/, display label, install probe relative to repo)
+#
+# The first field does double duty: it is the run-output subdir AND the install
+# marker key written by install.sh's mark_tool_installed, which _detect_tools
+# requires alongside the probe. Keep it equal to configurator.detect_installs's
+# marker key for the same tool.
 #
 # Every TUI surface iterates this: the header "Tools:" bar, the run-picker hints
 # and both "Run status" views. They were four independently maintained literals
@@ -59,8 +64,32 @@ def _installer_for_host(repo: Path) -> Path:
 
 
 def _detect_tools(repo: Path) -> dict[str, bool]:
-    """Lightweight check for installed design tools (no heavy imports)."""
-    return {label: (repo / marker).exists() for _subdir, label, marker in TOOL_SEQUENCE}
+    """Installed design tools: the installer's own marker AND this reader's probe.
+
+    The probes below are paths in the tool's CLONE, which is not an install. PXDesign
+    and Protein-Hunter were reported installed from a bare checkout with no
+    environment at all, and a conda env directory left behind by a failed solve reads
+    the same way -- so this view disagreed with the wizard, which does require a
+    marker (configurator.detect_installs).
+
+    Same rule as there, deliberately: marker AND probe once any marker exists, probe
+    alone before then. Keyed on the marker FILES rather than on the directory, because
+    clear_tool_mark is `rm -f` and `--uninstall --tool all` leaves an empty directory
+    behind; reading that as "markers are authoritative, none are set" reports every
+    tool uninstalled on a box where everything works. No markers at all is the
+    pre-migration state and must fall back to the probes.
+    """
+    state = repo / ".install_state"
+    try:
+        markers = any(p.is_file() for p in state.iterdir())
+    except OSError:
+        markers = False
+
+    def installed(key: str, probe_path: str) -> bool:
+        probe = (repo / probe_path).exists()
+        return ((state / key).is_file() and probe) if markers else probe
+
+    return {label: installed(key, probe) for key, label, probe in TOOL_SEQUENCE}
 
 
 def _tool_outputs(run_dir: Path) -> list[str]:

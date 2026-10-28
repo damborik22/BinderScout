@@ -36,6 +36,19 @@ TEXTS = {"install.sh": X86_TEXT, "install_aarch.sh": AARCH_TEXT}
 # Parametrise on the name only — the file bodies are too large to serve as test ids.
 INSTALLERS = pytest.mark.parametrize("name", sorted(TEXTS))
 
+# Helpers that must exist, and be byte-identical, in BOTH installers. Each reads only
+# paths and conda env names that the two files define identically, so a difference means
+# one architecture has been fixed and the other has not. Three fixes landed in
+# install.sh alone before this list existed:
+#   * run_logged — the streaming rewrite. aarch64 kept the version that buffered into a
+#     mktemp file and had no non-TTY branch at all, so on a Spark `tail -f` showed
+#     nothing for the whole 45-90 min BindCraft step and a redirected run printed
+#     nothing ever. install_aarch.sh is what `bindmaster install` dispatches to there,
+#     so the fix was in the one file that platform never runs.
+#   * _pin_rfd3_atomworks — rc-foundry floats atomworks on both platforms.
+#   * _patch_bindcraft_pyrosetta — the original entry, ported by 764854f.
+SHARED_FUNCTIONS = pytest.mark.parametrize("func", ["_patch_bindcraft_pyrosetta", "run_logged", "_pin_rfd3_atomworks"])
+
 
 def shell_function(text: str, name: str) -> str | None:
     """Return the body of shell function *name*, or None if it is not defined.
@@ -65,14 +78,17 @@ class TestPyrosettaCallSitePatch:
             f"and the run yields zero designs (BUG-14)."
         )
 
-    def test_the_two_copies_are_identical(self):
-        x86 = shell_function(X86_TEXT, "_patch_bindcraft_pyrosetta")
-        aarch = shell_function(AARCH_TEXT, "_patch_bindcraft_pyrosetta")
+    @SHARED_FUNCTIONS
+    def test_the_two_copies_are_identical(self, func):
+        x86 = shell_function(X86_TEXT, func)
+        aarch = shell_function(AARCH_TEXT, func)
+        # Not just equality: None == None would pass for a symbol missing from both.
+        assert x86 is not None, f"install.sh does not define {func}()"
+        assert aarch is not None, f"install_aarch.sh does not define {func}()"
         assert x86 == aarch, (
-            "_patch_bindcraft_pyrosetta() differs between install.sh and "
-            "install_aarch.sh. It rewrites a cloned Python file and has no "
-            "architecture-dependent behaviour, so a difference means one arch has "
-            "been fixed and the other has not — the exact shape of BUG-14."
+            f"{func}() differs between install.sh and install_aarch.sh. These helpers "
+            f"have no architecture-dependent behaviour, so a difference means one arch "
+            f"has been fixed and the other has not — the exact shape of BUG-14."
         )
 
     @INSTALLERS
@@ -89,6 +105,7 @@ class TestPyrosettaCallSitePatch:
     def test_the_patch_keeps_the_pre_2026_29_fallback(self, name):
         text = TEXTS[name]
         body = shell_function(text, "_patch_bindcraft_pyrosetta")
+        assert body is not None, f"{name} does not define _patch_bindcraft_pyrosetta()"
         assert "except ImportError" in body, (
             f"{name}'s patch dropped the ImportError fallback. The emitted code must "
             f"work against both sides of the 2026.29 boundary: aarch64 takes PyRosetta "
@@ -100,6 +117,7 @@ class TestPyrosettaCallSitePatch:
     def test_the_patch_verifies_its_own_result(self, name):
         text = TEXTS[name]
         body = shell_function(text, "_patch_bindcraft_pyrosetta")
+        assert body is not None, f"{name} does not define _patch_bindcraft_pyrosetta()"
         after_heredoc = body.split("PYEOF")[-1]
         assert "DockingPartners" in after_heredoc and "print_fail" in after_heredoc, (
             f"{name}'s patch does not re-check the file after editing it. The heredoc's "
@@ -140,4 +158,82 @@ class TestSharedPins:
             f"BINDCRAFT_COMMIT disagrees: install.sh={x86!r}, "
             f"install_aarch.sh={aarch!r}. The pyrosetta call-site patch is written "
             f"against the call site as it exists at this commit."
+        )
+
+
+class TestRfd3AtomworksPinIsOnBothArches:
+    """rc-foundry installs atomworks UNPINNED, on both platforms.
+
+    atomworks 3.0.0 moved `extra_fields` / `build_assembly` off parse_atom_array()
+    into a PrepareConfig object and rejects leftover kwargs, while rfd3's pinned
+    input_parsing.py still passes them. `import atomworks` and a version check both
+    pass, so the failure arrives in the dataloader after a GPU is committed.
+    """
+
+    @INSTALLERS
+    def test_the_pin_constant_is_set(self, name):
+        version = assignment(TEXTS[name], "ATOMWORKS_VERSION")
+        assert version, f"{name} does not pin ATOMWORKS_VERSION"
+        assert int(version.split(".")[0]) < 3, f"{name} pins atomworks {version}; 3.x drops the two kwargs rfd3 passes"
+
+    @INSTALLERS
+    def test_install_rfd3_calls_the_pin(self, name):
+        """The helper is not the fix; the call is.
+
+        A test that exercises _pin_rfd3_atomworks directly stays green when the call
+        is deleted from install_rfd3, which is the whole bug.
+        """
+        body = shell_function(TEXTS[name], "install_rfd3")
+        assert body is not None, f"{name} has no install_rfd3()"
+        assert "_pin_rfd3_atomworks" in body, (
+            f"{name} defines _pin_rfd3_atomworks() but install_rfd3() never calls it, "
+            f"so the env is built with whatever atomworks rc-foundry resolved."
+        )
+
+    @INSTALLERS
+    def test_the_pin_asserts_the_signature_not_the_version(self, name):
+        body = shell_function(TEXTS[name], "_pin_rfd3_atomworks")
+        assert body is not None, f"{name} has no _pin_rfd3_atomworks()"
+        assert "inspect.signature(parse_atom_array)" in body, (
+            f"{name}'s pin does not inspect the signature; a version string alone "
+            f"passes on any release that moves the kwargs again"
+        )
+        for kwarg in ("extra_fields", "build_assembly"):
+            assert kwarg in body, f"{name} does not assert {kwarg} is still accepted"
+
+
+class TestToolchainIsCheckedBeforeTheLongSteps:
+    """BUG-08: `--tool all` reached the last step before reporting a one-second fact.
+
+    SoluProt source-builds USEARCH v12 on both platforms (and scikit-learn 0.20.4 on
+    aarch64, which has no wheel for it), so a box without a compiler cannot finish —
+    but it found out ~57 min in. The check belongs in preflight.
+    """
+
+    @INSTALLERS
+    def test_preflight_checks_for_a_compiler(self, name):
+        body = shell_function(TEXTS[name], "preflight")
+        assert body is not None, f"{name} has no preflight()"
+        assert "DO_SOLUPROT" in body, (
+            f"{name}'s preflight does not consider SoluProt, the tool that needs the toolchain"
+        )
+        for tool in ("git", "make", "g++"):
+            assert tool in body, f"{name}'s preflight does not look for {tool}"
+
+    def test_the_remedy_names_the_package_that_exists_for_the_platform(self):
+        """conda-forge names its compiler metapackages per platform.
+
+        gxx_linux-64 does not exist for linux-aarch64, so the copy-pasteable command
+        in the aarch64 installer has to name gxx_linux-aarch64. A remedy that cannot
+        resolve is worse than no remedy, and this is the no-root path.
+        """
+        x86 = shell_function(X86_TEXT, "preflight")
+        aarch = shell_function(AARCH_TEXT, "preflight")
+        assert "gxx_linux-64" in x86, "install.sh's remedy lost its conda-forge package"
+        assert "gxx_linux-aarch64" in aarch, (
+            "install_aarch.sh's toolchain remedy must name gxx_linux-aarch64; "
+            "gxx_linux-64 has no linux-aarch64 build and the command would not resolve"
+        )
+        assert "gxx_linux-64 " not in aarch.replace("gxx_linux-aarch64", ""), (
+            "install_aarch.sh still mentions the x86 package name"
         )
