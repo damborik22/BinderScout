@@ -36,7 +36,11 @@ BOLTZGEN_COMMIT="da0f092"
 MOSAIC_COMMIT="82593a8"
 
 PXDESIGN_REPO="https://github.com/bytedance/PXDesign.git"
-PXDESIGN_COMMIT="HEAD"
+# Was the literal string "HEAD", so two installs a week apart got different code
+# while every other tool here was pinned. Same commit as install.sh: PXDesign's
+# Python is architecture-independent (only its torch build differs per arch), so
+# there is no reason for the two installers to track different revisions.
+PXDESIGN_COMMIT="f788441313c84c3074fe9596ac2433f96b15c763"
 PXDESIGN_DIR="${BINDMASTER_DIR}/PXDesign"
 
 ARCH="$(uname -m)"     # expected: aarch64
@@ -876,6 +880,63 @@ _fix_advanced_settings() {
 
 # ─── BindCraft ────────────────────────────────────────────────────────────────
 
+# Migrate the one BindCraft call site whose API PyRosetta 2026.29 changed.
+#
+# aarch64 gets PyRosetta from the graylab conda channel, unpinned, so a fresh
+# install picks up whatever that channel currently serves. The 2026.29 quarterly
+# changed InterfaceAnalyzerMover.set_interface() from taking a str to requiring a
+# core::pose::DockingPartners, and BindCraft is pinned at 7cd4ace, which still
+# passes the string. Unpatched, every trajectory dies in score_interface() after
+# ~8 min of GPU and the run produces ZERO designs (BUG-14).
+#
+# x86_64 solves this by pinning PyRosetta to 2026.29 and patching the call site.
+# Here only the patch applies -- there is no conda version string to pin that is
+# known to exist for aarch64, and the patch is what actually removes the
+# breakage: it tries the new API and falls back to the old one, so it is correct
+# against both sides of the 2026.29 boundary. Keep it that way rather than
+# pinning a guessed version.
+#
+# Byte-identical to install.sh's copy on purpose; tests/test_installer_parity.py
+# would catch a drift between them.
+_patch_bindcraft_pyrosetta() {
+    local f="${BINDCRAFT_DIR}/functions/pyrosetta_utils.py"
+    [[ -f "${f}" ]] || return 0
+    if grep -q 'DockingPartners' "${f}"; then
+        print_ok "BindCraft set_interface already patched for PyRosetta >= 2026.29"
+        return 0
+    fi
+    if ! grep -q 'iam.set_interface("A_B")' "${f}"; then
+        print_warn "Could not find iam.set_interface(\"A_B\") in pyrosetta_utils.py — left unpatched"
+        return 0
+    fi
+    python3 - "${f}" << 'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+src = path.read_text()
+# The call sits inside score_interface(), so the block carries that body indent.
+src = src.replace(
+    '    iam.set_interface("A_B")',
+    '    # PyRosetta >= 2026.29 requires DockingPartners instead of a plain string.\n'
+    '    try:\n'
+    '        from pyrosetta.rosetta.core.pose import DockingPartners\n'
+    '        iam.set_interface(DockingPartners.docking_partners_from_string("A_B"))\n'
+    '    except ImportError:\n'
+    '        iam.set_interface("A_B")  # PyRosetta < 2026.29',
+    1,
+)
+path.write_text(src)
+PYEOF
+    # Verify rather than trust the heredoc's exit status: without this patch every
+    # trajectory dies in score_interface(), so a silent miss costs GPU-hours.
+    if ! grep -q 'DockingPartners' "${f}"; then
+        print_fail "Failed to patch set_interface in ${f} — BindCraft would produce zero designs"
+        return 1
+    fi
+    print_ok "Patched BindCraft set_interface for PyRosetta >= 2026.29"
+}
+
 install_bindcraft() {
     print_step "Installing BindCraft (aarch64 / CUDA ${CUDA_VERSION})"
     ensure_conda_in_path
@@ -904,6 +965,11 @@ install_bindcraft() {
     _install_bindcraft_binaries_aarch64
     _install_af2_params || return 1
     _fix_advanced_settings
+
+    # Migrate the set_interface() call site before the env exists. Idempotent and
+    # safe on an existing clone. Without it BindCraft yields zero designs against
+    # PyRosetta >= 2026.29 (BUG-14).
+    _patch_bindcraft_pyrosetta || return 1
 
     # PyRosetta's pr.init() passes paths through shlex.split() then into
     # Rosetta's C++ option parser, which chokes on spaces even when the token
