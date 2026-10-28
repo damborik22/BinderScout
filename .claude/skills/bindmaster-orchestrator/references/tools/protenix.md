@@ -15,7 +15,16 @@ Released in waves:
 - **Protenix-v1** (2026-02) — full feature set (MSA, RNA MSA, template), matches AF3 at same training cutoff
 - **Protenix-v2** (2026-04) — 464 M params, antibody-antigen gains, ligand plausibility update
 
-In BindMaster, Protenix is being added as a **second refolder engine** alongside Boltz-2 (Part J of the evaluator roadmap). The motivation is **engine disagreement as signal**: a design tool whose output `ipsae_min` agrees across both Boltz-2 and Protenix gets `agreement_count = 2`, which is a more decisive signal than either engine alone. The BindMaster CLAUDE.md `Critical domain facts` calls this out as the primary driver of cross-method ranking.
+**Protenix was a candidate second refolder (Part J) and is not one.** Part J was reverted
+on 2026-07-26: AF3 fills the independent-cross-check role, so `refold-protenix`,
+`scripts/refold_protenix.py` and every `protenix_*` column were removed. The engine
+line-up is ESMFold2 (default) + Boltz-2 + AF3. Do not schedule a Protenix refold and do
+not expect `protenix_*` columns in `metrics.csv`.
+
+The original motivation — engine disagreement as signal — survives, but in the form Part U
+settled on: a cross-engine gate (`consensus_iptm_n >= --min-engines`) then
+`consensus_iptm_mean`, with `consensus_iptm_spread` as the disagreement read. Not
+`agreement_count`, which Part U removed as a sort key.
 
 **Critical to the orchestrator:** Protenix is used by PXDesign internally during design. PXDesign outputs already have Protenix scores baked into their composite ranking, so Protenix refold of PXDesign outputs is *not* fully independent. For PXDesign, the orchestrator should weight Boltz-2 and AF3 refolds more.
 

@@ -168,7 +168,95 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   commit no longer in this history; and `binder-eval-af3` / `binder-eval-esmfold2`
   were documented as Python 3.10 against `python=3.12` in both env ymls.
 
+- **The second audit pass: 23 majors, mostly claims that would send a user or an agent
+  down a path that no longer exists.** Continuing the sweep above.
+
+  *Commands and requirements that do not match the installer.* The requirements list
+  asked for "~60 GB free disk space" while the preflight's own arithmetic needs ~71 GB
+  for `--tool all` and **aborts** below it — a user who freed exactly what the README
+  asked for hit a hard failure. The same list omitted the C/C++ toolchain that `--tool
+  all` now requires (SoluProt source-builds USEARCH v12, and a failed build fails the
+  install). The `--tool` table still called SoluProt "not in `--tool all`" three
+  sections after the README said it was, and `install.sh`'s own header called ESMFold2
+  opt-in against its `--help` and its `all` branch. `CONTRIBUTING.md` told contributors
+  to install with the `bindmaster` shortcut that the installer itself creates, and its
+  evaluator smoke test passed `--target-pdb` (not a flag; `evaluate.sh` takes
+  `--target-seq`) against two `Evaluator/example/` files that do not exist.
+
+  *Ranking language Part U retired.* The metrics table still labelled `ipsae_min`
+  "**Primary metric**" while the section above it said `consensus_iptm_mean` is the only
+  ranking; "two-stage" survived in three more places, including the architecture diagram.
+
+  *Dead references.* Two broken README links (`docs/PLAN_soluprot_integration.md`,
+  `docs/repo_analysis_2026-07-26.html`), a whole "Known issues" section whose substance
+  was a link to the second of those, `docs/bindmaster2_grafts.md` describing the engine
+  line-up as "AF3 + ESMFold2 + Protenix", and a "read trace for the current code" in
+  `INVESTIGATION_RANKING_DISCREPANCY.md` naming `scripts/refold_protenix.py`, deleted
+  with the Part J revert.
+
+  *Skill-database gaps.* `protenix.md` said Protenix "is being added as a second refolder
+  engine" thirteen lines under its own `Status: retired as a refolder`. ESMFold2 — the
+  **default** engine — had no file in the tool database at all while the retired engine
+  had a complete one; `esmfold2.md` now exists.
+
+  *Bookkeeping.* `STAGES.md` still listed F2 (headless configurator) as deferred, which
+  `configurator.py` says it closed; `CLAUDE.md` placed Parts I–M on `[Unreleased]` when
+  they shipped in `[1.0.0]`; and `CLAUDE.md` claimed the configurator "generates
+  `run_rfd3.sh` from the template" when it mirrors the template in an embedded writer —
+  two copies with nothing keeping them in step, which have already drifted.
+
+  Also added: a README section documenting `install/locks/`, the mechanism that makes a
+  pinned install reproducible. The README mentioned it once in passing (the DGX Spark
+  platform row) but never explained it, nor its two real limits — x86_64 only, and 10 of
+  11 environments.
+
+- **`CLAUDE.md` no longer states a version, because the repository cannot currently name
+  one.** It said "Current status: 1.0.1" while tags reached `v2.0.2`. The deeper problem
+  is that **no tag in the repository is an ancestor of `master`** — all twelve, `v1.0.0`
+  through `v2.0.2`, point into the history the public-release rewrite replaced, so
+  `git tag --merged HEAD` is empty and `git describe --tags` answers `fatal: No tags can
+  describe`. Separately, 1.1.0 through 2.0.2 have no CHANGELOG sections. That needs a decision (recreate the
+  tags on this history, or retire them and restart numbering); until then the status line
+  says master is through Part U and tells readers to cite a commit.
+
+### Removed
+
+- **Two dead files, archived before removal.** `Evaluator/tools/soluprot/data/pdb_no_nesg_100.fasta`
+  (22 MB) shipped with the vendored SoluProt 1.0 distribution and had zero
+  references anywhere in the tree — SoluProt reads the near-duplicate sibling
+  `Ecoli_xray_nmr_pdb_no_nesg.fa` (`soluprot.py:38`; 64,549 records against this
+  file's 64,416). `Evaluator/scripts/promera_env.sh` was the aarch64/sm_121 env
+  recipe for Promera, closed as a negative result in Part T; nothing in the repo
+  creates a `binder-eval-promera` env and no doc referenced the script.
+
 ### Added
+
+- **`docs/INVESTIGATION_partT_promera.md` restored.** The history rewrite that made
+  this repository public dropped it, leaving Part T's only account in a commit
+  message. It is recoverable — `git show 512bc2d:docs/INVESTIGATION_partT_promera.md`
+  — and is now back in the tree at its refutation-corrected revision. Checked against
+  the identifier classes commit `7952b36` scrubbed (IPs, internal DNS, usernames,
+  `/home` and Lustre paths, SSH fingerprints): the document contains none of them.
+
+  Part T's result in brief: Promera does **not** beat the incumbent engines and is not
+  wired into `evaluate.sh`. Benchmarked over 2,515 of 2,517 labelled Adaptyv designs
+  plus an 87-design pilot, it lost on every target with real binder counts (n=1,963;
+  EGFR 0.52 vs 0.76, IL7R 0.50 vs 0.68, PD-L1 0.61 vs 0.78 — target wins ESMFold2 ×2,
+  Boltz-2 ×1, AF3 ×1, Promera ×0), its binder-catch rate sat at chance (0.293 vs
+  0.25), and as a 4th consensus voter it was matched or beaten by a *random* selector
+  in 100% of 200 simulations. Its pooled `promera_plddt` of 0.826 was a
+  Simpson's-paradox artifact (within-target ~0.60).
+
+  **What holds from the side finding, and what does not.** The per-engine advantage map
+  holds: no engine dominates, and each catches binders the others miss — an argument
+  for keeping all three engines, independent of Part U's regret analysis. The
+  *length-dependent* Boltz-2/AF3 crossover it also suggested was **REFUTED** on
+  independent data (`512bc2d`, 2026-07-25): 110 BindCraft de-novo designs across 7
+  targets, balanced across length terciles, all three engines on the same designs, gave
+  the opposite sign — short tercile Boltz-2 0.58 vs AF3 0.74, and within-target on PD1
+  0.82 vs 0.83. Length-conditioned engine weighting is **not** implemented and should
+  not be. What replicated instead: all engines degrade on long binders (a shared, not
+  differential, effect). See §5.1 of the restored document.
 
 - **README: "Running with Claude Code".** The repository ships five skills
   (`target-analyst`, `orchestrator`, `worker`, `evaluator`, `wetlab`) covering a

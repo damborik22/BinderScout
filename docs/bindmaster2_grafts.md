@@ -4,7 +4,7 @@ Capabilities ported from the (abandoned) [BindMaster 2](https://github.com/dambo
 agentic concept onto BinderScout's evaluator. We grafted the **orchestration/lifecycle**
 capabilities BinderScout lacked — *not* BM2's agent framework (redundant with our Claude Code
 skills + the `autosize` controller) and *not* its evaluator (ours is more advanced: two-stage
-ranking, AF3 + ESMFold2 + Protenix, `chain_iptm_interface`, RFD3).
+ranking, Boltz-2 + AF3 + ESMFold2, `chain_iptm_interface`, RFD3).
 
 Each graft is a **pure, unit-tested core** in `Evaluator/binder_comparison/comparison/` plus a
 thin `binder-compare` subcommand. Heavy steps (GPU refold, Rosetta) are delegated to the

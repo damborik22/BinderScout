@@ -116,7 +116,7 @@ The deprecated function (verified by `git show 1dd0c51:./binder_comparison/compa
 Read trace for the current code:
 
 - `scripts/refold_boltz2.py` → saves `bb|bt|tb|tt` PAE blocks in `[binder|target]` order (Boltz-2 native). Consumed by `add_boltz_ipsae_from_files` with `ordering='binder_target'` (`scoring.py:222`). Correct.
-- `scripts/refold_protenix.py` / `refold_af3.py` (target-first by JSON convention) → consumed with `ordering='target_binder'` (`report.py:80, 92`). Correct.
+- `scripts/refold_af3.py` (target-first by JSON convention) → consumed with `ordering='target_binder'` (`report.py:80, 92`). Correct. (`scripts/refold_protenix.py` was deleted when Part J was reverted; it had the same ordering.)
 - Historical `scripts/refold_af2.py` (target-first) → consumed with `ordering='target_binder'`. Correct.
 
 The transpose math in `compute_ipsae_from_pae` (`scoring.py:117-123`) is symmetric, well-tested against DunbrackLab ipsae v1.0.1 per the docstring. **No ordering bugs found.**

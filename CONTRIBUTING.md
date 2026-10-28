@@ -19,8 +19,18 @@ cd BinderScout
 
 ### Install tools
 
+`bindmaster.py` writes the `bindmaster` shortcut itself, on any invocation
+(`_install_bindmaster_shortcut()`), so the first run goes through the entrypoint in the
+clone:
+
 ```bash
-bindmaster install --tool all
+python3 bindmaster.py install --tool all
+```
+
+Afterwards `bindmaster install …` works, once `bin/` is on your PATH:
+
+```bash
+export PATH="$(pwd)/bin:$PATH"
 ```
 
 ---
@@ -93,13 +103,25 @@ require `--gpus all` and a CUDA-capable host.
 
 ### Evaluator manual testing
 
+`evaluate.sh` takes the target as a **sequence**, not a PDB, and the repository ships no
+example inputs — point it at a run of your own:
+
 ```bash
 cd Evaluator
 bash evaluate.sh \
-    --sequences example/sequences.fasta \
-    --target-pdb example/target.pdb \
+    --sequences /path/to/binders.fasta \
+    --target-seq "MGFQKFSPF..." \
     --output ./test_results
 ```
+
+`bash evaluate.sh --help` prints the full flag list. Useful ones while developing:
+
+- `--skip-boltz2` **reuses** an existing `boltz2_results.csv` (and hard-errors if the file
+  is missing), so it is the one skip flag that keeps its engine in the report.
+- `--skip-af3` / `--skip-esmfold2` **drop** that engine from the report rather than reusing
+  its CSV. Combine with `--min-engines 2` or every design fails the default 3-engine gate.
+- `--min-engines 2` when a host is genuinely short an engine.
+- `--resume` to pick up a part-finished refold.
 
 ---
 

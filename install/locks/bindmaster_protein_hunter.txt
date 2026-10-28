@@ -6,7 +6,7 @@
 #     > install/locks/bindmaster_protein_hunter.txt
 #
 # What this is for: install.sh names only a couple of dozen packages explicitly,
-# while each env holds 115-176 distributions. The unnamed remainder is where all
+# while each env holds anywhere from ~25 to ~236 distributions. The unnamed remainder is where all
 # three of this repo's dependency outages came from — BUG-14 (pyrosetta 2026.29
 # changed set_interface), BUG-20 (atomworks 3.0.0 deleted AtomSelectionStack) and
 # the RUF071 CI failure (ruff 0.17 added a rule) — and no realistic number of

@@ -950,11 +950,11 @@ pipeline by menu:
   <tbody>
     <tr><td>Wizard Step 5 — offered</td>
       <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
-    <tr><td>Step 7 preview tree <span class="fine">(<code>print_tree</code>)</span></td>
+    <tr><td>Step 7 preview tree <span class="fine">(<code>print_tree</code>)</span><br><span class="fine"><strong>since fixed</strong> — all seven, via <code>TOOL_SEQUENCE</code></span></td>
       <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="no">NO</td><td class="no">NO</td><td class="no">NO</td></tr>
-    <tr><td>"To run later" list</td>
+    <tr><td>"To run later" list<br><span class="fine"><strong>since fixed</strong> — all seven, via <code>TOOL_SEQUENCE</code></span></td>
       <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="no">NO</td><td class="no">NO</td></tr>
-    <tr><td>"Run the pipeline now?" <span class="fine">(<code>run_pipeline</code>)</span></td>
+    <tr><td>"Run the pipeline now?" <span class="fine">(<code>run_pipeline</code>)</span><br><span class="fine"><strong>since fixed</strong> — all seven, via <code>TOOL_SEQUENCE</code></span></td>
       <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="no">NO</td><td class="no">NO</td></tr>
     <tr><td><code>run_all.sh</code> generator</td>
       <td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
@@ -985,9 +985,11 @@ pipeline by menu:
   <li><code>bindmaster</code> → <strong>Configure run</strong> → walk the 7 steps. Prefer a <code>.pdb</code>
       target over <code>.cif</code> (F1), and check the residue count on the
       <code>✓ Auto-extracted sequence</code> line.</li>
-  <li>Answer <strong>no</strong> to "Run the pipeline now?" if you enabled RFD3 or Protein-Hunter, then run
-      <code>bash runs/&lt;name&gt;/run_all.sh</code> — it is the only launcher that covers all seven. If Mosaic
-      is enabled, run <code>run_mosaic.sh</code> first (F8).</li>
+  <li><strong>Fixed since capture:</strong> answering "Run the pipeline now?" is now enough —
+      <code>run_pipeline()</code> covers every enabled tool, RFD3 and Protein-Hunter included (F9). Either
+      answer works, and <code>bash runs/&lt;name&gt;/run_all.sh</code> runs the same set unattended. Mosaic no
+      longer needs a manual first pass: it takes no stdin and runs through <code>run_tool()</code> like the
+      other six (F8 is fixed — the skip was what made the one-command path silently run 6 of 7).</li>
   <li><code>bash runs/&lt;name&gt;/run_evaluate.sh</code> — <em>not</em> the TUI's "Evaluate results" and not the
       <code>evaluate</code> shortcut, both of which error out (§5). Add
       <code>--rfd3 runs/&lt;name&gt;/rfd3</code> to the extract call yourself if RFD3 ran.</li>

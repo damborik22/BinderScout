@@ -44,7 +44,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 |---|---|---|
 | `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the default refold engine ESMFold2 and the SoluProt solubility screen; AF3 is a separate `--tool` add (gated weights) | bash |
 | `bindmaster configure` | Interactive wizard: target → configs → run scripts | system Python |
-| `bindmaster evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by two-stage cross-engine iPTM, generate HTML report | conda env `binder-eval` |
+| `bindmaster evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by the cross-engine gate then consensus iPTM, generate HTML report | conda env `binder-eval` |
 
 ### Installed tools
 
@@ -69,7 +69,7 @@ The evaluator (`bindmaster evaluate` / `binder-compare`) runs on top of the desi
 | **Boltz-2** | Primary refold engine; ranking reference | `Mosaic/.venv` (rides Mosaic install) | x86_64 + aarch64 | default (with Mosaic) |
 | **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.12) | x86_64 + aarch64 | default (in `--tool all`) |
 | **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.12, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | `--tool af3` (gated weights) |
-| **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model — see [docs/PLAN_soluprot_integration.md](docs/PLAN_soluprot_integration.md) | in `--tool all` |
+| **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model | in `--tool all` |
 
 ### Architecture
 
@@ -100,7 +100,7 @@ flowchart LR
         ESMFold2["ESMFold2\n(binder-eval-esmfold2;\nlightweight, no gated weights)"]
     end
 
-    Report["Report generator\nranked HTML + CSV\n(two-stage: max-screen →\nmean consensus iPTM;\nnative_* columns from extract)"]
+    Report["Report generator\nranked HTML + CSV\n(cross-engine gate →\nmean consensus iPTM;\nnative_* columns from extract)"]
 
     Input --> Config
     Config --> Design
@@ -243,7 +243,7 @@ bindmaster evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bind
 
 ```
 bindmaster install   [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|all]
-                     [--tool af3|soluprot]             # extra evaluator engines (esmfold2 ships in --tool all)
+                     [--tool af3|soluprot]             # individually; only af3 is outside --tool all (gated weights)
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
                      [--skip-preflight] [--force]
 bindmaster configure [options passed through to configurator.py]
@@ -263,7 +263,7 @@ Options:
 | `--tool all\|bindcraft\|boltzgen\|mosaic\|pxdesign\|proteina-complexa\|protein-hunter\|rfd3` | Which design tool(s) to install. Omit for interactive menu. |
 | `--tool evaluator` | Evaluator pipeline only — the `binder-eval` conda env and the `binder-compare` CLI (already in `--tool all`). This is the one to use when someone else ran the designs and you only want to refold, rank and report them. |
 | `--tool esmfold2` | ESMFold2 refolder — **default** (already in `--tool all`); lightweight, no gated weights; also the `autosize` gate. Listed here for explicit re-install. |
-| `--tool af3\|soluprot` | Extra evaluator tools (not in `--tool all`). `af3` = AlphaFold 3 v3.0.2 (gated weights — canonical cross-check). `soluprot` = solubility screen (x86 needs the SoluProt + USEARCH downloads; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it source-builds scikit-learn 0.20.4 + USEARCH v12 and uses the `--no_tmhmm` model). |
+| `--tool af3\|soluprot` | Named individually to install just that engine. `af3` = AlphaFold 3 v3.0.2 — the one engine **not** in `--tool all`, because its weights are gated. `soluprot` = solubility screen, **already part of `--tool all`** (x86 needs the SoluProt + USEARCH downloads; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it source-builds scikit-learn 0.20.4 + USEARCH v12 and uses the `--no_tmhmm` model). |
 | `--cuda VERSION` | CUDA version for conda package resolution (default: 12.4) |
 | `--skip-examples` | Do not prompt to run bundled examples after install |
 | `--skip-preflight` | Skip the disk / GPU / network checks run before downloading |
@@ -351,7 +351,7 @@ Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). Ther
 
 #### Usage — `bindmaster evaluate` forwards to `binder-compare`
 
-`bindmaster evaluate <args>` runs the `binder-compare` CLI in the `binder-eval` conda env. The full pipeline (extract → refold → two-stage report) is one command:
+`bindmaster evaluate <args>` runs the `binder-compare` CLI in the `binder-eval` conda env. The full pipeline (extract → refold → report) is one command:
 
 ```bash
 binder-compare run --mosaic runs/PDL1/mosaic --bindcraft runs/PDL1/bindcraft \
@@ -448,7 +448,8 @@ Every one takes `--help`. `bindmaster evaluate <cmd> …` runs the same thing in
 
 | Metric | Direction | Notes |
 |---|---|---|
-| `ipsae_min` | higher = better | **Primary metric.** min(bt, tb) iPSAE (DunbrackLab 2025) |
+| `consensus_iptm_mean` | higher = better | **THE ranking** (after the cross-engine gate). Mean refold iPTM across engines — see above |
+| `ipsae_min` | higher = better | Diagnostic / quality tier, **not** a sort key. min(bt, tb) iPSAE (DunbrackLab 2025) |
 | `iptm` | higher = better | Interface pTM |
 | `bt_ipsae` | higher = better | Binder-to-target iPSAE |
 | `tb_ipsae` | higher = better | Target-to-binder iPSAE |
@@ -464,17 +465,40 @@ Every one takes `--help`. `bindmaster evaluate <cmd> …` runs the same thing in
 
 - Linux with an NVIDIA GPU (CUDA driver >= 12.1)
 - `git` and `curl` available in PATH
-- ~60 GB free disk space
+- A C/C++ toolchain (`gcc`/`g++`, `make`) — `--tool all` includes SoluProt, which
+  source-builds USEARCH v12 on both platforms, and a failed build **fails the install**
+- ~75 GB free disk space for `--tool all`, to leave headroom. The preflight computes the
+  figure per selected tool and **aborts** below it: 70 GB for `all`, or 71 if it also
+  installs its own Miniforge3. `--skip-preflight` overrides
 - Conda/Miniforge is **not required** — the installer downloads Miniforge3 automatically if needed
 
 ### What happens during install
 
 Each tool goes through:
-1. **Clone** — repo cloned at a pinned commit into `BindMaster/<Tool>/`
+1. **Clone** — repo cloned at a pinned commit into `BinderScout/<Tool>/`
 2. **Environment** — conda env or uv venv created (spinner + full log)
 3. **Smoke test** — minimal import or `--help` call
 4. **Example** (optional, skippable) — bundled example run
-5. **Shortcut** — launcher written to `BindMaster/bin/`
+5. **Shortcut** — launcher written to `BinderScout/bin/`
+
+### Reproducibility: `install/locks/`
+
+Tool repositories are cloned at pinned commits, but the pins that actually broke this
+project three times were *transitive* — `pip install pyrosetta` picking up 2026.29,
+`uv pip install atomworks` picking up 3.0.0, `pip install ruff` picking up 0.17. The
+installer names a couple of dozen packages; the environments hold anywhere from ~25 to
+~236 distributions each (measured on the capture host), and the unnamed remainder is where
+those outages came from.
+
+So every verified environment is captured into `install/locks/<env>.txt` (plus Mosaic's
+`uv.lock`) and fed back to pip as a constraints file on reinstall. `install/locks/EVIDENCE.md`
+records where each capture came from.
+
+Two limits worth knowing before you rely on it: the locks are **x86_64 only** —
+`_constraints()` refuses to apply them on another architecture — and they cover 10 of the
+11 environments. `binder-eval-af3` has none: its pins have not been captured
+yet. (`EVIDENCE.md` long said the env was absent on the capture host, which was wrong — it
+exists there and produced the PD-L1 AF3 refolds.)
 
 ### Non-interactive options
 
@@ -651,15 +675,20 @@ ls BindMaster/conda/envs/         # shows local envs (standalone mode)
 
 ## Known issues
 
-A full read-only audit of the repository — purpose, data flow, dependencies, defects,
-non-LLM operability, and GUI options — is at
-**[docs/repo_analysis_2026-07-26.html](docs/repo_analysis_2026-07-26.html)**
-(31 findings with file:line and a suggested fix order).
+A full read-only audit of the repository was run on 2026-07-26 — purpose, data flow,
+dependencies, defects, non-LLM operability and GUI options, 31 findings with file:line
+and a suggested fix order. Every finding it raised against the quick-start path (F1, F2,
+F3, F5, F8, F9, F15, F20, F33, F34, F38, F40, F41) has since been fixed, and the tables
+that listed them as live issues were removed rather than left to mislead.
 
-Every finding that document raised against the quick-start path (F1, F2, F3, F5, F8,
-F9, F15, F20, F33, F34, F38, F40, F41) has since been fixed, and the tables that
-listed them as live issues have been removed rather than left to mislead. Read the
-audit as a record of what was wrong, not as current behaviour.
+The audit document itself does not ship: it was dropped by the history rewrite that made
+this repository public. `docs/walkthrough_and_dataflow.html` is the surviving companion
+piece, and is likewise a snapshot rather than current documentation — see the banner at
+the top of it.
+
+**No known issues are open against the documented quick-start path.** If you hit one,
+the fastest useful report is the failing command, `install.log` (or `install_aarch.log`),
+and `git rev-parse --short HEAD` from the repository root.
 
 The items below are what is still true today.
 

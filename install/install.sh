@@ -1,8 +1,9 @@
 #!/bin/bash
 # BindMaster Installer
 # Installs BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa,
-# Protein-Hunter, RFD3, and/or the Evaluator. AF3 and ESMFold2 are opt-in
-# (--tool af3 / --tool esmfold2).
+# Protein-Hunter, RFD3, and/or the Evaluator. ESMFold2 (default refold engine)
+# and the SoluProt screen are part of --tool all. AF3 is the one opt-in engine
+# (--tool af3), because its weights are gated.
 #
 # Usage:
 #   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|af3|esmfold2|all] [--cuda VERSION] [--skip-examples] [--yes] [--force]
@@ -936,7 +937,7 @@ PYEOF
 # this once near its top and then splices "${CONSTRAINTS[@]}" into its pip lines.
 #
 # Why a constraints file and not a version on every pip line: install.sh names a
-# couple of dozen packages, but the envs hold 115-176 distributions each. The
+# couple of dozen packages, but the envs hold ~25-236 distributions each. The
 # unnamed remainder is where all three of this repo's dependency outages came from
 # (BUG-14 pyrosetta, BUG-20 atomworks, the RUF071 ruff failure), and no realistic
 # number of inline pins reaches it. A constraints file also cannot accidentally

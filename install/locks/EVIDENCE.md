@@ -27,7 +27,7 @@ of `install/locks/` is to stop guessing.
 | `binder-eval-soluprot` | `binder-eval-soluprot.txt` | **ran** | solubility screen over the pool, pre-refold |
 | Boltz-2 refold | `mosaic.uv.lock` | **ran** | `refold-boltz2` over the campaign FASTA |
 | `binder-eval-esmfold2` | `binder-eval-esmfold2.txt` | **installed** | default refold engine; not reached in this campaign before capture |
-| `binder-eval-af3` | *(none)* | **no lock** | AF3 weights are gated and the env is absent on this box, so there was nothing to capture. The only env without a lock. |
+| `binder-eval-af3` | *(none)* | **no lock** | Not captured yet. The only env without a lock. (This cell previously said the env was absent on this box; that was wrong — `conda/envs/binder-eval-af3` was created 2026-10-27 19:37 and produced the 65 PD-L1 AF3 refolds the same evening, so it was capturable when this file was written.) |
 
 ## Not covered by any lock
 

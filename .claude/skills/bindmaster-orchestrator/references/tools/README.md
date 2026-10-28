@@ -58,7 +58,7 @@ Threshold 0.61 is the agreement threshold (the per-engine "pass" cutoff used in 
 | `boltz2.md` | Primary refolder. AF3-class diffusion + affinity head. Native `[binder\|target]` ordering, pLDDT `[0,1]`. | Stable, default | Correlated with Mosaic / BoltzGen / Protein-Hunter |
 | `protenix.md` | **Retired as a refolder** (Part J reverted 2026-07-26). Background only — PXDesign's internal engine. | Not a refolder | n/a |
 | `alphafold3.md` | **Canonical 2nd refolder** (Part K, landed). DeepMind native AF3 v3.0.2. Any CUDA host — ~4.4 GiB peak for 258-391 tokens, so a 24 GB card is enough. | Stable; `--tool af3` (gated weights) | Independent of every design tool **except PXDesign** (Protenix internally) |
-| *(no file — see `../evaluation.md`)* | **ESMFold2 — the default refolder**, installed by `--tool all`. Lightweight, no gated weights. Also the source of the `chain_iptm_interface` gate `autosize` uses. | Stable, default | Independent of every design tool |
+| `esmfold2.md` | **The default refolder**, installed by `--tool all`. Lightweight, no gated weights. Also the source of the `chain_iptm_interface` gate `autosize` uses. | Stable, default | Independent of every design tool |
 
 ## Entry template
 

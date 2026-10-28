@@ -52,7 +52,8 @@
 ## Part F: Batch 4 — Configurator & UX
 
 - [x] F1.  Add Evaluator as a tool option in `configurator.py` wizard (Step 5)
-- [ ] F2.  *(deferred — future)* Add `--headless` mode to `configurator.py` — accept JSON config, skip all prompts
+- [x] F2.  Add `--headless` mode to `configurator.py` — accept JSON config, skip all prompts
+       *(shipped as `--config <file>` plus the run-config written by every wizard run; see configurator.py "Run config persistence")*
 - [x] F3.  Add run folder archiving (`configurator.py --archive <run>` → tar.gz)
 - [x] F4.  Add `configurator.py --status` — show all runs and their completion state
 - [x] F5.  Add target sequence auto-extraction from mmCIF files (not just PDB)
