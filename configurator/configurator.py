@@ -2687,20 +2687,29 @@ def write_run_all(path: Path, cfg: dict, tools_enabled: dict):
 
     if tools_enabled.get("mosaic"):
         lines += [
-            "# Mosaic is interactive — run it separately before the pipeline:",
-            '#   bash "$RUN_DIR/run_mosaic.sh"',
-            "# Then re-run this script. It will skip Mosaic if designs.csv already exists.",
-            "# Missing Mosaic output is a WARNING, not a failure: this block used to `exit 1`,",
-            "# and because it is emitted first that aborted the whole run before BoltzGen,",
-            "# BindCraft, PXDesign, Proteina-Complexa, RFD3 or Protein-Hunter had started —",
-            "# even though `bash runs/<name>/run_all.sh` is the documented one-command path.",
-            'echo "=== Step: Mosaic ==="',
+            "# Mosaic runs unattended like every other tool. This block used to SKIP it with a",
+            '# "needs interactive input" warning, so `bash runs/<name>/run_all.sh` -- the one',
+            "# command the README presents as running the whole pipeline -- quietly ran 8 of 9",
+            "# tools, in exactly the context where nobody is watching. An overnight campaign",
+            "# came back with Mosaic missing from the report, and the remedy the warning",
+            "# offered (run it separately, then re-run this script) means re-running every",
+            "# other tool too.",
+            "#",
+            "# The claim was stale, not a trade-off: run_mosaic.sh runs mosaic/hallucinate.py,",
+            "# every parameter of which (target sequence and PDB, N_DESIGNS, TOP_K, MIN/MAX",
+            "# length, LENGTH_STEP, EPITOPE_IDX) is injected by write_mosaic_hallucinate at",
+            "# generation time. Neither it nor the template it comes from contains an input()",
+            "# or reads stdin anywhere. Mosaic now counts into FAILED like the rest.",
+            "#",
+            "# Re-running this script stays cheap for Mosaic: a finished designs.csv is reused",
+            "# rather than regenerated. The banner lives in the skip branch only, because",
+            '# run_tool echoes "=== Step: $label ===" itself and echoing it here too printed',
+            "# the Mosaic header twice in an unattended log while the other eight printed once.",
             'if [[ -f "$RUN_DIR/mosaic/designs.csv" ]]; then',
-            '    echo "  Mosaic designs.csv found — skipping interactive run."',
+            '    echo "=== Step: Mosaic ==="',
+            '    echo "  Mosaic designs.csv found — already done, skipping."',
             "else",
-            '    echo "  WARNING: Mosaic needs interactive input and is being SKIPPED." >&2',
-            "    echo \"           Run 'bash $RUN_DIR/run_mosaic.sh' separately, then re-run this\" >&2",
-            '    echo "           script to include its designs. Continuing with the other tools." >&2',
+            '    run_tool "Mosaic" "$RUN_DIR/run_mosaic.sh" "$RUN_DIR/mosaic/designs.csv"',
             "fi",
             "",
         ]
@@ -4516,6 +4525,41 @@ def write_run_config(path: Path, cfg: dict, tools_enabled: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 
+def _default_pxdesign_mode(tools_enabled: dict, cfg: dict | None = None) -> None:
+    """`pxdesign: True` with no mode key: INFER the mode from the evidence, then default.
+
+    PXDesign is the one tool with a MODE on top of its switch -- run it locally, or
+    import someone else's finished results -- and each half is gated on a different
+    key: the generator on "pxdesign_local" (TOOL_SEQUENCE, generate()), the import
+    branch of write_run_evaluate on "pxdesign" plus cfg["pxdesign_output_dir"]. Only
+    the wizard's mode prompt sets those keys, so a headless --config that enabled the
+    tool the obvious way got NO run_pxdesign.sh and no warning -- the tool simply was
+    not there. Nothing in the output mentions PXDesign at all, so the operator's only
+    clue is its absence from a list they would have to already know the length of.
+
+    Defaulting unconditionally to local breaks the other hand-written shape, though:
+    `{pxdesign: true}` plus cfg["pxdesign_output_dir"] is unambiguously an IMPORT, and
+    forcing local mode then hard-fails preflight on local mode's required keys
+    (pxdesign_binder_length) -- a config that used to work. So read cfg first:
+    pxdesign_output_dir is read only by the import path and local mode never sets it.
+    An explicit mode key still wins, and the wizard always sets all three, so this is
+    a no-op there.
+    """
+    if not tools_enabled.get("pxdesign"):
+        return
+    if tools_enabled.get("pxdesign_local") or tools_enabled.get("pxdesign_import"):
+        return
+    if cfg and cfg.get("pxdesign_output_dir"):
+        tools_enabled["pxdesign_import"] = True
+        print_warn("pxdesign enabled without a mode — inferring IMPORT (pxdesign_import).")
+        print("  Evidence: cfg['pxdesign_output_dir'] is set, and only import mode reads it.")
+        return
+    tools_enabled["pxdesign_local"] = True
+    print_warn("pxdesign enabled without a mode — inferring a LOCAL run (pxdesign_local).")
+    print("  Evidence: no cfg['pxdesign_output_dir'] to import from, and a local run is")
+    print("  what the other eight tools mean by 'enabled'. Set pxdesign_output_dir to import.")
+
+
 def load_run_config(path: Path) -> tuple[dict, dict]:
     """Read a config.json back into (cfg, tools_enabled).
 
@@ -4538,6 +4582,7 @@ def load_run_config(path: Path) -> tuple[dict, dict]:
 
     cfg = dict(payload["cfg"])
     tools_enabled = dict(payload["tools_enabled"])
+    _default_pxdesign_mode(tools_enabled, cfg)
 
     # Configs written before 2026-09-28 can carry soluprot_filter=true. The flag was
     # removed (SoluProt is a label; the drop discarded several of the tightest measured
@@ -4578,10 +4623,30 @@ def load_run_config(path: Path) -> tuple[dict, dict]:
     return cfg, tools_enabled
 
 
+def refuse_run_dir_that_is_a_file(run_dir: Path) -> None:
+    """Refuse a run folder that already exists and is not a directory.
+
+    Shared by the wizard's Step 1 and the headless `--config` path, because both
+    reached the same crash from different directions: the wizard's bare .exists()
+    check accepted a file and died in generate() with NotADirectoryError after ~80
+    answers, and load_run_config never checked at all, so cmd_from_config's
+    `run_dir.mkdir(parents=True, exist_ok=True)` raised FileExistsError as a bare
+    traceback -- exist_ok suppresses the error only when the existing path IS a
+    directory. One helper so neither half can be fixed alone again.
+    """
+    if run_dir.exists() and not run_dir.is_dir():
+        print()
+        print_fail(f"Not a directory: {run_dir}")
+        print("  The run folder must be a directory (or a new path).")
+        print("  Did you paste the target structure path by mistake?")
+        sys.exit(1)
+
+
 def cmd_from_config(config_path: str, run_now: bool) -> None:
     """Non-interactive path: generate a run directory straight from a saved config."""
     cfg, tools_enabled = load_run_config(Path(config_path))
     run_dir = Path(cfg["run_dir"])
+    refuse_run_dir_that_is_a_file(run_dir)
 
     print_step(f"Generating run folder from {config_path}")
     print(f"  Run folder: {run_dir}")
@@ -4728,6 +4793,73 @@ def _rfd4_target_format_problem(cfg: dict, tools_enabled: dict) -> str | None:
     )
 
 
+# The tools_enabled keys generate() gates a run-script writer on. Identical to
+# TOOL_SEQUENCE's keys today, and the pair exists precisely so that a DRIFT between
+# the list the UI calls "enabled" and the key the generator actually branches on is
+# reportable BEFORE a single file is written. PXDesign shipped for a while with the
+# generator on "pxdesign_local" while a headless config could enable it as "pxdesign",
+# so `pxdesign: true` generated nothing and said nothing. _default_pxdesign_mode above
+# closes that instance; this closes the class. Kept honest by
+# tests/configurator/test_configurator_writers.py, which re-derives the keys generate()
+# branches on from generate()'s own source -- so adding a tenth tool to TOOL_SEQUENCE
+# without a generator fails the test rather than shipping a silent no-op.
+_SCRIPT_WRITER_KEYS = frozenset(
+    {
+        "mosaic",
+        "boltzgen",
+        "bindcraft",
+        "bindcraft2",
+        "pxdesign_local",
+        "proteina_complexa",
+        "rfd3",
+        "protein_hunter",
+        "rfd4",
+    }
+)
+
+
+def _tools_without_a_generator(tools_enabled: dict) -> list[tuple[str, str, str]]:
+    """(label, tools_enabled key, script) for enabled tools generate() would not write.
+
+    Knowable before any file exists, which is the point: the post-write check below
+    can only report the same fact once both config.json writes have happened, leaving
+    a half-built run directory for the operator to clean up.
+    """
+    return [
+        (label, key, script)
+        for key, script, label, _subdir in enabled_tools(tools_enabled)
+        if key not in _SCRIPT_WRITER_KEYS
+    ]
+
+
+def verify_enabled_tools_generated(run_dir: Path, tools_enabled: dict) -> None:
+    """Every tool reported as enabled must have left its run script behind.
+
+    Defence in depth behind preflight's _tools_without_a_generator(), which asks the
+    same question up front from the key registry. This one asks the FILESYSTEM after
+    the fact, so a generator branch that exists but silently writes nothing -- a writer
+    that returns early, a path built wrong -- is still caught rather than discovered
+    hours later by run_all.sh skipping a step it has no script for.
+    """
+    missing = [
+        (label, script)
+        for _key, script, label, _subdir in enabled_tools(tools_enabled)
+        if not (run_dir / script).is_file()
+    ]
+    if not missing:
+        return
+
+    print()
+    print_fail("This run is incomplete — tools are reported as enabled but have no run script:")
+    for label, script in missing:
+        print(f"    {RED}✗{RESET} {label}    (expected: {run_dir / script})")
+    print()
+    print("    That is a configurator bug, not a problem with your config: the generator")
+    print("    gates this tool on a different key than the enabled-tools list does.")
+    print()
+    sys.exit(1)
+
+
 def preflight(cfg: dict, tools_enabled: dict) -> None:
     """Refuse to start generating unless every enabled tool can be generated.
 
@@ -4738,11 +4870,20 @@ def preflight(cfg: dict, tools_enabled: dict) -> None:
     assets = _missing_tool_assets(cfg, tools_enabled)
     keys = _missing_cfg_keys(cfg, tools_enabled)
     rfd4_format = _rfd4_target_format_problem(cfg, tools_enabled)
-    if not assets and not keys and not rfd4_format:
+    ungenerated = _tools_without_a_generator(tools_enabled)
+    if not assets and not keys and not rfd4_format and not ungenerated:
         return
 
     print()
     print_fail("Cannot generate this run — fix the following first:")
+    if ungenerated:
+        print()
+        print(f"  {BOLD}Tools reported as enabled that the generator has no writer for:{RESET}")
+        for label, key, script in ungenerated:
+            print(f"    {RED}✗{RESET} {label}    (key {key!r}, would never write {script})")
+        print()
+        print("    That is a configurator bug, not a problem with your config: the generator")
+        print("    gates this tool on a different key than the enabled-tools list does.")
     if assets:
         print()
         print(f"  {BOLD}Enabled tools that are not installed:{RESET}")
@@ -4891,6 +5032,8 @@ def generate(cfg: dict, tools_enabled: dict):
     # `configurator.py --config` and machine-readable without re-running the wizard.
     write_run_config(run_dir / CONFIG_FILENAME, cfg, tools_enabled)
 
+    verify_enabled_tools_generated(run_dir, tools_enabled)
+
 
 # ─── Pipeline runner ──────────────────────────────────────────────────────────
 
@@ -4905,7 +5048,7 @@ def run_pipeline(cfg: dict, tools_enabled: dict):
     # "Run the pipeline now?" silently ran nothing for RFD3 or Protein-Hunter, and
     # the Evaluator then reported on an empty pool.
     for _key, script, label, _subdir in enabled_tools(tools_enabled):
-        print_step(f"Running {label}" + ("  (interactive — you will be prompted below)" if _key == "mosaic" else ""))
+        print_step(f"Running {label}")
         rc = subprocess.run(["bash", str(run_dir / script)]).returncode
         if rc == 0:
             print_ok(f"{label} completed")
@@ -5053,10 +5196,24 @@ def wizard():
         )
     ).expanduser()
 
-    if run_dir.exists():
+    # A bare .exists() is true for FILES too, and the prompt above asked for a path --
+    # tab-completion in a targets/ directory lands on a .pdb, and the prompt immediately
+    # before this one asked for exactly such a path. Pasting one here used to be
+    # accepted, warned about as a "folder", offered a meaningless "Overwrite?" (nothing
+    # was overwritten -- verified byte-identical afterwards), and then crash generate()
+    # with NotADirectoryError AFTER all ~80 answers had been given. config.json is
+    # written by generate(), so there was nothing to replay and the whole interview was
+    # lost. Catch it here, where the user can still fix it for free.
+    refuse_run_dir_that_is_a_file(run_dir)
+
+    # And only warn when there is something to lose: this fired on an empty directory
+    # the user had just made for the purpose, and "Overwrite?" did not describe what
+    # happens either -- files of the same name are replaced, everything else is left.
+    if run_dir.is_dir() and any(run_dir.iterdir()):
         print()
-        print_warn(f"Run folder already exists: {run_dir}")
-        if not ask_yn("  Overwrite?", default=False):
+        print_warn(f"Run folder already exists and is not empty: {run_dir}")
+        print("  Existing files with the same names will be replaced; others are left alone.")
+        if not ask_yn("  Continue?", default=False):
             print("  Aborted.")
             sys.exit(0)
 
@@ -5782,8 +5939,6 @@ def wizard():
 
     # ── Step 9: Run now? ──────────────────────────────────────────────────────
     print()
-    if use_mosaic:
-        print_warn("Mosaic requires interactive input and will run first.")
     if use_boltzgen:
         print_warn("BoltzGen downloads ~6 GB of weights on first run.")
     if use_evaluator:
@@ -5988,6 +6143,15 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (KeyboardInterrupt, EOFError):  # EOFError = Ctrl-D or a closed stdin
+    except EOFError:
+        # Piped or redirected stdin, or a Ctrl-D at a prompt -- i.e. someone running
+        # the wizard from a script or over ssh inside one. "Interrupted." was shared
+        # with Ctrl-C and told that user nothing: they did not interrupt anything, and
+        # the thing they need to know is that this path has a non-interactive
+        # equivalent. Exit code stays 1 either way.
+        print(f"\n\n  {YELLOW}No more input.{RESET} The wizard needs an interactive terminal.")
+        print(f"  For scripted use see:  {CYAN}{_INVOKE} configure --config <config.json>{RESET}")
+        sys.exit(1)
+    except KeyboardInterrupt:
         print(f"\n\n  {YELLOW}Interrupted.{RESET} Some files may have been partially written.")
         sys.exit(1)

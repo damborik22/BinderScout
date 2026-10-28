@@ -330,16 +330,75 @@ class TestToolSequenceCoverage:
         for _key, run_script, _label, _subdir in conf.TOOL_SEQUENCE:
             assert run_script in content, f"{run_script} missing from run_all.sh"
 
-    def test_run_all_does_not_abort_when_mosaic_output_is_absent(self, base_cfg, tmp_path):
-        """The Mosaic block is emitted first; `exit 1` there aborted the whole run
-        before any other tool started."""
+    def _mosaic_block(self, base_cfg, tmp_path):
+        """Everything run_all.sh emits for Mosaic, bounded by its neighbours.
+
+        Bounded at the end of the run_tool() definition and at the first other tool
+        rather than at the Mosaic `if`, because a banner echoed ABOVE that `if` --
+        which is exactly the double-header this file pins -- would otherwise fall
+        outside the slice and be invisible to the assertion.
+
+        Comment lines are stripped, so these assertions read what bash will RUN.
+        Without that, the comment explaining why Mosaic is no longer skipped is
+        itself enough to fail an assertion on the words "needs interactive input" --
+        a test that the fix's own documentation can break is not pinning the fix.
+        """
         script = tmp_path / "run_all.sh"
         conf.write_run_all(script, base_cfg, _ALL_TOOLS)
         content = script.read_text()
-        mosaic_block = content[content.index("=== Step: Mosaic ===") :]
-        mosaic_block = mosaic_block[: mosaic_block.index("fi")]
-        assert "exit 1" not in mosaic_block
-        assert "SKIPPED" in mosaic_block
+        start = content.index("\n}\n") + 3  # end of the run_tool() helper
+        region = content[start : content.index('run_tool "BoltzGen"')]
+        return "\n".join(ln for ln in region.splitlines() if not ln.lstrip().startswith("#"))
+
+    def test_run_all_runs_mosaic_instead_of_skipping_it(self, base_cfg, tmp_path):
+        """`bash run_all.sh` is the documented one-command path, and it ran 8 of 9 tools.
+
+        The old block printed "Mosaic needs interactive input and is being SKIPPED"
+        and moved on, so an unattended overnight campaign came back with Mosaic
+        missing from the report. The claim was stale rather than a trade-off:
+        run_mosaic.sh runs mosaic/hallucinate.py, which the configurator generates
+        with every parameter injected, and neither it nor its template reads stdin --
+        pinned by test_the_mosaic_run_path_reads_no_stdin below.
+        """
+        block = self._mosaic_block(base_cfg, tmp_path)
+        assert "SKIPPED" not in block, "run_all.sh must not skip Mosaic"
+        assert "needs interactive input" not in block
+        assert 'run_tool "Mosaic" "$RUN_DIR/run_mosaic.sh" "$RUN_DIR/mosaic/designs.csv"' in block, (
+            "Mosaic must go through run_tool, so a failure lands in FAILED like every other tool"
+        )
+        # The reason the old block could not use run_tool: it aborted instead of
+        # continuing. Keep that property pinned now that it does.
+        assert "exit 1" not in block
+
+    def test_mosaic_does_not_print_its_header_twice(self, base_cfg, tmp_path):
+        """run_tool echoes "=== Step: $label ===" itself.
+
+        The old block echoed it as well, so in an unattended log Mosaic announced
+        itself twice while the other eight announced themselves once -- which reads
+        as a repeated step rather than a cosmetic duplication.
+        """
+        block = self._mosaic_block(base_cfg, tmp_path)
+        assert block.count("=== Step: Mosaic ===") == 1, "the banner belongs in the skip branch only"
+
+    def test_a_finished_mosaic_run_is_still_reused(self, base_cfg, tmp_path):
+        """Re-running run_all.sh must not re-pay for designs that already exist."""
+        block = self._mosaic_block(base_cfg, tmp_path)
+        assert 'if [[ -f "$RUN_DIR/mosaic/designs.csv" ]]' in block
+        assert "already done, skipping" in block
+
+    def test_the_mosaic_run_path_reads_no_stdin(self, base_cfg, tmp_path):
+        """The evidence the fix above rests on, checked rather than asserted in prose.
+
+        If hallucinate.py ever grows an input() -- or the upstream template it is
+        built from does -- run_all.sh would hang forever on a closed stdin instead of
+        skipping a tool, which is strictly worse than the bug. Fail here instead.
+        """
+        conf.write_mosaic_hallucinate(tmp_path / "hallucinate.py", base_cfg)
+        generated = (tmp_path / "hallucinate.py").read_text()
+        template = (conf.BINDERSCOUT_DIR / "binderscout_examples" / "hallucinate_binderscout.py").read_text()
+        for name, body in (("generated hallucinate.py", generated), ("the shipped template", template)):
+            assert "input(" not in body, f"{name} reads stdin — run_all.sh would hang"
+            assert "sys.stdin" not in body, f"{name} reads stdin — run_all.sh would hang"
 
 
 class TestRunAllIsolatesToolFailures:
