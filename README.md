@@ -38,6 +38,43 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 ---
 
+## Project status, bugs and ideas
+
+**BinderScout is under active development, and we would rather hear from you than not.**
+
+This pipeline works — we have run complete campaigns with it, and the release you are
+looking at is the state it was in when those campaigns ran. But it orchestrates seven
+independent design tools and three structure-prediction engines, all of them moving
+quickly and none of them ours. An upstream release can change a flag, a column name or a
+model's memory profile without warning, and that is usually how something here breaks. So
+we can say honestly that this was functional when we used it; we cannot promise that every
+path is functional for you today, on your hardware, with this week's upstream versions.
+
+**If you hit a bug, please tell us** — [open an issue](https://github.com/damborik22/BinderScout/issues).
+A report costs you a few minutes and saves the next person the same afternoon. It is
+genuinely useful even if you are not sure it is a bug, even if you cannot reproduce it
+reliably, and even if you suspect you did something wrong: "I ran this and got that, and I
+expected something else" is a complete and welcome report. What helps most, when you have
+it to hand:
+
+- the command you ran, and the error or the surprising output (a few lines is plenty)
+- your platform and GPU, and whether the install is standalone or system-conda
+- the relevant `runs/<name>/<tool>/settings.json`, which records the exact versions and
+  parameters that produced the result
+
+**Suggestions and ideas are just as welcome as bug reports.** A tool you would like
+integrated, a metric you think the ranking is missing, a step that was confusing, a
+default that fought you, documentation that sent you the wrong way, or a use case we
+clearly never considered — all of it is useful, and the awkward feedback is usually the
+most useful kind. Open an issue for those too; a rough thought is fine, you do not need a
+worked-out proposal.
+
+If you are considering a code contribution, see [CONTRIBUTING.md](CONTRIBUTING.md) — but
+please do not feel you need to bring a patch. Telling us what went wrong is a real
+contribution on its own.
+
+---
+
 ## Components
 
 | Component | What it does | Runs in |
