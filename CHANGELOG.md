@@ -19,11 +19,17 @@ First release of the `master` line under the reset numbering, and the point at w
 master is frozen; 2.0 development continues on `v2.0.x`.
 
 **Platform support.** Verified on x86_64 (RTX 3090, driver 580.159.03): full
-`--tool all` install, a seven-tool PD-L1 campaign, and all three refold engines.
-The aarch64 / DGX Spark path is **back-ported, not exercised here** — this release
-host has no Spark. The BindCraft PyRosetta call-site patch that aarch64 needs is
-byte-identical to the one running on `v2.0.x`, so it is not new code, but no Spark
-install was run against this tree.
+`--tool all` install, a seven-tool PD-L1 campaign against PD-L1, and all three
+refold engines.
+
+The aarch64 / DGX Spark path carries fixes developed and exercised on the `v2.0.x`
+line and ported here — the BindCraft PyRosetta call-site patch (BUG-14), the
+`run_logged` streaming rewrite, the toolchain preflight (BUG-08),
+`_pin_rfd3_atomworks` (BUG-28), the TUI's installed-tool reader (BUG-06) and the
+install-marker migration. The marker functions are byte-identical across both
+installers and a parity test holds them that way. **No Spark install was run
+against this tree**, so treat aarch64 as ported-and-reviewed rather than
+release-tested on hardware.
 
 
 ### Fixed
