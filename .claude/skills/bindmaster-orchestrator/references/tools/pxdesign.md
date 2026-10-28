@@ -11,7 +11,7 @@ PXDesign is ByteDance AI4S's binder design suite. The design model (PXDesign-d) 
 
 1. **Diffusion** — PXDesign-d samples N candidate binder structures conditioned on target structure, hotspots, and binder length.
 2. **MPNN** — ProteinMPNN designs sequences for the generated backbones.
-3. **Protenix evaluation** — Protenix base / mini / mini_tmpl checkpoints score the designed complexes (the same Protenix used as a refolder in the BindMaster evaluator Part J).
+3. **Protenix evaluation** — Protenix base / mini / mini_tmpl checkpoints score the designed complexes.
 4. **AF2-IG evaluation** — AF2 with initial guess (binder atom positions provided as starting point) does the final confidence prediction on both the complex and the monomer.
 5. **Ranking** — composite score from confidence + interface metrics, written to `summary.csv` in `<out_dir>/design_outputs/<task_name>/`.
 
@@ -21,7 +21,7 @@ Two run modes (controlled by `--preset`):
 - **`default`** — fast, fewer samples per stage
 - **`extended`** — recommended for production; more samples, more thorough filtering
 
-Because PXDesign internally uses Protenix as part of its evaluation chain, and the BindMaster evaluator's Part J Protenix refolder shares the same conda env (`bindmaster_pxdesign`), there's overlap: a PXDesign run produces designs that have already been Protenix-scored before they enter the BindMaster evaluator's cross-method comparison.
+Because PXDesign internally uses Protenix, and Protenix is an AF3 reimplementation, the overlap that matters downstream is with the **AF3** refold: an AF3 refold of a PXDesign binder is partly self-judging, and ESMFold2 is the clean read. (Protenix itself is not a refold engine — Part J was reverted; `pxdesign_protenix_iptm` survives only as a native design-time metric.)
 
 ## Strengths
 
@@ -56,7 +56,6 @@ Because PXDesign internally uses Protenix as part of its evaluation chain, and t
 
 - Single-target quick iteration with limited compute — full pipeline is heavier than **Mosaic** or hand-rolled **Protein-Hunter** workflows.
 - Backbone diversity is the top priority — **RFD3** or **BoltzGen** sample more diverse backbones.
-- You're already running Protenix as a separate refolder in the evaluator — PXDesign's internal Protenix evaluation overlaps with the evaluator's Part J Protenix refolder. Not harmful, but the orchestrator should know they're not fully independent signals.
 - Custom CUDA kernel compilation is blocked on your cluster — the web server is the safer path.
 
 ## Outputs the evaluator parses
@@ -81,7 +80,7 @@ Because PXDesign internally uses Protenix as part of its evaluation chain, and t
 
 **Evaluator step (BindMaster):**
 
-PXDesign outputs feed the standard evaluator — Boltz-2 refold with uniform 10 Å iPSAE producing `bt_ipsae`, `tb_ipsae`, `ipsae_min`. The evaluator's Part J Protenix refolder is the same model PXDesign uses internally; the orchestrator should weight that overlap when interpreting `agreement_count`. PXDesign's full native metric battery (Protenix ensemble, AF2-IG complex+monomer, MPNN sequence recovery) is preserved in `summary.csv` alongside the evaluator's cross-method `ipsae_min` — the evaluator is an unbiased judge across tools, not a replacement for PXDesign's internal ranking.
+PXDesign outputs feed the standard evaluator — Boltz-2 refold with uniform 10 Å iPSAE producing `bt_ipsae`, `tb_ipsae`, `ipsae_min`. The correlated engine for PXDesign outputs is **AF3**, because PXDesign's internal Protenix is an AF3 reimplementation — read ESMFold2 as the clean signal. (Protenix refolding is retired — Part J reverted — so there is no `protenix_*` column to weight, and `agreement_count` is a diagnostic only.) PXDesign's full native metric battery (Protenix ensemble, AF2-IG complex+monomer, MPNN sequence recovery) is preserved in `summary.csv` alongside the evaluator's cross-method `ipsae_min` — the evaluator is an unbiased judge across tools, not a replacement for PXDesign's internal ranking.
 
 ## Key knobs
 

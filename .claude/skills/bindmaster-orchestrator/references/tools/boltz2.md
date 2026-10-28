@@ -11,7 +11,7 @@ Boltz-2 is from the MIT group (Passaro, Corso, Wohlwend, Jaakkola, Barzilay). It
 
 In BindMaster, Boltz-2 is the **default refolding engine for every design**. After a design tool (Mosaic, BoltzGen, BindCraft, RFD3, PXDesign, Protein-Hunter, Proteina-Complexa) produces a sequence + target context, the evaluator re-folds the complex with Boltz-2 and computes iPSAE under the DunbrackLab 2025 `d0_res` formula with a uniform 10 Å PAE cutoff. The refold is what produces the `boltz_*` columns in `summary.csv`.
 
-**Critical to the orchestrator:** three design tools (Mosaic, BoltzGen, Protein-Hunter) use Boltz-2 internally during design. For those tools' outputs, the Boltz-2 refold is *not* an independent check — it's the same model the design was optimized against. The agreement_count signal from Boltz-2 alone is therefore not sufficient for those tools; Protenix and AF3 refold agreement matters more.
+**Critical to the orchestrator:** three design tools (Mosaic, BoltzGen, Protein-Hunter) use Boltz-2 internally during design. For those tools' outputs, the Boltz-2 refold is *not* an independent check — it's the same model the design was optimized against. A Boltz-2 refold alone is therefore not sufficient for those tools; the AF3 and ESMFold2 refolds are what make `consensus_iptm_mean` independent of the designer. (Protenix is not a refolder — Part J was reverted 2026-07-26; `agreement_count` is a diagnostic column, not a signal to weigh.)
 
 ## Strengths
 

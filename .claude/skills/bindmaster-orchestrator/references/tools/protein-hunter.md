@@ -2,7 +2,7 @@
 
 **Engine:** Iterative structure-hallucination-within-diffusion framework — uses AF3-style structure predictors (Boltz-1/2 or Chai-1) as the hallucination oracle. Lightweight, fine-tuning-free; starts from an all-X (unknown amino acid) sequence and iteratively cycles structure prediction → sequence sampling until convergence. Two backends in the repo: `boltz_ph` (Boltz edition, used by BindMaster) and `chai_ph` (Chai edition, under active development). Optional AF3 cross-validation.
 **Role:** design
-**Status:** in active integration (no automated configurator yet in BindMaster; run scripts written by hand from `bindmaster_examples/run_protein_hunter.sh.template`)
+**Status:** integrated in BindMaster (Part L); `bindmaster configure` generates `run_protein_hunter.sh` from its own embedded writer, which mirrors `bindmaster_examples/run_protein_hunter.sh.template` rather than reading it (`configurator.py:3247`). **x86 only** — `install/install_aarch.sh` refuses `--tool protein-hunter` (exit 1); untested on aarch64 (PH's own pip `pyrosetta-installer` path and its vendored Boltz-2 / Chai-1 build), not a PyRosetta-wheel limitation
 **Environment:** conda env `bindmaster_protein_hunter`; requires Boltz-2 cache populated at `~/.boltz/`
 
 ## Principle
@@ -32,7 +32,7 @@ Lower `percent_X` → more constrained search → tighter, more structured outpu
 
 ## Weaknesses
 
-- **Experimental software, no automated runner.** Per BindMaster CLAUDE.md, the configurator does not yet generate Protein-Hunter run scripts; written by hand from the template.
+- **Experimental software (upstream), but the runner IS generated.** `bindmaster configure` writes `run_protein_hunter.sh` via `write_run_protein_hunter` (`configurator.py:3247`, called at `configurator.py:4158`). That writer is an embedded copy that *mirrors* `bindmaster_examples/run_protein_hunter.sh.template` rather than reading it — two copies, nothing keeping them in step, so check both when changing either. Generate it rather than hand-writing, per `../learnings.md` §10.
 - **No experimental wet-lab validation in the paper.** Authors flag: "EXPERIMENTAL SOFTWARE: This pipeline is under active development and has NOT been experimentally validated in laboratory settings."
 - **CLAUDE.md runtime gotchas** — each one bit during the CALCA run:
   - `--msa_mode` valid values are `single` or `mmseqs`, **NOT** `single_sequence`. The literal `single_sequence` raises `argparse: invalid choice`.
@@ -56,7 +56,6 @@ Lower `percent_X` → more constrained search → tighter, more structured outpu
 ## Avoid when
 
 - You need experimentally validated provenance — Protein-Hunter is explicitly flagged as unvalidated in vivo by the authors.
-- You need a turnkey, configurator-managed run — BindMaster doesn't auto-generate run scripts yet.
 - You need stable cross-model validation — same-model self-judging applies (the Boltz-2 used for design is the same one used by the BindMaster evaluator's default refold).
 - You don't want to manually populate `~/.boltz/` and verify the `mols/` directory before first run.
 

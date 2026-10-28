@@ -45,7 +45,8 @@ A target reference in any of these forms — resolve to the others as step 0:
 - Protein/gene name (e.g. "PD-L1", "CALCA")
 - UniProt accession
 - PDB id(s) — apo and/or in complex
-- A local structure file (`runs/<name>/target/*.pdb|*.cif`)
+- A local structure file (`runs/<name>/target/*.pdb|*.cif`; `analyze-target` takes `.pdb`/`.ent`
+  only — convert mmCIF first)
 - **A bare amino-acid sequence** (very common) — handle via §2a.
 
 `TODO:` document the resolution recipe (name → UniProt → gene → PDB) using WebFetch on
@@ -151,8 +152,7 @@ cross-check the geometric pockets.
 
 Reconcile 3a–3c into a single dossier: a ranked list of candidate sites (with evidence),
 recommended hotspots for the chosen site, a difficulty assessment (geometry **+** literature
-signals like flexibility / glycosylation / shallow interface), and campaign parameters. `TODO:`
-the merge rules when literature and geometry disagree.
+signals like flexibility / glycosylation / shallow interface), and campaign parameters.
 
 ---
 

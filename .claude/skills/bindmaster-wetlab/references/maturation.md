@@ -1,7 +1,9 @@
 # Maturation strategy
 
-After binding data comes back (or, pre-experimentally, from the `affinity` composite as a Kd
-proxy), choose the next computational round and the parents to carry forward.
+After binding data comes back, choose the next computational round and the parents to carry
+forward. `--affinity-col` is read as **nM, lower = tighter** — it needs a measured Kd (or a proxy
+already mapped onto nM). `affinity_energy_density` is *higher* = tighter and not an nM scale, so
+passing it inverts both the parent choice and the thresholds below.
 
 ```bash
 binder-compare mature --designs results.csv --affinity-col kd_nM \

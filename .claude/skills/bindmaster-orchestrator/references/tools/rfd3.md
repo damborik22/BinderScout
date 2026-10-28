@@ -2,7 +2,7 @@
 
 **Engine:** All-atom diffusion. Generates protein structures atom-by-atom (4 backbone + 10 sidechain atoms per residue; smaller sidechains extended with "virtual atoms" on Cβ). Side-chain aware diffusion enables direct conditioning on atomic-level constraints — H-bond donors/acceptors, burial states, ligand contacts, catalytic geometry. Distributed via the `foundry` umbrella CLI (RosettaCommons). Pairs with `proteinmpnn` (or `ligandmpnn`) for sequence design and `rf3` for refolding.
 **Role:** design
-**Status:** in active integration in BindMaster (replaces deprecated RFAA; configurator does not yet generate RFD3 run scripts — written by hand from `bindmaster_examples/run_rfd3.sh.template`)
+**Status:** in active integration in BindMaster (replaces deprecated RFAA; `bindmaster configure` generates `run_rfd3.sh` — `configurator.py:2875`. Prefer it; do not hand-write from `bindmaster_examples/run_rfd3.sh.template`)
 **Environment:** conda env `bindmaster_rfd3` (replaces legacy `bindmaster_rfaa`)
 
 ## Principle
@@ -33,7 +33,7 @@ The `foundry` CLI handles installation, checkpoint management, and the inference
 
 ## Weaknesses
 
-- **No configurator support yet in BindMaster.** Run scripts written by hand. The template at `bindmaster_examples/run_rfd3.sh.template` is the canonical reference.
+- **Two copies of the run script — generate, don't hand-write.** `bindmaster configure` writes `run_rfd3.sh` from its own embedded writer (`write_run_rfd3`, `configurator.py:2875`), which *mirrors* `bindmaster_examples/run_rfd3.sh.template` rather than reading it, so check both when changing either. Prefer the configurator: it refuses at configure time when no hotspots are configured, while the template hands you an unfilled `{{SELECT_HOTSPOTS_LINE}}` under its load-bearing `infer_ori_strategy: hotspots` — left empty, that key dies in rfd3's dataloader; dropped, or swapped for `com`, it silently emits extended coils that pass every downstream guard (CBG/2VDY, ApoE4).
 - **CLAUDE.md runtime gotchas** — each bit during the CALCA run:
   - **Output format is `.cif.gz`** (compressed mmCIF), NOT `.pdb`. Decompress for tools that need PDB.
   - **Chain IDs in output mmCIF:** target = `A` (preserved residues from input contig), binder = `B` (designed). `label_entity_id` shows 0/1, but actual chain IDs at `label_asym_id` are letters.
@@ -58,7 +58,6 @@ The `foundry` CLI handles installation, checkpoint management, and the inference
 
 ## Avoid when
 
-- You need a turnkey configurator-managed run today — BindMaster's configurator doesn't generate RFD3 scripts yet; use the template by hand.
 - Single-GPU < 24 GB without `expandable_segments` set — guaranteed OOM mid-run on default settings.
 - You need experimentally robust provenance — the paper's wet-lab N is small and missing controls. Still useful for in-silico campaigns; treat as exploratory.
 - aarch64 — should be fine architecturally (no DGL dependency like RFAA had), but BindMaster integration not yet tested on Blackwell.

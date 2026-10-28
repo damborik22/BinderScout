@@ -49,8 +49,8 @@ The full refolder set on every platform is **ESMFold2 (default) + Boltz-2 + AF3*
 
 - **Not applicable from a same-model perspective** — no design tool in the BindMaster pool uses AF3 internally.
 - **The only practical caveats are availability and cost:**
-  - On x86 clusters where AF3 isn't available, the `agreement_count` denominator is 2 (Boltz-2 + Protenix), not 3. Orchestrator must adjust thresholds.
-  - For very large pools (>1000 designs), AF3 may be too slow to run on every design. Use Boltz-2 and Protenix first to triage; reserve AF3 for the survivors.
+  - A host whose gated AF3 weights are not in place yields `consensus_iptm_n = 2` (Boltz-2 + ESMFold2) and every design then misses the default `--min-engines 3` gate — place the weights or pass `--min-engines 2`. Availability is about the weights, not the architecture.
+  - For very large pools (>1000 designs), AF3 may be too slow to run on every design. Triage with ESMFold2 — cheapest, and clean against all seven design tools — then reserve AF3 for the survivors (`../learnings.md` §11).
 
 ## Outputs the evaluator parses
 
@@ -82,13 +82,9 @@ The full refolder set on every platform is **ESMFold2 (default) + Boltz-2 + AF3*
 
 **Column prefixing:** `af3_*` distinguishes from `boltz_*` and `protenix_*`.
 
-**Cross-engine agreement_count:**
+**Cross-engine rollup:**
 
-The orchestrator's primary cross-method comparator. Per CLAUDE.md `Critical domain facts`:
-
-> Ranking uses agreement_count (how many engines agree ipsae_min > 0.61) as primary sort, then ipsae_min desc
-
-With all three engines available, `agreement_count ∈ {0, 1, 2, 3}`. With only Boltz-2 + Protenix (x86 environments), denominator is 2 — the orchestrator should track which engines were available per design.
+AF3 is one of the three engines feeding `consensus_iptm` and `consensus_iptm_mean`. THE ranking (Part U) is a cross-engine gate — `consensus_iptm_n >= --min-engines`, default 3, floor 2, gate-failing rows ranked last and never dropped — then `consensus_iptm_mean` descending, tiebreak `consensus_iptm_n` -> `consensus_iptm` -> binder pLDDT. There is no way to select another ranking. `agreement_count` survives as a diagnostic column only: macro-AUC 0.532 with 87.2% of designs tied at zero, removed as a sort key in Part U. A host whose AF3 weights are not in place yields `consensus_iptm_n = 2` — pass `--min-engines 2` rather than reinterpreting the diagnostic.
 
 ## Key knobs
 
@@ -101,7 +97,7 @@ With all three engines available, `agreement_count ∈ {0, 1, 2, 3}`. With only 
 | MSA pipeline | DeepMind native | Different stack from Boltz-2 / Protenix; requires AF3-format MSA inputs. |
 | Template input | optional | Templates supported per AF3 paper; relevant for refolding against known structures. |
 | Database paths | env vars | UniRef, MGnify, BFD, etc. — set in `binder-eval-af3` env. |
-| GPU | aarch64 / DGX Spark | x86 not supported in BindMaster integration. |
+| GPU | any CUDA host | ~4.4 GiB peak for 258–391-token complexes, so a 24 GB card is enough; x86_64 and aarch64 both supported. |
 | `--use_msa_for_af3` (from Protein-Hunter) | passes MSA through to AF3 | Relevant only when Protein-Hunter triggers AF3 cross-val during design — not BindMaster's main refold path. |
 
 ## Sources

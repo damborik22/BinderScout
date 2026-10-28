@@ -32,6 +32,12 @@ binder-compare affinity --metrics report/metrics.csv \
 - **No:** the whole pool (too slow), or a single-engine pool where ranking is dominated by bias.
 
 ## Caveats
+- **Part N is a CLOSED NEGATIVE and this ranker is ADVISORY, not validated.** Ranking affinity
+  among binders from structure confidence failed on four independent datasets — Part N itself
+  (best pooled |ρ| ≈ 0.34, holding on only 2/4 targets), Part U, OpenBind (molecular weight is the
+  best predictor, ρ 0.48) and SKEMPI (PRODIGY 0.20, Rosetta ΔG 0.12). Interface ΔG, `|dG/dSASA|`,
+  PRODIGY and the BindCraft 14-metric panel all fail. Gate-then-density is what *survived*, not
+  what was validated: present it as advisory, and do not re-open the search.
 - An *interface-energy density* proxy, not a measured Kd — calibrate against any real data you have.
 - ΔG depends on the interface chain spec being right; a wrong `--interface` silently mis-scores.
 - `TODO:` PRODIGY fallback wiring if a host lacks PyRosetta (BindCraft env should always have it).

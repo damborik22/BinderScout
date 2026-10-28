@@ -44,7 +44,6 @@ settled on: a cross-engine gate (`consensus_iptm_n >= --min-engines`) then
 
 - **Same-model overlap with PXDesign.** PXDesign outputs already use Protenix internally — refold is not a clean independent check. For PXDesign-designed outputs, Boltz-2 and AF3 give cleaner cross-validation.
 - **PAE ordering convention is target-first.** Outputs PAE matrix with target chain first; BindMaster evaluator transposes to `[binder|target]` for consistency with Boltz-2 native ordering. Manual readers of raw Protenix output need to apply this transpose.
-- **Part J integration still in progress** — refolder code path not fully stable in BindMaster evaluator yet.
 - **Newer than AF2** — same caveat as Boltz-2; less battle-tested in production.
 - **Custom CUDA kernels** in the install path; BindMaster applies post-install patches (`pxdbench` `NumpyEncoder`, `configs_infer.py` num_workers, CUDA arch for Blackwell sm_120). If packages are upgraded manually, patches must be reapplied.
 - **`requirements.txt` pins `torch==2.3.1` (CPU-only).** BindMaster installer force-reinstalls PyTorch with CUDA after `requirements.txt`. Manual `pip install -r requirements.txt` without the followup breaks GPU support.

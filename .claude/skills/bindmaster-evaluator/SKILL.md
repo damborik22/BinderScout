@@ -1,6 +1,6 @@
 ---
 name: bindmaster-evaluator
-description: Use this skill to evaluate, rank, and quality-check a pool of designed binders. It runs the cross-engine refold (Boltz-2 + AF3 + ESMFold2), produces the cross-engine iPTM ranking (engine gate, then `consensus_iptm_mean`) and HTML/CSV report, ranks affinity among binders via the interface-energy composite (Part N, Rosetta in the BindCraft env), and flags context-dependent folds (monomer validation). It also owns the ESMFold2 `chain_iptm_interface` gate used by the autosize loop. Triggers include "evaluate the pool", "rank the designs", "which are the best", "run the cross-engine refold", "score affinity", "Part N", "check the folds / monomer", "generate the report", "merge the results". It interprets the metrics (the ranking vs ipsae_min, same-model bias, consensus) but does NOT run design tools — it consumes their outputs. Hands the top candidates to `bindmaster-wetlab`.
+description: Use this skill to evaluate, rank, and quality-check a pool of designed binders. It runs the cross-engine refold (Boltz-2 + AF3 + ESMFold2), produces the cross-engine iPTM ranking (engine gate, then `consensus_iptm_mean`) and HTML/CSV report, ranks affinity among binders via the advisory interface-energy density, gated not weighted (Part N, a closed negative; Rosetta in the BindCraft env), and flags context-dependent folds (monomer validation). It also owns the ESMFold2 `chain_iptm_interface` gate used by the autosize loop. Triggers include "evaluate the pool", "rank the designs", "which are the best", "run the cross-engine refold", "score affinity", "Part N", "check the folds / monomer", "generate the report", "merge the results". It interprets the metrics (the ranking vs ipsae_min, same-model bias, consensus) but does NOT run design tools — it consumes their outputs. Hands the top candidates to `bindmaster-wetlab`.
 ---
 
 # BindMaster Evaluator — SKILL base
@@ -9,7 +9,7 @@ description: Use this skill to evaluate, rank, and quality-check a pool of desig
 **Job:** extract → refold → rank → affinity → QC → report.
 
 **What this skill is NOT:** not a design runner; not a strategy/allocation brain (orchestrator);
-not the final affinity word (no metric ranks affinity perfectly — see `affinity.md`).
+not the final affinity word (ranking affinity among binders from structure confidence is a closed negative — see `affinity.md`).
 
 ---
 

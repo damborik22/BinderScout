@@ -34,8 +34,10 @@ assay). Presenting a top-10 as "the best" without this framing over-sells by a w
   (macro AUC ≈ **0.69** on the full Adaptyv batch; an earlier 0.745 was a subset figure and is
   inflated — do not quote it), and the `autosize` gate. Surfaced as a column.
 - **Same-model bias** — never accept a design on the engine it was *designed against*: BoltzGen /
-  Mosaic / Protein-Hunter game `boltz_iptm`; PXDesign games Protenix. AF3 is independent of every
-  design tool. (Matrix: `bindmaster-orchestrator/references/tools/README.md`.) The mean across
+  Mosaic / Protein-Hunter game `boltz_iptm`; PXDesign games Protenix. ESMFold2 is independent of
+  all seven design tools; AF3 is independent of all but PXDesign — Protenix reimplements AF3, so
+  the AF3 refold is correlated there too.
+  (Matrix: `bindmaster-orchestrator/references/tools/README.md`.) The mean across
   independent engines is what resists this — a design one engine loves and another rejects is
   demoted by the mean.
 - **`ipsae_min`** and the quality tiers (High > 0.80 / Medium 0.61–0.80 / Low 0.40–0.61 / Reject

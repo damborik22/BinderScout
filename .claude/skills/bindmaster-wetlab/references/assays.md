@@ -31,7 +31,8 @@ Advance a design down the ladder only as it survives the prior step.
 
 ## What governs the choices
 - **Adaptyv submission count**, not assay type, is the budget lever: every submitted design gets
-  BLI; only the leads go to SPR + FIDA. So `--top`/`--budget` set *how many designs to submit*.
+  BLI; only the leads go to SPR + FIDA. So `--top` sets *how many designs to submit*; `--budget` is
+  only echoed in the plan header.
 - Pair with **monomer QC** (`bindmaster-evaluator` `qc.md`): a context-dependent fold may express
   poorly — flag it before spending a submission slot.
 - Confirm with **SPR + FIDA together** for the final leads: agreement between an immobilized
@@ -39,7 +40,7 @@ Advance a design down the ladder only as it survives the prior step.
 
 ## Feeds maturation
 The Kd from BLI/SPR/FIDA is what `binder-compare mature` reads (`--affinity-col kd_nM`) to choose
-the next round (`maturation.md`). Pre-experimentally, the `affinity` composite stands in as the proxy.
+the next round (`maturation.md`).
 
 ## Caveats
 - Adaptyv / BLI / SPR / FIDA is *this lab's* stack — assay availability and cost are lab-specific;

@@ -70,9 +70,9 @@ Before running, verify:
    ```bash
    export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
    ```
-6. **AF3 env vars** for `binder-eval-af3` if aarch64 is available (database paths, model paths). See `Evaluator/docs/pipeline_reference.md`.
+6. **AF3 env vars** for `binder-eval-af3` on any host where AF3 will run (database paths, model paths). See `Evaluator/docs/pipeline_reference.md`.
 
-If AF3 isn't available (x86 environments), proceed with 2-engine evaluation — `agreement_count` denominator becomes 2 instead of 3. The orchestrator must note this in the final ranking (a design with `agreement_count = 2` out of 2 engines is *not* the same signal as `2 out of 3`).
+If AF3's gated weights are not in place, proceed with 2-engine evaluation and pass `--min-engines 2` — otherwise every design misses the default 3-engine gate and is ranked last. AF3 itself runs on x86_64 and aarch64 alike and fits a 24 GB card in our size regime; availability is a weights question, not a platform one.
 
 ---
 
@@ -110,7 +110,7 @@ ipsae_threshold = 0.61  # the agreement threshold
 agreement_count = sum(1 for engine in available_engines if engine.ipsae_min > ipsae_threshold)
 ```
 
-**Quality tiers** (applied to the best of {boltz_pae_ipsae_min, af3_ipsae_min, esmfold2_ipsae_min}, *or* a campaign-defined function — typically `mean` or `min`; orchestrator decides):
+**Quality tiers** — the `quality_tier` column is derived from the **primary engine's** `ipsae_min` (`comparison/scoring.py:468`; `evaluate.sh --primary-engine` selects it), not from an aggregate the orchestrator picks:
 
 | Tier | `ipsae_min` |
 |---|---|
@@ -197,20 +197,29 @@ for tar in /path/to/RESULTS/<TARGET>_*.tar.gz; do
     tar xf "$tar"
 done
 
-# Activate the evaluator env (Mosaic venv hosts the Boltz-2 refolder and the merge code)
-source ~/dev/BindMaster/Mosaic/.venv/bin/activate
+# Extract binder sequences from the untarred tool outputs into one FASTA.
+# evaluate.sh does NOT do this step: it requires the FASTA to exist already
+# (it runs `binder-compare parse-seqs` on it, and aborts if the file is missing).
+# One --<tool> DIR per tool present — flags in Evaluator/binder_comparison/cli/_tool_args.py.
+conda run -n binder-eval binder-compare extract \
+    --mosaic    ~/eval_workdir/<TARGET>/mosaic \
+    --bindcraft ~/eval_workdir/<TARGET>/bindcraft \
+    --rfd3      ~/eval_workdir/<TARGET>/rfd3 \
+    --target-seq "<TARGET_SEQ>" \
+    --output ~/eval_workdir/<TARGET>/sequences.fasta
 
-# Run cross-engine evaluation
-python -m bindmaster.evaluator \
-    --target-cif /path/to/<TARGET>/PDB/target.cif \
-    --inputs ~/eval_workdir/<TARGET>/ \
-    --engines boltz2,af3,esmfold2 \
-    --pae-cutoff 10.0 \
-    --d0-variant d0_res \
-    --output ~/eval_workdir/<TARGET>/summary.csv
+# Run cross-engine evaluation (refold-boltz2 -> refold-af3 -> refold-esmfold2 -> report).
+# evaluate.sh resolves each engine's env itself; don't pre-activate the Mosaic venv.
+bash ~/dev/BindMaster/Evaluator/evaluate.sh \
+    --sequences ~/eval_workdir/<TARGET>/sequences.fasta \
+    --target-seq "<TARGET_SEQ>" \
+    --output ~/eval_workdir/<TARGET>/evaluate
+# Outputs land under the --output dir: evaluate/report/report.html + evaluate/report/metrics.csv
 
-# If aarch64 isn't available, drop af3:
-#   --engines boltz2,af3
+# Skip an engine that isn't installed (or whose gated weights are missing):
+#   --skip-boltz2 / --skip-af3 / --skip-esmfold2
+# ...and relax the 3-engine gate when only two ran:
+#   --min-engines 2
 ```
 
 The evaluator handles env switching (it shells out to the AF3 and ESMFold2 envs as subprocesses), PAE transposition, pLDDT rescaling, iPSAE computation, and the merge. Output is the canonical `summary.csv`.

@@ -21,8 +21,9 @@ binder-compare wetlab --designs report/top30_candidates.csv -o wetlab_plan.md \
     --top 20 --budget 8000 --tag His6-TEV
 ```
 Sections: gene synthesis (codon-opt, tag), expression, **testing via Adaptyv** (BLI quick yes/no
-→ SPR + FIDA on leads — see `assays.md`), controls, FASTA + biophysics. `--budget` sets how many
-designs to submit to Adaptyv (every submission gets BLI; leads get SPR + FIDA).
+→ SPR + FIDA on leads — see `assays.md`), controls, FASTA + biophysics. `--top` sets how many
+designs to submit to Adaptyv (every submission gets BLI; leads get SPR + FIDA); `--budget` only
+prints a budget line in the plan header.
 
 ## 2. Maturation — the next round  →  see `references/maturation.md`
 
@@ -30,7 +31,8 @@ designs to submit to Adaptyv (every submission gets BLI; leads get SPR + FIDA).
 binder-compare mature --designs results.csv --affinity-col kd_nM \
     --round 2 --target-affinity 10 -o maturation_round.json
 ```
-Kd (or the `affinity` composite as a pre-experimental proxy) → strategy: weak >500 nM →
+Kd (experimental, nM — `--affinity-col` is read as nM, lower = tighter; do NOT pass
+`affinity_energy_density`, which is higher = tighter and not an nM scale) → strategy: weak >500 nM →
 partial diffusion; moderate >50 nM → MPNN redesign; strong → mutation scan; meets target → done.
 `TODO:` thresholds per program; how the `mature` JSON becomes an orchestrator kickoff.
 
