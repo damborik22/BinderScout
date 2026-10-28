@@ -2608,7 +2608,7 @@ echo "=== Proteina-Complexa design complete ==="
 # Collect binder sequences from outputs
 echo "=== Collecting binder sequences ==="
 python3 -c "
-import csv, glob, sys
+import csv, glob, shutil, sys
 from pathlib import Path
 
 pc_dir = Path('$RUN_DIR/proteina_complexa')
@@ -2624,70 +2624,125 @@ run_name = '{cfg["name"]}'
 # complete" with no sequences.csv, and the Evaluator then logged
 # "Proteina-Complexa: no CSV found" and silently dropped the tool from the pool.
 # Search `inference/` first and keep the old paths as fallbacks for other revisions.
+#
+# Scan EVERY candidate, not just the first that exists. The two trees hold different
+# things: `inference/<config>_<task>_<run>/` has one subdirectory per design with its
+# .pdb but no sequence-bearing CSV, while `evaluation_results/<config>_<task>/` has
+# the metrics. Committing to the first existing directory reached the PDBs and never
+# the metrics, so the harvest always fell through to the chain-B fallback below and
+# emitted designs with no iPTM / pLDDT / scRMSD -- measured on PD-L1 2026-10-28, where
+# Proteina-Complexa carried 2 native metric columns against 4-9 for every other tool.
 rows = []
-candidates = []
+search_dirs = []
 for base in (Path('inference'), Path('outputs')):
     if base.is_dir():
-        candidates += [p for p in sorted(base.iterdir()) if p.is_dir() and run_name in p.name]
-candidates += [Path('outputs') / run_name]
-candidates += [p for p in Path('.').rglob('evaluation_results') if run_name in str(p)]
-eval_dir = next((p for p in candidates if p.is_dir()), Path('outputs') / run_name)
-if eval_dir.is_dir():
-    print('  Reading Complexa outputs from ' + str(eval_dir))
+        search_dirs += [p for p in sorted(base.iterdir()) if p.is_dir() and run_name in p.name]
+# The run name sits in the CHILD of `evaluation_results`
+# (evaluation_results/<config>_<task>/), not in that directory's own path, so the old
+# `run_name in str(p)` filter on the rglob hit rejected every match and this candidate
+# could never contribute. Descend one level, and keep the parent as a fallback.
+for _ev in sorted(Path('.').rglob('evaluation_results')):
+    if not _ev.is_dir():
+        continue
+    _subs = [p for p in sorted(_ev.iterdir()) if p.is_dir() and run_name in p.name]
+    search_dirs += _subs or [_ev]
+if (Path('outputs') / run_name).is_dir():
+    search_dirs.append(Path('outputs') / run_name)
+_seen_dirs = set()
+search_dirs = [p for p in search_dirs if p.resolve() not in _seen_dirs and not _seen_dirs.add(p.resolve())]
+for p in search_dirs:
+    print('  Reading Complexa outputs from ' + str(p))
 
-# Strategy 1: Parse evaluation_results CSVs
-for csv_path in sorted(eval_dir.rglob('*.csv')) if eval_dir.exists() else []:
-    try:
-        with open(csv_path) as f:
-            reader = csv.DictReader(f)
-            for r in reader:
-                seq = r.get('sequence', '').strip()
-                if not seq or set(seq) == {{'X'}}:
+AA3TO1 = {{
+    'ALA':'A','ARG':'R','ASN':'N','ASP':'D','CYS':'C','GLN':'Q','GLU':'E',
+    'GLY':'G','HIS':'H','ILE':'I','LEU':'L','LYS':'K','MET':'M','PHE':'F',
+    'PRO':'P','SER':'S','THR':'T','TRP':'W','TYR':'Y','VAL':'V','MSE':'M',
+}}
+
+def chain_b_seq(pdb_path):
+    '''Binder sequence from a Complexa complex PDB (target = A, binder = B).'''
+    seen = {{}}
+    with open(pdb_path) as f:
+        for line in f:
+            if line[:4] != 'ATOM' or line[12:16].strip() != 'CA':
+                continue
+            if line[21].strip().upper() != 'B':
+                continue
+            key = (line[22:26].strip(), line[26].strip())
+            if key not in seen:
+                seen[key] = AA3TO1.get(line[17:20].strip().upper(), 'X')
+    return ''.join(seen.values())
+
+# Map binder sequence -> the PDB that holds it. The metrics CSVs carry no design name
+# column, so without this the design_id degrades to '<csv stem>_<row index>' and the
+# sequence cannot be traced to a structure -- which is the whole point of keeping both.
+pdb_by_seq = {{}}
+for _d in search_dirs:
+    for _p in sorted(_d.rglob('*.pdb')):
+        try:
+            _s = chain_b_seq(_p)
+        except Exception:
+            continue
+        if _s and set(_s) != {{'X'}} and _s not in pdb_by_seq:
+            pdb_by_seq[_s] = _p
+
+# Strategy 1: metrics CSVs. Complexa names the binder column `binder_sequence`;
+# reading only `sequence` was the other half of the same bug -- pointed straight at
+# evaluation_results, Strategy 1 still matched nothing and fell through.
+SEQ_COLS = ('binder_sequence', 'sequence')
+_seen_seqs = set()
+for _d in search_dirs:
+    for csv_path in sorted(_d.rglob('*.csv')):
+        try:
+            with open(csv_path) as f:
+                reader = csv.DictReader(f)
+                col = next((c for c in SEQ_COLS if reader.fieldnames and c in reader.fieldnames), None)
+                if not col:
                     continue
-                name = r.get('name', r.get('sample_id', csv_path.stem))
-                ipae = r.get('self_complex_i_pAE', '')
-                iptm = r.get('self_complex_i_pTM', '')
-                plddt = r.get('self_complex_pLDDT', '')
-                scrmsd = r.get('self_binder_scRMSD', '')
-                rows.append({{
-                    'design_id': f'complexa_{{name}}',
-                    'sequence': seq,
-                    'length': len(seq),
-                    'iptm': iptm,
-                    'plddt_binder_mean': plddt,
-                    'pae_bt_mean': ipae,
-                    'scrmsd_binder': scrmsd,
-                    'source': 'proteina_complexa',
-                }})
-    except Exception as e:
-        print(f'  Warning: could not parse {{csv_path}}: {{e}}', file=sys.stderr)
+                for i, r in enumerate(reader):
+                    seq = (r.get(col) or '').strip()
+                    if not seq or set(seq) == {{'X'}}:
+                        continue
+                    # The same design appears in several of Complexa's CSVs
+                    # (RAW_*_combined and all_successes_*); keep the first.
+                    if seq in _seen_seqs:
+                        continue
+                    _seen_seqs.add(seq)
+                    _hit = pdb_by_seq.get(seq)
+                    name = r.get('name') or r.get('sample_name') or r.get('sample_id') \
+                        or (_hit.stem if _hit is not None else csv_path.stem + '_' + str(i))
+                    ipae = r.get('self_complex_i_pAE', '')
+                    iptm = r.get('self_complex_i_pTM', '')
+                    plddt = r.get('self_complex_pLDDT', '')
+                    scrmsd = r.get('self_binder_scRMSD', '')
+                    rows.append({{
+                        'design_id': f'complexa_{{name}}',
+                        'sequence': seq,
+                        'length': len(seq),
+                        'iptm': iptm,
+                        'plddt_binder_mean': plddt,
+                        'pae_bt_mean': ipae,
+                        'scrmsd_binder': scrmsd,
+                        'structure': (_hit.name if _hit is not None else ''),
+                        'source': 'proteina_complexa',
+                    }})
+        except Exception as e:
+            print(f'  Warning: could not parse {{csv_path}}: {{e}}', file=sys.stderr)
+if rows:
+    _linked = sum(1 for r in rows if r.get('structure'))
+    print(f'  Found {{len(rows)}} sequences with metrics from Complexa CSVs '
+          f'({{_linked}} linked to a structure)')
 
 # Strategy 2: Fall back to PDB sequence extraction
 if not rows:
-    AA3TO1 = {{
-        'ALA':'A','ARG':'R','ASN':'N','ASP':'D','CYS':'C','GLN':'Q','GLU':'E',
-        'GLY':'G','HIS':'H','ILE':'I','LEU':'L','LYS':'K','MET':'M','PHE':'F',
-        'PRO':'P','SER':'S','THR':'T','TRP':'W','TYR':'Y','VAL':'V','MSE':'M',
-    }}
-    for pdb_path in sorted(eval_dir.rglob('*.pdb')) if eval_dir.exists() else []:
+    for pdb_path, seq in sorted((p, s) for s, p in pdb_by_seq.items()):
         try:
-            seen = {{}}
-            with open(pdb_path) as f:
-                for line in f:
-                    if line[:4] != 'ATOM' or line[12:16].strip() != 'CA':
-                        continue
-                    if line[21].strip().upper() != 'B':
-                        continue
-                    res = line[17:20].strip().upper()
-                    key = (line[22:26].strip(), line[26].strip())
-                    if key not in seen:
-                        seen[key] = AA3TO1.get(res, 'X')
-            seq = ''.join(seen.values())
             if seq and set(seq) != {{'X'}}:
                 rows.append({{
                     'design_id': f'complexa_{{pdb_path.stem}}',
                     'sequence': seq,
                     'length': len(seq),
+                    'structure': pdb_path.name,
                     'source': 'proteina_complexa',
                 }})
         except Exception:
@@ -2703,9 +2758,33 @@ if not rows:
     # that produces no designs is a failure, and run_all.sh is built to carry on
     # past a failed step and name it at the end.
     print('ERROR: No binder sequences extracted from Proteina-Complexa', file=sys.stderr)
-    print('       Looked under: ' + str(eval_dir), file=sys.stderr)
+    print('       Looked under: ' + ', '.join(str(p) for p in search_dirs), file=sys.stderr)
     print('       If Complexa wrote elsewhere, the harvest globs in this script need updating.', file=sys.stderr)
     sys.exit(1)
+
+# Copy the raw outputs into the run directory. Complexa writes its PDBs and metrics
+# CSVs inside its own clone (Proteina-Complexa/inference/, .../evaluation_results/),
+# which is gitignored and deleted by `bindmaster install --uninstall`. Every other
+# tool keeps its structures under runs/<name>/<tool>/; this one left the run holding
+# sequences.csv and nothing else -- 3 files against 34-639 for the other six -- so an
+# archived run could not be re-reported or inspected.
+struct_dir = pc_dir / 'structures'
+raw_dir = pc_dir / 'raw'
+struct_dir.mkdir(parents=True, exist_ok=True)
+raw_dir.mkdir(parents=True, exist_ok=True)
+n_pdb = n_csv = 0
+for _d in search_dirs:
+    for src in sorted(_d.rglob('*.pdb')):
+        dest = struct_dir / src.name
+        if not dest.exists():
+            shutil.copy2(src, dest)
+            n_pdb += 1
+    for src in sorted(_d.rglob('*.csv')):
+        dest = raw_dir / (_d.name + '__' + src.name)
+        if not dest.exists():
+            shutil.copy2(src, dest)
+            n_csv += 1
+print('  -> copied ' + str(n_pdb) + ' structure(s) and ' + str(n_csv) + ' raw CSV(s) into ' + str(pc_dir))
 
 out_csv = pc_dir / 'sequences.csv'
 with open(out_csv, 'w', newline='') as f:

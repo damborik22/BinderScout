@@ -8,6 +8,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Proteina-Complexa discarded the metrics it had computed, and left the run
+  directory with no raw output.** Found by auditing the PD-L1 run layout on
+  2026-10-28: `proteina_complexa` carried **2** populated `native_*` columns in
+  `metrics.csv` where the other six tools had 4–9, and its run directory held **3
+  files** against 34–639 for the others. Three faults in the generated harvest.
+  (1) It committed to the *first* candidate directory that existed. The two trees
+  hold different things — `inference/<config>_<task>_<run>/` has a subdirectory per
+  design with its `.pdb` and no sequence-bearing CSV, `evaluation_results/<config>_<task>/`
+  has the metrics — so it reached the PDBs and never the metrics. (2) Strategy 1 read
+  a column named `sequence`; Complexa writes **`binder_sequence`**, so even pointed at
+  the right directory it matched nothing and fell through to the chain-B PDB fallback.
+  (3) The `evaluation_results` candidate was filtered with `run_name in str(p)`, but
+  the run name sits in that directory's *child*, so the candidate could never match at
+  all. Net effect: the fallback always ran, and `self_complex_i_pTM` / `i_pAE` /
+  `pLDDT` / `scRMSD` — all present on disk — were dropped. The harvest now scans every
+  candidate directory, descends into `evaluation_results/`, accepts either column name,
+  de-duplicates designs that Complexa lists in more than one CSV, and matches each row
+  back to the PDB holding that chain B so `design_id` keeps the design's own name and a
+  new `structure` column links sequence to structure. It also copies the structures and
+  raw CSVs into `runs/<name>/proteina_complexa/` — Complexa writes them inside its own
+  gitignored clone, which `install --uninstall` deletes, so an archived run previously
+  had sequences and nothing to inspect. Re-harvesting the PD-L1 run recovered all 8
+  designs' metrics with all 8 linked to a structure (3 files → 67); the sequences are
+  byte-identical, so no ranking changed.
+
 - **Boltz-2 refolded none of the pool, reported success, and the report ranked
   another pool's designs.** Four faults in one chain, all found on the PD-L1 run of
   2026-10-28. (1) `engine_boltz2` was the only engine `evaluate.sh` invoked without
