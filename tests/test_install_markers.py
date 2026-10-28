@@ -107,18 +107,6 @@ class TestBackfillClosesTheMigrationGap:
         written, _ = run_backfill(tmp_path, ["mosaic", "evaluator"])
         assert written == ["evaluator", "mosaic"]
 
-    def test_this_boxs_actual_shortfall_would_be_closed(self, tmp_path):
-        """The 2026-10-28 state: 9 tools working, only af3 + soluprot marked.
-
-        Seeded as the *pre-marker* case (empty store) because that is what the
-        migration is for; the point is that all nine come back, not just the two
-        that happened to be installed through the new installer.
-        """
-        working = list(TOOL_KEYS)
-        written, _ = run_backfill(tmp_path, working)
-        for key in ("bindcraft", "boltzgen", "mosaic", "evaluator", "esmfold2"):
-            assert key in written, f"{key} works but would still read not-installed"
-
     def test_marker_records_that_it_was_back_filled(self, tmp_path):
         """A back-filled marker asserts "the probe passed", not "install finished"."""
         state = tmp_path / ".install_state"
@@ -147,6 +135,8 @@ class TestBackfillClosesTheMigrationGap:
         )
         assert written == sorted(TOOL_KEYS), "a half-marked box was left half-dark"
         assert "9 pre-existing install(s)" in out
+        for key in ("bindcraft", "boltzgen", "mosaic", "evaluator", "esmfold2"):
+            assert key in written, f"{key} works but would still read not-installed"
 
     def test_an_earned_marker_is_never_overwritten(self, tmp_path):
         """The earned marker is the stronger claim; migration must not downgrade it."""

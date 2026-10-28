@@ -13,7 +13,7 @@ AF3 remains the **reference model** in this lineage. Boltz-2 (MIT) and Protenix 
 
 In BindMaster, AF3 is the **canonical 2nd refolder engine** (Part K, landed). It's hosted in a separate conda env because the DeepMind-provided pipeline has a different MSA stack and database layout.
 
-**It is not aarch64-only.** AF3 runs on any CUDA host: measured ~4.4 GiB peak for 258-391-token complexes (24 GB RTX 3090), so a consumer card is enough in our size regime. DGX Spark is the lab's primary host because that is where the unified-memory headroom lives, not because of a platform restriction. The one real gate is the **gated weights** — AF3 is `--tool af3`, not part of `--tool all`.
+**It is not aarch64-only.** AF3 runs on any CUDA host: measured ~4.4 GiB peak for 258-391-token complexes (24 GB RTX 3090), so a consumer card is enough in our size regime. DGX Spark is the lab's primary host because that is where the unified-memory headroom lives, not because of a platform restriction. The one real gate is the **gated weights**. AF3's env is now built by `--tool all` — leaving it out gave a default install two engines against the report's three-engine gate — but the installer prints where to request the weights rather than fetching them, so a fresh install is AF3-installed-but-weightless until you place them.
 
 The full refolder set on every platform is **ESMFold2 (default) + Boltz-2 + AF3**. Protenix is *not* a refolder — Part J was reverted 2026-07-26.
 
@@ -30,7 +30,7 @@ The full refolder set on every platform is **ESMFold2 (default) + Boltz-2 + AF3*
 
 ## Weaknesses
 
-- **Gated weights.** AF3 parameters require a DeepMind access request, so AF3 is `--tool af3` rather than part of `--tool all`. A host with the env but no weights degrades to a 2-engine run — announced up front by `evaluate.sh`'s weights preflight, not silently — and with `consensus_iptm_n = 2` every design then misses the default `--min-engines 3` gate. Either place the weights or pass `--min-engines 2`.
+- **Gated weights.** AF3 parameters require a DeepMind access request. `--tool all` builds the env and prints where to ask; it cannot fetch them. So the realistic fresh-install state is env-present/weights-absent, and a host in that state degrades to a 2-engine run — announced up front by `evaluate.sh`'s weights preflight, not silently — and with `consensus_iptm_n = 2` every design then misses the default `--min-engines 3` gate. Either place the weights or pass `--min-engines 2`.
 - **Slowest of the three refolders.** Diffusion + recycling + AF3's deeper trunk → highest wall-time per refold.
 - **pLDDT scale is `[0,100]`** (AF3 convention), not [0,1] like Boltz-2 and Protenix. **BindMaster evaluator rescales by /100** before comparing — manual readers of raw AF3 output must apply this divisor.
 - **PAE matrix is target-first ordering.** BindMaster evaluator transposes to `[binder|target]` for consistency with Boltz-2.
@@ -108,7 +108,7 @@ With all three engines available, `agreement_count ∈ {0, 1, 2, 3}`. With only 
 
 - Paper: Abramson, Adler, Dunger, Evans, Jumper et al. 2024, "Accurate structure prediction of biomolecular interactions with AlphaFold 3," *Nature* 630, 493–500
 - Repo: https://github.com/google-deepmind/alphafold3
-- BindMaster integration: `binder-eval-af3` conda env (Python 3.12), AF3 v3.0.2, any CUDA host; canonical 2nd engine, Part K landed. Opt in with `--tool af3` (gated weights)
+- BindMaster integration: `binder-eval-af3` conda env (Python 3.12), AF3 v3.0.2, any CUDA host; canonical 2nd engine, Part K landed. Built by `--tool all`; weights gated and requested separately
 - pLDDT rescaling: BindMaster evaluator divides AF3 pLDDT by 100 for consistency with Boltz-2 / Protenix `[0,1]` convention
 - PAE transposition: target-first → `[binder|target]` applied automatically by BindMaster evaluator
 - iPSAE formula: DunbrackLab 2025 `d0_res` variant; CLAUDE.md `Evaluation metrics` section

@@ -42,7 +42,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 | Component | What it does | Runs in |
 |---|---|---|
-| `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) plus the default refold engine ESMFold2 and the SoluProt solubility screen; AF3 is a separate `--tool` add (gated weights) | bash |
+| `bindmaster install` | Installs design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3), all three refold engines (ESMFold2, Boltz-2, AF3) and the SoluProt solubility screen; AF3's env builds but its **weights are gated** and you request them yourself | bash |
 | `bindmaster configure` | Interactive wizard: target → configs → run scripts | system Python |
 | `bindmaster evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by the cross-engine gate then consensus iPTM, generate HTML report | conda env `binder-eval` |
 

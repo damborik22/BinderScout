@@ -48,7 +48,7 @@ export PATH="$(pwd)/bin:$PATH"
 | `bindmaster_rfd3` | RFD3 (`rc-foundry`) diffusion + ProteinMPNN | 3.12 |
 | `binder-eval` | Evaluator extract + report | 3.10 |
 | `binder-eval-esmfold2` | Evaluator ESMFold2 refolding — **default engine** | 3.12 |
-| `binder-eval-af3` | Evaluator AF3 v3.0.2 refolding — canonical 2nd engine (gated weights, `--tool af3`) | 3.12 |
+| `binder-eval-af3` | Evaluator AF3 v3.0.2 refolding — canonical 2nd engine; env built by `--tool all`, **weights gated** | 3.12 |
 | `binder-eval-soluprot` | SoluProt solubility screen (sequence-only, pre-refold) | 3.7 |
 
 Eleven environments; `CLAUDE.md` is the canonical table. There is **no `binder-eval-af2`
