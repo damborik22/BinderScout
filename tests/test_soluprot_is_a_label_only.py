@@ -265,7 +265,20 @@ def test_the_wizard_and_the_writer_agree_on_the_cfg_keys():
 
     # Only the evaluator contract — the writer also reads per-tool keys that live in
     # tools_enabled, and cfg keys set elsewhere, so this is deliberately scoped.
-    contract = {"use_soluprot", "soluprot_threshold", "use_tmprot", "tmprot_threshold"}
+    #
+    # `min_engines` is in here for the same reason, from the other direction: the
+    # writer emits --min-engines only when cfg carries it, so a wizard that never
+    # wrote the key would leave the gate at its default of 3 on every run -- and on
+    # any host without the gated AF3 weights that means two engines against a
+    # three-engine gate, every design ranked last, and an empty shortlist with no
+    # error. Exactly the use_soluprot failure mode, costed in GPU-hours.
+    contract = {
+        "use_soluprot",
+        "soluprot_threshold",
+        "use_tmprot",
+        "tmprot_threshold",
+        "min_engines",
+    }
     missing = sorted((contract & read) - written)
     assert not missing, (
         f"write_run_evaluate reads cfg keys the wizard never writes: {missing}. "

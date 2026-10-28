@@ -65,8 +65,7 @@ flags is kept from drifting out of step with the real one.</div>
 <div class="field"><label for="f_filter_preset"><code>filter_preset</code></label><input type="text" id="f_filter_preset" data-key="filter_preset" data-type="str" value="no_filters"><p class='help'>BindCraft filter set. no_filters keeps everything — right for a smoke run, wrong for a campaign.</p></div>
 <div class="field"><label for="f_advanced_preset"><code>advanced_preset</code></label><input type="text" id="f_advanced_preset" data-key="advanced_preset" data-type="str" value="default_4stage_multimer"><p class='help'>BindCraft advanced settings preset.</p></div>
 <div class="field"><label for="f_bindcraft_n_designs"><code>bindcraft_n_designs</code></label><input type="number" id="f_bindcraft_n_designs" data-key="bindcraft_n_designs" data-type="int" value="1"><p class='help'></p></div>
-<div class="field"><label for="f_boltzgen_n_designs"><code>boltzgen_n_designs</code></label><input type="number" id="f_boltzgen_n_designs" data-key="boltzgen_n_designs" data-type="int" value="1"><p class='help'></p></div>
-<div class="field"><label for="f_boltzgen_intermediate"><code>boltzgen_intermediate</code></label><input type="checkbox" id="f_boltzgen_intermediate" data-key="boltzgen_intermediate" data-type="bool"><p class='help'>BoltzGen generates this many candidates before its own ranked selection.</p></div>
+<div class="field"><label for="f_boltzgen_budget"><code>boltzgen_budget</code></label><input type="number" id="f_boltzgen_budget" data-key="boltzgen_budget" data-type="int" value="1"><p class='help'></p></div>
 <div class="field"><label for="f_mosaic_n_designs"><code>mosaic_n_designs</code></label><input type="number" id="f_mosaic_n_designs" data-key="mosaic_n_designs" data-type="int" value="1"><p class='help'></p></div>
 <div class="field"><label for="f_pxdesign_binder_length"><code>pxdesign_binder_length</code></label><input type="number" id="f_pxdesign_binder_length" data-key="pxdesign_binder_length" data-type="int" value="25"><p class='help'>PXDesign designs one fixed binder length.</p></div>
 <div class="field"><label for="f_rfd3_n_designs"><code>rfd3_n_designs</code></label><input type="number" id="f_rfd3_n_designs" data-key="rfd3_n_designs" data-type="int" value="1"><p class='help'></p></div>
@@ -106,7 +105,6 @@ const REQUIRED = {
     "target_pdb"
   ],
   "boltzgen": [
-    "boltzgen_intermediate",
     "chains",
     "hotspots",
     "max_length",
@@ -147,8 +145,7 @@ const DEFAULTS = {
   "filter_preset": "no_filters",
   "advanced_preset": "default_4stage_multimer",
   "bindcraft_n_designs": 1,
-  "boltzgen_n_designs": 1,
-  "boltzgen_intermediate": false,
+  "boltzgen_budget": 1,
   "mosaic_n_designs": 1,
   "pxdesign_binder_length": 25,
   "rfd3_n_designs": 1,

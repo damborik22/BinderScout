@@ -671,20 +671,31 @@ class TestPreflightFailsBeforeWritingAnything:
         """One run, one list — not a traceback per attempt."""
         self._uninstall(monkeypatch, tmp_path)
         cfg = self._cfg(tmp_path)
+        # n_designs, not boltzgen_intermediate: the intermediate pool is now DERIVED
+        # from the requested count when absent, so requiring it would force every
+        # headless config to restate the value the derivation exists to supply. The
+        # fixture is complete, so remove a key to have one to report.
+        cfg.pop("n_designs")
         with pytest.raises(SystemExit):
             conf.preflight(cfg, {"bindcraft": True, "mosaic": True, "boltzgen": True})
         out = capsys.readouterr().out
         assert "BindCraft" in out and "Mosaic" in out
-        assert "boltzgen_intermediate" in out, "the missing cfg key must be listed too"
+        assert "n_designs" in out, "the missing cfg key must be listed too"
 
     def test_missing_cfg_key_is_named_not_a_keyerror(self, tmp_path, capsys):
-        """Regression: a hand-edited --config died with `KeyError: 'boltzgen_intermediate'`
-        partway through generation. load_run_config validates only three keys."""
+        """Regression: a hand-edited --config died with a bare KeyError partway through
+        generation. load_run_config validates only three keys.
+
+        Re-pointed from boltzgen_intermediate to n_designs: the former is derived now,
+        the latter is what boltzgen_budget() hard-indexes and therefore what still
+        raises KeyError when a config omits it.
+        """
         cfg = self._cfg(tmp_path)
+        cfg.pop("n_designs")
         with pytest.raises(SystemExit):
             conf.preflight(cfg, {"boltzgen": True})
         out = capsys.readouterr().out
-        assert "boltzgen_intermediate" in out
+        assert "n_designs" in out
         assert "config.json" in out, "point the operator at a config that is known-complete"
 
     def test_a_complete_config_for_installed_tools_passes(self, tmp_path):
@@ -766,7 +777,19 @@ class TestRequiredCfgKeysStayInSyncWithTheWriters:
     _WRITERS: ClassVar = {
         "bindcraft": ("write_bindcraft_target", "copy_bindcraft_preset", "write_run_bindcraft"),
         "bindcraft2": ("write_bindcraft2_campaign", "write_run_bindcraft2"),
-        "boltzgen": ("copy_nanobody_scaffolds", "write_boltzgen_yaml", "write_run_boltzgen"),
+        # The three BoltzGen resolvers are part of the writer path, not helpers beside
+        # it: moving `cfg["n_designs"]` out of the two emission sites and into
+        # boltzgen_budget() is what reconciled --budget with the per-tool override, and
+        # it took the key out of this scan's sight while leaving it just as fatal when
+        # absent. Listed here so the derivation still sees what a KeyError would.
+        "boltzgen": (
+            "copy_nanobody_scaffolds",
+            "write_boltzgen_yaml",
+            "write_run_boltzgen",
+            "boltzgen_budget",
+            "boltzgen_intermediate",
+            "boltzgen_intermediate_default",
+        ),
         "mosaic": ("write_mosaic_hallucinate", "write_run_mosaic", "hotspots_to_epitope_idx"),
         "pxdesign_local": ("write_pxdesign_yaml", "write_run_pxdesign"),
         "proteina_complexa": ("write_run_proteina_complexa",),

@@ -28,8 +28,7 @@
     "advanced_preset": "default_4stage_multimer",
 
     "bindcraft_n_designs": 1,
-    "boltzgen_n_designs": 1,
-    "boltzgen_intermediate": false,
+    "boltzgen_budget": 1,
     "mosaic_n_designs": 1,
     "pxdesign_binder_length": 25,
     "rfd3_n_designs": 1,

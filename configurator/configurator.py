@@ -10,7 +10,9 @@ Usage:
 """
 
 import argparse
+import ast
 import datetime as _dt
+import difflib
 import json
 import os
 import re
@@ -1688,6 +1690,65 @@ def copy_bindcraft_preset(src_dir: Path, stem: str, dest: Path):
     shutil.copy2(src_dir / f"{stem}.json", dest)
 
 
+# BoltzGen over-generates and then filters down to --budget, so the intermediate pool
+# is a real knob -- but it defaulted to a flat 10 000 and was never reconciled with the
+# number of designs the user asked for. An `n_designs: 1` smoke test therefore carried
+# `--num_designs 10000`: measured on an RTX 3090, 1000 dataloader steps at ~53 s/step,
+# ETA 14 h 53 m, for ONE requested design, while every other tool honoured the count
+# (BindCraft 1, Protein-Hunter 1, RFD3 1x10 backbones). A first run on new hardware is
+# exactly where a smoke test belongs, and it waited overnight for one tool.
+#
+# Scale the pool with the request, with a floor so the filtering still has something to
+# filter, and keep cfg["boltzgen_intermediate"] as the explicit override for anyone who
+# knows they want a production-sized pool.
+_BOLTZGEN_INTERMEDIATE_FLOOR = 50
+_BOLTZGEN_INTERMEDIATE_PER_DESIGN = 100
+# Same 3090 measurement: 10 000 designs in ~14 h 53 m == 5.35 s of GPU time each.
+_BOLTZGEN_SECONDS_PER_DESIGN = 5.35
+
+
+def boltzgen_intermediate_default(n_designs: int) -> int:
+    """Intermediate pool implied by a requested design count."""
+    return max(_BOLTZGEN_INTERMEDIATE_FLOOR, _BOLTZGEN_INTERMEDIATE_PER_DESIGN * int(n_designs))
+
+
+def boltzgen_budget(cfg: dict) -> int:
+    """BoltzGen --budget: the per-tool override when set, else the global design count.
+
+    One resolver, because there were three answers. `--budget` in the executed script
+    and settings.json's "budget" both read cfg["n_designs"] directly and ignored
+    cfg["boltzgen_budget"] -- the per-tool override the wizard explicitly prompts for --
+    while the YAML header comment and the Step-8 summary did consult it. So a wizard run
+    with budget 20 over a global n_designs of 10 showed the operator 20 before the run
+    started and passed --budget 10 to BoltzGen.
+
+    cfg["n_designs"] is indexed, not .get(): the fallback has to exist, and preflight
+    naming a missing key beats silently designing one binder.
+    """
+    return int(cfg.get("boltzgen_budget") or cfg["n_designs"])
+
+
+def boltzgen_intermediate(cfg: dict) -> int:
+    """BoltzGen --num_designs: the explicit override when set, else derived from the count."""
+    override = cfg.get("boltzgen_intermediate")
+    if override:
+        return int(override)
+    return boltzgen_intermediate_default(boltzgen_budget(cfg))
+
+
+def boltzgen_cost_note(n_intermediate: int) -> str:
+    """ "10,000 intermediate designs (~15 h on one 24 GB GPU)" -- the GPU bill, before it is paid.
+
+    The intermediate pool IS the BoltzGen runtime, and it is the one number in the
+    Step-8 summary that can turn a one-design smoke test into an overnight job.
+    Evaluator/evaluate.sh already states its costs before spending them rather than
+    reporting them afterwards; this is the same thing a prompt earlier.
+    """
+    hours = n_intermediate * _BOLTZGEN_SECONDS_PER_DESIGN / 3600
+    span = f"~{round(hours * 60)} min" if hours < 1 else f"~{hours:.0f} h"
+    return f"{n_intermediate:,} intermediate designs ({span} on one 24 GB GPU)"
+
+
 def write_boltzgen_yaml(path: Path, cfg: dict):
     """
     Generate a BoltzGen design-specification YAML.
@@ -1708,8 +1769,8 @@ def write_boltzgen_yaml(path: Path, cfg: dict):
         "#   boltzgen run config.yaml \\",
         "#       --output outputs/ \\",
         "#       --protocol protein-anything \\",
-        f"#       --num_designs {cfg['boltzgen_intermediate']} \\",
-        f"#       --budget {cfg.get('boltzgen_budget', cfg['n_designs'])}",
+        f"#       --num_designs {boltzgen_intermediate(cfg)} \\",
+        f"#       --budget {boltzgen_budget(cfg)}",
         "",
         "entities:",
     ]
@@ -2012,8 +2073,8 @@ def write_run_boltzgen(path: Path, cfg: dict):
         design_params_inner=f"""
     "mode": "{cfg.get("boltzgen_mode", "protein")}",
     "protocol": "protein-anything",
-    "num_designs": {cfg["boltzgen_intermediate"]},
-    "budget": {cfg["n_designs"]},
+    "num_designs": {boltzgen_intermediate(cfg)},
+    "budget": {boltzgen_budget(cfg)},
     "min_binder_length": {cfg.get("boltzgen_min_length", cfg["min_length"])},
     "max_binder_length": {cfg.get("boltzgen_max_length", cfg["max_length"])},
     "use_kernels": false,
@@ -2066,8 +2127,8 @@ echo "  Settings persisted: $SETTINGS_DIR/settings.json"
 "$CONDA_PREFIX/bin/boltzgen" run "$CONFIG" \\
     --output "$OUTPUT_DIR" \\
     --protocol protein-anything \\
-    --num_designs {cfg["boltzgen_intermediate"]} \\
-    --budget {cfg["n_designs"]} \\
+    --num_designs {boltzgen_intermediate(cfg)} \\
+    --budget {boltzgen_budget(cfg)} \\
     --use_kernels false
 """
     )
@@ -4476,8 +4537,21 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         lines.append(f"    --tmprot-threshold {cfg.get('tmprot_threshold', 60.0)} \\")
 
     primary = cfg.get("primary_engine", "boltz")
+    lines.append(f"    --primary-engine {primary} \\")
+
+    # Emitted ONLY when the operator chose it -- the wizard prompt below, or by hand in
+    # config.json. Absent means evaluate.sh keeps its default gate of 3, because the
+    # gate is NEVER derived from the engines this host happens to have: deriving it
+    # would make two operators with the same designs produce different rankings
+    # (CLAUDE.md, Part U). But running fewer engines than the gate means NO design can
+    # clear it and the shortlist comes back empty -- which is what the documented
+    # one-command path does on any host without the gated AF3 weights, i.e. most of
+    # them. So the answer is recorded, once, as an explicit and auditable decision.
+    min_engines = cfg.get("min_engines")
+    if min_engines:
+        lines.append(f"    --min-engines {min_engines} \\")
+
     lines += [
-        f"    --primary-engine {primary} \\",
         "    --resume",
         "",
     ]
@@ -4523,6 +4597,81 @@ def write_run_config(path: Path, cfg: dict, tools_enabled: dict) -> None:
         "cfg": {k: _jsonable(v) for k, v in sorted(cfg.items())},
     }
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+
+
+def known_cfg_keys() -> frozenset[str]:
+    """Every cfg key this module actually reads, recovered from its own source.
+
+    Derived rather than hand-listed so it cannot drift: a hand list is how
+    `pxdesign_n_samples` and `bindcraft_n_designs` came to be siblings with
+    different suffixes in the first place, which is the confusion that produced the
+    bug below.
+    """
+    keys: set[str] = set()
+    try:
+        tree = ast.parse(Path(__file__).read_text())
+    except (OSError, SyntaxError):
+        return frozenset()
+
+    for node in ast.walk(tree):
+        # cfg["key"]
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "cfg":
+            if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+                keys.add(node.slice.value)
+        # cfg.get("key")
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "cfg"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            keys.add(node.args[0].value)
+    return frozenset(keys)
+
+
+def check_cfg_keys(cfg: dict, path: Path) -> None:
+    """Refuse a config carrying a key this version does not read.
+
+    A silently ignored key is the worst outcome available here, because the value the
+    operator wrote is replaced by a default that appears nowhere in their config. The
+    PD-L1 campaign config carried `pxdesign_n_designs: 1` -- entirely plausible, since
+    `bindcraft_n_designs` is real -- but the writer reads `pxdesign_n_samples`, so the
+    key was dropped and PXDesign ran its 1000-sample default. That is ~1000x the
+    requested GPU work, and the only symptom was 1000 of 1003 sequences arriving at
+    the evaluator, hours later.
+
+    Worse on this branch than a wasted run: write_run_config writes cfg back out
+    WHOLESALE, so the typo becomes a permanent property of the run folder and is
+    carried into every replay of it.
+
+    Fatal rather than a warning, because this path is `--config`, i.e. unattended by
+    design -- a warning scrolls past into a log nobody reads until the GPU bill
+    arrives. Keys starting with `_` are exempt: `_comment` is written by this very
+    module and is meant to be inert.
+    """
+    known = known_cfg_keys()
+    if not known:  # AST parse of our own source failed; nothing to check against
+        return
+
+    unknown = sorted(k for k in cfg if k not in known and not k.startswith("_"))
+    if not unknown:
+        return
+
+    print_fail(f"{path.name} has {len(unknown)} key(s) this version does not read:")
+    for key in unknown:
+        # Three candidates, not one: edit distance ranks `pxdesign_chains` above
+        # `pxdesign_n_samples` for `pxdesign_n_designs`, so the single best guess is
+        # not reliably the right one. Let the reader pick.
+        close = difflib.get_close_matches(key, sorted(known), n=3, cutoff=0.5)
+        hint = f"  — did you mean {', '.join(repr(c) for c in close)}?" if close else ""
+        print(f"    {key!r} = {cfg[key]!r}{hint}")
+    print_warn("  An unread key is not a no-op: the built-in default is used instead.")
+    print_warn("  Fix the spelling, or delete the key to accept the default deliberately.")
+    sys.exit(1)
 
 
 def _default_pxdesign_mode(tools_enabled: dict, cfg: dict | None = None) -> None:
@@ -4582,6 +4731,7 @@ def load_run_config(path: Path) -> tuple[dict, dict]:
 
     cfg = dict(payload["cfg"])
     tools_enabled = dict(payload["tools_enabled"])
+    check_cfg_keys(cfg, Path(path))
     _default_pxdesign_mode(tools_enabled, cfg)
 
     # Configs written before 2026-09-28 can carry soluprot_filter=true. The flag was
@@ -4648,12 +4798,25 @@ def cmd_from_config(config_path: str, run_now: bool) -> None:
     run_dir = Path(cfg["run_dir"])
     refuse_run_dir_that_is_a_file(run_dir)
 
+    # Before the summary, not just before generate(): the summary below resolves the
+    # BoltzGen budget out of cfg, so an incomplete config has to be a preflight message
+    # here rather than a KeyError traceback. generate() calls preflight again; it only
+    # prints on failure, so the repeat is free.
+    preflight(cfg, tools_enabled)
+
     print_step(f"Generating run folder from {config_path}")
     print(f"  Run folder: {run_dir}")
     enabled = [label for _k, _s, label, _d in enabled_tools(tools_enabled)]
     print(f"  Tools:      {', '.join(enabled) if enabled else '(none)'}")
+    if tools_enabled.get("boltzgen"):
+        # The same pre-GPU cost line the wizard's Step-8 summary prints. This path had
+        # no summary at all, and it is the path where `n_designs: 1` met a flat
+        # --num_designs 10000 and ran for fifteen hours.
+        print(f"  BoltzGen:   {boltzgen_cost_note(boltzgen_intermediate(cfg))}")
     if tools_enabled.get("evaluator"):
         print("  Evaluator:  enabled")
+        if cfg.get("min_engines"):
+            print(f"              cross-engine gate: --min-engines {cfg['min_engines']}")
 
     if not enabled and not tools_enabled.get("evaluator"):
         print_fail("No tools enabled in this config — nothing to generate.")
@@ -4730,8 +4893,11 @@ REQUIRED_CFG_KEYS: dict[str, tuple[str, ...]] = {
         "n_designs",
         "target_pdb",
     ),
+    # No "boltzgen_intermediate": it is DERIVED from the requested count when absent
+    # (boltzgen_intermediate()), so a config that omits it gets a pool sized to the
+    # request instead of a flat 10 000 -- and requiring it would force every headless
+    # config to restate the value the derivation exists to supply.
     "boltzgen": (
-        "boltzgen_intermediate",
         "chains",
         "hotspots",
         "max_length",
@@ -5311,6 +5477,10 @@ def wizard():
     # ── Refolding engine selection ──
     use_boltz = use_af3 = use_esmfold2 = False
     primary_engine = "boltz"
+    # None = leave the cross-engine gate at evaluate.sh's default of 3. Set only by the
+    # explicit prompt below, or by hand in config.json -- never derived from what
+    # happens to be installed on this box.
+    min_engines = None
     if use_evaluator:
         print(f"  {BOLD}Refolding engines for evaluation{RESET}")
         engines_available = []
@@ -5361,6 +5531,24 @@ def wizard():
                 primary_engine = selected[idx]
             else:
                 primary_engine = selected[0]
+
+            # The gate defaults to 3 and is never lowered automatically (see
+            # write_run_evaluate). Ask here, while the engine answers are still on
+            # screen, so the shortfall is a decision rather than an empty report
+            # discovered hours later.
+            if len(selected) == 2:
+                print()
+                print_warn("Only 2 refold engines selected, but the cross-engine gate defaults to 3.")
+                print("  With the default, every design fails the gate and you get no ranked shortlist.")
+                print("  Lowering it ranks on the engines you have — but rankings are then only")
+                print("  comparable to other runs using the same number of engines.")
+                if ask_yn("    Set --min-engines 2 in run_evaluate.sh?", default=True):
+                    min_engines = 2
+            elif len(selected) == 1:
+                print()
+                print_warn("Only 1 refold engine selected — a cross-engine consensus needs at least 2.")
+                print("  The gate cannot be met at all, so the ranked shortlist will be empty.")
+                print("  Enable AF3 or ESMFold2 as a second engine to get a ranked report.")
 
     # ── SoluProt solubility screen (label, not engine, not filter) ──
     # Sits before the refold engines because it is cheap and CPU-only, so the column
@@ -5452,11 +5640,14 @@ def wizard():
         "filter_preset": "default_filters",
         "advanced_preset": "default_4stage_multimer",
         "boltzgen_mode": "protein",
-        "boltzgen_intermediate": 10000,
+        "boltzgen_intermediate": boltzgen_intermediate_default(n_designs),
         "use_boltz": use_boltz,
         "use_af3": use_af3,
         "use_esmfold2": use_esmfold2,
         "primary_engine": primary_engine,
+        # None = leave the cross-engine gate at its default of 3. Set only by the
+        # explicit prompt in Step 5, never derived from what is installed.
+        "min_engines": min_engines,
         "use_soluprot": use_soluprot,
         "soluprot_threshold": soluprot_threshold,
         # write_run_evaluate reads these off cfg, not off tools_enabled. They were only
@@ -5519,10 +5710,16 @@ def wizard():
         cfg["boltzgen_max_length"] = int(
             ask("  Max binder length", default=max_length, validator=validate_int(min_val=1, max_val=500))
         )
+        # Default scaled to the budget just entered, not a flat 10 000 -- see
+        # boltzgen_intermediate(). The cost is stated BEFORE the prompt, because this
+        # one answer is the whole GPU bill for the tool.
+        bg_intermediate_default = boltzgen_intermediate_default(cfg["boltzgen_budget"])
+        print("  BoltzGen over-generates, then filters down to the budget above.")
+        print(f"  Default pool for a budget of {cfg['boltzgen_budget']}: {boltzgen_cost_note(bg_intermediate_default)}")
         cfg["boltzgen_intermediate"] = int(
             ask(
-                "  Intermediate designs (--num_designs, recommended: 10 000)",
-                default=10000,
+                "  Intermediate designs (--num_designs)",
+                default=bg_intermediate_default,
                 validator=validate_int(min_val=1),
             )
         )
@@ -5844,13 +6041,14 @@ def wizard():
     if use_boltzgen:
         bg_min = cfg.get("boltzgen_min_length", min_length)
         bg_max = cfg.get("boltzgen_max_length", max_length)
-        bg_n = cfg.get("boltzgen_budget", n_designs)
+        bg_n = boltzgen_budget(cfg)
         mode_label = "nanobody CDR redesign" if cfg["boltzgen_mode"] == "nanobody" else "de-novo protein"
         print(
             f"  {CYAN}BoltzGen{RESET}:      {mode_label}  |  "
             f"length={bg_min}–{bg_max}  budget={bg_n}  "
-            f"intermediate={cfg['boltzgen_intermediate']:,}"
+            f"intermediate={boltzgen_intermediate(cfg):,}"
         )
+        print(f"  {CYAN}BoltzGen cost{RESET}: {boltzgen_cost_note(boltzgen_intermediate(cfg))}")
     if use_mosaic:
         mo_min = cfg.get("mosaic_min_length", min_length)
         mo_max = cfg.get("mosaic_max_length", max_length)
