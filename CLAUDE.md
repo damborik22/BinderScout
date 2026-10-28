@@ -6,7 +6,9 @@ BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. I
 
 **Current status:** **1.0.0** — numbering was reset here. Master is through **Part U**; the CHANGELOG's `[1.0.0] — 2026-10-28` section is this release, and the sections marked *(retired numbering)* are the development record from before the reset.
 
-> **The earlier tags do not describe this tree.** No tag in the repository is an ancestor of `master` — all twelve, `v1.0.0` through `v2.0.2`, point into the history the public-release rewrite replaced, so `git tag --merged HEAD` is empty and `git describe --tags` answers `fatal: No tags can describe`. The reset means `v1.0.0` has to be re-pointed at this history and the `v1.0.1` … `v2.0.2` tags retired, or they will advertise versions *newer* than the release. Until that is done, cite a commit (`git rev-parse --short HEAD`), not a version.
+> **Branch and version layout.** `master` is **frozen at 1.0.0** — the stable release line. Active development continues on **`v2.0.x`**, which diverged from master at `602345a` (Release 1.0.3, 2026-09-22) and is well ahead of it; `v1.1.x` is a retired midpoint, kept for now and to be deleted. The `v1.0.0` tag was re-pointed at this history: the commit it previously named (`e618d43`) belonged to the pre-rewrite master line and is reachable from no branch. The `v1.1.0`–`v2.0.2` tags live on their own branches and are **not** stale — they are simply not on `master`, which is why `git tag --merged HEAD` is empty here and `git describe` needs `--all`.
+>
+> **Fixes landing on master need forward-porting to `v2.0.x`.** The two lines share no commits after `602345a`, so nothing crosses over by itself.
 
 **Repository:** `github.com/damborik22/BinderScout` (the working-tree directory may be checked out as `BinderScout`; the CLI command and Python package are both `bindmaster`. The old `damborik22/BindMaster` URL redirects.)
 

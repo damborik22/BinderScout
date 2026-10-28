@@ -15,6 +15,17 @@ anything reachable.
 
 ## [1.0.0] — 2026-10-28
 
+First release of the `master` line under the reset numbering, and the point at which
+master is frozen; 2.0 development continues on `v2.0.x`.
+
+**Platform support.** Verified on x86_64 (RTX 3090, driver 580.159.03): full
+`--tool all` install, a seven-tool PD-L1 campaign, and all three refold engines.
+The aarch64 / DGX Spark path is **back-ported, not exercised here** — this release
+host has no Spark. The BindCraft PyRosetta call-site patch that aarch64 needs is
+byte-identical to the one running on `v2.0.x`, so it is not new code, but no Spark
+install was run against this tree.
+
+
 ### Fixed
 
 - **Proteina-Complexa discarded the metrics it had computed, and left the run
