@@ -199,6 +199,84 @@ class TestAtomworksIsPinnedAndTheSymbolAsserted:
         )
 
 
+class TestRfd3GetsTheAtomworksPinToo:
+    """BUG-28: the same floating dependency, a second consumer, a different symptom.
+
+    rc-foundry installs atomworks unpinned into the RFD3 env as well. 3.0.0 did not
+    delete anything RFD3 imports -- it moved ``extra_fields`` and ``build_assembly``
+    off ``parse_atom_array()`` into a ``PrepareConfig`` object and made leftover
+    kwargs an error, while rfd3's pinned ``input_parsing.py`` still passes them. So
+    ``import atomworks`` passes, a version check passes, and the failure arrives in
+    the dataloader once a GPU has been committed.
+
+    Ported from master, where this helper existed in ``install.sh`` only. RFD3 is
+    installable on aarch64 too (opt-in), and rc-foundry floats there identically,
+    so the aarch64 copy is not optional.
+    """
+
+    @pytest.mark.parametrize("path", INSTALLERS, ids=lambda p: p.name)
+    def test_the_check_asserts_the_signature_not_the_version(self, path):
+        body = _function_source(path, "_pin_rfd3_atomworks")
+        assert "inspect.signature(parse_atom_array)" in body, (
+            f"{path.name}'s RFD3 atomworks check does not inspect the signature; a "
+            "version string alone passes on any release that moves the kwargs again"
+        )
+        for kwarg in ("extra_fields", "build_assembly"):
+            assert kwarg in body, f"{path.name} does not assert {kwarg} is still accepted"
+
+    @pytest.mark.parametrize("path", INSTALLERS, ids=lambda p: p.name)
+    def test_install_rfd3_actually_calls_the_pin(self, path):
+        """The function is not the fix; the call is.
+
+        A test that exercises ``_pin_rfd3_atomworks`` directly stays green when the
+        call is deleted from ``install_rfd3``, which is the whole bug.
+        """
+        body = _function_source(path, "install_rfd3")
+        assert "_pin_rfd3_atomworks" in body, (
+            f"{path.name}'s install_rfd3 never calls _pin_rfd3_atomworks, so the env is "
+            "built with whatever atomworks rc-foundry resolved"
+        )
+
+    @pytest.mark.parametrize("path", INSTALLERS, ids=lambda p: p.name)
+    def test_a_3x_env_is_refused_and_a_pinned_one_accepted(self, tmp_path, path):
+        """Behavioural: drive the helper against a stub env that reports 3.x."""
+        results = {}
+        for label, version, sig_rc in (("floating", "3.0.4", 1), ("pinned", "2.2.1", 0)):
+            env_bin = tmp_path / label / "envs" / "binderscout_rfd3" / "bin"
+            env_bin.mkdir(parents=True)
+            py = env_bin / "python"
+            py.write_text(
+                "#!/bin/bash\n"
+                'case "$*" in\n'
+                f'  *importlib.metadata*) echo "{version}" ;;\n'
+                f'  *parse_atom_array*) exit {sig_rc} ;;\n'
+                "esac\n"
+                "exit 0\n"
+            )
+            py.chmod(0o755)
+            proc = _run_bash(
+                _STUB_PRINTERS
+                + [
+                    "env_exists() { return 0; }",
+                    'run_logged() { shift; "$@"; }',
+                    f'CONDA_BASE="{tmp_path / label}"',
+                    'RFD3_ENV="binderscout_rfd3"',
+                    'ATOMWORKS_VERSION="2.2.1"',
+                    _function_source(path, "_env_python_ok"),
+                    _function_source(path, "_pin_rfd3_atomworks"),
+                    "_pin_rfd3_atomworks; echo RC=$?",
+                ]
+            )
+            results[label] = proc.stdout
+
+        assert "RC=1" in results["floating"], (
+            f"{path.name}: an env whose parse_atom_array lost the kwargs was accepted:\n"
+            + results["floating"]
+        )
+        assert "FAIL:" in results["floating"], "the refusal does not say what is wrong"
+        assert "RC=0" in results["pinned"], f"a correctly pinned env was refused:\n{results['pinned']}"
+
+
 class TestEsm2QuinoxIsPinnedAndTheAlphabetAsserted:
     """BUG-24: Mosaic died on its first optimisation step."""
 

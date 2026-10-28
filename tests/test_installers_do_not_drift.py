@@ -175,6 +175,10 @@ _SHARED_VERIFY_FUNCTIONS = (
     "_af3_full_precision",
     "_count_glob",
     "verify_tool",
+    # _pin_rfd3_atomworks: ported from master, where it existed in install.sh only.
+    # rc-foundry installs atomworks unpinned on BOTH platforms, so the aarch64 copy is
+    # not optional -- RFD3 is installable there (opt-in) and dies the same way.
+    "_pin_rfd3_atomworks",
     # run_logged and check_build_toolchain for the same reason, and with receipts.
     # run_logged's two copies were byte-identical (md5 7c7ecc5f...) through every
     # change this file has seen, and master then fixed the buffering in install.sh

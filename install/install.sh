@@ -2839,6 +2839,36 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/bindcraft2"
 }
 
+# RFD3 needs the same atomworks as Proteina-Complexa (see ATOMWORKS_VERSION), for an
+# unrelated reason: rc-foundry installs atomworks UNPINNED, and 3.0.0 moved
+# extra_fields/build_assembly off parse_atom_array() into a PrepareConfig object and
+# rejects leftover kwargs -- which rfd3's pinned input_parsing.py still passes. So
+# `import atomworks` and a version check both pass while every design run dies in the
+# dataloader. The assertion below is therefore on the SIGNATURE, not the version string.
+_pin_rfd3_atomworks() {
+    env_exists "${RFD3_ENV}" || { print_warn "No ${RFD3_ENV} env — skipping atomworks pin"; return 0; }
+    local py="${CONDA_BASE}/envs/${RFD3_ENV}/bin/python"
+
+    local have
+    have="$("${py}" -c "import importlib.metadata as m; print(m.version('atomworks'))" 2>/dev/null || true)"
+    if [[ "${have}" == "${ATOMWORKS_VERSION}" ]]; then
+        print_ok "atomworks already pinned to ${ATOMWORKS_VERSION} (RFD3)"
+    else
+        print_step "Pinning atomworks ${have:-<absent>} -> ${ATOMWORKS_VERSION} (RFD3)"
+        run_logged "Pinning atomworks==${ATOMWORKS_VERSION} (RFD3)" \
+            "${py}" -m pip install -q "atomworks==${ATOMWORKS_VERSION}" \
+            || { print_fail "Could not pin atomworks==${ATOMWORKS_VERSION} in ${RFD3_ENV}"; return 1; }
+    fi
+
+    _env_python_ok "${RFD3_ENV}" "
+import inspect, sys
+from atomworks.io.parser import parse_atom_array
+p = inspect.signature(parse_atom_array).parameters
+sys.exit(0 if ('extra_fields' in p and 'build_assembly' in p) else 1)
+" || { print_fail "atomworks parse_atom_array lacks extra_fields/build_assembly — RFD3 cannot design"; return 1; }
+    print_ok "atomworks parse_atom_array accepts extra_fields/build_assembly (RFD3)"
+}
+
 install_rfd3() {
     print_step "Installing RFD3 (foundry)"
     _refuse_if_env_in_use "${RFD3_ENV}" || return 1
@@ -2870,6 +2900,10 @@ install_rfd3() {
         "${CONDA_CMD}" run -n "${RFD3_ENV}" \
         pip install -q "rc-foundry[mpnn]==0.1.9" \
         || print_warn "rc-foundry[mpnn] install failed — MPNN redesign step may not work"
+
+    # atomworks arrives UNPINNED with rc-foundry, so pin it here -- before the weights
+    # download and before anyone runs a design -- and fail the step if it cannot be.
+    _pin_rfd3_atomworks || return 1
 
     # Download RFD3 weights to a shared location inside BinderScout
     mkdir -p "${FOUNDRY_WEIGHTS_DIR}"
