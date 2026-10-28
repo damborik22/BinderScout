@@ -571,6 +571,13 @@ class TestPreflightFailsBeforeWritingAnything:
 
     def test_uninstalled_tool_exits_cleanly_instead_of_raising(self, tmp_path, capsys, monkeypatch):
         self._uninstall(monkeypatch, tmp_path)
+        # _INVOKE resolves from the ambient PATH, so hardcoding either spelling here
+        # makes the assertion depend on whether this machine has run the installer --
+        # the same defect `_uninstall` above exists to avoid. It asserted
+        # "binderscout install", which held on a dev box with the shortcut and failed
+        # in CI, where the clone is fresh. Pin the spelling, and pin the RESOLUTION
+        # separately in test_the_hint_names_a_command_that_exists.
+        monkeypatch.setattr(conf, "_INVOKE", "binderscout")
         cfg = self._cfg(tmp_path)
         with pytest.raises(SystemExit) as exc:
             conf.preflight(cfg, {"bindcraft": True})
@@ -578,6 +585,28 @@ class TestPreflightFailsBeforeWritingAnything:
         out = capsys.readouterr().out
         assert "not installed" in out
         assert "binderscout install --tool bindcraft" in out, "the error must say how to fix it"
+
+    @pytest.mark.parametrize(
+        ("shortcut_on_path", "expected"),
+        [(True, "binderscout"), (False, "./binderscout.py")],
+    )
+    def test_the_hint_names_a_command_that_exists(self, tmp_path, capsys, monkeypatch, shortcut_on_path, expected):
+        """The remedy must be runnable in the state the user is actually in.
+
+        On a fresh clone there is no `binderscout` shortcut -- the installer is what
+        creates it -- so a hint reading "run: binderscout install --tool bindcraft"
+        hands a brand-new user a command that exits 127, in the one message whose
+        whole job is to tell them how to recover. Both arms run here because a test
+        machine can only be in one of the two states at a time.
+        """
+        self._uninstall(monkeypatch, tmp_path)
+        monkeypatch.setattr(conf.shutil, "which", lambda name: "/usr/bin/binderscout" if shortcut_on_path else None)
+        monkeypatch.setattr(conf, "_INVOKE", conf._resolve_invoke())
+        cfg = self._cfg(tmp_path)
+        with pytest.raises(SystemExit):
+            conf.preflight(cfg, {"bindcraft": True})
+        out = capsys.readouterr().out
+        assert f"{expected} install --tool bindcraft" in out
 
     def test_reports_every_problem_at_once(self, tmp_path, capsys, monkeypatch):
         """One run, one list — not a traceback per attempt."""

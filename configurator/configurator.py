@@ -33,7 +33,20 @@ RESET = "\033[0m"
 # shortcut -- the installer is what creates it -- so a hint that says
 # "run: binderscout install" hands that user a command that exits 127. Resolved
 # once at import, the same way binderscout.py's own USAGE does it.
-_INVOKE = "binderscout" if shutil.which("binderscout") else "./binderscout.py"
+
+
+def _resolve_invoke() -> str:
+    """How to spell the CLI in a hint, given this machine's PATH.
+
+    Its own function so a test can exercise both answers; a test machine can only
+    be in one of the two states at a time, and asserting the hint's literal text
+    made the assertion depend on whether the dev box happened to have run the
+    installer (green locally, red in CI on a fresh clone).
+    """
+    return "binderscout" if shutil.which("binderscout") else "./binderscout.py"
+
+
+_INVOKE = _resolve_invoke()
 
 
 def print_step(msg):
