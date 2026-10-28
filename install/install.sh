@@ -4372,7 +4372,16 @@ repair_tools() {
         for t in "${__rt_todo[@]}"; do [[ "${t}" == "${tool}" ]] && wanted=true; done
         [[ "${wanted}" == true ]] || continue
         echo -e "\n${BOLD}Repairing ${tool}${RESET}"
-        if "${fn}"; then repaired+=("${tool}"); else print_warn "${tool}: repair attempt failed"; fi
+        # Through run_install_step, not the bare "${fn}": a repair is an install, so
+        # it has to clear the stale marker first and write a fresh one on success.
+        # Calling the function directly would leave a repaired tool looking broken
+        # to every marker-aware reader, and a FAILED repair looking fine.
+        local key="${flag#DO_}"
+        if run_install_step "${key,,}" "${fn}"; then
+            repaired+=("${tool}")
+        else
+            print_warn "${tool}: repair attempt failed"
+        fi
     done
     (( ${#repaired[@]} )) && print_ok "Re-ran: ${repaired[*]}"
     return 0
@@ -4384,6 +4393,47 @@ repair_tools() {
 # error deep inside install.log, leaving half-built envs behind. Advisory by
 # default for GPU/network (an install can legitimately precede the driver, or run
 # behind a proxy); only disk space aborts, and --skip-preflight bypasses all of it.
+# ─── Per-tool success markers ────────────────────────────────────────────────
+#
+# A conda env DIRECTORY is not an install. Conda creates it when it STARTS solving
+# and leaves it behind when the solve fails, so every reader that probed for the
+# directory reported a half-built or outright failed tool as installed -- and the
+# user found out when the GPU run died on ModuleNotFoundError, which converts an
+# install problem into a confusing run-time one. Tightening the probe to
+# bin/python does not help: that symlink exists just as early.
+#
+# Two people hit it. Anyone who configures in a second terminal while installing,
+# which is natural when the installer says it takes 45-90 min; and anyone whose
+# install failed at all. The second form is permanent, not a race: a `--tool all`
+# run that failed at SoluProt left binder-eval-soluprot created, so the
+# configurator offered the solubility screen forever after.
+#
+# Nothing here distinguished "finished successfully" from "died halfway". A marker
+# per tool does, and it is evidence the probes cannot have, because it is written
+# by the only thing that knows: the installer, after the install returned 0.
+INSTALL_STATE_DIR="${BINDERSCOUT_DIR}/.install_state"
+
+clear_tool_mark() { rm -f "${INSTALL_STATE_DIR}/$1"; }
+
+mark_tool_installed() {
+    mkdir -p "${INSTALL_STATE_DIR}"
+    printf '%s\t%s\n' "$(date -Is)" \
+        "$(git -C "${BINDERSCOUT_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+        > "${INSTALL_STATE_DIR}/$1"
+}
+
+is_tool_marked() { [[ -f "${INSTALL_STATE_DIR}/$1" ]]; }
+
+# Run one tool's installer, clearing its marker first and writing it only on
+# success. Cleared FIRST, because a re-install that fails must not leave the
+# previous run's marker standing as evidence for an env it has just half-rebuilt.
+run_install_step() {
+    local key="$1" fn="$2"
+    clear_tool_mark "${key}"
+    "${fn}" || return 1
+    mark_tool_installed "${key}"
+}
+
 # The tools that compile at install time ON THIS PLATFORM, as "DO_ flag|label|why".
 # x86_64: three. Everything else arrives as a wheel or a conda package.
 TOOLCHAIN_TOOLS=(
@@ -4639,6 +4689,12 @@ main() {
         for _spec in "${TOOL_REGISTRY[@]}"; do
             IFS='|' read -r _flag _tool _fn _dflt _desc <<< "${_spec}"
             [[ "${!_flag}" == true ]] || continue
+            # Clear the marker whether or not the removal reported success: the
+            # env is gone or damaged either way, so leaving a success marker behind
+            # would make `--uninstall --tool rfd3` the new way to get a tool that
+            # claims to be installed and is not.
+            local _key="${_flag#DO_}"
+            clear_tool_mark "${_key,,}"
             uninstall_tool "${_tool}" || failed_uninstalls+=("${_tool}")
         done
 
@@ -4733,22 +4789,22 @@ main() {
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
 
-    [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; install_bindcraft || failed_tools+=("BindCraft"); }
+    [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; run_install_step bindcraft install_bindcraft || failed_tools+=("BindCraft"); }
     # BindCraft 2 is cloned from upstream like every other tool now that it is
     # public, so a failure here is a real failure -- no skip special case.
-    [[ "${DO_BINDCRAFT2}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft 2${RESET}"; install_bindcraft2 || failed_tools+=("BindCraft 2"); }
-    [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
-    [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
-    [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
-    [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}";      install_rfd3      || failed_tools+=("RFD3"); }
-    [[ "${DO_RFD4}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD4-Proteina${RESET}"; install_rfd4  || failed_tools+=("RFD4-Proteina"); }
-    [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
-    [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
-    [[ "${DO_PROTEIN_HUNTER}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Protein-Hunter${RESET}"; install_protein_hunter || failed_tools+=("Protein-Hunter"); }
-    [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
-    [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
-    [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; install_soluprot || failed_tools+=("SoluProt"); }
-    [[ "${DO_TMPROT}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] TmProt 1.0${RESET}"; install_tmprot || failed_tools+=("TmProt"); }
+    [[ "${DO_BINDCRAFT2}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft 2${RESET}"; run_install_step bindcraft2 install_bindcraft2 || failed_tools+=("BindCraft 2"); }
+    [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  run_install_step boltzgen install_boltzgen  || failed_tools+=("BoltzGen");  }
+    [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    run_install_step mosaic install_mosaic    || failed_tools+=("Mosaic");    }
+    [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; run_install_step evaluator install_evaluator || failed_tools+=("Evaluator"); }
+    [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}";      run_install_step rfd3 install_rfd3      || failed_tools+=("RFD3"); }
+    [[ "${DO_RFD4}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD4-Proteina${RESET}"; run_install_step rfd4 install_rfd4  || failed_tools+=("RFD4-Proteina"); }
+    [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  run_install_step pxdesign install_pxdesign  || failed_tools+=("PXDesign"); }
+    [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Proteina-Complexa${RESET}"; run_install_step proteina_complexa install_proteina_complexa || failed_tools+=("Proteina-Complexa"); }
+    [[ "${DO_PROTEIN_HUNTER}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Protein-Hunter${RESET}"; run_install_step protein_hunter install_protein_hunter || failed_tools+=("Protein-Hunter"); }
+    [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; run_install_step af3 install_af3 || failed_tools+=("AF3"); }
+    [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; run_install_step esmfold2 install_esmfold2 || failed_tools+=("ESMFold2"); }
+    [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; run_install_step soluprot install_soluprot || failed_tools+=("SoluProt"); }
+    [[ "${DO_TMPROT}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] TmProt 1.0${RESET}"; run_install_step tmprot install_tmprot || failed_tools+=("TmProt"); }
 
     # Verify before summarising. Without this a tool whose install function
     # ended on print_ok -- RFD3 with an empty weights dir, Proteina-Complexa

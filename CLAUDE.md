@@ -202,7 +202,13 @@ BinderScout/
 - `BindCraft2/` — *staged*, not vendored: BindCraft 2 is public (https://github.com/PacesaLab/BindCraft2, released September 2026) but source-available under its own licence (BindCraft2 Source-Available, hosting-restricted), not this repo's MIT, so no file of it is committed here — the same posture as the AF3 weights. The installer unpacks it from `--bc2-source` and installs it **editable**, so the checkout is the installation — moving or deleting it breaks the `bindcraft` command
 - `weights/foundry/` — RFD3 / ProteinMPNN checkpoints fetched by `foundry install` (no clone dir; `rc-foundry` is pip-installed into `binderscout_rfd3`)
 - `runs/` — generated experiment directories
-- `install.log`, `install_aarch.log` — installer output
+- `install.log`, `install_aarch.log` — installer output (both STREAM now: `tail -f` works
+  while a step is running, and a non-TTY run prints a heartbeat every two minutes)
+- `.install_state/` — one file per tool, written by the installer only after that tool's
+  install returned 0. A conda env DIRECTORY is not an install (conda creates it when it
+  starts solving and leaves it behind when the solve fails), so `detect_installs()` and
+  the TUI require a marker **and** their own probe. Enforcement switches on only once at
+  least one marker exists, so every env that predates this keeps working untouched
 - `refold_boltz2/` — intermediate refolding outputs
 
 ### Environment isolation (critical)

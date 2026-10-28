@@ -115,3 +115,8 @@ Evaluator/benchmarks/**/*.json
 REPO_DIARY.md
 DIARY_2.0.md
 DIARY_*.md
+
+# Per-tool install success markers, written by install/install.sh and read by the
+# configurator and the TUI. Machine state, not source: whether THIS checkout
+# finished installing a tool says nothing about any other checkout.
+.install_state/

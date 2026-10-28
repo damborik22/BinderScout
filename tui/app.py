@@ -23,7 +23,14 @@ RESET = "\033[0m"
 
 
 # ── Design tools, in execution order — the single source of truth ────────────
-# (output subdir under runs/<name>/, display label, install marker relative to repo)
+# (tool key, display label, install marker relative to repo)
+#
+# The first field is BOTH the output subdir under runs/<name>/ and the installer's
+# success-marker filename (install/install.sh: mark_tool_installed, keyed on the
+# DO_ flag lowercased). Those coincide for all nine, and
+# tests/test_the_three_installed_tool_readers_agree.py asserts they still do --
+# if they ever diverge this field has to split in two, because reading a marker
+# under a run-output name would silently report every tool as uninstalled.
 #
 # Every TUI surface iterates this: the header "Tools:" bar, the run-picker hints
 # and both "Run status" views. They were four independently maintained literals
@@ -72,15 +79,38 @@ def _installer_for_host(repo: Path) -> Path:
 
 
 def _detect_tools(repo: Path) -> dict[str, bool]:
-    """Lightweight check for installed design tools (no heavy imports)."""
+    """Lightweight check for installed design tools (no heavy imports).
+
+    The markers in TOOL_SEQUENCE are necessary and not sufficient, and two of them
+    were neither: PXDesign and Protein-Hunter were probed by a file of the UPSTREAM
+    CLONE (`PXDesign/pxdesign`, `Protein-Hunter/boltz_ph/design.py`), so a checkout
+    with no conda env at all reported both as installed. The rest ask whether a
+    conda env directory exists, which conda creates when it STARTS solving and
+    leaves behind when the solve fails.
+
+    So the installer's own per-tool success markers decide, exactly as in
+    configurator.detect_installs(): once any marker exists, a tool needs both a
+    marker and its probe. Read here rather than imported from the configurator
+    because this module is the no-args entry point and deliberately imports nothing
+    heavy -- but the rule and the marker keys are the same, which
+    tests/test_the_three_installed_tool_readers_agree.py pins.
+    """
     conda_base = _find_conda_base(repo)
+    state_dir = repo / ".install_state"
+    markers_present = state_dir.is_dir() and any(state_dir.iterdir())
 
     def _present(marker: str) -> bool:
         if marker.startswith("env:"):
             return conda_base is not None and (conda_base / "envs" / marker[4:]).is_dir()
         return (repo / marker).exists()
 
-    return {label: _present(marker) for _subdir, label, marker in TOOL_SEQUENCE}
+    def _installed(key: str, marker: str) -> bool:
+        probe = _present(marker)
+        if not markers_present:
+            return probe
+        return (state_dir / key).is_file() and probe
+
+    return {label: _installed(key, marker) for key, label, marker in TOOL_SEQUENCE}
 
 
 def _tool_outputs(run_dir: Path) -> list[str]:

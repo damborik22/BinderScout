@@ -172,6 +172,10 @@ PROTEIN_HUNTER_DIR = BINDERSCOUT_DIR / "Protein-Hunter"
 RFD4_DIR = BINDERSCOUT_DIR / "RFD4-Proteina"
 RFD4_VENV = RFD4_DIR / ".venv"
 FOUNDRY_WEIGHTS_DIR = BINDERSCOUT_DIR / "weights" / "foundry"
+# Per-tool success markers written by the installer (install/install.sh:
+# mark_tool_installed). Gitignored; see detect_installs() for why they exist and
+# why their absence is not treated as "not installed".
+INSTALL_STATE_DIR = BINDERSCOUT_DIR / ".install_state"
 # Pre-MPNN backbone-geometry gate (config-correctness check, not a quality filter).
 RFD3_GATE = BINDERSCOUT_DIR / "tools" / "rfd3_gate.py"
 # BindCraft 2 installs EDITABLE into a venv beside its own checkout, so the
@@ -281,10 +285,38 @@ AA3TO1 = {
 
 
 def detect_installs() -> dict:
+    """What is installed, per tool: the installer's own success marker AND a probe.
+
+    The probes below ask the filesystem what a working install looks like. Several
+    are strong (Protein-Hunter's pyrosetta, RFD3's checkpoint, BindCraft 2's and
+    RFD4's console scripts) and a few can only ask whether a conda env directory
+    exists -- and a conda env directory is not an install. Conda creates it when it
+    STARTS solving and leaves it behind when the solve fails, so a half-built or
+    outright failed tool reported as installed: the wizard printed
+    `BindCraft [installed]`, defaulted "Enable BindCraft?" to Y, and the run died
+    with `ModuleNotFoundError: No module named 'pyrosetta'`. Tightening the probe to
+    bin/python does not help; that symlink exists just as early. Measured over a
+    tree of EMPTY env directories, eight of fourteen tools reported installed.
+
+    So the installer now records success per tool (INSTALL_STATE_DIR), and a tool
+    counts as installed only when it has BOTH a marker and a passing probe. AND,
+    not OR: a marker alone would trust a tool whose env was deleted afterwards, and
+    a probe alone is the bug.
+
+    The markers are only consulted once at least one exists. Every env on this fleet
+    predates them, so requiring one unconditionally would report a working
+    installation as absent and refuse to configure any of it. That makes the marker
+    directory a one-way upgrade: the first install after this change starts
+    enforcing, and nothing has to be migrated.
     """
-    BindCraft / BoltzGen: check for their conda env directory.
-    Mosaic: check for the uv venv python binary.
-    """
+    markers_present = INSTALL_STATE_DIR.is_dir() and any(INSTALL_STATE_DIR.iterdir())
+
+    def _marked(key: str) -> bool:
+        return (INSTALL_STATE_DIR / key).is_file()
+
+    def _installed(key: str, probe: bool) -> bool:
+        """Marker AND probe once markers exist; probe alone before then."""
+        return (_marked(key) and probe) if markers_present else probe
 
     def _env_exists(name: str) -> bool:
         if CONDA_ENVS_DIR is None:
@@ -319,34 +351,42 @@ def detect_installs() -> dict:
     rfd3_env = _resolve_env("binderscout_rfd3")
     protein_hunter_env = _resolve_env("binderscout_protein_hunter")
 
+    # The marker key is the installer's DO_ flag lowercased, which is this dict's
+    # own key everywhere except pxdesign_local -- "local" is a configurator-side
+    # mode, not something the installer knows about.
     return {
-        "bindcraft": _env_exists("BindCraft"),
-        "boltzgen": _env_exists("BoltzGen"),
-        "mosaic": (MOSAIC_VENV / "bin" / "python").exists(),
-        "evaluator": ((EVALUATOR_DIR / "evaluate.sh").exists() and _env_exists("binder-eval")),
-        "pxdesign_local": _env_exists(pxdesign_env),
-        "proteina_complexa": (PROTEINA_COMPLEXA_VENV / "bin" / "python").exists(),
+        "bindcraft": _installed("bindcraft", _env_exists("BindCraft")),
+        "boltzgen": _installed("boltzgen", _env_exists("BoltzGen")),
+        "mosaic": _installed("mosaic", (MOSAIC_VENV / "bin" / "python").exists()),
+        "evaluator": _installed("evaluator", (EVALUATOR_DIR / "evaluate.sh").exists() and _env_exists("binder-eval")),
+        "pxdesign_local": _installed("pxdesign", _env_exists(pxdesign_env)),
+        "proteina_complexa": _installed("proteina_complexa", (PROTEINA_COMPLEXA_VENV / "bin" / "python").exists()),
         # Not a conda env: BindCraft 2 builds its own venv, and the `bindcraft`
         # console script only exists once the editable install succeeded, so it
         # distinguishes a finished install from a staged-but-unbuilt checkout.
-        "bindcraft2": (BINDCRAFT2_VENV / "bin" / "bindcraft").exists(),
-        "rfd3": _env_exists(rfd3_env) and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists(),
+        "bindcraft2": _installed("bindcraft2", (BINDCRAFT2_VENV / "bin" / "bindcraft").exists()),
+        "rfd3": _installed("rfd3", _env_exists(rfd3_env) and (FOUNDRY_WEIGHTS_DIR / "rfd3_latest.ckpt").exists()),
         # The console script, not the checkout: RFD4-Proteina is installed editable
         # into its own venv, so the clone exists before anything is importable.
-        "rfd4": (RFD4_VENV / "bin" / "rfd4-generate").exists(),
+        "rfd4": _installed("rfd4", (RFD4_VENV / "bin" / "rfd4-generate").exists()),
         # An env directory is not an install: BM5 carried a `binderscout_protein_hunter`
         # env for months that held only pip and setuptools — no PyRosetta, no boltz_ph —
         # and this probe reported the tool as ready. Look for PyRosetta, which is the
         # part that actually fails to install, and which design.py imports at startup.
-        "protein_hunter": (
+        "protein_hunter": _installed(
+            "protein_hunter",
             _env_exists(protein_hunter_env)
             and PROTEIN_HUNTER_DIR.exists()
-            and _env_has_package(protein_hunter_env, "pyrosetta")
+            and _env_has_package(protein_hunter_env, "pyrosetta"),
         ),
-        "af3": _env_exists("binder-eval-af3"),
-        "esmfold2": _env_exists("binder-eval-esmfold2"),
-        "soluprot": _env_exists("binder-eval-soluprot"),
-        "tmprot": _env_exists("binder-eval-tmprot"),
+        "af3": _installed("af3", _env_exists("binder-eval-af3")),
+        "esmfold2": _installed("esmfold2", _env_exists("binder-eval-esmfold2")),
+        # The permanent, non-racy form of the bug: a `--tool all` run that failed at
+        # SoluProt (no `make`) had already created binder-eval-soluprot, so the
+        # configurator offered the solubility screen forever after and it failed at
+        # run time, every time.
+        "soluprot": _installed("soluprot", _env_exists("binder-eval-soluprot")),
+        "tmprot": _installed("tmprot", _env_exists("binder-eval-tmprot")),
     }
 
 
