@@ -4,16 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-**Versioning was reset at 1.0.0 on 2026-10-28.** The history rewrite that published
-this repository replaced the commits the earlier tags pointed at: none of `v1.0.0` …
-`v2.0.2` is an ancestor of `master`, `git tag --merged HEAD` is empty and
-`git describe` answers `fatal: No tags can describe`. Rather than recreate a numbering
-that no longer maps onto any commit here, the sequence restarts: **this tree is
-1.0.0**. Sections below marked *(retired numbering)* are the development record from
-before the reset and are kept verbatim; their version numbers no longer refer to
-anything reachable.
+**Numbering continues from 1.0.5.** `git describe --tags` on `master` returns
+`v1.0.5-24-g…`; tags `v1.0.0`–`v1.0.5` are ancestors of this history. (An earlier
+draft of this file claimed the opposite and reset numbering to 1.0.0. That was an
+artifact of stale *local* tag refs — `git fetch` does not update an existing local
+tag without `--force`, so refs left from before the public-release history rewrite
+pointed at commits that no longer exist, and every tag read as orphaned. Corrected
+before release; no tag was moved.) The `v1.1.x` and `v2.0.x` tags belong to those
+branches and are deliberately not on `master`.
 
-## [1.0.0] — 2026-10-28
+## [1.0.6] — 2026-10-28
 
 First release of the `master` line under the reset numbering, and the point at which
 master is frozen; 2.0 development continues on `v2.0.x`.
@@ -375,7 +375,7 @@ release-tested on hardware.
   index. Upper bounds added to `Evaluator/pyproject.toml` (ceilings, not `==`: it
   is editable-installed into four envs across two Python versions).
 
-## [1.0.5] — 2026-09-23 *(retired numbering)*
+## [1.0.5] — 2026-09-23
 
 ### Fixed
 
@@ -407,7 +407,7 @@ release-tested on hardware.
   does return `[N/A]`. Fixes all seven writers. Backported from the 1.1.x line
   (`376de95`); `master` stays the seven-tool line.
 
-## [1.0.4] — 2026-09-23 *(retired numbering)*
+## [1.0.4] — 2026-09-23
 
 ### Fixed
 
@@ -422,7 +422,7 @@ release-tested on hardware.
   concurrent one caught a non-zero rc but never looked at the output. Backported
   from the 1.1.x line (`e427ebe`); `master` stays the seven-tool line.
 
-## [1.0.3] — 2026-09-22 *(retired numbering)*
+## [1.0.3] — 2026-09-22
 
 Two refold-engine fixes, both found by benchmarking the engines across every GPU we
 own (`docs/data/gpu_benchmark_2026-09-18/`). Both affect every machine.
@@ -453,7 +453,7 @@ own (`docs/data/gpu_benchmark_2026-09-18/`). Both affect every machine.
   `refold_boltz2.py` already had this guard; ESMFold2 was the only engine missing it.
 
 
-## [1.0.2] — 2026-09-18 *(retired numbering)*
+## [1.0.2] — 2026-09-18
 
 ### Fixed
 
@@ -474,7 +474,7 @@ own (`docs/data/gpu_benchmark_2026-09-18/`). Both affect every machine.
   complete, it could contribute an entire engine of nothing to a 3-engine gate.
 
 
-## [1.0.1] — 2026-09-18 *(retired numbering)*
+## [1.0.1] — 2026-09-18
 
 Three aarch64 platform fixes. Each tool reported itself healthy and was not:
 BindCraft 1 was silently on the CPU, and PXDesign could not launch a CUDA kernel
@@ -558,7 +558,7 @@ Everything previously filed under `[Unreleased]` shipped in **v1.0.0** -- the ta
 sits on the commit this release branches from, with no commits in between -- so
 that section is now labelled `[1.0.0]` rather than left open.
 
-## [1.0.0] — 2026-09-16 *(retired numbering)*
+## [1.0.0] — 2026-09-16
 
 ### Fixed (2026-08-14 — the rest of the terminal-path audit: the gate you cannot reach, the wizard session you lose, the menu that errors)
 

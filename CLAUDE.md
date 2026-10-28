@@ -4,9 +4,11 @@
 
 BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. It wraps seven independent design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) behind a single CLI (`bindmaster`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders.
 
-**Current status:** **1.0.0** — numbering was reset here. Master is through **Part U**; the CHANGELOG's `[1.0.0] — 2026-10-28` section is this release, and the sections marked *(retired numbering)* are the development record from before the reset.
+**Current status:** **1.0.6** (`master`, 24 commits past `v1.0.5` — `git describe --tags` → `v1.0.5-24-g…`). Master is through **Part U** and is frozen at this release; 2.0 development continues on `v2.0.x`.
 
-> **Branch and version layout.** `master` is **frozen at 1.0.0** — the stable release line. Active development continues on **`v2.0.x`**, which diverged from master at `602345a` (Release 1.0.3, 2026-09-22) and is well ahead of it; `v1.1.x` is a retired midpoint, kept for now and to be deleted. The `v1.0.0` tag was re-pointed at this history: the commit it previously named (`e618d43`) belonged to the pre-rewrite master line and is reachable from no branch. The `v1.1.0`–`v2.0.2` tags live on their own branches and are **not** stale — they are simply not on `master`, which is why `git tag --merged HEAD` is empty here and `git describe` needs `--all`.
+> **Branch and tag layout.** Tags `v1.0.0`–`v1.0.5` are ancestors of `master` and describe its own release line. `v1.1.0`/`v1.1.1` and `v2.0.0`–`v2.0.2` sit on the `v1.1.x` and `v2.0.x` branches and are deliberately not on master — `v1.1.x` is a retired midpoint kept for now, `v2.0.x` is where active development happens. It diverged from master at `602345a` (Release 1.0.3, 2026-09-22) and is well ahead.
+>
+> **If `git describe` ever fails here, suspect your local tag refs before concluding anything about the history.** `git fetch` does not update an existing local tag; refs left from before the public-release rewrite point at commits that no longer exist, and every tag then reads as orphaned. `git fetch --tags --force` is the fix. A draft of this file once reset the project's numbering on the strength of that artifact.
 >
 > **Fixes landing on master need forward-porting to `v2.0.x`.** The two lines share no commits after `602345a`, so nothing crosses over by itself.
 
