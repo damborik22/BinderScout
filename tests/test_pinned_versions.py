@@ -249,7 +249,7 @@ class TestRfd3GetsTheAtomworksPinToo:
                 "#!/bin/bash\n"
                 'case "$*" in\n'
                 f'  *importlib.metadata*) echo "{version}" ;;\n'
-                f'  *parse_atom_array*) exit {sig_rc} ;;\n'
+                f"  *parse_atom_array*) exit {sig_rc} ;;\n"
                 "esac\n"
                 "exit 0\n"
             )
@@ -270,8 +270,7 @@ class TestRfd3GetsTheAtomworksPinToo:
             results[label] = proc.stdout
 
         assert "RC=1" in results["floating"], (
-            f"{path.name}: an env whose parse_atom_array lost the kwargs was accepted:\n"
-            + results["floating"]
+            f"{path.name}: an env whose parse_atom_array lost the kwargs was accepted:\n" + results["floating"]
         )
         assert "FAIL:" in results["floating"], "the refusal does not say what is wrong"
         assert "RC=0" in results["pinned"], f"a correctly pinned env was refused:\n{results['pinned']}"
