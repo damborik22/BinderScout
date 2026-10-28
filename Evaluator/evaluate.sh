@@ -106,6 +106,14 @@ if [[ "$(uname -m)" == "aarch64" ]]; then
     export TORCH_CUDA_ARCH_LIST="12.0"
 fi
 
+# Step logs must read chronologically. Every step below runs its real work in a
+# child env via `conda run`, and Python block-buffers stdout when it is not a
+# terminal while stderr stays unbuffered -- so a child's traceback arrived BEFORE
+# the child's own "[filter-soluprot] loaded 3 sequence(s)" header, and the log
+# read as if the step crashed before it started. Set once here rather than at
+# fifteen call sites, and before any of them run.
+export PYTHONUNBUFFERED=1
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MOSAIC_VENV_FILE="$SCRIPT_DIR/envs/mosaic_venv_path"
@@ -273,17 +281,66 @@ fi
 if [[ $SKIP_SOLUPROT -eq 0 ]]; then
     if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${SOLUPROT_ENV}"; then
         echo "[note] conda env '${SOLUPROT_ENV}' not found — SoluProt solubility screen will be skipped."
-        echo "        (install with: binderscout install --tool soluprot)"
+        echo "        (install with: binderscout install --tool soluprot — ranking is unaffected)"
         echo ""
         SKIP_SOLUPROT=1
     fi
+fi
+
+# The env name is necessary and not sufficient. SoluProt cannot score without
+# USEARCH, and a `--tool all` install that failed at the USEARCH build leaves the
+# env standing -- so the name-only check above passed, the screen ran, and the
+# missing binary surfaced mid-evaluation as a twelve-line Python traceback plus a
+# red `ERROR conda.cli.main_run`. The handling underneath was already right (the
+# run continues, says so, and says refolding is unaffected) but a scientist reads
+# a traceback as a broken run. AF3 gets a tidy one-line [note] for the same
+# condition; so should this.
+#
+# Mirrors soluprot_runner._resolve_usearch's search order exactly, so a screen
+# that WOULD work is never skipped here.
+find_usearch() {
+    local dir="${SOLUPROT_HOME:-${SCRIPT_DIR}/tools/soluprot}" arch
+    arch="$(uname -m)"
+    if [[ -n "${SOLUPROT_USEARCH:-}" && -x "${SOLUPROT_USEARCH}" ]]; then
+        echo "${SOLUPROT_USEARCH}"; return 0
+    fi
+    local cand
+    for cand in "${dir}/usearch.${arch}" "${dir}/usearch"; do
+        [[ -x "${cand}" ]] && { echo "${cand}"; return 0; }
+    done
+    command -v usearch 2>/dev/null && return 0
+    return 1
+}
+
+if [[ $SKIP_SOLUPROT -eq 0 ]] && ! find_usearch >/dev/null 2>&1; then
+    echo "[note] USEARCH not found — SoluProt solubility screen will be skipped."
+    echo "        SoluProt needs it for the identity feature and cannot score without it."
+    echo "        (build it with: binderscout install --tool soluprot — ranking is unaffected)"
+    echo ""
+    SKIP_SOLUPROT=1
 fi
 
 # Auto-detect TmProt availability unless the user skipped it
 if [[ $SKIP_TMPROT -eq 0 ]]; then
     if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${TMPROT_ENV}"; then
         echo "[note] conda env '${TMPROT_ENV}' not found — TmProt melting-temperature screen will be skipped."
-        echo "        (install with: binderscout install --tool tmprot)"
+        echo "        (install with: binderscout install --tool tmprot — ranking is unaffected)"
+        echo ""
+        SKIP_TMPROT=1
+    fi
+fi
+
+# And the same gap for TmProt, which has no equivalent on master at all. Its
+# binary is resolved INSIDE the child env (tmprot_runner._resolve_tmprot_bin:
+# $TMPROT_BIN, else `tmprot` on that env's PATH), so an env that exists without
+# the console script raises RuntimeError mid-evaluation -- the identical shape to
+# the SoluProt traceback above. Ask the env once, here, where the answer costs
+# one `conda run` instead of a step's worth of confusion.
+if [[ $SKIP_TMPROT -eq 0 ]]; then
+    if ! conda run -n "${TMPROT_ENV}" bash -c \
+            'command -v "${TMPROT_BIN:-tmprot}" >/dev/null 2>&1' >/dev/null 2>&1; then
+        echo "[note] the 'tmprot' command is not available in '${TMPROT_ENV}' — Tm screen will be skipped."
+        echo "        (re-install with: binderscout install --tool tmprot — ranking is unaffected)"
         echo ""
         SKIP_TMPROT=1
     fi

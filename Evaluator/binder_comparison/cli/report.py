@@ -169,6 +169,64 @@ def _collect_provenance(args: argparse.Namespace) -> dict:
     return prov
 
 
+def _gate_notice_lines(body: str, width: int = 88) -> list[str]:
+    """Greedy wrap on word boundaries, so a long notice does not run off a terminal."""
+    lines: list[str] = []
+    current = ""
+    for word in body.split():
+        candidate = f"{current} {word}".strip()
+        if len(candidate) > width and current:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _rank_and_report_the_gate(df: pd.DataFrame, min_engines: int) -> pd.DataFrame:
+    """rank_designs(), with its gate notices pitched as notices.
+
+    rank_designs is library code and warns, which is right -- the warning is a
+    programmatic signal and tests assert on it. But a UserWarning reaches a human
+    carrying a file path, a line number and a line of our own source:
+
+        .../binder_comparison/cli/report.py:342: UserWarning: [rank] no design was
+        refolded by 3+ engines ...
+          df = rank_designs(df, min_engines=min_engines)
+
+    A scientist reads that as an internal error, when it is the single most
+    actionable thing the report says -- and evaluate.sh pitches the IDENTICAL
+    condition correctly earlier in the same run. So the CLI presents it: the same
+    words, on the same `[rank]` channel as every other line here, with the warning
+    re-emitted so nothing programmatic loses it.
+
+    The text itself is deliberately NOT rewritten. It names the consequence --
+    that with the gate empty, passes_engine_gate stops discriminating and a
+    single-engine design can outrank a three-engine one -- and
+    tests/test_empty_gate_names_its_consequence.py asserts on those words.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = rank_designs(df, min_engines=min_engines)
+
+    for w in caught:
+        text = str(w.message)
+        if text.startswith("[rank]"):
+            body = text[len("[rank]") :].strip()
+            first = True
+            for line in _gate_notice_lines(body):
+                print(f"{'[rank] WARNING:' if first else '[rank]         '} {line}")
+                first = False
+        # Re-emitted either way: a pandas FutureWarning is not ours to re-pitch,
+        # and callers filtering on the [rank] warning (or asserting on it) must
+        # still see it. The human already has the readable copy above.
+        warnings.warn_explicit(w.message, w.category, w.filename, w.lineno)
+
+    return result
+
+
 def run(args: argparse.Namespace) -> None:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -409,7 +467,7 @@ def run(args: argparse.Namespace) -> None:
     df = compute_consensus_iptm(df)
     df = compute_consensus_ipsae(df)
     min_engines = getattr(args, "min_engines", None) or MIN_ENGINES_DEFAULT
-    df = rank_designs(df, min_engines=min_engines)
+    df = _rank_and_report_the_gate(df, min_engines)
     # The actionable form. Picking N designs for synthesis, two slots on one fold is
     # a wasted slot -- so name the swap rather than leaving the reader to find it.
     # A SUGGESTION: nothing here re-ranks or rewrites the selection, because fold
