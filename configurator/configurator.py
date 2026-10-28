@@ -239,20 +239,45 @@ _INVOKE = "bindmaster" if shutil.which("bindmaster") else str(BINDMASTER_DIR / "
 
 
 def _marked(key: str) -> bool:
-    """True if install.sh recorded a successful install of `key`."""
+    """True if install.sh recorded an install of `key` (earned or back-filled)."""
     return (INSTALL_STATE_DIR / key).is_file()
+
+
+def _any_marker() -> bool:
+    """True if the marker store holds at least one marker.
+
+    Keyed on the files, not on ``INSTALL_STATE_DIR.is_dir()``: ``clear_tool_mark``
+    is ``rm -f``, so ``--uninstall --tool all`` leaves the directory in place but
+    empty. An empty store means "no marker information" and must fall back to the
+    probes; reading it as "markers exist, none of them set" reported every tool
+    uninstalled on a box where everything worked.
+    """
+    try:
+        return any(p.is_file() for p in INSTALL_STATE_DIR.iterdir())
+    except OSError:
+        return False
 
 
 def detect_installs() -> dict:
     """
-    A tool counts as installed when install/install.sh left a success marker for it
-    (see INSTALL_STATE_DIR).
+    Once the marker store is non-empty, a tool counts as installed when it has BOTH
+    a marker from install/install.sh AND a passing probe.
 
-    The old probes — conda env directory, venv python binary, weights file — are kept
-    as a fallback for environments installed before markers existed, but only while no
-    marker directory exists at all: they cannot tell a finished install from a failed
-    one, so once the installer has started recording successes they must not be
-    allowed to override it. A missing marker directory is "no markers", not an error.
+    Both halves are load-bearing, and each alone was wrong in a way that shipped:
+
+    * **Marker alone** — a marker outlives the thing it describes. Delete a conda env
+      by hand and the tool still reads "installed", which is BUG-06 in mirror image.
+    * **Probe alone** — a conda env directory or a venv python binary cannot tell a
+      finished install from one that died half way, which is what BUG-06 was.
+
+    While the store is empty the probes are the only source, so a box installed
+    before markers existed still reads correctly. ``install.sh`` closes that gap in
+    the other direction with ``backfill_install_markers()``, which records a marker
+    for every passing probe before it can write the first real one — without it, the
+    first ``install --tool X`` made one marker authoritative and every other working
+    tool went dark here, taking the Step-9 refold engines with it.
+
+    A missing marker directory is "no markers", not an error.
     """
 
     def _env_exists(name: str) -> bool:
@@ -260,10 +285,10 @@ def detect_installs() -> dict:
             return False
         return (CONDA_ENVS_DIR / name).is_dir()
 
-    markers = INSTALL_STATE_DIR.is_dir()
+    markers = _any_marker()
 
     def _installed(key: str, probe: bool) -> bool:
-        return _marked(key) if markers else probe
+        return (_marked(key) and probe) if markers else probe
 
     return {
         "bindcraft": _installed("bindcraft", _env_exists("BindCraft")),

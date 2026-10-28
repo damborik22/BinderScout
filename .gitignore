@@ -23,6 +23,7 @@ bin/
 # Per-tool install-success markers written by install.sh and read by the
 # configurator. Machine-local state, one file per tool, never shared.
 .install_state/
+.install_state.migrated
 
 # Installer logs — ephemeral, can be large.
 # NOT `install*.log`: that glob has no slash, so git matches it against the

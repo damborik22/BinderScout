@@ -660,6 +660,68 @@ is_tool_marked() {
     [[ -f "${INSTALL_STATE_DIR}/$1" ]]
 }
 
+# One-time migration: record markers for installs that predate the marker store.
+#
+# The configurator's detect_installs() switches from the old path probes to the
+# markers as soon as the store is non-empty. Without this function the first
+# `install --tool X` on a fully-populated box wrote exactly one marker and every
+# other working tool went dark in the wizard -- and because the Step-9 engine list
+# is gated on that same dict, the refold engines printed "skipped" and the user
+# landed on "No refolding engine selected -- Evaluator disabled". Measured on this
+# box on 2026-10-28: 2 markers present, 9 working tools reported not-installed,
+# and the only engine still offered (AF3) prompts default-no.
+#
+# So before anything can write the first marker, record one for every tool whose
+# probe already passes. A back-filled marker asserts only "the probe passed at
+# migration time", not "this installer finished a successful install", so it is
+# tagged `backfill` and the two can be told apart later. That is the weaker claim,
+# but it cannot manufacture a false positive the probe would not already have
+# produced on its own, because every reader now requires the marker AND the live
+# probe -- see detect_installs() in configurator.py.
+backfill_install_markers() {
+    # Keyed on a sentinel OUTSIDE the store, not on the store's contents.
+    #
+    # "Run once when the store is empty" looks equivalent and is not: a box can
+    # arrive already half-marked and then never migrate. This one did -- it carried
+    # markers for af3 and soluprot (installed through the new installer) while nine
+    # older tools had none, so a contents-based trigger would have declared the
+    # migration done and left those nine dark forever. A restored backup or an
+    # rsync'd tree lands in the same state, as do two racing installs.
+    #
+    # The sentinel cannot live inside INSTALL_STATE_DIR: the readers treat a
+    # non-empty store as "markers are authoritative", so a store containing only a
+    # sentinel would report every tool uninstalled.
+    local _sentinel="${BINDMASTER_DIR}/.install_state.migrated"
+    [[ -f "${_sentinel}" ]] && return 0
+
+    local _key _fn _n=0
+    for _key in bindcraft boltzgen mosaic evaluator pxdesign proteina_complexa \
+                protein_hunter rfd3 af3 esmfold2 soluprot; do
+        _fn="is_${_key}_installed"
+        declare -F "${_fn}" >/dev/null 2>&1 || continue
+        # Never overwrite an earned marker with a back-filled one: the earned marker
+        # is the stronger claim.
+        [[ -f "${INSTALL_STATE_DIR}/${_key}" ]] && continue
+        "${_fn}" 2>/dev/null || continue
+        mkdir -p "${INSTALL_STATE_DIR}" || return 0
+        printf '%s\t%s\tbackfill\n' "$(date -Is)" \
+            "$(git -C "${BINDMASTER_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+            > "${INSTALL_STATE_DIR}/${_key}" || return 0
+        _n=$(( _n + 1 ))
+    done
+
+    # Written even when nothing was back-filled: a genuinely empty box has still
+    # been migrated, and re-running the probes on every invocation would make the
+    # marker store mean nothing (every passing probe would mint its own marker,
+    # collapsing `marker AND probe` back to `probe`).
+    : > "${_sentinel}" 2>/dev/null || true
+
+    if (( _n > 0 )); then
+        print_ok "Recorded ${_n} pre-existing install(s) as install markers (one-time migration)"
+    fi
+    return 0
+}
+
 # _install_step <canonical tool key> <install function>
 # Clears the marker, runs the install, and writes the marker only if it
 # succeeded — the whole contract for one tool, so every tool gets it identically.
@@ -3346,6 +3408,10 @@ main() {
         print_warn "  Mosaic:    may fail — torchtext has no Linux aarch64 wheel."
         print_warn "  Proteina-Complexa: may need patches — some deps (PyG, torchtext) may lack aarch64 wheels."
     fi
+
+    # Must run after detect_conda (the probes need CONDA_BASE) and before anything
+    # can write the first marker, including print_tool_status reading them.
+    backfill_install_markers
 
     print_tool_status
 
