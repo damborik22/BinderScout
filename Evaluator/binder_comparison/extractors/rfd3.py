@@ -113,8 +113,8 @@ class RFD3Extractor(SequenceExtractor):
 
         results: list[ExtractedBinder] = []
         for idx, row in df.iterrows():
-            seq = str(row[seq_col]).strip().upper()
-            if not self._validate_sequence(seq):
+            seq = self._sequence_cell(row[seq_col])
+            if seq is None or not self._validate_sequence(seq):
                 continue
             sidecar = self._read_sidecar(csv_path, row)
             results.append(

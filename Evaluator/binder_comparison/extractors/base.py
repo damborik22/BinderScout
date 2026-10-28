@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
 
+import pandas as pd
+
 from ..comparison.tool_classification import DEFAULT_EXTRACTOR_METADATA, ExtractorMetadata
 from ..core.schema import ExtractedBinder
 
@@ -122,3 +124,17 @@ class SequenceExtractor(ABC):
         """Return True if *seq* is a non-empty string of standard amino acids."""
         valid = set("ACDEFGHIKLMNPQRSTVWY")
         return bool(seq) and all(c in valid for c in seq.upper())
+
+    def _sequence_cell(self, value) -> str | None:
+        """Normalise one sequence cell, or None when the cell holds no sequence.
+
+        Read a blank CSV cell with pandas and you get NaN; `str(nan).upper()` is
+        `"NAN"`; and N, A and N are all standard residues. So an empty cell passes
+        `_validate_sequence()` and enters the pool as a three-residue binder that
+        refolds, scores and ranks like any other design — a wrong answer with no
+        error anywhere. `ProteinHunterExtractor` guarded this at its own two call
+        sites and said why in a comment; every other extractor did not.
+        """
+        if value is None or pd.isna(value):
+            return None
+        return str(value).strip().upper() or None

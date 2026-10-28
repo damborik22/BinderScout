@@ -106,7 +106,9 @@ class MosaicExtractor(SequenceExtractor):
         results: list[ExtractedBinder] = []
 
         for idx, row in df.iterrows():
-            seq = str(row[_SEQUENCE_COL]).strip().upper()
+            seq = self._sequence_cell(row[_SEQUENCE_COL])
+            if seq is None:
+                continue
             if not self._validate_sequence(seq):
                 warnings.warn(f"Mosaic row {idx}: invalid sequence — skipping")
                 continue

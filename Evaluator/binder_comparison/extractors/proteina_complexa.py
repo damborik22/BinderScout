@@ -185,7 +185,7 @@ class ProteinaComplexaExtractor(SequenceExtractor):
         # aatype, and an evaluation CSV carries binder_sequence.
         seq_col = next((c for c in _SEQUENCE_COL_CANDIDATES if c in df.columns), None)
         if seq_col is not None:
-            sequences: list[str | None] = [str(v).strip().upper() for v in df[seq_col]]
+            sequences: list[str | None] = [self._sequence_cell(v) for v in df[seq_col]]
         elif _AATYPE_COL in df.columns:
             sequences = self._binders_from_aatype(df)
         else:
