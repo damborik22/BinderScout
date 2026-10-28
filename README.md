@@ -68,7 +68,7 @@ The evaluator (`bindmaster evaluate` / `binder-compare`) runs on top of the desi
 |---|---|---|---|---|
 | **Boltz-2** | Primary refold engine; ranking reference | `Mosaic/.venv` (rides Mosaic install) | x86_64 + aarch64 | default (with Mosaic) |
 | **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.12) | x86_64 + aarch64 | default (in `--tool all`) |
-| **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.12, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | `--tool af3` (gated weights) |
+| **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.12, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | default (in `--tool all`; the env builds, the **weights** you request yourself) |
 | **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model | in `--tool all` |
 
 ### Architecture
@@ -115,7 +115,7 @@ flowchart LR
     ESMFold2 --> Report
 ```
 
-ESMFold2 and SoluProt are in `--tool all`; AF3 is an explicit `--tool af3` install (gated weights). All three refold engines are then auto-detected by `evaluate.sh` from their conda envs. SoluProt acts as a filter, never as a re-ranker — it only drops designs with `--soluprot-filter` — its `soluprot_score` and `soluprot_passes` columns show up in `metrics.csv` alongside the refold scores so users can sort on them if they want.
+All three refold engines are in `--tool all`, so a default install matches the report's default 3-engine gate. AF3 is included too: the installer builds its env and then prints where to request the weights from DeepMind, which are the one thing it cannot fetch for you — so AF3 is installed-but-weightless until you place them. ESMFold2 and SoluProt need nothing extra. All three engines are auto-detected by `evaluate.sh` from their conda envs. SoluProt acts as a filter, never as a re-ranker — it only drops designs with `--soluprot-filter` — its `soluprot_score` and `soluprot_passes` columns show up in `metrics.csv` alongside the refold scores so users can sort on them if they want.
 
 ### Components at a glance
 
@@ -161,7 +161,7 @@ flowchart TB
     EvaluateSh -->|conda run -n …| EvalEnvs
 ```
 
-Solid blue boxes are the seven design tools' isolated environments; green / yellow boxes are the four evaluator environments (ESMFold2 and SoluProt ship in `--tool all`; AF3 is opt-in via `--tool af3`). The grey panel shows the per-run output layout the configurator generates and `evaluate.sh` fills in.
+Solid blue boxes are the seven design tools' isolated environments; green / yellow boxes are the four evaluator environments (all three engines ship in `--tool all`; AF3's env builds but its weights are gated and requested separately). The grey panel shows the per-run output layout the configurator generates and `evaluate.sh` fills in.
 
 ---
 
@@ -243,7 +243,7 @@ bindmaster evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bind
 
 ```
 bindmaster install   [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|all]
-                     [--tool af3|soluprot]             # individually; only af3 is outside --tool all (gated weights)
+                     [--tool af3|soluprot]             # individually; both are also in --tool all
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
                      [--skip-preflight] [--force]
 bindmaster configure [options passed through to configurator.py]
@@ -263,7 +263,7 @@ Options:
 | `--tool all\|bindcraft\|boltzgen\|mosaic\|pxdesign\|proteina-complexa\|protein-hunter\|rfd3` | Which design tool(s) to install. Omit for interactive menu. |
 | `--tool evaluator` | Evaluator pipeline only — the `binder-eval` conda env and the `binder-compare` CLI (already in `--tool all`). This is the one to use when someone else ran the designs and you only want to refold, rank and report them. |
 | `--tool esmfold2` | ESMFold2 refolder — **default** (already in `--tool all`); lightweight, no gated weights; also the `autosize` gate. Listed here for explicit re-install. |
-| `--tool af3\|soluprot` | Named individually to install just that engine. `af3` = AlphaFold 3 v3.0.2 — the one engine **not** in `--tool all`, because its weights are gated. `soluprot` = solubility screen, **already part of `--tool all`** (x86 needs the SoluProt + USEARCH downloads; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it source-builds scikit-learn 0.20.4 + USEARCH v12 and uses the `--no_tmhmm` model). |
+| `--tool af3\|soluprot` | Named individually to install just that engine. `af3` = AlphaFold 3 v3.0.2 — **in `--tool all`** as of this change, because leaving it out gave a default install two engines against a three-engine gate, so every design failed the gate. The install builds the env and smoke-tests it; the **weights are gated** and it prints where to request them rather than failing. `soluprot` = solubility screen, **already part of `--tool all`** (x86 needs the SoluProt + USEARCH downloads; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it source-builds scikit-learn 0.20.4 + USEARCH v12 and uses the `--no_tmhmm` model). |
 | `--cuda VERSION` | CUDA version for conda package resolution (default: 12.4) |
 | `--skip-examples` | Do not prompt to run bundled examples after install |
 | `--skip-preflight` | Skip the disk / GPU / network checks run before downloading |

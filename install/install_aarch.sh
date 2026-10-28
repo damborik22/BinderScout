@@ -47,6 +47,19 @@ ARCH="$(uname -m)"     # expected: aarch64
 CUDA_VERSION="13.0"    # DGX Spark GB10 (Blackwell, sm_121)
 FOUNDRY_VERSION="0.1.9"   # rc-foundry release pinned for RFD3 (matches install.sh)
 
+# PyTorch pins. Every torch install in this file used to be a bare `pip install torch`
+# against the cu130 index, so two installs a week apart got different torch -- the same
+# floating-dependency class as the HEAD pin and the unpinned atomworks, and the one the
+# repo keeps paying for. x86 pins torch at every site; this file pinned none.
+#
+# Values are the versions MEASURED WORKING on GB10 (sm_121) hardware, read out of the
+# live envs rather than chosen: BoltzGen 2.10.0 (also what CLAUDE.md records as verified
+# there), PXDesign 2.14.0, RFD3 2.12.1. The cu130 index turns these into the +cu130
+# local builds; plain PyPI torch is CPU-only on aarch64 for these versions.
+TORCH_BOLTZGEN="2.10.0"
+TORCH_PXDESIGN="2.14.0"
+TORCH_RFD3="2.12.1"
+
 # atomworks is pinned for RFD3. rc-foundry installs it UNPINNED, and atomworks 3.0.0
 # (2026-10-05) moved `extra_fields` / `build_assembly` off parse_atom_array()'s
 # signature into a PrepareConfig object and started rejecting leftover kwargs, while
@@ -110,7 +123,14 @@ while [[ $# -gt 0 ]]; do
                     # install without it cannot run the documented workflow. On this
                     # platform it also source-builds scikit-learn 0.20.4 and USEARCH
                     # v12, so `all` now requires a C/C++ toolchain.
-                    DO_SOLUPROT=true ;;
+                    DO_SOLUPROT=true
+                    # Every refold engine by default. AF3's weights are gated, but install_af3
+                    # only BUILDS the env and then prints where to request them -- it does not
+                    # fail without them. Leaving it out gave a fresh install TWO engines against
+                    # the report's default 3-engine gate, so every design failed the gate and was
+                    # ranked last. The engines have to match the gate out of the box.
+                    DO_AF3=true
+ ;;
                 bindcraft)
                     DO_BINDCRAFT=true ;;
                 boltzgen)
@@ -124,7 +144,17 @@ while [[ $# -gt 0 ]]; do
                 rfd3|foundry)
                     DO_RFD3=true ;;
                 protein-hunter|protein_hunter|phunter)
-                    echo -e "${RED}Protein-Hunter is not supported on aarch64: PyRosetta publishes no aarch64 wheels.${RESET}"
+                    # The old reason -- "PyRosetta publishes no aarch64 wheels" -- is
+                    # disproved by this very file, which installs pyrosetta from the
+                    # graylab CONDA channel into the BindCraft env. "No wheels" was only
+                    # ever true of PyPI. What is actually untested here is Protein-Hunter's
+                    # own installer, which takes the pip `pyrosetta-installer` path, and
+                    # its vendored Boltz-2 / Chai-1 stack, which has never been built on
+                    # aarch64. So this is UNTESTED, not blocked.
+                    echo -e "${RED}Protein-Hunter is not wired up for aarch64 yet.${RESET}"
+                    echo -e "${YELLOW}  Not a PyRosetta limitation: this installer already installs pyrosetta from${RESET}"
+                    echo -e "${YELLOW}  the graylab conda channel. Untested here are Protein-Hunter's own pip${RESET}"
+                    echo -e "${YELLOW}  pyrosetta-installer path and its vendored Boltz-2 / Chai-1 build.${RESET}"
                     exit 1 ;;
                 proteina-complexa|proteina_complexa|complexa)
                     # DEPRECATED 2026-07-29 — a throughput verdict, not an install failure.
@@ -133,7 +163,12 @@ while [[ $# -gt 0 ]]; do
                     # runs on CPU at ~320 s/call vs <=2.46 s on an H200. The production MCTS recipe
                     # costs 3300 AF2 calls per 100-design replicate, i.e. 12.2 days here vs 2.25 h.
                     echo -e "${RED}Proteina-Complexa is deprecated on aarch64 (DGX Spark): not viable, not broken.${RESET}"
-                    echo -e "${YELLOW}  No CUDA jaxlib for aarch64 → the AF2 reward runs on CPU (~320 s/call vs 2.5 s on H200).${RESET}"
+                    echo -e "${YELLOW}  NOT because there is no CUDA jaxlib for aarch64 — there is, and this file${RESET}"
+                    echo -e "${YELLOW}  installs jax[cuda12]==0.6.2 elsewhere. The blocker is a version pincer:${RESET}"
+                    echo -e "${YELLOW}  PC vendors colabdesign 1.1.1.1, which calls jax.tree_map (removed in jax${RESET}"
+                    echo -e "${YELLOW}  0.6), while jax 0.4.x cannot compile an AF2-class graph for sm_121.${RESET}"
+                    echo -e "${YELLOW}  Throughput here is UNMEASURED: the one attempt to measure it recorded a${RESET}"
+                    echo -e "${YELLOW}  run whose AF2 reward never executed (every reward 0.0) and was retracted.${RESET}"
                     echo -e "${YELLOW}  The production MCTS recipe needs 3300 AF2 calls per 100-design replicate:${RESET}"
                     echo -e "${YELLOW}    12.2 days here vs 2.25 h on one H200. Run Proteina-Complexa on x86 hardware.${RESET}"
                     echo -e "${YELLOW}  Reopens only if a CUDA jaxlib for aarch64/sm_121 appears, or if a${RESET}"
@@ -622,6 +657,139 @@ check_tools_dir() {
 
 # ─── Install Status Checks ────────────────────────────────────────────────────
 
+# Install-state markers. Ported from install.sh, which had the whole mechanism to
+# itself: this installer wrote no markers at all, so configurator.detect_installs()
+# found an empty store, fell back to probe-only, and this platform kept exactly the
+# behaviour the markers exist to prevent -- a conda env directory left behind by a
+# FAILED solve reading as an install. backfill_install_markers() is byte-identical
+# to the x86 copy and needs no per-platform list: it skips any tool whose
+# is_<key>_installed probe this file does not define (`declare -F`), which is how
+# the two tools aarch64 refuses drop out on their own.
+# The marker is cleared before each (re)install and written only on success, so a
+# failed or interrupted install leaves NO marker. One file per tool, named by the
+# canonical lowercase key (bindcraft, boltzgen, mosaic, evaluator, pxdesign,
+# proteina_complexa, protein_hunter, rfd3, esmfold2, soluprot, af3); content is
+# one line, "<ISO-8601 timestamp>\t<short git sha>". configurator.py reads the
+# same directory and treats its absence as "no markers", not as an error.
+INSTALL_STATE_DIR="${BINDMASTER_DIR}/.install_state"
+
+# mark_tool_installed <canonical tool key>
+mark_tool_installed() {
+    mkdir -p "${INSTALL_STATE_DIR}" || return 0
+    printf '%s\t%s\n' "$(date -Is)" \
+        "$(git -C "${BINDMASTER_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+        > "${INSTALL_STATE_DIR}/$1"
+}
+
+# clear_tool_mark <canonical tool key>
+clear_tool_mark() {
+    rm -f "${INSTALL_STATE_DIR}/$1"
+}
+
+# is_tool_marked <canonical tool key>
+is_tool_marked() {
+    [[ -f "${INSTALL_STATE_DIR}/$1" ]]
+}
+
+# One-time migration: record markers for installs that predate the marker store.
+#
+# The configurator's detect_installs() switches from the old path probes to the
+# markers as soon as the store is non-empty. Without this function the first
+# `install --tool X` on a fully-populated box wrote exactly one marker and every
+# other working tool went dark in the wizard -- and because the Step-9 engine list
+# is gated on that same dict, the refold engines printed "skipped" and the user
+# landed on "No refolding engine selected -- Evaluator disabled". Measured on this
+# box on 2026-10-28: 2 markers present, 9 working tools reported not-installed,
+# and the only engine still offered (AF3) prompts default-no.
+#
+# So before anything can write the first marker, record one for every tool whose
+# probe already passes. A back-filled marker asserts only "the probe passed at
+# migration time", not "this installer finished a successful install", so it is
+# tagged `backfill` and the two can be told apart later. That is the weaker claim,
+# but it cannot manufacture a false positive the probe would not already have
+# produced on its own, because every reader now requires the marker AND the live
+# probe -- see detect_installs() in configurator.py.
+backfill_install_markers() {
+    # Keyed on a sentinel OUTSIDE the store, not on the store's contents.
+    #
+    # "Run once when the store is empty" looks equivalent and is not: a box can
+    # arrive already half-marked and then never migrate. This one did -- it carried
+    # markers for af3 and soluprot (installed through the new installer) while nine
+    # older tools had none, so a contents-based trigger would have declared the
+    # migration done and left those nine dark forever. A restored backup or an
+    # rsync'd tree lands in the same state, as do two racing installs.
+    #
+    # The sentinel cannot live inside INSTALL_STATE_DIR: the readers treat a
+    # non-empty store as "markers are authoritative", so a store containing only a
+    # sentinel would report every tool uninstalled.
+    local _sentinel="${BINDMASTER_DIR}/.install_state.migrated"
+    [[ -f "${_sentinel}" ]] && return 0
+
+    local _key _fn _n=0
+    for _key in bindcraft boltzgen mosaic evaluator pxdesign proteina_complexa \
+                protein_hunter rfd3 af3 esmfold2 soluprot; do
+        _fn="is_${_key}_installed"
+        declare -F "${_fn}" >/dev/null 2>&1 || continue
+        # Never overwrite an earned marker with a back-filled one: the earned marker
+        # is the stronger claim.
+        [[ -f "${INSTALL_STATE_DIR}/${_key}" ]] && continue
+        "${_fn}" 2>/dev/null || continue
+        mkdir -p "${INSTALL_STATE_DIR}" || return 0
+        printf '%s\t%s\tbackfill\n' "$(date -Is)" \
+            "$(git -C "${BINDMASTER_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+            > "${INSTALL_STATE_DIR}/${_key}" || return 0
+        _n=$(( _n + 1 ))
+    done
+
+    # Written even when nothing was back-filled: a genuinely empty box has still
+    # been migrated, and re-running the probes on every invocation would make the
+    # marker store mean nothing (every passing probe would mint its own marker,
+    # collapsing `marker AND probe` back to `probe`).
+    : > "${_sentinel}" 2>/dev/null || true
+
+    if (( _n > 0 )); then
+        print_ok "Recorded ${_n} pre-existing install(s) as install markers (one-time migration)"
+    fi
+    return 0
+}
+
+# _install_step <canonical tool key> <install function>
+# Clears the marker, runs the install, and writes the marker only if it
+# succeeded — the whole contract for one tool, so every tool gets it identically.
+_install_step() {
+    clear_tool_mark "$1"
+    "$2" || return 1
+    mark_tool_installed "$1"
+}
+
+# _any_tool_marked
+# True when the marker store holds at least one marker. Keyed on the FILES rather
+# than on the directory, because clear_tool_mark is `rm -f`: --uninstall --tool all
+# leaves the directory in place but empty, and reading that as "markers are
+# authoritative, none are set" reports every tool uninstalled on a working box.
+_any_tool_marked() {
+    local _f
+    for _f in "${INSTALL_STATE_DIR}"/*; do
+        [[ -f "${_f}" ]] && return 0
+    done
+    return 1
+}
+
+# _tool_is_installed <canonical tool key> <probe function>
+# The one rule, shared with configurator.detect_installs() and tui/app.py: once ANY
+# marker exists a tool needs the marker AND a passing probe; before then the probe
+# decides alone. Marker-alone would trust a tool whose env was deleted afterwards,
+# and probe-alone is the defect the markers exist to fix. This reader used to say
+# marker-OR-probe, which disagreed with the other two about the same box.
+_tool_is_installed() {
+    local _key="$1" _probe="$2"
+    if _any_tool_marked; then
+        is_tool_marked "${_key}" && "${_probe}" 2>/dev/null
+    else
+        "${_probe}" 2>/dev/null
+    fi
+}
+
 is_bindcraft_installed() {
     [[ -d "${BINDCRAFT_DIR}" ]] && env_exists BindCraft
 }
@@ -644,17 +812,42 @@ is_pxdesign_installed() {
 
 # print_tool_status
 # Shows installed/not-installed for each tool.
+is_rfd3_installed() {
+    env_exists bindmaster_rfd3
+}
+
+is_af3_installed() {
+    [[ -d "${AF3_DIR}" ]] && env_exists binder-eval-af3
+}
+
+is_esmfold2_installed() {
+    env_exists binder-eval-esmfold2
+}
+
+is_soluprot_installed() {
+    # USEARCH as well as the env: the env is created before the source build, so
+    # an env-only probe reports a failed USEARCH build as a working SoluProt.
+    # The binary is named for the architecture, so this one is NOT shared with
+    # install.sh, which looks for usearch.x86_64.
+    env_exists binder-eval-soluprot && [[ -x "${SOLUPROT_DIR}/usearch.aarch64" ]]
+}
+
 print_tool_status() {
     echo ""
     echo -e "${BOLD}=== Installed Tools ===${RESET}"
     local _status _icon
-    for _tool in BindCraft BoltzGen Mosaic Evaluator PXDesign; do
-        if "is_${_tool,,}_installed" 2>/dev/null; then
+    # Every tool this installer can install. The old list named five, so RFD3, AF3,
+    # ESMFold2 and SoluProt -- including the DEFAULT refold engine -- never appeared
+    # under a heading that claims to list the installed tools.
+    for _tool in BindCraft BoltzGen Mosaic Evaluator PXDesign RFD3 AF3 ESMFold2 SoluProt; do
+        local _key="${_tool,,}"
+        local _fn="is_${_key}_installed"
+        if _tool_is_installed "${_key}" "${_fn}"; then
             _icon="${GREEN}✓${RESET}"; _status="installed"
         else
             _icon="${RED}✗${RESET}"; _status="not installed"
         fi
-        printf "  %b  %-12s  %s\n" "${_icon}" "${_tool}" "${_status}"
+        printf "  %b  %-20s  %s\n" "${_icon}" "${_tool}" "${_status}"
     done
     echo ""
 }
@@ -670,24 +863,36 @@ select_tools_interactive() {
     local sel_mo=true
     local sel_ev=true
     local sel_pxd=false
+    local sel_rfd3=false   # opt-in: installable here, unvalidated on this hardware
+    local sel_esm=true     # the DEFAULT refold engine, and in --tool all
+    local sel_sp=true      # in --tool all; the pre-refold solubility label
+    local sel_af3=true     # in --tool all: the env builds; the WEIGHTS are requested separately
 
-    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "PXDesign")
+    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "PXDesign" "RFD3" "ESMFold2" "SoluProt" "AlphaFold 3")
     local descs=(
         "Binder design via AlphaFold2 (conda, Python 3.10)"
         "Structure generation with Boltz-1 (conda, Python 3.12)"
         "JAX-based protein design with Marimo notebooks (uv venv)"
         "Evaluate binders: refold with Boltz-2 (+ AF3, ESMFold2 if installed), ranked report (requires Mosaic)"
         "Protenix-based de novo binder design (conda)"
+        "RFD3 / foundry — all-atom diffusion (conda; unvalidated on this hardware)"
+        "ESMFold2 refolder — the DEFAULT evaluation engine, no gated weights (conda)"
+        "SoluProt 1.0 — solubility label, never a filter; source-builds here (conda)"
+        "AlphaFold 3 v3.0.2 refolder — builds the env; weights are gated, request them separately"
     )
 
     # Check current install state once (avoid repeated conda calls in the loop)
-    local inst_bc inst_bg inst_mo inst_ev inst_pxd
+    local inst_bc inst_bg inst_mo inst_ev inst_pxd inst_rfd3 inst_esm inst_sp inst_af3
     is_bindcraft_installed && inst_bc="${GREEN}installed${RESET}" || inst_bc="${YELLOW}not installed${RESET}"
     is_boltzgen_installed  && inst_bg="${GREEN}installed${RESET}" || inst_bg="${YELLOW}not installed${RESET}"
     is_mosaic_installed    && inst_mo="${GREEN}installed${RESET}" || inst_mo="${YELLOW}not installed${RESET}"
     is_evaluator_installed && inst_ev="${GREEN}installed${RESET}" || inst_ev="${YELLOW}not installed${RESET}"
     is_pxdesign_installed  && inst_pxd="${GREEN}installed${RESET}" || inst_pxd="${YELLOW}not installed${RESET}"
-    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev" "$inst_pxd")
+    is_rfd3_installed      && inst_rfd3="${GREEN}installed${RESET}" || inst_rfd3="${YELLOW}not installed${RESET}"
+    is_esmfold2_installed  && inst_esm="${GREEN}installed${RESET}" || inst_esm="${YELLOW}not installed${RESET}"
+    is_soluprot_installed  && inst_sp="${GREEN}installed${RESET}" || inst_sp="${YELLOW}not installed${RESET}"
+    is_af3_installed       && inst_af3="${GREEN}installed${RESET}" || inst_af3="${YELLOW}not installed${RESET}"
+    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev" "$inst_pxd" "$inst_rfd3" "$inst_esm" "$inst_sp" "$inst_af3")
 
     # Helper: print current state
     _print_menu() {
@@ -695,8 +900,8 @@ select_tools_interactive() {
         echo -e "${BOLD}${CYAN}  Select tools to install${RESET}"
         echo -e "  Type a number to toggle selection, then press Enter when done."
         echo ""
-        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_pxd")
-        for i in 0 1 2 3 4; do
+        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_pxd" "$sel_rfd3" "$sel_esm" "$sel_sp" "$sel_af3")
+        for i in 0 1 2 3 4 5 6 7 8; do
             local box
             if [[ "${states[$i]}" == true ]]; then
                 box="${GREEN}[x]${RESET}"
@@ -720,17 +925,23 @@ select_tools_interactive() {
             3) [[ "$sel_mo" == true ]] && sel_mo=false || sel_mo=true ;;
             4) [[ "$sel_ev" == true ]] && sel_ev=false || sel_ev=true ;;
             5) [[ "$sel_pxd" == true ]] && sel_pxd=false || sel_pxd=true ;;
-            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true;  sel_pxd=true  ;;
-            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false; sel_pxd=false ;;
+            6) [[ "$sel_rfd3" == true ]] && sel_rfd3=false || sel_rfd3=true ;;
+            7) [[ "$sel_esm" == true ]] && sel_esm=false || sel_esm=true ;;
+            8) [[ "$sel_sp" == true ]] && sel_sp=false || sel_sp=true ;;
+            9) [[ "$sel_af3" == true ]] && sel_af3=false || sel_af3=true ;;
+            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true;  sel_pxd=true;  sel_rfd3=true;  sel_esm=true;  sel_sp=true;  sel_af3=true  ;;
+            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false; sel_pxd=false; sel_rfd3=false; sel_esm=false; sel_sp=false; sel_af3=false ;;
             "")
                 # Confirm: at least one must be selected
-                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false && "$sel_pxd" == false ]]; then
+                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false \
+                      && "$sel_pxd" == false && "$sel_rfd3" == false && "$sel_esm" == false \
+                      && "$sel_sp" == false && "$sel_af3" == false ]]; then
                     echo -e "  ${RED}No tools selected. Select at least one.${RESET}"
                     continue
                 fi
                 break
                 ;;
-            *) echo -e "  ${RED}Invalid input. Enter 1–5, a, n, or press Enter.${RESET}" ;;
+            *) echo -e "  ${RED}Invalid input. Enter 1–9, a, n, or press Enter.${RESET}" ;;
         esac
     done
 
@@ -739,6 +950,10 @@ select_tools_interactive() {
     DO_MOSAIC="$sel_mo"
     DO_EVALUATOR="$sel_ev"
     DO_PXDESIGN="$sel_pxd"
+    DO_RFD3="$sel_rfd3"
+    DO_ESMFOLD2="$sel_esm"
+    DO_SOLUPROT="$sel_sp"
+    DO_AF3="$sel_af3"
 
     echo ""
     echo -e "  ${BOLD}Installing:${RESET}"
@@ -1138,7 +1353,26 @@ _bindcraft_smoke_test() {
         || return 1
     smoke_test "JAX GPU matmul" \
         "${CONDA_CMD}" run -n BindCraft \
-        python -c "import jax.numpy as jnp; print(jnp.dot(jnp.ones((2,2)), jnp.ones((2,2))))"
+        python -c "import jax.numpy as jnp; print(jnp.dot(jnp.ones((2,2)), jnp.ones((2,2))))" \
+        || return 1
+    # The patch (_patch_bindcraft_pyrosetta) is applied on both platforms; only x86
+    # checked that it actually works against the INSTALLED PyRosetta. This platform
+    # takes pyrosetta UNPINNED from the graylab conda channel, so it is the side where
+    # an API mismatch is most likely -- and score_interface() runs only after a full
+    # ~8 min trajectory, so without this the symptom is "zero designs", not an error.
+    smoke_test "pyrosetta set_interface API" \
+        "${CONDA_CMD}" run -n BindCraft python -c "
+import pyrosetta
+from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
+pyrosetta.init('-mute all')
+iam = InterfaceAnalyzerMover()
+try:
+    from pyrosetta.rosetta.core.pose import DockingPartners
+    iam.set_interface(DockingPartners.docking_partners_from_string('A_B'))
+except ImportError:
+    iam.set_interface('A_B')
+print('OK')" \
+        || { print_fail "PyRosetta API mismatch — BindCraft would produce zero designs"; return 1; }
 }
 
 _write_bindcraft_shortcut() {
@@ -1263,7 +1497,7 @@ install_boltzgen() {
     # compute_120 PTX which JIT-compiles to sm_121 at runtime.
     run_logged "Installing PyTorch (aarch64, CUDA 13.0)" \
         "${CONDA_CMD}" run -n BoltzGen \
-        pip install torch --index-url https://download.pytorch.org/whl/cu130 \
+        pip install "torch==${TORCH_BOLTZGEN}" --index-url https://download.pytorch.org/whl/cu130 \
         || { print_fail "Failed to install PyTorch"; return 1; }
 
     # On aarch64, gemmi==0.6.5 has no binary wheel and fails to build from source.
@@ -1428,6 +1662,40 @@ install_mosaic() {
     run_logged "Setting up Mosaic venv (uv sync --group jax-cuda)" \
         bash -c "cd '${MOSAIC_DIR}' && uv sync --group jax-cuda" \
         || { print_fail "uv sync failed for Mosaic"; return 1; }
+
+    # `uv sync` PRUNES anything the resolution does not list, and install_evaluator()
+    # injects two packages into this venv afterwards -- binder-compare[boltz2] (the
+    # whole Boltz-2 refold stage runs out of here) and fair-esm (the ESM2 prior).
+    # Observed on x86 as "Uninstalled 3 packages: binder-comparison, fair-esm,
+    # esm2quinox", so re-running `--tool mosaic` on a complete install silently broke
+    # Boltz-2 refolding. Same sync, same pruning, same consequence here.
+    if [[ -f "${EVALUATOR_DIR}/envs/mosaic_venv_path" ]]; then
+        print_step "Restoring Evaluator packages pruned from the Mosaic venv by uv sync"
+        run_logged "re-install binder-compare into Mosaic venv" \
+            uv pip install --python "${MOSAIC_DIR}/.venv/bin/python" -q -e "${EVALUATOR_DIR}[boltz2]" \
+            || print_warn "Could not restore binder-compare — re-run: install_aarch.sh --tool evaluator"
+        run_logged "re-install fair-esm into Mosaic venv" \
+            uv pip install --python "${MOSAIC_DIR}/.venv/bin/python" -q fair-esm \
+            || print_warn "Could not restore fair-esm — Mosaic will run without the ESM2 prior"
+    fi
+
+    # esm2quinox 0.2.0 rewrote the private token table Mosaic's ESM2 prior indexes
+    # (32 entries keyed "^"/"$"/"#" instead of 33 keyed "b"/"e"/"m", against a
+    # hardcoded one-hot width of 33), so the first optimisation step dies with
+    # `KeyError: 'b'`. Mosaic asks for `esm2quinox>=0.1.0` with no ceiling. x86 is held
+    # at 0.1.0 by the captured lock; this installer syncs UNLOCKED, so it is the side
+    # that actually resolves 0.2.0 -- cap it explicitly, then assert the SYMBOLS,
+    # because `import mosaic` never reaches this loss.
+    run_logged "Capping esm2quinox below the release that rewrote the token table" \
+        uv pip install --python "${MOSAIC_DIR}/.venv/bin/python" -q "esm2quinox<0.2" \
+        || print_warn "Could not cap esm2quinox — the ESM2 prior may fail at the first step"
+    smoke_test "esm2quinox token table (ESM2 prior)" \
+        "${MOSAIC_DIR}/.venv/bin/python" -c "
+from esm2quinox._esm2 import _alphabet as a
+assert len(a) == 33, len(a)
+[a[k] for k in ('b', 'e', 'm')]
+print('OK')" \
+        || print_warn "esm2quinox token table is not the one Mosaic indexes — Mosaic will crash in the ESM prior (BUG-24)"
 
     smoke_test "import mosaic" \
         "${MOSAIC_DIR}/.venv/bin/python" -c "import mosaic; print('OK')" || return 1
@@ -1635,7 +1903,7 @@ install_pxdesign() {
     # aarch64: install PyTorch from PyPI with cu130 index (no conda pytorch-cuda for aarch64)
     run_logged "Installing PyTorch (aarch64, CUDA 13.0)" \
         "${CONDA_CMD}" run -n bindmaster_pxdesign \
-        pip install torch --index-url https://download.pytorch.org/whl/cu130 \
+        pip install "torch==${TORCH_PXDESIGN}" --index-url https://download.pytorch.org/whl/cu130 \
         || { print_fail "Failed to install PyTorch"; return 1; }
 
     # Install PXDesign
@@ -1668,7 +1936,7 @@ install_pxdesign() {
     # requirements.txt pins torch==2.3.1 (CPU-only from PyPI); reinstall with CUDA
     run_logged "Reinstalling PyTorch with CUDA 13.0 (aarch64)" \
         "${CONDA_CMD}" run -n bindmaster_pxdesign \
-        pip install torch --force-reinstall --index-url https://download.pytorch.org/whl/cu130 \
+        pip install "torch==${TORCH_PXDESIGN}" --force-reinstall --index-url https://download.pytorch.org/whl/cu130 \
         || print_warn "PyTorch CUDA reinstall failed — GPU may not work"
 
     # ColabDesign from GitHub (PyPI version 1.1.1 too old, missing 'weights' param)
@@ -1734,6 +2002,49 @@ for fn in ['tools/af2/main_af2_complex.py', 'tools/af2/main_af2_monomer.py']:
     t = t.replace('json.dump(results, f)', 'json.dump(results, f, cls=_NumpyEncoder)')
     fp.write_text(t); print(f'Patched: {fn}')
 PATCHEOF
+
+    # Ported from install.sh. This file DESCRIBES the symptom this patch cures --
+    # "pxdbench then reads the empty output file and dies on a JSONDecodeError that
+    # says nothing about the real cause" -- while not applying the cure. This is the
+    # platform with MORE subprocess-abort modes (the bf16/SVE SIGABRT patched just
+    # below), so it is the one that most needs the error to name itself.
+    run_logged "Patching pxdbench MPNN error handling" \
+        "${CONDA_CMD}" run -n bindmaster_pxdesign python << 'MPNNEOF'
+import importlib.util, pathlib
+spec = importlib.util.find_spec('pxdbench')
+if not spec or not spec.submodule_search_locations:
+    print('pxdbench not found — skipping'); exit(0)
+base = pathlib.Path(spec.submodule_search_locations[0])
+# Patch main_mpnn.py: write error JSON on exception
+mpnn = base / 'tools/protmpnn/main_mpnn.py'
+if mpnn.exists():
+    t = mpnn.read_text()
+    old = '        traceback.print_exc()\n        exit(1)'
+    new = ('        traceback.print_exc()\n'
+           '        with open(args.output, "w") as f:\n'
+           '            json.dump({"error": True, "message": str(e)}, f)\n'
+           '        exit(1)')
+    if old in t and 'error' not in t.split('traceback.print_exc')[1][:100]:
+        t = t.replace(old, new); mpnn.write_text(t); print('Patched main_mpnn.py')
+    else: print('main_mpnn.py already patched or different format')
+# Patch base.py: handle JSONDecodeError
+bp = base / 'tools/base.py'
+if bp.exists():
+    t = bp.read_text()
+    if 'JSONDecodeError' not in t:
+        old_base = '                return json.load(f)\n\n        except Exception as e:'
+        new_base = ('                result = json.load(f)\n'
+                    '            if isinstance(result, dict) and result.get("error"):\n'
+                    '                raise RuntimeError(f"Subprocess failed: {result.get(\'message\', \'unknown\')}")\n'
+                    '            return result\n\n'
+                    '        except json.JSONDecodeError:\n'
+                    '            raise RuntimeError(f"Subprocess {self.script_path} produced empty output")\n'
+                    '        except Exception as e:')
+        if old_base in t:
+            t = t.replace(old_base, new_base); bp.write_text(t); print('Patched base.py')
+        else: print('base.py format differs — manual patch may be needed')
+    else: print('base.py already patched')
+MPNNEOF
 
     # Patch: pxdbench AF2 eval must not use bf16 on aarch64.
     # The AF2 eval runs under JAX_PLATFORMS=cpu here (the JAX CUDA backend is
@@ -2011,7 +2322,7 @@ install_rfd3() {
     # cu130 wheels for Blackwell/GB10 (the x86 installer pins cu121).
     run_logged "Installing PyTorch (cu130, aarch64)" \
         "${CONDA_CMD}" run -n bindmaster_rfd3 \
-        pip install -q torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130 \
+        pip install -q "torch==${TORCH_RFD3}" torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130 \
         || { print_fail "Failed to install PyTorch"; return 1; }
 
     run_logged "Installing rc-foundry[rfd3]==${FOUNDRY_VERSION}" \
@@ -2141,8 +2452,11 @@ install_esmfold2() {
 
     echo ""
     print_ok "ESMFold2 weights are open-source and download on first use via the HuggingFace cache."
-    print_ok "  Default model: ${BOLD}fast${RESET} (~1 GB)"
-    print_ok "  Switch via:    --esmfold2-model full  (larger, MSA-capable; ~3-5 GB)"
+    # refold_esmfold2.py defaults to "full" (model_name: str = "full", and
+    # --model default="full"), so advertising "fast" steered the operator into the
+    # LESS accurate engine while the code did something else.
+    print_ok "  Default model: ${BOLD}full${RESET} (biohub/ESMFold2, MSA-capable, more accurate; ~3-5 GB)"
+    print_ok "  Switch via:    --esmfold2-model fast  (smaller/faster, ~1 GB)"
     echo ""
 
     print_ok "ESMFold2 refolder installation complete"
@@ -2163,7 +2477,7 @@ if [ "$#" -eq 0 ]; then
     echo "ESMFold2 env (binder-eval-esmfold2) activated."
     echo "Usage:"
     echo "  binder-compare refold-esmfold2 --sequences seqs.fasta --target-seq SEQ -o esmfold2.csv"
-    echo "  (Default model: fast; switch via --esmfold2-model full)"
+    echo "  (Default model: full; switch via --esmfold2-model fast)"
     echo ""
     exec "${CONDA_CMD}" run --live-stream -n binder-eval-esmfold2 bash
 else
@@ -2177,6 +2491,10 @@ ESMFOLD2EOF
 
 uninstall_tool() {
     local tool="${1,,}"
+    # The marker must go before the env does: a surviving marker plus a deleted env
+    # is exactly the state _tool_is_installed refuses, but --verify would still have
+    # to explain it. Keys use underscores; the CLI spells some tools with a dash.
+    clear_tool_mark "${tool//-/_}"
     case "${tool}" in
         bindcraft)
             print_step "Uninstalling BindCraft"
@@ -2620,26 +2938,34 @@ preflight() {
         fi
     fi
 
-    # Toolchain — only the tools that compile from source need it. On this platform
-    # SoluProt builds BOTH USEARCH v12 and scikit-learn 0.20.4, neither of which has
-    # an aarch64 wheel. Three `command -v` calls, checked here because a stock image
-    # has no `make` and `--tool all` otherwise spends the better part of an hour
-    # getting to the last step before reporting a one-second fact.
-    if [[ "${DO_SOLUPROT}" == true ]]; then
+    # Toolchain — the tools that compile from source need it, and both are now in
+    # `--tool all`: SoluProt builds USEARCH v12 and scikit-learn 0.20.4, and AF3 is a jax +
+    # C++ source build. Checked here because a stock image has no `make` and the
+    # install otherwise spends the better part of an hour getting to the step that
+    # needs it before reporting a one-second fact.
+    local _needs_toolchain=()
+    [[ "${DO_SOLUPROT}" == true ]] && _needs_toolchain+=("SoluProt — builds USEARCH v12 from source")
+    [[ "${DO_AF3}" == true ]] && _needs_toolchain+=("AlphaFold 3 — jax 0.9.1 + C++ source build")
+    if (( ${#_needs_toolchain[@]} )); then
         local _missing=() _bin
         for _bin in git make g++; do
             command -v "${_bin}" &>/dev/null || _missing+=("${_bin}")
         done
         if (( ${#_missing[@]} )); then
-            print_fail "SoluProt needs a C/C++ toolchain to build USEARCH v12 and scikit-learn 0.20.4 (missing: ${_missing[*]})"
+            print_fail "No C/C++ toolchain (missing: ${_missing[*]}) — these selected tools compile from source:"
+            local _t
+            for _t in "${_needs_toolchain[@]}"; do
+                echo "      • ${_t}"
+            done
             print_warn "  With root:    sudo apt-get install -y git make g++"
             print_warn "  Without root: get them from conda-forge into a build env —"
             print_warn "                  ${CONDA_CMD} create -y -n bindmaster_build -c conda-forge make gxx_linux-aarch64"
             print_warn "                  conda activate bindmaster_build    # then re-run this installer"
-            print_warn "  Or skip it:   SoluProt is an OPTIONAL pre-refold solubility filter. Ranking"
-            print_warn "                does not use it and is not blocked by its absence. Install the"
-            print_warn "                other tools with --tool <tool>, and add SoluProt later with"
-            print_warn "                --tool soluprot once a toolchain is available."
+            print_warn "  Or drop them:  install the rest with --tool <tool> and add these later."
+            if [[ "${DO_SOLUPROT}" == true ]]; then
+                print_warn "                 SoluProt in particular is an OPTIONAL label — the ranking does"
+                print_warn "                 not use it and is not blocked by its absence."
+            fi
             return 1
         fi
         print_ok "Toolchain: git, make, g++ present"
@@ -2654,6 +2980,13 @@ main() {
 
     check_arch
     detect_conda || exit 1
+
+    # Must run after detect_conda (the probes need CONDA_BASE) and before anything
+    # can write the first marker or read them. Without it, the first install on this
+    # platform writes one marker, _any_tool_marked flips to true, and every OTHER
+    # working tool starts reading as not-installed -- measured on a fully installed
+    # box: 10 tools installed, 0 reported.
+    backfill_install_markers
     local _name _ver
     _name="$(basename "${CONDA_CMD}")"; _ver="$("${CONDA_CMD}" --version 2>/dev/null | awk '{print $2}')"
     print_ok "${_name} ${_ver} at: ${CONDA_BASE}"
@@ -2759,15 +3092,15 @@ main() {
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
 
-    [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; install_bindcraft || failed_tools+=("BindCraft"); }
-    [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  install_boltzgen  || failed_tools+=("BoltzGen");  }
-    [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    install_mosaic    || failed_tools+=("Mosaic");    }
-    [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; install_evaluator || failed_tools+=("Evaluator"); }
-    [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  install_pxdesign  || failed_tools+=("PXDesign"); }
-    [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}"; install_rfd3 || failed_tools+=("RFD3"); }
-    [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; install_af3 || failed_tools+=("AF3"); }
-    [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; install_esmfold2 || failed_tools+=("ESMFold2"); }
-    [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; install_soluprot || failed_tools+=("SoluProt"); }
+    [[ "${DO_BINDCRAFT}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BindCraft${RESET}"; _install_step bindcraft install_bindcraft || failed_tools+=("BindCraft"); }
+    [[ "${DO_BOLTZGEN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] BoltzGen${RESET}";  _install_step boltzgen install_boltzgen  || failed_tools+=("BoltzGen");  }
+    [[ "${DO_MOSAIC}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Mosaic${RESET}";    _install_step mosaic install_mosaic    || failed_tools+=("Mosaic");    }
+    [[ "${DO_EVALUATOR}" == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Evaluator${RESET}"; _install_step evaluator install_evaluator || failed_tools+=("Evaluator"); }
+    [[ "${DO_PXDESIGN}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] PXDesign${RESET}";  _install_step pxdesign install_pxdesign  || failed_tools+=("PXDesign"); }
+    [[ "${DO_RFD3}"      == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] RFD3${RESET}"; _install_step rfd3 install_rfd3 || failed_tools+=("RFD3"); }
+    [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; _install_step af3 install_af3 || failed_tools+=("AF3"); }
+    [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; _install_step esmfold2 install_esmfold2 || failed_tools+=("ESMFold2"); }
+    [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; _install_step soluprot install_soluprot || failed_tools+=("SoluProt"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"

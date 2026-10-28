@@ -2,8 +2,10 @@
 # BindMaster Installer
 # Installs BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa,
 # Protein-Hunter, RFD3, and/or the Evaluator. ESMFold2 (default refold engine)
-# and the SoluProt screen are part of --tool all. AF3 is the one opt-in engine
-# (--tool af3), because its weights are gated.
+# and the SoluProt screen are part of --tool all, and so is AF3: its WEIGHTS are
+# gated, but install_af3 only builds the env and prints where to request them, and
+# leaving it out of `all` gave a default install two refold engines against the
+# report's default three-engine gate -- so every design failed the gate.
 #
 # Usage:
 #   bash install/install.sh [--tool bindcraft|boltzgen|mosaic|evaluator|pxdesign|proteina-complexa|protein-hunter|rfd3|af3|esmfold2|all] [--cuda VERSION] [--skip-examples] [--yes] [--force]
@@ -98,7 +100,10 @@ PROTEIN_HUNTER_DIR="${BINDMASTER_DIR}/Protein-Hunter"
 # documentation + uninstall (FOUNDRY_DIR is cleaned on uninstall if present).
 # shellcheck disable=SC2034
 FOUNDRY_REPO="https://github.com/RosettaCommons/foundry.git"
-FOUNDRY_COMMIT="v0.1.9"
+# The pip spec below uses this, not a literal: the log line said
+# ${FOUNDRY_COMMIT} while pip installed a hardcoded "==0.1.9", so bumping the
+# constant changed the message and not the install.
+FOUNDRY_VERSION="0.1.9"   # rc-foundry release pinned for RFD3 (matches install_aarch.sh)
 FOUNDRY_DIR="${BINDMASTER_DIR}/Foundry"
 FOUNDRY_WEIGHTS_DIR="${BINDMASTER_DIR}/weights/foundry"
 # AlphaFold 3 (DeepMind, Evaluator refolding). NOT a real PyPI package — the
@@ -162,7 +167,14 @@ while [[ $# -gt 0 ]]; do
                     # the documented full install cannot run the documented workflow.
                     # Costs a Python 3.7 env and a USEARCH source build (needs a
                     # C/C++ toolchain) -- see the preflight footprint table.
-                    DO_SOLUPROT=true ;;
+                    DO_SOLUPROT=true
+                    # Every refold engine by default. AF3's weights are gated, but install_af3
+                    # only BUILDS the env and then prints where to request them -- it does not
+                    # fail without them. Leaving it out gave a fresh install TWO engines against
+                    # the report's default 3-engine gate, so every design failed the gate and was
+                    # ranked last. The engines have to match the gate out of the box.
+                    DO_AF3=true
+ ;;
                 bindcraft)
                     DO_BINDCRAFT=true ;;
                 boltzgen)
@@ -731,6 +743,34 @@ _install_step() {
     mark_tool_installed "$1"
 }
 
+# _any_tool_marked
+# True when the marker store holds at least one marker. Keyed on the FILES rather
+# than on the directory, because clear_tool_mark is `rm -f`: --uninstall --tool all
+# leaves the directory in place but empty, and reading that as "markers are
+# authoritative, none are set" reports every tool uninstalled on a working box.
+_any_tool_marked() {
+    local _f
+    for _f in "${INSTALL_STATE_DIR}"/*; do
+        [[ -f "${_f}" ]] && return 0
+    done
+    return 1
+}
+
+# _tool_is_installed <canonical tool key> <probe function>
+# The one rule, shared with configurator.detect_installs() and tui/app.py: once ANY
+# marker exists a tool needs the marker AND a passing probe; before then the probe
+# decides alone. Marker-alone would trust a tool whose env was deleted afterwards,
+# and probe-alone is the defect the markers exist to fix. This reader used to say
+# marker-OR-probe, which disagreed with the other two about the same box.
+_tool_is_installed() {
+    local _key="$1" _probe="$2"
+    if _any_tool_marked; then
+        is_tool_marked "${_key}" && "${_probe}" 2>/dev/null
+    else
+        "${_probe}" 2>/dev/null
+    fi
+}
+
 # ─── Install Status Checks ────────────────────────────────────────────────────
 
 is_bindcraft_installed() {
@@ -790,9 +830,7 @@ print_tool_status() {
                  Protein_Hunter RFD3 AF3 ESMFold2 SoluProt; do
         local _key="${_tool,,}"
         local _fn="is_${_key}_installed"
-        # The marker is authoritative (it means "install finished successfully");
-        # the probe is the fallback for installs made before markers existed.
-        if is_tool_marked "${_key}" || "${_fn}" 2>/dev/null; then
+        if _tool_is_installed "${_key}" "${_fn}"; then
             _icon="${GREEN}✓${RESET}"; _status="installed"
         else
             _icon="${RED}✗${RESET}"; _status="not installed"
@@ -819,8 +857,11 @@ select_tools_interactive() {
     local sel_pxd=false
     local sel_pc=false
     local sel_ph=false
+    local sel_esm=true     # the DEFAULT refold engine, and in --tool all
+    local sel_sp=true      # in --tool all; the pre-refold solubility label
+    local sel_af3=true     # in --tool all: the env builds; the WEIGHTS are requested separately
 
-    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "RFD3" "PXDesign" "Proteina-Complexa" "Protein-Hunter")
+    local tools=("BindCraft" "BoltzGen" "Mosaic" "Evaluator" "RFD3" "PXDesign" "Proteina-Complexa" "Protein-Hunter" "ESMFold2" "SoluProt" "AlphaFold 3")
     local descs=(
         "Binder design via AlphaFold2 (conda, Python 3.10)"
         "Structure generation with Boltz-1 (conda, Python 3.12, ~6 GB download)"
@@ -830,10 +871,13 @@ select_tools_interactive() {
         "Protenix-based de novo binder design (conda)"
         "NVIDIA flow matching + test-time compute binder design (uv venv)"
         "Protein-Hunter — Boltz/Chai hallucination: protein/cyclic/ligand/DNA/RNA binders (conda)"
+        "ESMFold2 refolder — the DEFAULT evaluation engine, no gated weights (conda)"
+        "SoluProt 1.0 — sequence-only E. coli solubility label, never a filter (conda)"
+        "AlphaFold 3 v3.0.2 refolder — builds the env; weights are gated, request them separately"
     )
 
     # Check current install state once (avoid repeated conda calls in the loop)
-    local inst_bc inst_bg inst_mo inst_ev inst_rfd3 inst_pxd inst_pc inst_ph
+    local inst_bc inst_bg inst_mo inst_ev inst_rfd3 inst_pxd inst_pc inst_ph inst_esm inst_sp inst_af3
     is_bindcraft_installed && inst_bc="${GREEN}installed${RESET}" || inst_bc="${YELLOW}not installed${RESET}"
     is_boltzgen_installed  && inst_bg="${GREEN}installed${RESET}" || inst_bg="${YELLOW}not installed${RESET}"
     is_mosaic_installed    && inst_mo="${GREEN}installed${RESET}" || inst_mo="${YELLOW}not installed${RESET}"
@@ -842,7 +886,10 @@ select_tools_interactive() {
     is_pxdesign_installed  && inst_pxd="${GREEN}installed${RESET}" || inst_pxd="${YELLOW}not installed${RESET}"
     is_proteina_complexa_installed && inst_pc="${GREEN}installed${RESET}" || inst_pc="${YELLOW}not installed${RESET}"
     is_protein_hunter_installed    && inst_ph="${GREEN}installed${RESET}" || inst_ph="${YELLOW}not installed${RESET}"
-    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev" "$inst_rfd3" "$inst_pxd" "$inst_pc" "$inst_ph")
+    is_esmfold2_installed          && inst_esm="${GREEN}installed${RESET}" || inst_esm="${YELLOW}not installed${RESET}"
+    is_soluprot_installed          && inst_sp="${GREEN}installed${RESET}" || inst_sp="${YELLOW}not installed${RESET}"
+    is_af3_installed               && inst_af3="${GREEN}installed${RESET}" || inst_af3="${YELLOW}not installed${RESET}"
+    local inst_states=("$inst_bc" "$inst_bg" "$inst_mo" "$inst_ev" "$inst_rfd3" "$inst_pxd" "$inst_pc" "$inst_ph" "$inst_esm" "$inst_sp" "$inst_af3")
 
     # Helper: print current state
     _print_menu() {
@@ -850,8 +897,8 @@ select_tools_interactive() {
         echo -e "${BOLD}${CYAN}  Select tools to install${RESET}"
         echo -e "  Type a number to toggle selection, then press Enter when done."
         echo ""
-        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_rfd3" "$sel_pxd" "$sel_pc" "$sel_ph")
-        for i in 0 1 2 3 4 5 6 7; do
+        local states=("$sel_bc" "$sel_bg" "$sel_mo" "$sel_ev" "$sel_rfd3" "$sel_pxd" "$sel_pc" "$sel_ph" "$sel_esm" "$sel_sp" "$sel_af3")
+        for i in 0 1 2 3 4 5 6 7 8 9 10; do
             local box
             if [[ "${states[$i]}" == true ]]; then
                 box="${GREEN}[x]${RESET}"
@@ -879,17 +926,22 @@ select_tools_interactive() {
             6) [[ "$sel_pxd" == true ]] && sel_pxd=false || sel_pxd=true ;;
             7) [[ "$sel_pc" == true ]] && sel_pc=false || sel_pc=true ;;
             8) [[ "$sel_ph" == true ]] && sel_ph=false || sel_ph=true ;;
-            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true;  sel_rfd3=true;  sel_pxd=true;  sel_pc=true;  sel_ph=true  ;;
-            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false; sel_rfd3=false; sel_pxd=false; sel_pc=false; sel_ph=false ;;
+            9) [[ "$sel_esm" == true ]] && sel_esm=false || sel_esm=true ;;
+            10) [[ "$sel_sp" == true ]] && sel_sp=false || sel_sp=true ;;
+            11) [[ "$sel_af3" == true ]] && sel_af3=false || sel_af3=true ;;
+            a) sel_bc=true;  sel_bg=true;  sel_mo=true;  sel_ev=true;  sel_rfd3=true;  sel_pxd=true;  sel_pc=true;  sel_ph=true;  sel_esm=true;  sel_sp=true;  sel_af3=true  ;;
+            n) sel_bc=false; sel_bg=false; sel_mo=false; sel_ev=false; sel_rfd3=false; sel_pxd=false; sel_pc=false; sel_ph=false; sel_esm=false; sel_sp=false; sel_af3=false ;;
             "")
                 # Confirm: at least one must be selected
-                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false && "$sel_rfd3" == false && "$sel_pxd" == false && "$sel_pc" == false && "$sel_ph" == false ]]; then
+                if [[ "$sel_bc" == false && "$sel_bg" == false && "$sel_mo" == false && "$sel_ev" == false \
+                      && "$sel_rfd3" == false && "$sel_pxd" == false && "$sel_pc" == false && "$sel_ph" == false \
+                      && "$sel_esm" == false && "$sel_sp" == false && "$sel_af3" == false ]]; then
                     echo -e "  ${RED}No tools selected. Select at least one.${RESET}"
                     continue
                 fi
                 break
                 ;;
-            *) echo -e "  ${RED}Invalid input. Enter 1–8, a, n, or press Enter.${RESET}" ;;
+            *) echo -e "  ${RED}Invalid input. Enter 1–11, a, n, or press Enter.${RESET}" ;;
         esac
     done
 
@@ -901,6 +953,9 @@ select_tools_interactive() {
     DO_PXDESIGN="$sel_pxd"
     DO_PROTEINA_COMPLEXA="$sel_pc"
     DO_PROTEIN_HUNTER="$sel_ph"
+    DO_ESMFOLD2="$sel_esm"
+    DO_SOLUPROT="$sel_sp"
+    DO_AF3="$sel_af3"
 
     echo ""
     echo -e "  ${BOLD}Installing:${RESET}"
@@ -2486,15 +2541,15 @@ install_rfd3() {
         || { print_fail "Failed to install PyTorch"; return 1; }
 
     # foundry + rfd3 extra (PyPI package name is `rc-foundry`)
-    run_logged "Installing rc-foundry[rfd3] ${FOUNDRY_COMMIT}" \
+    run_logged "Installing rc-foundry[rfd3]==${FOUNDRY_VERSION}" \
         "${CONDA_CMD}" run -n bindmaster_rfd3 \
-        pip install -q "${CONSTRAINTS[@]}" "rc-foundry[rfd3]==0.1.9" \
+        pip install -q "${CONSTRAINTS[@]}" "rc-foundry[rfd3]==${FOUNDRY_VERSION}" \
         || { print_fail "Failed to install rc-foundry"; return 1; }
 
     # Also install MPNN extra for post-diffusion sequence design (ProteinMPNN + LigandMPNN)
-    run_logged "Installing rc-foundry[mpnn]" \
+    run_logged "Installing rc-foundry[mpnn]==${FOUNDRY_VERSION}" \
         "${CONDA_CMD}" run -n bindmaster_rfd3 \
-        pip install -q "${CONSTRAINTS[@]}" "rc-foundry[mpnn]==0.1.9" \
+        pip install -q "${CONSTRAINTS[@]}" "rc-foundry[mpnn]==${FOUNDRY_VERSION}" \
         || print_warn "rc-foundry[mpnn] install failed — MPNN redesign step may not work"
 
     # rc-foundry pulls atomworks unpinned, and 3.x drops the parse_atom_array
@@ -2510,6 +2565,19 @@ install_rfd3() {
             "${CONDA_CMD}" run -n bindmaster_rfd3 \
             foundry install rfd3 --checkpoint-dir "${FOUNDRY_WEIGHTS_DIR}" \
             || print_warn "RFD3 weight download failed — retry: conda run -n bindmaster_rfd3 foundry install rfd3 --checkpoint-dir ${FOUNDRY_WEIGHTS_DIR}"
+    fi
+
+    # ProteinMPNN weights are NOT bundled with rfd3: `foundry install rfd3` fetches
+    # only rfd3_latest.ckpt (~2.5 GB), and the MPNN stage then has no ~7 MB
+    # proteinmpnn_v_48_020.pt to load. install_aarch.sh fetched this; this installer
+    # did not, so the sequence-design half of an RFD3 run had no weights.
+    if [[ -f "${FOUNDRY_WEIGHTS_DIR}/proteinmpnn_v_48_020.pt" ]]; then
+        print_ok "ProteinMPNN checkpoint already present"
+    else
+        run_logged --retries 3 "Downloading ProteinMPNN weights (~7 MB)" \
+            "${CONDA_CMD}" run -n bindmaster_rfd3 \
+            foundry install proteinmpnn --checkpoint-dir "${FOUNDRY_WEIGHTS_DIR}" \
+            || print_warn "ProteinMPNN weight download failed — retry: conda run -n bindmaster_rfd3 foundry install proteinmpnn --checkpoint-dir ${FOUNDRY_WEIGHTS_DIR}"
     fi
 
     # Smoke test: rfd3 CLI help
@@ -2897,7 +2965,7 @@ if [ "$#" -eq 0 ]; then
     echo "ESMFold2 env (binder-eval-esmfold2) activated."
     echo "Usage:"
     echo "  binder-compare refold-esmfold2 --sequences seqs.fasta --target-seq SEQ -o esmfold2.csv"
-    echo "  (Default model: fast; switch via --esmfold2-model full)"
+    echo "  (Default model: full; switch via --esmfold2-model fast)"
     echo ""
     exec "${CONDA_CMD}" run --live-stream -n binder-eval-esmfold2 bash
 else
@@ -3361,25 +3429,34 @@ preflight() {
         fi
     fi
 
-    # Toolchain — only the tools that compile from source need it (SoluProt builds
-    # USEARCH v12). Three `command -v` calls, checked here because a stock Ubuntu
-    # Server image has no `make` and `--tool all` otherwise spent ~57 min getting to
-    # step 10/10 before reporting a one-second fact.
-    if [[ "${DO_SOLUPROT}" == true ]]; then
+    # Toolchain — the tools that compile from source need it, and both are now in
+    # `--tool all`: SoluProt builds USEARCH v12, and AF3 is a jax +
+    # C++ source build. Checked here because a stock image has no `make` and the
+    # install otherwise spends the better part of an hour getting to the step that
+    # needs it before reporting a one-second fact.
+    local _needs_toolchain=()
+    [[ "${DO_SOLUPROT}" == true ]] && _needs_toolchain+=("SoluProt — builds USEARCH v12 from source")
+    [[ "${DO_AF3}" == true ]] && _needs_toolchain+=("AlphaFold 3 — jax 0.9.1 + C++ source build")
+    if (( ${#_needs_toolchain[@]} )); then
         local _missing=() _bin
         for _bin in git make g++; do
             command -v "${_bin}" &>/dev/null || _missing+=("${_bin}")
         done
         if (( ${#_missing[@]} )); then
-            print_fail "SoluProt needs a C/C++ toolchain to build USEARCH v12 (missing: ${_missing[*]})"
+            print_fail "No C/C++ toolchain (missing: ${_missing[*]}) — these selected tools compile from source:"
+            local _t
+            for _t in "${_needs_toolchain[@]}"; do
+                echo "      • ${_t}"
+            done
             print_warn "  With root:    sudo apt-get install -y git make g++"
             print_warn "  Without root: get them from conda-forge into a build env —"
             print_warn "                  ${CONDA_CMD} create -y -n bindmaster_build -c conda-forge make gxx_linux-64"
             print_warn "                  conda activate bindmaster_build    # then re-run this installer"
-            print_warn "  Or skip it:   SoluProt is an OPTIONAL pre-refold solubility filter. Ranking"
-            print_warn "                does not use it and is not blocked by its absence. Install the"
-            print_warn "                other tools with --tool <tool>, and add SoluProt later with"
-            print_warn "                --tool soluprot once a toolchain is available."
+            print_warn "  Or drop them:  install the rest with --tool <tool> and add these later."
+            if [[ "${DO_SOLUPROT}" == true ]]; then
+                print_warn "                 SoluProt in particular is an OPTIONAL label — the ranking does"
+                print_warn "                 not use it and is not blocked by its absence."
+            fi
             return 1
         fi
         print_ok "Toolchain: git, make, g++ present"

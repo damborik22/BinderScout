@@ -47,7 +47,25 @@ INSTALLERS = pytest.mark.parametrize("name", sorted(TEXTS))
 #     so the fix was in the one file that platform never runs.
 #   * _pin_rfd3_atomworks — rc-foundry floats atomworks on both platforms.
 #   * _patch_bindcraft_pyrosetta — the original entry, ported by 764854f.
-SHARED_FUNCTIONS = pytest.mark.parametrize("func", ["_patch_bindcraft_pyrosetta", "run_logged", "_pin_rfd3_atomworks"])
+SHARED_FUNCTIONS = pytest.mark.parametrize(
+    "func",
+    [
+        "_patch_bindcraft_pyrosetta",
+        "run_logged",
+        "_pin_rfd3_atomworks",
+        # The install-state marker mechanism, which was x86-only in its entirety:
+        # install_aarch.sh wrote no markers at all, so that platform kept the
+        # "a conda env left behind by a FAILED solve reads as installed" behaviour
+        # the markers exist to prevent.
+        "mark_tool_installed",
+        "clear_tool_mark",
+        "is_tool_marked",
+        "backfill_install_markers",
+        "_install_step",
+        "_any_tool_marked",
+        "_tool_is_installed",
+    ],
+)
 
 
 def shell_function(text: str, name: str) -> str | None:
