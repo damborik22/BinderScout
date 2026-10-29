@@ -49,7 +49,7 @@ find / -name "libgfortran.so.5" 2>/dev/null
 # or:      /usr/lib/x86_64-linux-gnu/libgfortran.so.5
 ```
 
-The run-script template handles this for you. Use it.
+Nothing shipped sets these for BindCraft: `bindmaster_examples/` has no BindCraft template, and the configurator's generated `run_bindcraft.sh` launches `python -u ./bindcraft.py` with no `LD_LIBRARY_PATH` or `LD_PRELOAD`. Add both to that line yourself.
 
 ---
 
@@ -76,9 +76,9 @@ But not the *actual* exception that caused it.
 | **BindCraft (outer wrapper)** | `<run>/bindcraft.log` |
 | **BoltzGen** | `<run>/log.txt` or sbatch `.out` |
 | **Mosaic** | stdout in sbatch `.out` (Mosaic doesn't have a separate log file) |
-| **Protein-Hunter** | `runs/<name>/protein_hunter/<name>/logs/*.log` |
-| **PXDesign** | sbatch `.out` for runtime; kernel-compile errors are in `~/.cache/torch_extensions/` |
-| **Proteina-Complexa** | `$PC/logs/.../generate.log`, also `outputs/<run_name>/.hydra/<task>.log` |
+| **Protein-Hunter** | stdout/stderr only (sbatch `.out`/`.err`, or `run.log` in driven mode) — Protein-Hunter writes no log file |
+| **PXDesign** | sbatch `.out` for runtime and for the Protenix `layer_norm` kernel's compile log (that kernel builds in the `bindmaster_pxdesign` env's `site-packages/protenix/model/layer_norm/`); the DeepSpeed EvoformerAttention kernel, used only with `--use_deepspeed_evo_attention True`, builds silently in `~/.cache/torch_extensions/` and its compiler output appears only in the failure traceback |
+| **Proteina-Complexa** | `$PC/logs/design_pipeline_*/<stage>.log` for `generate`, `filter`, `evaluate`, `analyze` (read the stage that failed; `generate` with `gen_njobs` > 1 and `evaluate` with `eval_njobs` > 1 write `<stage>_job<N>.log` instead) |
 | **RFD3** | `<run>/foundry.log` + sbatch `.out` |
 
 If the inner log is empty or only contains warnings, the failure is likely a startup issue (env activation, GPU not detected, cache missing) — check `nvidia-smi`, env activation, and the tool-specific cache verification in `pre-flight.md` §7.
@@ -108,7 +108,7 @@ nvidia-smi
 | PXDesign on 24 GB target ≥300 aa | won't fit, ship to ≥48 GB |
 | Mosaic on 24 GB target ≥300 aa | won't fit, ship to ≥48 GB |
 | Protein-Hunter on 24 GB target ≥300 aa | won't fit, ship to ≥48 GB |
-| Proteina-Complexa on 24 GB | not recommended, default config wants 2 GPUs |
+| Proteina-Complexa on 24 GB target ≥300 aa | won't fit, ship to ≥48 GB (smaller targets run on one 24 GB card: BindMaster launches `search_binder_local_pipeline.yaml`, `gen_njobs: 1`) |
 
 The orchestrator's assignment should match a feasible combination, but if you're hitting OOM on the *first batch*, the assumption was wrong. Report it.
 
@@ -131,17 +131,19 @@ Recovery: after the OOM, `out_dir/` will have N partial outputs. RFD3 doesn't re
 
 ### 4.3 JAX preallocation hogging memory
 
-**Symptom (BindCraft, Mosaic, anything JAX):** JAX preallocates ~90% of GPU memory by default. Other processes can't use the GPU. Sometimes OOM even though "your process" is the only one.
+**Symptom (BindCraft, Mosaic, anything JAX):** JAX preallocates 75% of GPU memory by default (`XLA_PYTHON_CLIENT_MEM_FRACTION`). Other processes can't use the GPU. Sometimes OOM even though "your process" is the only one.
 
-**Fix:**
+**Fix (discrete card, e.g. the x86 fleet):**
 
 ```bash
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
-# or to cap at 75%:
-export XLA_PYTHON_CLIENT_MEM_FRACTION=0.75
+# or shrink the pool below the 0.75 default (setting 0.75 itself changes nothing):
+export XLA_PYTHON_CLIENT_MEM_FRACTION=0.5
 ```
 
-In templates already.
+The generated x86 `run_bindcraft.sh` sets neither, so these take effect there as written. Mosaic and the Boltz-2 / AF3 refolders set their own memory policy (`Evaluator/binder_comparison/refolding/memory_policy.py`; AF3 in `Evaluator/scripts/refold_af3.py`) and force `PREALLOCATE=true`, so an exported `PREALLOCATE=false` is silently overwritten there. Change their fraction instead: `MOSAIC_XLA_MEM_FRACTION` / `BOLTZ2_XLA_MEM_FRACTION` / `AF3_XLA_MEM_FRACTION` (a plain `XLA_PYTHON_CLIENT_MEM_FRACTION` also works).
+
+**On Spark (GB10) do not use `PREALLOCATE=false` outside the CUDA MPS cap (`tools/gpu_mem_guard.sh`):** the GPU pool *is* the 121.7 GiB of system RAM, JAX's default 0.75 already reserves ~91 GiB of it, and `PREALLOCATE=false` with no ceiling grows into the shared pool with no fail-fast (the slow-starve path). Cap the fraction instead, as the generated `run_bindcraft.sh` does on aarch64 (`BINDCRAFT_GPU_GIB`, default 24) and the engines above do.
 
 ### 4.4 JAX RSS leak (BindCraft long runs)
 
@@ -153,7 +155,7 @@ In templates already.
 ps aux | grep bindcraft | awk '{print $6/1024/1024 " GB"}'
 ```
 
-**Mitigation:** kill criterion in your assignment should be `process RSS > 50 GB`. Document the kill in PROGRESS.md, restart from where you left off (BindCraft state can be resumed from `Accepted/Ranked/` + `final_design_stats.csv`).
+**Mitigation:** kill criterion in your assignment should be `process RSS > 50 GB`. Document the kill in PROGRESS.md, restart from where you left off: relaunch with the same `design_path`. BindCraft resumes by counting the `*.pdb` files directly in `Accepted/` and `Trajectory/Relaxed/` and appending to the existing `*_stats.csv` files; `Accepted/Ranked/` is wiped and rebuilt only when the target number of designs is reached.
 
 ---
 
@@ -224,24 +226,26 @@ Single-quote to escape the shell. The `--is_legacy_weights True` is also require
 
 **Cause:** PXDesign's `requirements.txt` pins `torch==2.3.1` (CPU-only). The installer (`install.sh`) force-reinstalls PyTorch with CUDA *after* `requirements.txt`. If you ran `pip install -r requirements.txt` manually without the followup, you'll have CPU-only torch.
 
-**Fix:** rerun the installer, or manually reinstall with CUDA:
+**Fix:** reinstall CUDA torch into the activated `bindmaster_pxdesign` env yourself. Re-running the x86 installer does not currently do it: in its "Reinstalling PyTorch with CUDA" step (`install_pxdesign()` in `install/install.sh`) two comment lines sit inside a `\` continuation, so the `mamba run -n bindmaster_pxdesign` (or `conda run`) call is handed no command and the step fails, and the `pip install` after it runs in the installer's own shell, never in this env.
 
 ```bash
 pip uninstall torch -y
-pip install torch==2.3.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cu124
 ```
+
+`2.6.0` is the pin in `install/locks/bindmaster_pxdesign.txt`; `cu124` is the x86 installer's default CUDA (`CUDA_VERSION` in `install/install.sh`, overridden by `--cuda`). On aarch64 the pin is `TORCH_PXDESIGN` on the cu130 index in `install/install_aarch.sh`.
 
 ### 5.6 PXDesign / Protenix: post-install patches reverted
 
-**Cause:** the BindMaster `install/install.sh` applies patches to `protenix` (CUDA arch for Blackwell sm_120), `pxdbench` (`NumpyEncoder` JSON serialization), and `configs_infer.py` (num_workers). These are reapplied on each install but lost if you `pip install --upgrade` manually.
+**Cause:** the installers patch after installing. `install/install.sh` (x86) patches `protenix` (`layer_norm.py` CUDA-JIT fallback), `pxdbench` (`NumpyEncoder` JSON serialization, MPNN error JSON, lazy `ProtenixFilter` import) and `configs_infer.py` (num_workers); `install/install_aarch.sh` patches `protenix` (`torch_ext_compile.py`: CUDA arch sm_120 and `-std=c++20`), `pxdbench` (`NumpyEncoder`, MPNN error JSON, AF2 eval `use_bfloat16=False`) and `configs_infer.py`. These are reapplied on each install but lost if you `pip install --upgrade` manually.
 
-**Fix:** rerun `bindmaster install --tool pxdesign` to reapply the patches. There is no `--pxdesign` flag; the installer selects tools with `--tool <name>`. The re-run resumes into the existing `bindmaster_pxdesign` env rather than aborting, so only the patch steps redo any work.
+**Fix:** rerun `bindmaster install --tool pxdesign` to reapply the patches. There is no `--pxdesign` flag; the installer selects tools with `--tool <name>`. The re-run reuses the existing `bindmaster_pxdesign` env rather than aborting, but it re-executes every later step (pip installs, patches, weights script, JIT smoke test: idempotent but network-bound), not just the patches. It also clears `.install_state/pxdesign` first and rewrites it only if the run completes, so on a box with other installed tools a re-run that dies partway leaves the configurator treating PXDesign as not installed until a later run completes. On x86 the `Reinstalling PyTorch with CUDA` step in `install/install.sh` is broken: `conda run -n bindmaster_pxdesign` gets no command and logs as a failed step (the run carries on), and the `pip install torch==2.6.0 --force-reinstall` runs in your calling shell instead. Do not launch the re-run from a shell with another conda env active (`base` included), or that env's torch stack is force-reinstalled.
 
 ### 5.7 Protein-Hunter: `pyrosetta-installer` rename
 
-**Cause:** `pyrosetta-installer` ≥ 0.3 renamed `download_pyrosetta` → `install_pyrosetta`. Old install scripts call the old name and fail.
+**Cause:** no release of `pyrosetta-installer` (0.0.1 through 0.1.2, the latest as of 2026-10) has ever had `download_pyrosetta`; the entry point is `install_pyrosetta`. Install scripts that call `download_pyrosetta` fail with `ImportError: cannot import name 'download_pyrosetta'`.
 
-**Fix:** BindMaster's `install/install.sh` was updated in commit `7642942` to use the new name. Fresh manual envs need to call `install_pyrosetta` (not `download_pyrosetta`).
+**Fix:** BindMaster's `install/install.sh` already calls `install_pyrosetta`. Fresh manual envs need to call `install_pyrosetta` (not `download_pyrosetta`).
 
 ---
 
@@ -249,7 +253,7 @@ pip install torch==2.3.1+cu121 --index-url https://download.pytorch.org/whl/cu12
 
 ### 6.1 BindCraft: `Accepted/` shows 4 empty subdirs but you expected designs
 
-**Cause:** `Accepted/` always has 4 placeholder subdirs (`Ranked/`, `BIRDS/`, etc.) even with zero accepts. `ls Accepted/` is not a valid completion signal.
+**Cause:** `Accepted/` always has 4 placeholder subdirs (`Ranked/`, `Animation/`, `Plots/`, `Pickle/`) even with zero accepts. `ls Accepted/` is not a valid completion signal.
 
 **Fix:** check the actual source-of-truth:
 
@@ -322,8 +326,8 @@ Falling back to policy: 'reinit'
 
 ### Spark (DGX Spark)
 
-- aarch64 — only some tools ported. Don't accept assignments for Proteina-Complexa here yet.
-- Hosts the AF3 v3.0.2 refolder (`binder-eval-af3` env), the Boltz-2 refolder (`Mosaic/.venv`), and the Protenix refolder (`bindmaster_pxdesign`) for the orchestrator's local cross-engine refold. If Spark is also doing worker duty, be careful not to clash refolder runs with worker design runs on the same GPU.
+- aarch64 — only some tools ported. Don't accept Proteina-Complexa assignments here: it is deprecated on aarch64 as a throughput verdict, not an install failure (the production MCTS recipe projects to ~12 days per 100-design replicate vs ~2.25 h on one H200), and `install_aarch.sh --tool proteina-complexa` exits with that explanation. Run it on x86, and do not switch it to `best-of-n` to compensate.
+- Hosts the AF3 v3.0.2 refolder (`binder-eval-af3` env), the Boltz-2 refolder (`Mosaic/.venv`), and the ESMFold2 refolder (`binder-eval-esmfold2`) for the orchestrator's local cross-engine refold. If Spark is also doing worker duty, be careful not to clash refolder runs with worker design runs on the same GPU.
 - VPN routing: Spark may route to the HPC cluster via a "VPN-on-Spark" mode if configured — that's primarily for orchestrator-driven remote sessions, not worker-side runs.
 
 ---

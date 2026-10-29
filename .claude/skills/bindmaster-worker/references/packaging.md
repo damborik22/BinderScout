@@ -20,7 +20,7 @@ ApoE4_RFD3_Spark.tar.gz
 CALCA_ProteinHunter_<node>.tar.gz
 ```
 
-The orchestrator's evaluator parses these filenames to attribute designs back to their source tool + machine in the merged `summary.csv`. **Don't deviate from this naming.**
+The evaluator does not parse these names: it attributes designs by which `--<tool> DIR` flag each unpacked tool directory is passed under (`binder-compare extract --bindcraft DIR …`) and writes `report/metrics.csv`. **Keep this naming anyway** — the fetch command and PROGRESS.md entries below use it.
 
 ## What to include vs. exclude
 
@@ -32,11 +32,11 @@ Each tool has a different "real evidence" set. See per-tool guidance below. Gene
 - Per-design metric files (`.npz` for PAE matrices, `.json` for AF3/RFD3 per-design metadata)
 - The run script `run.sh` (for reproduction)
 - The `target_settings.json` (or equivalent) used
+- The per-run `settings.json` in the tool's output dir (`runs/<name>/<tool>/` under `bindmaster configure`) — every generated run script writes it before the design step; it records `tool`, `started_at`, `version`, `target`, `design_params` and `env`, i.e. what produced these designs
 - The sbatch `.out` log (for wall-clock and SLURM ID provenance)
 
 **Exclude (to save space):**
-- Trajectory PDBs for failed designs (BindCraft `trajectories/` — usually optional)
-- BindCraft's `bindcraft/outputs/` intermediate JAX log files (these are huge and rarely needed)
+- Trajectory PDBs for failed designs (BindCraft `bindcraft/outputs/Trajectory/` and `Rejected/` — usually optional; `bindcraft/outputs/` itself is the results directory, never exclude it)
 - Tool conda env directories (they're rebuildable; never tar an env)
 - Boltz-2 cache (`~/.boltz/` — rebuildable, machine-specific)
 - PXDesign kernel compilation cache (rebuildable)
@@ -67,25 +67,27 @@ For the `_final` subset (often what the orchestrator actually wants for fast ins
 
 ```bash
 tar czf /path/to/RESULTS/<TARGET>_BindCraft_<machine>_final.tar.gz \
-    Accepted/Ranked/ \
-    final_design_stats.csv \
-    target_settings.json
+    bindcraft/outputs/Accepted/Ranked/ \
+    bindcraft/outputs/final_design_stats.csv \
+    bindcraft/target_settings.json
 ```
 
-Skip `trajectories/` unless the campaign needs trajectory provenance. Skip `bindcraft/outputs/` unless debugging.
+Skip `bindcraft/outputs/Trajectory/` unless the campaign needs trajectory provenance. Skip `bindcraft/outputs/MPNN/` and `bindcraft/outputs/Rejected/` unless debugging.
 
 ### BoltzGen
 
 ```bash
 cd ~/runs/<TARGET>-<machine>-boltzgen/
 tar czf /path/to/RESULTS/<TARGET>_BoltzGen_<machine>.tar.gz \
-    final_ranked_designs/ \
-    intermediate_designs_inverse_folded/refold_cif/ \
-    intermediate_designs_inverse_folded/aggregate_metrics_analyze.csv \
-    intermediate_designs_inverse_folded/per_target_metrics_analyze.csv \
-    config/ \
-    steps.yaml \
-    run.sh \
+    boltzgen/outputs/final_ranked_designs/ \
+    boltzgen/outputs/intermediate_designs_inverse_folded/refold_cif/ \
+    boltzgen/outputs/intermediate_designs_inverse_folded/aggregate_metrics_analyze.csv \
+    boltzgen/outputs/intermediate_designs_inverse_folded/per_target_metrics_analyze.csv \
+    boltzgen/outputs/config/ \
+    boltzgen/outputs/steps.yaml \
+    boltzgen/config.yaml \
+    boltzgen/settings.json \
+    run*.sh \
     *.out
 ```
 
@@ -93,10 +95,10 @@ The `_final` subset (substantially smaller — BoltzGen's full output can be 50+
 
 ```bash
 tar czf /path/to/RESULTS/<TARGET>_BoltzGen_<machine>_final.tar.gz \
-    final_ranked_designs/final_<budget>_designs/ \
-    final_ranked_designs/final_designs_metrics_<budget>.csv \
-    final_ranked_designs/results_overview.pdf \
-    config/
+    boltzgen/outputs/final_ranked_designs/final_<budget>_designs/ \
+    boltzgen/outputs/final_ranked_designs/final_designs_metrics_<budget>.csv \
+    boltzgen/outputs/final_ranked_designs/results_overview.pdf \
+    boltzgen/outputs/config/
 ```
 
 ### Mosaic
@@ -104,12 +106,11 @@ tar czf /path/to/RESULTS/<TARGET>_BoltzGen_<machine>_final.tar.gz \
 ```bash
 cd ~/runs/<TARGET>-<machine>-mosaic/
 tar czf /path/to/RESULTS/<TARGET>_Mosaic_<machine>.tar.gz \
-    designs.csv \
-    refold_outputs/ \
-    refold_cifs/*.cif \
-    refold_paes/*.npz \
-    target_settings.py \
-    run.sh \
+    mosaic/designs.csv \
+    mosaic/structures_*/ \
+    mosaic/hallucinate.py \
+    mosaic/settings.json \
+    run*.sh \
     *.out
 ```
 
@@ -120,25 +121,26 @@ Note: if Mosaic's `designs.csv` mixed 11-col and 13-col rows during the run (mul
 ```bash
 cd ~/runs/<TARGET>-<machine>-protein-hunter/
 tar czf /path/to/RESULTS/<TARGET>_ProteinHunter_<machine>.tar.gz \
-    protein_hunter/<name>/high_iptm_yaml/ \
-    protein_hunter/<name>/high_iptm_cif/ \
-    protein_hunter/<name>/summary_high_iptm.csv \
-    protein_hunter/<name>/summary_all_runs.csv \
-    protein_hunter/<name>/plots/ \
+    protein_hunter/high_iptm_yaml/ \
+    protein_hunter/high_iptm_pdb/ \
+    protein_hunter/summary_high_iptm.csv \
+    protein_hunter/summary_all_runs.csv \
     run.sh \
     *.out
 ```
 
-Note the doubled-name path: `--save_dir runs/<TARGET>/protein_hunter --name <TARGET>_<variant>` puts outputs at `protein_hunter/<TARGET>_<variant>/...`. Confusing but correct.
+Note there is no `<name>/` subdirectory: at the pinned Protein-Hunter commit `--save_dir` is used as-is, and `--name <TARGET>_<variant>` only prefixes filenames (`<name>_run_<N>_cycle_<M>_structure.pdb`). A `<name>/` layer exists only when `--save_dir` is omitted (`./results_boltz/<name>/`).
 
 ### PXDesign
 
 ```bash
 cd ~/runs/<TARGET>-<machine>-pxdesign/
 tar czf /path/to/RESULTS/<TARGET>_PXDesign_<machine>.tar.gz \
-    design_outputs/<task_name>/ \
-    <task_name>.yaml \
-    run.sh \
+    pxdesign/outputs*/design_outputs/ \
+    pxdesign/input*.yaml \
+    pxdesign/sequences.csv \
+    pxdesign/settings.json \
+    run*.sh \
     *.out
 ```
 
@@ -147,21 +149,24 @@ tar czf /path/to/RESULTS/<TARGET>_PXDesign_<machine>.tar.gz \
 ```bash
 cd ~/runs/<TARGET>-<machine>-proteina-complexa/
 tar czf /path/to/RESULTS/<TARGET>_ProteinaComplexa_<machine>.tar.gz \
-    outputs/<run_name>/generate/ \
-    outputs/<run_name>/filter/ \
-    outputs/<run_name>/evaluate/ \
-    outputs/<run_name>/analyze/ \
-    .env \
-    run.sh \
+    proteina_complexa/structures/ \
+    proteina_complexa/raw/ \
+    proteina_complexa/sequences.csv \
+    proteina_complexa/target_bindmaster.yaml \
+    proteina_complexa/settings.json \
+    run*.sh \
     *.out
 ```
+
+All of this lives in the run dir: the run script's harvest step copies Complexa's PDBs and metrics CSVs out of its own clone (`Proteina-Complexa/inference/`, `evaluation_results/`) into `proteina_complexa/{structures,raw}/` and adds a `structure` column to `sequences.csv`. Package from the run dir, never from the clone — it is gitignored and `bindmaster install --uninstall` deletes it.
 
 For the `_final` subset:
 
 ```bash
 tar czf /path/to/RESULTS/<TARGET>_ProteinaComplexa_<machine>_final.tar.gz \
-    outputs/<run_name>/analyze/ \
-    outputs/<run_name>/filter/successful/
+    proteina_complexa/sequences.csv \
+    proteina_complexa/structures/ \
+    proteina_complexa/settings.json
 ```
 
 ### RFD3 + MPNN
