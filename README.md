@@ -32,7 +32,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 >
 > **`master` is the only branch expected to be fully functional.** It is also where
 > active development happens, and it supports both x86_64 and aarch64. Every other
-> branch — currently `v1.1.x` and `v2.0.x` — is a development or maintenance line, may
+> branch — currently only `v2.0.x` — is a development or maintenance line, may
 > be mid-refactor, and is not guaranteed to install or run end to end. Unless you were
 > pointed at one deliberately, clone `master` (the default).
 
@@ -609,9 +609,10 @@ the x86_64 installer. Earlier revisions of this section advertised
 
 ### Other branches
 
-`v1.1.x` and `v2.0.x` are maintenance/development lines: neither is guaranteed to
-install or run end to end, and work lands on `master` first. Use `master` unless you
-were pointed at one of them deliberately.
+`v2.0.x` is the active development line: it is not guaranteed to install or run end to
+end, and work lands on `master` first. Use `master` unless you were pointed at `v2.0.x`
+deliberately. (`v1.1.x` was a midpoint line, retired and deleted on 2026-10-29; the tag
+`archive/v1.1.x` keeps it reachable.)
 
 ### aarch64 notes
 

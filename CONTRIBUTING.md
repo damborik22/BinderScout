@@ -145,7 +145,7 @@ remote, so `git checkout aarch64` fails.
 |---|---|---|
 | `master` | Both platforms. Frozen at the current release; 2.0 work happens elsewhere | Bug fixes and documentation, yes |
 | `v2.0.x` | Active development line. Diverged from master at `602345a` and is well ahead | Features, yes — ask first |
-| `v1.1.x` | Retired midpoint, kept for now | No |
+| ~~`v1.1.x`~~ | Retired and deleted 2026-10-29. Preserved as the tag `archive/v1.1.x` | No |
 
 The three lines share no commits after `602345a`, so **nothing crosses over by itself**:
 a fix that lands on `master` needs forward-porting to `v2.0.x`, and vice versa. Say in

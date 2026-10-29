@@ -6,7 +6,7 @@ BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. I
 
 **Current status:** **1.0.8** (`master`, tagged `v1.0.8` — `git describe --tags` → `v1.0.8`). Master is through **Part U** and is frozen at this release; 2.0 development continues on `v2.0.x`. `v1.0.6` and `v1.0.7` are superseded: each was tagged and then found to still carry a silent-wrong-answer bug, so the freeze moved forward rather than leaving the fix past the release tag. 1.0.8's fix is the one that matters most — refold CSVs from different targets used to merge into one row and report cross-engine agreement that never happened.
 
-> **Branch and tag layout.** Tags `v1.0.0`–`v1.0.5` are ancestors of `master` and describe its own release line. `v1.1.0`/`v1.1.1` and `v2.0.0`–`v2.0.2` sit on the `v1.1.x` and `v2.0.x` branches and are deliberately not on master — `v1.1.x` is a retired midpoint kept for now, `v2.0.x` is where active development happens. It diverged from master at `602345a` (Release 1.0.3, 2026-09-22) and is well ahead.
+> **Branch and tag layout.** Tags `v1.0.0`–`v1.0.5` are ancestors of `master` and describe its own release line. `v2.0.0`–`v2.0.2` sit on the `v2.0.x` branch and are deliberately not on master; `v2.0.x` is where active development happens. The `v1.1.x` branch was retired and deleted on 2026-10-29 — its tags `v1.1.0`/`v1.1.1` remain, and the tag `archive/v1.1.x` keeps the whole line reachable. **Two commits on it exist nowhere else and are correctness fixes** (`b840ead` refuse to fold on random ESMC-6B weights, `942a385` `--skip-<engine>` must not drop results already on disk); cherry-pick from that tag if either line wants them. `v2.0.x` diverged from master at `602345a` (Release 1.0.3, 2026-09-22) and is well ahead.
 >
 > **If `git describe` ever fails here, suspect your local tag refs before concluding anything about the history.** `git fetch` does not update an existing local tag; refs left from before the public-release rewrite point at commits that no longer exist, and every tag then reads as orphaned. `git fetch --tags --force` is the fix. A draft of this file once reset the project's numbering on the strength of that artifact.
 >
@@ -296,8 +296,9 @@ the parameter sweep.
 
 - **Primary branch:** `master` — carries BOTH installers, x86_64 and aarch64. There is no
   `aarch64` branch; aarch64 support is `install/install_aarch.sh` on this branch.
-- **Other lines:** `v2.0.x` (active development) and `v1.1.x` (retired midpoint). Neither
-  shares commits with `master` after `602345a`, so fixes need forward-porting by hand.
+- **Other lines:** `v2.0.x` (active development). It shares no commits with `master`
+  after `602345a`, so fixes need forward-porting by hand. `v1.1.x` was retired and
+  deleted 2026-10-29; see the tag `archive/v1.1.x`.
 - **Commit style:** `Part X: description` matching STAGES.md parts, or imperative mood for smaller changes
 - **PR conventions:** imperative title < 70 chars, body references STAGES.md items, CI must pass, one logical change per PR
 - **This repo is PUBLIC — no infrastructure identifiers in tracked files.** No machine IPs,

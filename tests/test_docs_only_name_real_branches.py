@@ -39,7 +39,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 
 # The real branches on origin, as of 1.0.8.
-BRANCHES = {"master", "v1.1.x", "v2.0.x"}
+BRANCHES = {"master", "v2.0.x"}
 
 # Placeholders and generic git examples, not claims about this repo.
 EXAMPLES = {"-b", "my-feature", "feature", "branch-name", "your-branch", "HEAD", "."}
