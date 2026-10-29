@@ -13,6 +13,24 @@ pointed at commits that no longer exist, and every tag read as orphaned. Correct
 before release; no tag was moved.) The `v1.1.x` and `v2.0.x` tags belong to those
 branches and are deliberately not on `master`.
 
+## [Unreleased]
+
+Documentation only — no code change, so `v1.0.8` remains the release to use.
+
+- **The docs described an `aarch64` branch. There is none**, and never was on this
+  remote: aarch64 support is `install/install_aarch.sh`, on `master`, beside the x86_64
+  installer. README was corrected earlier and three places were missed —
+  CONTRIBUTING.md's "Branch structure" table (which also called `master` x86_64-only),
+  and CLAUDE.md twice. Anyone following them got `error: pathspec 'aarch64' did not
+  match any file(s) known to git`. Both files now describe the real three lines
+  (`master`, `v2.0.x`, `v1.1.x`) and say that fixes need forward-porting by hand, since
+  the lines share no commits after `602345a`.
+  `tests/test_docs_only_name_real_branches.py` now fails on a doc that tells a reader to
+  check out a branch that does not exist.
+- Dropped two struck-through "Fixed:" entries from README's *Running without an LLM*
+  section. Both gaps really are closed, so the section states the two capabilities
+  plainly instead of listing them as defects with a correction attached.
+
 ## [1.0.8] — 2026-10-29
 
 One fix, carrying the freeze forward from 1.0.7 for the same reason 1.0.7 moved off

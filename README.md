@@ -791,17 +791,16 @@ They are not required — see below.
 
 The executable pipeline has **no runtime LLM dependency** — the `.claude/skills/`
 packages are an operating manual, not a requirement. Every step above is a plain
-CLI call documented in this README. Two gaps affect scripted use:
+CLI call documented in this README, and scripted use is covered end to end:
 
-- ~~**The configurator has no headless mode.**~~ **Fixed:** every wizard run now writes
+- **The configurator has a headless mode.** Every wizard run writes
   `runs/<name>/config.json`, and `configurator --config <file>` regenerates a run
   directory with no prompts (`--run` also starts the pipeline). Replays are
   byte-identical.
-- ~~**15 of the 22 `binder-compare` subcommands have no human-facing documentation.**~~
-  **Fixed:** all 22 are listed under
-  [All `binder-compare` subcommands](#all-binder-compare-subcommands), and a test
-  fails if the table and the parser disagree in either direction. `--help` on any
-  subcommand remains the detailed reference.
+- **All 22 `binder-compare` subcommands are documented**, under
+  [All `binder-compare` subcommands](#all-binder-compare-subcommands), and a test fails
+  if the table and the parser disagree in either direction. `--help` on any subcommand
+  remains the detailed reference.
 
 ---
 

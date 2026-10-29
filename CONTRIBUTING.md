@@ -136,10 +136,20 @@ bash evaluate.sh \
 
 ## Branch structure
 
-| Branch | Platform | Notes |
+**There is no `aarch64` branch.** Both installers live on `master`, side by side —
+`install/install.sh` for x86_64 and `install/install_aarch.sh` for aarch64 / DGX Spark.
+An earlier version of this table listed a platform branch that does not exist on the
+remote, so `git checkout aarch64` fails.
+
+| Branch | What it is | Target it? |
 |---|---|---|
-| `master` | x86_64 Linux + NVIDIA GPU | Primary development branch |
-| `aarch64` | NVIDIA DGX Spark / Grace-Hopper | Periodically rebased from master |
+| `master` | Both platforms. Frozen at the current release; 2.0 work happens elsewhere | Bug fixes and documentation, yes |
+| `v2.0.x` | Active development line. Diverged from master at `602345a` and is well ahead | Features, yes — ask first |
+| `v1.1.x` | Retired midpoint, kept for now | No |
+
+The three lines share no commits after `602345a`, so **nothing crosses over by itself**:
+a fix that lands on `master` needs forward-porting to `v2.0.x`, and vice versa. Say in
+the PR which lines you think it belongs on.
 
 ---
 

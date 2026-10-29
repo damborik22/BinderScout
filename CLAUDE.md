@@ -180,10 +180,13 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 
 ### Machines and platforms
 
-| Branch | Platform | Installer | CUDA default |
-|---|---|---|---|
-| `master` | x86_64 Linux + NVIDIA GPU | `install/install.sh` | 12.4 |
-| `aarch64` | NVIDIA DGX Spark / Grace-Hopper (GB10 Blackwell) | `install/install_aarch.sh` | 13.0 |
+Both installers live on `master`. **There is no `aarch64` branch** — the column below is
+the platform, not a branch.
+
+| Platform | Installer | CUDA default |
+|---|---|---|
+| x86_64 Linux + NVIDIA GPU | `install/install.sh` | 12.4 |
+| NVIDIA DGX Spark / Grace-Hopper (GB10 Blackwell), aarch64 | `install/install_aarch.sh` | 13.0 |
 
 **aarch64 specifics:**
 - BindCraft ARM64 binaries (`DAlphaBall.gcc`, `dssp`) bundled in `tools/aarch64/`
@@ -291,8 +294,10 @@ the parameter sweep.
 
 ### Git and branching
 
-- **Primary branch:** `master` (x86_64)
-- **Platform branch:** `aarch64` (periodically rebased from master)
+- **Primary branch:** `master` — carries BOTH installers, x86_64 and aarch64. There is no
+  `aarch64` branch; aarch64 support is `install/install_aarch.sh` on this branch.
+- **Other lines:** `v2.0.x` (active development) and `v1.1.x` (retired midpoint). Neither
+  shares commits with `master` after `602345a`, so fixes need forward-porting by hand.
 - **Commit style:** `Part X: description` matching STAGES.md parts, or imperative mood for smaller changes
 - **PR conventions:** imperative title < 70 chars, body references STAGES.md items, CI must pass, one logical change per PR
 - **This repo is PUBLIC — no infrastructure identifiers in tracked files.** No machine IPs,
