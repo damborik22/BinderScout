@@ -13,7 +13,99 @@ pointed at commits that no longer exist, and every tag read as orphaned. Correct
 before release; no tag was moved.) The `v1.1.x` and `v2.0.x` tags belong to those
 branches and are deliberately not on `master`.
 
+## [1.0.7] — 2026-10-29
+
+**This is where `master` is frozen.** 1.0.6 was tagged a day earlier and then found to
+have three silent-wrong-answer bugs still in it, so the freeze moved here rather than
+leaving the fixes sitting past the release tag. 2.0 development continues on `v2.0.x`.
+
+The test suite went from 860 to **1045 passing** (6 skipped, 2 xfailed). Every test
+added here had to pass on a clean tree and then *fail* under a stated one-line mutation
+of the source it guards; a test that still passed under its mutation was discarded
+rather than committed, because a test that pins nothing reads as coverage.
+
+### Fixed
+
+- **A blank sequence cell became the three-residue binder `"NAN"`.** pandas reads an
+  empty CSV cell as NaN, `str(nan).strip().upper()` is `"NAN"`, and N, A and N are all
+  standard residues — so it passed validation, was written to the FASTA, refolded by all
+  three engines, scored, ranked, and could reach a top-N table. Six of seven extractors
+  read the cell unguarded. Protein-Hunter alone guarded it, with a comment naming the
+  exact trap, so this was known in one file and nowhere else. The guard now lives once,
+  as `SequenceExtractor._sequence_cell`, and all seven go through it.
+
+- **The generated `run_proteina_complexa.sh` did not parse.** `bash -n` exited 2; the
+  step died before Complexa was invoked. The harvest was passed as `python3 -c "…"`, and
+  the program's own comments carry 9 quote characters and 12 backquoted words — the
+  comments describing the previous day's harvest rewrite, so documenting one bug
+  introduced another. Now a heredoc with a quoted delimiter, which bash passes through
+  with no substitution, so no future comment can break it.
+
+- **`--uninstall --tool rfd3` removed nothing on aarch64 and exited 0.** `uninstall_tool`
+  had the branch; the dispatch block had no `DO_RFD3` line. The env, ~2.5 GB of weights
+  and the install marker all survived an uninstall that reported success.
+
+### Added
+
+- 13 mutation-proven tests. The ones worth naming: `consensus_iptm_mean` pinned **by
+  value**, since a median or trimmed mean leaves the two-engine case identical and
+  silently inverts the one property the ranking exists for; the engine-column contract
+  end to end (runner CSV field → merger prefix → PAE loader → `_ENGINE_IPTM_COLS` → the
+  gate), where any broken link drops an engine from the mean and re-rates the pool with
+  no error; per-engine PAE ordering, hardcoded at five call sites and previously pinned
+  nowhere; `print_tool_status` listing every tool the installer can install, executed
+  under bash rather than grepped; and rfd3's load-bearing `infer_ori_strategy` key in
+  **both** copies of the run-script writer.
+
+- A README section inviting bug reports and ideas, which states plainly what this
+  release can and cannot promise: it was functional when we ran our campaigns, and it
+  orchestrates ten fast-moving upstream tools that are not ours.
+
+### Changed
+
+- The skills under `.claude/skills/` were revised against this tree — 35 verified
+  corrections across four skills, plus 23 in `bindmaster-worker`'s troubleshooting and
+  packaging references. They are agent instructions, executed rather than read, and the
+  worker skill's stale remedies were the worst of it: Spark was described as hosting a
+  Protenix refolder (Part J was reverted, so that engine does not exist), three tools'
+  log paths were wrong, and one instruction pointed at a run-script template that is not
+  in the repository.
+
+- README platform column corrected in both directions: BindCraft and Mosaic gained
+  aarch64, which they have had since 1.0.1; Proteina-Complexa is recorded as running on
+  aarch64 but unviable there on throughput (no CUDA `jaxlib`, so its AF2 reward falls to
+  the CPU: ~12 days per replicate against ~2.25 h on one H200), not as broken.
+
+### Known issues
+
+Found by the same sweep, read in the source, and **not fixed here** — each needs a
+behaviour change with a real chance of altering existing rankings, which is not a thing
+to land while freezing. Their tests were written and are held with them.
+
+- **`--resume` in the three standalone `Evaluator/scripts/refold_*.py` keys its skip set
+  on positional `idx`, not design identity.** The identity-keyed fix landed in the three
+  package runners only. `refold_boltz2.py` declares `--resume` and never reads it.
+- **Nothing deduplicates an engine CSV on `sequence` before the merge**, and the
+  engine-to-engine join has no `validate=`. All three refold scripts append, so a repeat
+  fans out as N×M (×K) report rows for one design.
+- **Engine CSVs that disagree on `target_sequence` merge into one row silently.**
+  `target_sequence` is a passthrough column, later engines' values are dropped as
+  duplicates, and nothing compares them — so a binder folded against two different
+  targets reports as one design with three engines agreeing.
+- Two of nine captured locks (`binder-eval-soluprot`, `proteina-complexa`) are never fed
+  to a package manager, so those envs install unpinned while the lock files suggest
+  otherwise. Pinned as `xfail(strict=True)`, which is why every run reports 2 xfailed.
+
+Four of the 21 proposed tests were never proved (the account limit cut the run short),
+and `bindmaster-worker`'s `SKILL.md`, `pre-flight.md`, `new-run-types.md` and its eight
+`references/tools/` files were audited but their corrections never verified, so they are
+unchanged. Four confirmed items there remain open, listed in `fff1835`.
+
 ## [1.0.6] — 2026-10-28
+
+Tagged 2026-10-28 and superseded by 1.0.7 the next day; prefer 1.0.7. Everything below
+still applies to it — the three bugs 1.0.7 fixes were present here and in every earlier
+release of this line.
 
 First release of the `master` line under the reset numbering, and the point at which
 master is frozen; 2.0 development continues on `v2.0.x`.
