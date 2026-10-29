@@ -13,6 +13,21 @@ pointed at commits that no longer exist, and every tag read as orphaned. Correct
 before release; no tag was moved.) The `v1.1.x` and `v2.0.x` tags belong to those
 branches and are deliberately not on `master`.
 
+## [1.2.1] — 2026-10-29
+
+Presentation only; no code change. **This is the tag to use** — it is 1.2.0 plus the
+logo.
+
+- The BinderScout mark from the EuRosettaCon 2026 poster now heads the README as a
+  full-width banner (`assets/binderscout-logo.svg`, vector, transparent, olive `#68724D`
+  / navy `#225479`).
+
+Why a new tag rather than moving 1.2.0: `v*` tags in this repository are immutable
+(ruleset "Release tags are immutable", no bypass), and moving a release tag to tidy a
+README image is not worth tearing that down — it protects against exactly the mistake
+that nearly moved `v1.0.0` off its commit on 2026-10-28. `v1.2.0` remains valid and
+points at the same code.
+
 ## [1.2.0] — 2026-10-29
 
 **TmProt runs in-pipeline.** Numbering skips 1.1.x: those tags belong to the retired
