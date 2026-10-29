@@ -13,6 +13,39 @@ pointed at commits that no longer exist, and every tag read as orphaned. Correct
 before release; no tag was moved.) The `v1.1.x` and `v2.0.x` tags belong to those
 branches and are deliberately not on `master`.
 
+## [1.0.8] — 2026-10-29
+
+One fix, carrying the freeze forward from 1.0.7 for the same reason 1.0.7 moved off
+1.0.6: the fix should not sit past the release tag.
+
+### Fixed
+
+- **Refold CSVs that disagree about the target merged into one row, silently, and the
+  result reported cross-engine agreement that never happened.** `target_sequence` is a
+  passthrough column — kept unprefixed because every engine in a run folds the same
+  target — and the engine-to-engine join dropped the later engine's copy as a redundant
+  duplicate without ever comparing the two. Engine CSVs produced against *different*
+  targets therefore joined on the binder `sequence` alone and emerged as a single design
+  carrying the first engine's target, with `consensus_iptm_n = 3` and `rank = 1`. Exit 0,
+  no warning, and output byte-identical to an honest run: a **fabricated cross-engine
+  consensus**, which is the one thing the ranking exists to resist.
+
+  Reachable without anyone doing anything strange: a refold CSV accumulates across runs
+  by design (`--resume` depends on it), and until 1.0.7 `refold-boltz2` defaulted its
+  output to a CWD-relative directory shared by every run against every target. The
+  2026-10-28 PD-L1 incident was that directory holding 1,003 rows from earlier pools.
+
+  `merge_refold_results` now compares `target_sequence` across engines before dropping
+  the duplicate and **refuses the report** on a mismatch, naming the binder, both
+  targets and the likely cause. Refusing rather than warning because there is no correct
+  row to emit: a crash costs an operator ten minutes, a plausible wrong answer can cost
+  a gene order. It cannot change an honest run — where the engines agree on the target,
+  the comparison is a no-op.
+
+  Proven by mutation: disabling the guard fails 4 of the 7 new tests in
+  `tests/binder_comparison/test_merge_engine_identity.py`, which drive the real
+  `binder-compare report` with each engine in turn as the odd one out.
+
 ## [1.0.7] — 2026-10-29
 
 **This is where `master` is frozen.** 1.0.6 was tagged a day earlier and then found to

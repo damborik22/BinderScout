@@ -61,6 +61,7 @@ def merge_refold_results(
             merged = df.copy()
         else:
             merged = pd.merge(merged, df, on="sequence", how="outer", suffixes=("", f"_{name}_dup"))
+            _refuse_mismatched_targets(merged, name)
             # Drop accidental duplicate passthrough columns (prefer the first engine's values)
             for col in list(merged.columns):
                 if col.endswith(f"_{name}_dup"):
@@ -84,6 +85,54 @@ def merge_refold_results(
         merged = _restrict_to_pool(merged, sequences_fasta)
         merged = _attach_fasta_metadata(merged, sequences_fasta)
     return merged
+
+
+def _refuse_mismatched_targets(merged: pd.DataFrame, name: str) -> None:
+    """Refuse to merge engine rows that describe different targets.
+
+    ``target_sequence`` is a passthrough column: it stays unprefixed because every
+    engine in a run folds against the same target, and the merge therefore drops the
+    later engine's copy as a redundant duplicate. Nothing used to compare the two
+    before dropping one. So CSVs produced against *different* targets joined on the
+    binder ``sequence`` alone and came out as a single row carrying the first
+    engine's target, with ``consensus_iptm_n`` counting every engine as independent
+    agreement. Exit 0, no warning, and the design ranked first — a fabricated
+    cross-engine consensus, which is the one thing the ranking exists to resist.
+
+    This is reachable without anyone doing something strange. A refold CSV
+    accumulates across runs (``--resume`` depends on that), and until 1.0.7
+    ``refold-boltz2`` defaulted its output to a CWD-relative directory shared by
+    every run against every target.
+
+    A disagreement means the inputs do not describe one experiment. There is no
+    correct row to emit, so the report is refused rather than written: a crash costs
+    an operator ten minutes, and a plausible wrong answer can cost a gene order.
+    """
+    dup = f"target_sequence_{name}_dup"
+    if dup not in merged.columns or "target_sequence" not in merged.columns:
+        return
+
+    def _norm(col: pd.Series) -> pd.Series:
+        return col.astype(str).str.strip().str.upper()
+
+    comparable = merged["target_sequence"].notna() & merged[dup].notna()
+    clash = comparable & (_norm(merged["target_sequence"]) != _norm(merged[dup]))
+    if not clash.any():
+        return
+
+    row = merged.loc[clash].iloc[0]
+    raise ValueError(
+        f"refold CSVs disagree about the target: {int(clash.sum())} of {int(comparable.sum())} shared "
+        f"designs have a different target_sequence in the {name} CSV than in the first engine's. "
+        f"These results were folded against different targets, so merging them would report one design "
+        f"as confirmed by several engines when the engines did not fold the same complex.\n"
+        f"  binder   {str(row['sequence'])[:40]}…\n"
+        f"  first    {str(row['target_sequence'])[:60]}…\n"
+        f"  {name:<8} {str(row[dup])[:60]}…\n"
+        f"Most likely one CSV is left over from another run or another target — a refold CSV accumulates "
+        f"across runs. Re-refold this pool into a per-run --output-dir, or pass the CSVs that belong to "
+        f"this target."
+    )
 
 
 def _restrict_to_pool(df: pd.DataFrame, fasta_path: str | Path) -> pd.DataFrame:

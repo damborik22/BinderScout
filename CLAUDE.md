@@ -4,7 +4,7 @@
 
 BindMaster is a unified toolkit for GPU-accelerated **protein binder design**. It wraps seven independent design tools (BindCraft, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3) behind a single CLI (`bindmaster`) that handles installation, interactive configuration, execution, and cross-tool evaluation of designed binders.
 
-**Current status:** **1.0.7** (`master`, tagged `v1.0.7` — `git describe --tags` → `v1.0.7`). Master is through **Part U** and is frozen at this release; 2.0 development continues on `v2.0.x`. `v1.0.6` was tagged a day earlier and is superseded: three silent-wrong-answer bugs were still in it, so the freeze moved forward rather than leaving the fixes past the release tag.
+**Current status:** **1.0.8** (`master`, tagged `v1.0.8` — `git describe --tags` → `v1.0.8`). Master is through **Part U** and is frozen at this release; 2.0 development continues on `v2.0.x`. `v1.0.6` and `v1.0.7` are superseded: each was tagged and then found to still carry a silent-wrong-answer bug, so the freeze moved forward rather than leaving the fix past the release tag. 1.0.8's fix is the one that matters most — refold CSVs from different targets used to merge into one row and report cross-engine agreement that never happened.
 
 > **Branch and tag layout.** Tags `v1.0.0`–`v1.0.5` are ancestors of `master` and describe its own release line. `v1.1.0`/`v1.1.1` and `v2.0.0`–`v2.0.2` sit on the `v1.1.x` and `v2.0.x` branches and are deliberately not on master — `v1.1.x` is a retired midpoint kept for now, `v2.0.x` is where active development happens. It diverged from master at `602345a` (Release 1.0.3, 2026-09-22) and is well ahead.
 >
