@@ -7,6 +7,7 @@ Subcommands:
     refold-af3       — refold with AlphaFold 3 v3.0.2 (run in binder-eval-af3 env; runs on 24 GB GPUs)
     refold-esmfold2  — refold with ESMFold2 (biohub; run in binder-eval-esmfold2 env)
     filter-soluprot  — score sequence solubility with SoluProt 1.0 (run in binder-eval-soluprot env; no GPU)
+    filter-tmprot    — predict melting temperature with TmProt 1.0 (run in binder-eval-tmprot env)
     report           — merge, normalise, generate HTML report
     run              — full pipeline orchestrator
     validate         — sanity-check input sequences before refolding
@@ -26,6 +27,7 @@ from .cli import (
     epitope_map,
     extract,
     filter_soluprot,
+    filter_tmprot,
     hits,
     mature,
     monomer,
@@ -60,6 +62,7 @@ def main(argv=None) -> None:
     refold_af3.add_parser(subparsers)
     refold_esmfold2.add_parser(subparsers)
     filter_soluprot.add_parser(subparsers)
+    filter_tmprot.add_parser(subparsers)
     prefilter.add_parser(subparsers)
     report.add_parser(subparsers)
     run.add_parser(subparsers)

@@ -107,6 +107,7 @@ The evaluator (`bindmaster evaluate` / `binder-compare`) runs on top of the desi
 | **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.12) | x86_64 + aarch64 | default (in `--tool all`) |
 | **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.12, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | x86_64: in `--tool all` (the env builds, the **weights** you request yourself). aarch64: opt-in via `--tool af3` |
 | **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); filter, not a re-ranker | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model | in `--tool all` |
+| **TmProt 1.0** | Sequence-only melting-temperature (Tm) prediction (Pailozian, Kohout *et al.* 2026); ESM-2 650M + LoRA. Advisory — nothing in the ranking reads it | conda env `binder-eval-tmprot` (Python 3.11, torch) | x86_64. Not wired into the aarch64 installer. GPU optional — a few hundred binders are minutes on CPU; predictions are cached per sequence | opt-in (`--tool tmprot`; pulls ESM-2 650M, ~2.5 GB) |
 
 ### Architecture
 
@@ -460,6 +461,7 @@ Every one takes `--help`. `bindmaster evaluate <cmd> …` runs the same thing in
 | `refold-esmfold2` | Refold with ESMFold2 (`binder-eval-esmfold2`) — the default engine |
 | **Screening before the GPU** | |
 | `filter-soluprot` | Sequence-only *E. coli* solubility score (`binder-eval-soluprot`, no GPU) |
+| `filter-tmprot` | Sequence-only melting-temperature (Tm) prediction (`binder-eval-tmprot`, GPU optional) |
 | `prefilter` | Rank designs by a Boltz-2 fold-back interface score, for tools with no native metric (e.g. RFD3) |
 | `autosize` | Decide whether enough independent designs cleared the ESMFold2 gate; size the next batch |
 | **Campaign planning** | |

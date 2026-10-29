@@ -142,3 +142,7 @@ slurm-*.err
 # designed binder + target sequences). Ignore it wholesale; un-ignore a specific
 # file deliberately if genuinely-public reference data ever belongs in the docs.
 docs/data/
+
+# TmProt is cloned at install time, never vendored: upstream is GPL-3.0 (its
+# tmprot-1.0/setup.py says LGPLv3) and this repository is MIT.
+Evaluator/tools/tmprot/

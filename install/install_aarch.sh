@@ -727,7 +727,7 @@ backfill_install_markers() {
 
     local _key _fn _n=0
     for _key in bindcraft boltzgen mosaic evaluator pxdesign proteina_complexa \
-                protein_hunter rfd3 af3 esmfold2 soluprot; do
+                protein_hunter rfd3 af3 esmfold2 soluprot tmprot; do
         _fn="is_${_key}_installed"
         declare -F "${_fn}" >/dev/null 2>&1 || continue
         # Never overwrite an earned marker with a back-filled one: the earned marker

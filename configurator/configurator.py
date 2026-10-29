@@ -306,6 +306,7 @@ def detect_installs() -> dict:
         "af3": _installed("af3", _env_exists("binder-eval-af3")),
         "esmfold2": _installed("esmfold2", _env_exists("binder-eval-esmfold2")),
         "soluprot": _installed("soluprot", _env_exists("binder-eval-soluprot")),
+        "tmprot": _installed("tmprot", _env_exists("binder-eval-tmprot")),
     }
 
 

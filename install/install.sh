@@ -94,6 +94,10 @@ FOLDSEEK_COMMIT="463739e0014a1549a527de589102cde98f802f37"
 MMSEQS_COMMIT="d1e110c3daf8c4b41eaa71281f80c4fc3617953f"
 PROTEIN_HUNTER_REPO="https://github.com/yehlincho/Protein-Hunter.git"
 PROTEIN_HUNTER_COMMIT="d4bd9515882c2aa81e97f3d3bf7f42247a9fe80c"
+
+# TmProt 1.0 — sequence-only Tm predictor (Loschmidt Lab). Default branch is
+# tmprot-development; pinned so two installs a week apart get the same model.
+TMPROT_COMMIT="02d4c12b39ffae8a6cde64a401210390ea9cb23f"
 PROTEIN_HUNTER_DIR="${BINDMASTER_DIR}/Protein-Hunter"
 # RFD3 / Foundry (Baker lab's RFdiffusion3, BSD-3, commercial-use OK).
 # Installed from PyPI as rc-foundry — no clone needed. Variables kept for
@@ -148,6 +152,7 @@ DO_RFD3=false
 DO_AF3=false            # opt-in via --tool af3 (runs on 24 GB GPUs; gated weights not bundled)
 DO_ESMFOLD2=false       # default refold engine (included in --tool all; lightweight, no gated weights)
 DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen; needs a C/C++ toolchain for the USEARCH v12 source build)
+DO_TMPROT=false         # opt-in via --tool tmprot (sequence-only melting-temperature screen; pulls ESM-2 650M, ~2.5 GB, so not in --tool all)
 
 # Note: legacy RFAA support was removed entirely (see CHANGELOG).
 # Use RFD3 (--tool rfd3) for all-atom diffusion-based binder design.
@@ -197,8 +202,10 @@ while [[ $# -gt 0 ]]; do
                     DO_ESMFOLD2=true ;;
                 soluprot|solu|solubility)
                     DO_SOLUPROT=true ;;
+                tmprot|tm|thermostability)
+                    DO_TMPROT=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfd3, pxdesign, proteina-complexa, protein-hunter, af3, esmfold2, soluprot${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, boltzgen, mosaic, evaluator, rfd3, pxdesign, proteina-complexa, protein-hunter, af3, esmfold2, soluprot, tmprot${RESET}"
                     exit 1
                     ;;
             esac
@@ -708,7 +715,7 @@ backfill_install_markers() {
 
     local _key _fn _n=0
     for _key in bindcraft boltzgen mosaic evaluator pxdesign proteina_complexa \
-                protein_hunter rfd3 af3 esmfold2 soluprot; do
+                protein_hunter rfd3 af3 esmfold2 soluprot tmprot; do
         _fn="is_${_key}_installed"
         declare -F "${_fn}" >/dev/null 2>&1 || continue
         # Never overwrite an earned marker with a back-filled one: the earned marker
@@ -813,6 +820,13 @@ is_esmfold2_installed() {
     env_exists binder-eval-esmfold2
 }
 
+is_tmprot_installed() {
+    # The env alone is not enough: it is created before the clone and the pip install,
+    # so an env-only probe reports a half-built TmProt as working. The `tmprot` console
+    # script is what filter-tmprot actually invokes, so probe for that.
+    env_exists binder-eval-tmprot && [[ -x "${CONDA_BASE}/envs/binder-eval-tmprot/bin/tmprot" ]]
+}
+
 is_soluprot_installed() {
     # USEARCH as well as the env: the env is created before the source build, so
     # an env-only probe reports a failed USEARCH build as a working SoluProt.
@@ -827,7 +841,7 @@ print_tool_status() {
     echo -e "${BOLD}=== Installed Tools ===${RESET}"
     local _status _icon
     for _tool in BindCraft BoltzGen Mosaic Evaluator PXDesign Proteina_Complexa \
-                 Protein_Hunter RFD3 AF3 ESMFold2 SoluProt; do
+                 Protein_Hunter RFD3 AF3 ESMFold2 SoluProt TmProt; do
         local _key="${_tool,,}"
         local _fn="is_${_key}_installed"
         if _tool_is_installed "${_key}" "${_fn}"; then
@@ -2980,6 +2994,7 @@ ESMFOLD2EOF
 # Where SoluProt's distribution lands. Kept inside Evaluator/tools/ so the
 # Python runner's default _resolve_scripts_path() finds it without env vars.
 SOLUPROT_DIR="${EVALUATOR_DIR}/tools/soluprot"
+TMPROT_DIR="${EVALUATOR_DIR}/tools/tmprot"
 SOLUPROT_ZIP_URL="https://loschmidt.chemi.muni.cz/soluprot/?page=download&f=soluprot.zip"
 USEARCH12_REPO="https://github.com/rcedgar/usearch12"
 
@@ -3076,6 +3091,67 @@ _build_usearch_v12() {
     return 1
 }
 
+
+install_tmprot() {
+    print_step "Installing TmProt 1.0 melting-temperature screen (binder-eval-tmprot env)"
+    ensure_conda_in_path
+
+    if [[ "${ARCH}" != "x86_64" ]]; then
+        print_warn "TmProt is not wired into the aarch64 installer and has not been run on aarch64."
+        print_warn "  It is pure pip (torch / transformers / peft), so it may well work — but it is untested there."
+        return 1
+    fi
+    if [[ ! -f "${EVALUATOR_DIR}/envs/binder-eval-tmprot.yml" ]]; then
+        print_fail "Env spec not found at ${EVALUATOR_DIR}/envs/binder-eval-tmprot.yml"
+        return 1
+    fi
+
+    # 1. Env.
+    if env_exists binder-eval-tmprot; then
+        print_ok "binder-eval-tmprot already exists"
+    else
+        run_logged "create binder-eval-tmprot env" \
+            "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval-tmprot.yml" || return 1
+    fi
+
+    # 2. Clone upstream at the pinned commit. NOT vendored: the repo LICENSE is GPL-3.0
+    #    (its tmprot-1.0/setup.py says LGPLv3), and this repository is MIT. Cloning on
+    #    request keeps that code out of our tree and leaves the licence choice with the
+    #    user -- the same reasoning as the SoluProt installer building GPLv3 USEARCH
+    #    from source rather than shipping a binary.
+    mkdir -p "$(dirname "${TMPROT_DIR}")"
+    if [[ -d "${TMPROT_DIR}/.git" ]]; then
+        print_ok "TmProt clone present at ${TMPROT_DIR}"
+    else
+        rm -rf "${TMPROT_DIR}"
+        run_logged "clone TmProt" git clone --quiet https://github.com/loschmidt/TmProt "${TMPROT_DIR}" || return 1
+    fi
+    run_logged "pin TmProt to ${TMPROT_COMMIT:0:12}" \
+        git -C "${TMPROT_DIR}" checkout --quiet "${TMPROT_COMMIT}" || return 1
+
+    # 3. The installable package lives in the tmprot-1.0/ subdirectory, not the repo root
+    #    (the root is the training/evaluation pipeline, which we do not want).
+    if [[ ! -f "${TMPROT_DIR}/tmprot-1.0/setup.py" ]]; then
+        print_fail "Expected ${TMPROT_DIR}/tmprot-1.0/setup.py — upstream layout changed; check TMPROT_COMMIT"
+        return 1
+    fi
+    run_logged "pip install tmprot" \
+        "${CONDA_CMD}" run -n binder-eval-tmprot python -m pip install -e "${TMPROT_DIR}/tmprot-1.0" || return 1
+
+    # 4. Pre-warm the base encoder. The LoRA adapter ships in the clone (~7.6 MB) but
+    #    facebook/esm2_t33_650M_UR50D (~2.5 GB) is fetched from HuggingFace on FIRST USE
+    #    -- i.e. mid-campaign, after the GPU work has started, on whatever network the
+    #    node happens to have. Pull it now so the screen is offline-ready.
+    print_step "Pre-fetching ESM-2 650M weights (~2.5 GB; one time)"
+    if ! run_logged "fetch esm2_t33_650M_UR50D" "${CONDA_CMD}" run -n binder-eval-tmprot python -c \
+        "from transformers import AutoTokenizer, EsmForSequenceClassification as M; n='facebook/esm2_t33_650M_UR50D'; AutoTokenizer.from_pretrained(n); M.from_pretrained(n, num_labels=1); print('cached')"; then
+        print_warn "Could not pre-fetch ESM-2 weights. TmProt will download them on first run instead."
+    fi
+
+    print_ok "TmProt installed — conda run -n binder-eval-tmprot binder-compare filter-tmprot --help"
+    print_warn "Cite: Pailozian, Kohout et al., bioRxiv 2026.05.07.723192 (TmProt 1.0)."
+    return 0
+}
 
 install_soluprot() {
     print_step "Installing SoluProt 1.0 solubility screen (binder-eval-soluprot env)"
@@ -3367,6 +3443,19 @@ uninstall_tool() {
             fi
             print_ok "SoluProt solubility screen uninstalled"
             ;;
+        tmprot|tm|thermostability)
+            print_step "Uninstalling TmProt melting-temperature screen"
+            env_exists binder-eval-tmprot && run_logged "Removing binder-eval-tmprot conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-tmprot -y
+            if [[ -d "${TMPROT_DIR}" ]]; then
+                rm -rf "${TMPROT_DIR}"
+                print_ok "Removed ${TMPROT_DIR} (clone + bundled LoRA adapter)"
+            fi
+            # The ~2.5 GB ESM-2 base model is left alone on purpose: it lives in the
+            # shared HuggingFace cache, other tools may use it, and re-downloading it
+            # is a long wait for anyone who only meant to remove this screen.
+            print_ok "TmProt uninstalled (ESM-2 weights left in the HuggingFace cache)"
+            ;;
         *)
             print_fail "Unknown tool: ${tool}"
             return 1
@@ -3538,6 +3627,7 @@ main() {
         [[ "${DO_AF3}"       == true ]] && { uninstall_tool af3       || failed_uninstalls+=("AF3"); }
         [[ "${DO_ESMFOLD2}"  == true ]] && { uninstall_tool esmfold2  || failed_uninstalls+=("ESMFold2"); }
         [[ "${DO_SOLUPROT}"  == true ]] && { uninstall_tool soluprot  || failed_uninstalls+=("SoluProt"); }
+        [[ "${DO_TMPROT}"    == true ]] && { uninstall_tool tmprot    || failed_uninstalls+=("TmProt"); }
 
         # Offer to remove local Miniforge when all tools are uninstalled
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
@@ -3590,6 +3680,7 @@ main() {
     [[ "${DO_AF3}"       == true ]] && (( total++ ))
     [[ "${DO_ESMFOLD2}"  == true ]] && (( total++ ))
     [[ "${DO_SOLUPROT}"  == true ]] && (( total++ ))
+    [[ "${DO_TMPROT}"    == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
@@ -3605,6 +3696,7 @@ main() {
     [[ "${DO_AF3}"       == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] AlphaFold 3${RESET}"; _install_step af3 install_af3 || failed_tools+=("AF3"); }
     [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; _install_step esmfold2 install_esmfold2 || failed_tools+=("ESMFold2"); }
     [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; _install_step soluprot install_soluprot || failed_tools+=("SoluProt"); }
+    [[ "${DO_TMPROT}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] TmProt 1.0${RESET}"; _install_step tmprot install_tmprot || failed_tools+=("TmProt"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"

@@ -13,9 +13,67 @@ pointed at commits that no longer exist, and every tag read as orphaned. Correct
 before release; no tag was moved.) The `v1.1.x` and `v2.0.x` tags belong to those
 branches and are deliberately not on `master`.
 
-## [Unreleased]
+## [1.2.0] — 2026-10-29
 
-Documentation only — no code change, so `v1.0.8` remains the release to use.
+**TmProt runs in-pipeline.** Numbering skips 1.1.x: those tags belong to the retired
+`v1.1.x` line and cannot be reused.
+
+### Added
+
+- **`binder-compare filter-tmprot` — a sequence-only melting-temperature screen**, the
+  sister tool to SoluProt (TmProt 1.0: ESM-2 650M with a LoRA adapter; Pailozian, Kohout
+  *et al.*, bioRxiv 2026.05.07.723192, Loschmidt Laboratories).
+
+  The *ingest* half already existed — `report --tmprot-results` has attached
+  `native_tmprot_tm` to the report, the plots and the top-30 table for some time — but
+  nothing produced that CSV, so the column was only reachable by running TmProt by hand.
+  Now `bindmaster install --tool tmprot` builds `binder-eval-tmprot` and the subcommand
+  fills it in.
+
+  Verified end to end on this box: 10 real PD-L1 designs scored in 5.5 s on an RTX 3090,
+  Tm 64.96–83.73 °C, ten distinct values.
+
+  **Advisory, like SoluProt.** A predicted Tm is a stability signal, not a binding
+  signal; nothing in the ranking reads the column. The published binary task
+  (thermostable at Tm >= 60 °C) scores AUC 0.75, so it is for noticing the bottom of a
+  distribution before committing synthesis money, not for separating 68 °C from 71 °C.
+
+  Two upstream behaviours the wrapper absorbs, both of which silently shorten a result
+  set: TmProt **sorts its output by Tm descending** and identifies rows by FASTA ID
+  alone, so anything that zipped rows back by position would mislabel every design; and
+  it **silently skips** sequences under 20 aa, over 2000, or carrying a non-standard
+  residue. Every input sequence appears in the output, and one TmProt declined to score
+  gets an empty Tm rather than disappearing.
+
+  **Not vendored.** Upstream is GPL-3.0 (its `tmprot-1.0/setup.py` says LGPLv3) and this
+  repository is MIT, so the installer clones it at a pinned commit into a gitignored
+  directory — the same reasoning as the SoluProt installer building GPLv3 USEARCH from
+  source rather than shipping a binary. Opt-in rather than part of `--tool all`, because
+  the base encoder is a ~2.5 GB download; the installer pre-fetches it so a campaign does
+  not stop for it midway.
+
+### Fixed
+
+- `--tool tmprot` is counted in the installer's step total, which otherwise printed
+  `[1/0]`.
+
+### Documentation
+
+- **The docs described an `aarch64` branch. There is none**, and never was on this
+  remote: aarch64 support is `install/install_aarch.sh`, on `master`, beside the x86_64
+  installer. README was corrected earlier and three places were missed —
+  CONTRIBUTING.md's "Branch structure" table (which also called `master` x86_64-only),
+  and CLAUDE.md twice. Anyone following them got `error: pathspec 'aarch64' did not
+  match any file(s) known to git`. `tests/test_docs_only_name_real_branches.py` now fails
+  on a doc that sends a reader to a branch that does not exist.
+- **The `v1.1.x` branch is retired and deleted.** Three active-looking branches for a
+  project with one frozen release and one development line was the confusion. It is
+  preserved as the pushed tag `archive/v1.1.x` and as a bundle. **Two commits on it exist
+  on no other branch and are correctness fixes** — `b840ead` (refuse to fold on random
+  ESMC-6B weights) and `942a385` (`--skip-<engine>` must not drop results already on
+  disk). Neither is ported; both are named in the tag message.
+- Dropped two struck-through "Fixed:" entries from README's *Running without an LLM*
+  section. Both gaps are closed, so it states the capabilities plainly.
 
 - **The docs described an `aarch64` branch. There is none**, and never was on this
   remote: aarch64 support is `install/install_aarch.sh`, on `master`, beside the x86_64

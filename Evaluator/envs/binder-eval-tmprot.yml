@@ -1,0 +1,49 @@
+name: binder-eval-tmprot
+# TmProt 1.0 — sequence-only melting-temperature (Tm) predictor
+# (Pailozian, Kohout et al., Loschmidt Laboratories, Masaryk University;
+# bioRxiv 2026.05.07.723192). ESM-2 650M with a LoRA adapter.
+#
+# Used for: binder-compare filter-tmprot
+# Platform: x86_64. Pure pip (torch / transformers / peft), so nothing here is
+# architecture-specific in principle, but it is NOT wired into
+# install/install_aarch.sh and has not been run on aarch64.
+#
+# TmProt is NOT redistributed with BinderScout and is NOT vendored into this
+# repo. `bindmaster install --tool tmprot` clones
+#   https://github.com/loschmidt/TmProt
+# at the pinned TMPROT_COMMIT into Evaluator/tools/tmprot/ (gitignored) and
+# pip-installs its `tmprot-1.0/` package. Licensing differs between the two:
+# the repository LICENSE is GPL-3.0 while tmprot-1.0/setup.py declares LGPLv3.
+# Cloning at install time keeps that code out of this MIT repository and leaves
+# the choice with the user — the same reason the SoluProt installer builds
+# GPLv3 USEARCH from source instead of shipping a binary.
+#
+# WEIGHTS. The LoRA adapter (~7.6 MB) is bundled in the upstream repo. The BASE
+# model is not: `facebook/esm2_t33_650M_UR50D` (~2.5 GB) is fetched from
+# HuggingFace on first use. The installer pre-warms it so a campaign does not
+# stop for a 2.5 GB download midway; set HF_HOME to control where it lands.
+#
+# GPU is optional. TmProt uses CUDA when torch finds it and falls back to CPU
+# otherwise — one forward pass per sequence through a 650M encoder, so a few
+# hundred binders are minutes on CPU, not hours. It also caches predictions in
+# ~/.cache/tmprot/tm_cache.json keyed by (model, sequence), so re-running only
+# to change --threshold does no inference at all.
+#
+# Citation owed in any publication that uses TmProt predictions:
+#   Pailozian, K., Kohout, P., et al. "Investigation of Protein Melting
+#   Temperature Prediction with Cross-Method Validation on Biophysical Data."
+#   bioRxiv 2026.05.07.723192.
+#
+# Python is pinned to 3.11: upstream declares >=3.8, and 3.11 is the newest
+# version its transformers/peft pins are known-good on here.
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - torch>=2.0
+      - transformers>=4.30
+      - peft>=0.4
+      - biopython>=1.81
+      - click>=8.0
