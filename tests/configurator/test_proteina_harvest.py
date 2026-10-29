@@ -147,11 +147,17 @@ def _generated_harvest(tmp_path: Path, run_name: str) -> str:
     cfgmod.write_run_proteina_complexa(script, cfg)
 
     text = script.read_text()
-    m = re.search(r'python3 -c "\n(.*?)\n"\n', text, re.S)
-    assert m, "could not find the embedded python3 -c harvest in the generated script"
+    m = re.search(r"python3 - <<'PY'\n(.*?)\nPY\n", text, re.S)
+    assert m, (
+        "could not find the embedded harvest heredoc in the generated script. It used to be an inline "
+        '`python3 -c "..."` string and became a quoted heredoc, because the program\'s comments carry '
+        "quotes and backquoted words that made the generated script fail `bash -n`. If the shape changed "
+        "again, update this extractor and test_generated_scripts_are_valid_bash.py together."
+    )
     body = m.group(1)
-    # The generated script resolves $RUN_DIR from the shell; substitute it directly.
-    return body.replace("$RUN_DIR", str(run_dir))
+    # The generated script hands RUN_DIR to python through the environment (a quoted heredoc
+    # substitutes nothing, by design); inline it so the program runs standalone here.
+    return body.replace('os.environ["RUN_DIR"]', repr(str(run_dir)))
 
 
 def _run_harvest(tmp_path: Path, run_name: str, cwd: Path) -> subprocess.CompletedProcess:

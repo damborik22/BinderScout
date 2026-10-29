@@ -2632,11 +2632,18 @@ echo "=== Proteina-Complexa design complete ==="
 
 # Collect binder sequences from outputs
 echo "=== Collecting binder sequences ==="
-python3 -c "
-import csv, glob, shutil, sys
+# The harvest goes through a quoted heredoc, never an inline -c string. Inside a
+# double-quoted shell word a quote character ends the string and a backquoted word
+# runs as a command, and this program comments contain both -- 9 and 12 of them,
+# one reading like an uninstall command. The generated script failed bash -n
+# outright, so the step died before Complexa ever ran. Quoting the heredoc
+# delimiter makes bash pass the body through untouched; the single value that does
+# need expanding is handed over as an environment variable instead.
+RUN_DIR="$RUN_DIR" python3 - <<'PY'
+import csv, glob, os, shutil, sys
 from pathlib import Path
 
-pc_dir = Path('$RUN_DIR/proteina_complexa')
+pc_dir = Path(os.environ["RUN_DIR"]) / "proteina_complexa"
 run_name = '{cfg["name"]}'
 
 # Find the directory Complexa actually wrote its designs into.
@@ -2817,7 +2824,7 @@ with open(out_csv, 'w', newline='') as f:
     w.writeheader()
     w.writerows(rows)
 print(f'  -> {{len(rows)}} binder sequences written to {{out_csv}}')
-"
+PY
 """
     )
 
