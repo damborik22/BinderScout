@@ -6,12 +6,14 @@ Dispatches sub-commands to their respective scripts:
   (no args) → interactive TUI menu (tui/app.py)
   install   → bash install/install.sh (or install_aarch.sh on aarch64)
   configure → python configurator/configurator.py
+  status    → python status/cli.py (stdlib-only probe, fans out over ssh)
   evaluate  → conda run -n binder-eval binder-compare (Evaluator/binder_comparison)
 
 Usage:
   binderscout                                                    Interactive menu (TUI)
   binderscout install   [--tool all|<tool>] [--cuda VERSION] [--skip-examples]   (--help for the tool list)
   binderscout configure [options passed through to configurator.py]
+  binderscout status    [--hosts a,b] [--local] [--json] [--watch [SECS]]
   binderscout evaluate  <binder-compare args>   (e.g. run --mosaic DIR --target-seq SEQ -o OUT)
   binderscout --version
   binderscout --help
@@ -51,6 +53,7 @@ USAGE = f"""{BOLD}BinderScout{RESET} — GPU-accelerated protein binder design t
   {_INVOKE}                                                    Interactive menu (TUI)
   {_INVOKE} install   [--tool all|<tool>] [--cuda VERSION] [--skip-examples]   (--help for the tool list)
   {_INVOKE} configure [options passed through]
+  {_INVOKE} status    [--hosts a,b] [--local] [--json] [--watch [SECS]]
   {_INVOKE} evaluate  <binder-compare args>   (e.g. run --mosaic DIR --target-seq SEQ -o OUT)
   {_INVOKE} --version
   {_INVOKE} --help
@@ -60,11 +63,13 @@ USAGE = f"""{BOLD}BinderScout{RESET} — GPU-accelerated protein binder design t
   {CYAN}install{RESET}    Install the design tools and refold engines (seven design tools,
              plus the evaluator, ESMFold2, SoluProt and opt-in AF3)
   {CYAN}configure{RESET}  Interactive wizard to set up a run (target, tools, parameters)
+  {CYAN}status{RESET}     Live campaign state per tool and per box — counts, liveness, ETA
   {CYAN}evaluate{RESET}   Passthrough to the binder-compare evaluator (extract / refold / report / run)
 
 {BOLD}Environments:{RESET}
   install    → bash          {REPO}/install/install.sh  (install_aarch.sh on aarch64)
   configure  → system python {REPO}/configurator/configurator.py
+  status     → system python {REPO}/status/cli.py
   evaluate   → conda env binder-eval → binder-compare (Evaluator/binder_comparison)
 
 {BOLD}Clone:{RESET}
@@ -187,6 +192,18 @@ def _dispatch(cmd: str, args: list) -> None:
             print(f"{RED}✗ configurator.py not found: {script}{RESET}", file=sys.stderr)
             sys.exit(1)
         print(f"{BOLD}BinderScout → configure{RESET}")
+        _exec(sys.executable, [sys.executable, str(script)] + args)
+
+    elif cmd == "status":
+        script = REPO / "status" / "cli.py"
+        if not script.exists():
+            print(f"{RED}✗ status/cli.py not found: {script}{RESET}", file=sys.stderr)
+            sys.exit(1)
+        # System Python on purpose: the probe is stdlib-only so it runs anywhere,
+        # which is what lets remote.py pipe it into `ssh <host> python3 -`.
+        print(f"{BOLD}BinderScout → status{RESET}")
+        env_pythonpath = os.environ.get("PYTHONPATH")
+        os.environ["PYTHONPATH"] = str(REPO) + (f":{env_pythonpath}" if env_pythonpath else "")
         _exec(sys.executable, [sys.executable, str(script)] + args)
 
     elif cmd == "evaluate":
