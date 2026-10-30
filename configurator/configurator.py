@@ -894,6 +894,48 @@ def extract_sequence_from_structure(path: str, chain_id: str) -> str | None:
     return extract_sequence_from_pdb(str(p), chain_id)
 
 
+def target_chain_sequences(path: str, chains: str, primary_sequence: str | None = None) -> list[dict]:
+    """One entry per targeted chain: ``[{"chain": "A", "sequence": "..."}, ...]``.
+
+    ``cfg["target_sequence"]`` is the PRIMARY chain only, and the tools that take a
+    target *sequence* rather than a target *structure* used to receive just that. On a
+    three-chain pMHC (HLA + beta-2m + peptide) that silently designed every binder
+    against the bare HLA heavy chain: Protein-Hunter shipped 400 sequences whose Boltz-2
+    inputs contained no peptide and no beta-2m at all, so the peptide the campaign
+    exists to discriminate was never in the complex (measured 2026-10-30, campaign
+    P-59). Nothing downstream can detect that -- the run looks healthy and reports
+    ipTM 0.82 about a complex that is not the target.
+
+    The primary chain's sequence is taken from ``primary_sequence`` when given, so an
+    expression-tag trim applied upstream is not silently undone here. A chain whose
+    sequence cannot be read is skipped rather than emitted empty.
+    """
+    out: list[dict] = []
+    wanted = [c.strip() for c in (chains or "A").split(",") if c.strip()] or ["A"]
+    for idx, cid in enumerate(wanted):
+        seq = primary_sequence if idx == 0 and primary_sequence else extract_sequence_from_structure(path, cid)
+        if seq:
+            out.append({"chain": cid, "sequence": seq})
+    return out
+
+
+def cfg_target_chain_sequences(cfg: dict) -> list[dict]:
+    """``cfg["target_chain_sequences"]``, or the primary chain alone as a fallback.
+
+    The fallback keeps ``--config`` replay of a config written before this key existed
+    working; it reproduces the old single-chain behaviour rather than guessing.
+    """
+    entries = cfg.get("target_chain_sequences") or []
+    cleaned = [e for e in entries if isinstance(e, dict) and e.get("sequence")]
+    if cleaned:
+        return cleaned
+    seq = cfg.get("target_sequence") or ""
+    if not seq:
+        return []
+    primary = (cfg.get("chains") or "A").split(",")[0].strip() or "A"
+    return [{"chain": primary, "sequence": seq}]
+
+
 # ─── Expression-tag detection ────────────────────────────────────────────────
 #
 # A stock RCSB entry is the CONSTRUCT that was crystallised, not the biological target.
@@ -1827,7 +1869,10 @@ def write_boltzgen_yaml(path: Path, cfg: dict):
         lines += [
             "  # Designed binder chain: uniform random length in the given range",
             "  - protein:",
-            "      id: B",
+            # NOT hardcoded "B": a multi-chain target (e.g. a pMHC: MHC heavy + b2m
+            # + peptide) already occupies B, and two entities sharing a chain id is a
+            # malformed spec. Take the first letter the target does not use.
+            f"      id: {next(c for c in 'BCDEFGHIJKLMNOPQRSTUVWXYZ' if c not in chain_ids)}",
             f"      sequence: {cfg.get('boltzgen_min_length', cfg['min_length'])}..{cfg.get('boltzgen_max_length', cfg['max_length'])}",
         ]
 
@@ -1846,10 +1891,16 @@ def write_boltzgen_yaml(path: Path, cfg: dict):
     if cfg["hotspots"]:
         binding_str = hotspots_to_boltzgen_str(cfg["hotspots"])
         lines.append("      binding_types:")
-        for c in chain_ids:
-            lines.append("        - chain:")
-            lines.append(f"            id: {c}")
-            lines.append(f"            binding: {binding_str}")
+        # ONLY the primary chain. The hotspot numbers are residue ids in the chain
+        # the operator read them off -- chains[0]. Writing them against every chain
+        # of a multi-chain target asks for residue 150 of a 10-residue peptide, and
+        # BoltzGen refuses the whole run with "Specified end ... is higher than the
+        # length of the chain" (measured on a pMHC target, 2026-10-29). The other
+        # target chains are still included above; they simply carry no binding
+        # constraint, which is what "the epitope is on chain A" means.
+        lines.append("        - chain:")
+        lines.append(f"            id: {chain_ids[0]}")
+        lines.append(f"            binding: {binding_str}")
 
     lines.append('      structure_groups: "all"')
     lines.append("")
@@ -1907,6 +1958,29 @@ def write_mosaic_hallucinate(path: Path, cfg: dict):
     BINDERSCOUT PARAMETERS block at the top of the file.
     """
     content = MOSAIC_HALLUCINATE_SRC.read_text()
+
+    # The template hallucinates against ONE target sequence (TARGET_SEQUENCE feeds a
+    # single TargetChain, the target-MSA cache key and the epitope indices alike), so a
+    # multi-chain target would silently be reduced to its primary chain. Refuse instead.
+    #
+    # This is the configure-time half of campaign P-59: Protein-Hunter, the other
+    # sequence-fed tool, shipped 400 designs against the bare HLA heavy chain of a
+    # three-chain pMHC -- no peptide, no beta-2m -- and reported ipTM 0.82 about a
+    # complex that was not the target. Nothing downstream can detect that, and the arm
+    # cost ~9 h. Protein-Hunter's own CLI took the other chains once we passed them;
+    # Mosaic's template genuinely cannot yet, so refusing is the honest answer. Give
+    # Mosaic a single-chain target, or run a structure-fed tool for this target.
+    chain_seqs = cfg_target_chain_sequences(cfg)
+    if len(chain_seqs) > 1:
+        named = ", ".join(f"{e['chain']} ({len(e['sequence'])} aa)" for e in chain_seqs)
+        raise RuntimeError(
+            "Mosaic takes a single target sequence, but "
+            f"{len(chain_seqs)} chains are targeted: {named}. It would design against "
+            f"chain {chain_seqs[0]['chain']} alone and the other chains would be absent "
+            "from every predicted complex -- a silently wrong run. Target one chain with "
+            "Mosaic, or use a structure-fed tool (RFD3, RFD4, BoltzGen, BindCraft, "
+            "BindCraft 2, PXDesign, Proteina-Complexa) for a multi-chain target."
+        )
 
     target_pdb_path = str(cfg.get("target_pdb", ""))
     epitope_idx = hotspots_to_epitope_idx(cfg)
@@ -2257,8 +2331,15 @@ def write_pxdesign_yaml(path: Path, cfg: dict):
         f"  file: {cfg['target_pdb']}",
         "  chains:",
     ]
+    # Hotspots belong to the chain their numbers were read off -- chains[0] -- and
+    # NOT to every chain of a multi-chain target. Writing them under each chain asks
+    # PXDesign for residue 150 of a 99-residue beta-2-microglobulin, and it refuses
+    # the whole run: `KeyError: Hotspot residue not found in atom_array: ('B', 150)`
+    # (measured on an L40S, 2026-10-29). The other chains are still passed as `all`,
+    # which is what "the epitope is on chain A" means. BoltzGen and
+    # Proteina-Complexa had the identical defect.
     for cid in chain_ids:
-        if hotspot_list:
+        if hotspot_list and cid == chain_ids[0]:
             hs = ", ".join(str(h) for h in hotspot_list)
             lines.append(f"    {cid}:")
             lines.append(f"      hotspots: [{hs}]")
@@ -2373,7 +2454,19 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
-conda activate binderscout_pxdesign
+# The env name is RESOLVED, not hardcoded. These envs predate the 2.0 rename on
+# the HPC cluster, where they are still `bindmaster_*` (CLAUDE.local.md). A
+# hardcoded `binderscout_pxdesign` there dies in 0 s with
+# `EnvironmentNameNotFound`, which in sacct is indistinguishable from a fast
+# crash -- that is exactly how one campaign silently lost an arm.
+_bs_env=binderscout_pxdesign
+if ! conda env list 2>/dev/null | awk '{{print $1}}' | grep -qx "$_bs_env"; then
+    if conda env list 2>/dev/null | awk '{{print $1}}' | grep -qx bindmaster_pxdesign; then
+        _bs_env=bindmaster_pxdesign
+        echo "NOTE: using pre-rename env $_bs_env (no binderscout_pxdesign on this host)."
+    fi
+fi
+conda activate "$_bs_env"
 export CUDA_HOME="$CONDA_PREFIX"
 
 # Surface CUDA dev headers + libs for PyTorch's JIT compiler.
@@ -2653,8 +2746,9 @@ def write_run_pxdesign(path: Path, cfg: dict):
 
         # Build YAML chain lines
         chain_lines = ""
+        # Primary chain only -- see write_pxdesign_yaml for why.
         for cid in chain_ids:
-            if hotspot_list:
+            if hotspot_list and cid == chain_ids[0]:
                 hs = ", ".join(str(h) for h in hotspot_list)
                 chain_lines += f"    {cid}:\\n      hotspots: [{hs}]\\n"
             else:
@@ -2692,7 +2786,11 @@ for LENGTH in $(seq "$MIN_LENGTH" "$LENGTH_STEP" "$MAX_LENGTH"); do
     printf 'binder_length: %d\\ntarget:\\n  file: %s\\n  chains:\\n{chain_lines}' \\
         "$LENGTH" "$TARGET_PDB" > "$INPUT_YAML"
 
-    pxdesign pipeline \\
+    # $CONDA_PREFIX/bin, never a bare name: on the HPC cluster `bin/pxdesign` is
+    # `exec mamba run -n <env> bash`, which DISCARDS its arguments and exits 0 --
+    # designing nothing and reporting no error (CLAUDE.local.md). `which pxdesign`
+    # actively misleads there, because the shortcut dir precedes the env on PATH.
+    "$CONDA_PREFIX/bin/pxdesign" pipeline \\
         --preset {preset} \\
         --N_sample "$N_SAMPLES" \\
         --dtype bf16 \\
@@ -2721,7 +2819,8 @@ mkdir -p "$SETTINGS_DIR"
 echo "=== Running PXDesign for {name} ==="
 echo "  Settings persisted: $SETTINGS_DIR/settings.json"
 
-pxdesign pipeline \\
+# $CONDA_PREFIX/bin, never a bare name -- see the scan branch above.
+"$CONDA_PREFIX/bin/pxdesign" pipeline \\
     --preset {preset} \\
     --N_sample {n_samples} \\
     --dtype bf16 \\
@@ -2910,7 +3009,10 @@ def write_run_proteina_complexa(path: Path, cfg: dict):
     max_len = cfg.get("complexa_max_length", cfg.get("max_length", 150))
     chains_str = cfg.get("complexa_chains", cfg.get("chains", "A"))
     hotspots_str = cfg.get("complexa_hotspots", "") or cfg.get("hotspots", "") or ""
-    target_pdb = cfg["target_pdb"]
+    # Path(), not the raw value: `--config <json>` replay hands this in as a str, and
+    # the per-chain CA count below calls .read_text() on it. Every other writer that
+    # reads the file coerces the same way (see write_run_rfd3 / write_rfd4_input_yaml).
+    target_pdb = Path(cfg["target_pdb"])
     # Optional quality knobs (None = let Complexa default apply, no Hydra override)
     mcts_n_simulations = cfg.get("complexa_mcts_n_simulations")
     nres_nsamples = cfg.get("complexa_nres_nsamples")
@@ -2920,25 +3022,39 @@ def write_run_proteina_complexa(path: Path, cfg: dict):
     chain_ids = [c.strip() for c in chains_str.split(",")]
     hotspot_list = parse_hotspots(hotspots_str) if hotspots_str.strip() else []
 
-    target_input_lines = []
-    for cid in chain_ids:
-        target_input_lines.append(f"      {cid}:")
-        if hotspot_list:
-            hs = ", ".join(str(h) for h in hotspot_list)
-            target_input_lines.append(f"        hotspot_residues: [{hs}]")
+    # Complexa's own schema, read from configs/targets/targets_dict.yaml and from
+    # binder_eval_utils.py:272 (`target_pdb_chain = sorted(set(x[0] for x in
+    # target_cfg["target_input"].split(",")))`): target_input is a STRING of
+    # comma-separated "<chain><lo>-<hi>" ranges -- so multi-chain IS expressible
+    # even though every shipped example is single-chain -- and hotspot_residues is
+    # a flat list of CHAIN-PREFIXED ids at the entry's top level.
+    #
+    # This replaced a nested mapping of {chain: {hotspot_residues: [...]}} that
+    # matched nothing in Complexa, and that repeated the primary chain's hotspot
+    # NUMBERS under every chain: against a pMHC that asked for residue 150 of a
+    # 10-residue peptide. Hotspots belong to the chain they were read off, which
+    # is chains[0].
+    def _pc_chain_ca_count(_ch: str) -> int:
+        try:
+            _keys, _ = _pdb_chain_ca_residues(target_pdb.read_text(errors="replace").splitlines(), _ch)
+            return len(_keys)
+        except OSError:
+            return 0
 
-    target_input_yaml = "\n".join(target_input_lines)
+    target_input = ",".join(rfd3_target_contig(target_pdb, cid, _pc_chain_ca_count(cid)) for cid in chain_ids)
+    hotspot_residues = [f"{chain_ids[0]}{h}" for h in hotspot_list]
+    hotspot_flag = " \\\n        --hotspot-residues " + " ".join(hotspot_residues) if hotspot_residues else ""
 
     # Optional Hydra overrides (each ends with ` \\` so it sits on its own
     # continuation line in the heredoc).  Built outside the f-string to stay
     # py310-compatible (PEP 701 nested f-string escapes are 3.12+).
     extra_overrides = ""
     if mcts_n_simulations is not None:
-        extra_overrides += f"\n    ++generation.search.mcts.n_simulations={mcts_n_simulations} \\"
+        extra_overrides += f" \\\n    ++generation.search.mcts.n_simulations={mcts_n_simulations}"
     if nres_nsamples is not None:
-        extra_overrides += f"\n    ++generation.dataloader.dataset.nres.nsamples={nres_nsamples} \\"
+        extra_overrides += f" \\\n    ++generation.dataloader.dataset.nres.nsamples={nres_nsamples}"
     if refinement:
-        extra_overrides += f"\n    ++generation.refinement.algorithm={refinement} \\"
+        extra_overrides += f" \\\n    ++generation.refinement.algorithm={refinement}"
 
     name = cfg["name"]
     target_seq = cfg.get("target_sequence", "")
@@ -2999,19 +3115,31 @@ source env.sh
 echo "=== Running Proteina-Complexa for {name} ==="
 echo "  Settings persisted: $SETTINGS_DIR/settings.json"
 
-# Write custom target definition
-TARGET_YAML="$RUN_DIR/proteina_complexa/target_binderscout.yaml"
-cat > "$TARGET_YAML" << 'TARGETEOF'
-target_dict_cfg:
-  binderscout_{cfg["name"]}:
-    source: binderscout
-    target_filename: "{cfg["name"]}"
-    target_path: "{target_pdb}"
-    target_input:
-{target_input_yaml}
-    binder_length: [{min_len}, {max_len}]
-    pdb_id: null
-TARGETEOF
+# Register the target the way Complexa actually LOADS it.
+#
+# `++targets_dict=<path>` does nothing: target_dict_cfg is a hydra CONFIG GROUP,
+# pulled in by configs/pipeline/binder/binder_generate.yaml:8
+# (`- /targets/targets_dict@_here_`). Setting a top-level `targets_dict` key to a
+# file path leaves that group untouched, so the run died with
+#   omegaconf.errors.InterpolationKeyError:
+#     Interpolation key 'target_dict_cfg.binderscout_<name>.source' not found
+# even though the file we wrote DID contain `source`. Measured 2026-10-29.
+#
+# So use Complexa's own target CLI, which appends into the dict that group reads.
+# Guarded by `target show` because there is no `target remove`: re-running is a
+# no-op rather than a duplicate entry. If this run's parameters change, edit or
+# delete the entry in Complexa's configs/targets/targets_dict.yaml by hand.
+if "${{PROTEINA_COMPLEXA_DIR}}/.venv/bin/complexa" target show "binderscout_{cfg["name"]}" >/dev/null 2>&1; then
+    echo "  Target binderscout_{cfg["name"]} already registered with Complexa — reusing it."
+else
+    "${{PROTEINA_COMPLEXA_DIR}}/.venv/bin/complexa" target add "binderscout_{cfg["name"]}" \\
+        --source binderscout \\
+        --target-filename "{cfg["name"]}" \\
+        --target-path "{target_pdb}" \\
+        --target-input "{target_input}" \\
+        --binder-length {min_len} {max_len}{hotspot_flag}
+    echo "  Registered target binderscout_{cfg["name"]} with Complexa."
+fi
 
 echo "  Target: {target_pdb}"
 echo "  Chains: {chains_str}"
@@ -3025,15 +3153,14 @@ echo "  Refinement: {refinement or "(none)"}"
 echo ""
 
 # Run Proteina-Complexa design pipeline
-complexa design configs/search_binder_local_pipeline.yaml \\
+"${{PROTEINA_COMPLEXA_DIR}}/.venv/bin/complexa" design configs/search_binder_local_pipeline.yaml \\
     ++run_name="{cfg["name"]}" \\
     ++generation.task_name="binderscout_{cfg["name"]}" \\
     ++generation.dataloader.dataset.nres.low={min_len} \\
     ++generation.dataloader.dataset.nres.high={max_len} \\
     ++generation.search.algorithm={search_algo} \\
     ++generation.search.best_of_n.replicas={replicas} \\
-    ++generation.filter.filter_samples_limit={n_designs} \\{extra_overrides}
-    ++targets_dict="$TARGET_YAML"
+    ++generation.filter.filter_samples_limit={n_designs}{extra_overrides}
 
 echo ""
 echo "=== Proteina-Complexa design complete ==="
@@ -3049,13 +3176,20 @@ run_name = '{cfg["name"]}'
 
 # Find evaluation result CSVs from Complexa outputs
 rows = []
+# Complexa writes evaluation_results/<pipeline>_<task_name>/ RELATIVE TO ITS OWN CWD
+# (we cd into PROTEINA_COMPLEXA_DIR above), and the run name appears in the CHILD
+# directory, never in 'evaluation_results' itself. The old probe tested
+# `run_name in str(p)` against the 'evaluation_results' path, so it could not match:
+# a COMPLETED 8-design run with 40 structures and 12 result CSVs reported
+# 'No binder sequences extracted' (measured 2026-10-30, Clara job 261240).
+searched = []
 eval_dir = Path('outputs') / run_name
 if not eval_dir.exists():
-    # Try finding in complexa's default output location
-    for p in Path('.').rglob('evaluation_results'):
-        if run_name in str(p):
-            eval_dir = p
-            break
+    for root in sorted(Path('.').rglob('evaluation_results')):
+        hits = sorted(d for d in root.iterdir() if d.is_dir() and run_name in d.name)
+        searched.extend(hits)
+        searched.append(root)
+    eval_dir = next((d for d in searched if d.exists()), eval_dir)
 
 # Strategy 1: Parse evaluation_results CSVs
 for csv_path in sorted(eval_dir.rglob('*.csv')) if eval_dir.exists() else []:
@@ -3063,7 +3197,7 @@ for csv_path in sorted(eval_dir.rglob('*.csv')) if eval_dir.exists() else []:
         with open(csv_path) as f:
             reader = csv.DictReader(f)
             for r in reader:
-                seq = r.get('sequence', '').strip()
+                seq = (r.get('sequence') or r.get('self_sequence') or '').strip()
                 if not seq or set(seq) == {{'X'}}:
                     continue
                 name = r.get('name', r.get('sample_id', csv_path.stem))
@@ -3119,6 +3253,9 @@ if not rows:
 
 if not rows:
     print('WARNING: No binder sequences extracted from Proteina-Complexa', file=sys.stderr)
+    probed = ', '.join(str(d) for d in searched) or '[none]'
+    print('  looked in: ' + str(eval_dir) + ' [cwd ' + str(Path.cwd()) + ']', file=sys.stderr)
+    print('  candidates probed: ' + probed, file=sys.stderr)
     sys.exit(0)
 
 out_csv = pc_dir / 'sequences.csv'
@@ -3534,7 +3671,24 @@ def write_run_rfd3(path: Path, cfg: dict):
     # Author numbering, read from the file RFD3 will actually load — not 1..N. One value
     # feeds all three emission sites below (settings.json, the inputs YAML, the banner),
     # which previously carried three copies of the same format string.
-    target_contig = rfd3_target_contig(target_pdb, primary_chain, target_len)
+    # EVERY selected chain, joined by chain breaks — not just the primary. A pMHC
+    # target is three chains (MHC heavy + beta-2-microglobulin + presented peptide);
+    # preserving only chains[0] hands RFD3 the bare heavy chain and the binder is
+    # designed against an empty groove. That is a silently wrong run for any
+    # peptide-specific campaign, and nothing downstream can detect it.
+    _chain_list = [c.strip() for c in cfg.get("chains", primary_chain).split(",") if c.strip()] or [primary_chain]
+
+    def _chain_ca_count(_ch: str) -> int:
+        try:
+            _keys, _ = _pdb_chain_ca_residues(target_pdb.read_text(errors="replace").splitlines(), _ch)
+            return len(_keys)
+        except OSError:
+            return 0
+
+    target_contig = ",/0,".join(
+        rfd3_target_contig(target_pdb, _ch, target_len if _ch == primary_chain else _chain_ca_count(_ch))
+        for _ch in _chain_list
+    )
 
     name = cfg["name"]
 
@@ -3609,7 +3763,19 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
-conda activate binderscout_rfd3
+# The env name is RESOLVED, not hardcoded. These envs predate the 2.0 rename on
+# the HPC cluster, where they are still `bindmaster_*` (CLAUDE.local.md). A
+# hardcoded `binderscout_rfd3` there dies in 0 s with
+# `EnvironmentNameNotFound`, which in sacct is indistinguishable from a fast
+# crash -- that is exactly how one campaign silently lost an arm.
+_bs_env=binderscout_rfd3
+if ! conda env list 2>/dev/null | awk '{{print $1}}' | grep -qx "$_bs_env"; then
+    if conda env list 2>/dev/null | awk '{{print $1}}' | grep -qx bindmaster_rfd3; then
+        _bs_env=bindmaster_rfd3
+        echo "NOTE: using pre-rename env $_bs_env (no binderscout_rfd3 on this host)."
+    fi
+fi
+conda activate "$_bs_env"
 
 # foundry's checkpoint registry reads FOUNDRY_CHECKPOINT_DIRS / FOUNDRY_CHECKPOINTS_DIR.
 # Singular FOUNDRY_CHECKPOINT_DIR is silently ignored (rfd3 design then aborts with
@@ -3850,6 +4016,19 @@ def write_run_protein_hunter(path: Path, cfg: dict):
     if not target_seq:
         raise RuntimeError("Protein-Hunter needs cfg['target_sequence'] (target chain amino-acid sequence).")
 
+    # EVERY targeted chain, not just the primary one. boltz_ph splits --protein_seqs with
+    # model_utils.smart_split (comma, else colon, else whitespace) and assigns chain ids
+    # B, C, D..., so a multi-chain target has always been expressible -- we were simply
+    # passing one sequence. Passing one against a pMHC designed 400 binders against the
+    # bare HLA heavy chain, with no peptide in the complex at all (campaign P-59).
+    #
+    # --contact_residues stays a SINGLE group: pipeline.py:209-215 splits it on "|" and
+    # maps group i to protein_chain_ids[i], so one group lands on chain B, which is the
+    # first sequence below. Hotspots read off the primary chain therefore stay on it.
+    chain_seqs = cfg_target_chain_sequences(cfg)
+    target_seqs_arg = ",".join(e["sequence"] for e in chain_seqs) or target_seq
+    chain_summary = ", ".join(f"{e['chain']}:{len(e['sequence'])}aa" for e in chain_seqs)
+
     n_designs = cfg.get("protein_hunter_n_designs", cfg.get("n_designs", 50))
     min_len = cfg.get("protein_hunter_min_length", cfg.get("min_length", 60))
     max_len = cfg.get("protein_hunter_max_length", cfg.get("max_length", 150))
@@ -3874,7 +4053,9 @@ def write_run_protein_hunter(path: Path, cfg: dict):
         target_dict_inner=f"""
     "name": "{name}",
     "sequence": "{target_seq}",
-    "length": {len(target_seq)}""",
+    "length": {len(target_seq)},
+    "chains": {json.dumps([e["chain"] for e in chain_seqs])},
+    "chain_sequences": {json.dumps({e["chain"]: e["sequence"] for e in chain_seqs})}""",
         design_params_inner=f"""
     "num_designs": {n_designs},
     "num_cycles": {num_cycles},
@@ -3917,7 +4098,19 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
-conda activate binderscout_protein_hunter
+# The env name is RESOLVED, not hardcoded. These envs predate the 2.0 rename on
+# the HPC cluster, where they are still `bindmaster_*` (CLAUDE.local.md). A
+# hardcoded `binderscout_protein_hunter` there dies in 0 s with
+# `EnvironmentNameNotFound`, which in sacct is indistinguishable from a fast
+# crash -- that is exactly how one campaign silently lost an arm.
+_bs_env=binderscout_protein_hunter
+if ! conda env list 2>/dev/null | awk '{{print $1}}' | grep -qx "$_bs_env"; then
+    if conda env list 2>/dev/null | awk '{{print $1}}' | grep -qx bindmaster_protein_hunter; then
+        _bs_env=bindmaster_protein_hunter
+        echo "NOTE: using pre-rename env $_bs_env (no binderscout_protein_hunter on this host)."
+    fi
+fi
+conda activate "$_bs_env"
 set -u
 
 # Gotcha: boltz_ph reads Boltz-2 weights + CCD library from ~/.boltz. The
@@ -3937,7 +4130,8 @@ cd "$PH_DIR"
         + settings_block
         + f"""
 echo "=== Protein-Hunter design for {name} ==="
-echo "  Target seq:    {target_seq[:50]}{"..." if len(target_seq) > 50 else ""} ({len(target_seq)} aa)"
+echo "  Target chains: {chain_summary} ({len(chain_seqs)} chain(s), {len(target_seqs_arg) - target_seqs_arg.count(",")} aa total)"
+echo "  Primary seq:   {target_seq[:50]}{"..." if len(target_seq) > 50 else ""} ({len(target_seq)} aa)"
 echo "  Binder length: {min_len}-{max_len}"
 echo "  Designs:       {n_designs}"
 echo "  Cycles:        {num_cycles}"
@@ -3958,7 +4152,7 @@ python boltz_ph/design.py \\
     --num_cycles {num_cycles} \\
     --min_protein_length {min_len} \\
     --max_protein_length {max_len} \\
-    --protein_seqs "{target_seq}" \\
+    --protein_seqs "{target_seqs_arg}" \\
     --msa_mode {msa_mode} \\
     --high_iptm_threshold {iptm_thr} \\
     --high_plddt_threshold {plddt_thr} \\
@@ -4196,7 +4390,7 @@ PYEOF
 """
 
 
-def _rfd4_preserved_segment(cfg: dict) -> tuple[Path, str, int, int]:
+def _rfd4_preserved_segment(cfg: dict) -> tuple[Path, list[tuple[str, int, int]]]:
     """(mmCIF, chain, lo, hi) for the contig's preserved target segment, in label_seq_id.
 
     RFD4 resolves a contig's residue ids against the mmCIF `label_seq_id`. This
@@ -4204,7 +4398,13 @@ def _rfd4_preserved_segment(cfg: dict) -> tuple[Path, str, int, int]:
     numbering differs: a user who typed "18-132" off the PDB entry page needs to
     know why the generated contig reads `A2-116` for the same residues.
     """
-    chain = cfg.get("chains", "A").split(",")[0].strip()
+    # EVERY selected chain, not just the first. A pMHC target is three chains
+    # (MHC heavy + beta-2-microglobulin + the presented peptide) and preserving
+    # only chains[0] hands RFD4 the bare heavy chain: the binder is then designed
+    # against a target with no peptide in the groove, which for a peptide-specific
+    # campaign is a silently wrong run, not a degraded one.
+    chains = [c.strip() for c in cfg.get("chains", "A").split(",") if c.strip()] or ["A"]
+    chain = chains[0]
     cif = cfg.get("target_cif")
     if not cif:
         raise RuntimeError(
@@ -4220,15 +4420,24 @@ def _rfd4_preserved_segment(cfg: dict) -> tuple[Path, str, int, int]:
             f"preserved segment names its chain by the mmCIF label_asym_id; correct "
             f"cfg['chains'] (currently {cfg.get('chains', 'A')!r})."
         )
-    lo, hi = info["label_lo"], info["label_hi"]
-    if info["auth_lo"] is not None and (info["auth_lo"], info["auth_hi"]) != (lo, hi):
-        print_warn(
-            f"Chain {chain} is numbered {info['auth_lo']}-{info['auth_hi']} by the author "
-            f"(auth_seq_id) but {lo}-{hi} in label_seq_id. RFD4 resolves the contig against "
-            f"label_seq_id, so the generated contig preserves {chain}{lo}-{hi} — the same "
-            f"{info['n_residues']} residues, named the way RFD4 reads them."
-        )
-    return Path(cif).resolve(), chain, lo, hi
+    segments: list[tuple[str, int, int]] = []
+    for ch in chains:
+        ch_info = cif_chain_numbering(str(cif), ch) if ch != chain else info
+        if ch_info is None:
+            raise RuntimeError(
+                f"RFD4: chain {ch!r} has no CA records in {Path(cif).name}, but cfg['chains'] "
+                f"({cfg.get('chains')!r}) names it. Correct cfg['chains']."
+            )
+        c_lo, c_hi = ch_info["label_lo"], ch_info["label_hi"]
+        if ch_info["auth_lo"] is not None and (ch_info["auth_lo"], ch_info["auth_hi"]) != (c_lo, c_hi):
+            print_warn(
+                f"Chain {ch} is numbered {ch_info['auth_lo']}-{ch_info['auth_hi']} by the author "
+                f"(auth_seq_id) but {c_lo}-{c_hi} in label_seq_id. RFD4 resolves the contig against "
+                f"label_seq_id, so the generated contig preserves {ch}{c_lo}-{c_hi} — the same "
+                f"{ch_info['n_residues']} residues, named the way RFD4 reads them."
+            )
+        segments.append((ch, c_lo, c_hi))
+    return Path(cif).resolve(), segments
 
 
 def write_rfd4_input_yaml(path: Path, cfg: dict) -> None:
@@ -4243,7 +4452,12 @@ def write_rfd4_input_yaml(path: Path, cfg: dict) -> None:
     `docs/reference/yaml-json.md`), but nothing in this project has run it, so
     the wizard's hotspot answer is not used by this tool.
     """
-    target_cif, chain, lo, hi = _rfd4_preserved_segment(cfg)
+    target_cif, segments = _rfd4_preserved_segment(cfg)
+    # One preserved span per chain, separated by chain breaks, so a multi-chain
+    # target (e.g. a pMHC) reaches RFD4 whole.
+    preserved = ", /0, ".join(f"{ch}{lo}-{hi}" for ch, lo, hi in segments)
+    sel_chains = ",".join(ch for ch, _lo, _hi in segments)
+    chain, lo, hi = segments[0]
     min_len = int(cfg.get("rfd4_min_length", cfg.get("min_length", 60)))
     max_len = int(cfg.get("rfd4_max_length", cfg.get("max_length", 100)))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -4253,19 +4467,29 @@ def write_rfd4_input_yaml(path: Path, cfg: dict) -> None:
 # Run it with: rfd4-generate inputs=<this file> num_replicates=N out_dir=DIR '~metrics'
 {cfg["name"]}:
   input: {target_cif}
+  # The binder segment goes LAST, and that ordering is load-bearing. RFD4's
+  # deferred binder sentinel re-derives molecule ids over the partially assembled
+  # array, and the build fails when a preserved chain placed after the first
+  # carries a pre-derived molecule_iid equal to the id the inserted binder is
+  # handed. Measured 2026-10-29 on this pMHC target (A=MHC, B=b2m, C=peptide):
+  #   "60-150, /0, A1-276, /0, B2-100, /0, C1-10"  -> FAILS, index_group_molecule_must_be_connected
+  #   "A1-276, /0, B2-100, /0, C1-10, /0, 60-150"  -> PASSES
+  # It is NOT "binder-first always fails": "60-150, /0, A1-276, /0, C1-10"
+  # passes, while "60-150, /0, C1-10, /0, A1-276" fails. Binder-last avoids the
+  # collision for every ordering, so it is what we emit.
   # "<lo>-<hi>" = designed binder length range, "/0" = chain break,
   # "{chain}{lo}-{hi}" = preserved target segment.
   # Those residue ids are label_seq_id, which is what RFD4 resolves a contig
   # against (NOT auth_seq_id). A range in author numbering is rejected outright:
   # "Preserved segment 'A18-132' runs outside chain A, whose residues are 2-116".
-  contig: "{min_len}-{max_len}, /0, {chain}{lo}-{hi}"
+  contig: "{preserved}, /0, {min_len}-{max_len}"
   conditions:
     C_CRDGRP:
       1:
-        - select: "sel('{chain}/*/*/[N,CA,C,O]') and not has_nan_coord()"
+        - select: "sel('{sel_chains}/*/*/[N,CA,C,O]') and not has_nan_coord()"
     C_SEQ:
       true:
-        - select: "sel('{chain}')"
+        - select: "sel('{sel_chains}')"
 """
     )
 
@@ -5672,6 +5896,9 @@ def wizard():
         "target_pdb_src": target_pdb_src,
         "target_pdb": None,
         "target_sequence": target_sequence or "",
+        # Every targeted chain, for the tools that take a SEQUENCE rather than a
+        # structure (Protein-Hunter, Mosaic). See target_chain_sequences().
+        "target_chain_sequences": target_chain_sequences(target_pdb_src, chains, target_sequence),
         "chains": chains,
         "hotspots": hotspots.strip() if hotspots.strip() else None,
         "min_length": min_length,

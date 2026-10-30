@@ -97,7 +97,16 @@ class TestLabelSeqIdIsTheContigNumbering:
         spec = cif_cfg["run_dir"] / "rfd4" / "input.yaml"
         conf.write_rfd4_input_yaml(spec, cif_cfg)
         contig = next(line.split('"')[1] for line in spec.read_text().splitlines() if line.startswith("  contig: "))
-        assert contig == "60-100, /0, A2-116"
+        # Binder LAST. Changed 2026-10-29 from "60-100, /0, A2-116" after measuring
+        # RFD4's own validator: its deferred binder sentinel re-derives molecule ids
+        # over the partially assembled array, and the build fails when a preserved
+        # chain placed after the first already carries the id the binder is handed.
+        # On a 3-chain pMHC target "60-150, /0, A1-276, /0, B2-100, /0, C1-10" fails
+        # with index_group_molecule_must_be_connected while the binder-last form
+        # passes. It is NOT "binder-first always fails" ("60-150, /0, A1-276, /0,
+        # C1-10" passes), but binder-last is safe for every ordering, so that is what
+        # the writer emits -- including for this single-chain case, to keep one shape.
+        assert contig == "A2-116, /0, 60-100"
         # The author range must not reach the spec at all: it is the value rfd4
         # rejects, and a user who sees it there will believe it worked.
         assert "A18-132" not in contig
@@ -189,7 +198,16 @@ class TestGeneratedRunScript:
         )
         proc = subprocess.run(["bash", str(runner)], capture_output=True, text=True, check=True)
         contig, input_cif = proc.stdout.splitlines()
-        assert contig == "60-100, /0, A2-116"
+        # Binder LAST. Changed 2026-10-29 from "60-100, /0, A2-116" after measuring
+        # RFD4's own validator: its deferred binder sentinel re-derives molecule ids
+        # over the partially assembled array, and the build fails when a preserved
+        # chain placed after the first already carries the id the binder is handed.
+        # On a 3-chain pMHC target "60-150, /0, A1-276, /0, B2-100, /0, C1-10" fails
+        # with index_group_molecule_must_be_connected while the binder-last form
+        # passes. It is NOT "binder-first always fails" ("60-150, /0, A1-276, /0,
+        # C1-10" passes), but binder-last is safe for every ordering, so that is what
+        # the writer emits -- including for this single-chain case, to keep one shape.
+        assert contig == "A2-116, /0, 60-100"
         assert Path(input_cif) == cif_cfg["target_cif"].resolve()
 
 
