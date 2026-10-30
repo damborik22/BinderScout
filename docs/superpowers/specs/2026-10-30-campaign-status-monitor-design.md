@@ -148,8 +148,21 @@ home path enters a tracked file; the existing tree test enforces this.
 
 ## Phasing
 
-1. Probe + classification + terminal renderer + SSH fan-out. Validated against
-   the live pMHC and TfR1 arms, which is a real test rather than a synthetic one.
-2. The pushed page, reading the same document.
+1. **Done.** Probe + classification + terminal renderer + SSH fan-out, as
+   `binderscout status [--local] [--json] [--watch [SECS]]`. Validated against the
+   live pMHC and TfR1 arms, which is where five of its bugs came from; fixtures
+   found none of those. 70 tests, 11 mutations killed.
+2. **Done.** The pushed page, reading the same document from the `db` capability
+   at `status/latest`. The page's own data age is its most prominent figure and
+   turns amber at 5 min, red at 20 min, with text saying the push may have
+   stopped — because a dashboard showing an old number as current is the failure
+   this feature exists to prevent. Deadlines come from a `deadlines` map in the
+   same document, since the probe cannot know them.
+
+   **Its honest limit:** nothing on the boxes can write to that store. The push
+   is `binderscout status --json` captured and written by an agent session, so
+   the page is exactly as current as the last push and says so rather than
+   implying live data. A cron on the orchestrator cannot replace that without a
+   server-side writer, which does not exist here.
 3. Optional: `progress.jsonl` heartbeats written by the run scripts, preferred by
    the probe when present. Deferred because it cannot see any arm now running.

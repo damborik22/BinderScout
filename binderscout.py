@@ -201,7 +201,10 @@ def _dispatch(cmd: str, args: list) -> None:
             sys.exit(1)
         # System Python on purpose: the probe is stdlib-only so it runs anywhere,
         # which is what lets remote.py pipe it into `ssh <host> python3 -`.
-        print(f"{BOLD}BinderScout → status{RESET}")
+        # No banner for --json: the document is meant to be piped, and the
+        # banner's ANSI escape makes it fail to parse at char 0.
+        if "--json" not in args:
+            print(f"{BOLD}BinderScout → status{RESET}")
         env_pythonpath = os.environ.get("PYTHONPATH")
         os.environ["PYTHONPATH"] = str(REPO) + (f":{env_pythonpath}" if env_pythonpath else "")
         _exec(sys.executable, [sys.executable, str(script)] + args)

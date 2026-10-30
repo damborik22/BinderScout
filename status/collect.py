@@ -12,7 +12,15 @@ from status import liveness
 from status.probes import KNOWN_TOOLS, probe_started, probe_tool, resolve_alias
 from status.schema import DEAD, DONE, QUEUED, RUNNING, SCHEMA_VERSION
 
-__all__ = ["cadence", "classify", "collect_local", "eta_seconds", "probe_started", "resolve_repo"]
+__all__ = [
+    "cadence",
+    "classify",
+    "collect_local",
+    "eta_seconds",
+    "home_relative",
+    "probe_started",
+    "resolve_repo",
+]
 
 # Writes closer together than this belong to one batch. RFD3 emits ten designs
 # inside a single second, so anything from ~0.5 s up gives the same answer.
@@ -72,6 +80,24 @@ def eta_seconds(done: int, total, mtimes):
         return None
     batches_left = math.ceil((total - done) / c["batch_size"])
     return batches_left * c["gap_s"]
+
+
+def home_relative(path) -> str:
+    """A path with the account name taken out of it.
+
+    This document is published to a page, and an absolute checkout path names
+    the Unix account. Captured across the fleet it named four of them. Which
+    checkout a box used is still worth reporting -- the spellings differ per box
+    -- so it is reported against $HOME rather than dropped.
+    """
+    path = Path(path)
+    home = Path.home()
+    if path == home:
+        return "~"
+    try:
+        return "~/" + str(path.relative_to(home))
+    except ValueError:
+        return str(path)
 
 
 def resolve_repo(explicit=None) -> Path | None:
@@ -153,7 +179,7 @@ def collect_local(repo_root=None, host: str = "local") -> dict:
         "reachable": True,
         "host": host,
         "schema": SCHEMA_VERSION,
-        "repo": str(repo),
+        "repo": home_relative(repo),
         "gpu": liveness.gpus(),
         "runs": runs,
     }

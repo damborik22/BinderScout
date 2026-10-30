@@ -189,6 +189,16 @@ _SHARED_VERIFY_FUNCTIONS = (
     # which is data and is checked separately.
     "run_logged",
     "check_build_toolchain",
+    # The install-state staleness readers, for the same reason: they read only
+    # ${BINDERSCOUT_DIR} and ${INSTALL_STATE_DIR}, which both files define
+    # identically, and mark_tool_installed() writes the SHA field on both
+    # platforms. A fork here would let one platform keep reporting a tool built
+    # against an older commit as plainly "installed", which is the whole gap
+    # these close.
+    "current_repo_sha",
+    "marker_recorded_sha",
+    "tool_marker_is_stale",
+    "report_stale_tools",
 )
 
 
