@@ -9,9 +9,26 @@ BinderScout is a unified toolkit for GPU-accelerated **protein binder design**. 
 internal lab material from the tree *and* the published history — **every commit SHA and
 tag below `v2.0.2` changed on 2026-10-27, so an older clone must be re-cloned, not pulled.**
 Shipped to the fleet
-only — **not published**, and deliberately **not merged to `master`**, which stays frozen at
-1.0.3. `v2.0.x` is the working branch: all work on these machines lands there, never on `master`
-or `v1.1.x`.
+only — **not published**, and deliberately **not merged to `master`**. `v2.0.x` is the working
+branch: all work on these machines lands there, never on `master`.
+
+**`master` is NOT frozen at 1.0.3 — that claim is stale (corrected 2026-10-29).** Master is a
+**separate line with no common ancestry**: the 2026-10-28 history rewrite reset its numbering at
+1.0.0, so none of `v1.0.0`…`v2.0.2` is reachable from it (`git merge-base --is-ancestor v2.0.x
+master` is false) and `git describe` on master cannot see the old tags. As of 2026-10-29 master
+is at **`v1.2.1`** (1.0.6 → 1.0.7 → 1.0.8 → 1.2.0 → 1.2.1 all landed that day; `v1.2.0` added
+`binder-compare filter-tmprot`, `v1.0.8` added the refold-CSV target-mismatch guard).
+**Consequence for porting: a fix cannot be cherry-picked between the lines** — diff the trees and
+re-apply. `v1.1.x` was retired to the tag `archive/v1.1.x` and no longer exists as a branch.
+Three master fixes are still absent from `v2.0.x`: `_refuse_mismatched_targets`,
+`refolding/resume.py` (sequence-keyed resume) and `filter-tmprot`.
+
+**Local-only branch worth knowing about:** `feat/d1-ligand-target`, 30 commits off `v2.0.2`,
+never merged and not on any remote. It carries the ligand-target support (`core/ligand.py`) and —
+more importantly for any specificity campaign — a counter-screen and specificity-margin framework
+(`comparison/counterscreen.py`, `refolding/counterscreen_runner.py`,
+`comparison/design_objective.py`) plus the hapten campaign's measured limits on what a margin can
+deliver. Read it before building a counter-screen from scratch.
 
 **What 2.0 is.** An *evaluation* release, not a feature release. The `v2.0.0` tag shipped no new
 design tool (the eighth, BindCraft 2, arrived in 1.1.0) and the same three-engine refold pipeline
@@ -411,9 +428,25 @@ the parameter sweep.
     `tests/test_no_user_home_paths_in_tree.py`, which fails if a *new* binary joins it or
     if that one is ever rebuilt clean and the exemption is left behind.
 
-  `tests/test_script_hygiene.py` detects this class in shell scripts. Nothing enforces it
-  across the tree, which is why the claim above could be false for three days without
-  anyone noticing.
+  `tests/test_script_hygiene.py` detects this class in shell scripts, and
+  `tests/test_no_infrastructure_identifiers_in_tree.py` (added 2026-10-30) now enforces
+  four of the classes **across every tracked text file**: private IPv4 addresses
+  (RFC 1918, by shape), SSH host-key fingerprints (by shape), and **this box's own
+  account name and hostname**, both derived at test time rather than listed -- a test
+  that spelled them out would have to contain the identifiers it bans, and a derived
+  check adapts to whichever machine runs it. RFC 5737 documentation ranges
+  (192.0.2.x / 198.51.100.x / 203.0.113.x) and loopback are deliberately allowed,
+  because fixtures need addresses and those are the ones to use.
+
+  It was added after a status-monitor fixture pasted a real cluster login-node address
+  into a tracked file to exercise an error sanitiser; a manual grep caught it before it
+  was pushed, and nothing in the suite would have. All four checks are mutation-proven
+  against that exact mistake.
+
+  **Still unenforced:** internal DNS hostnames for boxes *other* than the one running the
+  tests, cluster account names other than the local one, and public-range institutional
+  addresses. The `loschmidt.chemi.muni.cz` URLs in the tree are a public web service, not
+  infrastructure, and must stay.
 
 ---
 
@@ -458,6 +491,8 @@ the parameter sweep.
 **Stage 0 — cross-engine gate.** A design must have been refolded by at least `--min-engines` independent engines (**default 3** = all of Boltz-2 / AF3 / ESMFold2; floor 2). `consensus_iptm_mean` skips missing engines, so without this a single-engine design's mean *is* that one engine's score and it competes against 3-engine means on an incomparable scale — and for Mosaic / Protein-Hunter that engine is the one that designed it. Designs failing the gate are ranked **last, not dropped** (`passes_engine_gate` records it). If nothing clears the gate the run warns and names the shortfall rather than silently reporting that no design was good enough.
 
 **Rank — `consensus_iptm_mean`,** ties broken by `consensus_iptm_n` (more engines backing an equal mean wins), then `consensus_iptm`, then binder pLDDT.
+
+> **The mean is `skipna`, and that is why the gate is load-bearing.** `consensus_iptm_mean` is `numeric.mean(axis=1)` over the three `*_pae_iptm` columns (`scoring.py`), so pandas drops NaNs: a design scored by **one** engine gets that engine's score **as its "mean"**, on a scale not comparable to a 3-engine mean. Stage 0 is the only thing standing between that and the top of the list. Two consequences worth stating plainly: (1) gate failures are **ranked last, not dropped**, so *within* the failed block the order IS that incomparable comparison — do not read a rank below the `passes_engine_gate` boundary as a cross-engine result; (2) the code warns loudly when the gate is **empty**, but the partial case is silently true, so always read `consensus_iptm_n` alongside `rank`. Verified in code 2026-10-29.
 
 **What was removed, and why — do not re-add any of it:**
 
@@ -505,7 +540,7 @@ the parameter sweep.
 
 ### Critical domain facts
 
-- **iptm is gameable by the designing engine** — BindCraft games AF2 ipTM, and BindCraft 2's i_pTM is design-time-biased in exactly the same way (it hallucinates against AF2 too), so neither tool's own i_pTM ever enters `consensus_iptm_mean`; Mosaic games `boltz_iptm` by construction (it *is* Boltz-2 gradient hallucination). Never rank on a single engine's ipTM. The two-stage `consensus_iptm_mean` (mean across independent engines) resists this — a design one engine loves but another rejects is demoted by the mean.
+- **iptm is gameable by the designing engine** — BindCraft games AF2 ipTM, and BindCraft 2's i_pTM is design-time-biased in exactly the same way (it hallucinates against AF2 too). **Neither tool's own i_pTM ever enters `consensus_iptm_mean` — but read that precisely, because the protection it implies is ASYMMETRIC and only BindCraft / BindCraft 2 actually get it.** What the ranking averages is `boltz_pae_iptm` / `af3_pae_iptm` / `esmfold2_pae_iptm` (`scoring.py:_ENGINE_IPTM_COLS`) — our **own re-derivation from each engine's PAE**, never the tool's reported number. For BindCraft and BindCraft 2 that is a real firewall: AF2 refolding was removed in Part I, so their design engine is absent from the panel entirely. For **Mosaic and Protein-Hunter it is not**: both design against **Boltz-2**, and `boltz_pae_iptm` is one of the three inputs at full 1/3 weight — so a Mosaic design is scored partly by the very model it was optimised against, just via our PAE kernel instead of Mosaic's own metric (BoltzGen is adjacent: Boltz-1 diffusion against a Boltz-2 refold). Verified in code 2026-10-29. The cross-engine mean dilutes that to 1/3, which is the whole point of the >=3-engine gate, but it does not remove it, and a 2-engine run that keeps Boltz-2 dilutes it only to 1/2. Never rank on a single engine's ipTM. The two-stage `consensus_iptm_mean` (mean across independent engines) resists this — a design one engine loves but another rejects is demoted by the mean.
 - **More engines really is less wrong — measured, and bounded.** On the canonical Adaptyv benchmark (563 designs, 4 targets, 258 binders, 2026-10-03): one engine buries a true binder in its own within-target bottom quartile **5.69×** more often than all three do together (CI [3.27, 18.39]; 11.4× at a bottom-decile cut), and the mean rescues **92.9%** of binders buried by exactly one engine, 25.0% of those buried by two, and **0%** of those buried by all three. Error correlation measured within target and within class is **ρ ≈ 0.39**, i.e. **effective n = 1.6–1.7 of 3**. This replicates Cao's numbers (5.2×, ρ 0.382, 1.70) on an independent pool — the one cross-engine claim that has survived replication. **Two limits worth stating with it:** the benefit is capped by correlation (a random-ordering null gives **17.2×**, p=0.0008, so the engines are not independent votes), and joint burial is **length-linked** — mean binder length 84.5 aa when no engine buries vs **119.9 aa** when two do, which is the shared failure mode. Full detail and the engine panel: `docs/INVESTIGATION_coverage_premise_2026-10-03.md`.
 - **`consensus_iptm_mean` IS the agreement rule — it is not an approximation of one, and a vote count would be worse.** The design intent: one engine can be *played* for or against a design (Mosaic games `boltz_iptm` **by construction** — it is Boltz-2 gradient hallucination; BindCraft games AF2 i_pTM; BindCraft 2's i_pTM is biased the same way), two can disagree, and three is the right number — two in favour do not kill a design, but three must effectively agree for it to reach the top tier. **The mean implements that directly:** a high mean requires all three scores high, one dissenter drags it down proportionally rather than fatally, two drag it below the surface. Measured on the canonical benchmark against real experimental labels — of true binders buried in the bottom quartile by exactly **one** engine the mean rescues **92.9%**, by **two** only **25.0%**, by **three** **0%**. That gradient *is* the rule.
   **`agreement_count` is a WARNING FLAG, and it is NOT redundant with the mean — it reads a different quantity.** The ranking averages **ipTM** (`*_pae_iptm`); `agreement_count` counts engines over a threshold on **ipSAE** (`boltz_pae_ipsae_min` / `af3_ipsae_min` / `esmfold2_ipsae_min`, `scoring.py:454-468`). So the pair carries orthogonal information, and the useful reading is the *disagreement between them*: **a design with a high ipTM mean but only two engines calling its ipSAE high is a caution — the confidence score is high while the interface-error geometry only partly supports it, so something may be wrong.** It is a per-design flag for a human weighing what to order, not an input to `rank`.
@@ -516,7 +551,7 @@ the parameter sweep.
 - **Engine disagreement lowers the mean — but is NOT a useful stratifier.** For short binders (~60aa), refolding engines often disagree on interface quality, and `consensus_iptm_mean` captures that continuously (disagreement drags the mean down). That much holds. What does *not* hold is using disagreement to slice the pool: on Cao, splitting at the median engine spread changed AUC by −0.006/+0.005 against a random-split null of ±0.018 (p=0.71/0.81), and `agreement_count` scores macro-AUC 0.532 with 87.2% of designs tied at zero. Keep `agreement_count` as a diagnostic column; do not gate or stratify on it (Part U).
 - **DO NOT USE Cao 2022 as a benchmark (operator decision, 2026-10-03).** Its Kd labels are too censored to support a conclusion: **73.4 %** of its binder labels are one-sided (**94.2 %** across the full 654,716-design library), its own `kd_ok` quality flag keeps only ~495 designs, and **8 of 12 targets sit at the random-ordering noise floor** — so any Cao result is decided by ~4 informative targets. Measured 2026-10-03: a hand-rolled "two-sided Kd" slice admits designs with `kd_lb == 0` (a degenerate [0, X] interval), and swapping it for `kd_ok` **flips the sign** of an engine-set effect that had p=0.0078. **The canonical labelled benchmark is the curated Adaptyv/ProteinBase set** (563 designs with the full PAE panel, 4 targets, replicated binding calls), assembled 2026-10-02 on the MUNI share under `EVALUATOR/Benchmark/`; see its own `README.md` and `PROVENANCE.md`. Note that "Adaptyv" and "ProteinBase" are **one dataset**, not two corroborating ones. **Every Cao-derived figure below and in Parts T/U is therefore provisional and must be re-measured on that benchmark before it is relied on.**
 - **The ranking is a triage filter, not a decision procedure.** Calibrate expectations before presenting a top-N as "the best". **(Cao-derived — see the preceding bullet; these specific numbers are provisional.)** On the Cao 2022 near-miss pool (4,442 Rosetta minibinders, 12 targets — the closest analogue to a real campaign pool: hundreds of same-tool, same-length designs against one target) the whole 72-metric field spans macro-AUC **0.471–0.560**, and taking the top decile by the best metric is worth ~**1.5–2× enrichment** (FGFR2 8.98 → 2.13 designs-per-hit) — but it beats a random ranking on only **6/12 targets**, and on TrkA and Tie2 it is *worse than not ranking at all*. Ranking looks much stronger on easier pools (Adaptyv 0.68–0.72, de novo BindCraft 0.72–0.78 macro) and on label-clean positives (Cao rises to 0.73 once one-sided-Kd "binders" are excluded — 73.4% of Cao's binder labels are one-sided; reproduced exactly 2026-10-03, and 94.2% on the full 654,716-design library). **Two of Part U's supporting claims about that were withdrawn on 2026-10-03** — the binary-assay corroboration is near-circular (`binder_4000_nm` is predicted by `kd_ub < 4000` at MCC 0.819, 0.075% error over 654,716 rows), and one-sided binders are NOT "experimentally indistinguishable" from non-binders: they pass at 8.7× the rate (p=4e-62), 32× at 400 nM. Weaker, not indistinguishable. So Cao answers "3 engines vs an *arbitrary* single engine" and must not be used for "vs the *best* single engine" without that caveat. See `docs/INVESTIGATION_coverage_premise_2026-10-03.md`. Part U.
-- **Binder length is a main driver** — Longer binders tend to score lower on `ipsae_min` (r ≈ -0.78). (Not testable on Cao: 75.1% of that set is exactly 65 aa.)
+- **~~Binder length is a main driver — longer binders score lower on `ipsae_min` (r ≈ -0.78).~~ RETRACTED 2026-10-29: that correlation does not reproduce anywhere we can test it.** Measured over **12 engine-pools** (4 pools x 3 refold engines, 597 engine-design rows: CALCA/BC2, AK1b pd-l1, GF_asyn100, GF_asynfull), the strongest length correlation on `ipsae_min` is **-0.31** and **five of the twelve are POSITIVE**. `docs/PLAN_2.0_PART_RESULTS.md` had already found the same thing on two targets independently. Where a length effect *does* show up it is substantially a **normalization artifact, not biology**: `compute_iptm_from_pae` takes a global `d0` from `L_b + L_t`, so d0 grows with the complex and the kernel gets more forgiving for longer binders. Pinning d0 flips the sign of the length correlation on CALCA (+0.36 to -0.30) and reorders that pool (Spearman 0.67-0.82), while leaving AK1b and GF essentially unchanged (0.98-0.999) — the distortion scales with how much binder length varies *relative to the target*, so it is large for a wide length sweep against a small target and negligible for a narrow sweep against a big one. **Length is a variable to control for, not a driver to assume.** (Was never testable on Cao either: 75.1% of that set is exactly 65 aa.)
 - **Mosaic designs.csv format** — Can mix column formats between workers (old 11-col / new 13-col). The parser must handle this carefully or columns misalign. The `is_top` column marks the ~40 refolded designs out of ~800 total; extractors filter to `is_top=1` by default.
 - **Mosaic `target_sequence` placeholder** — The Mosaic template (`hallucinate_binderscout.py`) writes `"REPLACE_ME"` as `target_sequence` when not configured. The legacy evaluator guards against using this as a real target sequence.
 - **AF3 memory: the ">=100 GB GPU" requirement was wrong — it fits a 24 GB card, and the small-pool abort was OUR BUG.** Both halves are now measured, and both earlier readings of this bullet were wrong.
