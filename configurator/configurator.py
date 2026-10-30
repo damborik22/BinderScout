@@ -4581,6 +4581,36 @@ if [[ ! -f "$INPUT_YAML" ]]; then
     exit 1
 fi
 
+# Triton JIT-compiles triton/backends/nvidia/driver.c on the FIRST generate call
+# and that C file includes Python.h. If RFD4's venv was built on the system
+# interpreter, those headers come from a distro -dev package -- and requiring one
+# would break the zero-sudo promise of standalone mode. A uv-managed CPython
+# ships its own headers, so point the compiler at those instead.
+#
+# Without this the arm dies ~8 s in with
+#   fatal error: Python.h: No such file or directory
+#   torch._inductor.exc.InductorError: CalledProcessError ... driver.c
+# which reads like a CUDA fault but is not: libcuda.so.1 resolves fine.
+# Measured 2026-10-30 on BM1/BM2/BM4, none of which carry python3.12-dev.
+_py_inc="$("$RFD4_PY" -c 'import sysconfig; print(sysconfig.get_paths()["include"])' 2>/dev/null || true)"
+if [[ -n "${{_py_inc}}" && ! -f "${{_py_inc}}/Python.h" ]]; then
+    _py_tag="$(basename "${{_py_inc}}")"
+    for _cand in "${{HOME}}"/.local/share/uv/python/cpython-*/include/"${{_py_tag}}"; do
+        if [[ -f "${{_cand}}/Python.h" ]]; then
+            export CPATH="${{_cand}}${{CPATH:+:${{CPATH}}}}"
+            echo "  NOTE: no ${{_py_tag}}/Python.h on this host; using uv-managed headers"
+            echo "        ${{_cand}}  (Triton needs them to build its CUDA shim)"
+            break
+        fi
+    done
+    if [[ -z "${{CPATH:-}}" ]]; then
+        echo "ERROR: Triton needs Python.h and none was found." >&2
+        echo "       Looked in ${{_py_inc}} and ~/.local/share/uv/python/cpython-*/include/${{_py_tag}}." >&2
+        echo "       Install a uv-managed interpreter (no sudo): uv python install ${{_py_tag#python}}" >&2
+        exit 1
+    fi
+fi
+
 # Read the spec back instead of restating it: it is editable after generation.
 # awk rather than `grep | head`, so nothing can trip `set -o pipefail`.
 CONTIG=$(awk -F'"' '/^  contig: /{{print $2; exit}}' "$INPUT_YAML")
