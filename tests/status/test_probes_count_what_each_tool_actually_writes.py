@@ -55,16 +55,18 @@ def test_bindcraft2_counts_accepted_rows_not_files_on_disk(tmp_path):
     assert (r["done"], r["total"]) == (3, 50)
 
 
-def test_boltzgen_is_not_counted_from_structures_on_disk(tmp_path):
-    # Measured on BM2 2026-10-30: 3430 .cif files, all intermediates, zero
-    # finished designs. Counting structures would have reported 3430/5000 for a
-    # run that has produced nothing. The count comes from the metrics CSV --
-    # see test_the_probe_counts_what_the_extractor_would_extract.py.
+def test_boltzgen_intermediates_are_generation_progress_not_banked_designs(tmp_path):
+    # Measured on BM2 2026-10-30: 3430 .cif files, all under
+    # intermediate_designs/, and no metrics table. They are raw generated
+    # designs, not the filtered pool, so they count against --num_designs and
+    # the phase says which number this is. See test_boltzgen_is_a_two_phase_tool.
     d = _run(tmp_path) / "boltzgen" / "outputs" / "intermediate_designs"
     d.mkdir(parents=True)
     for i in range(5):
         (d / f"d{i}.cif").write_text("data_x\n")
-    assert probe_tool("boltzgen", tmp_path, CFG)["done"] == 0
+    r = probe_tool("boltzgen", tmp_path, CFG)
+    assert r["phase"] == "generating"
+    assert r["done"] == 5
 
 
 def test_an_empty_tool_dir_counts_zero_and_does_not_raise(tmp_path):

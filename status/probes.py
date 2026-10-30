@@ -42,9 +42,35 @@ _CSV_GLOBS = {
 }
 
 
+# BoltzGen generates raw designs here first, for hours, before any metrics file
+# exists. They are not finished designs, but they ARE progress, and 18 hours of
+# it was invisible while the probe reported 0.
+_BOLTZGEN_RAW_GLOB = "boltzgen/**/intermediate_designs/*.cif"
+
+
 def boltzgen_count_sources() -> tuple:
     """The files BoltzGen's design count is read from, in preference order."""
     return _CSV_GLOBS["boltzgen"]
+
+
+def _probe_boltzgen(run_dir: Path, tool_dir: Path, cfg: dict) -> tuple:
+    """(done, total, paths, phase) for whichever phase the arm is in.
+
+    Two phases, two denominators: `--num_designs` raw designs are generated,
+    then analysed, then filtered down to `--budget` final ones. Reporting the
+    banked count alone shows 0 for the entire generation phase.
+    """
+    params = _settings_params(tool_dir)
+    for pattern in _CSV_GLOBS["boltzgen"]:
+        hits = sorted(tool_dir.rglob(pattern))
+        if hits:
+            budget = params.get("budget")
+            return _rows(hits[-1]), (budget if isinstance(budget, int) else None), [hits[-1]], "banked"
+
+    raw = sorted(run_dir.glob(_BOLTZGEN_RAW_GLOB))
+    requested = params.get("num_designs")
+    total = requested if isinstance(requested, int) else cfg.get("n_designs")
+    return len(raw), total, raw, "generating"
 
 
 # Tools that mark progress by creating a directory per design.
@@ -86,12 +112,17 @@ def probe_started(tool_dir: Path) -> bool:
     return (Path(tool_dir) / "settings.json").is_file()
 
 
+def _settings_params(tool_dir: Path) -> dict:
+    """The tool's own `design_params`, or an empty dict."""
+    try:
+        return json.loads((tool_dir / "settings.json").read_text()).get("design_params") or {}
+    except (OSError, ValueError):
+        return {}
+
+
 def _declared_total(tool_dir: Path):
     """The count this tool was given, from its own settings.json."""
-    try:
-        params = json.loads((tool_dir / "settings.json").read_text()).get("design_params") or {}
-    except (OSError, ValueError):
-        return None
+    params = _settings_params(tool_dir)
     for key in _COUNT_KEYS:
         value = params.get(key)
         if isinstance(value, int) and value > 0:
@@ -221,18 +252,13 @@ def probe_tool(tool: str, run_dir: Path, cfg: dict) -> dict:
     total = _declared_total(tool_dir) or (cfg.get("n_designs") if tool in KNOWN_TOOLS else None)
 
     paths: list = []
-    if tool in _CSV_SOURCES:
+    phase = None
+    if tool == "boltzgen":
+        done, total, paths, phase = _probe_boltzgen(run_dir, tool_dir, cfg)
+    elif tool in _CSV_SOURCES:
         csv_path = run_dir / _CSV_SOURCES[tool]
         done = _rows(csv_path) if csv_path.is_file() else 0
         paths = [csv_path] if csv_path.is_file() else []
-    elif tool in _CSV_GLOBS:
-        done = 0
-        for pattern in _CSV_GLOBS[tool]:
-            hits = sorted(tool_dir.rglob(pattern))
-            if hits:
-                paths = [hits[-1]]
-                done = _rows(hits[-1])
-                break
     else:
         globs = _FILE_GLOBS.get(tool) or _DIR_GLOBS.get(tool)
         if globs is None:
@@ -256,6 +282,7 @@ def probe_tool(tool: str, run_dir: Path, cfg: dict) -> dict:
         "total": total,
         "mtimes": _stat_mtimes(paths),
         "activity_mtime": _activity_mtime(tool_dir),
+        "phase": phase,
         "started": probe_started(tool_dir),
         "warnings": warnings,
     }

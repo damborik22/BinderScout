@@ -6,8 +6,10 @@ live read is as fresh as data can be, and a cache would only add staleness.
 
 import argparse
 import json
+import os
 import sys
 import time
+from pathlib import Path
 
 from status.collect import collect_local
 from status.remote import DEFAULT_TIMEOUT_S, fleet_hosts, merge_host_results, probe_hosts
@@ -24,6 +26,32 @@ binderscout status [options]
 """
 
 
+# Only these two keys are taken from the file; anything else in it is ignored,
+# so the document's shape cannot be widened by editing a local file.
+_CAMPAIGN_MAP_KEYS = ("campaigns", "deadlines")
+
+
+def load_campaign_map() -> dict:
+    """Campaign labels and deadlines from $BINDERSCOUT_CAMPAIGNS, if it is set.
+
+    These are operator facts -- which run directories are one campaign, and when
+    it is due -- that no probe can discover, and they name real projects, so they
+    stay in a machine-local file rather than anything tracked in this repo.
+    A missing or malformed file is not an error: the view degrades to one block
+    per run directory, which is what it did before.
+    """
+    raw = os.environ.get("BINDERSCOUT_CAMPAIGNS")
+    if not raw:
+        return {}
+    try:
+        loaded = json.loads(Path(raw).read_text())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return {k: loaded[k] for k in _CAMPAIGN_MAP_KEYS if isinstance(loaded.get(k), dict)}
+
+
 def build_document(hosts, timeout_s: int) -> dict:
     """Probe the remote boxes AND this one.
 
@@ -34,7 +62,7 @@ def build_document(hosts, timeout_s: int) -> dict:
     """
     results = probe_hosts(hosts, timeout_s) if hosts else {}
     results.setdefault("local", collect_local(host="local"))
-    return merge_host_results(results)
+    return {**merge_host_results(results), **load_campaign_map()}
 
 
 def main(argv=None) -> int:

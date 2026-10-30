@@ -10,7 +10,8 @@ Found by running against the live fleet: the BoltzGen probe globbed
 `boltzgen/outputs/*.pdb`, and BoltzGen writes `.cif`. On BM2 it had produced 3430
 files, all of them under `intermediate_designs/`, and zero counted designs. The
 glob was wrong AND an intermediate is not a design -- so a naive fix would have
-reported 3430/5000 for a run that has finished nothing.
+reported those 3430 as members of the filtered pool. They are not: they are
+generation progress against `--num_designs`, which the `phase` field names.
 """
 
 import json
@@ -28,7 +29,7 @@ def test_the_boltzgen_probe_reads_the_same_files_as_the_extractor():
     )
 
 
-def test_intermediate_designs_are_not_counted_as_designs(tmp_path):
+def test_intermediate_designs_are_not_counted_as_banked_designs(tmp_path):
     (tmp_path / "config.json").write_text(json.dumps(CFG))
     inter = tmp_path / "boltzgen" / "outputs" / "intermediate_designs"
     inter.mkdir(parents=True)
@@ -36,7 +37,10 @@ def test_intermediate_designs_are_not_counted_as_designs(tmp_path):
         (inter / f"i{i}.cif").write_text("data_x\n")
 
     r = probe_tool("boltzgen", tmp_path, CFG)
-    assert r["done"] == 0, "an intermediate is not a finished design"
+    # An intermediate is not a member of the filtered pool the extractor reads,
+    # and the phase label is what keeps the two numbers from being confused.
+    assert r["phase"] == "generating", "no metrics table yet, so nothing is banked"
+    assert r["done"] == 3430, "but 3430 raw designs is real progress, not zero"
 
 
 def test_the_metrics_csv_is_what_counts(tmp_path):

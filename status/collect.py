@@ -163,6 +163,7 @@ def collect_local(repo_root=None, host: str = "local") -> dict:
                     "done": p["done"],
                     "total": p["total"],
                     "started": p["started"],
+                    "phase": p.get("phase"),
                     "output_age_s": (time.time() - newest) if newest else None,
                     "batch_size": c["batch_size"],
                     "gap_s": c["gap_s"],
