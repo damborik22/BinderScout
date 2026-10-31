@@ -72,9 +72,13 @@ def run_boltz2_refold(
 
     skip_indices: set[int] = set()
     if resume:
-        skip_indices = _load_completed_indices(output_dir / "refold_designs.csv")
+        from .resume import resume_plan
+
+        skip_indices, n_rerun = resume_plan(output_dir / "refold_designs.csv", list(sequences))
         if skip_indices:
             print(f"[boltz2] Resuming — skipping {len(skip_indices)} already-completed binders")
+        if n_rerun:
+            print(f"[boltz2] Resuming — RE-RUNNING {n_rerun} binder(s) whose previous row was blank")
 
     # Resolve target_pdb to absolute path before chdir changes CWD
     target_pdb_abs = str(Path(target_pdb).resolve()) if target_pdb else None
@@ -156,37 +160,6 @@ def _publish_csv(generated_csv: Path, output_csv: Path, output_dir: Path) -> boo
     # Rewrite them as absolute so downstream tools can find the files.
     _absolutize_csv_paths(output_csv, output_dir, ["pdb", "pae_file", "plddt_file"])
     return True
-
-
-def _load_completed_indices(csv_path: Path) -> set[int]:
-    """Read existing CSV and return a set of completed 1-based binder indices."""
-    if not csv_path.exists():
-        return set()
-    try:
-        import csv
-
-        indices: set[int] = set()
-        with open(csv_path) as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                idx_val = row.get("idx")
-                if idx_val is None:
-                    continue
-                try:
-                    i = int(idx_val)
-                except ValueError:
-                    continue
-                # Completed means SCORED, as in the other two runners.  Boltz-2 omits a
-                # failed design's row entirely rather than blanking it, so this is
-                # currently the same answer either way -- kept identical on purpose,
-                # because three copies of this function that disagree about what
-                # "completed" means is how the ESMFold2 copy came to skip the designs a
-                # resume exists to retry.
-                if (row.get("iptm") or "").strip():
-                    indices.add(i)
-        return indices
-    except Exception:
-        return set()
 
 
 def _absolutize_csv_paths(csv_path: Path, base_dir: Path, path_cols: list[str]) -> None:

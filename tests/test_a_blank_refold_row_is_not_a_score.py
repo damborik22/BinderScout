@@ -270,35 +270,45 @@ def test_the_cli_maps_a_partial_failure_to_exit_3(monkeypatch, tmp_path, subcomm
 
 _SCORED = "run_id,idx,sequence,target_sequence,binder_length,iptm,ptm\n"
 
+# There is now ONE resume implementation, `refolding/resume.py`, shared by all
+# three engines and keyed on the binder SEQUENCE rather than the row position
+# (see that module and tests/test_resume_is_keyed_on_the_sequence.py for why).
+# These tests keep this file's own question -- "can a blank row pass for a
+# score?" -- pointed at it, and the parametrized test below keeps the guarantee
+# that mattered here: that all three engines ask the same question. Three copies
+# agreeing on a test is weaker than one copy they all call.
 
-@pytest.mark.parametrize(
-    "runner",
-    [esmfold2_runner, af3_runner, boltz2_runner],
-    ids=lambda m: m.__name__.rsplit(".", 1)[-1],
-)
-def test_resume_does_not_treat_a_blank_row_as_completed(runner, tmp_path):
+
+def test_resume_does_not_treat_a_blank_row_as_completed(tmp_path):
     """The whole point of a retry is to re-run the blanks.
 
     Keying on ``idx`` skipped them -- a blank row has an idx -- so the re-run after a
     partial OOM reproduced the gap exactly and reported success.
     """
+    from binder_comparison.refolding.resume import resume_plan
+
     csv = tmp_path / "r.csv"
     csv.write_text(_SCORED + "a,1,AAA,TTT,3,0.81,0.70\n" + "b,2,BBB,TTT,3,,\n" + "c,3,CCC,TTT,3,0.44,0.50\n")
-    assert runner._load_completed_indices(csv) == {1, 3}, (
-        "design 2 folded to a blank row; resume must retry it, not skip it"
-    )
+    skip, rerun = resume_plan(csv, ["AAA", "BBB", "CCC"])
+    assert skip == {1, 3}, "design 2 folded to a blank row; resume must retry it, not skip it"
+    assert rerun == 1, "the blank being repaired must be counted and reported, not silently redone"
 
 
-@pytest.mark.parametrize(
-    "runner",
-    [esmfold2_runner, af3_runner, boltz2_runner],
-    ids=lambda m: m.__name__.rsplit(".", 1)[-1],
-)
-def test_resume_still_skips_rows_that_really_are_complete(runner, tmp_path):
+def test_resume_still_skips_rows_that_really_are_complete(tmp_path):
     """The fix must not turn every resume into a full re-run."""
+    from binder_comparison.refolding.resume import resume_plan
+
     csv = tmp_path / "r.csv"
     csv.write_text(_SCORED + "a,1,AAA,TTT,3,0.81,0.70\n" + "b,2,BBB,TTT,3,0.62,0.60\n")
-    assert runner._load_completed_indices(csv) == {1, 2}
+    assert resume_plan(csv, ["AAA", "BBB"]) == ({1, 2}, 0)
+
+
+def test_a_wholly_blank_csv_resumes_nothing(tmp_path):
+    from binder_comparison.refolding.resume import resume_plan
+
+    csv = tmp_path / "r.csv"
+    csv.write_text(_SCORED + "a,1,AAA,TTT,3,,\n" + "b,2,BBB,TTT,3,,\n")
+    assert resume_plan(csv, ["AAA", "BBB"]) == (set(), 2)
 
 
 @pytest.mark.parametrize(
@@ -306,10 +316,19 @@ def test_resume_still_skips_rows_that_really_are_complete(runner, tmp_path):
     [esmfold2_runner, af3_runner, boltz2_runner],
     ids=lambda m: m.__name__.rsplit(".", 1)[-1],
 )
-def test_a_wholly_blank_csv_resumes_nothing(runner, tmp_path):
-    csv = tmp_path / "r.csv"
-    csv.write_text(_SCORED + "a,1,AAA,TTT,3,,\n" + "b,2,BBB,TTT,3,,\n")
-    assert runner._load_completed_indices(csv) == set()
+def test_every_runner_resumes_through_the_shared_module(runner, tmp_path):
+    """No engine may keep a private answer to "what counts as completed".
+
+    Each runner previously carried its own ``_load_completed_indices``. One of
+    them drifted, and that drift is failure (3) in this file's header. This fails
+    if any runner reintroduces a local copy or stops calling the shared one.
+    """
+    src = Path(runner.__file__).read_text()
+    assert "resume_plan" in src, f"{runner.__name__} does not call the shared resume_plan()"
+    assert "_load_completed_indices" not in src, (
+        f"{runner.__name__} has a private resume implementation again -- that divergence is "
+        "exactly what this file exists to prevent."
+    )
 
 
 # ---------------------------------------------------------------------------

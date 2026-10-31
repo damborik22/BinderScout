@@ -77,9 +77,13 @@ def run_esmfold2_refold(
 
     skip_indices: set[int] = set()
     if resume and output_csv.exists():
-        skip_indices = _load_completed_indices(output_csv)
+        from .resume import resume_plan
+
+        skip_indices, n_rerun = resume_plan(output_csv, list(sequences))
         if skip_indices:
             print(f"[esmfold2] Resuming — skipping {len(skip_indices)} already-completed binders")
+        if n_rerun:
+            print(f"[esmfold2] Resuming — RE-RUNNING {n_rerun} binder(s) whose previous row was blank")
 
     # See boltz2_runner for why a partial failure is held rather than propagated: the
     # rows that DID fold are valid work, and _absolutize_csv_paths below is what makes
@@ -126,35 +130,6 @@ def run_esmfold2_refold(
         # is not importable, so re-raise the canonical class: that is the one
         # binder_comparison.main catches to exit 3 rather than 1.
         raise PartialRefoldFailure(str(partial)) from partial
-
-
-def _load_completed_indices(csv_path: Path) -> set[int]:
-    if not csv_path.exists():
-        return set()
-    try:
-        import csv
-
-        indices: set[int] = set()
-        with csv_path.open() as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                idx_val = row.get("idx")
-                if idx_val is None:
-                    continue
-                try:
-                    i = int(idx_val)
-                except ValueError:
-                    continue
-                # ESMFold2 writes a row for a FAILED design too -- _empty_row() fills in
-                # idx and sequence and leaves every score blank.  Keying "completed" on
-                # idx alone therefore skipped precisely the designs a resume exists to
-                # retry, so the re-run after a partial CUDA OOM reproduced the gap
-                # exactly and reported success.  Completed means scored.
-                if (row.get("iptm") or "").strip():
-                    indices.add(i)
-        return indices
-    except Exception:
-        return set()
 
 
 def _absolutize_csv_paths(csv_path: Path, base_dir: Path, path_cols: list[str]) -> None:

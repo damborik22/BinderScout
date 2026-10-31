@@ -836,29 +836,13 @@ if __name__ == "__main__":
 
     skip: set[int] = set()
     if args.resume and Path(args.output).exists():
-        n_blank = 0
-        with open(args.output) as f:
-            for row in csv.DictReader(f):
-                v = row.get("idx")
-                if not v:
-                    continue
-                try:
-                    i = int(v)
-                except ValueError:
-                    continue
-                # A failed design still gets a row -- _empty_row() writes its idx and
-                # sequence with every score blank.  Keying resume on idx alone therefore
-                # skipped precisely the designs that needed re-running, so the retry
-                # that was supposed to repair a partial OOM reproduced it exactly and
-                # looked clean.  Resume on the SCORE, which is what "completed" means.
-                if (row.get("iptm") or "").strip():
-                    skip.add(i)
-                else:
-                    n_blank += 1
+        from binder_comparison.refolding.resume import resume_plan
+
+        skip, n_rerun = resume_plan(args.output, seqs)
         if skip:
             print(f"[esmfold2] Resuming — skipping {len(skip)} already-completed binders")
-        if n_blank:
-            print(f"[esmfold2] Resuming — RE-RUNNING {n_blank} binder(s) whose previous row was blank")
+        if n_rerun:
+            print(f"[esmfold2] Resuming — RE-RUNNING {n_rerun} binder(s) whose previous row was blank")
 
     try:
         refold_batch(

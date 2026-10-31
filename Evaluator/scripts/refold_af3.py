@@ -844,39 +844,6 @@ def _empty_row(idx: int, binder_seq: str, target_seq: str) -> dict[str, str]:
     return row
 
 
-def _completed_indices(output_csv: Path) -> tuple[set[int], int]:
-    """Indices that already carry a SCORE, and a count of the blank rows.
-
-    Resume on the score, not on the row. ``_empty_row()`` above writes a failed
-    design's ``idx`` and sequence with every metric column empty, so a pool that
-    lost designs to an OOM has a full row count and a short scored count.
-    Keying resume on ``idx`` alone therefore skipped exactly the designs a resume
-    exists to repair: the retry reproduced the gap, announced "skipping N
-    already-completed binders", and exited 0.
-
-    Measured 2026-10-31 on the TfR1 pool, where an ESMFold2 run OOMed from
-    binder #12 and left 92 blank rows of 100. ESMFold2 re-ran them because its
-    own resume carries this same gate -- added there after this identical bug.
-    This is the AF3 side of that fix.
-    """
-    done: set[int] = set()
-    blank = 0
-    with open(output_csv) as fh:
-        for row in csv.DictReader(fh):
-            raw = row.get("idx")
-            if not raw:
-                continue
-            try:
-                i = int(raw)
-            except ValueError:
-                continue
-            if (row.get("iptm") or "").strip():
-                done.add(i)
-            else:
-                blank += 1
-    return done, blank
-
-
 def _fmt(v) -> str:
     """Stringify a numeric metric; empty string for None/NaN."""
     if v is None:
@@ -925,11 +892,13 @@ if __name__ == "__main__":
 
     skip: set[int] = set()
     if args.resume and Path(args.output).exists():
-        skip, n_blank = _completed_indices(Path(args.output))
+        from binder_comparison.refolding.resume import resume_plan
+
+        skip, n_rerun = resume_plan(args.output, seqs)
         if skip:
             print(f"[af3] Resuming — skipping {len(skip)} already-completed binders")
-        if n_blank:
-            print(f"[af3] Resuming — RE-RUNNING {n_blank} binder(s) whose previous row was blank")
+        if n_rerun:
+            print(f"[af3] Resuming — RE-RUNNING {n_rerun} binder(s) whose previous row was blank")
 
     try:
         refold_batch(
