@@ -164,5 +164,36 @@ home path enters a tracked file; the existing tree test enforces this.
    the page is exactly as current as the last push and says so rather than
    implying live data. A cron on the orchestrator cannot replace that without a
    server-side writer, which does not exist here.
-3. Optional: `progress.jsonl` heartbeats written by the run scripts, preferred by
+
+   **What that limit cost, measured 2026-10-31.** Scheduling the push on a
+   10-minute timer made the page current and made the session unusable: each
+   firing is a visible agent turn, so a surface built to be checked at a glance
+   produced a notification every ten minutes, almost always to report that
+   nothing had changed. The push is the wrong mechanism for an unattended
+   refresh, and no interval fixes that — the cost is per firing, not per change.
+3. **Done (2026-10-31), and now the default unattended surface.**
+   `binderscout status --html FILE` writes a self-contained page that any box can
+   regenerate from a timer and serve over HTTP. No account, no token, nothing to
+   push, and no agent in the loop, so a 5-minute refresh costs nothing and
+   notifies nobody.
+
+   Three things it must get right, each pinned by a test:
+   - **Grouping is imported, not reimplemented** (`_rows`, `_deadline_for` from
+     the terminal renderer). Two copies would drift, and the first rule to drift
+     would be the dedup key `(run, tool)` — collapsing on `(campaign, tool)`
+     shows one RFD3 arm for TfR1 and silently drops 350 designs.
+   - **The freshness band is recomputed in the browser from the stamp.** Baked in
+     at render time it reads `fresh` forever once the generator dies, which is
+     the single failure this page exists to catch. Server-side the band defaults
+     to `stale`, so the no-script case errs toward distrust.
+   - **The file is written beside and renamed.** The generator's period and the
+     browser's 60 s poll are unrelated clocks, so a read eventually lands inside
+     a write; in-place writing hands that reader a truncated page, which renders
+     as blank and looks exactly like a dead fleet.
+
+   Serving it is deliberately left to the operator: binding a port and installing
+   a persistent timer are machine-local decisions, and the unit files are staged
+   rather than installed. `python3 -m http.server` on one directory is adequate
+   on a trusted lab LAN and must not be exposed beyond it.
+4. Optional: `progress.jsonl` heartbeats written by the run scripts, preferred by
    the probe when present. Deferred because it cannot see any arm now running.

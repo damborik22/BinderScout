@@ -21,6 +21,7 @@ binderscout status [options]
   --hosts a,b      probe these ssh aliases (default: $BINDERSCOUT_FLEET)
   --local          this box only, no ssh
   --json           emit the raw document (what the pushed page consumes)
+  --html FILE      write a self-contained page to FILE (serve it; no account)
   --watch [SECS]   redraw every SECS seconds (default 60)
   --timeout SECS   per-host ssh timeout (default 25)
 """
@@ -65,11 +66,29 @@ def build_document(hosts, timeout_s: int) -> dict:
     return {**merge_host_results(results), **load_campaign_map()}
 
 
+def write_html(path: Path, doc: dict) -> None:
+    """Render `doc` to `path`, atomically.
+
+    A browser polls this file on a timer, so it can read it at any instant --
+    including the instant the renderer is half-way through writing it. Writing
+    beside it and renaming means a reader sees either the old page or the new
+    one, never a truncated one.
+    """
+    from status.render_html import render as render_html
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(render_html(doc))
+    tmp.replace(path)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="binderscout status", usage=USAGE, add_help=True)
     parser.add_argument("--hosts", default=None)
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--html", default=None)
     parser.add_argument("--watch", nargs="?", type=int, const=60, default=None)
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S)
     args = parser.parse_args(argv)
@@ -83,9 +102,13 @@ def main(argv=None) -> int:
 
     while True:
         doc = build_document(hosts, args.timeout)
+        if args.html:
+            write_html(Path(args.html), doc)
         if args.json:
             print(json.dumps(doc, indent=2))
-        else:
+        # With --html the page IS the output. A terminal dump on top of it would
+        # only fill the timer's journal with a rendering nobody reads.
+        elif not args.html:
             if args.watch:
                 sys.stdout.write("\033[2J\033[H")
             sys.stdout.write(render(doc, color=sys.stdout.isatty()))
