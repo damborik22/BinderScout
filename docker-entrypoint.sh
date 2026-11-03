@@ -11,7 +11,7 @@ set -e
 if [[ ! -d "${HOME}" ]] || [[ "${HOME}" == "/" ]]; then
     export HOME=/home/binderscout-user
 fi
-mkdir -p "${HOME}" 2>/dev/null || { export HOME=/tmp/binderscout-home; mkdir -p "${HOME}"; }
+mkdir -p "${HOME}" 2>/dev/null || { HOME="$(mktemp -d)"; export HOME; }
 
 # ── conda init ────────────────────────────────────────────────────────────────
 if [[ -f /opt/miniforge3/etc/profile.d/conda.sh ]]; then
