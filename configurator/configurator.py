@@ -3251,11 +3251,15 @@ echo "=== Proteina-Complexa design complete ==="
 
 # Collect binder sequences from outputs
 echo "=== Collecting binder sequences ==="
+# Read from the environment, never pasted into the Python source: a run folder holding an
+# apostrophe would end the string literal and make the collector a SyntaxError after the
+# design step had already run.
+export RUN_DIR
 python3 -c "
-import csv, glob, sys
+import csv, glob, os, sys
 from pathlib import Path
 
-pc_dir = Path('$RUN_DIR/proteina_complexa')
+pc_dir = Path(os.environ['RUN_DIR']) / 'proteina_complexa'
 run_name = '{cfg["name"]}'
 
 # Find evaluation result CSVs from Complexa outputs

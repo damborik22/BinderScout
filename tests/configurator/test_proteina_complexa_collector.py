@@ -28,6 +28,7 @@ brace-doubling are exercised rather than assumed. No design job is run.
 from __future__ import annotations
 
 import csv
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -235,3 +236,22 @@ def test_an_empty_tree_names_where_it_looked(tmp_path):
     assert "looked in:" in proc.stderr
     assert "candidates probed:" in proc.stderr
     assert _rows(run_dir) == []
+
+
+def test_the_collector_runs_from_a_run_folder_with_a_space_a_dollar_and_an_apostrophe(tmp_path):
+    """$RUN_DIR used to be pasted inside a single-quoted Python literal, so an apostrophe in the run
+    folder made the collector a SyntaxError AFTER the design step had run. It is read from the
+    environment instead, like the PXDesign collector."""
+    run_dir = tmp_path / "it's a $HOME run"
+    (run_dir / "proteina_complexa").mkdir(parents=True)
+    pc_dir = tmp_path / "pc_install"
+    pc_dir.mkdir()
+    _complexa_outputs(pc_dir)
+
+    tail = _generate(tmp_path, run_dir).split("\n", 1)[1]
+    proc = _run(f"RUN_DIR={shlex.quote(str(run_dir))}\n" + tail, cwd=pc_dir)
+
+    assert "SyntaxError" not in proc.stderr, proc.stderr
+    rows = _rows(run_dir)
+    assert len(rows) == 1, f"stdout={proc.stdout} stderr={proc.stderr}"
+    assert rows[0]["sequence"] == SEQ
