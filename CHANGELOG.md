@@ -13,6 +13,131 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+Work since `v2.0.2` (37 commits), in preparation as `v2.0.3`. Nothing here changes the ranking:
+`rank` is still the cross-engine gate then `consensus_iptm_mean`, computed exactly as before.
+
+### Behaviour changes you may notice
+
+- **A refold `--resume` now re-runs blank rows.** A design whose previous row had every metric empty
+  (the shape a per-design CUDA OOM leaves behind) used to count as finished, so a retry skipped
+  exactly the designs it existed to repair and exited 0. Resume now keys on the binder **sequence**
+  and on a non-empty score, for all three engines, and says how many blank rows it is re-running.
+- **Merging refold CSVs from different targets is refused.** Engine CSVs whose `target_sequence`
+  disagree can no longer merge into one design with `consensus_iptm_n = 3`.
+- **A PAE matrix that cannot be what it claims is refused with a named warning, and scores NaN:**
+  non-square, non-finite, wrongly sized for `binder_length + target`, or an all-zero interface.
+  A one-residue `binder_length` error used to inflate ipTM by up to +0.31 and an all-zero interface
+  scored 1.0. Non-finite input now gives NaN rather than `ipsae 0.0` / "Reject".
+- **`--json` is pure JSON.** Shortcut notices and the dispatcher banner go to **stderr**; on a fresh
+  clone the first `binderscout status --json` used to fail to parse at character 0.
+- **`binderscout install --verify` reports tools built against another commit as `STALE`** (still
+  usable, so the exit status is unchanged). `--repair --stale` rebuilds them; plain `--repair` does not,
+  because one pull of a tool's repository would otherwise mark every tool stale at once.
+- **Headless `--config` files are stricter.** An unrecognised key is fatal before anything is written
+  (with up to three near-miss suggestions) instead of silently falling back to a default; a run
+  folder that is an existing *file* is refused; an enabled tool with no script writer is refused.
+- **Generated runs target what you asked for.** Hotspots are no longer replicated onto every target
+  chain, RFD3/RFD4 contigs preserve every targeted chain, and tools given a target *sequence* get
+  every chain, not the first (see Fixed). A pMHC-style multi-chain target is the case that exposed it.
+- **The BoltzGen pool size follows the requested count** (floor 50) instead of a flat 10 000, and
+  generation prints the implied cost in hours. A "1 design" smoke test used to run for ~15 hours.
+- **`run_all.sh` runs Mosaic** (it used to print "SKIPPED" and run 8 of 9 tools).
+- **The `binderscout` shortcut does not exist on a fresh clone**, so the quick start now begins with
+  `./binderscout.py install`. A tool is reported `installed` only when the installer's own marker
+  exists as well as its probe; checkouts that predate the markers keep working untouched.
+
+### Added
+
+- **`binderscout status`** — live campaign state per tool and per machine: designs banked of
+  requested, liveness and an ETA. Three signals per arm, not one, because designs land in batches and
+  a frozen count does not mean a stalled arm: the count, the process/GPU, and log silence.
+  `--hosts`, `--local`, `--json`, `--watch [SECS]`, `--timeout`; hosts come from `$BINDERSCOUT_FLEET`.
+  Remote boxes are probed by piping a stdlib-only script into `ssh <alias> python3 -` (no checkout
+  needed there). BoltzGen is reported by phase (generating vs analysed) with each phase's own
+  denominator, and BindCraft is no longer confused with BindCraft 2. Runs group into campaigns, with
+  labels and deadlines from a machine-local file named by `$BINDERSCOUT_CAMPAIGNS`; absolute paths are
+  reported relative to `$HOME`.
+- **`binderscout status --html FILE`** — a self-contained page any box can regenerate from a timer and
+  serve over plain HTTP, so nothing has to push it. It is written beside and renamed (a polling
+  browser never sees a half-written page), and its freshness band is recomputed in the browser from
+  the page's own stamp, so a dead generator turns the page stale instead of reading "fresh" forever.
+- **`*_pae_iptm_pinned` and `consensus_iptm_mean_pinned` — diagnostic columns, rank unchanged.**
+  Each design is re-scored with one d0 (the pool-median binder length, or `--d0-binder-length`) so the
+  length artifact in ipTM's `L_binder + L_target` d0 is visible per design. Measured on the
+  563-design labelled benchmark, ranking on them does **not** help (macro AUC +0.0025, 95% CI
+  -0.004..+0.010, signs split 2/2 across targets), so `rank` stays on the per-design d0.
+- **`binderscout_paths.find_conda_base()`** — one shared answer to "where is conda?"; the CLI, the TUI
+  and the configurator each had a private candidate list. Order: `$BINDERSCOUT_CONDA`, the checkout's `conda/`,
+  `$CONDA_EXE`, `$CONDA_PREFIX`, `PATH`, then the usual locations; no subprocess. With conda on `PATH`
+  but no checkout-local conda, `binderscout evaluate` used to report "conda not found".
+- **RFD4-Proteina is installable on aarch64** (`install_aarch.sh --tool rfd4`), opt-in and not in
+  `--tool all`, with a pinned commit and a size + sha256 check on the weights. It is validated by a
+  dependency resolve and an install on one GB10, **not** by a design campaign there.
+- **Installer hardening (the BUG-xx series from a full campaign run):** the installers stream to
+  `install.log` and print a two-minute heartbeat off a TTY (BUG-07); a toolchain preflight names a
+  missing compiler before an hour of installing (BUG-08); install markers are written only after a
+  tool's install returns 0 (BUG-06); floating dependencies are pinned and verified at the artifact
+  the tool needs to run — PyRosetta for BindCraft (BUG-14), `atomworks` in the RFD3 env on both
+  platforms (BUG-28), others (BUG-23/24/25); `--repair` is ported to `install_aarch.sh`; the
+  optional SoluProt and TmProt screens are skipped with a note, not a traceback, when their binary is
+  absent (BUG-10); and the cross-engine gate shortfall is presented as a notice, not a raw warning
+  (BUG-12).
+- A guard test that documentation and tests name machines only by architecture
+  (`tests/test_public_docs_are_anonymous.py`), and one that pins the README, CLAUDE.md and
+  THIRD_PARTY_NOTICES facts (`tests/test_docs_state_the_release_facts.py`).
+
+### Fixed
+
+- **A design missing from the first engine kept its identity columns.** The outer join dropped every
+  later engine's `binder_length` / `target_sequence` / `run_id`, so such a design lost `binder_length`,
+  every PAE slice for it was NaN and it was ranked last with no warning (rank 20 -> 394 on an archived
+  pool). Gaps are now filled from the later engine; the first engine's values still win.
+- **The merge join key is canonical.** Sequences are stripped and upper-cased on load, so a re-keyed
+  CSV cannot split one design into single-engine rows; a CSV pair where only one carries
+  `target_sequence` now warns instead of silently skipping the mismatch guard.
+- **Resume consolidated.** Six private implementations of "what counts as already done" (three refold
+  scripts, three runners) are now one module, `refolding/resume.py`, ported from the `master` line and
+  keeping this line's score gate. It fixes the case where a CWD-relative output directory shared with
+  other targets made every design look completed (a 65-design pool refolded 0 of 65 and reported
+  success), and the AF3 blank-row case above.
+- **Configurator structure handling:** the mmCIF-to-PDB writer omitted the altLoc column, shifting
+  every later field one column left (BUG-19); expression tags are trimmed from the depositor's own
+  annotation rather than guessed (BUG-09); hotspots resolve in author numbering, not label numbering;
+  chain ids are case-sensitive; the RFD3 contig comes from the structure's own numbering (BUG-21); the
+  prepared structure keeps only the selected chains and is what every tool is pointed at (BUG-16).
+- **Proteina-Complexa:** the target is registered through `complexa target add`, not a config key it
+  never read; its sequence collector no longer throws away a finished run's results; and it reads
+  Complexa's own `self_sequence` column. The generated script parses (the harvest moved to a heredoc).
+- **RFD4 needs no root.** The generated script finds Python headers through `sysconfig`, falls back to
+  a uv-managed interpreter's headers, and refuses up front with `uv python install <ver>` if neither
+  exists, instead of dying inside Triton's JIT on `Python.h`.
+- **The configurator asks about the cross-engine gate once** when fewer than three refold engines are
+  installed, and records the answer (`min_engines`) in `config.json` as an explicit decision, rather
+  than the operator discovering at report time that nothing cleared the gate. The gate is still never
+  derived from what happens to be installed; with a single engine it offers nothing, because the floor
+  is 2.
+- **Protein-Hunter received only the first target chain** when fed a target sequence (400 designs had
+  Boltz-2 inputs holding just a 276-aa heavy chain and reported ipTM 0.82 about a complex that was not
+  the target). Every chain is now passed; `--contact_residues` stays one group on the first chain.
+  Mosaic's template can take only one sequence, so it now refuses and names the chains it would have
+  dropped.
+
+### Changed
+
+- **Documentation.** The README banner, branch and clone instructions, tool counts and a new
+  `binderscout status` section now match the repository: tags `v2.0.0`–`v2.0.2` are on the public
+  remote, `master` is a separate 1.x line, `v1.1.x` is retired to `archive/v1.1.x`, and there is no
+  `aarch64` branch. CLAUDE.md corrects the ancestry statement (the lines share exactly one commit,
+  `602345a`), records which `master` fixes are ported and which is not (`filter-tmprot`), and states
+  what `*_pae_iptm` is and what the rank can resolve (see `Evaluator/docs/evaluation/ranking.md` §1a).
+  THIRD_PARTY_NOTICES.md's GPLv3 written offer cites commits that exist after the 2026-10-27 history
+  rewrite and adds RFD4-Proteina, TmProt and ESMFold2 rows. CONTRIBUTING.md gains a Releasing section.
+  Machine and cluster names were removed from tracked documents and test fixtures.
+- Seven project subagents are tracked under `.claude/agents/`; the working-tree clones of two foreign
+  tools are gitignored so a stray `git add -A` cannot turn the lint job red.
+- `tests/test_version_matches_changelog.py` pins `binderscout.__version__` to the newest numbered
+  changelog heading. It is `xfail(strict=True)` until the release commit bumps the version.
+
 ## [2.0.2] — 2026-10-27
 
 ### Added
@@ -38,7 +163,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/plans.md`, `docs/completed_plans.md`, the `docs/data/` benchmark sets, the two skill
   deploy playbooks and `tools/fleet.sh`. Several of those carried **unpublished designed binder
   sequences next to their targets**. The diaries were not deleted but moved: they live on the lab
-  share at `Project-01-BINDMASTER/REPO_DIARY/`, and `.gitignore` now blocks `DIARY_*.md`.
+  share (outside this repository), and `.gitignore` now blocks `DIARY_*.md`.
   A rewrite does not undo publication — it only stops future casual access.
 
 ### Changed
@@ -60,7 +185,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2.0.0] — 2026-10-04
 
-**Shipped to the fleet only; not published.** 2.0 is an *evaluation* release, not
+**Shipped to the fleet only; not published.** *(As written at the time; the `v2.0.0` tag and the
+`v2.0.x` branch are now on the public remote.)* 2.0 is an *evaluation* release, not
 a feature release: no new design tool, and the three-engine refold pipeline
 (Boltz-2 + AF3 + ESMFold2) is the same one 1.1 shipped. What changed is what the
 pipeline is allowed to claim.
@@ -102,8 +228,8 @@ the plan are feature work, not shipping blockers. See
   - `require_device_memory()` refuses ESMFold2 on a card below **14,248 MiB** *before* the
     MSA fetch and the weight download (measured: 14,248 MiB at 150 tokens on an RTX 3090,
     13,781 on GB10 — a floor rather than a slope, because it is resident-weight cost). This
-    is what enforces "BM3 must never produce authoritative refolds" in code rather than in
-    convention. `BINDERSCOUT_ALLOW_SMALL_GPU=1` overrides it and says the output is not
+    is what enforces "a GPU that is too small must never produce authoritative refolds" in code
+    rather than in convention. `BINDERSCOUT_ALLOW_SMALL_GPU=1` overrides it and says the output is not
     authoritative. **Boltz-2 and AF3 deliberately get no floor** — Boltz-2's demand is
     card-dependent (8,518 MiB at 150 tokens, 16,712 at 300, failure at 600; GB10 needs
     ~1.5× a discrete card), so a static floor would either refuse a card that can fold a
@@ -556,7 +682,7 @@ the plan are feature work, not shipping blockers. See
   stdin even in the foreground, though `mamba run` does. So all four PXDesign
   site-packages patches on x86, and three on aarch64 including the load-bearing
   protenix `sm_120` + `-std=c++20` one, were skipped while the log printed a
-  green check. Measured on BM4: a May install whose log claimed all four applied
+  green check. Measured on an x86_64 workstation: a May install whose log claimed all four applied
   had none of them. Each body now goes to a temp file passed as an argv path,
   and an assertion greps the target for the marker the patch writes, so a silent
   no-op fails loudly.
@@ -667,8 +793,8 @@ the plan are feature work, not shipping blockers. See
 
   **Three names were deliberately NOT renamed**, because they do not refer to
   this project:
-  - `BindMaster1/2/4` in `docs/superpowers/plans/2026-07-27-fleet-orchestration.md`
-    are **machine hostnames**, not the project.
+  - The machine hostnames in `docs/superpowers/plans/2026-07-27-fleet-orchestration.md`
+    that happen to contain the old project name are **not the project**.
   - `BindMaster 2` (`docs/bindmaster2_grafts.md`, and the
     `damborik22/BindMaster2` URL) is a **separate, abandoned repository** whose
     orchestration capabilities were grafted onto the Evaluator. Renaming it to
@@ -693,8 +819,8 @@ the plan are feature work, not shipping blockers. See
   `gpu_mem_guard.sh` now looks for `UNIT=binderscout-mps`.
 
   **Upgrading a machine that was installed before 2.0** takes four steps, none
-  of which the git checkout does for you. They were derived by migrating BM1,
-  BM4 and BM5:
+  of which the git checkout does for you. They were derived by migrating three
+  x86_64 machines and one aarch64 machine:
 
   1. `python3 binderscout.py configure --status` once, which writes
      `bin/binderscout` and `~/.local/bin/binderscout` and unlinks a stale
@@ -743,18 +869,18 @@ the plan are feature work, not shipping blockers. See
   hand-maintained one that had drifted to 12 of 20 eligible scripts —
   `tools/preflight.sh` and `tools/gpu_mem_guard.sh` had never been linted,
   despite `evaluate.sh:33` refusing to run without the latter.
-- **BM4 is the fleet orchestrator**, and GPU work for BM5 is sized by querying
+- **One x86_64 machine is the fleet orchestrator**, and GPU work on a GB10 is sized by querying
   `gpurun --max` rather than quoting a number. The admissible cap moves with
   load — 92 GiB with a desktop up against 90 on a quiet box — so any number
   copied into a run script is stale. `lab-deploy.md` said "All commands run from
-  BM5"; `fleet.sh` has read `$FLEET_MACHINES` since `7b71d50`.
+  the aarch64 box"; `fleet.sh` has read `$FLEET_MACHINES` since `7b71d50`.
 
 ### Removed
 
 - **RFAA**, four months after the code was deleted (2026-05-28). Its rows
   survived in `tools/gb10-env.sh`'s budget and framework tables, and a stale
-  install — clone, `LigandMPNN/`, conda env and `bin/rfaa` — sat on bm1, bm2 and
-  bm5. Roughly 12 GiB reclaimed. Protein-Hunter's *vendored* `LigandMPNN` is a
+  install — clone, `LigandMPNN/`, conda env and `bin/rfaa` — sat on three x86_64
+  machines and one aarch64 machine. Roughly 12 GiB reclaimed. Protein-Hunter's *vendored* `LigandMPNN` is a
   different path and was left intact.
 
 ## [1.1.0] — 2026-09-23
@@ -916,7 +1042,7 @@ own (`docs/data/gpu_benchmark_2026-09-18/`). Both affect every machine.
   machine that installed on 2026-09-16 gets `69869f737bef`, whose config nests
   `architectures` / `model_type` inside `structure_head`; the pinned transformers
   4.57.6 `DiffusionStructureHeadConfig` rejects those and the run dies with
-  `TypeError: ... unexpected keyword argument 'architectures'`. Confirmed on BM2 while
+  `TypeError: ... unexpected keyword argument 'architectures'`. Confirmed on an x86_64 workstation while
   benchmarking. The revision is now pinned to `8fc3ff471022`, the one every validated
   result in this project was produced with, overridable per-run via `$ESMFOLD2_REVISION`.
   The engine also announces which revision it loaded, so an unpinned host is visible in
@@ -1143,13 +1269,13 @@ Not a code change, but worth recording: these tools' headline metrics are coarse
 
 ### Deprecated (2026-07-29 — Proteina-Complexa on aarch64 / DGX Spark: not viable)
 
-**Run upstream Proteina-Complexa on x86 (Clara / BM1–BM4). It is deprecated on Spark — a throughput verdict, not an install failure.**
+**Run upstream Proteina-Complexa on x86_64. It is deprecated on Spark — a throughput verdict, not an install failure.**
 
 The install works and was under-described before: upstream `complexa` (`916eaae`) runs on Spark (uv venv, torch 2.13.0+cu130, GB10/sm_121) and has **produced real designs there**, reproducible byte-identically 16 days later. It is also **not a different algorithm** — both platforms run one reward model, `af2folding` with `i_pae = -1.0` and every other weight zero. Three previously-recorded blockers were stale: tmol's CUDA kernels **do** build at sm_121, `rf3` **is** installed and working, and the `torch_scatter` shim is **never entered** (`fold_emb` is absent from the shipped checkpoint). The old "PyG / torchtext lack aarch64 wheels" rationale in `CLAUDE.md` and the installer was simply wrong — PC imports neither.
 
 The real blocker is that **no CUDA `jaxlib` exists for aarch64**, so the AF2 reward — the only member of the composite — runs on CPU:
 
-| | H200 (Clara) | GB10 (Spark) |
+| | H200 | GB10 (Spark) |
 |---|---|---|
 | per AF2 call | ≤ 2.46 s | **~320 s** |
 | 100-design MCTS replicate (generate) | 2.25 h | **12.2 days** |
@@ -1190,7 +1316,7 @@ Part U removed `--rank-by` and `--screen-metric` from the code but not from the 
 
 Every one of these produced a **plausible, non-zero pool** with no error, so nothing downstream — including `--allow-empty` — could catch it. Measured on shipped run data, not hypothesised.
 
-**(a) Proteina-Complexa emitted the whole complex as the binder.** The NVIDIA-native `aatype` column encodes `target + binder + poly-alanine pad`. Verified on three production runs: 2VDY (1000 designs at 500–509 aa against a 389-aa target), ApoE4/Clara (100 at 298–305 vs 185 aa) and ApoE4-iso PC-v3 (4804/4804 rows carrying the 141-aa target as an exact prefix). Refolded unstripped, each design was scored against a target it already contained.
+**(a) Proteina-Complexa emitted the whole complex as the binder.** The NVIDIA-native `aatype` column encodes `target + binder + poly-alanine pad`. Verified on three production runs: 2VDY (1000 designs at 500–509 aa against a 389-aa target), ApoE4 (100 at 298–305 vs 185 aa) and ApoE4-iso PC-v3 (4804/4804 rows carrying the 141-aa target as an exact prefix). Refolded unstripped, each design was scored against a target it already contained.
 
 - `ProteinaComplexaExtractor(target_sequence=...)`, fed by a new `binder-compare extract --target-seq`. `binder-compare run` and the configurator's generated `run_evaluate.sh` both already held the target and now forward it — one line each.
 - The binder END comes from `_n_<N>_` in the job-directory name (= `len(target) + len(binder)`, exact on 1100/1100 designs checked against PC's own evaluation CSVs). Where the job name has no length field, a trailing alanine run of ≥ 10 is treated as padding — above the longest genuine C-terminal alanine run on disk (7) and below the pads measured on PC-v3 (up to 42).
@@ -1200,7 +1326,7 @@ Every one of these produced a **plausible, non-zero pool** with no error, so not
 
 **(a2) RFD3's FASTA-fallback guard rejected 0 % of real concatenations.** `_MAX_PLAUSIBLE_BINDER_LEN = 500` is calibrated on binder length, not target+binder length, so it only fires when the target alone exceeds ~360 aa: on the shipped CALCA run it passed all 8000 mpnn sequences, every one carrying the same 32-aa target prefix. Replaced by a shared-prefix check — a prefix ≥ 20 aa common to every FASTA sequence refuses the pool and names `sequences.csv` as the remedy. mpnn's trailing comma (`>name, sequence_recovery=…`) no longer rides into `binder_id`.
 
-**(b) All seven extractors resolved a multi-match glob with `matches[0]`** — raw filesystem order, no warning. Pointed at a parent of N replicates that kept ONE: 96 of 4804 rows on PC-v3, 100 of 500 on a Clara run. On an ordinary multi-variant run dir it picked `bindcraft_variant_a` out of four, and BoltzGen's `sorted()[-1]` discarded a whole 700-design pool. New `resolve_single_match()` in `extractors/base.py` **stops the run and lists every candidate**. Where several files genuinely are one pool, `extract --aggregate-replicates` opts in and reports the count. The top-level `sequences.csv` short-circuit is preserved, so a stray nested CSV cannot turn a correct run dir into an error.
+**(b) All seven extractors resolved a multi-match glob with `matches[0]`** — raw filesystem order, no warning. Pointed at a parent of N replicates that kept ONE: 96 of 4804 rows on PC-v3, 100 of 500 on a cluster run. On an ordinary multi-variant run dir it picked `bindcraft_variant_a` out of four, and BoltzGen's `sorted()[-1]` discarded a whole 700-design pool. New `resolve_single_match()` in `extractors/base.py` **stops the run and lists every candidate**. Where several files genuinely are one pool, `extract --aggregate-replicates` opts in and reports the count. The top-level `sequences.csv` short-circuit is preserved, so a stray nested CSV cannot turn a correct run dir into an error.
 
 **(c) A duplicate `binder_id` was a silent DROP.** `add_design_groups` keys `design_group` on it and the report keeps only the first row per group, so the colliding design vanished from the report, Top-N, candidates and diversity while surviving in `metrics.csv` — announced by a "Collapsing N near-duplicate variant(s)" line indistinguishable from the intended Protein-Hunter/BindCraft collapse. **PC on 2VDY collapsed 1000 designs into 253 ids (75 %); a merged Protein-Hunter summary gave 1654 rows → 1487 ids with all 164 collisions covering *different* sequences.**
 
