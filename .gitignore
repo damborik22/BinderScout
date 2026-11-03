@@ -36,9 +36,10 @@ bin/
 # af3_install.log carries it in the middle and escaped for months.
 *install*.log
 
-# Claude Code internal files (settings, history, etc.) — but DO track .claude/skills/
+# Claude Code internal files (settings, history, etc.) — but DO track .claude/skills/ and .claude/agents/
 .claude/*
 !.claude/skills/
+!.claude/agents/
 
 # Machine-local Claude Code notes (per-workstation setup, IPs, key paths) — never shared
 CLAUDE.local.md
