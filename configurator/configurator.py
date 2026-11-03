@@ -2134,6 +2134,36 @@ python -u ./bindcraft.py \\
     path.chmod(0o755)
 
 
+# Bash guard that runs one command in its own process group and cleans the group up.
+# Kept as a constant so the generated script and its test share one text. It is a plain
+# string (not an f-string), so its braces are bash's own.
+BOLTZGEN_GROUP_GUARD_BEGIN = "# -- begin process-group guard --"
+BOLTZGEN_GROUP_GUARD_END = "# -- end process-group guard --"
+BOLTZGEN_GROUP_GUARD = f"""{BOLTZGEN_GROUP_GUARD_BEGIN}
+_bg_pid=""
+_bg_stop() {{
+    trap - EXIT TERM INT HUP
+    [[ -n "$_bg_pid" ]] || return 0
+    kill -TERM -- "-$_bg_pid" 2>/dev/null || true
+    for _bg_i in $(seq 25); do
+        kill -0 -- "-$_bg_pid" 2>/dev/null || break
+        sleep 0.2
+    done
+    kill -KILL -- "-$_bg_pid" 2>/dev/null || true
+    _bg_pid=""
+}}
+trap _bg_stop EXIT
+trap '_bg_stop; exit 143' TERM
+trap '_bg_stop; exit 130' INT
+trap '_bg_stop; exit 129' HUP
+_bg_run() {{
+    setsid "$@" &
+    _bg_pid=$!
+    wait "$_bg_pid"
+}}
+{BOLTZGEN_GROUP_GUARD_END}"""
+
+
 def write_run_boltzgen(path: Path, cfg: dict):
     run_dir = cfg["run_dir"]
     name = cfg["name"]
@@ -2210,7 +2240,13 @@ mkdir -p "$SETTINGS_DIR"
         + f"""
 echo "=== Running BoltzGen for {cfg["name"]} ==="
 echo "  Settings persisted: $SETTINGS_DIR/settings.json"
-"$CONDA_PREFIX/bin/boltzgen" run "$CONFIG" \\
+
+# BoltzGen forks dataloader / worker processes that outlive it when this script is
+# terminated, and they keep the GPU busy. Run it in its own session, so it and every
+# child share one process group, and signal that whole group when the script exits or
+# is told to stop.
+{BOLTZGEN_GROUP_GUARD}
+_bg_run "$CONDA_PREFIX/bin/boltzgen" run "$CONFIG" \\
     --output "$OUTPUT_DIR" \\
     --protocol protein-anything \\
     --num_designs {boltzgen_intermediate(cfg)} \\
