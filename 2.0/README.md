@@ -6,7 +6,7 @@ drifts from the first within a week. The diaries are deliberately not in the rep
 
 | | |
 |---|---|
-| **Branch** | `v2.0.x` — all 2.0 work. `master` is a **separate `v1.2.x` line** (it shares one commit with this line and cannot be cherry-picked from); `v1.1.x` was retired to the `archive/v1.1.x` tag |
+| **Branch** | `v2.0.x` — all 2.0 work. `master` is a **separate `v1.2.x` line** (it has a single merge base with this line, `602345a` (`v1.0.3`), and has diverged since, so it cannot be cherry-picked from); `v1.1.x` was retired to the `archive/v1.1.x` tag |
 | **Version** | Tags `v2.0.0`, `v2.0.1` and `v2.0.2` exist; **`v2.0.3` is in preparation**. The version is carried in `binderscout.py` |
 | **State** | 1839 tests passing, 10 skipped, 1 xfailed; ruff + shellcheck clean; working tree clean |
 

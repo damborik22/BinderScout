@@ -240,3 +240,24 @@ def test_changelog_unreleased_section_is_written():
     assert len(body) > 2500, "the [Unreleased] section is empty or a stub"
     for needle in ("binderscout status", "--repair --stale", "stderr", "_pinned", "resume", "binderscout_paths"):
         assert needle in body, f"[Unreleased] does not mention {needle!r}"
+
+
+# --- ancestry, pool provenance and test scope (docs lane, 2026-11-03) --------
+
+
+def _flat(rel: str) -> str:
+    return " ".join(_text(rel).split())
+
+
+@pytest.mark.parametrize("doc", ["CLAUDE.md", "2.0/README.md"])
+def test_master_ancestry_is_a_single_merge_base_not_one_shared_commit(doc):
+    """The two lines share all history up to ONE merge base; they do not share "one commit".
+
+    ``git merge-base --all master v2.0.x`` is a single commit, but everything below it is shared too, so
+    "shares one commit" / "share exactly one commit" was false. Both documents must say the corrected thing.
+    """
+    text = _flat(doc)
+    for stale in ("shares one commit", "share exactly one commit", "share one commit"):
+        assert stale not in text, f"{doc} still says {stale!r}"
+    for needle in ("single merge base", "602345a", "diverged"):
+        assert needle in text, f"{doc} does not state {needle!r}"

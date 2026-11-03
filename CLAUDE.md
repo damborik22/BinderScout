@@ -14,8 +14,8 @@ branch: all work on these machines lands there, never on `master`.
 
 **`master` is NOT frozen at 1.0.3 — that claim is stale (corrected 2026-10-29).** Master is a
 **separate line**: `v2.0.x` is not an ancestor of it (`git merge-base --is-ancestor v2.0.x
-master` is false). The two share exactly one commit, `602345a` (`v1.0.3`), and have diverged
-since, with paths that differ too (master still has `bindmaster.py`, this line `binderscout.py`).
+master` is false). The two have a single merge base, `602345a` (`v1.0.3`): they share their history
+up to it and have diverged since, with paths that differ too (master still has `bindmaster.py`, this line `binderscout.py`).
 As of 2026-10-29 master is at **`v1.2.1`** (1.0.6 → 1.0.7 → 1.0.8 → 1.2.0 → 1.2.1 all landed
 that day; `v1.2.0` added `binder-compare filter-tmprot`, `v1.0.8` added the refold-CSV
 target-mismatch guard).
