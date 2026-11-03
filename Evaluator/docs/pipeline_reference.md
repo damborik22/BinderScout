@@ -70,6 +70,80 @@ bash Evaluator/evaluate.sh \
   - **A timing run and a production run sit side by side** under one target directory, each with its own `inference_samples/`. The extractor refuses a directory containing more than one of them rather than pooling throwaway designs into the production pool — point `--rfd4` at the specific run.
   - `binder_id` is `rfd4_<sample dir>` and the generation index is the sample's trailing replicate number, so the pool comes back in generation order (`_10` after `_2`, not before it).
 
+## Opt-in: `--save-pae-bins` (Boltz-2 and ESMFold2 only)
+
+**Off by default, not used for ranking, and not yet validated on a GPU.** The runners save only
+the *expected* PAE, `E[e] = sum_b p_b c_b`. The engines compute their own ipTM from the whole
+error distribution, `E[1/(1+(e/d0)^2)]`; that kernel is convex in `e`, so our point-PAE ipTM runs
+below the engine's and the difference cannot be recovered afterwards. `--save-pae-bins` keeps the
+per-pair bin probabilities so the gap can be measured. It exists to answer that question, nothing else:
+no report column, no gate and no rank reads it.
+
+```bash
+binder-compare refold-boltz2   ... --save-pae-bins
+binder-compare refold-esmfold2 ... --save-pae-bins
+```
+
+`evaluate.sh` does not pass the flag; it is for direct runs.
+
+- **Without the flag nothing changes:** no hook, no extra forward pass, no file, no CSV column.
+- **Output:** `<design>_pae_bins.npz` next to the design's `_pae.npy` (`probs` float16
+  `[N, N, n_bins]`, `bin_centres` float32), and a `pae_bins_file` column in the refold CSV that
+  exists only when the flag is on. Appending to a CSV whose header lacks the column is refused up
+  front.
+- **Size:** a 300-token complex at 64 bins is 300 x 300 x 64 float16 values = **11.52 MB per
+  design before compression**. The compressed size on real engine output has **not been
+  measured**; budget the uncompressed figure (a 1,000-design pool is ~11.5 GB).
+- **Extra cost:** Boltz-2 pays **one extra forward pass per design** (Mosaic's `predict()` keeps
+  only the expected PAE, so the script calls the public `model_output()` a second time with
+  `predict()`'s arguments and key). ESMFold2 pays none: a forward hook captures `pae_logits` from
+  the very pass that produced the saved PAE.
+- **Checked on write:** each distribution must reproduce the PAE saved for the same design
+  (mean absolute difference of the expected value <= 0.25 A). A file that does not is refused, and a
+  run that folded designs and wrote no bins file exits non-zero, so a wrong bin convention, token
+  order or diffusion sample cannot leave a trusted-looking file behind.
+- **AF3 is NOT covered, and `refold-af3` has no such flag.** AF3's `confidence_head` computes
+  `pae_probs` as a local and returns only the point PAEs, and its inference result carries no
+  distribution, so there is nothing to read without patching AF3 itself (three source edits: expose
+  `pae_probs` from the head, copy it into the inference result, write it out beside the confidences).
+  A flag that silently did nothing would be a quiet failure, so there is none.
+- **GPU-unvalidated.** Everything above is tested against fakes. The 0.25 A tolerance, the hook
+  seeing `pae_logits` on the real ESMFold2 model, and Boltz-2's second pass matching `predict()` are
+  unverified on hardware until a real run exercises it.
+
+`comparison.scoring.compute_iptm_from_pae_bins` computes the expected-kernel ipTM from a stored file
+(a delta distribution reproduces the point-PAE kernel exactly).
+
+## Transplanted pools: structure and PAE path remapping
+
+Refold CSVs record **absolute** `pdb` / `cif` / `pae_file` paths. A pool folded under one account
+and reported under another therefore names a tree that is not there. The report resolves every
+structure column (`boltz_*`, `af3_*`, `esmfold2_*` `_pdb` / `_cif`, and the bare `pdb`) and every
+PAE column against the directory of **that engine's results CSV**:
+
+1. the path as written;
+2. the path relative to the CSV's directory;
+3. otherwise leading directories are dropped, longest remainder first, until the rest exists under
+   the CSV's directory.
+
+Step 3 is **bounded**: if the recorded path contains the engine's own output directory
+(`refold_boltz2`, `refold_af3`, `refold_esmfold2`) no remainder shorter than that directory is
+tried, and a path with none of those names never falls to a bare file name. Export names are
+`<binder_id>_<engine>.pdb` with no per-run id, so two runs of one design write identically named
+files; an unbounded strip could bind a design to the other run's file with nothing to show it.
+The cost is that a flat directory of hand-copied files is not found; that is reported (below) rather
+than guessed.
+
+Two warnings, each emitted **once per column**, not once per design:
+
+- `[structure]` / `[pae]` ... `N/M paths in '<column>' were REMAPPED under <dir>: ... the leading
+  '<prefix>' was dropped` -- informational. It says how many cells were found by step 3 and the
+  common prefix that was shed. Read it as "these are the files of the pool I meant"; if the prefix
+  is not the run you moved, stop.
+- `[structure]` / `[pae]` ... `were not found` -- those designs are missing from the 3D viewer,
+  `top20_structures/`, `view_top20.pml` or the engine's PAE-derived ipTM/ipSAE (and, without PAE,
+  from the cross-engine gate). Carry the `refold_<engine>/` directory with its CSV.
+
 ## Metrics
 
 > **The full reference lives in [`evaluation/`](evaluation/)**: `ranking.md` (how designs are

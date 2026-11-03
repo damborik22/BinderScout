@@ -407,7 +407,7 @@ def refold_batch(
         allow_no_msa:    True = proceed without a target MSA if it cannot be
                          obtained (air-gapped node).  Default is to abort.
         save_pae_bins:   True = also store each design's per-pair PAE bin probabilities
-                         (``refold<idx>_<run_id>_pae_bins.npz``) and a ``pae_bins_file``
+                         (``<design>_pae_bins.npz``, next to the design's ``_pae.npy``) and a ``pae_bins_file``
                          column. Costs one extra forward pass per design (the Mosaic
                          ``predict()`` keeps only the expected PAE; ``model_output()``,
                          called with the same arguments and key, returns the logits).

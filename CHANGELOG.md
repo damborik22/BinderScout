@@ -18,6 +18,15 @@ Work since `v2.0.2` (37 commits), in preparation as `v2.0.3`. Nothing here chang
 
 ### Behaviour changes you may notice
 
+- **A transplanted pool's structure files are found again, and a remap is announced.** Refold CSVs
+  record absolute paths, so a pool reported under another account lost the 3D viewer,
+  `top20_structures/` and `view_top20.pml` with exit 0. Structure columns are now resolved against
+  each engine's CSV directory (as the PAE columns already were), with one `[structure]` warning per
+  column for what is still missing. The remap is **bounded at the engine's own directory**
+  (`refold_boltz2` / `refold_af3` / `refold_esmfold2`) and never falls to a bare file name, because
+  export names carry no per-run id and an unbounded strip could bind a design to another run's
+  same-named file; each column also gets one informational warning saying how many cells were
+  `REMAPPED` and which leading prefix was dropped.
 - **A refold `--resume` now re-runs blank rows.** A design whose previous row had every metric empty
   (the shape a per-design CUDA OOM leaves behind) used to count as finished, so a retry skipped
   exactly the designs it existed to repair and exited 0. Resume now keys on the binder **sequence**
@@ -48,6 +57,13 @@ Work since `v2.0.2` (37 commits), in preparation as `v2.0.3`. Nothing here chang
 
 ### Added
 
+- **`--save-pae-bins` on `refold-boltz2` and `refold-esmfold2`** (opt-in, default off, **not
+  validated on a GPU yet**). Stores each design's per-pair PAE bin probabilities as
+  `<design>_pae_bins.npz` (about 11.5 MB per design before compression for a 300-token complex, 64
+  bins) plus a `pae_bins_file` CSV column, so the gap between our point-PAE ipTM and the engines' own
+  can be measured. Boltz-2 pays one extra forward pass per design; ESMFold2 hooks the existing pass.
+  Not used for ranking and not in the report. **AF3 has no such flag**: it does not expose the
+  distribution without patching AF3 itself. See `Evaluator/docs/pipeline_reference.md`.
 - **`binderscout status`** — live campaign state per tool and per machine: designs banked of
   requested, liveness and an ETA. Three signals per arm, not one, because designs land in batches and
   a frozen count does not mean a stalled arm: the count, the process/GPU, and log silence.
