@@ -80,3 +80,60 @@ def test_the_foreign_note_alone_is_still_only_a_note(platform, tmp_path):
 
     assert "BROKEN" not in out, out
     assert "another checkout" in out, out
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_repair_does_not_repoint_an_env_owned_by_another_checkout(platform, tmp_path):
+    """A BROKEN verdict for the stale Mosaic pointer must not send --repair into `pip install -e` of THIS checkout.
+
+    The env's editable install belongs to a second checkout sharing the conda; re-pointing it would break that
+    checkout silently, which is the one thing the NOTE says must not happen.
+    """
+    log = tmp_path / "conda-calls.log"
+    repo, script, env, base = _sandbox(tmp_path, platform)
+    # _sandbox made the base; swap its conda for one that records every call.
+    (base / "bin" / "conda").write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nexit 0\n')
+    uv_dir = tmp_path / "stub-bin"
+    uv_dir.mkdir()
+    (uv_dir / "uv").write_text("#!/bin/sh\nexit 0\n")  # the repair installs into the Mosaic venv with uv first
+    (uv_dir / "uv").chmod(0o755)
+    env["PATH"] = f"{uv_dir}:{env['PATH']}"
+    other = tmp_path / "other-checkout"
+    (other / "Evaluator").mkdir(parents=True)
+    _editable_env(base, "binder-eval", f"file://{other}/Evaluator")
+    _stub_env_tools(base, "binder-eval")
+    _venv(repo / "Mosaic", recorded=repo / "Mosaic")
+    (repo / "Evaluator" / "envs").mkdir(parents=True)
+    (repo / "Evaluator" / "envs" / "mosaic_venv_path").write_text(str(tmp_path / "vanished" / "Mosaic" / ".venv"))
+
+    run_bash(f'bash "{script}" --repair --tool evaluator --yes --skip-preflight </dev/null', env, repo)
+
+    calls = log.read_text() if log.exists() else ""
+    assert f"{repo}/Evaluator" not in calls, f"--repair re-pointed a foreign-owned env at this checkout:\n{calls}"
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_the_repair_control_does_reach_the_editable_install_when_the_env_is_ours(platform, tmp_path):
+    """Control for the test above: without it, 'no call logged' could just mean --repair never got that far."""
+    log = tmp_path / "conda-calls.log"
+    repo, script, env, base = _sandbox(tmp_path, platform)
+    # _sandbox made the base; swap its conda for one that records every call.
+    (base / "bin" / "conda").write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nexit 0\n')
+    uv_dir = tmp_path / "stub-bin"
+    uv_dir.mkdir()
+    (uv_dir / "uv").write_text("#!/bin/sh\nexit 0\n")  # the repair installs into the Mosaic venv with uv first
+    (uv_dir / "uv").chmod(0o755)
+    env["PATH"] = f"{uv_dir}:{env['PATH']}"
+    (repo / "Evaluator").mkdir(parents=True)
+    _editable_env(base, "binder-eval", f"file://{repo}/Evaluator")
+    _stub_env_tools(base, "binder-eval")
+    _venv(repo / "Mosaic", recorded=repo / "Mosaic")
+    (repo / "Evaluator" / "envs").mkdir(parents=True)
+    (repo / "Evaluator" / "envs" / "mosaic_venv_path").write_text(str(tmp_path / "vanished" / "Mosaic" / ".venv"))
+
+    run_bash(f'bash "{script}" --repair --tool evaluator --yes --skip-preflight </dev/null', env, repo)
+
+    calls = log.read_text() if log.exists() else ""
+    assert f"{repo}/Evaluator" in calls, (
+        f"the control never reached the editable install, so the guard test proves nothing:\n{calls}"
+    )

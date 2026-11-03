@@ -7,7 +7,7 @@ Each assertion here pins a statement that was wrong in a shipped document:
   public remote and ``master`` stood at 1.2.x;
 * the README gave ``git clone -b aarch64`` for a branch that does not exist;
 * ``binderscout status`` had no user-facing documentation at all;
-* CLAUDE.md said the two lines "share no ancestry" (they share one commit),
+* CLAUDE.md said the two lines "share no ancestry" (they share a merge base, `602345a`),
   that v2.0.x was "not published" (its tags are on the public remote) and that
   three master fixes were absent from this line (two have since been ported);
 * THIRD_PARTY_NOTICES.md's GPLv3 written offer cited commit SHAs that stopped

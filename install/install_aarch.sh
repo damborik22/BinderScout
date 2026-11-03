@@ -2325,9 +2325,16 @@ install_evaluator() {
             "${CONDA_CMD}" env create -f "${EVALUATOR_DIR}/envs/binder-eval.yml" -y \
             || { print_fail "Failed to create binder-eval conda env"; return 1; }
     fi
-    run_logged "Installing binder-compare into binder-eval" \
-        "${CONDA_CMD}" run -n binder-eval pip install -q -e "${EVALUATOR_DIR}[report]" \
-        || { print_fail "Failed to install binder-compare into binder-eval"; return 1; }
+    # An env whose editable install belongs to ANOTHER checkout (a second checkout sharing this
+    # conda) is left alone: re-pointing it here would silently break that checkout, and --repair
+    # must not do what --verify just declined to call a defect.
+    if [[ "$(_stale_editable_reason binder-eval "${EVALUATOR_DIR}")" == "NOTE: "* ]]; then
+        print_warn "binder-eval is an editable install of another checkout; leaving it pointed there."
+    else
+        run_logged "Installing binder-compare into binder-eval" \
+            "${CONDA_CMD}" run -n binder-eval pip install -q -e "${EVALUATOR_DIR}[report]" \
+            || { print_fail "Failed to install binder-compare into binder-eval"; return 1; }
+    fi
 
     # (AF2 and Protenix refolding have both been removed; the binder-eval-af2
     #  env is no longer created. AF3 is installed separately via `install_af3`,
@@ -4357,9 +4364,13 @@ install_tmprot() {
         || { print_fail "Failed to install TmProt from ${_pkg}"; return 1; }
 
     # binder-compare inside the env so `screen-tmprot` runs there directly.
-    run_logged --retries 2 "Installing binder-compare into binder-eval-tmprot" \
-        "${CONDA_CMD}" run -n binder-eval-tmprot pip install -q -e "${EVALUATOR_DIR}" \
-        || { print_fail "Failed to install binder-compare into binder-eval-tmprot"; return 1; }
+    if [[ "$(_stale_editable_reason binder-eval-tmprot "${EVALUATOR_DIR}")" == "NOTE: "* ]]; then
+        print_warn "binder-eval-tmprot has an editable binder-compare from another checkout; leaving it pointed there."
+    else
+        run_logged --retries 2 "Installing binder-compare into binder-eval-tmprot" \
+            "${CONDA_CMD}" run -n binder-eval-tmprot pip install -q -e "${EVALUATOR_DIR}" \
+            || { print_fail "Failed to install binder-compare into binder-eval-tmprot"; return 1; }
+    fi
 
     # Verify the thing the screen actually needs: that tmprot imports and its
     # console script exists. An entry point that merely answers --help is not

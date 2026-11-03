@@ -143,8 +143,8 @@ Work since `v2.0.2` (37 commits), in preparation as `v2.0.3`. Nothing here chang
 - **Documentation.** The README banner, branch and clone instructions, tool counts and a new
   `binderscout status` section now match the repository: tags `v2.0.0`–`v2.0.2` are on the public
   remote, `master` is a separate 1.x line, `v1.1.x` is retired to `archive/v1.1.x`, and there is no
-  `aarch64` branch. CLAUDE.md corrects the ancestry statement (the lines share exactly one commit,
-  `602345a`), records which `master` fixes are ported and which is not (`filter-tmprot`), and states
+  `aarch64` branch. CLAUDE.md corrects the ancestry statement (the lines share a merge base,
+  `602345a`, and have diverged since), records which `master` fixes are ported and which is not (`filter-tmprot`), and states
   what `*_pae_iptm` is and what the rank can resolve (see `Evaluator/docs/evaluation/ranking.md` §1a).
   THIRD_PARTY_NOTICES.md's GPLv3 written offer cites commits that exist after the 2026-10-27 history
   rewrite and adds RFD4-Proteina, TmProt and ESMFold2 rows. CONTRIBUTING.md gains a Releasing section.
