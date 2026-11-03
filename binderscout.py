@@ -94,8 +94,26 @@ def _remove_stale_bindmaster_shortcut(bin_dir: Path) -> None:
         print(f"{YELLOW}→{RESET} Removed stale shortcut: {stale} (renamed to binderscout)", file=sys.stderr)
 
 
-def _install_binderscout_shortcut() -> None:
-    """Write BinderScout/bin/binderscout pointing at this script (idempotent)."""
+def _shortcut_target(shortcut: Path) -> Path | None:
+    """The script an existing shim execs, or None when it cannot be read."""
+    try:
+        for line in shortcut.read_text().splitlines():
+            if line.startswith("exec python3 "):
+                words = shlex.split(line)
+                return Path(words[2]) if len(words) > 2 else None
+    except (OSError, UnicodeDecodeError, ValueError):
+        pass
+    return None
+
+
+def _install_binderscout_shortcut(repoint: bool = True) -> None:
+    """Write BinderScout/bin/binderscout pointing at this script (idempotent).
+
+    `repoint` is whether the account-wide ~/.local/bin copy may be moved away from another
+    checkout that still exists. Only `install` does that: a read-only query (`status`,
+    `--json`) run from a throwaway clone used to take over the account's `binderscout`
+    command. A shim whose target is gone is still healed either way.
+    """
     local_bin = REPO / "bin"
     script = Path(__file__).resolve()
     # shlex.quote, not "{script}": a checkout path containing $, a backtick or a double quote made the
@@ -124,7 +142,12 @@ def _install_binderscout_shortcut() -> None:
         home_bin = Path.home() / ".local" / "bin"
         home_bin.mkdir(parents=True, exist_ok=True)
         home_shortcut = home_bin / "binderscout"
-        if not home_shortcut.exists() or target_line not in home_shortcut.read_text():
+        current = _shortcut_target(home_shortcut) if home_shortcut.exists() else None
+        # Another live checkout owns the command: leave it unless this is an install.
+        owned_elsewhere = current is not None and current != script and current.is_file()
+        if (not home_shortcut.exists() or target_line not in home_shortcut.read_text()) and (
+            repoint or not owned_elsewhere
+        ):
             home_shortcut.write_text(shortcut_content)
             home_shortcut.chmod(0o755)
             # This is the copy that makes the bare `binderscout` command work, so it is
@@ -255,7 +278,7 @@ def main() -> None:
         print(f"BinderScout {__version__}")
         sys.exit(0)
 
-    _install_binderscout_shortcut()
+    _install_binderscout_shortcut(repoint=bool(args) and args[0] == "install")
 
     if not args:
         from tui.app import launch_tui

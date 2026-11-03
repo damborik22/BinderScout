@@ -79,3 +79,62 @@ def test_the_shim_survives_a_checkout_path_with_shell_metacharacters(tmp_path, m
     assert shim.exists(), "the shim was not written, so this proved nothing"
     out = subprocess.run(["bash", str(shim), "x"], capture_output=True, text=True)
     assert out.stdout.strip() == "ran ['x']", (out.stdout, out.stderr)
+
+
+def _two_checkouts(cli, tmp_path, monkeypatch):
+    """HOME's shortcut belongs to checkout A (a real script on disk); B is the invoker."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    a = tmp_path / "a"
+    a.mkdir()
+    (a / "binderscout.py").write_text("")
+    b = tmp_path / "b"
+    b.mkdir()
+    (b / "binderscout.py").write_text("")
+    monkeypatch.setattr(cli, "REPO", a)
+    monkeypatch.setattr(cli, "__file__", str(a / "binderscout.py"))
+    cli._install_binderscout_shortcut()
+    shim = home / ".local" / "bin" / "binderscout"
+    assert str(a / "binderscout.py") in shim.read_text(), "setup: A should own the command"
+    monkeypatch.setattr(cli, "REPO", b)
+    monkeypatch.setattr(cli, "__file__", str(b / "binderscout.py"))
+    return shim, a, b
+
+
+def test_a_query_from_another_checkout_does_not_take_over_the_account_command(tmp_path, monkeypatch):
+    """`status --json` from a throwaway verification clone silently re-pointed the account's
+    `binderscout` at that clone (found in the v2.0.3 end-to-end run on the aarch64 host)."""
+    cli = _load_cli()
+    shim, a, b = _two_checkouts(cli, tmp_path, monkeypatch)
+    cli._install_binderscout_shortcut(repoint=False)
+    assert str(a / "binderscout.py") in shim.read_text()
+    assert str(b / "binderscout.py") not in shim.read_text()
+
+
+def test_install_may_take_the_command_over(tmp_path, monkeypatch):
+    cli = _load_cli()
+    shim, a, b = _two_checkouts(cli, tmp_path, monkeypatch)
+    cli._install_binderscout_shortcut(repoint=True)
+    assert str(b / "binderscout.py") in shim.read_text()
+
+
+def test_a_shim_whose_checkout_is_gone_is_healed_even_by_a_query(tmp_path, monkeypatch):
+    cli = _load_cli()
+    shim, a, b = _two_checkouts(cli, tmp_path, monkeypatch)
+    (a / "binderscout.py").unlink()
+    cli._install_binderscout_shortcut(repoint=False)
+    assert str(b / "binderscout.py") in shim.read_text()
+
+
+def test_only_the_install_command_is_allowed_to_repoint_the_account_command(monkeypatch):
+    """The call site, not just the function: main() must pass repoint=True for `install` alone."""
+    cli = _load_cli()
+    seen = []
+    monkeypatch.setattr(cli, "_install_binderscout_shortcut", lambda repoint=True: seen.append(repoint))
+    monkeypatch.setattr(cli, "_dispatch", lambda cmd, rest: None)
+    for argv, expected in ((["status", "--json"], False), (["evaluate", "--help"], False), (["install"], True)):
+        seen.clear()
+        monkeypatch.setattr(cli.sys, "argv", ["binderscout.py", *argv])
+        cli.main()
+        assert seen == [expected], (argv, seen)
