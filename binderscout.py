@@ -204,16 +204,19 @@ def _dispatch(cmd: str, args: list) -> None:
         _exec(sys.executable, [sys.executable, str(script)] + args)
 
     elif cmd == "evaluate":
-        conda_base = find_conda_base(REPO)
-        conda_bin = conda_base / "bin" / "conda" if conda_base is not None else None
-        if conda_bin is None or not conda_bin.is_file():
-            found = f"{conda_bin} does not exist" if conda_bin else "conda not found"
+        # `require`: a base with conda.sh but no bin/conda (a checkout conda/ that was never
+        # finished) must not shadow a later candidate that has both.
+        conda_base = find_conda_base(REPO, require="bin/conda")
+        if conda_base is None:
+            partial = find_conda_base(REPO)
+            found = f"{partial / 'bin' / 'conda'} does not exist" if partial else "conda not found"
             print(
                 f"{RED}✗ {found} — set BINDERSCOUT_CONDA to the conda base directory, "
                 f"or install the evaluator (`binderscout install --tool all`){RESET}",
                 file=sys.stderr,
             )
             sys.exit(1)
+        conda_bin = conda_base / "bin" / "conda"
         print(f"{BOLD}BinderScout → evaluate (binder-compare){RESET}")
         _exec(
             str(conda_bin),

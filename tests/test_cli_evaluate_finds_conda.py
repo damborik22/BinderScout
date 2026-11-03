@@ -116,3 +116,17 @@ def test_neither_entry_point_keeps_a_private_conda_search():
     cli = _load_cli()
     assert not hasattr(cli, "_find_conda_base")
     assert not hasattr(app, "_find_conda_base")
+
+
+def test_a_checkout_conda_without_a_conda_executable_does_not_shadow_a_working_one(bare_box, tmp_path, monkeypatch):
+    """The checkout's conda/ has conda.sh but no bin/conda; a later candidate has both."""
+    _base(bare_box / "conda", with_conda_bin=False)
+    working = _base(tmp_path / "system")
+    monkeypatch.setenv("CONDA_EXE", str(working / "bin" / "conda"))
+    cli = _load_cli()
+    calls = _run_evaluate(cli, monkeypatch, bare_box)
+
+    cli._dispatch("evaluate", ["--help"])
+
+    assert calls, "evaluate refused although a working conda was reachable"
+    assert calls[0][0] == str(working / "bin" / "conda")
