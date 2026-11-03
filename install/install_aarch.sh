@@ -571,6 +571,93 @@ bs_env_lookup() {
 }
 # <<< binderscout-conda-block <<<
 
+# ─── Relocated checkouts ─────────────────────────────────────────────────────
+# Editable installs and uv venvs bake ABSOLUTE paths into themselves (console-script
+# shebangs, bin/activate, direct_url.json). Move or rename the checkout and all of them
+# still point at the old location while every file "exists", so --verify used to call
+# the tool usable until its first run died. These compare what the install recorded with
+# where the checkout is NOW. Each prints a reason, or nothing when all is well.
+
+# _canon_path <path>: the resolved path when it can be, the text itself otherwise
+_canon_path() {
+    readlink -f -- "$1" 2>/dev/null || printf '%s' "$1"
+}
+
+# _venv_recorded_path <venv-dir>: where the venv believes it lives (from bin/activate)
+_venv_recorded_path() {
+    local act="$1/bin/activate" line
+    [[ -f "${act}" ]] || return 1
+    line="$(grep -m1 -E "^VIRTUAL_ENV=[\"']/" "${act}" 2>/dev/null)" || return 1
+    line="${line#VIRTUAL_ENV=}"
+    line="${line#[\"\']}"
+    line="${line%[\"\']}"
+    printf '%s' "${line}"
+}
+
+# _stale_venv_reason <checkout-dir>
+_stale_venv_reason() {
+    local dir="$1" rec
+    rec="$(_venv_recorded_path "${dir}/.venv")" || return 0
+    if [[ "$(_canon_path "${rec}")" == "$(_canon_path "${dir}/.venv")" ]]; then return 0; fi
+    printf '%s' "BROKEN — ${dir}/.venv was built at ${rec}, but the checkout is now at ${dir}. The checkout IS the installation (editable, absolute paths baked in), so a moved or renamed checkout breaks it while every file still exists. Run --repair to rebuild it here, or move the checkout back."
+}
+
+# _stale_mosaic_pointer: Evaluator/envs/mosaic_venv_path is how evaluate.sh finds Boltz-2
+_stale_mosaic_pointer() {
+    local f="${EVALUATOR_DIR}/envs/mosaic_venv_path" rec
+    [[ -f "${f}" ]] || return 0
+    rec="$(<"${f}")"
+    if [[ -x "${rec}/bin/python" ]]; then return 0; fi
+    printf '%s' "BROKEN — ${f} still names ${rec}, which no longer exists (the checkout was moved or renamed), so evaluate.sh cannot find Boltz-2. Run --repair to rewrite it."
+}
+
+# _stale_editable_reason <conda-env>: binder-compare is an editable install of Evaluator/
+_stale_editable_reason() {
+    local du url root
+    bs_env_lookup "${CONDA_BASE}" "$1" || return 0
+    for du in "${BS_ENV_PREFIX}"/lib/python*/site-packages/binder_comparison*.dist-info/direct_url.json; do
+        [[ -f "${du}" ]] || continue
+        grep -q '"editable": *true' "${du}" || continue
+        url="$(grep -o '"url": *"file://[^"]*"' "${du}" | head -1)"
+        root="${url#*file://}"
+        root="${root%\"}"
+        root="$(printf '%b' "${root//%/\\x}")"
+        [[ -n "${root}" ]] || continue
+        if [[ "$(_canon_path "${root}")" == "$(_canon_path "${EVALUATOR_DIR}")" ]]; then return 0; fi
+        printf '%s' "BROKEN — binder-compare in the ${1} env is an editable install of ${root}, but the Evaluator is now at ${EVALUATOR_DIR}. Run --repair to point it here."
+        return 0
+    done
+    return 0
+}
+
+# _relocation_reason <tool>: the reason this tool's recorded location no longer matches
+_relocation_reason() {
+    local r=""
+    case "${1,,}" in
+        "bindcraft 2"|bindcraft2) r="$(_stale_venv_reason "${BINDCRAFT2_DIR}")" ;;
+        mosaic)
+            r="$(_stale_venv_reason "${MOSAIC_DIR}")"
+            if [[ -z "${r}" ]]; then r="$(_stale_mosaic_pointer)"; fi ;;
+        rfd4|rfd4-proteina) r="$(_stale_venv_reason "${RFD4_DIR}")" ;;
+        proteina-complexa) r="$(_stale_venv_reason "${PROTEINA_COMPLEXA_DIR}")" ;;
+        evaluator) r="$(_stale_editable_reason binder-eval)" ;;
+        af3) r="$(_stale_editable_reason binder-eval-af3)" ;;
+        esmfold2) r="$(_stale_editable_reason binder-eval-esmfold2)" ;;
+        tmprot) r="$(_stale_editable_reason binder-eval-tmprot)" ;;
+    esac
+    printf '%s' "${r}"
+}
+
+# _discard_relocated_venv <checkout-dir>
+# An install step that finds a venv and says "already exists -- skipping creation" would
+# make --repair a no-op on a moved checkout: the venv is rebuilt only if it is removed.
+_discard_relocated_venv() {
+    [[ -n "${1:-}" ]] || return 0
+    [[ -n "$(_stale_venv_reason "$1")" ]] || return 0
+    print_warn "$1/.venv was built at another location (the checkout was moved or renamed) — rebuilding it here."
+    rm -rf "$1/.venv"
+}
+
 # ─── Helper Functions ─────────────────────────────────────────────────────────
 
 print_step() {
@@ -2005,6 +2092,7 @@ install_mosaic() {
             || print_warn "Offline-MSA patch failed to apply — offline target MSA disabled"
     fi
 
+    _discard_relocated_venv "${MOSAIC_DIR}"
     run_logged "Setting up Mosaic venv (uv sync --group jax-cuda)" \
         bash -c "cd '${MOSAIC_DIR}' && uv sync --group jax-cuda" \
         || { print_fail "uv sync failed for Mosaic"; return 1; }
@@ -2736,6 +2824,7 @@ install_bindcraft2() {
     command -v uv &>/dev/null || { print_fail "uv still not found after install; check PATH"; return 1; }
     print_ok "uv is available: $(command -v uv)"
 
+    _discard_relocated_venv "${BINDCRAFT2_DIR}"
     if [[ -x "${BINDCRAFT2_DIR}/.venv/bin/python" ]]; then
         print_ok "BindCraft 2 venv already exists — skipping creation"
     else
@@ -3226,6 +3315,7 @@ install_rfd4() {
     command -v uv &>/dev/null || { print_fail "uv still not found after install; check PATH"; return 1; }
     print_ok "uv is available: $(command -v uv)"
 
+    _discard_relocated_venv "${RFD4_DIR}"
     if [[ -x "${RFD4_DIR}/.venv/bin/python" ]]; then
         print_ok "RFD4-Proteina venv already exists — skipping creation"
     else
@@ -4678,7 +4768,8 @@ _count_glob() {
 }
 verify_tool() {
     local tool="$1"
-    VERIFY_REASON=""
+    VERIFY_REASON="$(_relocation_reason "${tool}")"
+    [[ -z "${VERIFY_REASON}" ]] || return 1
     case "${tool,,}" in
         bindcraft)
             # Five .npz files were the whole check, and they are not evidence BindCraft

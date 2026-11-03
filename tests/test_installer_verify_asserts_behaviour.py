@@ -40,7 +40,18 @@ INSTALLERS = [REPO / "install" / "install.sh", REPO / "install" / "install_aarch
 
 # Enough of the verify family to reach the bindcraft and mosaic arms. The other arms
 # are parsed but never expanded, so their variables need not exist.
-_NEEDED = ("_env_python_ok", "_count_glob", "verify_tool")
+_NEEDED = (
+    "_env_python_ok",
+    "_count_glob",
+    "verify_tool",
+    # verify_tool asks these first whether the checkout was moved
+    "_relocation_reason",
+    "_stale_venv_reason",
+    "_stale_mosaic_pointer",
+    "_stale_editable_reason",
+    "_venv_recorded_path",
+    "_canon_path",
+)
 
 
 def _function_source(path: Path, name: str) -> str:
@@ -68,6 +79,7 @@ def _run_verify_tool(installer: Path, root: Path, tool: str, env_exists: bool = 
         "set -u",
         f'BINDCRAFT_DIR="{root}/BindCraft"',
         f'MOSAIC_DIR="{root}/Mosaic"',
+        f'EVALUATOR_DIR="{root}/Evaluator"',
         f'CONDA_BASE="{root}/conda"',
         'VERIFY_REASON=""',
         # The real env lookup, from the installer's shared conda block. Whether the env
