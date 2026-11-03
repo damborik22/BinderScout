@@ -124,7 +124,7 @@ loss:
 - **Terminal:** probe on demand, no cache. Nothing is fresher than the filesystem
   read at the moment of asking. Hosts concurrent, per-host timeout; an
   unreachable host renders as `unreachable` beside live bars and never aborts the
-  view (Clara is offline now and must not break it).
+  view (a cluster that is offline must not break it).
 - **Page (phase 2):** necessarily a push, so it carries its own data age and greys
   out past a threshold. The risk is not the interval, it is a dead pusher showing
   old numbers that look current.

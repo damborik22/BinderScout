@@ -25,7 +25,8 @@ inspection only · `NATIVE` is a design tool's own metric carried through untouc
 | `plddt_binder_mean/min` | binder fold confidence | ↑ | **RANKS** (key 5, min) | — |
 | `rank` | the single output ordering | ↓ | the result | — |
 | `agreement_count` | engines over an **absolute ipSAE 0.61** — **a different quantity from the ipTM that ranks** | ↑ | **WARNS**, note-only since 2026-10-03: it prints in `wetlab_reason` and cannot withhold the recommendation | macro-AUC **0.6295** on the registered pool's all-3-engine subset (70.5 % tied at zero). Monotone then saturating — binder rate 0.378 → 0.567 → **0.778** → 0.758, so *some vs none* carries the information and **2-vs-3 carries none**. The 0.532/87.2 % quoted elsewhere is a **Cao** figure, not this pool |
-| `*_pae_iptm` | per-engine ipTM recomputed from PAE | ↑ | **RANKS** (via the mean) | — |
+| `*_pae_iptm` | per-engine ipTM recomputed from PAE by a point-PAE kernel; sits ~0.08-0.13 below the engine's own `*_iptm` (Spearman >= 0.994 within an engine; same formula, not the same scale). Within-target only | ↑ | **RANKS** (via the mean) | — |
+| `*_pae_iptm_pinned`, `consensus_iptm_mean_pinned` | the same, with d0 fixed at one reference binder length (pool median, or `--d0-binder-length`) | ↑ | REPORTS (diagnostic) | pinning does not improve ranking on the 563-design benchmark: macro AUC +0.0025, CI -0.004..+0.010, signs split 2/2. Rank stays on the per-design d0 |
 | `*_iptm` | engine's **self-reported** ipTM | ↑ | REPORTS | scales differ sharply between engines |
 | `ipsae_min` | min(bt,tb) iPSAE, DunbrackLab 2025 | ↑ | REPORTS + GATES (affinity) | **measured INVERTED** on our SPOC data |
 | quality tiers (High/Medium/Low/Reject) | bands on `ipsae_min` | — | REPORTS | **measured INVERTED** — "Reject" held 6/10 CBG binders; "High" fired on none |
@@ -37,7 +38,7 @@ inspection only · `NATIVE` is a design tool's own metric carried through untouc
 | `would_exclude_*` | what each shadow gate *would* have removed | — | REPORTS | — |
 | `seq_family_*` | near-duplicate sequences, k-mer Jaccard ≥ 0.20 | — | REPORTS | all observed near-dupes were same-tool |
 | `struct_family_*` | shared fold, Foldseek TM ≥ 0.5, binder chain only | — | REPORTS | max pairwise sequence Jaccard 0.298 over 114 designs — folds are invisible to sequence methods |
-| `generation_index`, `_source` | where a design fell in generation order | — | REPORTS | 5 of 8 tools can report; `unavailable` is first-class |
+| `generation_index`, `_source` | where a design fell in generation order | — | REPORTS | 6 of 9 tools can report; `unavailable` is first-class |
 | `soluprot_*` | sequence-only solubility | ↑ | REPORTS (label only) | best available predictor of *expression*; filter mode removed |
 | `tmprot_*` | predicted melting temperature | ↑ | REPORTS (label only) | advisory; must not grow a filter |
 | `wetlab_recommended`, `wetlab_reason` | blockers + informational notes, concatenated | ↑ | GATES (advisory) | Blocks on the cross-engine gate, binder pLDDT < 0.50, and a FAILED RUN. **SoluProt (2026-09-28) and `agreement_count` (2026-10-03) are notes that cannot block** — both measured badly against our own Kd results |
@@ -45,6 +46,17 @@ inspection only · `NATIVE` is a design tool's own metric carried through untouc
 | `native_*` | a tool's own metrics, prefixed | — | NATIVE | each gameable by its own tool |
 
 ---
+
+**Reading notes for the columns above** (full argument in [ranking.md §1a](ranking.md)):
+
+- `rank` reads the **optimistic** interface direction (ipTM = max of binder->target and
+  target->binder); `ipsae_min` is the **pessimistic** one (the minimum). A high ipTM with a
+  near-zero `ipsae_min` is a one-directional interface, not a contradiction.
+- A 2-engine mean (`--min-engines 2`) and a 3-engine mean are **not on one scale**; read
+  `consensus_iptm_n` beside `rank`.
+- `quality_tier` is computed from one engine (Boltz-2 by default, the most generous), not from
+  the consensus.
+- The top-N is an unordered tier: rank resolution is ~150x finer than engine disagreement.
 
 ---
 
@@ -82,8 +94,8 @@ because each one changes how a number is read:
   outputs and release of raw scores/structures for training, which conflicts with
   publishing our scores. The only record of *why* the engine line-up is what it is on legal
   grounds.
-- **The cross-method bias matrix** — 8 design tools × 3 refold engines, clean/correlated per
-  cell (`skills/binderscout-orchestrator/references/tools/README.md`). The evaluator skill
+- **The cross-method bias matrix** — design tools × 3 refold engines, clean/correlated per
+  cell (written when there were eight tools; RFD4-Proteina has no row yet) (`skills/binderscout-orchestrator/references/tools/README.md`). The evaluator skill
   names that file as its authority, so it cannot simply be deleted.
 - **The measured GPU-memory table** (`README.md`) — AF3 2.3–5.2 GB flat; **ESMFold2's
   14.2 GB floor at 150 tokens, so a 12 GB card cannot run it at any size** (`require_device_memory`

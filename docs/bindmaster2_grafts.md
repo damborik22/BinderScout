@@ -2,7 +2,7 @@
 
 Capabilities ported from the (abandoned) [BindMaster 2](https://github.com/damborik22/BindMaster2)
 agentic concept onto BinderScout's evaluator. We grafted the **orchestration/lifecycle**
-capabilities BinderScout lacked — *not* BM2's agent framework (redundant with our Claude Code
+capabilities BinderScout lacked — *not* BindMaster 2's agent framework (redundant with our Claude Code
 skills + the `autosize` controller) and *not* its evaluator (ours is more advanced: two-stage
 ranking, AF3 + ESMFold2 + Protenix, `chain_iptm_interface`, RFD3).
 
@@ -38,11 +38,11 @@ analyze-target → (suggest n_target / tier / tools)
 - **Rosetta is not x86-gated.** `affinity` runs `Evaluator/scripts/interface_energy.py` via
   `conda run -n BindCraft` — PyRosetta ships in the BindCraft env on every platform we run
   BindCraft on, including aarch64 / DGX Spark.
-- **`analyze-target` difficulty is heuristic/advisory.** BM2 never pinned a formula; ours is
+- **`analyze-target` difficulty is heuristic/advisory.** BindMaster 2 never pinned a formula; ours is
   explicit (length 0.45 + disorder 0.25 + flat-surface 0.30, disorder not yet modelled) and
   meant to *seed* a campaign, not replace judgement. Review before committing GPU time.
-- **`mature` thresholds** (weak >500 nM, moderate >50 nM) follow BM2 and are CLI-overridable;
+- **`mature` thresholds** (weak >500 nM, moderate >50 nM) follow BindMaster 2 and are CLI-overridable;
   pre-experimentally it can run on the `affinity` composite as a proxy instead of real Kd.
 - **`wetlab` vendor/cost** are lab-overridable defaults, not authority.
-- What we deliberately did **not** take: BM2's RFAA (we use RFD3), AF2 (we use AF3 + ESMFold2),
+- What we deliberately did **not** take: BindMaster 2's RFAA (we use RFD3), AF2 (we use AF3 + ESMFold2),
   and its in-code agent runtime + state machine (covered by our skills + `autosize`).

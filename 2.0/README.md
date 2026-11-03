@@ -2,7 +2,7 @@
 
 Everything needed to pick up 2.0. **You have the repo**, so most of this points
 at files already in it rather than copying them — a second copy of `CLAUDE.md`
-drifts from the first within a week. The diaries are deliberately not in the repo (sensitive data); they live on MUNI in MUNI `Project-01-BINDMASTER/REPO_DIARY/`.
+drifts from the first within a week. The diaries are deliberately not in the repo (sensitive data); they live only on the lab's private share.
 
 | | |
 |---|---|
@@ -49,16 +49,17 @@ The project's canonical self-description: environment isolation (never mix
 packages across envs), the ranking rules and what was removed from them, and
 per-tool runtime gotchas that each cost a campaign to learn.
 
-> **One live caveat.** Its claim that AF3 "runs fleet-wide (BM1/BM2/BM4)" is
-> marked **in doubt** in place, with the measurement and the reason. It will not
-> mislead you, but it is the one knowingly-uncertain statement in that file.
+> **One live caveat.** Its statements about which machine runs which engine are
+> measurements from specific boxes, not guarantees — the ESMFold2 transformers fork,
+> for one, is present on some x86_64 machines and absent on others. Re-check on
+> yours before relying on them.
 
 ### 6. How the findings were reached
-**`DIARY_2.0.md`** *(MUNI share, `Project-01-BINDMASTER/REPO_DIARY/`)*
+**`DIARY_2.0.md`** *(the lab's private share, not in this repo)*
 
 The 2.0 chapter of the repo diary — 8 entries, 771 lines. Records the wrong
 turns as well as the conclusions, which is the part that stops them being
-repeated. Extracted from `REPO_DIARY.md` in that same MUNI folder; the diary is the
+repeated. Extracted from `REPO_DIARY.md` on that same share; the diary is the
 living copy.
 
 ---
@@ -77,10 +78,10 @@ living copy.
 ## Not part of this handoff
 
 The repo holds ~14 other `PLAN_*` / `INVESTIGATION_*` documents — BindCraft 2
-integration, the AF3 Spark runbook, fleet orchestration, SoluProt, BM5 unified
-memory, the virtual-lab concept. All real, none about 2.0.
+integration, the AF3 Spark runbook, fleet orchestration, SoluProt, the GB10
+unified-memory plan, the virtual-lab concept. All real, none about 2.0.
 
-The historical diary (`REPO_DIARY.md`, on the MUNI share) in full is 2,858 lines, of
+The historical diary (`REPO_DIARY.md`, on the same private share) in full is 2,858 lines, of
 which 2,098 predate 2.0.
 
 ---

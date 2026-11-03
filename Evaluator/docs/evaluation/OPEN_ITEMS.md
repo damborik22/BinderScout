@@ -105,7 +105,7 @@ So §8's removal of `adaptyv_rank` stands, but its stated reason should be resta
 null" — weaker than the mean, and saturating above 2.
 
 **12.3 — WITHDRAWN, and replaced with what you asked for.** The 13/13 rescue figure came from a
-BM2 scratch script deleted during cleanup and is **not reproducible from anything saved**, so it
+scratch script deleted during cleanup and is **not reproducible from anything saved**, so it
 is withdrawn rather than built on. What is measurable argues against shipping it anyway: 3/3 is
 not separable from 2/3 (§12.2), and on CBG a 3/3 design binds at 0.095 against a 0.073 pool rate.
 

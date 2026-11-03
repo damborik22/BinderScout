@@ -16,6 +16,40 @@ output is a single `rank` column. Everything else the evaluator produces either 
 number, flags a caution for a human, or is reported for inspection — and the catalogue in
 §6 says which, per column.
 
+### 1a. What the number is, and what it can resolve
+
+Read these before quoting a rank. All of them come from the scoring audit and none changes
+the ranking; they say what it is allowed to mean.
+
+- **`*_pae_iptm` is a point-PAE re-derivation, not the engine's own ipTM.** Each engine's
+  PAE matrix is pushed through one shared kernel. The result sits **~0.08-0.13 below** that
+  engine's own `*_iptm`. Within an engine the two orderings are equivalent (Spearman
+  >= 0.994), so nothing is lost by ranking on the re-derivation; across engines the three
+  columns share a *formula* but not a *scale*, which is why the mean is taken over
+  re-derived values and never over the engines' self-reported ones.
+- **It is within-target only.** A `consensus_iptm_mean` on one target is not comparable to
+  one on another; the binder-to-target kernel depends on the target's size.
+- **The top-N is an unordered tier.** Adjacent ranks are separated by ~150x less than the
+  engines disagree about a single design, so the order *inside* a shortlist is below what
+  the engines can distinguish. Take the top N as a set.
+- **Rank reads the optimistic interface direction.** ipTM takes the larger of
+  binder->target and target->binder; `ipsae_min` takes the smaller. A high ipTM beside a
+  near-zero `ipsae_min` is therefore a *one-directional* interface, not a contradiction
+  between two metrics.
+- **`quality_tier` is single-engine,** computed from the primary engine (Boltz-2 by
+  default, the most generous of the three), not from the cross-engine consensus.
+- **Two-engine and three-engine means are not on one scale.** `--min-engines 2` admits
+  designs scored by two engines beside designs scored by three; read `consensus_iptm_n`
+  next to `rank` and do not compare across that line.
+- **Length enters through d0.** ipTM's d0 uses `L_binder + L_target`, so a longer binder
+  gets a more forgiving kernel: up to **+0.036** on the consensus. Pinning d0 to one
+  reference length (`*_pae_iptm_pinned`, `consensus_iptm_mean_pinned`; the reference is the
+  pool-median binder length unless `--d0-binder-length` says otherwise) was **measured not
+  to improve the ranking** on the 563-design labelled benchmark — macro AUC +0.0025, 95 % CI
+  -0.004..+0.010, sign split 2/2 across targets — because it re-weights by length rather
+  than correcting a bias. So **`rank` stays on the per-design d0**, and the pinned columns
+  are diagnostic: they make the size of the length artifact visible per design.
+
 ---
 
 ---
@@ -136,7 +170,7 @@ backwards. Confirmed
 to be our metric and not a proxy: the panel's `Mean_iPTM` matches `consensus_iptm_mean` on
 135/137 designs to the decimal.
 
-**The correct reading, from the repo diary** (MUNI share, `Project-01-BINDMASTER/REPO_DIARY/`)**:** pool mean ipTM tells you **the target
+**The correct reading, from the lab's private repo diary:** pool mean ipTM tells you **the target
 is tractable**, not **which design on a hard target will bind**. A between-target signal,
 on n=2 targets. Conflating the two is the trap.
 
