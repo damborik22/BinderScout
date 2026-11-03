@@ -5346,6 +5346,9 @@ def derive_run_dir_from_name(cfg: dict, config_path: Path) -> None:
 def cmd_from_config(config_path: str, run_now: bool) -> None:
     """Non-interactive path: generate a run directory straight from a saved config."""
     cfg, tools_enabled = load_run_config(Path(config_path))
+    # BEFORE the name-derived relocation: a structure file pasted as the run folder must be
+    # refused as such, not silently turned into a sibling folder of the user's .pdb.
+    refuse_run_dir_that_is_a_file(Path(cfg["run_dir"]))
     derive_run_dir_from_name(cfg, Path(config_path))
     apply_headless_tag_trim(cfg)
     run_dir = Path(cfg["run_dir"])

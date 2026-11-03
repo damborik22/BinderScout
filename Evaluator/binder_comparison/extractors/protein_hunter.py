@@ -186,13 +186,20 @@ class ProteinHunterExtractor(SequenceExtractor):
         result, not a missing file.
         """
         base = f"Protein-Hunter: no {_HIGH_IPTM_CSV} found in {input_dir}."
-        all_runs_path = self._find_csv(input_dir, _ALL_RUNS_CSV)
+        generic = f"{base} Fall back to --all-protein-hunter-designs to read {_ALL_RUNS_CSV}."
+        # A diagnostic must never raise: _find_csv REFUSES ambiguity (two replicate folders each
+        # holding a summary_all_runs.csv) with a ValueError, which would turn "PH cleared nothing"
+        # into a traceback that loses every other tool's pool.
+        try:
+            all_runs_path = self._find_csv(input_dir, _ALL_RUNS_CSV)
+        except ValueError:
+            return generic
         if all_runs_path is None:
-            return f"{base} Fall back to --all-protein-hunter-designs to read {_ALL_RUNS_CSV}."
+            return generic
         try:
             all_runs = pd.read_csv(all_runs_path)
         except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError):
-            return f"{base} Fall back to --all-protein-hunter-designs to read {_ALL_RUNS_CSV}."
+            return generic
         seq_col = "best_seq" if "best_seq" in all_runs.columns else "sequence"
         n = int(all_runs[seq_col].notna().sum()) if seq_col in all_runs.columns else 0
         iptm = pd.to_numeric(all_runs["best_iptm"], errors="coerce") if "best_iptm" in all_runs.columns else None

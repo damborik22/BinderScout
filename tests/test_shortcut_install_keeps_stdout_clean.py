@@ -57,3 +57,25 @@ def test_an_unwritable_checkout_reports_on_stderr_only(tmp_path, monkeypatch, ca
     out, err = capsys.readouterr()
     assert out == "", f"the failure notice leaked onto stdout: {out!r}"
     assert "Could not write" in err
+
+
+def test_the_shim_survives_a_checkout_path_with_shell_metacharacters(tmp_path, monkeypatch):
+    """`exec python3 "<path>"` broke for a path containing $, a backtick or a double quote."""
+    import subprocess
+
+    cli = _load_cli()
+    weird = tmp_path / 'a "quoted" $HOME `dir`'
+    weird.mkdir()
+    fake_script = weird / "binderscout.py"
+    fake_script.write_text("import sys\nprint('ran', sys.argv[1:])\n")
+    monkeypatch.setattr(cli, "REPO", weird)
+    monkeypatch.setattr(cli, "__file__", str(fake_script))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+
+    cli._install_binderscout_shortcut()
+
+    shim = weird / "bin" / "binderscout"
+    assert shim.exists(), "the shim was not written, so this proved nothing"
+    out = subprocess.run(["bash", str(shim), "x"], capture_output=True, text=True)
+    assert out.stdout.strip() == "ran ['x']", (out.stdout, out.stderr)

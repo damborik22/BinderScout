@@ -73,3 +73,29 @@ class TestNothingClearedTheThresholdSaysSo:
         text = " ".join(messages)
         assert "summary_high_iptm.csv" in text
         assert "--high_iptm_threshold" not in text
+
+
+class TestTheDiagnosticNeverRaises:
+    """The 'why is there no high-iPTM file' message must not turn into a traceback.
+
+    Two replicate folders each holding a summary_all_runs.csv make _find_csv refuse (ambiguity) with a
+    ValueError. Routed through that, a run where Protein-Hunter cleared nothing lost every OTHER tool's
+    pool too (found in review 2026-11-03).
+    """
+
+    def test_two_all_runs_files_still_warn_and_return_nothing(self, tmp_path):
+        row = [{"run_id": 1, "best_seq": _SEQ_A, "best_iptm": 0.41, "best_plddt": 0.8}]
+        _csv(tmp_path / "rep1" / "summary_all_runs.csv", row)
+        _csv(tmp_path / "rep2" / "summary_all_runs.csv", row)
+        got, messages = _collect(ProteinHunterExtractor(), tmp_path)
+        assert got == []
+        assert any("summary_high_iptm.csv" in m for m in messages), messages
+
+    def test_control_one_all_runs_file_still_gets_the_specific_message(self, tmp_path):
+        """Without this control the test above would also pass if the message builder were never reached."""
+        _csv(
+            tmp_path / "summary_all_runs.csv",
+            [{"run_id": 1, "best_seq": _SEQ_A, "best_iptm": 0.41, "best_plddt": 0.8}],
+        )
+        _, messages = _collect(ProteinHunterExtractor(), tmp_path)
+        assert any("high_iptm_threshold" in m for m in messages), messages

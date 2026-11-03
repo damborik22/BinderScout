@@ -35,7 +35,7 @@ def _write_cfg(tmp_path, run_dir_value):
         "config_version": 1,
         "tools_enabled": {"bindcraft2": True},
         "cfg": {
-            "name": Path(run_dir_value).name,
+            "name": "T",
             "run_dir": run_dir_value,
             "target_pdb_src": str(pdb),
             "target_sequence": "AAAA",
