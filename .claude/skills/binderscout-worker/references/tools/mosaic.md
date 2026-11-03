@@ -61,7 +61,7 @@ Composite-objective design (multiple loss terms each requiring a structure predi
 
 ```bash
 cd ~/runs/<TARGET>-<machine>-mosaic/
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_Mosaic_<machine>.tar.gz \
+tar czf <lab-share>/<TARGET>/RESULTS/<TARGET>_Mosaic_<machine>.tar.gz \
     designs.csv \
     refold_outputs/ \
     refold_cifs/*.cif \
@@ -74,7 +74,7 @@ Include `refold_outputs/` (which holds Boltz-2 prediction outputs for `is_top=1`
 For `_final` (just the top designs):
 
 ```bash
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_Mosaic_<machine>_final.tar.gz \
+tar czf <lab-share>/<TARGET>/RESULTS/<TARGET>_Mosaic_<machine>_final.tar.gz \
     designs.csv \
     refold_cifs/ refold_paes/ \
     target_settings.py

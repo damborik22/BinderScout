@@ -25,7 +25,7 @@ In addition to the generic `pre-flight.md` checks:
 
 - **AF2 weights** (~5.3 GB) — verify presence in the env: `ls ~/.colabdesign_params/` or wherever BindCraft expects them. The installer downloads on first run.
 - **PyRosetta license** — academic free, commercial requires license. Confirm the env was installed with the right license posture.
-- **Aarch64 binaries (if on Spark / ARM):** `DAlphaBall.gcc` and `dssp` ARM64 versions bundled in `binderscout_examples/`. The run-script template copies them; verify post-copy:
+- **Aarch64 binaries (if on aarch64 / ARM):** `DAlphaBall.gcc` and `dssp` ARM64 versions bundled in `binderscout_examples/`. The run-script template copies them; verify post-copy:
   ```bash
   file ~/dev/BindMaster/BindCraft/functions/DAlphaBall.gcc
   # Should report: ELF 64-bit LSB shared object, ARM aarch64
@@ -64,7 +64,7 @@ See `packaging.md` for the canonical recipe. Quick version:
 
 ```bash
 cd ~/runs/<TARGET>-<machine>-bindcraft/
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_BindCraft_<machine>.tar.gz \
+tar czf <lab-share>/<TARGET>/RESULTS/<TARGET>_BindCraft_<machine>.tar.gz \
     Accepted/ \
     final_design_stats.csv \
     MPNN_design_stats.csv \
@@ -78,7 +78,7 @@ tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_BindCraft_<machine>.tar.gz \
 For a curated `_final` subset (faster for orchestrator to inspect):
 
 ```bash
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_BindCraft_<machine>_final.tar.gz \
+tar czf <lab-share>/<TARGET>/RESULTS/<TARGET>_BindCraft_<machine>_final.tar.gz \
     Accepted/Ranked/ final_design_stats.csv target_settings.json
 ```
 
@@ -91,6 +91,6 @@ Completion entry should include:
 MPNN candidates: <M>; accept rate <N/M> = <%>.
 Top metrics: iPTM_avg <x>, dG <y>, ShapeComplementarity <z> (from final_design_stats.csv top row).
 Wall: <h> on <GPU>.
-Compute: <GPU-h> on <node-id>.
+Compute: <GPU-h> on <host-id>.
 Packaged: <TARGET>_BindCraft_<machine>.tar.gz (<size>).
 ```

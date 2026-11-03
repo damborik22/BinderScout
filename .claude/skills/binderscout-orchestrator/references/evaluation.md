@@ -1,8 +1,8 @@
-# Cross-Engine Refold + iPSAE Merge — Spark-Local Evaluation Recipe
+# Cross-Engine Refold + iPSAE Merge — aarch64-Host-Local Evaluation Recipe
 
 **When to read this:** at the start of campaign Phase 3' — when enough tarballs have returned to RESULTS/ to constitute a pool worth merging. Typically when at least 3 design tools have completed and the orchestrator is starting to consolidate into a top-N for wet-lab handoff.
 
-**What this is:** the orchestrator-side recipe for running cross-engine refolding locally on Spark, computing iPSAE under the uniform 10 Å PAE cutoff (DunbrackLab 2025 `d0_res` variant), merging into a unified `summary.csv`, and ranking.
+**What this is:** the orchestrator-side recipe for running cross-engine refolding locally on the aarch64 (GB10) host, computing iPSAE under the uniform 10 Å PAE cutoff (DunbrackLab 2025 `d0_res` variant), merging into a unified `summary.csv`, and ranking.
 
 **What this is NOT:** the implementation. The BinderScout `Evaluator/` package already implements these steps. This file is the orchestrator's mental model — what happens, why, and how to invoke it without surprises.
 
@@ -10,7 +10,7 @@
 
 ## 1. Mental model
 
-Three refolders run as **library code, not jobs**, all locally on Spark:
+Three refolders run as **library code, not jobs**, all locally on the aarch64 (GB10) host:
 
 | Refolder | Env | Status | Notes |
 |---|---|---|---|
@@ -20,7 +20,7 @@ Three refolders run as **library code, not jobs**, all locally on Spark:
 
 Each refolder takes a (binder sequence + target structure + chain assignment) tuple and produces a (`.cif` structure + PAE matrix `.npz`). The evaluator then computes iPSAE on each PAE matrix and merges results.
 
-Because all three envs co-exist on Spark, the evaluation pipeline is a single Python orchestration:
+Because all three envs co-exist on the aarch64 host, the evaluation pipeline is a single Python orchestration:
 
 ```
 for design in pool:
@@ -41,7 +41,7 @@ for design in pool:
     }
 ```
 
-Conceptually three sequential refold passes per design, but in practice they're batched by tool and pipelined on the single Spark GPU.
+Conceptually three sequential refold passes per design, but in practice they're batched by tool and pipelined on the single aarch64-host GPU.
 
 ---
 
@@ -219,7 +219,7 @@ python -m binderscout.evaluator \
 
 The evaluator handles env switching (it shells out to the AF3 and ESMFold2 envs as subprocesses), PAE transposition, pLDDT rescaling, iPSAE computation, and the merge. Output is the canonical `summary.csv`.
 
-Wall time on Spark (rough budget):
+Wall time on the aarch64 host (rough budget):
 - Boltz-2 refold: ~30-60 s per design
 - AF3 refold: ~3-5 min per design (slowest; the inference-time scaling is significant)
 

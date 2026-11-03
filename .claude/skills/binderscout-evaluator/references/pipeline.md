@@ -1,6 +1,6 @@
 # Evaluation pipeline — canonical recipe
 
-The cross-engine refold + ranking, run **locally on the eval host** (Spark / any CUDA
+The cross-engine refold + ranking, run **locally on the eval host** (the aarch64 GB10 host / any CUDA
 box) as library code, not cluster jobs. Promotes + updates the orchestrator's `evaluation.md` to
 the current engine set (ESMFold2 default, two-stage ranking, + affinity/monomer).
 

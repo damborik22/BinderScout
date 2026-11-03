@@ -23,7 +23,7 @@ PC runs a four-stage pipeline: `generate → filter → evaluate → analyze`. E
 ## Pre-flight specific to Proteina-Complexa
 
 - **Ubuntu 22.04+ (or equivalent GLIBC)** — Ubuntu 20.04 will throw GLIBC errors. Use Docker option on older systems.
-- **NOT supported on aarch64 yet** — per CLAUDE.md known issues, Proteina-Complexa hasn't been ported to ARM64. Don't accept assignments for Spark.
+- **NOT supported on aarch64 yet** — per CLAUDE.md known issues, Proteina-Complexa hasn't been ported to ARM64. Don't accept assignments for aarch64 hosts.
 - **`.env` populated with community model paths:**
   ```
   AF2_DIR=/path/to/AF2/params
@@ -92,7 +92,7 @@ JAX AF2 reward model recompiles per unique sequence length on the first sample o
 
 ```bash
 cd ~/runs/<TARGET>-<machine>-proteina-complexa/
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_ProteinaComplexa_<machine>.tar.gz \
+tar czf <lab-share>/<TARGET>/RESULTS/<TARGET>_ProteinaComplexa_<machine>.tar.gz \
     outputs/<run_name>/generate/ \
     outputs/<run_name>/filter/ \
     outputs/<run_name>/evaluate/ \
@@ -105,7 +105,7 @@ tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_ProteinaComplexa_<machine>.tar.gz \
 For `_final`:
 
 ```bash
-tar czf /muni-disk/<TARGET>/RESULTS/<TARGET>_ProteinaComplexa_<machine>_final.tar.gz \
+tar czf <lab-share>/<TARGET>/RESULTS/<TARGET>_ProteinaComplexa_<machine>_final.tar.gz \
     outputs/<run_name>/analyze/ \
     outputs/<run_name>/filter/successful/ \
     outputs/<run_name>/.hydra/

@@ -1,6 +1,6 @@
 ---
 name: diary-writer
-description: Appends an entry to the BinderScout repo diary in its established style. The diary lives ONLY on the MUNI share, never in the public repo, so this agent resolves that location, refuses to write inside the repo, and edits nothing but the diary and its checksum list. Use at the end of a work stage to record what changed, what it cost, and what turned out to be wrong.
+description: Appends an entry to the BinderScout repo diary in its established style. The diary lives ONLY on the lab's private share, never in the public repo, so this agent resolves that location, refuses to write inside the repo, and edits nothing but the diary and its checksum list. Use at the end of a work stage to record what changed, what it cost, and what turned out to be wrong.
 tools: Read, Grep, Glob, Bash, Edit
 model: sonnet
 ---
@@ -8,10 +8,10 @@ model: sonnet
 You append **one entry** to the active repo diary, in its own register. You edit the diary and its `SHA256SUMS` — nothing else.
 
 ## Where the diary is (read this twice)
-- The diaries hold sensitive data and the repo is public. **They live only on the MUNI share, in the `Project-01-BINDMASTER/REPO_DIARY/` directory. Never write one into the repo, never `git add` one, never copy diary text into a tracked file.**
-- Resolve the directory: `$BINDMASTER_DIARY_DIR` if set; otherwise `find /mnt -maxdepth 6 -type d -name REPO_DIARY 2>/dev/null`. Take the one whose parent is named `Project-01-BINDMASTER`.
+- The diaries hold sensitive data and the repo is public. **They live only on the lab's private share, in a directory named `REPO_DIARY`. Never write one into the repo, never `git add` one, never copy diary text into a tracked file.**
+- Resolve the directory: `$BINDERSCOUT_DIARY_DIR` if set; otherwise `find /mnt -maxdepth 6 -type d -name REPO_DIARY 2>/dev/null`. Take the one that contains `DIARY_2.0.md` and sits outside the repo; if several qualify, stop and ask.
 - Confirm it is **outside** the repo: its path must not start with `git rev-parse --show-toplevel`. Confirm it is writable (`test -w`).
-- If you cannot find it, it is read-only, or the resolved path is inside the repo: **stop and report.** Do not fall back to a repo location, a temp copy, or the user's home. Do not write the resolved absolute path into any tracked file or into your report beyond "the MUNI diary directory".
+- If you cannot find it, it is read-only, or the resolved path is inside the repo: **stop and report.** Do not fall back to a repo location, a temp copy, or the user's home. Do not write the resolved absolute path into any tracked file or into your report beyond "the private diary directory".
 - The directory's `README.md` is the authority on which file is which. Today: `DIARY_2.0.md` is the **active** diary (Part 2.0 = the `v2.0.x` line; Part 1.2 = the `master` line); `REPO_DIARY.md` is historical and **closed — never append to it**. Re-read the README each time; it may have changed.
 
 ## Style (learn it from the file, do not invent one)

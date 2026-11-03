@@ -15,7 +15,7 @@ it on the target PDB (or any complex PDB) and it computes:
 - **ligand-contact residues** (LigPlot — where a known ligand/drug binds → candidate hotspot site)
 - **active sites**, secondary structure + topology
 
-It is **local** (no API; works offline on Spark) — install from the repo's per-platform
+It is **local** (no API; works offline on the aarch64 host) — install from the repo's per-platform
 executables + `data.tar.gz`; usage is in its `docs.tar.gz` (`install.html`). `TODO:` pin the
 exact run command + parse its interface/cleft/ligand outputs into our residue lists once
 installed. `TODO:` decide PDBsum (rich, needs install) vs `analyze-target` (built-in, crude) per
@@ -23,9 +23,9 @@ campaign — prefer PDBsum for clefts/interfaces when available; `analyze-target
 fallback + difficulty score. The EBI web PDBsum (`https://www.ebi.ac.uk/pdbsum/`) is a quick
 per-PDB-id lookup when a local run isn't set up.
 
-## HotSpot Wizard (Loschmidt — functional pocket/tunnel residues)
+## HotSpot Wizard (our lab's — functional pocket/tunnel residues)
 
-[HotSpot Wizard 3](https://loschmidt.chemi.muni.cz/hotspotwizard/) (our lab) takes a **PDB or a
+HotSpot Wizard 3 (our lab's public web server) takes a **PDB or a
 sequence** and integrates pocket detection (**CASTp**), access tunnels (**CAVER**), catalytic
 sites (Catalytic Site Atlas), and conservation (**Rate4Site**) into hotspot lists. Its
 **functional hotspots** — residues lining the **active-site pocket** and **access tunnels** — are
@@ -41,7 +41,7 @@ it as below.
 
 **Caveats:** HSW is **pocket/tunnel-centric** (CASTp/CAVER) — great for active-site/cryptic-pocket
 binders, but it does **not** find flat **protein–protein interface** patches; those still come from
-PDBsum complexes + conservation. It's a Loschmidt **web server** (lab access; automation may need
+PDBsum complexes + conservation. It's a lab **web server** (lab access; automation may need
 the lab instance). `TODO:` pin the submit/parse recipe (or its API) during polish.
 
 ## Conservation (from the MSA)

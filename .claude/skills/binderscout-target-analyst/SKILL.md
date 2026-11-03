@@ -124,7 +124,7 @@ Turn the research + structure into a list of candidate binding sites, each with 
 combine several signals (details + caveats in `interaction-sites.md`):
 - **PDBsum** ([PDBsum1](https://github.com/RomanLas/PDBsum1), local) → interface residues (PPI /
   epitopes), clefts/pockets, ligand contacts, active sites. Primary per-structure source.
-- **HotSpot Wizard** ([HSW3](https://loschmidt.chemi.muni.cz/hotspotwizard/), Loschmidt; PDB *or*
+- **HotSpot Wizard** (HSW3, our lab's public web server; PDB *or*
   sequence) → functional hotspots = active-site-pocket + access-tunnel residues (CASTp/CAVER) for
   enzyme/pocket targets. Use its pocket *location*, not its mutability ranking; pocket-centric (not PPI).
 - **Conservation** (from the MSA, §2a) — conserved + surface patch = functional site.
@@ -182,7 +182,7 @@ gate tier. `TODO:` exact field mapping dossier → kickoff doc.
   - [PDBsum1](https://github.com/RomanLas/PDBsum1) — local structural annotation (interfaces /
     clefts / ligand contacts / active sites). Per-platform executables + `data.tar.gz`, not
     pip-installable; `TODO:` worker pre-flight setup note.
-  - [HotSpot Wizard 3](https://loschmidt.chemi.muni.cz/hotspotwizard/) — Loschmidt functional
+  - HotSpot Wizard 3 — our lab's functional
     pocket/tunnel hotspots + conservation (CASTp / CAVER / Rate4Site); web server, lab access.
   - MSA via the repo's `get_target_msa` (`Evaluator/binder_comparison/refolding/target_msa.py`,
     ColabFold MMseqs2, cached); folding via `configurator/predict_structure.py` (Boltz-2).

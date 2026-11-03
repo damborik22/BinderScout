@@ -46,6 +46,10 @@ def _in_scope(path: Path) -> bool:
     rel = path.relative_to(REPO).as_posix()
     if rel.startswith("docs/"):
         return not rel.split("/")[-1].startswith(_PLANNING) and rel.endswith((".md", ".html"))
+    if rel.startswith(".claude/"):
+        # The skills and subagent prompts are public text too; they were the largest block of
+        # machine names left in the tree until 2026-11-03.
+        return rel.endswith(".md")
     if rel.startswith(("tests/", "Evaluator/docs/")):
         return rel.endswith((".md", ".py", ".fasta", ".json", ".txt"))
     return rel in {

@@ -106,5 +106,5 @@ Configuration is in Hydra YAML; CLI overrides via `++key=value`.
 - Project page: https://research.nvidia.com/labs/genair/proteina-complexa/
 - Repo: https://github.com/NVIDIA-Digital-Bio/Proteina-Complexa (branch `dev`)
 - Model card: https://github.com/NVIDIA-Digital-Bio/Proteina-Complexa/blob/dev/assets/model_card/overview.md
-- Checkpoints (NGC): https://catalog.ngc.nvidia.com/orgs/nvidia/teams/clara/models/proteina_complexa
+- Checkpoints (NGC): the NVIDIA NGC catalog page for the proteina_complexa model
 - Code license: NVIDIA Open Model License Agreement (code) + Apache 2.0

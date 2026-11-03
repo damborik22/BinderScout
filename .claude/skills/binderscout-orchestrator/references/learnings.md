@@ -36,7 +36,7 @@ For Boltz-2-based tools (Protein-Hunter, BoltzGen, Mosaic): if the target is in 
 
 If a target's hotspots span multiple distant regions (different secondary-structure elements, different chain regions), BindCraft's AF2 hallucination may not be able to satisfy all of them simultaneously.
 
-**2VDY example:** Four hotspot clusters — N-term helix (15–22), central sheet (232–242), pocket lid (260–267), C-term helix (366–371). With hotspots ON: BM2 10/10 trajectories failed pre-MPNN; BM4 ran 9 days with 0/203 accepted (every MPNN sequence failed AF2 cross-val on the V2 interface PAE filters). Same V2+V4 preset with hotspots OFF: BM2 22 accepts, Clara L40S 10 accepts.
+**2VDY example:** Four hotspot clusters — N-term helix (15–22), central sheet (232–242), pocket lid (260–267), C-term helix (366–371). With hotspots ON: one x86_64 GPU workstation had 10/10 trajectories fail pre-MPNN; another ran 9 days with 0/203 accepted (every MPNN sequence failed AF2 cross-val on the V2 interface PAE filters). Same V2+V4 preset with hotspots OFF: the first workstation 22 accepts, a cluster L40S 10 accepts.
 
 **Generalization rule:** Hotspots clustered on one face (single binding pocket on one side) → hotspots-ON is fine. Hotspots spanning the protein → run BindCraft no-hotspots and let the trajectory find the binding mode unguided. Cross-engine refold at the end filters on actual interface metrics anyway.
 
@@ -114,7 +114,7 @@ Slurm `.err` only shows wrapper-level Python exceptions. Real Python tracebacks 
 
 Every PROGRESS.md row should record compute hours. By end of 2VDY, knowing "PH cost 22 GPU-h for 95 designs at ≥0.85" vs "PC cost 30 GPU-h for 13 at ≥0.70" was decisive for picking which tool to scale up.
 
-Format: `"Compute: <wall> GPU-time on <node-id>."` Wrap up the campaign with a total budget summary.
+Format: `"Compute: <wall> GPU-time on <host-id>."` Wrap up the campaign with a total budget summary.
 
 **Applies to:** SKILL.md §3.2 (status table row format), §6.1 (math first heuristic).
 
@@ -125,10 +125,10 @@ Format: `"Compute: <wall> GPU-time on <node-id>."` Wrap up the campaign with a t
 
 The `~/BinderScout/bin/<tool>` shortcuts work interactively but break under SLURM / nohup / any non-TTY shell, in two distinct ways:
 
-- **`mamba run` wrappers** (e.g. `rfd3`) materialize a `/tmp/mambaXXXX` script whose `exec --` line dies on some bash builds: `exec: --: invalid option` (Clara Rocky 9.6 / bash 5.1.8; ApoE4 SLURM 119818 died in 1 s).
+- **`mamba run` wrappers** (e.g. `rfd3`) materialize a `/tmp/mambaXXXX` script whose `exec --` line dies on some bash builds: `exec: --: invalid option` (multi-user cluster, Rocky 9.6 / bash 5.1.8; ApoE4 SLURM 119818 died in 1 s).
 - **Interactive wrappers** (e.g. `boltzgen`) `source` conda, `cd`, print a banner, then `exec bash` with **no `$@` relay** — under SLURM stdin closes, the wrapper exits rc=0 with zero work (ApoE4 119820 silent no-op).
 
-**Fix:** after `conda activate <env>`, call **`"$CONDA_PREFIX/bin/<tool>"`** (absolute env binary, bypasses the PATH-shadowing wrapper). Note `conda activate` does not guarantee the env bin precedes `~/BinderScout/bin` in PATH — verified on Clara that `which rfd3` still resolved to the wrapper post-activate. `$CONDA_PREFIX/bin/<tool>` is unambiguous.
+**Fix:** after `conda activate <env>`, call **`"$CONDA_PREFIX/bin/<tool>"`** (absolute env binary, bypasses the PATH-shadowing wrapper). Note `conda activate` does not guarantee the env bin precedes `~/BinderScout/bin` in PATH — verified on the cluster that `which rfd3` still resolved to the wrapper post-activate. `$CONDA_PREFIX/bin/<tool>` is unambiguous.
 
 **Applies to tool entries:** `tools/rfd3.md`, `tools/boltzgen.md`, and any tool whose run script calls the tool by bare name. The configurator's `write_run_*` functions should emit `"$CONDA_PREFIX/bin/<tool>"`.
 
@@ -148,14 +148,14 @@ Every CLI-drift bug this campaign hit (PC `pipeline=` shorthand + wrong Hydra pa
 ## 11. Generation is cheap; the cross-engine refold is the funnel — draw more, filter hard
 **[Likely portable]** — orchestration strategy
 
-When the goal is "best possible designs" (expensive wet-lab validation downstream), the binding constraint is **not** design-tool compute — it's the cross-engine refold (Boltz-2 + AF3 + ESMFold2 on the big-VRAM/Spark node). Cheap generators (esp. **RFD3** — ApoE4 did 100 backbones in 1h59m on H200) can flood a large pool, but tools that emit *unscored* designs (RFD3 has no native interface metric) load the refold 1:1.
+When the goal is "best possible designs" (expensive wet-lab validation downstream), the binding constraint is **not** design-tool compute — it's the cross-engine refold (Boltz-2 + AF3 + ESMFold2 on the big-VRAM/aarch64 node). Cheap generators (esp. **RFD3** — ApoE4 did 100 backbones in 1h59m on H200) can flood a large pool, but tools that emit *unscored* designs (RFD3 has no native interface metric) load the refold 1:1.
 
-**Pattern — decouple the cheap engine from the Spark-locked one:**
+**Pattern — decouple the cheap engine from the aarch64-locked one:**
 1. Scale up the cheap generator (RFD3 backbones, MPNN best-of-N) + filter cheaply first: geometry (drop chainbreaks/clashes), then a cheap fold.
-2. **ESMFold2-Fast** (`binder-eval-esmfold2`) folds the *complex* and emits `iptm` directly — it is NOT Spark-locked, runs on any idle 24 GB card. Use it as a pre-filter: gate on `iptm` up front (cheap, conventional), keep the top slice (~40%).
+2. **ESMFold2-Fast** (`binder-eval-esmfold2`) folds the *complex* and emits `iptm` directly — it is NOT aarch64-locked, runs on any idle 24 GB card. Use it as a pre-filter: gate on `iptm` up front (cheap, conventional), keep the top slice (~40%).
 3. Promote only survivors to the expensive Boltz-2 + AF3 + ESMFold2 merge, where `ipsae_min` does the real ranking (`scoring.py` computes `esmfold2_ipsae_min` too; ESMFold2 is reported-not-counted in `agreement_count`).
 
-This keeps the Spark refold load flat as the generated pool grows. (ApoE4 2026-05-29: RFD3 v2 = 500 backbones → geometry → MPNN best-of-30 → ESMFold2 iPTM top-40% → cross-engine merge.)
+This keeps the aarch64 refold load flat as the generated pool grows. (ApoE4 2026-05-29: RFD3 v2 = 500 backbones → geometry → MPNN best-of-30 → ESMFold2 iPTM top-40% → cross-engine merge.)
 
 **Applies to tool entries:** `tools/rfd3.md`, `tools/boltz2.md`, `evaluation.md` (triage stage), SKILL.md §6 (cheap-first / funnel heuristics).
 
@@ -226,4 +226,4 @@ Categories of lessons that have repeated themselves across the campaign. If a ne
 - **Logs lie at the wrapper level.** Real errors are deeper (§7).
 - **`bin/` wrappers fail non-interactively.** Use `$CONDA_PREFIX/bin/<tool>` in batch (§9).
 - **Hand-written CLIs drift; the configurator doesn't.** Generate/validate against it; smoke-test before long runs (§10).
-- **Generation is cheap; the refold is the funnel.** Draw more, filter hard, triage off-Spark with ESMFold2 (§11).
+- **Generation is cheap; the refold is the funnel.** Draw more, filter hard, triage off the aarch64 host with ESMFold2 (§11).

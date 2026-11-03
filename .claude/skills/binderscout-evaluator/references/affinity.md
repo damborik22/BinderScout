@@ -21,7 +21,7 @@ binder-compare affinity --metrics report/metrics.csv \
     --structures-dir runs/<name>/structures --run-rosetta --interface B_A -o affinity.csv
 ```
 - ΔG / ΔSASA come from **Rosetta InterfaceAnalyzer**, run via `conda run -n BindCraft` — PyRosetta
-  is in the BindCraft env on **every** BindCraft platform incl. aarch64 / Spark (NOT x86-gated).
+  is in the BindCraft env on **every** BindCraft platform incl. aarch64 (GB10) (NOT x86-gated).
 - `--interface B_A` = binder_target chains (RFD3 convention is binder B, target A — check yours).
 - Or supply a precomputed `--energy interface_energy.csv` (skip `--run-rosetta`).
 

@@ -4,7 +4,7 @@ Run these checks in order before touching the run script. If any fails, append a
 
 ## 1. Read and validate the assignment
 
-**Driven mode (BM1/BM2/BM4 via `tools/fleet.sh`):** there's no `CLUSTER/` doc — read the run script `fleet.sh launch` will ship (or already shipped) instead; it carries the same settings a `CLUSTER/` doc's "Setup / install" section would. The rest of this checklist (§2-5, §7-9) still applies; §6 (muni-disk reachability) does not.
+**Driven mode (LAN GPU nodes via `tools/fleet.sh`):** there's no `CLUSTER/` doc — read the run script `fleet.sh launch` will ship (or already shipped) instead; it carries the same settings a `CLUSTER/` doc's "Setup / install" section would. The rest of this checklist (§2-5, §7-9) still applies; §6 (lab-share reachability) does not.
 `tools/fleet.sh` itself is **not in this repository** — it is archived off-repo on the lab
 share, so fetch it from there before using driven mode, or push the run script by plain `scp`.
 
@@ -72,9 +72,9 @@ Check:
 
 If memory class is below what the assignment needs, that's a pre-flight failure. The orchestrator may have made an assumption that doesn't hold; report it.
 
-### 3.1 GPU-busy floor (BM1/BM2/BM4)
+### 3.1 GPU-busy floor (LAN GPU nodes)
 
-When checking "is the GPU actually free" before a manual launch on one of the LAN machines, apply the same >512 MiB floor `tools/fleet.sh` uses (`GPU_BUSY_MIB`) — small desktop-integration processes ride the GPU permanently on these boxes and don't count as busy. Confirmed on BM4: a ~6 MiB `snapd-desktop-integration` process and, at times, a ~294 MiB `rustdesk` process are both always-on and both correctly ignored by the floor. A check without the floor will conclude the machine is busy when it isn't.
+When checking "is the GPU actually free" before a manual launch on one of the LAN machines, apply the same >512 MiB floor `tools/fleet.sh` uses (`GPU_BUSY_MIB`) — small desktop-integration processes ride the GPU permanently on these boxes and don't count as busy. Confirmed on an x86_64 LAN workstation: a ~6 MiB `snapd-desktop-integration` process and, at times, a ~294 MiB `rustdesk` process are both always-on and both correctly ignored by the floor. A check without the floor will conclude the machine is busy when it isn't.
 
 ```bash
 nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits \
@@ -90,7 +90,7 @@ nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits \
 free -g | awk '/^Mem:/{print $2}'   # total installed RAM, not free/available
 ```
 
-BM1 has **31 GB** total RAM against BM2/BM4's 62 GB. The BindCraft JAX RSS leak (§ below, and `troubleshooting.md` §4.4) killed BM4 at 58 GB after nine days; on BM1 the same run OOMs far sooner, before it produces meaningful yield. **Do not route long BindCraft runs to BM1** — short jobs or non-BindCraft tools are fine there.
+The smallest LAN node has **31 GB** total RAM against 62 GB on the others. The BindCraft JAX RSS leak (§ below, and `troubleshooting.md` §4.4) killed a 62 GB node at 58 GB after nine days; on the 31 GB node the same run OOMs far sooner, before it produces meaningful yield. **Do not route long BindCraft runs to the 31 GB node** — short jobs or non-BindCraft tools are fine there.
 
 ### 3.3 `PYTORCH_CUDA_ALLOC_CONF` (LAN machines, RFD3)
 
@@ -100,7 +100,7 @@ All three x86 LAN boxes are 24 GB Ampere, so `export PYTORCH_CUDA_ALLOC_CONF=exp
 
 ```bash
 df -h ~/runs                # local scratch
-df -h /path/to/muni-disk    # output destination (if mounted)
+df -h /path/to/lab-share    # output destination (if mounted)
 ```
 
 Budget guide per tool (rough):
@@ -129,34 +129,34 @@ git checkout <pinned-SHA-from-assignment>
 git log -1 --oneline                # verify HEAD
 ```
 
-If the pinned SHA doesn't exist locally even after fetch, the orchestrator may have committed locally on Spark without pushing. Report it.
+If the pinned SHA doesn't exist locally even after fetch, the orchestrator may have committed locally on the aarch64 host without pushing. Report it.
 
 If the repo has uncommitted changes locally, that's a worker-side mess; ask before stashing or discarding.
 
-## 6. Verify muni-disk reachable
+## 6. Verify the lab share is reachable
 
-This check applies to **assignment mode** — Clara, or any machine reading a `CLUSTER/` doc directly. **Skip it for driven-mode LAN jobs** (BM1/BM2/BM4 launched via `tools/fleet.sh` from BM5): the run script arrives by direct SSH push, not a `CLUSTER/` read, and results are pulled back by `fleet.sh fetch` and archived to muni-disk by BM5 itself — the worker machine never touches muni-disk in that flow.
+This check applies to **assignment mode** — a multi-user cluster, or any machine reading a `CLUSTER/` doc directly. **Skip it for driven-mode LAN jobs** (LAN GPU nodes launched via `tools/fleet.sh` from the driving host): the run script arrives by direct SSH push, not a `CLUSTER/` read, and results are pulled back by `fleet.sh fetch` and archived to the lab share by the driving host itself — the worker machine never touches the lab share in that flow.
 
 For assignment mode, either it's mounted:
 
 ```bash
-ls /path/to/muni-disk/<TARGET>/CLUSTER/   # should show your assignment
+ls /path/to/lab-share/<TARGET>/CLUSTER/   # should show your assignment
 ```
 
 Or it needs the right VPN:
 
 ```bash
-# After connecting to MUNI VPN:
-ls /path/to/muni-disk/<TARGET>/CLUSTER/
+# After connecting to the lab-share VPN:
+ls /path/to/lab-share/<TARGET>/CLUSTER/
 ```
 
 **Which machines need which:**
-- **Clara** needs the MUNI VPN to reach XBay — VPN-only access (see `troubleshooting.md` §8).
-- **BM1/BM2/BM4** are on the university LAN and mount muni-disk **directly, no VPN**. If one of them is ever run in assignment mode (rather than driven mode) and needs to read a `CLUSTER/` doc, it should already be reachable without switching anything.
+- **The cluster** needs the lab-share VPN to reach the lab share — VPN-only access (see `troubleshooting.md` §8).
+- **x86_64 LAN GPU nodes** are on the university LAN and mount the lab share **directly, no VPN**. If one of them is ever run in assignment mode (rather than driven mode) and needs to read a `CLUSTER/` doc, it should already be reachable without switching anything.
 
-If not reachable and you're on Clara, you may be on the wrong VPN. Switch and re-check.
+If not reachable and you're on the cluster, you may be on the wrong VPN. Switch and re-check.
 
-**Note for VPN switching:** if you need to switch VPN (Clara-VPN ↔ MUNI-VPN), announce it in a PROGRESS.md Worker updates entry first. The orchestrator may be relying on your current VPN for monitoring. This doesn't apply to BM1/BM2/BM4 — they need no VPN at all.
+**Note for VPN switching:** if you need to switch VPN (cluster VPN ↔ lab-share VPN), announce it in a PROGRESS.md Worker updates entry first. The orchestrator may be relying on your current VPN for monitoring. This doesn't apply to the LAN GPU nodes — they need no VPN at all.
 
 ## 7. Tool-specific cache verification
 
@@ -228,7 +228,7 @@ foundry install ligandmpnn
 
 Database and model paths set in `binder-eval-af3` env. See `Evaluator/docs/pipeline_reference.md`.
 
-## 8. aarch64-specific checks (Spark, future ARM nodes)
+## 8. aarch64-specific checks (DGX Spark / GB10, future ARM nodes)
 
 ```bash
 uname -m                                # should print 'aarch64'
@@ -241,7 +241,7 @@ Confirm tool-specific aarch64 ports:
   file ~/dev/BindMaster/BindCraft/functions/DAlphaBall.gcc
   ```
 - **Proteina-Complexa:** NOT yet ported. Refuse the assignment if it landed here by mistake; ask the orchestrator.
-- **Protein-Hunter:** permanently blocked on aarch64, not just "not yet ported" — PyRosetta has no aarch64 wheels. Refuse if this machine is BM5/Spark; route to BM1/BM2/BM4 or Clara instead.
+- **Protein-Hunter:** permanently blocked on aarch64, not just "not yet ported" — PyRosetta has no aarch64 wheels. Refuse if this machine is the aarch64 (GB10) host; route to an x86_64 LAN GPU node or the cluster instead.
 - **RFD3:** should work via foundry; the `mpnn` console-script needs ARM64-built wheels.
 - **PXDesign:** install patches handle Blackwell sm_120; verify they were applied (see `troubleshooting.md`).
 
