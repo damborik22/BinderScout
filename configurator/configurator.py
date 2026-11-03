@@ -4769,10 +4769,11 @@ def write_run_rfd4(path: Path, cfg: dict):
     name = cfg["name"]
     primary_chain = cfg.get("chains", "A").split(",")[0].strip()
     target_seq = cfg.get("target_sequence", "")
-    if not target_seq and cfg.get("target_pdb"):
+    target_structure = cfg.get("target_pdb")
+    if not target_seq and target_structure:
         # A headless replay may carry no sequence; settings.json should still record
         # the one the design actually ran against, so read it from the structure.
-        target_seq = extract_sequence_from_structure(str(cfg["target_pdb"]), primary_chain) or ""
+        target_seq = extract_sequence_from_structure(str(target_structure), primary_chain) or ""
     n_designs = int(cfg.get("rfd4_n_designs", cfg.get("n_designs", 50)))
     seed = int(cfg.get("rfd4_seed", 1))
 
