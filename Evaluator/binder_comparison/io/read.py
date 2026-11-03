@@ -435,3 +435,23 @@ def parse_fasta_header_tags(header: str) -> dict[str, str]:
     Returns {'iptm': '0.8120', 'bt_ipsae': '0.6500', 'pdb': 'foo.pdb'}
     """
     return dict(re.findall(r"(\w+)=(\S+)", header))
+
+
+def split_fasta_header(header: str) -> tuple[str, dict[str, str]]:
+    """Split a FASTA header into (id, tags): ``'id  k=v  k2=v2'`` -> ``('id', {'k': 'v', 'k2': 'v2'})``.
+
+    Whitespace-separated words that are not ``key=value`` belong to the id and are joined with
+    '_' (a space inside an id would end it early for every reader). The first word is always
+    the id, even if it contains '='.
+    """
+    words = header.split()
+    if not words:
+        return "", {}
+    id_words, tags = [words[0]], {}
+    for w in words[1:]:
+        m = re.fullmatch(r"(\w+)=(\S*)", w)
+        if m:
+            tags[m.group(1)] = m.group(2)
+        else:
+            id_words.append(w)
+    return "_".join(id_words), tags

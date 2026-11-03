@@ -20,7 +20,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from ..io.read import parse_sequences_any_format
+from ..io.read import parse_sequences_any_format, split_fasta_header
 from ..io.write import write_fasta
 
 
@@ -33,8 +33,16 @@ def run(args: argparse.Namespace) -> None:
 
     print(f"[parse-seqs] Found {len(entries)} sequences in {Path(args.input).name}")
 
-    headers, sequences = zip(*entries)
-    write_fasta(sequences, args.output, headers=headers)
+    # A FASTA header is 'id  key=value ...': split it so the tags are re-emitted as tags. Passing
+    # the whole line as the id welds them into it, and a second pass (the output is also the next
+    # run's input) would corrupt an `extract` FASTA.
+    split = [split_fasta_header(h) for h, _ in entries]
+    write_fasta(
+        [s for _, s in entries],
+        args.output,
+        headers=[i for i, _ in split],
+        tags=[t for _, t in split],
+    )
     print(f"[parse-seqs] Written → {args.output}")
 
 

@@ -592,10 +592,19 @@ fi
 
 # --- Step 0: Normalise sequences to FASTA ----------------------------------
 FASTA="$OUTPUT/sequences.fasta"
+# The generated run_evaluate.sh passes --sequences "$OUTPUT/sequences.fasta", i.e. $SEQUENCES and
+# $FASTA are the SAME file. Parse into a temporary file and move it into place, so the input is
+# never read and written at once and a failed parse leaves the original untouched.
+normalise_sequences () {   # $1=input  $2=output FASTA
+    local tmp="$2.parse.$$"
+    if ! conda run -n binder-eval binder-compare parse-seqs --input "$1" --output "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    mv -f "$tmp" "$2"
+}
 echo "[step 0] Parsing sequences → $FASTA"
-conda run -n binder-eval binder-compare parse-seqs \
-    --input  "$SEQUENCES" \
-    --output "$FASTA"
+normalise_sequences "$SEQUENCES" "$FASTA"
 SEQUENCES="$FASTA"
 
 # --- Step 1: Boltz-2 refolding ---------------------------------------------
