@@ -13,14 +13,16 @@
 ### Clone
 
 ```bash
-git clone https://github.com/damborik22/BinderScout.git
+git clone -b v2.0.x https://github.com/damborik22/BinderScout.git
 cd BinderScout
 ```
+
+The default branch is `master`, a separate 1.x line; `-b v2.0.x` gets this one.
 
 ### Install tools
 
 ```bash
-binderscout install --tool all
+./binderscout.py install --tool all   # the `binderscout` shortcut exists only after this has run once
 ```
 
 ---
@@ -37,6 +39,7 @@ binderscout install --tool all
 | Proteina-Complexa `.venv` (uv) | Flow matching binder design | 3.12 |
 | `binderscout_protein_hunter` | Protein-Hunter (Boltz-2 / Chai-1 hallucination) | 3.10 |
 | `binderscout_rfd3` | RFD3 / foundry diffusion + ProteinMPNN | 3.12 |
+| `RFD4-Proteina/.venv` (uv) | RFD4-Proteina latent-reasoning diffusion (backbone and sequence in one pass; opt-in `--tool rfd4`, the checkout is the installation) | 3.12 |
 | `binder-eval` | Evaluator extract + report | 3.10 |
 | `binder-eval-af3` | AlphaFold 3 refolding (opt-in; gated weights) | 3.12 |
 | `binder-eval-esmfold2` | ESMFold2 refolding — the default engine | 3.10 |
@@ -152,10 +155,15 @@ Then open `/tmp/report/report.html`.
 
 ## Branch structure
 
-| Branch | Platform | Notes |
-|---|---|---|
-| `master` | x86_64 Linux + NVIDIA GPU | Primary development branch |
-| `aarch64` | NVIDIA DGX Spark / Grace-Hopper | Periodically rebased from master |
+There is no `aarch64` branch: one tree serves both architectures (`install/install.sh` on
+x86_64, `install/install_aarch.sh` on aarch64). Branches are release lines.
+
+| Branch | Notes |
+|---|---|
+| `v2.0.x` | The 2.0 line (tags `v2.0.0` onward). Working branch for new work |
+| `master` | A separate 1.x line, currently `v1.2.x`; `v2.0.x` is not an ancestor of it, so fixes are re-applied by hand, not cherry-picked |
+
+`v1.1.x` was retired to the tag `archive/v1.1.x`.
 
 ---
 
@@ -172,3 +180,38 @@ For smaller changes within a part, use descriptive imperative messages:
 ```
 Fix PAE heatmap rendering for single-sequence inputs
 ```
+
+---
+
+## Releasing
+
+A release is a tag on a clean, verified tree. Every step below exists because skipping
+it once produced a tag that did not match what was tested.
+
+1. **Start from a clean tree.** `git status` shows nothing. Never tag on a dirty tree: the
+   `binderscout_git_sha` written into every run's `settings.json` must name code that exists.
+2. **Run the full suite on a clean clone,** not in the directory you developed in (an
+   untracked file or an editable install can make a test pass that fails for everyone
+   else): clone the branch into a scratch directory and run `python -m pytest -q` there
+   with the `binder-eval` environment's Python. Zero failures.
+3. **Lint with the CI-pinned tools:** `ruff check .` and `ruff format --check .` with
+   `ruff==0.17.0` (the version `.github/workflows/ci.yml` pins), and
+   `shellcheck --shell=bash --severity=warning` over the shell scripts listed above.
+4. **Write the changelog.** Move the `[Unreleased]` entries under a new
+   `## [X.Y.Z] — date` heading in `CHANGELOG.md`, leaving an empty `[Unreleased]` above it.
+   Call out every behaviour change a user could notice.
+5. **Bump `__version__`** in `binderscout.py` in the same commit.
+   `tests/test_version_matches_changelog.py` compares it with the newest numbered changelog
+   heading; it is marked `xfail(strict=True)` while a release is being prepared, so the
+   release commit is where that marker is removed.
+6. **Create an annotated tag** on that commit (`git tag -a vX.Y.Z -m "..."`). Lightweight
+   tags carry no message and no date.
+7. **Push the branch and the tag,** then create the GitHub release with
+   `gh release create vX.Y.Z --latest=false`. `--latest=false` so that a release of this
+   line does not take the repository's "Latest" badge.
+8. **Re-pin the fleet.** Move each machine's checkout to the new tag and confirm with
+   `binderscout install --verify`, which reports tools built against another commit as `STALE`.
+
+**Tags are immutable once pushed.** A clone, a fleet checkout or a recorded
+`binderscout_git_sha` may already point at one. If a tag turns out to be wrong, do not move
+or delete it: cut the next patch release that supersedes it and say so in the changelog.
