@@ -781,6 +781,35 @@ csv_rows () {
     ' "$1"
 }
 
+# A row delta is not evidence the POOL was refolded. A refold that resumes off a stale CSV
+# shared with earlier pools gains hundreds of rows, refolds none of this pool, and exits 0;
+# the delta alone then read "ok -- 1003 new row(s)" while every design of the pool was
+# missing from that engine and nothing could clear the cross-engine gate. So count the pool
+# sequences the CSV actually carries, scored: `sequence` is the column every engine writes
+# and the one the report's merge joins on, and a row with a blank `iptm` is not a refold
+# (see csv_rows above). Columns are found by name -- the engines' CSVs differ in order.
+pool_coverage () {   # $1=engine csv  $2=sequences fasta  -> count of pool seqs scored in it
+    [[ -f "$1" && -f "$2" ]] || { echo 0; return; }
+    awk -v FS=, '
+        NR == FNR {
+            if (FNR == 1) { for (i = 1; i <= NF; i++) { if ($i == "sequence") col = i; if ($i == "iptm") sc = i }; next }
+            if (col && sc) {
+                v = $col; gsub(/[ \t\r]/, "", v)
+                if (v != "" && $sc != "") seen[toupper(v)] = 1
+            }
+            next
+        }
+        # `cur` accumulates one (possibly wrapped) FASTA record. It must not share a name
+        # with anything in the CSV pass above: awk variables are global, so a leftover
+        # value counted the last CSV row as a pool hit.
+        /^>/ { if (cur != "" && toupper(cur) in seen) n++; cur = ""; next }
+        { t = $0; gsub(/[ \t\r]/, "", t); cur = cur t }
+        END { if (cur != "" && toupper(cur) in seen) n++; print n + 0 }
+    ' "$1" "$2"
+}
+
+fasta_count () { if [[ -f "$1" ]]; then grep -c '^>' "$1"; else echo 0; fi; }
+
 engine_csv () {
     case "$1" in
         boltz2)   echo "$BOLTZ2_CSV" ;;
@@ -792,7 +821,7 @@ engine_csv () {
 
 # $1=label  $2=csv  $3=rows before  $4=rc
 check_engine_rows () {
-    local name=$1 csv=$2 before=$3 rc=$4 after
+    local name=$1 csv=$2 before=$3 rc=$4 after covered pool
     after=$(csv_rows "$csv")
     if [[ $rc -ne 0 ]]; then
         echo "Error: $name refolding failed (rc=$rc). Refusing to report a partial pool." >&2
@@ -804,7 +833,20 @@ check_engine_rows () {
         echo "       A missing engine silently breaks the cross-engine gate -- aborting." >&2
         return 1
     fi
-    echo "    [$name] ok -- $((after - before)) new row(s)"
+    covered=$(pool_coverage "$csv" "$SEQUENCES")
+    pool=$(fasta_count "$SEQUENCES")
+    if [[ "$covered" -eq 0 ]]; then
+        echo "Error: $name wrote $((after - before)) new SCORED row(s) to $csv, but NONE of them is a" >&2
+        echo "       design in $SEQUENCES ($pool in the pool)." >&2
+        echo "       Rows from another pool cannot rank this one. Likely a stale CSV or" >&2
+        echo "       structure directory being resumed off -- aborting." >&2
+        return 1
+    fi
+    if [[ "$covered" -lt "$pool" ]]; then
+        echo "    [$name] WARNING -- covers $covered/$pool pool design(s); the rest will fail" >&2
+        echo "               the cross-engine gate." >&2
+    fi
+    echo "    [$name] ok -- $covered/$pool pool design(s), $((after - before)) new row(s)"
     return 0
 }
 
