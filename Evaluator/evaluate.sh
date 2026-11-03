@@ -880,6 +880,15 @@ check_engine_rows () {
         return 1
     fi
     if [[ "$after" -le "$before" ]]; then
+        # --resume on a finished run skips every design and exits 0 having written nothing. That
+        # is success if the CSV already carries a scored row for EVERY pool design; it is only an
+        # error when the pool is not covered (a stalled engine, a blank CSV, another pool's rows).
+        covered=$(pool_coverage "$csv" "$SEQUENCES")
+        pool=$(fasta_count "$SEQUENCES")
+        if [[ "$pool" -gt 0 && "$covered" -ge "$pool" ]]; then
+            echo "    [$name] ok -- already complete: $covered/$pool pool design(s) scored in $csv, no new rows needed"
+            return 0
+        fi
         echo "Error: $name exited 0 but wrote no new SCORED rows to $csv ($before -> $after)." >&2
         echo "       Counted on a non-empty iptm, so a file full of blank rows counts as zero." >&2
         echo "       A missing engine silently breaks the cross-engine gate -- aborting." >&2
