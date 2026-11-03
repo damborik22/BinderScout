@@ -171,6 +171,27 @@ Work since `v2.0.2` (37 commits), in preparation as `v2.0.3`. Nothing here chang
 - `tests/test_version_matches_changelog.py` pins `binderscout.__version__` to the newest numbered
   changelog heading. It is `xfail(strict=True)` until the release commit bumps the version.
 
+### Fixed by the end-to-end demo campaign (2026-11-03)
+
+- **`evaluate.sh` step 0 no longer destroys the design id.** It re-parsed the extract FASTA over itself and
+  welded the `source=` / `length=` tags into the id, so `metrics.csv` said `source_tool='unknown'` and every
+  structure filename was bloated. `parse-seqs` now keeps tags as tags (idempotent on an extract FASTA) and
+  step 0 writes to a temporary file and moves it into place.
+- **A finished run can be re-run.** With `--resume` (always passed by the generated script) a complete run
+  writes nothing, and the no-new-rows guard reported failure. It now reports "already complete" when every
+  pool design carries a scored row **folded against this run's target**; the stale-shared-CSV and
+  different-target protections are kept.
+- **RFD3:** the geometry gate's "cannot verify" exit no longer kills the script under `set -e` (the documented
+  warn-and-continue branch and `RFD3_IGNORE_GATE` were unreachable, so RFD3 produced 0 designs), and a binder
+  shorter than the gate's floor is described as too short rather than as having no atoms.
+- **`binder-compare extract`:** one empty tool is a named warning and the other tools' designs are still
+  written (it used to exit 1 and discard them); exit 1 only when every tool is empty.
+- **Configurator:** a copied `--config` with a new `name` gets its own run folder; the BoltzGen script stops its
+  whole process group on termination; a headless config can set `trim_construct_tag`; the Protein-Hunter
+  collector finds its summaries at either directory level.
+- **Hygiene:** the machine-names guard no longer scans `__pycache__` (the suite failed on its second run), and
+  a conda shell function on the host can no longer make the `evaluate.sh` parser test flaky.
+
 ### Ported from `master` (1.0.6-1.0.8), re-applied on this line
 
 - **One NaN guard for every extractor's sequence cell.** An empty CSV cell is NaN and

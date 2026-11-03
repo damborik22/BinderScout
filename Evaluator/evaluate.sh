@@ -840,14 +840,21 @@ csv_rows () {
 # sequences the CSV actually carries, scored: `sequence` is the column every engine writes
 # and the one the report's merge joins on, and a row with a blank `iptm` is not a refold
 # (see csv_rows above). Columns are found by name -- the engines' CSVs differ in order.
-pool_coverage () {   # $1=engine csv  $2=sequences fasta  -> count of pool seqs scored in it
+pool_coverage () {   # $1=engine csv  $2=sequences fasta  [$3=target]  -> count of pool seqs scored in it
     [[ -f "$1" && -f "$2" ]] || { echo 0; return; }
-    awk -v FS=, '
+    # $3, when given, is the run's target: a row folded against ANOTHER target is not coverage. --resume
+    # keys on the binder sequence only, so re-running into the same output directory with a different
+    # --target-seq would otherwise find every design "complete" and report the old target's scores.
+    # A CSV without a target_sequence column cannot be checked and still counts.
+    local tgt="${3//[[:space:]]/}"
+    awk -v FS=, -v tgt="$tgt" '
         NR == FNR {
-            if (FNR == 1) { for (i = 1; i <= NF; i++) { if ($i == "sequence") col = i; if ($i == "iptm") sc = i }; next }
+            if (FNR == 1) { for (i = 1; i <= NF; i++) { if ($i == "sequence") col = i; if ($i == "iptm") sc = i; if ($i == "target_sequence") tc = i }; next }
             if (col && sc) {
                 v = $col; gsub(/[ \t\r]/, "", v)
-                if (v != "" && $sc != "") seen[toupper(v)] = 1
+                ok = 1
+                if (tgt != "" && tc) { tv = $tc; gsub(/[ \t\r]/, "", tv); ok = (toupper(tv) == toupper(tgt)) }
+                if (v != "" && $sc != "" && ok) seen[toupper(v)] = 1
             }
             next
         }
@@ -883,18 +890,19 @@ check_engine_rows () {
         # --resume on a finished run skips every design and exits 0 having written nothing. That
         # is success if the CSV already carries a scored row for EVERY pool design; it is only an
         # error when the pool is not covered (a stalled engine, a blank CSV, another pool's rows).
-        covered=$(pool_coverage "$csv" "$SEQUENCES")
+        covered=$(pool_coverage "$csv" "$SEQUENCES" "${TARGET_SEQ:-}")
         pool=$(fasta_count "$SEQUENCES")
         if [[ "$pool" -gt 0 && "$covered" -ge "$pool" ]]; then
             echo "    [$name] ok -- already complete: $covered/$pool pool design(s) scored in $csv, no new rows needed"
             return 0
         fi
         echo "Error: $name exited 0 but wrote no new SCORED rows to $csv ($before -> $after)." >&2
+        echo "       (rows folded against a DIFFERENT target than this run's --target-seq do not count as coverage.)" >&2
         echo "       Counted on a non-empty iptm, so a file full of blank rows counts as zero." >&2
         echo "       A missing engine silently breaks the cross-engine gate -- aborting." >&2
         return 1
     fi
-    covered=$(pool_coverage "$csv" "$SEQUENCES")
+    covered=$(pool_coverage "$csv" "$SEQUENCES" "${TARGET_SEQ:-}")
     pool=$(fasta_count "$SEQUENCES")
     if [[ "$covered" -eq 0 ]]; then
         echo "Error: $name wrote $((after - before)) new SCORED row(s) to $csv, but NONE of them is a" >&2

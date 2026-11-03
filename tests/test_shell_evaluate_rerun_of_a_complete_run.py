@@ -135,3 +135,36 @@ def test_the_sequential_wrapper_passes_a_stub_engine_that_writes_nothing_on_a_co
     assert r.returncode == 0, r.stdout + r.stderr
     assert "reached-after-engine" in r.stdout
     assert "already complete" in r.stdout
+
+
+class TestACompleteRunOfAnotherTargetIsNotComplete:
+    """`--resume` keys on the binder sequence only: a re-run with a DIFFERENT --target-seq into the same
+    output directory finds every design 'completed' and writes nothing. That must not read as success
+    (review 2026-11-03: the new already-complete shortcut would have published the old target's scores)."""
+
+    def _run(self, tmp_path, csv_target: str, run_target: str):
+        csv = tmp_path / "e.csv"
+        csv.write_text(f"idx,sequence,target_sequence,iptm\n1,AAAA,{csv_target},0.9\n")
+        fa = _fasta(tmp_path / "s.fasta", ["AAAA"])
+        program = "\n".join(
+            [_fn(n) for n in _FUNCS]
+            + [
+                f'SEQUENCES="{fa}"',
+                f'TARGET_SEQ="{run_target}"',
+                f'check_engine_rows "Boltz-2" "{csv}" 1 0',
+                "echo rc=$?",
+            ]
+        )
+        return _bash(program, tmp_path)
+
+    def test_the_same_target_is_complete(self, tmp_path):
+        r = self._run(tmp_path, "TTTTTT", "TTTTTT")
+        assert "already complete" in r.stdout and "rc=0" in r.stdout, (r.stdout, r.stderr)
+
+    def test_a_different_target_is_refused(self, tmp_path):
+        r = self._run(tmp_path, "OLDTARGET", "NEWTARGET")
+        assert "rc=1" in r.stdout and "DIFFERENT target" in r.stderr, (r.stdout, r.stderr)
+
+    def test_case_and_whitespace_in_the_target_do_not_matter(self, tmp_path):
+        r = self._run(tmp_path, " tttttt ", "TTTTTT")
+        assert "already complete" in r.stdout, (r.stdout, r.stderr)
