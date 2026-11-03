@@ -51,7 +51,7 @@ metrics scores **0.517**, worse than the **0.555** of the shipped metric (p = 0.
 the best of 2,489 searched combinations sits inside the permutation null. The Stage-1 max screen
 removed 0 designs from the top decile on 12/12 targets and was retired. Affinity ranking from
 structure confidence is closed as negative on four independent datasets.
-Full write-up: `docs/INVESTIGATION_partU_cao_benchmark.md`.
+Full write-up: removed from the tree 2026-11-03, archived off-repo; the summary is in `CLAUDE.md`.
 
 ## The one caveat to state out loud
 

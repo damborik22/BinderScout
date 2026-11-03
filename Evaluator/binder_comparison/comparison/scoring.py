@@ -954,7 +954,7 @@ def compute_agreement(
     Uses per-engine thresholds (defaulting to *threshold* for backward compat
     when `engine_thresholds` not supplied). AF2 is **excluded** from the count
     because its DunbrackLab distribution is mis-calibrated on short targets
-    (see docs/INVESTIGATION_RANKING_DISCREPANCY.md §6).
+    (see the ranking-discrepancy investigation, archived off-repo).
 
     Adds column 'agreement_count' (0–3: Boltz-2, AF3, ESMFold2 over their thresholds)
     and **'agreement_denom'**, how many of those engines actually produced a score for

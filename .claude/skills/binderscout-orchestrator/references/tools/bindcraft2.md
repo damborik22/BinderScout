@@ -97,7 +97,7 @@ Under `--tool all` on x86, a missing source **warns and skips**; an explicit `--
 
 - **Upstream repository: [PacesaLab/BindCraft2](https://github.com/PacesaLab/BindCraft2)** — public since 2026-09-16, source-available under its own (non-MIT, hosting-restricted) licence. The installer clones it at `v1.0.1`; `--bc2-source` / `$BINDCRAFT2_SOURCE` overrides with a `.zip`, a directory or another git URL. `BindCraft2/` is gitignored and never committed.
 - Lineage: the same lab's rewrite of BindCraft (Pacesa et al. 2024, bioRxiv 2024.09.30.615802), which remains a separate tool — see `bindcraft.md`.
-- BinderScout integration plan, with the measurements quoted above: `docs/PLAN_bindcraft2_integration.md`
+- BinderScout integration plan with the measurements quoted above: removed from the tree 2026-11-03, archived off-repo
 - Extractor (and the dual-schema reasoning): `Evaluator/binder_comparison/extractors/bindcraft2.py`
 - Run-script template: `binderscout_examples/run_bindcraft2.sh.template`
 - Not to be confused with **BindMaster 2** (`docs/bindmaster2_grafts.md`), which is a different thing entirely.

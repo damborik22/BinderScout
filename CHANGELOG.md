@@ -154,6 +154,15 @@ Work since `v2.0.2` (37 commits), in preparation as `v2.0.3`. Nothing here chang
 - `tests/test_version_matches_changelog.py` pins `binderscout.__version__` to the newest numbered
   changelog heading. It is `xfail(strict=True)` until the release commit bumps the version.
 
+### Removed
+
+- **The 16 planning records under `docs/`** (`PLAN_*`, `INVESTIGATION_*`, `REPORT_*`,
+  `MORNING_DECISIONS`, `NEXT_STAGES`) left the tree. They were internal, several named machines and
+  storage, and the 2.0.2 notes already said they had been removed. They are archived off-repo with the
+  diaries; git history is deliberately not rewritten, so older commits and the published tags still
+  contain them. What the project needs from them lives in `CLAUDE.md`, this changelog and
+  `Evaluator/docs/`. `2.0/README.md` was rewritten as an index of what remains.
+
 ## [2.0.2] — 2026-10-27
 
 ### Added

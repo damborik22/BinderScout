@@ -1,111 +1,31 @@
 # BinderScout 2.0 — handoff index
 
-Everything needed to pick up 2.0. **You have the repo**, so most of this points
-at files already in it rather than copying them — a second copy of `CLAUDE.md`
-drifts from the first within a week. The diaries are deliberately not in the repo (sensitive data); they live only on the lab's private share.
+Everything needed to pick up 2.0. **You have the repo**, so this points at files already in it
+rather than copying them — a second copy of `CLAUDE.md` drifts from the first within a week.
+The diaries and the planning records are deliberately not in the repo (sensitive data and
+unpublished results); they live only on the lab's private share.
 
 | | |
 |---|---|
-| **Branch** | `v2.0.x` — all 2.0 work. `master` is a **separate `v1.2.x` line** (it has a single merge base with this line, `602345a` (`v1.0.3`), and has diverged since, so it cannot be cherry-picked from); `v1.1.x` was retired to the `archive/v1.1.x` tag |
-| **Version** | Tags `v2.0.0`, `v2.0.1` and `v2.0.2` exist; **`v2.0.3` is in preparation**. The version is carried in `binderscout.py` |
-| **State** | 1839 tests passing, 10 skipped, 1 xfailed; ruff + shellcheck clean; working tree clean |
-
----
+| **Branch** | `v2.0.x` — all 2.0 work. `master` is a **separate `v1.2.x` line**: the two share a single merge base (`602345a`, `v1.0.3`) and have diverged since, so a fix cannot be cherry-picked between them — diff the trees and re-apply. `v1.1.x` was retired to the tag `archive/v1.1.x`. |
+| **Version** | Tags `v2.0.0`, `v2.0.1` and `v2.0.2` exist; **`v2.0.3` is in preparation**. The version is carried in `binderscout.py`. |
+| **Install** | One tree. `install/install.sh` on x86_64, `install/install_aarch.sh` on aarch64. There is no `aarch64` branch. |
 
 ## Read in this order
 
-### 1. Start here — what 2.0 is and where it stands
-**[`docs/PLAN_2.0_CONCLUSION.md`](../docs/PLAN_2.0_CONCLUSION.md)** *(a historical planning record — its status table is as of 2026-10-09 and is not current; the table above is)*
+1. **`CLAUDE.md`** — the project's own memory: architecture, the one ranking, every platform and tool gotcha that cost a campaign to learn. Start here and trust it over any other summary.
+2. **`CHANGELOG.md`** — what changed and why, release by release. `[Unreleased]` is the work since `v2.0.2`.
+3. **`Evaluator/docs/`** — how the evaluator scores (`evaluation/ranking.md`, `evaluation/metrics.md`) and `pipeline_reference.md` (metrics, known issues, `--save-pae-bins`, the structure-path remap).
+4. **`README.md`** — install, configure and evaluate, with the exact commands.
+5. **`CONTRIBUTING.md`** — dev setup, lint, tests, and the *Releasing* checklist.
 
-Self-contained. What was done, what is left and why, the three open decisions,
-the findings that cost real time, the platform reality, and what needs a machine
-this one is not. If you read one file, read this.
+## Not in the repo
 
-### 2. What happened to each of the twelve parts
-**[`docs/PLAN_2.0_PART_RESULTS.md`](../docs/PLAN_2.0_PART_RESULTS.md)**
-
-One row per lettered part (Y, Z, AA–AJ) with the result — "done", "blocked, here
-is the evidence", or a verdict. The four the plan admits were never investigated
-(AE, AF, AI, AJ) have verdicts here rather than silence. Read it with the
-conclusion; neither covers what the other does.
-
-### 3. The decisions that are waiting on a human
-**[`docs/MORNING_DECISIONS.md`](../docs/MORNING_DECISIONS.md)**
-
-Three live ones, each with the options and a standing recommendation. §1
-(pre-filtered pools) blocks finishing Stage 1 and is the only one that blocks
-code.
-
-### 4. Per-stage detail
-**[`docs/NEXT_STAGES.md`](../docs/NEXT_STAGES.md)**
-
-What the conclusion compresses. Note it predates the 2026-09-27 refold session,
-so a few lines in it are stale — the conclusion doc lists which.
-
-### 5. Before touching code
-**[`CLAUDE.md`](../CLAUDE.md)**
-
-The project's canonical self-description: environment isolation (never mix
-packages across envs), the ranking rules and what was removed from them, and
-per-tool runtime gotchas that each cost a campaign to learn.
-
-> **One live caveat.** Its statements about which machine runs which engine are
-> measurements from specific boxes, not guarantees — the ESMFold2 transformers fork,
-> for one, is present on some x86_64 machines and absent on others. Re-check on
-> yours before relying on them.
-
-### 6. How the findings were reached
-**`DIARY_2.0.md`** *(the lab's private share, not in this repo)*
-
-The 2.0 chapter of the repo diary — 8 entries, 771 lines. Records the wrong
-turns as well as the conclusions, which is the part that stops them being
-repeated. Extracted from `REPO_DIARY.md` on that same share; the diary is the
-living copy.
-
----
-
-## Read only if the work reaches them
-
-| if you are working on | read |
-|---|---|
-| **Stage 1 / `generation_index`** | [`docs/INVESTIGATION_generation_index_2026-09-24.md`](../docs/INVESTIGATION_generation_index_2026-09-24.md) — the per-tool verdicts on what generation order can honestly be recovered. Small and load-bearing |
-| **the ranking** | [`docs/INVESTIGATION_partU_cao_benchmark.md`](../docs/INVESTIGATION_partU_cao_benchmark.md) — the evidence behind "one ranking, no way to choose another", and why each removed alternative stays removed |
-| **affinity ranking** | `docs/completed_plans.md` — archives Part N's negative result; no longer in this repo, archived off-repo on the lab share |
-| **the original plan** | [`docs/PLAN_binderscout_v2.md`](../docs/PLAN_binderscout_v2.md) **together with** [`docs/PLAN_binderscout_v2_corrections.md`](../docs/PLAN_binderscout_v2_corrections.md) — **never the first alone.** The plan contains premises later measured false; the corrections file is what says which |
-
----
-
-## Not part of this handoff
-
-The repo holds ~14 other `PLAN_*` / `INVESTIGATION_*` documents — BindCraft 2
-integration, the AF3 Spark runbook, fleet orchestration, SoluProt, the GB10
-unified-memory plan, the virtual-lab concept. All real, none about 2.0.
-
-The historical diary (`REPO_DIARY.md`, on the same private share) in full is 2,858 lines, of
-which 2,098 predate 2.0.
-
----
+- **The diaries** (`DIARY_2.0.md`, historical `REPO_DIARY.md`) and the **planning records** (the 2.0 plan and its conclusion, the Part AK plan, the investigations, the pool reports). They record how each finding was reached, including the wrong turns. The planning records were removed from the tree on 2026-11-03 (the history is intentionally untouched). Ask for them on the lab's private share.
 
 ## Confirm the state before trusting any of it
 
 ```bash
-git rev-parse --abbrev-ref HEAD          # v2.0.x
-git status --short                       # empty
-./conda/envs/binder-eval/bin/python -m pytest tests/ -q   # 1839 passed, 10 skipped, 1 xfailed
-uvx ruff check . && uvx ruff format --check .
-./install/install.sh --tool all --verify # audits what is actually on disk
+git describe --tags            # nearest tag, then commits since
+python -m pytest tests -q      # use the binder-eval env's interpreter
 ```
-
----
-
-## The one habit worth carrying over
-
-2.0 spent most of its time on code that was **present, looked complete, and was
-either unwired or unverified** — not on missing features. Five installer
-verifiers passed environments that could not run; five test guards passed the
-mutations they were written to catch.
-
-So: write the guard as a test, then **mutate the code and confirm the test goes
-red — and assert that the mutation applied.** A mutation that silently fails to
-apply leaves a green test proving nothing. That happened twice here, and both
-times it was caught only by checking rather than by reading.

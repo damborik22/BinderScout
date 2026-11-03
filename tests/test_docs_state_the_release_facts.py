@@ -96,10 +96,17 @@ def test_handoff_index_states_the_branch_and_tag_layout():
         assert needle in top, f"the 2.0/README.md state table does not mention {needle!r}"
 
 
-def test_handoff_index_does_not_present_the_conclusion_as_current_status():
-    index = _text("2.0/README.md")
-    link = index[index.index("PLAN_2.0_CONCLUSION.md") :].splitlines()[0]
-    assert "historical" in link.lower(), "the conclusion is a planning record and must be linked as one"
+def test_the_removed_planning_records_are_not_linked_and_every_relative_link_resolves():
+    """The planning records left the tree on 2026-11-03; a link to one is a dead link in a public README."""
+    import re
+
+    for rel in ("2.0/README.md", "README.md", "CONTRIBUTING.md"):
+        text = _text(rel)
+        base = REPO / Path(rel).parent
+        for target in re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", text):
+            if target.startswith(("http://", "https://", "mailto:")):
+                continue
+            assert (base / target).exists(), f"{rel} links to {target!r}, which is not in the tree"
 
 
 # --- CLAUDE.md ---------------------------------------------------------------
@@ -125,8 +132,9 @@ def test_claude_md_does_not_list_the_aliases_it_forbids():
 def test_claude_md_states_what_the_anonymity_test_does_not_cover():
     claude = " ".join(_text("CLAUDE.md").split())
     rule = claude[claude.index("test_public_docs_are_anonymous.py") :][:1500]
-    for needle in (".claude/**", "planning records", "PLAN_*", "INVESTIGATION_*", "Known gaps"):
+    for needle in (".claude/**", "does not cover git history", "Excluded"):
         assert needle in rule, f"CLAUDE.md's anonymity-test sentence does not mention {needle!r}"
+    assert "Known gaps" not in rule and "PLAN_*" not in rule, "the planning records are gone; the gap list is stale"
 
 
 def test_claude_md_documents_the_pae_iptm_facts():
@@ -289,13 +297,14 @@ def test_claude_md_anonymity_scope_names_exactly_what_the_test_scans():
     text = _flat("CLAUDE.md")
     sentence = text[text.index("test_public_docs_are_anonymous.py") :][:1500]
     assert "`tests/**` and `Evaluator/docs/**` text files" not in sentence, "the vague 'text files' wording is back"
-    for ext in (".md", ".html", ".py", ".fasta", ".json", ".txt"):
+    for ext in (".md", ".html", ".py", ".fasta", ".json", ".txt", ".sh", ".template"):
         assert f"`{ext}`" in sentence, f"the scope sentence omits {ext}"
-    for root in ("`docs/**`", "`tests/**`", "`Evaluator/docs/**`"):
+    for root in ("`docs/`", "`tests/**`", "`Evaluator/docs/**`", "`.claude/**/*.md`"):
         assert root in sentence, f"the scope sentence omits {root}"
     # The extensions really are what the sentence says: probe the predicate itself.
     assert anon._in_scope(REPO / "docs/x.md") and anon._in_scope(REPO / "docs/x.html")
-    assert not anon._in_scope(REPO / "docs/x.py")
+    assert anon._in_scope(REPO / "install/x.sh") and anon._in_scope(REPO / ".claude/skills/x/SKILL.md")
+    assert not anon._in_scope(REPO / "Evaluator/tools/soluprot/x.py"), "vendored code is excluded"
     for ext in (".py", ".fasta", ".json", ".txt", ".md"):
         assert anon._in_scope(REPO / f"tests/x{ext}")
         assert anon._in_scope(REPO / f"Evaluator/docs/x{ext}")

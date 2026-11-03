@@ -4456,7 +4456,7 @@ uninstall_tool() {
 # when its entry point exists.
 #
 # This exists because both halves of that distinction bit us in one run
-# (2026-09-23, docs/INVESTIGATION_install_bare_box_2026-09-23.md):
+# (2026-09-23, the bare-box install investigation, archived off-repo):
 #
 #   * RFD3's smoke test ran `rfd3 --help`, which passed while
 #     weights/foundry/ was EMPTY — a transient DNS failure had killed

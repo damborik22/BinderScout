@@ -209,7 +209,7 @@ def apply_jax_memory_policy(engine: str, target_gib: float, *, env=None, verbose
 #   IS the floor and does not fall with a smaller complex: 14,248 MiB on an RTX
 #   3090 and 13,781 MiB on GB10 -- two architectures agreeing, because the number
 #   is a weight-residency cost, not a graph cost.  "A floor, not a slope"
-#   (docs/NEXT_STAGES.md).  A card that cannot hold the weights cannot run it at
+#   (the next-stages plan, archived off-repo).  A card that cannot hold the weights cannot run it at
 #   any size, which is a prediction a static check can make honestly.
 #
 #   Boltz-2 gets NO floor on purpose.  It scales hard AND card-dependently: 8,518

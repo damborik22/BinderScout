@@ -86,7 +86,7 @@ class NativeMetrics:
     # ---- BoltzGen (Boltz-1 internal eval) ----
     # `bg_design_ipsae_min` is BG's own ipSAE; ρ vs Boltz-2 refold ipSAE = +0.84.
     # `bg_final_rank` is a composite (diversity+pTM+hbond+RMSD); ρ vs refold ipSAE = -0.15.
-    # See docs/INVESTIGATION_RANKING_DISCREPANCY.md §5.
+    # See the ranking-discrepancy investigation (archived off-repo).
     bg_design_ipsae_min: float | None = None
     bg_final_rank: int | None = None
 
@@ -239,7 +239,7 @@ class ExtractedBinder:
     # quality. The value must come from something the tool itself recorded, and
     # two tools record nothing usable -- so None/"unavailable" is a real answer,
     # not a gap. A quality-sorted index would invert the metric it feeds.
-    # Per-tool verdicts: docs/INVESTIGATION_generation_index_2026-09-24.md
+    # Per-tool verdicts: the generation-index investigation (archived off-repo)
     #
     # source: "explicit"    -- a counter the tool wrote (Mosaic, Protein-Hunter)
     #         "joined"      -- a counter from another of the tool's tables (BindCraft 2)

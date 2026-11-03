@@ -81,7 +81,7 @@ class BoltzGenExtractor(SequenceExtractor):
                 binder_id = f"boltzgen_{stem}_{idx}"
 
             # Surface BoltzGen's own ipSAE_min (ρ = +0.84 with refold) and final_rank.
-            # See docs/INVESTIGATION_RANKING_DISCREPANCY.md §5.
+            # See the ranking-discrepancy investigation (archived off-repo).
             native = NativeMetrics()
             for col in ("design_ipsae_min", "ipsae_min", "design_ipsae", "ipsae_min_top10"):
                 if col in row.index and pd.notna(row[col]):

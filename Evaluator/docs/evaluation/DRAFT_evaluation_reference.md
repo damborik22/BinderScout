@@ -10,4 +10,4 @@ Split, as planned in its own banner, into:
   Not reference material; kept because the items are real.
 
 Nothing was dropped in the split except this file's own scaffolding and the questions it asked,
-which are answered in `OPEN_ITEMS.md` and in `docs/PLAN_2.0_CONCLUSION.md` §5.
+which are answered in `OPEN_ITEMS.md`.

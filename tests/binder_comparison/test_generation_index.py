@@ -3,7 +3,7 @@
 Item AD wants a per-design `generation_index` so a report can say how early in a
 campaign a good design appeared. The plan assumed this was one line per
 extractor -- glob the per-design files, take an mtime. The source investigation
-(docs/INVESTIGATION_generation_index_2026-09-24.md) found otherwise: seven of
+(the generation-index investigation, archived off-repo) found otherwise: seven of
 eight extractors read a single aggregate CSV, and **row position is not usable
 for any tool**. Where the file happens to be in generation order the extractor
 re-sorts before iterating; where it does not, the order is a quality sort.

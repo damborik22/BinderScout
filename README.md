@@ -12,8 +12,7 @@
 > ranking (a cross-engine gate, then `consensus_iptm_mean`), no compatibility shim for
 > the columns it removed, and nine design tools including RFD4-Proteina. Several shipped
 > columns are advisory and not validated against experiment — see
-> [`docs/PLAN_2.0_CONCLUSION.md`](docs/PLAN_2.0_CONCLUSION.md) and [`2.0/README.md`](2.0/README.md)
-> for what remains open.
+> [`2.0/README.md`](2.0/README.md) and `CHANGELOG.md` for what remains open.
 >
 > **`master` is a separate line, currently `v1.2.x`.** Its numbering restarted at 1.0.0 in a
 > history rewrite, so `v2.0.x` is not an ancestor of it and a fix cannot be cherry-picked
@@ -71,7 +70,7 @@ That rank is read from its file and never recomputed. Its i_pTM is
 design-time-biased exactly as BindCraft 1's is, so it never enters
 `consensus_iptm_mean`; the cross-engine refold is what places its designs
 against the other tools'. The integration is written up in
-[docs/PLAN_bindcraft2_integration.md](docs/PLAN_bindcraft2_integration.md).
+the BindCraft 2 integration notes in `CHANGELOG.md` (the plan itself was removed from the tree).
 
 ### Evaluator engines & filters
 
@@ -431,7 +430,7 @@ choose — see [Ranking metrics](#ranking-metrics) below.
 | **ESMFold2** | `binder-compare refold-esmfold2` | `binder-eval-esmfold2` conda | Anywhere — lightweight, no gated weights. The default engine (`--tool all`), and the source of the `chain_iptm_interface` gate `autosize` uses. |
 | **AF3 v3.0.2** | `binder-compare refold-af3` | `binder-eval-af3` conda | **The cheapest engine we have**, and flat in size: 2.3–5.2 GB from 150 to 900 tokens. The gate is the **gated weights**, not VRAM |
 
-Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). There is **one ranking and no way to select another**: a cross-engine gate (`--min-engines`, default 3) then `consensus_iptm_mean`, emitted as a single `rank` column. `ipsae_min` (DunbrackLab 2025 formula) and `agreement_count` are diagnostic columns — `agreement_count` in particular is a flat null as a screen (macro-AUC 0.532), so do not gate on it. Part U removed the `--rank-by` / `--screen-metric` flags and the `two_stage_rank` / `adaptyv_rank` / `consensus_rank` / `active_rank` columns; see `docs/INVESTIGATION_partU_cao_benchmark.md`. AF3 and ESMFold2 produce token-order PAE which the evaluator transposes to match Boltz-2's `[binder|target]` order.
+Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). There is **one ranking and no way to select another**: a cross-engine gate (`--min-engines`, default 3) then `consensus_iptm_mean`, emitted as a single `rank` column. `ipsae_min` (DunbrackLab 2025 formula) and `agreement_count` are diagnostic columns — `agreement_count` in particular is a flat null as a screen (macro-AUC 0.532), so do not gate on it. Part U removed the `--rank-by` / `--screen-metric` flags and the `two_stage_rank` / `adaptyv_rank` / `consensus_rank` / `active_rank` columns; the evidence is summarised in `CLAUDE.md` (the full write-up was removed from the tree). AF3 and ESMFold2 produce token-order PAE which the evaluator transposes to match Boltz-2's `[binder|target]` order.
 
 > Evaluation = Boltz-2 + AF3 + ESMFold2, exactly three independent engines. Each is auto-detected from its conda env and can be skipped with `--skip-<engine>`.
 

@@ -49,7 +49,7 @@ def read_generation_index(row, column: str) -> int | None:
     in generation order by the time it iterates -- several are sorted by quality,
     and a quality-ordered index inverts the discovery metric this feeds.
 
-    Per-tool verdicts: docs/INVESTIGATION_generation_index_2026-09-24.md
+    Per-tool verdicts: the generation-index investigation (archived off-repo)
     """
     import pandas as pd
 

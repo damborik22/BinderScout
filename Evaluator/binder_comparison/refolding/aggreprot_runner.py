@@ -23,7 +23,7 @@ once — that answers D3 and picks the reduction from the same run.
 Second, the premise behind D3 should be measured rather than assumed. The same
 concern was raised for TmProt (D1), and on a real 2VDY pool of 436 designs
 TmProt vs SoluProt came out at Spearman -0.090 — essentially uncorrelated. See
-docs/PLAN_binderscout_v2_corrections.md.
+the v2 corrections plan (archived off-repo).
 
 **Status of the tool side.** AggreProt has no public code repository (both
 likely GitHub paths 404) and the web server accepts at most three sequences per
