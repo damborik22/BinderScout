@@ -2816,7 +2816,7 @@ def write_run_pxdesign(path: Path, cfg: dict):
     settings_block = _settings_json_block(
         tool="pxdesign",
         settings_dir_var="SETTINGS_DIR",
-        conda_env="binderscout_pxdesign",
+        conda_env="$_bs_env",  # the env _activate_env actually activated, not the canonical name
         version_dict_inner="""
     "binderscout_git_sha": "$GIT_SHA",
     "binderscout_git_branch": "$GIT_BRANCH",
@@ -3786,7 +3786,7 @@ def write_run_rfd3(path: Path, cfg: dict):
     settings_block = _settings_json_block(
         tool="rfd3",
         settings_dir_var="RFD3_DIR",
-        conda_env="binderscout_rfd3",
+        conda_env="$_bs_env",  # the env _activate_env actually activated, not the canonical name
         version_dict_inner="""
     "binderscout_git_sha": "$GIT_SHA",
     "binderscout_git_branch": "$GIT_BRANCH",
@@ -4122,7 +4122,7 @@ def write_run_protein_hunter(path: Path, cfg: dict):
     settings_block = _settings_json_block(
         tool="protein-hunter",
         settings_dir_var="PH_DIR_OUT",
-        conda_env="binderscout_protein_hunter",
+        conda_env="$_bs_env",  # the env _activate_env actually activated, not the canonical name
         version_dict_inner="""
     "binderscout_git_sha": "$GIT_SHA",
     "binderscout_git_branch": "$GIT_BRANCH",

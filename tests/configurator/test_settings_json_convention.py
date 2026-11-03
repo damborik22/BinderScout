@@ -164,6 +164,8 @@ class TestEveryWriterPersistsSettingsJson:
             # RUN_DIR is derived from the script's own location, which is the point of
             # the self-locating block; it needs `$(`, so carry it explicitly.
             or ln.startswith(("mkdir -p ", "RUN_DIR="))
+            # The activated env name (conda itself is not run here); settings.json records it.
+            or ln.startswith("_bs_env=")
         ]
         # Lives in the run folder, like the real script: RUN_DIR comes from its location.
         runner = full_cfg["run_dir"] / f"{key}_block.sh"

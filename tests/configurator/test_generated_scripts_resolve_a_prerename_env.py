@@ -30,6 +30,11 @@ def scripts(tmp_path, fake_checkout, replay):
 
 def _activated(script: str, listed: list[str]) -> tuple[str, str]:
     """Run only the env-selection lines of a generated script; return (activated env, stderr)."""
+    return _run(script, listed)[:2]
+
+
+def _run(script: str, listed: list[str]) -> tuple[str, str, str]:
+    """As `_activated`, plus the `env.conda_env` value the script's settings.json heredoc would record."""
     lines = script.splitlines()
     start = next(i for i, ln in enumerate(lines) if ln.startswith("_bs_env="))
     end = next(i for i in range(start, len(lines)) if lines[i].startswith('conda activate "$_bs_env"'))
@@ -43,9 +48,13 @@ def _activated(script: str, listed: list[str]) -> tuple[str, str]:
         "    return 99\n"
         "}\n" + block + "\n"
     )
+    # The heredoc is unquoted, so the value expands in the shell that ran the block above.
+    recorded = next(ln for ln in lines if ln.strip().startswith('"conda_env":')).split(":", 1)[1].strip().rstrip(",")
+    harness += f"printf 'RECORDED %s\\n' {recorded}\n"
     proc = subprocess.run(["bash", "-c", harness], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    return proc.stdout.strip().removeprefix("ACTIVATED "), proc.stderr
+    out = dict(ln.split(" ", 1) for ln in proc.stdout.splitlines())
+    return out["ACTIVATED"], proc.stderr, out["RECORDED"]
 
 
 @pytest.mark.parametrize("tool", TOOLS)
@@ -53,6 +62,16 @@ def test_only_the_prerename_env_is_activated_when_it_is_all_there_is(scripts, to
     env, err = _activated(scripts[tool], [f"bindmaster_{tool}", "BindCraft"])
     assert env == f"bindmaster_{tool}"
     assert "previous project name" in err
+
+
+@pytest.mark.parametrize("tool", TOOLS)
+def test_settings_json_records_the_env_that_was_activated_not_the_canonical_name(scripts, tool):
+    """The reproducibility record must not claim `binderscout_<tool>` when `bindmaster_<tool>` ran."""
+    env, _, recorded = _run(scripts[tool], [f"bindmaster_{tool}", "BindCraft"])
+    assert env == f"bindmaster_{tool}"
+    assert recorded == env
+    env, _, recorded = _run(scripts[tool], [f"bindmaster_{tool}", f"binderscout_{tool}"])
+    assert recorded == env == f"binderscout_{tool}"
 
 
 @pytest.mark.parametrize("tool", TOOLS)
