@@ -83,6 +83,15 @@ PROTEINA_COMPLEXA_DIR="${BINDERSCOUT_DIR}/Proteina-Complexa"
 # level -- so a fresh install dies at the first generate step. The digit is a ceiling
 # below 3.0.0, not the claim: _pin_complexa_atomworks() asserts the SYMBOL.
 ATOMWORKS_VERSION="2.2.1"
+# dm-haiku is pinned for Proteina-Complexa for the same reason as atomworks: it is pulled in
+# unpinned, and from 0.0.14 on haiku declares jax only as an OPTIONAL EXTRA, so a resolver
+# happily places a haiku next to a jax it cannot import under and reports success. Only
+# running the code catches that, so _pin_complexa_haiku() IMPORTS colabdesign.
+# The value differs from install.sh's (0.0.13) because the jax does: this platform's PC venv
+# runs jax 0.6.2, and 0.0.15 is the haiku already measured against jax 0.6.x on this
+# hardware (the BindCraft env, which pins it beside ColabDesign). It has NOT been measured in
+# PC's own venv -- the import assertion is what will say so if it is wrong.
+HAIKU_VERSION="0.0.15"
 
 TMPROT_REPO="https://github.com/loschmidt/TmProt.git"
 TMPROT_BRANCH="tmprot-development"
@@ -4020,6 +4029,34 @@ _build_usearch_v12() {
     return 1
 }
 
+# Pin dm-haiku in Proteina-Complexa's venv and prove it by IMPORTING colabdesign. Same
+# treatment as atomworks, for a different reason (see HAIKU_VERSION): upstream's build
+# pulls haiku unpinned and then pins jax DOWN, leaving a pair that resolves and cannot
+# import. A version comparison would pass; what has to hold is the import `complexa
+# generate` performs, so that is the assertion. Idempotent. Shared byte-for-byte with
+# install.sh, which differs only in the value of HAIKU_VERSION.
+_pin_complexa_haiku() {
+    local py="${PROTEINA_COMPLEXA_DIR}/.venv/bin/python"
+    [[ -x "${py}" ]] || { print_warn "No Proteina-Complexa venv — skipping dm-haiku pin"; return 0; }
+
+    local have
+    have="$("${py}" -c "import importlib.metadata as m; print(m.version('dm-haiku'))" 2>/dev/null || true)"
+    if [[ "${have}" == "${HAIKU_VERSION}" ]]; then
+        print_ok "dm-haiku already pinned to ${HAIKU_VERSION}"
+    else
+        print_step "Pinning dm-haiku ${have:-<absent>} -> ${HAIKU_VERSION}"
+        run_logged "Pinning dm-haiku==${HAIKU_VERSION}" \
+            "${UV:-uv}" pip install --python "${py}" -q "dm-haiku==${HAIKU_VERSION}" \
+            || { print_fail "Could not pin dm-haiku==${HAIKU_VERSION}"; return 1; }
+    fi
+
+    # Import haiku THROUGH colabdesign: that is the path generate takes, and the failure
+    # was an attribute lookup inside haiku, so a version check passes while the run dies.
+    "${py}" -c "from colabdesign.af.model import mk_af_model" 2>/dev/null \
+        || { print_fail "colabdesign cannot import under dm-haiku ${HAIKU_VERSION} / jax $("${py}" -c 'import jax;print(jax.__version__)' 2>/dev/null) — Proteina-Complexa cannot generate"; return 1; }
+    print_ok "colabdesign + dm-haiku ${HAIKU_VERSION} import cleanly"
+}
+
 install_proteina_complexa() {
     print_step "Installing Proteina-Complexa — aarch64 (GB10 / sm_121)"
 
@@ -4184,6 +4221,9 @@ SHIMPY
         print_warn "Upstream ColabDesign has no 'device' kwarg; PC's reward passes one. Reinstall PC editable."
         return 1
     fi
+
+    # After jax is in place: haiku's compatibility is with the jax that is installed NOW.
+    _pin_complexa_haiku || return 1
 
     # Make the composite reward REFUSE rather than silently score 0.0 when a reward model
     # cannot execute. See the patch's own docstring: PC catches every reward exception,

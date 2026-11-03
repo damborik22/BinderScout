@@ -97,6 +97,18 @@ PROTEINA_COMPLEXA_DIR="${BINDERSCOUT_DIR}/Proteina-Complexa"
 # generate run used, 2.2.0 is what an existing install carries, and both provide the class.
 # _pin_complexa_atomworks() asserts the SYMBOL, which is what actually has to hold.
 ATOMWORKS_VERSION="2.2.1"
+# dm-haiku is pinned for Proteina-Complexa because haiku 0.0.14+ uses
+# `jax.core.take_current_trace`, which does not exist in the jax 0.4.29 that upstream's
+# build_uv_env.sh deliberately installs for colabdesign/AF2.
+#
+# This one DEFEATS dependency resolution rather than losing to it: from 0.0.14 on, haiku
+# declares jax only as an OPTIONAL EXTRA, so plain `dm-haiku` carries no jax requirement at
+# all. pip and uv therefore place a new haiku next to jax 0.4.29 and report a perfectly
+# valid resolution, which then cannot import. No constraints file, `--dry-run` or resolver
+# check can catch that; only running the code does, so _pin_complexa_haiku() imports
+# colabdesign. 0.0.13 is the last release that requires jax directly (`jax>=0.4.28`) and
+# the last without take_current_trace.
+HAIKU_VERSION="0.0.13"
 PROTEIN_HUNTER_REPO="https://github.com/yehlincho/Protein-Hunter.git"
 PROTEIN_HUNTER_COMMIT="d4bd9515882c2aa81e97f3d3bf7f42247a9fe80c"
 PROTEIN_HUNTER_DIR="${BINDERSCOUT_DIR}/Protein-Hunter"
@@ -2777,6 +2789,34 @@ _pin_complexa_atomworks() {
     print_ok "atomworks ${ATOMWORKS_VERSION} provides AtomSelectionStack"
 }
 
+# Pin dm-haiku in Proteina-Complexa's venv and prove it by IMPORTING colabdesign. Same
+# treatment as atomworks, for a different reason (see HAIKU_VERSION): upstream's build
+# pulls haiku unpinned and then pins jax DOWN, leaving a pair that resolves and cannot
+# import. A version comparison would pass; what has to hold is the import `complexa
+# generate` performs, so that is the assertion. Idempotent. Shared byte-for-byte with
+# install_aarch.sh, which differs only in the value of HAIKU_VERSION.
+_pin_complexa_haiku() {
+    local py="${PROTEINA_COMPLEXA_DIR}/.venv/bin/python"
+    [[ -x "${py}" ]] || { print_warn "No Proteina-Complexa venv — skipping dm-haiku pin"; return 0; }
+
+    local have
+    have="$("${py}" -c "import importlib.metadata as m; print(m.version('dm-haiku'))" 2>/dev/null || true)"
+    if [[ "${have}" == "${HAIKU_VERSION}" ]]; then
+        print_ok "dm-haiku already pinned to ${HAIKU_VERSION}"
+    else
+        print_step "Pinning dm-haiku ${have:-<absent>} -> ${HAIKU_VERSION}"
+        run_logged "Pinning dm-haiku==${HAIKU_VERSION}" \
+            "${UV:-uv}" pip install --python "${py}" -q "dm-haiku==${HAIKU_VERSION}" \
+            || { print_fail "Could not pin dm-haiku==${HAIKU_VERSION}"; return 1; }
+    fi
+
+    # Import haiku THROUGH colabdesign: that is the path generate takes, and the failure
+    # was an attribute lookup inside haiku, so a version check passes while the run dies.
+    "${py}" -c "from colabdesign.af.model import mk_af_model" 2>/dev/null \
+        || { print_fail "colabdesign cannot import under dm-haiku ${HAIKU_VERSION} / jax $("${py}" -c 'import jax;print(jax.__version__)' 2>/dev/null) — Proteina-Complexa cannot generate"; return 1; }
+    print_ok "colabdesign + dm-haiku ${HAIKU_VERSION} import cleanly"
+}
+
 install_proteina_complexa() {
     print_step "Installing Proteina-Complexa"
 
@@ -2862,6 +2902,7 @@ install_proteina_complexa() {
 
     # Pin atomworks AFTER the upstream build, which installs it unpinned.
     _pin_complexa_atomworks || return 1
+    _pin_complexa_haiku || return 1
 
     # Initialize and download checkpoints
     print_step "Initializing Proteina-Complexa"
