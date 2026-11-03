@@ -1159,6 +1159,13 @@ _check_system_conda_writable() {
         return 0
     fi
 
+    # $CONDA_ENVS_PATH is where conda will put new envs, ahead of <base>/envs. A shared, read-only
+    # system conda with per-user envs is a normal setup, and it is not a reason to fetch a second one.
+    local first_env_dir="${CONDA_ENVS_PATH:-}"; first_env_dir="${first_env_dir%%:*}"
+    if [[ -n "${first_env_dir}" && -d "${first_env_dir}" && -w "${first_env_dir}" ]]; then
+        return 0
+    fi
+
     local envs_dir="${CONDA_BASE}/envs"
     if [[ -d "${envs_dir}" && -w "${envs_dir}" ]]; then
         return 0

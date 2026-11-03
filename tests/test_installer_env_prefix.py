@@ -12,6 +12,7 @@ These drive the real functions, extracted from each installer, in a subshell.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -112,3 +113,44 @@ class TestEnvLocation:
         # The only legitimate spelling is the documented fallback inside bs_env_lookup, which
         # is written with a local `base`, and the writability probe of the default envs dir.
         assert all("envs_dir" in line for line in offenders), offenders
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write a read-only directory")
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+class TestSystemCondaWritable:
+    """A shared read-only system conda with per-user envs is a normal setup, not 'no usable conda'.
+
+    `_check_system_conda_writable` only looked at <base>/envs, so with CONDA_ENVS_PATH pointing at a
+    writable directory the installer still decided the conda was unusable and downloaded a second one.
+    """
+
+    def _check(self, platform, tmp_path, **extra):
+        base = fake_base(tmp_path / "base")
+        (base / "envs").mkdir()
+        (base / "envs").chmod(0o555)
+        try:
+            prog = _program(
+                INSTALLERS[platform],
+                "\n".join(
+                    [
+                        extract_functions(INSTALLERS[platform], "_check_system_conda_writable"),
+                        'print_warn() { echo "WARN $*"; }',
+                        f'CONDA_BASE="{base}"; STANDALONE=auto',
+                        "if _check_system_conda_writable; then echo WRITABLE; else echo READONLY; fi",
+                    ]
+                ),
+            )
+            return run_bash(prog, clean_env(tmp_path / "home", **extra), tmp_path).stdout
+        finally:
+            (base / "envs").chmod(0o755)
+
+    def test_a_read_only_base_is_not_writable(self, platform, tmp_path):
+        assert "READONLY" in self._check(platform, tmp_path)
+
+    def test_a_writable_conda_envs_path_makes_it_usable(self, platform, tmp_path):
+        mine = tmp_path / "my-envs"
+        mine.mkdir()
+        assert "WRITABLE" in self._check(platform, tmp_path, CONDA_ENVS_PATH=f"{mine}:{tmp_path / 'other'}")
+
+    def test_an_unwritable_conda_envs_path_does_not(self, platform, tmp_path):
+        assert "READONLY" in self._check(platform, tmp_path, CONDA_ENVS_PATH=str(tmp_path / "does-not-exist"))
