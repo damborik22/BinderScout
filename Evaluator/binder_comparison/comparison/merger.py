@@ -110,6 +110,17 @@ def merge_refold_results(
         else:
             # validate="1:1" turns any future regression into an error rather than
             # silent row inflation -- the same guard cli/report.py:729 uses.
+            if ("target_sequence" in merged.columns) != ("target_sequence" in df.columns):
+                # The mismatch guard below compares the two copies; with one missing there is
+                # nothing to compare, and it used to skip without a word. All current runners
+                # write the column, so its absence means an old or hand-made CSV.
+                warnings.warn(
+                    f"[merger] {name} CSV and the earlier engine CSV do not both carry "
+                    "'target_sequence', so these results cannot be checked for having been folded "
+                    "against the same target. A CSV left over from another target would merge "
+                    "silently. Re-refold with the current runners, or check the inputs by hand.",
+                    stacklevel=2,
+                )
             merged = pd.merge(merged, df, on="sequence", how="outer", suffixes=("", f"_{name}_dup"), validate="1:1")
             # BEFORE the _dup columns are dropped: the duplicate target_sequence is the
             # only evidence that two engines folded the same complex, and dropping it
@@ -169,6 +180,11 @@ def _load_engine(path: str | Path, prefix: str) -> pd.DataFrame:
     # a re-run without --resume repeats rows. (`extract` deduplicates by sequence and
     # AF3 collapses its seeds, so neither of those can trigger it.)
     if "sequence" in df.columns:
+        # The join key must be canonical: a refold CSV that was hand-edited, re-keyed or
+        # written by another path can carry the same binder in lower case or with trailing
+        # whitespace, and the exact-string outer join then split ONE design into several
+        # single-engine rows (n=1 each, ranked last). Same normalisation resume.py uses.
+        df = df.assign(sequence=df["sequence"].astype(str).str.strip().str.upper())
         n_before = len(df)
         if "iptm" in df.columns:
             # Prefer a scored row over a blank one for the same sequence. AF3 and
@@ -213,7 +229,7 @@ def _attach_fasta_metadata(df: pd.DataFrame, fasta_path: str | Path) -> pd.DataF
         binder_id = tokens[0] if tokens else header
         meta_rows.append(
             {
-                "sequence": seq,
+                "sequence": seq.strip().upper(),
                 "binder_id": binder_id,
                 "source_tool": parts.get("source", "unknown"),
             }

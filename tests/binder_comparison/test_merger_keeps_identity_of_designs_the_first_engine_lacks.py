@@ -73,3 +73,26 @@ def test_the_first_engines_values_still_win_where_it_has_them(tmp_path):
 def test_only_one_engine_is_unchanged(tmp_path):
     m = merge_refold_results(_csv(tmp_path / "boltz.csv", [(A, 0.8), (C, 0.9)]))
     assert list(m["binder_length"]) == [len(A), len(C)]
+
+
+# --- join key and target-column guards (same review, same day) ----------------
+
+
+def test_case_and_whitespace_do_not_split_a_design(tmp_path):
+    """A hand-edited or re-keyed CSV must not turn one design into three single-engine rows."""
+    boltz = _csv(tmp_path / "boltz.csv", [(A, 0.8)])
+    af3_df = pd.read_csv(_csv(tmp_path / "af3_src.csv", [(A, 0.8)]))
+    af3_df["sequence"] = "  " + af3_df["sequence"].str.lower() + " "
+    af3_df.to_csv(tmp_path / "af3.csv", index=False)
+    esm = _csv(tmp_path / "esm.csv", [(A, 0.8)])
+    m = merge_refold_results(boltz, af3_csv=tmp_path / "af3.csv", esmfold2_csv=esm)
+    assert len(m) == 1, f"one design became {len(m)} rows: {list(m['sequence'])}"
+    assert m[["boltz_iptm", "af3_iptm", "esmfold2_iptm"]].notna().all(axis=1).iloc[0]
+
+
+def test_a_csv_without_target_sequence_warns_that_the_target_cannot_be_checked(tmp_path):
+    boltz = _csv(tmp_path / "boltz.csv", [(A, 0.8)])
+    af3 = pd.read_csv(_csv(tmp_path / "af3.csv", [(A, 0.8)])).drop(columns=["target_sequence"])
+    af3.to_csv(tmp_path / "af3b.csv", index=False)
+    with pytest.warns(UserWarning, match="cannot be checked"):
+        merge_refold_results(boltz, af3_csv=tmp_path / "af3b.csv")
