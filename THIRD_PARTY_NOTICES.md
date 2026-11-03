@@ -43,14 +43,19 @@ redistributed by us.
 
 Two notes for anyone auditing this:
 
-- **The binaries remain in git history** (they entered in `b8d2b87`). Removing
+- **The binaries remain in git history** (they entered in `db9d315`). Removing
   them from `HEAD` stops future release tarballs and source archives from
-  carrying them, but a full `git clone` still fetches them from history. Ending
-  that outright would need a history rewrite, which would break every existing
-  clone and invalidate the `binderscout_git_sha` recorded in every past run's
-  `settings.json` — the provenance record this project deliberately keeps. That
-  trade-off has not been taken; the **written offer below** covers the
-  historical distribution instead.
+  carrying them, but a full `git clone` still fetches them from history. The
+  history *was* rewritten on 2026-10-27, for an unrelated reason (internal lab
+  material, see `CHANGELOG.md`), and that rewrite did **not** remove these
+  binaries: they are still reachable at `db9d315`. Ending that outright would
+  mean another rewrite, which would break every existing clone and invalidate
+  the `binderscout_git_sha` recorded in every past run's `settings.json` — the
+  provenance record this project deliberately keeps. That trade-off has not been
+  taken; the **written offer below** covers the historical distribution instead.
+  (The commit identifiers in this file are the values after that rewrite; the
+  earlier ones no longer exist, and `tests/test_docs_state_the_release_facts.py`
+  fails if a cited commit stops resolving.)
 - **Do not substitute the drive5 build.** `https://drive5.com/usearch/` serves
   the older proprietary 32-bit USEARCH under an academic-use-only licence. That
   is *stricter* than the GPLv3 v12 it would replace, and it is not the version
@@ -64,8 +69,8 @@ SoluProt's own *E. coli* reference database, produce **byte-identical** output.
 ### Written offer for the USEARCH binaries previously distributed here
 
 This offer covers the GPLv3 object code that was distributed from this
-repository between **2026-06-30** (commit `b8d2b87`, which added it) and
-**2026-07-26** (commit `2ae1bdb`, which removed it), and which remains reachable
+repository between **2026-06-30** (commit `db9d315`, which added it) and
+**2026-07-26** (commit `48d6a88`, which removed it), and which remains reachable
 in this repository's git history:
 
 | File | Size | SHA-256 |
@@ -123,9 +128,11 @@ directly. They are listed so the full dependency surface is visible in one place
 | Proteina-Complexa | [NVIDIA-Digital-Bio/proteina-complexa](https://github.com/NVIDIA-Digital-Bio/proteina-complexa) |
 | Protein-Hunter (vendored Boltz-2 / Chai-1) | Cho et al. 2025 |
 | RFD3 / `rc-foundry` | [RosettaCommons/foundry](https://github.com/RosettaCommons/foundry) — BSD-3 |
+| RFD4-Proteina | [RosettaCommons/RFD4-Proteina](https://github.com/RosettaCommons/RFD4-Proteina), cloned at a pinned commit — code **BSD-3**. The **weights** (`nvidia/RFD4-Proteina` on Hugging Face, fetched by the installer at a pinned revision) have a licence that is **UNVERIFIED** here: BSD-3 covers the code only. Read the model card's terms before any publication or commercial use |
+| TmProt | [loschmidt/TmProt](https://github.com/loschmidt/TmProt), cloned at a pinned commit by `--tool tmprot` — **GPL-3.0**, which is why it is cloned and installed editable rather than vendored into this MIT repository. Its production weights ship inside the package; any separate terms on them are **unverified** here |
 | BindCraft 2 | [PacesaLab/BindCraft2](https://github.com/PacesaLab/BindCraft2) — source-available (hosting-restricted), not vendored; see below |
 | AlphaFold 3 v3.0.2 | [google-deepmind/alphafold3](https://github.com/google-deepmind/alphafold3) — weights are **gated**; obtain them from DeepMind under their terms |
-| ESMFold2 | Biohub `esm` |
+| ESMFold2 | Biohub: the `esm` SDK ([Biohub/esm](https://github.com/Biohub/esm), pinned commit), a `transformers` fork, and the `biohub/ESMFold2` weights on Hugging Face (pinned revision). This repository records **no licence** for the code or the weights, so both are **UNVERIFIED** here — confirm with upstream before commercial use. No gated download |
 | PyRosetta (BindCraft, Protein-Hunter) | Academic/non-commercial free; commercial use requires a licence |
 
 Model weights — AF2 parameters, Boltz-1/Boltz-2 checkpoints, RFD3 and
