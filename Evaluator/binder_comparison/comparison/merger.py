@@ -116,7 +116,17 @@ def merge_refold_results(
             # unchecked is what let CSVs from different targets merge into one design
             # carrying consensus_iptm_n = 3. Ported from master (v1.0.8) 2026-10-29.
             _refuse_mismatched_targets(merged, name)
-            # Drop accidental duplicate passthrough columns (prefer the first engine's values)
+            # Passthrough columns: prefer the first engine's values, but FILL GAPS from this
+            # engine's copy before dropping it. A design the first engine never scored has no
+            # first-engine value (the outer join leaves NaN), and dropping this engine's copy
+            # threw away the only real one: `binder_length` is what the report slices every
+            # PAE matrix with, so the design lost all its PAE-derived scores and was ranked
+            # last without a warning.
+            for col in _PASSTHROUGH_COLS - {"sequence"}:
+                dup = f"{col}_{name}_dup"
+                if dup in merged.columns and col in merged.columns:
+                    merged[col] = merged[col].fillna(merged[dup])
+            # Drop the duplicate passthrough columns
             for col in list(merged.columns):
                 if col.endswith(f"_{name}_dup"):
                     merged.drop(columns=[col], inplace=True)
