@@ -84,7 +84,7 @@ GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i 0
 # it is a number.
 GPU_MEM=$(printf '%s' "$GPU_MEM" | grep -E '^[0-9]+$' || echo 0)
 PY_VER=$(python -c 'import sys;print(".".join(map(str,sys.version_info[:3])))' 2>/dev/null || echo "unknown")
-RFD3_VER=$(python -c 'import importlib.metadata;print(importlib.metadata.version("rfd3"))' 2>/dev/null || echo "unknown")
+RFD3_VER=$(python -c 'import importlib.metadata as m;print(m.version("rc-foundry"))' 2>/dev/null || echo "unknown")
 cat > "$RUN_DIR/settings.json" <<JSON
 {
   "tool": "rfd3",
@@ -257,7 +257,7 @@ for CIF in "${CIFS[@]}"; do
         --write_fasta True \
         --write_structures False \
         --seed 42 \
-        > /dev/null 2>&1 || { echo "  WARN: mpnn failed for $NAME"; continue; }
+        > "$MPNN_DIR/${NAME}.log" 2>&1 || { echo "  WARN: mpnn failed for $NAME (see $MPNN_DIR/${NAME}.log)"; continue; }
     DONE=$((DONE + 1))
     if (( DONE % 50 == 0 )); then
         echo "  $DONE/$N MPNN passes done"
@@ -313,6 +313,10 @@ for fa in sorted(mpnn_dir.glob("*.fa")):
         "mpnn_sequence_recovery": f"{best_rec:.4f}",
         "n_mpnn_samples": len(candidates),
     })
+
+if not rows:
+    sys.exit("ERROR: ProteinMPNN produced no sequence for any backbone, so nothing was designed. "
+             "Read the per-backbone logs in " + str(mpnn_dir) + "/*.log.")
 
 (out_dir / "sequences.csv").write_text("")  # truncate
 with (out_dir / "sequences.csv").open("w", newline="") as fh:

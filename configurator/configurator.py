@@ -3969,7 +3969,7 @@ def write_run_rfd3(path: Path, cfg: dict):
     "mpnn_temperature": {mpnn_temperature},
     "mpnn_bias": {mpnn_bias_json},
     "select_hotspots": "{select_hotspots_str}\"""",
-        extra_env_inner='\nRFD3_VER=$(python -c \'import importlib.metadata;print(importlib.metadata.version("rfd3"))\' 2>/dev/null || echo "unknown")',
+        extra_env_inner='\nRFD3_VER=$(python -c \'import importlib.metadata as m;print(m.version("rc-foundry"))\' 2>/dev/null || echo "unknown")',
     )
 
     content = (
@@ -4155,7 +4155,7 @@ for CIF in "${{CIFS[@]}}"; do
         --write_fasta True \\
         --write_structures False \\
         --seed 42 \\
-        > /dev/null 2>&1 || {{ echo "  WARN: mpnn failed for $NAME"; continue; }}
+        > "$MPNN_DIR/${{NAME}}.log" 2>&1 || {{ echo "  WARN: mpnn failed for $NAME (see $MPNN_DIR/${{NAME}}.log)"; continue; }}
     DONE=$((DONE + 1))
     if (( DONE % 50 == 0 )); then
         echo "  $DONE/$N MPNN passes done"
@@ -4213,8 +4213,8 @@ for fa in sorted(mpnn_dir.glob("*.fa")):
     }})
 
 if not rows:
-    print("WARNING: no RFD3 binder sequences extracted", file=sys.stderr)
-    sys.exit(0)
+    sys.exit("ERROR: no RFD3 binder sequence was extracted, so nothing was designed. "
+             "Read the per-backbone ProteinMPNN logs in " + str(mpnn_dir) + "/*.log.")
 
 with (out_dir / "sequences.csv").open("w", newline="") as fh:
     w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
