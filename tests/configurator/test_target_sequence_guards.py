@@ -38,7 +38,9 @@ def _cfg(tmp_path, **over):
     run.mkdir(parents=True, exist_ok=True)
     pdb = tmp_path / "t.pdb"
     pdb.write_text(PDB_CHAIN_A)
-    cfg = {"name": "T", "run_dir": str(run), "target_pdb": str(pdb), "target_sequence": TARGET}
+    # hotspots: RFD3 refuses a run with none (test_rfd3_refuses_a_run_with_no_hotspots.py), and this
+    # file is about the target length, which the writer checks first.
+    cfg = {"name": "T", "run_dir": str(run), "target_pdb": str(pdb), "target_sequence": TARGET, "hotspots": "2"}
     cfg.update(over)
     return cfg
 

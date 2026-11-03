@@ -59,6 +59,7 @@ flags is kept from drifting out of step with the real one.</div>
 <div class="field"><label for="f_target_sequence"><code>target_sequence</code></label><input type="text" id="f_target_sequence" data-key="target_sequence" data-type="str" value="EDEARLLLAALVQDYVQMKASELEQEQEREGS"><p class='help'>Target sequence. Must match the chain named below, or RFD3 refuses the contig.</p></div>
 <div class="field"><label for="f_chains"><code>chains</code></label><input type="text" id="f_chains" data-key="chains" data-type="str" value="A"><p class='help'>Target chain id(s) in the structure, e.g. A.</p></div>
 <div class="field"><label for="f_hotspots"><code>hotspots</code></label><input type="text" id="f_hotspots" data-key="hotspots" data-type="str" value=""><p class='help'>Optional. Epitope residues to aim at, e.g. A15,A18,A22. Leave blank for none.</p></div>
+<div class="field"><label for="f_rfd3_hotspots"><code>rfd3_hotspots</code></label><input type="text" id="f_rfd3_hotspots" data-key="rfd3_hotspots" data-type="str" value="5,9,12"><p class='help'>REQUIRED for RFD3 when hotspots above is blank: RFD3 cannot aim without them and the run is refused.</p></div>
 <div class="field"><label for="f_min_length"><code>min_length</code></label><input type="number" id="f_min_length" data-key="min_length" data-type="int" value="20"><p class='help'>Shortest binder to design (aa).</p></div>
 <div class="field"><label for="f_max_length"><code>max_length</code></label><input type="number" id="f_max_length" data-key="max_length" data-type="int" value="30"><p class='help'>Longest binder to design (aa).</p></div>
 <div class="field"><label for="f_n_designs"><code>n_designs</code></label><input type="number" id="f_n_designs" data-key="n_designs" data-type="int" value="1"><p class='help'>Designs per tool, unless a per-tool override below says otherwise.</p></div>
@@ -144,6 +145,7 @@ const DEFAULTS = {
   "target_sequence": "EDEARLLLAALVQDYVQMKASELEQEQEREGS",
   "chains": "A",
   "hotspots": null,
+  "rfd3_hotspots": "5,9,12",
   "min_length": 20,
   "max_length": 30,
   "n_designs": 1,

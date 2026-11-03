@@ -476,6 +476,13 @@ def validate_hotspots(s):
     return "Use format like: 56  or  1-10,20  or leave blank for auto."
 
 
+def validate_hotspots_required(s):
+    """validate_hotspots, minus the blank: for a tool that cannot run without hotspots (RFD3)."""
+    if not s.strip():
+        return "RFD3 cannot aim without hotspots. Enter residues like: 56  or  1-10,20"
+    return validate_hotspots(s)
+
+
 def validate_chains(s):
     if re.fullmatch(r"[A-Za-z,]+", s):
         return True
@@ -1669,6 +1676,41 @@ def parse_hotspots(hotspot_str: str) -> list:
         else:
             result.append(int(part))
     return result
+
+
+def rfd3_lacks_hotspots(cfg: dict) -> bool:
+    """True when RFD3 has no hotspot residue to aim at (the tool-specific value wins over the global one)."""
+    return not (cfg.get("rfd3_hotspots") or cfg.get("hotspots") or "").strip()
+
+
+def print_rfd3_needs_hotspots() -> None:
+    """Say why a hotspot-less RFD3 run is refused, and both ways out.
+
+    RFD3 REQUIRES hotspots; hotspots are optional for every other tool, and that is a fact about
+    RFD3, not a gap in the wizard. `infer_ori_strategy: hotspots` is load-bearing in its input YAML
+    and asserts inside RFD3 (after the model has loaded) when no hotspot exists. The tempting
+    workaround, `infer_ori_strategy: com`, removes the crash and makes the output worse than
+    useless: it centres the binder on the whole fixed motif's centre of mass, so it nucleates inside
+    the target and grows as an extended coil that passes every downstream gate (measured: binder Rg
+    23.1 A vs 10.9 A, DSSP helix 0.27 vs 0.85, n_chainbreaks 0 either way). A silent generator of
+    unfoldable backbones is the worst of the three outcomes, so refuse, before any GPU is committed.
+    """
+    print_fail("RFD3 needs hotspot residues and none are configured.")
+    print(
+        "  Without them RFD3 centres the binder on the whole target's centre of\n"
+        "  mass and silently produces extended coils that pass every quality gate\n"
+        "  (measured: Rg 23.1 A vs 10.9 A, helix 0.27 vs 0.85). It is not safe to\n"
+        "  guess a default, so this run is refused rather than wasted.\n"
+        "\n"
+        "  Fix either way:\n"
+        '    * set hotspots for the campaign, e.g.  "hotspots": "56,115,123"\n'
+        '      (or "rfd3_hotspots" to scope them to RFD3 alone), then re-run; or\n'
+        '    * leave RFD3 out of this campaign:  "rfd3": false  in tools_enabled\n'
+        "      (or untick it in the wizard) and use another tool.\n"
+        "\n"
+        "  The binderscout-target-analyst skill proposes hotspots for a target if\n"
+        "  you do not have them yet."
+    )
 
 
 def hotspots_to_boltzgen_str(hotspot_str: str) -> str:
@@ -3868,6 +3910,13 @@ def write_run_rfd3(path: Path, cfg: dict):
     # rfd3's parsing.canonicalize_() will treat each as a token-level hotspot.
     select_hotspots_str = ",".join(f"{primary_chain}{r}" for r in hotspot_list) if hotspot_list else ""
 
+    # `infer_ori_strategy: hotspots` below needs hotspots to aim at, and there is no safe
+    # fallback (see print_rfd3_needs_hotspots). preflight() refuses first on every normal path;
+    # this keeps a direct call to the writer from emitting a script that cannot work.
+    if not select_hotspots_str:
+        print_rfd3_needs_hotspots()
+        sys.exit(1)
+
     # Author numbering, read from the file RFD3 will actually load — not 1..N. One value
     # feeds all three emission sites below (settings.json, the inputs YAML, the banner),
     # which previously carried three copies of the same format string.
@@ -3986,13 +4035,14 @@ cat > "$INPUTS_YAML" <<INPUTSEOF
 {name}:
   input: $TARGET_PDB
   contig: "{target_contig},/0,{min_len}-{max_len}"
-  infer_ori_strategy: hotspots{("  # COM falls back when select_hotspots is empty" if not select_hotspots_str else "")}{(chr(10) + '  select_hotspots: "' + select_hotspots_str + '"') if select_hotspots_str else ""}
+  infer_ori_strategy: hotspots
+  select_hotspots: "{select_hotspots_str}"
 INPUTSEOF
 
 echo "=== RFD3 backbone diffusion for {name} ==="
 echo "  Target:        $TARGET_PDB"
 echo "  Contig:        {target_contig},/0,{min_len}-{max_len}"
-echo "  Hotspots:      {select_hotspots_str or "(none)"}"
+echo "  Hotspots:      {select_hotspots_str}"
 echo "  Designs:       {n_designs}  (batch_size={batch_size} x n_batches={n_batches} = {batch_size * n_batches})"
 echo "  Diffusion:     T={diffusion_steps}, step_scale={step_scale}"
 echo "  Checkpoint:    $WEIGHTS_DIR/rfd3_latest.ckpt"
@@ -5638,7 +5688,8 @@ def preflight(cfg: dict, tools_enabled: dict) -> None:
     keys = _missing_cfg_keys(cfg, tools_enabled)
     rfd4_format = _rfd4_target_format_problem(cfg, tools_enabled)
     ungenerated = _tools_without_a_generator(tools_enabled)
-    if not assets and not keys and not rfd4_format and not ungenerated:
+    rfd3_hotspots = bool(tools_enabled.get("rfd3")) and rfd3_lacks_hotspots(cfg)
+    if not assets and not keys and not rfd4_format and not ungenerated and not rfd3_hotspots:
         return
 
     print()
@@ -5669,6 +5720,9 @@ def preflight(cfg: dict, tools_enabled: dict) -> None:
         print()
         print(f"  {BOLD}Target structure format:{RESET}")
         print(f"    {RED}✗{RESET} {rfd4_format}")
+    if rfd3_hotspots:
+        print()
+        print_rfd3_needs_hotspots()
     print()
     sys.exit(1)
 
@@ -6504,6 +6558,16 @@ def wizard():
 
     if use_rfd3:
         print_step("Step 6f — RFD3 settings")
+        if cfg.get("hotspots"):
+            print_ok(f"  Using hotspots from Step 3: {cfg['hotspots']}")
+        else:
+            # RFD3 is the one tool that cannot run without them (see print_rfd3_needs_hotspots),
+            # so ask here, now, rather than refuse after the rest of the wizard.
+            cfg["rfd3_hotspots"] = ask(
+                "  RFD3 hotspot residues (required, e.g. 56 or 1-10,20)",
+                default="",
+                validator=validate_hotspots_required,
+            )
         cfg["rfd3_batch_size"] = int(
             ask(
                 "  Diffusion batch size (10 fits 24 GB; drop to 4 for longer binders)",

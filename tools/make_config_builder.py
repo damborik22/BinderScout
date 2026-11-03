@@ -39,6 +39,7 @@ FIELD_HELP: dict[str, str] = {
     "target_sequence": "Target sequence. Must match the chain named below, or RFD3 refuses the contig.",
     "chains": "Target chain id(s) in the structure, e.g. A.",
     "hotspots": "Optional. Epitope residues to aim at, e.g. A15,A18,A22. Leave blank for none.",
+    "rfd3_hotspots": "REQUIRED for RFD3 when hotspots above is blank: RFD3 cannot aim without them and the run is refused.",
     "min_length": "Shortest binder to design (aa).",
     "max_length": "Longest binder to design (aa).",
     "n_designs": "Designs per tool, unless a per-tool override below says otherwise.",

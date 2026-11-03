@@ -24,9 +24,11 @@
 #                        drop to 4 if longer or smaller GPU)
 #   {{MPNN_SAMPLES}}     ProteinMPNN samples per backbone (5 = best-of-5)
 #   {{MPNN_TEMPERATURE}} ProteinMPNN sampling temperature (0.1 = field default)
-#   {{SELECT_HOTSPOTS_LINE}}  Either an empty string, or a line of the form
-#                        '  select_hotspots: "A15,A18,A22"'. infer_ori_strategy above
-#                        needs hotspots to aim at; with none it falls back to target COM.
+#   {{SELECT_HOTSPOTS_LINE}}  A line of the form '  select_hotspots: "A15,A18,A22"'.
+#                        REQUIRED: infer_ori_strategy above needs hotspots to aim at and
+#                        asserts inside rfd3 with none. It does NOT fall back to the target
+#                        COM, and forcing `com` is worse than the crash (the binder grows
+#                        as a coil inside the target). Do not substitute an empty string.
 
 set -euo pipefail
 
