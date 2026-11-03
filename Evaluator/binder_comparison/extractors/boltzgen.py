@@ -69,7 +69,9 @@ class BoltzGenExtractor(SequenceExtractor):
         stem = csv_path.stem
 
         for idx, row in df.iterrows():
-            seq = str(row[seq_col]).strip().upper()
+            seq = self._sequence_cell(row[seq_col])
+            if seq is None:
+                continue
             if not self._validate_sequence(seq):
                 warnings.warn(f"BoltzGen row {idx}: invalid sequence — skipping")
                 continue

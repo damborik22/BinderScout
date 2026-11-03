@@ -201,9 +201,9 @@ class BindCraft2Extractor(SequenceExtractor):
         results: list[ExtractedBinder] = []
         for _, row in df.iterrows():
             raw = row[seq_col]
-            if pd.isna(raw):  # before str(): "NAN" passes the amino-acid validator
+            seq = self._sequence_cell(raw)
+            if seq is None:
                 continue
-            seq = str(raw).strip().upper()
 
             if "/" in seq:
                 # Upstream strips the separator and treats the chains as one

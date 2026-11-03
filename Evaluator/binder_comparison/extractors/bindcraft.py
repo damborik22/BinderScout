@@ -88,7 +88,9 @@ class BindCraftExtractor(SequenceExtractor):
         stem = csv_path.stem
 
         for idx, row in df.iterrows():
-            seq = str(row[_SEQUENCE_COL]).strip().upper()
+            seq = self._sequence_cell(row[_SEQUENCE_COL])
+            if seq is None:
+                continue
             if not self._validate_sequence(seq):
                 warnings.warn(f"BindCraft row {idx}: invalid sequence '{seq[:20]}...' — skipping")
                 continue
