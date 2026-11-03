@@ -125,3 +125,31 @@ def test_non_finite_pae_is_missing_data_not_a_reject():
     assert np.isnan(ip["ipsae_min"]), "unreadable data was filed as ipsae 0.0 (the Reject tier)"
     assert ip["ipsae_valid"] == 0
     assert np.isnan(compute_iptm_from_pae(bad, LB)["iptm"])
+
+
+# --- pinned-d0 DIAGNOSTIC (does not rank) --------------------------------------
+
+
+def test_pinning_d0_at_the_designs_own_length_changes_nothing():
+    pae = _pae("binder")
+    own = compute_iptm_from_pae(pae, LB, ordering="binder_target")["iptm"]
+    pinned = compute_iptm_from_pae(pae, LB, ordering="binder_target", d0_binder_length=LB)["iptm"]
+    assert pinned == pytest.approx(own, abs=1e-12)
+
+
+def test_a_longer_reference_length_makes_the_kernel_more_forgiving():
+    pae = _pae("binder")
+    short = compute_iptm_from_pae(pae, LB, ordering="binder_target", d0_binder_length=20)["iptm"]
+    long_ = compute_iptm_from_pae(pae, LB, ordering="binder_target", d0_binder_length=150)["iptm"]
+    assert long_ > short
+
+
+def test_the_pinned_column_is_added_only_on_request_and_never_replaces_the_ranking_column(tmp_path):
+    df = _frame(tmp_path, _pae("binder"), LB)
+    plain = add_iptm_from_pae_files(df, "p", prefix="e")
+    assert "e_pae_iptm_pinned" not in plain.columns
+    both = add_iptm_from_pae_files(df, "p", prefix="e", pinned_binder_length=100)
+    assert both["e_pae_iptm"].iloc[0] == plain["e_pae_iptm"].iloc[0], (
+        "asking for the diagnostic changed the ranked value"
+    )
+    assert both["e_pae_iptm_pinned"].iloc[0] != both["e_pae_iptm"].iloc[0]

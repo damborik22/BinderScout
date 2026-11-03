@@ -435,10 +435,13 @@ def add_iptm_from_pae_files(
     ordering: str = "binder_target",
     prefix: str = "boltz",
     base_dir: str | Path | None = None,
+    pinned_binder_length: int | None = None,
 ) -> pd.DataFrame:
     """Load PAE .npy files and compute ipTM, adding columns to df.
 
-    Adds columns: {prefix}_pae_iptm (independently computed from PAE matrix).
+    Adds columns: {prefix}_pae_iptm (independently computed from PAE matrix) and, when
+    ``pinned_binder_length`` is given, the DIAGNOSTIC {prefix}_pae_iptm_pinned scored with
+    one d0 for the whole pool (see ``compute_iptm_from_pae``). Only the first ranks.
 
     Args:
         df:              DataFrame with refolding results.
@@ -454,6 +457,7 @@ def add_iptm_from_pae_files(
         return result
 
     iptm_vals = []
+    pinned_vals = []
     n_unresolved = 0
 
     for _, row in df.iterrows():
@@ -465,21 +469,31 @@ def add_iptm_from_pae_files(
             if resolved is None and not pd.isna(pae_path):
                 n_unresolved += 1
             iptm_vals.append(np.nan)
+            pinned_vals.append(np.nan)
             continue
 
         try:
             pae = _load_checked_pae(resolved, L_b, row.get("target_sequence"), ordering)
             scores = compute_iptm_from_pae(pae, int(L_b), ordering=ordering)
             iptm_vals.append(scores["iptm"])
+            if pinned_binder_length is not None:
+                pinned_vals.append(
+                    compute_iptm_from_pae(pae, int(L_b), ordering=ordering, d0_binder_length=pinned_binder_length)[
+                        "iptm"
+                    ]
+                )
         except Exception as e:
             import warnings
 
             warnings.warn(f"Failed to compute ipTM for {pae_path}: {e}")
             iptm_vals.append(np.nan)
+            pinned_vals.append(np.nan)
 
     _warn_unresolved_pae(n_unresolved, len(df), pae_file_col, base_dir)
 
     result[f"{prefix}_pae_iptm"] = iptm_vals
+    if pinned_binder_length is not None:
+        result[f"{prefix}_pae_iptm_pinned"] = pinned_vals
 
     return result
 
@@ -642,6 +656,7 @@ def compute_iptm_from_pae(
     binder_length: int,
     *,
     ordering: str = "binder_target",
+    d0_binder_length: int | None = None,
 ) -> dict[str, float]:
     """Compute ipTM from a full PAE matrix (independently of model-reported values).
 
@@ -658,6 +673,12 @@ def compute_iptm_from_pae(
         pae:           PAE matrix in Å, shape [L_total, L_total].
         binder_length: Number of binder residues.
         ordering:      'binder_target' or 'target_binder'.
+        d0_binder_length: DIAGNOSTIC. When given, d0 is computed from ``L_target +
+                       d0_binder_length`` instead of this design's own length, so every design in
+                       a pool is scored against one kernel. Never used for the ranking: measured
+                       2026-11-03 on the 563-design labelled benchmark, ranking on it moved
+                       macro AUC by +0.0025 (95% CI -0.004..+0.010) with the sign split 2/2 across
+                       targets, i.e. it only re-weights by length.
 
     Returns:
         dict with keys: bt_iptm, tb_iptm, iptm
@@ -687,7 +708,8 @@ def compute_iptm_from_pae(
     # np.cbrt takes the real cube root, giving the negative value the formula intends,
     # which the max() then floors to 1.0. Unreachable via the configurator (binders are
     # >= 10 aa and targets larger) but reachable from sequence-only mode.
-    d0 = max(1.0, 1.24 * float(np.cbrt(L_b + L_t - 15)) - 1.8)
+    d0_L = L_t + (L_b if d0_binder_length is None else int(d0_binder_length))
+    d0 = max(1.0, 1.24 * float(np.cbrt(d0_L - 15)) - 1.8)
 
     pae_bt = pae[:L_b, L_b:]  # shape [L_b, L_t]
     pae_tb = pae[L_b:, :L_b]  # shape [L_t, L_b]

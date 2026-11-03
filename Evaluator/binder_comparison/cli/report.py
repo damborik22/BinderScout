@@ -378,12 +378,30 @@ def run(args: argparse.Namespace) -> None:
     # didn't write absolute paths.  The CSV's parent dir is the best guess.
     boltz_base = Path(args.boltz2_results).resolve().parent if args.boltz2_results else None
 
+    # DIAGNOSTIC only: one d0 for the whole pool, from the pool-median binder length (or
+    # --d0-binder-length). ipTM's d0 grows with each design's own length, so longer binders
+    # get a slightly more forgiving kernel. Pinning it was measured NOT to improve ranking
+    # (labelled benchmark, macro AUC +0.0025, CI spans zero, sign splits 2/2 across targets),
+    # so `rank` stays on the per-design d0; the *_pae_iptm_pinned columns just make the size
+    # of the effect visible per design.
+    d0_ref = getattr(args, "d0_binder_length", None)
+    if d0_ref is None and "binder_length" in df.columns:
+        _bl = pd.to_numeric(df["binder_length"], errors="coerce").dropna()
+        d0_ref = round(float(_bl.median())) if len(_bl) else None
+    if d0_ref is not None:
+        print(f"[report] Diagnostic pinned-d0 ipTM columns use binder length {d0_ref} (rank is unchanged).")
+
     if "boltz_pae_file" in df.columns:
         print("[report] Computing Boltz-2 ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
         df = add_boltz_ipsae_from_files(df, pae_file_col="boltz_pae_file", base_dir=boltz_base)
         print("[report] Computing Boltz-2 ipTM from PAE files…")
         df = add_iptm_from_pae_files(
-            df, pae_file_col="boltz_pae_file", ordering="binder_target", prefix="boltz", base_dir=boltz_base
+            df,
+            pae_file_col="boltz_pae_file",
+            ordering="binder_target",
+            prefix="boltz",
+            base_dir=boltz_base,
+            pinned_binder_length=d0_ref,
         )
 
     # AF3 (aarch64 / DGX Spark): identical treatment — Part K wires this up end-to-end.
@@ -394,7 +412,12 @@ def run(args: argparse.Namespace) -> None:
             df, pae_file_col="af3_pae_file", prefix="af3", ordering="target_binder", base_dir=af3_base
         )
         df = add_iptm_from_pae_files(
-            df, pae_file_col="af3_pae_file", ordering="target_binder", prefix="af3", base_dir=af3_base
+            df,
+            pae_file_col="af3_pae_file",
+            ordering="target_binder",
+            prefix="af3",
+            base_dir=af3_base,
+            pinned_binder_length=d0_ref,
         )
 
     # ESMFold2 (biohub): same convention as AF3 — target first in input, so PAE is target_binder.
@@ -414,7 +437,14 @@ def run(args: argparse.Namespace) -> None:
             ordering="target_binder",
             prefix="esmfold2",
             base_dir=esmfold2_base,
+            pinned_binder_length=d0_ref,
         )
+
+    _pinned_cols = [
+        c for c in ("boltz_pae_iptm_pinned", "af3_pae_iptm_pinned", "esmfold2_pae_iptm_pinned") if c in df.columns
+    ]
+    if _pinned_cols:
+        df["consensus_iptm_mean_pinned"] = df[_pinned_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
 
     # Recover the interface chain-pair iPTM (mean of the two directional pair iPTMs).
     # Canonical definition lives in scoring.add_chain_iptm_interface so the report and
@@ -1457,6 +1487,14 @@ def add_parser(subparsers) -> None:
     # searching for a better one on labelled data makes it worse (nested selection
     # over 72 metrics scored 0.5170 vs 0.5552 for the shipped metric). The former
     # 'adaptyv' and 'consensus_iptm' orderings were removed with them.
+    p.add_argument(
+        "--d0-binder-length",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Binder length used for the DIAGNOSTIC *_pae_iptm_pinned / consensus_iptm_mean_pinned columns "
+        "(one d0 for the whole pool). Default: the pool-median binder length. Does not affect `rank`.",
+    )
     p.add_argument(
         "--min-engines",
         type=int,
