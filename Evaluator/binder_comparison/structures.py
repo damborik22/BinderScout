@@ -92,9 +92,10 @@ def collect_design_structures(
     """Copy each design's ORIGINAL complex structure (matched by binder sequence)
     into *out_dir* as PDB. Returns the number matched + written.
 
-    Tools whose structures don't carry the design sequence (e.g. RFD3 diffusion
-    backbones) simply match nothing → 0 collected → the report falls back to the
-    refold structure for them, which is correct.
+    Tools whose structures don't carry the design sequence simply match nothing → 0
+    collected → the report falls back to the refold structure for them, which is correct.
+    mmCIF structures cannot be read without gemmi; that case is warned about by name
+    rather than reported as a bare zero.
     """
     # gemmi is needed only to CONVERT mmCIF; a .pdb hit is copied verbatim, and
     # _chain_sequences reads PDB without it. So its absence costs the mmCIF
@@ -109,6 +110,23 @@ def collect_design_structures(
     out_dir = Path(out_dir)
     index = seq_to_structure_index(input_dir, max_files=max_files)
     if not index:
+        if gemmi is None:
+            # An empty index with gemmi absent is NOT "this tool's structures don't carry the
+            # design sequence": every mmCIF is unreadable without it, so a pool of mmCIF
+            # writers (BoltzGen, RFD3, RFD4) reads as 0 collected with no reason given. Say so.
+            n_cif = sum(
+                1
+                for pattern in ("*.cif", "*.cif.gz", "*.mmcif")
+                for q in Path(input_dir).rglob(pattern)
+                if "MONOMER_ONLY" not in q.name
+            )
+            if n_cif:
+                warnings.warn(
+                    f"gemmi is not installed, so {n_cif} mmCIF structure(s) under {input_dir} could not be "
+                    "read and none were collected for this tool. The report falls back to the refold "
+                    "structure for these designs. Install gemmi into the evaluator env to collect them.",
+                    stacklevel=2,
+                )
         return 0
     out_dir.mkdir(parents=True, exist_ok=True)
     written: set[str] = set()
