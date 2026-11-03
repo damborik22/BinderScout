@@ -119,11 +119,9 @@ bs_env_lookup() {
 }
 # <<< binderscout-conda-block <<<
 
-bs_source_conda "${_BINDERSCOUT_DIR}" || {
-    echo "Error: conda not found (looked at \$BINDERSCOUT_CONDA, ${_BINDERSCOUT_DIR}/conda, \$CONDA_EXE, \$CONDA_PREFIX, PATH and the usual install locations)." >&2
-    echo "       Install it with 'binderscout install --tool evaluator', or export BINDERSCOUT_CONDA=<its base directory>." >&2
-    exit 1
-}
+# A miss is reported below, after the exit trap is set, so the launcher window still pauses.
+_CONDA_MISSING=0
+bs_source_conda "${_BINDERSCOUT_DIR}" || _CONDA_MISSING=1
 
 EVALUATOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMPDIR_EVAL="$(mktemp -d)"
@@ -140,6 +138,12 @@ _finish() {
     read -rp "Press Enter to close..." _
 }
 trap _finish EXIT
+
+if [[ "${_CONDA_MISSING}" -eq 1 ]]; then
+    echo "Error: conda not found (looked at \$BINDERSCOUT_CONDA, ${_BINDERSCOUT_DIR}/conda, \$CONDA_EXE, \$CONDA_PREFIX, PATH and the usual install locations)." >&2
+    echo "       Install it with 'binderscout install --tool evaluator', or export BINDERSCOUT_CONDA=<its base directory>." >&2
+    exit 1
+fi
 
 echo "=============================="
 echo "  BinderScout Evaluator"

@@ -119,3 +119,7 @@ def test_the_other_evaluator_scripts_stop_at_once_when_there_is_no_conda(script,
     out = r.stdout + r.stderr
     assert r.returncode != 0, out
     assert "conda not found" in out, out
+    if script == RUN_SH:
+        # run.sh is the double-clickable launcher: its exit trap (which pauses the window) must be
+        # armed before this error, or the window closes before the message can be read.
+        assert "ERROR: evaluation failed" in out, out
