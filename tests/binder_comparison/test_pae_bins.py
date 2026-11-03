@@ -336,8 +336,8 @@ class _FakeBoltz2:
         return SimpleNamespace(pae_logits=60.0 * _delta(shown), pae_bins=CENTRES)
 
 
-@pytest.fixture
-def boltz(monkeypatch):
+def _boltz_script(monkeypatch):
+    """refold_boltz2.py loaded against stand-ins for jax / mosaic / boltz."""
     monkeypatch.setattr("binder_comparison.refolding.memory_policy.apply_jax_memory_policy", lambda *a, **k: "0.5")
     stand_ins = [
         "equinox",
@@ -358,7 +358,12 @@ def boltz(monkeypatch):
         monkeypatch.setitem(sys.modules, dep, mock.MagicMock(name=dep))
     sys.modules["equinox"].filter_jit = lambda f: f
     sys.modules["mosaic.common"].TOKENS = "ACDEFGHIKLMNPQRSTVWY"
-    script = _load(monkeypatch, "refold_boltz2", [])
+    return _load(monkeypatch, "refold_boltz2", [])
+
+
+@pytest.fixture
+def boltz(monkeypatch):
+    script = _boltz_script(monkeypatch)
 
     def run(*, save_pae_bins, agree=True):
         folder = _FakeBoltz2(logits_agree_with_pae=agree)
@@ -398,6 +403,41 @@ class TestBoltz2Script:
         with pytest.raises(ValueError, match="pae_bins_file"):
             boltz(save_pae_bins=True)
         assert not list(Path("structures").glob("*_bins.npz"))
+
+    def test_the_runner_publishes_the_folded_rows_before_failing_on_zero_bins(self, monkeypatch, tmp_path):
+        """The end-of-run zero-bins guard must not strand finished folds in the inner CSV.
+
+        Through ``run_boltz2_refold`` (not ``refold_batch``): the runner copies the inner CSV to
+        the caller's path only after the script returns, so a guard exception it does not hold
+        and re-raise leaves the caller's CSV missing and ``--resume`` re-folding the whole pool.
+        """
+        from binder_comparison.refolding.boltz2_runner import run_boltz2_refold
+
+        script = _boltz_script(monkeypatch)
+        folder = _FakeBoltz2(logits_agree_with_pae=False)
+        monkeypatch.setattr(script, "TargetChain", lambda **kw: SimpleNamespace(**kw))
+        monkeypatch.setattr(script, "Boltz2", lambda: folder)
+        monkeypatch.setattr(script, "prepare_target_msa", lambda *a, **k: ("", "none"))
+        monkeypatch.setitem(sys.modules, "refold_boltz2", script)  # the runner imports it by bare name
+
+        out_csv = tmp_path / "results" / "boltz2.csv"
+        with pytest.raises(RuntimeError, match="no PAE-bin file was written"):
+            run_boltz2_refold(
+                sequences=POOL,
+                target_sequence=TARGET,
+                output_dir=tmp_path / "work",
+                output_csv=out_csv,
+                scripts_path=_SCRIPTS,
+                save_pae_bins=True,
+            )
+        assert out_csv.exists(), "the folded designs never reached the caller's CSV"
+        assert len(_rows(out_csv)) == len(POOL)
+
+        # ...and --resume therefore keeps them instead of re-folding the pool.
+        from binder_comparison.refolding.resume import resume_plan
+
+        skip, _ = resume_plan(tmp_path / "work" / "refold_designs.csv", list(POOL))
+        assert len(skip) == len(POOL)
 
 
 # ---------------------------------------------------------------------------

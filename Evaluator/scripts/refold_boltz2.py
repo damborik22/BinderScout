@@ -42,6 +42,14 @@ class PartialRefoldFailure(RuntimeError):
     """Some designs folded and some did not.  Distinct exit code, rows kept."""
 
 
+class PaeBinsNotSaved(RuntimeError):
+    """--save-pae-bins was asked for and no design produced a file.  Rows are kept.
+
+    Its own class so the runner can publish the folded rows before re-raising it; a bare
+    RuntimeError would strand them in the work directory.
+    """
+
+
 import equinox as eqx
 import gemmi
 import jax
@@ -927,7 +935,7 @@ def refold_batch(
     # --save-pae-bins was asked for and not one design produced a file: the CSV would look
     # complete with a column of blanks. Say so with a non-zero exit.
     if save_pae_bins and n_todo - n_skipped > 0 and not n_bins_saved:
-        raise RuntimeError(
+        raise PaeBinsNotSaved(
             f"--save-pae-bins: {n_todo - n_skipped} binder(s) folded but no PAE-bin file was written. "
             "See the '[boltz2] --save-pae-bins' warnings above for the reason."
         )

@@ -111,6 +111,7 @@ def run_boltz2_refold(
     # the operator needs in order to re-run only the missing indices, for the same
     # reason the pre-publish above exists.  So: publish, then re-raise.
     partial: Exception | None = None
+    bins_failure: Exception | None = None
     old_cwd = os.getcwd()
     os.chdir(output_dir)
     try:
@@ -134,6 +135,9 @@ def run_boltz2_refold(
             )
         except _boltz2_script.PartialRefoldFailure as exc:
             partial = exc
+        except _boltz2_script.PaeBinsNotSaved as exc:
+            # Same reason as above: the designs folded, only the bins file did not.
+            bins_failure = exc
     finally:
         os.chdir(old_cwd)
 
@@ -143,6 +147,10 @@ def run_boltz2_refold(
         print(f"[boltz2] Results → {output_csv}")
     else:
         raise FileNotFoundError(f"Expected refold_boltz2 to write {generated_csv} but it was not found.")
+
+    if bins_failure is not None:
+        # Fail loudly, but only now that the folded rows are published.
+        raise bins_failure
 
     if partial is not None:
         # The scripts keep their own PartialRefoldFailure for envs where this package
