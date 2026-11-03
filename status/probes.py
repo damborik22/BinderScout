@@ -133,8 +133,8 @@ def _declared_total(tool_dir: Path):
 def _log_dirs(run_dir: Path) -> list:
     """Where to look for this arm's log.
 
-    Campaign logs live outside the run directory and are named after the box and
-    the attempt (`bm4_ph_v2.log`), not after the tool -- so the directory list is
+    Campaign logs live outside the run directory and are named after the host and
+    the attempt (`hostA_ph_v2.log`), not after the tool -- so the directory list is
     configurable and attribution is by content, not by filename.
     """
     dirs = [Path(run_dir) / "logs"]

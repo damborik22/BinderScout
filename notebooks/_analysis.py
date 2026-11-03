@@ -14,7 +14,7 @@ import pandas as pd
 from scipy import stats
 
 ROOT = Path(__file__).resolve().parents[1]
-RUN_DIR = ROOT / "runs/CALCA_helix_BM4"
+RUN_DIR = ROOT / "runs/CALCA_helix_run1"
 EVAL_DIR = RUN_DIR / "evaluate/run1_free"
 METRICS_CSV = EVAL_DIR / "report/metrics.csv"
 NB_DIR = ROOT / "notebooks"

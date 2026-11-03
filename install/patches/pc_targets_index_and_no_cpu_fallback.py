@@ -1,6 +1,6 @@
 """Make three local edits to the Proteina-Complexa checkout reproducible, and drop a fourth.
 
-These were found as uncommitted edits in BM5's PC checkout on 2026-10-04, predating the current
+These were found as uncommitted edits in a Proteina-Complexa checkout on an aarch64 host on 2026-10-04, predating the current
 installer. Unreproducible state on a shared machine is how a result becomes unexplainable, so
 each is either applied here or reverted:
 

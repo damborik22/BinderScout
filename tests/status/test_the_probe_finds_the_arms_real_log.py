@@ -5,7 +5,7 @@ than against fixtures:
 
 - The Protein-Hunter arm had died three hours earlier with an OOM, and
   run_arm.sh had written its FAILED marker correctly -- but into
-  `logs/bm4_ph_v2.log`, a campaign log named after the box and the attempt, not
+  `logs/hostA_ph_v2.log`, a campaign log named after the host and the attempt, not
   `<run>/logs/protein_hunter.log`. A probe that only looks for `<tool>.log`
   reports that arm as a silent `DEAD` with no reason, which is most of the
   information lost.
@@ -39,7 +39,7 @@ def test_a_campaign_log_named_after_the_box_is_still_attributed(tmp_path, monkey
     (tmp_path / "protein_hunter" / "settings.json").write_text("{}")
     logs = tmp_path / "campaign_logs"
     logs.mkdir()
-    (logs / "bm4_ph_v2.log").write_text(
+    (logs / "hostA_ph_v2.log").write_text(
         "KeyError: 'plddt'\n"
         "######## END protein_hunter rc=1 2026-10-30T11:23:34+01:00 ########\n"
         "######## protein_hunter FAILED -- do not read this arm as a zero-yield run ########\n"
@@ -53,7 +53,7 @@ def test_another_tools_log_is_not_attributed_to_this_arm(tmp_path, monkeypatch):
     (_run(tmp_path, "rfd3") / "settings.json").write_text("{}")
     logs = tmp_path / "campaign_logs"
     logs.mkdir()
-    (logs / "bm4_ph_v2.log").write_text("######## END protein_hunter rc=1 ########\n")
+    (logs / "hostA_ph_v2.log").write_text("######## END protein_hunter rc=1 ########\n")
     monkeypatch.setenv("BINDERSCOUT_LOG_DIRS", str(logs))
     assert probe_tool("rfd3", tmp_path, CFG)["warnings"] == []
 
@@ -62,7 +62,7 @@ def test_a_successful_log_raises_no_warning(tmp_path, monkeypatch):
     (_run(tmp_path, "rfd3") / "settings.json").write_text("{}")
     logs = tmp_path / "campaign_logs"
     logs.mkdir()
-    (logs / "bm4_rfd3.log").write_text("######## END rfd3 rc=0 2026-10-30T01:00:00+01:00 ########\n")
+    (logs / "hostA_rfd3.log").write_text("######## END rfd3 rc=0 2026-10-30T01:00:00+01:00 ########\n")
     monkeypatch.setenv("BINDERSCOUT_LOG_DIRS", str(logs))
     assert probe_tool("rfd3", tmp_path, CFG)["warnings"] == []
 

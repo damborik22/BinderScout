@@ -9,7 +9,7 @@ reports failures with `warnings.warn`. Two things then combine:
   is returned.
 
 So when the AF2 reward cannot execute, a search runs to completion against an all-zero
-reward, writes its rows, and exits 0. Measured on BM5 2026-10-04: a 112 s MCTS reported
+reward, writes its rows, and exits 0. Measured on an aarch64 (GB10) host, 2026-10-04: a 112 s MCTS reported
 nine reward evaluations, every one 0.0, and the GPU and CPU runs produced byte-identical
 sequences because nothing was steering them. That was initially read as a 25x throughput
 win and had to be retracted.

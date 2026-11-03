@@ -50,8 +50,17 @@ def _in_scope(path: Path) -> bool:
         # The skills and subagent prompts are public text too; they were the largest block of
         # machine names left in the tree until 2026-11-03.
         return rel.endswith(".md")
+    if rel.startswith("Evaluator/tools/") or rel.endswith(".min.js"):
+        return False  # vendored third-party code and data (SoluProt, NGL), not our text
     if rel.startswith(("tests/", "Evaluator/docs/")):
         return rel.endswith((".md", ".py", ".fasta", ".json", ".txt"))
+    # Everything else we author: code, installers, templates, configs. (Narrower than this, the largest
+    # blocks of machine names survived in install/, status/ and notebooks/ until 2026-11-03.)
+    if rel.endswith((".py", ".sh", ".template", ".yml", ".yaml", ".toml")) or rel in {
+        "tools/gpurun",
+        "Dockerfile.test",
+    }:
+        return True
     return rel in {
         "README.md",
         "CLAUDE.md",
