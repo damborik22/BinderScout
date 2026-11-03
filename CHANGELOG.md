@@ -195,6 +195,33 @@ Work since `v2.0.2` (137 commits). Nothing here changes the ranking:
 - **Hygiene:** the machine-names guard no longer scans `__pycache__` (the suite failed on its second run), and
   a conda shell function on the host can no longer make the `evaluate.sh` parser test flaky.
 
+### Fixed by the full end-to-end run (2026-11-03)
+
+Every design tool was then run from a configurator-generated script (x86_64: all nine; aarch64: RFD4),
+the pool refolded by all three engines and reported.
+
+- **RFD4 hung forever on aarch64.** Upstream's default of four DataLoader workers deadlocked there (ten
+  minutes, GPU idle, no output, no error). The generated script now passes `num_workers=0`, which gave 10 of
+  10 designs on the same host. The script also checks for a C compiler before starting (Triton's own
+  failure arrived 45 s in, after the model had loaded) and records the real interpreter version and the
+  target sequence in `settings.json`.
+- **`report` exits 1 when PAE files are listed but none can be read** (a refold CSV copied without its PAE
+  directory). It used to write a full-looking report with an empty `consensus_iptm_mean` and a `rank`
+  column, and exit 0.
+- **`report.html` no longer describes the removed Stage-1 max screen as a live stage**; the max-versus-mean
+  plot is now labelled as the engine-agreement diagnostic it is. The top tables show `consensus_iptm_n`
+  beside the rank, and the per-tool native ranking is wired for PXDesign, Protein-Hunter and
+  Proteina-Complexa (it said "no native column available" for tools whose native metrics were present).
+- **`extract --collect-structures` names a missing `gemmi`** instead of printing a bare `collected 0/N` for
+  every mmCIF-writing tool.
+- **RFD3 script:** per-backbone ProteinMPNN logs are kept (they went to `/dev/null`) and the script exits
+  non-zero when no backbone yielded a sequence; `settings.json` records the `rc-foundry` version.
+- **`binderscout status` (or any query) no longer re-points the account's `binderscout` command** at the
+  checkout it was run from; only `install` does that.
+- **BindCraft 2** no longer names a rejected-candidates file it did not write.
+- **Tests:** the x86_64 installer tests run on an aarch64 host (the installer's refusal is overridden for
+  tests only), and one configurator test no longer depends on whether the checkout has installed a tool.
+
 ### Ported from `master` (1.0.6-1.0.8), re-applied on this line
 
 - **One NaN guard for every extractor's sequence cell.** An empty CSV cell is NaN and
