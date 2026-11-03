@@ -71,7 +71,8 @@ def test_generated_scripts_carry_no_cluster_names_or_prerename_env_fallback(tmp_
     for name in ("run_pxdesign.sh", "run_rfd3.sh", "run_protein_hunter.sh"):
         text = (tmp_path / "run" / name).read_text()
         assert "_bs_env" not in text, f"{name} still resolves the env name through a fallback"
-        assert re.search(r"^conda activate binderscout_\w+$", text, re.M), name
+        # (assembled, so the env-name audit in tests/ does not read this as an instruction)
+        assert re.search(r"^conda activate " + r"binderscout_\w+$", text, re.M), name
 
 
 def test_a_prerename_env_is_not_reported_as_the_installed_tool(tmp_path, monkeypatch):

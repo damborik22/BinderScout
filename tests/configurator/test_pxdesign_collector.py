@@ -24,6 +24,7 @@ brace-doubling are exercised rather than assumed.
 from __future__ import annotations
 
 import csv
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -56,8 +57,10 @@ def _write_csv(path: Path, columns: list[str], rows: list[dict]) -> None:
 
 def _run_collector(run_dir: Path) -> list[dict]:
     """Execute the generated shell snippet and return the sequences.csv rows."""
-    snippet = _pxdesign_sequence_collector(str(run_dir))
-    proc = subprocess.run(["bash", "-c", snippet], capture_output=True, text=True)
+    snippet = _pxdesign_sequence_collector()
+    # The snippet reads the generated script's $RUN_DIR; the script sets it, so the test does.
+    env = {**os.environ, "RUN_DIR": str(run_dir)}
+    proc = subprocess.run(["bash", "-c", snippet], capture_output=True, text=True, env=env)
     out_csv = run_dir / "pxdesign" / "sequences.csv"
     if not out_csv.exists():
         raise AssertionError(f"collector wrote no sequences.csv\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}")
@@ -171,8 +174,9 @@ def test_warns_when_summary_is_a_small_selection(tmp_path: Path) -> None:
         [{"name": f"s_{i}", "seq_idx": "0", "sequence": SEQ_A if i % 2 else SEQ_B, "i_pTM": "0.5"} for i in range(50)],
     )
 
-    snippet = _pxdesign_sequence_collector(str(tmp_path))
-    proc = subprocess.run(["bash", "-c", snippet], capture_output=True, text=True)
+    snippet = _pxdesign_sequence_collector()
+    env = {**os.environ, "RUN_DIR": str(tmp_path)}
+    proc = subprocess.run(["bash", "-c", snippet], capture_output=True, text=True, env=env)
     combined = proc.stdout + proc.stderr
 
     assert "WARNING" in combined.upper(), (

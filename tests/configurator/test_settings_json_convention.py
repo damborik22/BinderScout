@@ -161,9 +161,12 @@ class TestEveryWriterPersistsSettingsJson:
             ln
             for ln in lines[:start]
             if (_LITERAL_ASSIGNMENT.match(ln) and "$(" not in ln and "CONDA_PREFIX" not in ln)
-            or ln.startswith("mkdir -p ")
+            # RUN_DIR is derived from the script's own location, which is the point of
+            # the self-locating block; it needs `$(`, so carry it explicitly.
+            or ln.startswith(("mkdir -p ", "RUN_DIR="))
         ]
-        runner = tmp_path / f"{key}_block.sh"
+        # Lives in the run folder, like the real script: RUN_DIR comes from its location.
+        runner = full_cfg["run_dir"] / f"{key}_block.sh"
         runner.write_text(
             "\n".join(["#!/usr/bin/env bash", "set -euo pipefail", *prelude, *lines[start : end + 1]]) + "\n"
         )

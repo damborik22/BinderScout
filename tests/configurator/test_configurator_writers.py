@@ -484,8 +484,7 @@ class TestRunEvaluateRfd3Path:
         script = tmp_path / "run_evaluate.sh"
         conf.write_run_evaluate(script, base_cfg, _ALL_TOOLS)
         content = script.read_text()
-        run_dir = base_cfg["run_dir"]
-        assert f"--rfd3 {run_dir}/rfd3 " in content or f'--rfd3 "{run_dir}/rfd3"' in content or "/rfd3 \\" in content
+        assert '--rfd3 "$RUN_DIR/rfd3"' in content
         assert "rfd3/outputs" not in content
 
     def test_extract_is_given_the_target_sequence(self, base_cfg, tmp_path):

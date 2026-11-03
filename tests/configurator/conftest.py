@@ -5,7 +5,6 @@ every relative path at import time or against the working directory, so assertin
 on an in-process call would test the test's own cwd and sys.path instead.
 """
 
-import os
 import shutil
 import subprocess
 import sys
@@ -65,8 +64,3 @@ def replay():
         )
 
     return _replay
-
-
-def env_for_scripts(**extra: str) -> dict:
-    """A scrubbed environment for running `bash -n` / dry markers over generated scripts."""
-    return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": "/nonexistent", **extra}
