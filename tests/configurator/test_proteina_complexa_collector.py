@@ -7,7 +7,7 @@ never in ``evaluation_results`` itself.
 
 The collector's fallback probe tested ``run_name in str(p)`` against the
 ``evaluation_results`` path, so it could never match. The consequence was not a
-crash but a silent empty arm: Clara job 261240 (2026-10-29) COMPLETED in 24:50
+crash but a silent empty arm: a cluster job (2026-10-29) COMPLETED in 24:50
 with 8 designs, 40 structures and 12 result CSVs, and the arm still ended
 
     WARNING: No binder sequences extracted from Proteina-Complexa
@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "configurator"))
 from configurator import write_run_proteina_complexa
 
 RUN_NAME = "pmhc_g12d_t1"
-# Complexa's own directory spelling, verbatim from Clara job 261240.
+# Complexa's own directory spelling, verbatim from a cluster job.
 EVAL_CHILD = f"search_binder_local_pipeline_binderscout_{RUN_NAME}"
 SEQ = "MKAEELLRKAWEIAKQNPQAVELLKKAAELAKEHGDKELAKKVLEIAKQ"
 

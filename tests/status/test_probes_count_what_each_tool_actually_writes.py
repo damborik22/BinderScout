@@ -1,8 +1,8 @@
 """One probe per tool, against the layout that tool really produces.
 
 Layouts here were read off disk on 2026-10-30, not taken from documentation:
-  rfd3  -> rfd3/diffusion/*.cif.gz                        (50 on the pMHC arm, BM4)
-  rfd4  -> rfd4/generate/inference_samples/<n>_<i>/<n>_<i>_generated.cif  (50, BM1)
+  rfd3  -> rfd3/diffusion/*.cif.gz                        (50 on the pMHC arm)
+  rfd4  -> rfd4/generate/inference_samples/<n>_<i>/<n>_<i>_generated.cif  (50)
 
 Probes COUNT, they never parse. A monitor that parses a half-written CSV crashes
 exactly when you most want to look at it.
@@ -56,7 +56,7 @@ def test_bindcraft2_counts_accepted_rows_not_files_on_disk(tmp_path):
 
 
 def test_boltzgen_intermediates_are_generation_progress_not_banked_designs(tmp_path):
-    # Measured on BM2 2026-10-30: 3430 .cif files, all under
+    # Measured on an x86_64 box 2026-10-30: 3430 .cif files, all under
     # intermediate_designs/, and no metrics table. They are raw generated
     # designs, not the filtered pool, so they count against --num_designs and
     # the phase says which number this is. See test_boltzgen_is_a_two_phase_tool.

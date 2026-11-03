@@ -15,7 +15,7 @@ from status.cli import write_html
 _DOC = {
     "generated_at": "2026-10-31T07:10:56Z",
     "campaigns": {},
-    "hosts": {"bm1": {"reachable": True, "runs": {}}},
+    "hosts": {"host-a": {"reachable": True, "runs": {}}},
 }
 
 

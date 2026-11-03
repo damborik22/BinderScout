@@ -8,9 +8,9 @@
 It exits non-zero, so the installer's `|| { print_fail ...; return 1; }` fires and the whole
 tool install fails at its first step -- leaving the OLD venv in place and reporting failure.
 
-Measured on BM5, 2026-10-03. Proteina-Complexa's aarch64 install was fixed on 2026-09-26 to
+Measured on an aarch64 box, 2026-10-03. Proteina-Complexa's aarch64 install was fixed on 2026-09-26 to
 use `jax[cuda12]==0.6.2` instead of the CPU-only `jax[cpu]==0.4.29`, because 0.4.x cannot
-compile an AF2-class graph for sm_121. That fix never reached BM5: the box already had a
+compile an AF2-class graph for sm_121. That fix never reached it: the box already had a
 pre-0.6.2 venv, so the installer refused, and the env sat on `jax 0.4.29 / backend cpu` --
 exactly the configuration whose cost ("~130x too slow", "1.7 years") the deprecation rests on.
 A tool documented as "installable on aarch64" was only installable on a machine that had

@@ -1,7 +1,7 @@
 """`bindcraft` is a prefix of `bindcraft2`, and a substring match conflates them.
 
-Found on the live fleet: BM5 was running a BindCraft 2 campaign, and the monitor
-reported BindCraft -- a tool not installed for that arm -- as `running` on BM5,
+Found on the live fleet: an aarch64 box was running a BindCraft 2 campaign, and the monitor
+reported BindCraft -- a tool not installed for that arm -- as `running` on that box,
 because `BindCraft2/.venv/bin/bindcraft` contains the string `bindcraft`.
 
 The consequence is the same shape as the self-matching trap: a dead or absent arm

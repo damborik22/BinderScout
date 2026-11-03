@@ -11,7 +11,7 @@ actually runs on is the **biohub fork**, ``github.com/Biohub/transformers`` at c
 ``ESMFold2Model`` and carries ``load_esmc`` -- the method the fold calls. Measured
 2026-10-05:
 
-* BM2's working env, untouched since it produced the CALCA and CBG pools and the
+* a working x86_64 env, untouched since it produced the CALCA and CBG pools and the
   563-design benchmark: ``transformers 4.57.6`` whose ``direct_url.json`` records
   ``github.com/Biohub/transformers @ 3a8956fb``, with ``ESMFold2Model.load_esmc``
   present.

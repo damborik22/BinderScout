@@ -36,7 +36,7 @@ def convert(data):
     rounded_data = np.round(data, decimals=2)
   return rounded_data
 """
-# The older v3.0.2 build that BM5 carried also rounded the PAE matrix to ONE decimal.
+# The older v3.0.2 build that an aarch64 box carried also rounded the PAE matrix to ONE decimal.
 WITH_PAE = (
     CURRENT
     + """\

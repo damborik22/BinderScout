@@ -325,13 +325,13 @@ def test_the_generated_script_finds_python_headers_without_sudo(cif_cfg, tmp_pat
 
     RFD4's venv is built on whatever interpreter uv picked, which on our fleet is
     the SYSTEM python3.12 -- and its headers ship in a distro ``-dev`` package that
-    none of BM1/BM2/BM4 carry. Requiring one would break the zero-sudo promise of
+    none of our x86_64 machines carry. Requiring one would break the zero-sudo promise of
     standalone mode, so the script falls back to a uv-managed CPython's own
     bundled headers instead.
 
     Without this the arm dies about 8 s in with ``fatal error: Python.h: No such
     file or directory`` wrapped in an ``InductorError``, which reads like a CUDA
-    fault and is not -- ``libcuda.so.1`` resolves fine (measured 2026-10-30, BM1).
+    fault and is not -- ``libcuda.so.1`` resolves fine (measured 2026-10-30).
     """
     script = tmp_path / "run_rfd4.sh"
     conf.write_run_rfd4(script, cif_cfg)

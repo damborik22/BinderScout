@@ -46,7 +46,7 @@ def test_the_renderer_shows_the_activity_age():
     doc = {
         "generated_at": "now",
         "hosts": {
-            "bm2": {
+            "host-b": {
                 "reachable": True,
                 "runs": {
                     "camp": {

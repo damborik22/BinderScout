@@ -20,7 +20,7 @@ _DOC = {
     "generated_at": "2026-10-31T07:10:56Z",
     "campaigns": {"r1": "A campaign"},
     "hosts": {
-        "bm1": {
+        "host-a": {
             "reachable": True,
             "runs": {
                 "r1": {

@@ -33,7 +33,7 @@ def build_env():
 def default_fraction():
     """The pool-aware default, computed the same way the script computes it.
 
-    Deliberately NOT a hard-coded "0.8": that constant is what rebooted BM5, and
+    Deliberately NOT a hard-coded "0.8": that constant is what rebooted an aarch64 box, and
     _build_af3_env was changed to derive the fraction from the real pool. Asserting
     0.8 here made these tests pass on a discrete card and fail on a unified-memory
     host (GB10 resolves 12 GiB / 121.7 GiB = 0.099) — i.e. it asserted the bug.
@@ -194,7 +194,7 @@ def test_the_ram_fallback_does_not_force_the_unified_branch(fraction_under):
 def test_a_real_unified_host_still_gets_the_os_floor(fraction_under):
     """The protection this heuristic exists for must survive the fix: a GB10-sized pool
     that genuinely equals system RAM keeps the 40 GiB OS reserve, so AF3 cannot
-    preallocate the machine out of memory (the 2026-08-18 BM5 reboot)."""
+    preallocate the machine out of memory (the 2026-08-18 aarch64 reboot)."""
     frac = fraction_under(smi_total_mib=121.7 * 1024, ram_gib=121.7)
     assert frac == pytest.approx(12.0 / 121.7, abs=0.01), f"unified host should target the 12 GiB reserve, got {frac}"
     assert frac * 121.7 <= 121.7 - 40.0, "the OS floor is no longer respected"

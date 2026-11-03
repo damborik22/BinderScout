@@ -4,7 +4,7 @@ RFD4-Proteina is the only tool here that writes no CSV at all — one all-atom m
 per sample, binder in chain B, target in chain A — so these tests exercise the
 mmCIF path and the two ways it can come back empty.
 
-The fixtures are built from the REAL 690-design run (2026-10-23, PD-L1 on Clara
+The fixtures are built from the REAL 690-design run (2026-10-23, PD-L1 on a cluster
 l40s): the sequences, lengths, sample-directory names and design ids below are
 copied verbatim from the first rows of that run's ``designs.csv``, and the
 ``_atom_site`` column set is the one the upstream generator emits

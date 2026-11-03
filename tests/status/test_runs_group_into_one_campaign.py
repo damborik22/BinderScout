@@ -31,14 +31,14 @@ def _doc(campaigns=None):
         "generated_at": "now",
         "campaigns": campaigns or {},
         "hosts": {
-            "bm1": {
+            "host-a": {
                 "reachable": True,
                 "runs": {
                     "tfr1_apical": {"tools": {"rfd3": _arm("running", 10, 50)}},
                     "tfr1_rfd4": {"tools": {"rfd4": _arm("done", 50, 50)}},
                 },
             },
-            "bm5": {
+            "host-d": {
                 "reachable": True,
                 "runs": {"tfr1_bc2": {"tools": {"bindcraft2": _arm("running", 0, 50)}}},
             },
@@ -72,8 +72,8 @@ def test_an_unmapped_run_still_renders_under_its_own_name():
 
 def test_the_same_tool_in_two_runs_of_one_campaign_shows_twice():
     doc = _doc({"a": "C", "b": "C"})
-    doc["hosts"]["bm1"]["runs"] = {"a": {"tools": {"rfd3": _arm("done", 50, 50)}}}
-    doc["hosts"]["bm5"]["runs"] = {"b": {"tools": {"rfd3": _arm("running", 7, 350)}}}
+    doc["hosts"]["host-a"]["runs"] = {"a": {"tools": {"rfd3": _arm("done", 50, 50)}}}
+    doc["hosts"]["host-d"]["runs"] = {"b": {"tools": {"rfd3": _arm("running", 7, 350)}}}
     lines = [ln for ln in render(doc).splitlines() if "rfd3" in ln]
     assert len(lines) == 2, lines
 
@@ -89,11 +89,11 @@ def test_a_queued_second_run_is_not_eaten_by_the_running_first_one():
     work scheduled would be invisible.
     """
     doc = _doc({"r1": "C", "r2": "C"})
-    doc["hosts"]["bm1"]["runs"] = {
+    doc["hosts"]["host-a"]["runs"] = {
         "r1": {"tools": {"rfd3": _arm("running", 10, 50)}},
         "r2": {"tools": {"rfd3": dict(_arm("queued", 0, 350), started=False)}},
     }
-    doc["hosts"]["bm5"]["runs"] = {}
+    doc["hosts"]["host-d"]["runs"] = {}
 
     lines = [ln for ln in render(doc).splitlines() if "rfd3" in ln]
     assert len(lines) == 2, lines

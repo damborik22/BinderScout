@@ -7,7 +7,7 @@ disagree about WHICH file holds a tool's designs, the monitor reports a number
 nobody will be able to reproduce downstream.
 
 Found by running against the live fleet: the BoltzGen probe globbed
-`boltzgen/outputs/*.pdb`, and BoltzGen writes `.cif`. On BM2 it had produced 3430
+`boltzgen/outputs/*.pdb`, and BoltzGen writes `.cif`. On an x86_64 box it had produced 3430
 files, all of them under `intermediate_designs/`, and zero counted designs. The
 glob was wrong AND an intermediate is not a design -- so a naive fix would have
 reported those 3430 as members of the filtered pool. They are not: they are

@@ -339,7 +339,7 @@ class TestToolchainCheckBehaviour:
         assert "OPTIONAL" in out
 
     def test_the_optional_note_is_not_shown_when_soluprot_is_not_selected(self, tmp_path):
-        """Found by running this on BM5: the note printed on a Protein-Hunter +
+        """Found by running this on an aarch64 box: the note printed on a Protein-Hunter +
         BindCraft 2 selection too, where it describes none of the named tools."""
         path = REPO / "install" / "install_aarch.sh"
         _rc, out = self._run(tmp_path, path, {"DO_PROTEIN_HUNTER": True, "DO_BINDCRAFT2": True}, have=("git",))
@@ -352,7 +352,7 @@ class TestToolchainCheckBehaviour:
     )
     @pytest.mark.parametrize("path", INSTALLERS, ids=IDS)
     def test_the_conda_remedy_names_this_platform_s_package(self, tmp_path, path, arch, expected):
-        """Also found on BM5. conda-forge names its compiler metapackages per
+        """Also found on an aarch64 box. conda-forge names its compiler metapackages per
         platform, so the hardcoded gxx_linux-64 was a copy-pasteable command that
         cannot resolve on a Spark -- in the one message aimed at the operator who
         has no root and therefore nothing else to try.

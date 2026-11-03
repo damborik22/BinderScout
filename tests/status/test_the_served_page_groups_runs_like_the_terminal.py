@@ -31,7 +31,7 @@ _DOC = {
     "campaigns": {"tfr1_r1": "TfR1 apical", "tfr1_r2": "TfR1 apical", "pmhc": "pMHC"},
     "deadlines": {"TfR1 apical": "2026-11-02T11:59:00Z"},
     "hosts": {
-        "bm1": {
+        "host-a": {
             "reachable": True,
             "runs": {
                 "tfr1_r1": {"tools": {"rfd3": _arm("done", 50, 50)}},
@@ -39,7 +39,7 @@ _DOC = {
                 "pmhc": {"tools": {"rfd4": _arm("done", 50, 50)}},
             },
         },
-        "bm2": {"reachable": False, "error": "unreachable (ssh failed)"},
+        "host-b": {"reachable": False, "error": "unreachable (ssh failed)"},
     },
 }
 
