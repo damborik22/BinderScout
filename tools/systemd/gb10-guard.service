@@ -7,7 +7,7 @@
 # also retries on a timer, so start order is not load-bearing.
 [Unit]
 Description=GB10 unified-memory guard (kill the GPU job, not the device)
-Documentation=file://@REPO@/docs/PLAN_bm5_unified_memory.md
+Documentation=file://@REPO@/docs/GB10_FREEZE_FAILSAFE.md
 After=nvidia-persistenced.service
 Wants=nvidia-persistenced.service
 

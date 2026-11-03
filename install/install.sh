@@ -45,8 +45,8 @@ BOLTZGEN_COMMIT="da0f092"
 #
 # PROVENANCE OF THIS DIGIT, because an earlier comment here claimed it was "what the
 # BoltzGen env actually runs" and that is NOT true on this branch: 2.14.1 is what the
-# 1.0.x box ran. The live envs on this fleet are torch 2.11.0+cu130 (x86, BM4) and
-# 2.10.0+cu130 (BM5, pinned separately by install_aarch.sh). So a `--tool boltzgen`
+# 1.0.x box ran. The live envs on the machines this was checked on are torch 2.11.0+cu130
+# (x86_64) and 2.10.0+cu130 (aarch64, pinned separately by install_aarch.sh). So a `--tool boltzgen`
 # re-run against this pin is a three-minor UPGRADE of a working env, not a
 # restatement of it -- deliberate, because the alternative is naming a digit that
 # differs per box, but it has not been exercised end to end here.
@@ -90,7 +90,7 @@ PROTEINA_COMPLEXA_DIR="${BINDERSCOUT_DIR}/Proteina-Complexa"
 # `ImportError: cannot import name 'AtomSelectionStack'` -- while the old smoke test
 # (`import proteinfoundation`) never touched pdb_utils and reported the env healthy.
 # The digit is a ceiling below 3.0.0, not the claim: 2.2.1 is the version a completed
-# generate run used, 2.2.0 is what this lab's box carries, and both provide the class.
+# generate run used, 2.2.0 is what an existing install carries, and both provide the class.
 # _pin_complexa_atomworks() asserts the SYMBOL, which is what actually has to hold.
 ATOMWORKS_VERSION="2.2.1"
 PROTEIN_HUNTER_REPO="https://github.com/yehlincho/Protein-Hunter.git"
@@ -2409,8 +2409,8 @@ LNEOF
     #
     # This activate.d hook sets CPATH (preserving existing) and CUTLASS_PATH
     # whenever the env is activated, with CONDA_BACKUP_ for clean deactivation.
-    # Permanent fix for the protenix+DS4Sci JIT trap that bit the ApoE4
-    # BinderScout / PXDesign-BM4 campaign 2026-05-27 / 2026-05-28.
+    # Permanent fix for the protenix+DS4Sci JIT trap that bit an ApoE4 PXDesign campaign
+    # (2026-05-27 / 2026-05-28).
     print_step "Setting up CUDA-header CPATH + CUTLASS_PATH activate.d hook"
 
     # Clone CUTLASS v3.5.1 (header-only, ~150 MB) if not already present.
@@ -2790,7 +2790,7 @@ install_proteina_complexa() {
             || print_warn "complexa init failed — .env may need manual setup"
 
 
-        # Three edits found as UNCOMMITTED state in BM5's PC checkout on 2026-10-04, now
+        # Three edits found as UNCOMMITTED state in an aarch64 PC checkout on 2026-10-04, now
         # reproducible (the cu126 index is correct on x86 and is left alone): the apoe4_ntd target,
         # and the REMOVAL of a try/except that silently moved the AF2 reward to the CPU -- which
         # is the ~130x slowdown the tool's deprecation rests on, made invisible. See the patch's
@@ -2806,7 +2806,7 @@ install_proteina_complexa() {
         # Make the composite reward REFUSE rather than silently score 0.0 when a reward model
         # cannot execute. PC catches every reward exception, reports it with warnings.warn, and
         # its CLI runs python with -W ignore -- so an unusable AF2 reward produces a completed
-        # search full of zeros that exits 0. Measured on BM5 2026-10-04 (aarch64, but the defect
+        # search full of zeros that exits 0. Measured on aarch64 2026-10-04 (but the defect
         # is upstream and platform-independent), where it cost a retracted throughput result.
         print_step "Patching PC: a reward that cannot be computed must not be 0.0"
         if python3 "${BINDERSCOUT_DIR}/install/patches/pc_reward_refuses_when_every_model_fails.py" \
@@ -3002,7 +3002,7 @@ install_bindcraft2() {
             # correct answer, not a broken install. Normal on a cluster login
             # node: the install is staged on a shared filesystem and the
             # campaign runs on an allocated GPU node. Failing here made every
-            # Clara install exit non-zero while being perfectly good.
+            # install on a cluster exit non-zero while being perfectly good.
             print_warn "jax reports '${backend}': no GPU visible on this host (normal on a login node)."
             print_warn "  The install is fine; verify the backend inside a GPU allocation before a campaign."
         elif [[ "${ARCH}" == "aarch64" ]]; then
@@ -3547,7 +3547,7 @@ install_af3() {
 
     # Install AlphaFold 3 from source. The "alphafold3" PyPI package is an unrelated
     # stub (v0.0.x) — the genuine DeepMind AF3 ships only via its repo (source build)
-    # or Docker. Recipe (verified on Clara H200, 2026-07-15):
+    # or Docker. Recipe (verified on an H200, 2026-07-15):
     #   clone (pinned) -> pip install (pulls jax==0.9.1 + gemmi + deps, builds C++)
     #   -> build_data (generates the CCD chemical_component_sets.pickle AF3 needs).
     if [[ -d "${AF3_DIR}/.git" ]]; then
@@ -4994,7 +4994,7 @@ main() {
         # Staleness is commit INEQUALITY, not "older than": mark_tool_installed
         # stamps HEAD, so a single `git pull` -- even a docs-only commit -- makes
         # EVERY marker stale at once. Merging that into the repair list turned
-        # --repair into a whole-fleet reinstall (AF2 weights included) after any
+        # --repair into a reinstall of every tool (AF2 weights included) after any
         # pull, which is the opposite of its documented purpose ("the common case
         # is one tool that lost a download to a network blip"). A stale tool still
         # RUNS; rebuilding it is a deliberate act, so it needs a deliberate flag.

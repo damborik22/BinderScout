@@ -1681,7 +1681,7 @@ install_bindcraft() {
     # its aarch64 conda PyRosetta, are unchanged).  It also still exposes the
     # deprecated jax.lib.xla_bridge.get_backend that ColabDesign's clear_mem()
     # calls, so ColabDesign needs no patch.
-    # Measured on BM5 (GB10), 120aa target + 40aa binder, AF2 fwd+bwd:
+    # Measured on a GB10, 120aa target + 40aa binder, AF2 fwd+bwd:
     #   0.4.34 + bf16 disabled : 5.40 s/iter   (the only way to make 0.4.34 run)
     #   0.6.2  + bf16 enabled  : 2.39 s/iter   (2.3x faster, and half the memory)
     print_step "Installing JAX 0.6.2 with CUDA 12 plugins (PyPI)"
@@ -2499,7 +2499,7 @@ PATCHEOF
     # the eval subprocess aborts (SIGABRT) with
     #     LLVM ERROR: Cannot select: nxv4bf16 = AArch64ISD::UINT_TO_FP_MERGE_PASSTHRU
     # and pxdbench then reads the empty output file and dies on a JSONDecodeError
-    # that says nothing about the real cause.  Bisected on BM5: bf16 on = abort,
+    # that says nothing about the real cause.  Bisected on a GB10: bf16 on = abort,
     # bf16 off = AF2 completes on CPU in 89 s.  x86 is unaffected, so this patch
     # lives only in the aarch64 installer.
     pxd_patch="$(mktemp)"
@@ -2878,7 +2878,7 @@ install_bindcraft2() {
             # correct answer, not a broken install. Normal on a cluster login
             # node: the install is staged on a shared filesystem and the
             # campaign runs on an allocated GPU node. Failing here made every
-            # Clara install exit non-zero while being perfectly good.
+            # install on a cluster exit non-zero while being perfectly good.
             print_warn "jax reports '${backend}': no GPU visible on this host (normal on a login node)."
             print_warn "  The install is fine; verify the backend inside a GPU allocation before a campaign."
         elif [[ "${ARCH}" == "aarch64" ]]; then
@@ -3983,7 +3983,7 @@ install_proteina_complexa() {
         fi
     fi
 
-    # Three edits found as UNCOMMITTED state in BM5's PC checkout on 2026-10-04, now
+    # Three edits found as UNCOMMITTED state in a PC checkout on 2026-10-04, now
     # reproducible: the cu130 torch index (no aarch64 build on cu126), the apoe4_ntd target,
     # and the REMOVAL of a try/except that silently moved the AF2 reward to the CPU -- which
     # is the ~130x slowdown the tool's deprecation rests on, made invisible. See the patch's
@@ -4003,7 +4003,7 @@ install_proteina_complexa() {
     # --clear is load-bearing: without it `uv venv` REFUSES when a .venv already
     # exists ("A virtual environment already exists at `.venv`. Use --clear to
     # replace it") and the whole tool install fails at its first step. Measured on
-    # BM5 2026-10-03, where a venv from the pre-0.6.2 era was present: the installer
+    # a GB10 on 2026-10-03, where a venv from the pre-0.6.2 era was present: the installer
     # exited with "Proteina-Complexa failed to install" and the stale CPU-only
     # jax 0.4.29 venv was left in place. So "installable on aarch64 since
     # 2026-09-26" was only ever true of a box with NO prior PC venv -- i.e. never
@@ -4032,7 +4032,7 @@ install_proteina_complexa() {
     # uv's own hint names this flag. It lets a *subsequent* index (PyPI) supply the pinned
     # version instead of failing; both indexes here are ones we already install from, so
     # the dependency-confusion surface the default guards against is not widened.
-    # Measured on BM5 2026-10-03: without it the editable step is the second of two
+    # Measured on a GB10 2026-10-03: without it the editable step is the second of two
     # independent reasons PC had never actually installed on this platform.
     run_logged "Installing Proteina-Complexa (editable)" \
         bash -c "cd '${PROTEINA_COMPLEXA_DIR}' && '${UV}' pip install --python .venv/bin/python -q --index-strategy unsafe-best-match -e ." \
@@ -4088,7 +4088,7 @@ SHIMPY
     # installing it here SHADOWS the vendored fork and every `complexa generate` dies on
     # config instantiation with
     #   AssertionError("ERROR: the following inputs were not set: {'device': CudaDevice(id=0)}")
-    # Measured on BM5 2026-10-04: this step was installing upstream 1.1.3 over the fork,
+    # Measured on a GB10 2026-10-04: this step was installing upstream 1.1.3 over the fork,
     # which is why PC failed in 25-33 s no matter what else was fixed.
     run_logged "Installing jax[cuda12]==0.6.2 (AF2 reward)" \
         "${PCPIP[@]}" "jax[cuda12]==0.6.2" \
@@ -4112,7 +4112,7 @@ SHIMPY
     # cannot execute. See the patch's own docstring: PC catches every reward exception,
     # reports it with warnings.warn, and its CLI runs python with -W ignore -- so an
     # unusable AF2 reward produces a completed search full of zeros that exits 0. Measured
-    # on BM5 2026-10-04, where that cost a retracted throughput result.
+    # on a GB10 2026-10-04, where that cost a retracted throughput result.
     print_step "Patching PC: a reward that cannot be computed must not be 0.0"
     if python3 "${BINDERSCOUT_DIR}/install/patches/pc_reward_refuses_when_every_model_fails.py" \
             "${PROTEINA_COMPLEXA_DIR}"; then
@@ -4178,7 +4178,7 @@ SHIMPY
     # smoke test reports a false XLA/LLVM failure on the exact platform it was written for.
     # On GB10 the GPU pool IS system RAM (121.7 GiB), and jax takes its 0.75 default
     # fraction as a reservation at import, so a test needing a few MB reserves ~91 GiB and
-    # the kernel OOM-killer takes the process. Measured on BM5 2026-10-03: the script
+    # the kernel OOM-killer takes the process. Measured on a GB10 2026-10-03: the script
     # printed "jax 0.6.2 | backend gpu", "bf16 graph compiled and ran: 128.000" and
     # "colabdesign imports", then exited **137** (SIGKILL) at shutdown -- and the installer,
     # seeing non-zero, declared "the XLA/LLVM blocker is NOT resolved here". With
@@ -5082,7 +5082,7 @@ main() {
         # Staleness is commit INEQUALITY, not "older than": mark_tool_installed
         # stamps HEAD, so a single `git pull` -- even a docs-only commit -- makes
         # EVERY marker stale at once. Merging that into the repair list turned
-        # --repair into a whole-fleet reinstall (AF2 weights included) after any
+        # --repair into a reinstall of every tool (AF2 weights included) after any
         # pull, which is the opposite of its documented purpose ("the common case
         # is one tool that lost a download to a network blip"). A stale tool still
         # RUNS; rebuilding it is a deliberate act, so it needs a deliberate flag.

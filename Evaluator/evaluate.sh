@@ -38,7 +38,7 @@
 #                          another, with staggered starts. Requires the CUDA MPS ceiling
 #                          (tools/gpu_mem_guard.sh) and refuses to run without it, because
 #                          concurrency without a hard per-client cap is exactly what took
-#                          BM5 down. Per-engine output goes to $OUTPUT/refold_<engine>.log.
+#                          a unified-memory host down. Per-engine output goes to $OUTPUT/refold_<engine>.log.
 #   --stagger N            seconds between concurrent engine starts (default: 30). The
 #                          measured peak is the simultaneous COLD START -- all engines
 #                          preallocating at once -- not steady state.
@@ -203,7 +203,7 @@ bs_source_conda "${_BINDERSCOUT_DIR}" || true
 #     platforms that are instances of gpu are present", wrote empty rows, and
 #     still exited 0 -- silently removing a whole engine from consensus_iptm_mean
 #     and from the >=3-engine gate.
-# Measured 2026-08-20 on BM5: with it unset both engines report ['gpu'] and fold
+# Measured 2026-08-20 on a GB10: with it unset both engines report ['gpu'] and fold
 # correctly (AF3 iptm 0.8900, Boltz-2 17.2 GiB on-GPU).  Do not re-add it.
 # A machine that genuinely cannot run JAX on GPU can still export it externally;
 # evaluate.sh inherits the environment.
@@ -672,7 +672,7 @@ fi
 # On unified-memory hosts (GB10 / DGX Spark) the GPU pool IS system RAM:
 # cudaMemGetInfo total == SC_PHYS_PAGES == 121.7 GiB. An engine sizing itself as a
 # fraction of "device total" therefore reserves a fraction of the WHOLE MACHINE and
-# starves the kernel -- that is what hard-rebooted BM5 on 2026-08-18.
+# starves the kernel -- that is what hard-rebooted a GB10 host on 2026-08-18.
 #
 # Each engine also computes its own absolute-GiB fraction
 # (binder_comparison.refolding.memory_policy), but that is COOPERATIVE. The hard
@@ -716,7 +716,7 @@ engine_boltz2 () {
     # Its default is CWD-relative ./refold_boltz2, so without this every run
     # shares one directory keyed on where evaluate.sh happened to be invoked
     # from -- and --resume then reads THAT directory's accumulated
-    # refold_designs.csv. Measured on BM5 2026-10-04: a fresh 20-design run
+    # refold_designs.csv. Measured on a GB10 2026-10-04: a fresh 20-design run
     # resumed against 86 unrelated completed binders, folded nothing, and
     # published 260 rows from previous runs as its result. csv_rows() counts
     # non-empty iptm, so the guard reported "ok -- 260 new row(s)" over it.
@@ -741,7 +741,7 @@ engine_esmfold2 () {
 }
 
 # --- engine result guards ---------------------------------------------------
-# 2026-09-16 ESMFold2 died on Clara with a TypeError from an unpinned model
+# 2026-09-16 ESMFold2 died on a cluster node with a TypeError from an unpinned model
 # revision, wrote 0 rows, and evaluate.sh printed REFOLD_DONE and exited 0 -- an
 # entire engine contributing nothing to a >=3-engine gate, invisibly. An engine
 # that exits 0 and writes nothing is the same failure wearing a success code
