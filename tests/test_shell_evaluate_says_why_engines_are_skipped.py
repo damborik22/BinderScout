@@ -90,8 +90,13 @@ def test_an_installed_engine_is_not_listed(tmp_path):
 def test_no_conda_is_reported_as_no_conda_not_as_a_missing_env(tmp_path):
     r = _evaluate(tmp_path, None)
     out = r.stdout + r.stderr
-    assert r.returncode != 0, out
-    assert "conda not found" in out, out
+    # The script's own fatal line, with the remedy -- not just any failure. "conda not found" alone
+    # also appears in the per-engine [skipped] lines, and a later `conda: command not found` would
+    # give a non-zero exit even if the up-front refusal were deleted.
+    assert r.returncode == 1, out
+    assert "Error: conda not found (looked at " in r.stderr, out
+    assert "export BINDERSCOUT_CONDA=<its base directory>" in r.stderr, out
+    assert "command not found" not in out, out
     # the engines are named, with the real cause, instead of "env ... not found"
     assert "[skipped] AF3: conda not found" in out, out
     assert "[skipped] ESMFold2: conda not found" in out, out
