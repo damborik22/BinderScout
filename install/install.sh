@@ -186,6 +186,7 @@ FORCE=false      # --force: allow --yes to accept DESTRUCTIVE prompts (reclone /
 UNINSTALL_MODE=false
 VERIFY_ONLY=false        # --verify: audit what is on disk, install nothing
 CONDA_READONLY=false     # set by main for --verify / --uninstall: never install conda, never create a directory
+NO_CONDA=false           # set by main when a read-only mode found no conda: conda-backed tools are reported, not checked
 REPAIR_MODE=false        # --repair: audit, then re-install only what is broken
 REPAIR_STALE=false       # --stale: let --repair ALSO rebuild tools built against another commit
 TOOL_SPECIFIED=false
@@ -1123,8 +1124,19 @@ _use_conda_base() {
 # reason to go and fetch one.
 _conda_not_found() {
     print_fail "conda not found (looked at \$BINDERSCOUT_CONDA, ${BINDERSCOUT_DIR}/conda, \$CONDA_EXE, \$CONDA_PREFIX, PATH and the usual install locations)."
-    print_fail "  --verify and --uninstall never download or write anything, so no Miniforge was installed."
+    print_fail "  --verify and --uninstall never install conda, so no Miniforge was installed."
+    print_fail "  Tools that need no conda are still handled; each conda-backed tool is reported as not checked."
     print_fail "  If conda lives somewhere unusual: export BINDERSCOUT_CONDA=<its base directory> and re-run."
+}
+
+# _tool_needs_conda <tool>
+# Mosaic, BindCraft 2, RFD4-Proteina and Proteina-Complexa are uv venvs inside their own
+# checkouts; every other tool is a conda env. Takes a registry name or a --tool spelling.
+_tool_needs_conda() {
+    case "${1,,}" in
+        mosaic|bindcraft2|"bindcraft 2"|bc2|rfd4|rfd4-proteina|proteina-complexa|proteina_complexa|complexa) return 1 ;;
+        *) return 0 ;;
+    esac
 }
 
 # detect_conda
@@ -1248,7 +1260,9 @@ print_tool_status() {
     local spec tool flag fn
     for spec in "${TOOL_REGISTRY[@]}"; do
         IFS='|' read -r flag tool fn _dflt _desc <<< "${spec}"
-        if verify_tool "${tool}" 2>/dev/null; then
+        if [[ "${NO_CONDA}" == true ]] && _tool_needs_conda "${tool}"; then
+            printf "  %b  %-20s  %s\n" "${YELLOW}?${RESET}" "${tool}" "not checked (conda not found)"
+        elif verify_tool "${tool}" 2>/dev/null; then
             printf "  %b  %-20s  %s\n" "${GREEN}✓${RESET}" "${tool}" "installed"
         else
             printf "  %b  %-20s  %s\n" "${RED}✗${RESET}" "${tool}" "not installed"
@@ -4484,6 +4498,10 @@ _count_glob() {
 
 verify_tool() {
     local tool="$1"
+    if [[ "${NO_CONDA}" == true ]] && _tool_needs_conda "${tool}"; then
+        VERIFY_REASON="conda not found, so its conda env cannot be checked"
+        return 1
+    fi
     VERIFY_REASON="$(_relocation_reason "${tool}")"
     [[ -z "${VERIFY_REASON}" ]] || return 1
     case "${tool,,}" in
@@ -4941,19 +4959,23 @@ main() {
         CONDA_READONLY=true
     fi
     if ! detect_conda; then
-        if [[ "${VERIFY_ONLY}" == true ]]; then
-            print_fail "Verification result: nothing can be verified without conda."
+        [[ "${CONDA_READONLY}" == true ]] || exit 1
+        # A read-only mode still audits / removes what needs no conda (the uv venvs); the
+        # conda-backed tools are reported per tool by verify_tool and the uninstall loop.
+        NO_CONDA=true
+        CONDA_BASE=""
+        CONDA_CMD=""
+    fi
+    if [[ "${NO_CONDA}" != true ]]; then
+        local _conda_name _conda_ver
+        _conda_name="$(basename "${CONDA_CMD}")"
+        _conda_ver="$("${CONDA_CMD}" --version 2>/dev/null | awk '{print $2}')"
+        print_ok "${_conda_name} ${_conda_ver} at: ${CONDA_BASE}"
+        if [[ "${CONDA_BASE}" == "${LOCAL_CONDA_DIR}" ]]; then
+            print_ok "Standalone mode — all environments local to ${BINDERSCOUT_DIR}"
         fi
-        exit 1
+        resolve_env_names
     fi
-    local _conda_name _conda_ver
-    _conda_name="$(basename "${CONDA_CMD}")"
-    _conda_ver="$("${CONDA_CMD}" --version 2>/dev/null | awk '{print $2}')"
-    print_ok "${_conda_name} ${_conda_ver} at: ${CONDA_BASE}"
-    if [[ "${CONDA_BASE}" == "${LOCAL_CONDA_DIR}" ]]; then
-        print_ok "Standalone mode — all environments local to ${BINDERSCOUT_DIR}"
-    fi
-    resolve_env_names
 
     # REFUSE on aarch64 rather than warn. This script is x86-shaped throughout —
     # it pins cu121 wheel indexes that have no aarch64 build, and its BoltzGen arm
@@ -5083,6 +5105,13 @@ main() {
         for _spec in "${TOOL_REGISTRY[@]}"; do
             IFS='|' read -r _flag _tool _fn _dflt _desc <<< "${_spec}"
             [[ "${!_flag}" == true ]] || continue
+            # Without conda a conda-backed tool's env can be neither found nor removed:
+            # nothing was touched, so its marker stays and the tool is reported as failed.
+            if [[ "${NO_CONDA}" == true ]] && _tool_needs_conda "${_tool}"; then
+                print_fail "${_tool}: conda not found, so its conda env was not removed (nothing of it was changed)."
+                failed_uninstalls+=("${_tool}")
+                continue
+            fi
             # Clear the marker whether or not the removal reported success: the
             # env is gone or damaged either way, so leaving a success marker behind
             # would make `--uninstall --tool rfd3` the new way to get a tool that
