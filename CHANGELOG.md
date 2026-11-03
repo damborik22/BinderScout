@@ -13,7 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Work since `v2.0.2` (37 commits), in preparation as `v2.0.3`. Nothing here changes the ranking:
+## [2.0.3] — 2026-11-03
+
+Work since `v2.0.2` (137 commits). Nothing here changes the ranking:
 `rank` is still the cross-engine gate then `consensus_iptm_mean`, computed exactly as before.
 
 ### Behaviour changes you may notice
@@ -214,6 +216,18 @@ Work since `v2.0.2` (37 commits), in preparation as `v2.0.3`. Nothing here chang
 - **Every script the configurator generates must `bash -n` parse**, enforced by a test.
 - **Not ported (known gap):** master's Proteina-Complexa raw-output copy-back and the per-row `structure`
   column that links a design id to its PDB. Tracked for 2.0.4.
+
+### Known issues in 2.0.3
+
+- **aarch64 was not re-tested end to end for this release.** The aarch64 installer gained RFD4-Proteina
+  (opt-in) and the new `--repair --stale`; both are covered by the test suite on x86_64 but the RFD4 install
+  and the evaluate chain were not run on an aarch64 host. Treat RFD4 on aarch64 as unvalidated.
+- A fully resumed Boltz-2 run (nothing left to fold) still loads the model and briefly reserves its XLA pool
+  before exiting; harmless on an idle card, risky on a shared one. An early "nothing to do" exit is planned.
+- Proteina-Complexa raw-output copy-back and the per-row `structure` column (master) are not ported.
+- Only the CALCA smoke example and a PD-L1 contig check were exercised live; the full demo ran on one x86_64
+  host (RTX 3090). BindCraft, BindCraft 2, Mosaic, PXDesign and Proteina-Complexa arms were configured and
+  `bash -n` checked but not run end to end in this release's demo.
 
 ### Removed
 

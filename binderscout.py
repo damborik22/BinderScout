@@ -41,7 +41,7 @@ _INVOKE = "binderscout" if shutil.which("binderscout") else "./binderscout.py"
 # records which BinderScout produced it without anyone having to guess from a
 # commit date. The bundled evaluator package (`binder-comparison`) carries its
 # own, independent version — the two are allowed to differ and usually do.
-__version__ = "2.0.0"
+__version__ = "2.0.3"
 
 BOLD = "\033[1m"
 CYAN = "\033[0;36m"

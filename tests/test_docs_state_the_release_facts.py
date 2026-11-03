@@ -240,14 +240,21 @@ def test_third_party_table_covers_the_tools_added_since_it_was_written():
 # --- CHANGELOG ---------------------------------------------------------------
 
 
-def test_changelog_unreleased_section_is_written():
+def test_changelog_newest_release_section_is_written():
+    """The notes of the release being prepared live under [Unreleased] and, once cut, under the newest heading."""
+    import re
+
     text = _text("CHANGELOG.md")
     start = text.index("## [Unreleased]")
-    end = text.index("\n## [", start + 5)
-    body = text[start:end]
-    assert len(body) > 2500, "the [Unreleased] section is empty or a stub"
+    nxt = re.search(r"\n## \[\d", text[start:])
+    assert nxt, "no numbered release heading after [Unreleased]"
+    # [Unreleased] + the newest numbered section (the release cut from it) together carry the notes.
+    after = text[start + nxt.start() + 1 :]
+    end2 = re.search(r"\n## \[\d", after[5:])
+    body = text[start : start + nxt.start()] + after[: (end2.start() + 5) if end2 else len(after)]
+    assert len(body) > 2500, "the newest changelog section is empty or a stub"
     for needle in ("binderscout status", "--repair --stale", "stderr", "_pinned", "resume", "binderscout_paths"):
-        assert needle in body, f"[Unreleased] does not mention {needle!r}"
+        assert needle in body, f"the newest changelog section does not mention {needle!r}"
 
 
 # --- ancestry, pool provenance and test scope (docs lane, 2026-11-03) --------
