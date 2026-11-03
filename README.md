@@ -5,23 +5,22 @@
 
 # BinderScout
 
-> ## ⚠️ `v2.0.x` — DEVELOPMENT IN PROGRESS. DO NOT USE.
+> ## `v2.0.x` — the 2.0 line
 >
-> **You are on the `v2.0.x` branch. It is unfinished, unreleased and not tagged.
-> We strongly recommend you do not use it for anything real.**
+> **You are on the `v2.0.x` branch.** Its releases are tagged `v2.0.0`, `v2.0.1` and
+> `v2.0.2`; the next, `v2.0.3`, is in preparation. 2.0 is an *evaluation* release: one
+> ranking (a cross-engine gate, then `consensus_iptm_mean`), no compatibility shim for
+> the columns it removed, and nine design tools including RFD4-Proteina. Several shipped
+> columns are advisory and not validated against experiment — see
+> [`docs/PLAN_2.0_CONCLUSION.md`](docs/PLAN_2.0_CONCLUSION.md) and [`2.0/README.md`](2.0/README.md)
+> for what remains open.
 >
-> 2.0 is actively being built: parts of the plan are complete, others are
-> untouched, and several shipped columns are deliberately advisory-only and not
-> yet validated. Interfaces, CSV schemas and defaults change without notice, and
-> results produced here should not be relied on or published.
->
-> **For actual work use a released tag instead** — `master` is frozen at
-> **1.0.3**, the validated seven-tool pipeline. `v1.1.x` (1.1.1) adds BindCraft 2
-> as the eighth tool. RFD4-Proteina, the ninth, is on `v2.0.x` only.
->
-> Status and what remains: [`docs/PLAN_2.0_CONCLUSION.md`](docs/PLAN_2.0_CONCLUSION.md)
-> and [`2.0/README.md`](2.0/README.md).
-
+> **`master` is a separate line, currently `v1.2.x`.** Its numbering restarted at 1.0.0 in a
+> history rewrite, so `v2.0.x` is not an ancestor of it and a fix cannot be cherry-picked
+> between the two — diff the trees and re-apply. `v1.1.x` is retired: it survives only as
+> the tag `archive/v1.1.x`. Pick a line and stay on it; the default `git clone` lands on
+> `master`, so to get this one run `git clone -b v2.0.x <url>` (see
+> [Platform / branch](#platform--branch)).
 
 A unified toolkit for GPU-accelerated protein binder design — installer, configurator, and evaluator in one repository.
 
@@ -33,7 +32,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 | Component | What it does | Runs in |
 |---|---|---|
-| `binderscout install` | Installs design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3; RFD4-Proteina is a separate `--tool rfd4` add, x86_64 only) plus the default refold engine ESMFold2 and the SoluProt solubility screen; BindCraft 2 needs its source handed to `--bc2-source`, and AF3 is a separate `--tool` add (gated weights) | bash |
+| `binderscout install` | Installs design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3; RFD4-Proteina is a separate opt-in `--tool rfd4` add) plus the default refold engine ESMFold2 and the SoluProt solubility screen; BindCraft 2 needs its source handed to `--bc2-source`, and AF3 is a separate `--tool` add (gated weights) | bash |
 | `binderscout configure` | Interactive wizard: target → configs → run scripts | system Python |
 | `binderscout evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by cross-engine iPTM, generate HTML report | conda env `binder-eval` |
 
@@ -49,7 +48,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 | **Proteina-Complexa** | NVIDIA flow matching + inference-time optimisation (best-of-N, beam, MCTS) | uv venv `Proteina-Complexa/.venv` (Python 3.12) | x86_64; aarch64 opt-in since 2026-09-26 (unvalidated) |
 | **Protein-Hunter** | Boltz-2 / Chai-1 hallucination across 6 modalities (protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA) | conda env `binderscout_protein_hunter` (Python 3.10) | x86_64 |
 | **RFD3** | RosettaCommons foundry diffusion (RFdiffusion3 + ProteinMPNN, BSD-3, commercial-use OK) | conda env `binderscout_rfd3` (Python 3.12) | x86_64 + aarch64 |
-| **RFD4-Proteina** | Latent-reasoning diffusion (IPD x NVIDIA). Backbone **and** sequence in one pass, so no MPNN step. Code BSD-3; the **weights licence is unverified** here. Takes an **mmCIF** target only | uv venv at `RFD4-Proteina/.venv` (Python 3.12) | **x86_64 only** — opt-in via `--tool rfd4`, not in `--tool all` |
+| **RFD4-Proteina** | Latent-reasoning diffusion (IPD x NVIDIA). Backbone **and** sequence in one pass, so no MPNN step. Code BSD-3; the **weights licence is unverified** here. Takes an **mmCIF** target only | uv venv at `RFD4-Proteina/.venv` (Python 3.12) | x86_64; aarch64 installable since 2026-10-29 but **not yet run** there. Opt-in via `--tool rfd4`, not in `--tool all` |
 
 > Each tool runs in its own isolated environment. Environments must not be mixed.
 
@@ -219,9 +218,11 @@ Tool directories (`BindCraft/`, `BoltzGen/`, `Mosaic/`, `PXDesign/`, `Proteina-C
 ## Quick start
 
 ```bash
-# 1. Clone (x86_64)
-git clone https://github.com/damborik22/BinderScout.git ~/BinderScout
+# 1. Clone. The default branch is `master` (the 1.x line); this is the 2.0 line:
+git clone -b v2.0.x https://github.com/damborik22/BinderScout.git ~/BinderScout
 cd ~/BinderScout
+#    One tree serves both architectures: `./binderscout.py install` picks
+#    install/install.sh on x86_64 and install/install_aarch.sh on aarch64.
 
 # 2. Install tools — on a fresh clone call the script directly: the `binderscout`
 #    shortcut does not exist yet, because the installer is what creates it
@@ -265,13 +266,14 @@ binderscout evaluate run --mosaic runs/<name>/mosaic --bindcraft runs/<name>/bin
 
 ```
 binderscout install   [--tool bindcraft|bindcraft2|boltzgen|mosaic|pxdesign|proteina-complexa|protein-hunter|rfd3|all]
-                     [--tool rfd4]                     # ninth design tool, x86_64 only, not in --tool all
+                     [--tool rfd4]                     # ninth design tool, opt-in, not in --tool all
                      [--bc2-source <zip|dir|git-url>]  # override BindCraft 2's source (default: upstream)
                      [--tool evaluator]                # the evaluator alone (binder-eval env + binder-compare)
                      [--tool af3|soluprot|tmprot]      # extra evaluator engines (esmfold2 ships in --tool all)
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
                      [--skip-preflight] [--force] [--verify] [--repair] [--stale]
 binderscout configure [options passed through to configurator.py]
+binderscout status    [--hosts a,b] [--local] [--json] [--html FILE] [--watch [SECS]] [--timeout SECS]
 binderscout evaluate  <binder-compare args>             # passthrough, e.g. run / extract / report / autosize
 binderscout --help
 ```
@@ -287,7 +289,7 @@ Options:
 |---|---|
 | `--tool all\|bindcraft\|bindcraft2\|boltzgen\|mosaic\|pxdesign\|proteina-complexa\|protein-hunter\|rfd3` | Which design tool(s) to install. Omit for interactive menu. |
 | `--bc2-source <zip\|dir>` | Where BindCraft 2's source is — a `.zip` or an unpacked directory. Same as exporting `$BINDCRAFT2_SOURCE`. Required by `--tool bindcraft2`, since there is nothing public to download; without it `--tool all` warns and skips BindCraft 2 rather than failing the whole install. |
-| `--tool rfd4\|rfd4-proteina` | RFD4-Proteina, the ninth design tool. **x86_64 only** (upstream's `setup_venv.sh` refuses other architectures and the pinned wheels are x86 cu13) and **not** in `--tool all`: it is new here, validated by one 4-design run on one node, and its **weights licence is unverified** — the BSD-3 licence covers the code only. |
+| `--tool rfd4\|rfd4-proteina` | RFD4-Proteina, the ninth design tool. **Not** in `--tool all`: it is new here, validated by one 4-design run on one node, and its **weights licence is unverified** — the BSD-3 licence covers the code only. Upstream's `setup_venv.sh` refuses non-x86_64 hosts, but we never call it: the installer builds the venv with `uv` directly, and on aarch64 (`install_aarch.sh`) resolves the pinned set against the cu130 wheel index. On aarch64 that is validated by a dependency resolve and an install on one GB10, **not by a design campaign**. |
 | `--tool evaluator` | Evaluator pipeline only — the `binder-eval` conda env and the `binder-compare` CLI (already in `--tool all`). This is the one to use when someone else ran the designs and you only want to refold, rank and report them. |
 | `--tool esmfold2` | ESMFold2 refolder — **default** (already in `--tool all`); lightweight, no gated weights; also the `autosize` gate. Listed here for explicit re-install. |
 | `--tool af3\|soluprot\|tmprot` | Evaluator-side tools, each in its own env. `af3` = AlphaFold 3 v3.0.2, **opt-in** (gated weights — canonical cross-check). `soluprot` = solubility screen, **already in `--tool all`**; listed here for an explicit re-install (both platforms source-build USEARCH v12, so a C/C++ toolchain is needed; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it also source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model). `tmprot` = sequence-only melting-temperature screen, **opt-in**, cloned rather than vendored (GPL-3.0); advisory label only, it never filters or ranks. |
@@ -373,6 +375,47 @@ runs/<name>/
 ```
 
 Each per-tool run script writes a `runs/<name>/<tool>/settings.json` capturing tool version, design parameters, target sequence, and GPU info before the design step begins — so a run is self-describing without grepping the parent script (which may have been edited since).
+
+### `binderscout status`
+
+Live campaign state per design tool and per machine: how many designs each arm has
+banked of how many it was asked for, whether it is still running, and an ETA. It probes
+on demand and caches nothing — the filesystem is the source of truth.
+
+```bash
+binderscout status                    # this machine plus every host in $BINDERSCOUT_FLEET
+binderscout status --local            # this machine only, no ssh
+binderscout status --hosts a,b        # probe these ssh aliases instead of the environment's list
+binderscout status --watch            # redraw every 60 s; --watch 10 for every 10 s
+binderscout status --json             # the raw document, for another program to consume
+binderscout status --html status.html # a self-contained page, written atomically
+```
+
+| Flag / variable | Meaning |
+|---|---|
+| `--hosts a,b` | ssh aliases to probe (comma- or space-separated). Default: `$BINDERSCOUT_FLEET`, then `$FLEET_MACHINES`. Empty means local-only |
+| `--local` | This machine only; no ssh at all |
+| `--json` | Print the document as JSON instead of the terminal view. Notices go to stderr, so stdout is pure JSON |
+| `--html FILE` | Write a self-contained page to `FILE` instead of printing. The file is written beside and renamed, so a browser polling it never reads a half-written page |
+| `--watch [SECS]` | Redraw (or rewrite `--html`) every `SECS` seconds, default 60 |
+| `--timeout SECS` | Per-host ssh timeout, default 25 |
+| `$BINDERSCOUT_FLEET` | Space- or comma-separated ssh aliases to probe. Do not list the machine you are on: it is always probed, and listing it probes it twice under two labels |
+| `$BINDERSCOUT_CAMPAIGNS` | Path to a machine-local JSON file with two optional maps — `campaigns` (run directory → campaign label) and `deadlines` (label or run → due date). Without it each run directory is its own block. Keep this file out of the repository: it names real projects |
+
+Each arm is judged on **three signals, not one**, because designs land in batches and a
+count can sit frozen for an hour while the arm is perfectly healthy: the design count,
+whether its process is alive and the GPU busy, and how long its log has been silent. An
+arm that wrote its `settings.json` but has no process and no designs is reported as
+**dead**, not queued. Remote hosts are probed by piping a small stdlib-only script into
+`ssh <alias> python3 -`, so the far machine needs no checkout and cannot be on a
+different version.
+
+The `--html` page is meant to be regenerated by a timer on any box and served over plain
+HTTP; no account or agent is involved. Its freshness band is recomputed in the browser
+from the page's own timestamp, so a page whose generator has died turns stale rather than
+reading "fresh" forever. Binding a port and installing the timer are machine-local
+decisions and are left to the operator. Paths in the document are reported relative to
+`$HOME`.
 
 ### `binderscout evaluate`
 
@@ -464,7 +507,7 @@ Every one takes `--help`. `binderscout evaluate <cmd> …` runs the same thing i
 
 | Subcommand | What it does |
 |---|---|
-| `extract` | Pull binder sequences out of any combination of the eight tools' outputs into one FASTA (`--bindcraft2 DIR` for a BindCraft 2 campaign folder) |
+| `extract` | Pull binder sequences out of any combination of the nine tools' outputs into one FASTA (`--bindcraft2 DIR` for a BindCraft 2 campaign folder) |
 | `parse-seqs` | Convert sequences from FASTA / one-per-line / CSV / comma-separated into FASTA |
 | `validate` | Sanity-check sequences (alphabet, length, duplicates, target parse) before spending GPU time |
 | `run` | The whole pipeline in one call: extract → refold-boltz2 → report |
@@ -526,7 +569,7 @@ experimental results well enough to earn that power.
 | `self_consistency_rmsd` · `passes_self_consistency` | Target-aligned RMSD between refolds — the second axis RFdiffusion-family gates couple with interface confidence. Target-aligned on purpose: superposing on the binder measures its fold, not its placement, and a binder that folds perfectly on the wrong face scores ~0 Å that way |
 | `passes_confidence_gate` · `confidence_fail_reasons` · `confidence_n_engines` | BindCraft's own filters, ported exactly (i_pAE ≤ 10.85 Å, binder pLDDT ≥ 0.8, interface i_pTM ≥ 0.5) |
 | `would_exclude_*` | What each gate *would* have removed, had it been allowed to |
-| `generation_index` · `_source` | Where a design fell in its campaign's generation order, and how that was determined. Five of eight tools can report one; `unavailable` is a first-class answer — for Proteina-Complexa it is the correct one, since under MCTS the pool is a flattened tree |
+| `generation_index` · `_source` | Where a design fell in its campaign's generation order, and how that was determined. Six of nine tools can report one; `unavailable` is a first-class answer — for Proteina-Complexa it is the correct one, since under MCTS the pool is a flattened tree |
 | `agreement_count` | Kept as a diagnostic **only**. As a screen it is a flat null — macro-AUC 0.532 with 87.2 % of designs tied at zero (Part U) |
 | `soluprot_score` · `soluprot_passes` · `tmprot_*` | Sequence-only solubility and melting-temperature labels |
 
@@ -632,21 +675,34 @@ project directory. To remove everything: `rm -rf BinderScout/`.
 
 ## Platform / branch
 
-| Branch | Platform | Installer |
-|---|---|---|
-| `master` | x86_64 Linux + NVIDIA GPU | `install/install.sh` |
-| `aarch64` | NVIDIA DGX Spark / Grace-Hopper | `install/install_aarch.sh` |
+There is **no `aarch64` branch**. One tree serves both architectures; what differs is
+the installer:
+
+| Platform | Installer |
+|---|---|
+| x86_64 Linux + NVIDIA GPU | `install/install.sh` |
+| NVIDIA DGX Spark / Grace-Hopper (aarch64) | `install/install_aarch.sh` |
+
+`./binderscout.py install` picks the right one from `uname -m`; you can also run either
+script directly with `bash`. The branches that do exist are release lines, not platforms:
+
+| Branch | What it is |
+|---|---|
+| `v2.0.x` | The 2.0 line (tags `v2.0.0`–`v2.0.2`; `v2.0.3` in preparation). Nine design tools |
+| `master` | A separate 1.x line, currently `v1.2.x` (the default branch of the repository) |
+
+`v1.1.x` was retired to the tag `archive/v1.1.x`. The default clone lands on `master`:
 
 ```bash
-# x86_64
-git clone https://github.com/damborik22/BinderScout.git
+# the 2.0 line, on either architecture
+git clone -b v2.0.x https://github.com/damborik22/BinderScout.git
 
-# aarch64 / DGX Spark
-git clone -b aarch64 https://github.com/damborik22/BinderScout.git
+# the 1.x line
+git clone https://github.com/damborik22/BinderScout.git
 ```
 
-Both branches: `./binderscout.py install` (the `binderscout` shortcut only exists after
-that first run) or `bash install/install.sh`.
+Then `./binderscout.py install` (the `binderscout` shortcut only exists after that first
+run).
 
 ### aarch64 notes
 
@@ -658,12 +714,15 @@ that first run) or `bash install/install.sh`.
 - **Proteina-Complexa**: installable on aarch64 since 2026-09-26 — `bash install/install_aarch.sh --tool proteina-complexa`. Opt-in, not in `--tool all`, because nobody has run it end to end there yet.
   Two earlier explanations on this line were wrong and are worth not repeating. PyTorch Geometric and `torchtext` were never the blocker: PC imports neither, and its only PyG-family reference (`torch_scatter`) is satisfied by a small native shim the installer writes. Nor was it "no CUDA jaxlib for aarch64" — that exists. The actual blocker was that **jax 0.4.x cannot compile an AF2-class graph for sm_121**, which `jax[cuda12]==0.6.2` fixes; the installer uses it and smoke-tests a bf16 graph, the exact lowering that used to abort. What is still open is throughput, which was the deprecation's real content: measure a short MCTS run before planning a campaign.
 - **Protein-Hunter**: installable on aarch64 (`--tool protein-hunter`), opt-in rather than part of `--tool all`. This platform used to refuse it on the grounds that PyRosetta has no aarch64 wheels; that was wrong — the graylab **conda** channel ships one, and it is the same serialization build `install_aarch.sh` already uses for BindCraft. The installer takes it from there instead of the pip wheel, uses the cu130 torch index, and skips Chai-1 (the Boltz-2 entrypoint never imports it). `gemmi` builds from source, so a C/C++ toolchain is needed. Verified end-to-end on a GB10: a design run completes on the GPU.
+- **RFD4-Proteina**: `install_aarch.sh --tool rfd4` (opt-in, not in `--tool all`). Every CUDA-13 dependency publishes an aarch64 wheel, so the pinned set resolves and installs on a GB10; nobody has yet run a design campaign there, so treat it as installable, not validated.
 - **RFD3**: `install_aarch.sh --tool rfd3` installs it (cu130 torch wheels, `rc-foundry[rfd3,mpnn]`, weights + ProteinMPNN checkpoint into `weights/foundry/`). Opt-in rather than part of `--tool all` because it is **not yet validated on aarch64 hardware**.
 
 > **aarch64 tool matrix.** `install/install_aarch.sh` accepts `all`, `bindcraft`,
-> `bindcraft2`, `boltzgen`, `mosaic`, `evaluator`, `pxdesign`, `rfd3`, `af3`,
-> `esmfold2`, `soluprot`. `--tool all` installs BindCraft, BoltzGen, Mosaic,
-> Evaluator, PXDesign and **ESMFold2** (the default refold engine).
+> `bindcraft2`, `boltzgen`, `mosaic`, `evaluator`, `pxdesign`, `rfd3`, `rfd4`,
+> `protein-hunter`, `proteina-complexa`, `af3`, `esmfold2`, `soluprot`, `tmprot`.
+> `--tool all` installs the tools that are validated there, plus **ESMFold2** (the
+> default refold engine) — `install_aarch.sh --help` prints the exact list; the rest
+> are explicit opt-ins, listed below and in the notes above.
 >
 > - **BindCraft 2 is opt-in on aarch64:** `--tool bindcraft2 --bc2-source …`.
 >   Unlike RFD3 below it *has* been validated on this hardware — it sits outside
@@ -672,8 +731,10 @@ that first run) or `bash install/install.sh`.
 > - **RFD3 is opt-in on aarch64:** `--tool rfd3`. It is pure pip with no DGL
 >   dependency so it should work, but it has **not been validated on aarch64
 >   hardware** — which is why it is not in `--tool all`. Please report results.
-> - **Protein-Hunter and Proteina-Complexa are refused** with an explicit reason
->   (PyRosetta has no aarch64 wheels; PyG/torchtext may not either).
+> - **Protein-Hunter, Proteina-Complexa and RFD4-Proteina are opt-in too**
+>   (`--tool protein-hunter|proteina-complexa|rfd4`); see their entries above for
+>   what has and has not been measured on this hardware. An older version of this
+>   note said the first two were refused; that stopped being true.
 > - `binderscout install` now selects the installer for the host architecture
 >   automatically, so you no longer need to invoke `install_aarch.sh` by hand — the
 >   TUI's "Install tools" does the same.
@@ -792,7 +853,7 @@ Not defects — behaviour that will surprise you if you have not met it.
 
 - **The ranking is computed from PAE `.npy` files, not from the CSV's `iptm` column.**
   If a results directory is separated from the refold CSVs that reference it (a
-  `fleet.sh fetch`, an archived run, a CSV copied on its own), the per-engine ipTM and
+  copy made by hand, an archived run, a CSV copied on its own), the per-engine ipTM and
   ipSAE columns cannot be recomputed. The report says so — `[pae] N/N PAE files … were
   not found`, then `[rank] NO engine ipTM was available` — and the resulting `rank`
   column carries no cross-engine signal. Move the whole `evaluate/` directory, not just
