@@ -61,3 +61,14 @@ def test_a_directory_without_conda_sh_is_not_a_base(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "x" / "bin").mkdir(parents=True)
     assert not bp._is_base(tmp_path / "x")
+
+
+def test_require_skips_a_base_that_lacks_the_named_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(bp, "_FIXED_SYSTEM_DIRS", ())
+    shadow = _fake_base(tmp_path / "repo" / "conda")
+    good = _fake_base(tmp_path / "good")
+    (good / "bin" / "conda").write_text("#!/bin/sh\n")
+    env = _env(tmp_path, CONDA_EXE=str(good / "bin" / "conda"))
+    assert bp.find_conda_base(tmp_path / "repo", env) == shadow
+    assert bp.find_conda_base(tmp_path / "repo", env, require="bin/conda") == good
+    assert bp.find_conda_base(tmp_path / "repo", _env(tmp_path), require="bin/conda") is None
