@@ -15,7 +15,9 @@ binderscout configure --config examples/CALCA/smoke.json
 bash runs/CALCA_smoke/run_all.sh
 ```
 
-That generates a run folder with a script per tool and runs them in sequence.
+That generates a run folder with a script per tool and runs them in sequence. The
+config can be replayed from any directory: its relative paths are relative to the
+BinderScout checkout, never to your cwd.
 To exercise one tool instead of all eight:
 
 ```bash
@@ -42,6 +44,8 @@ this same target, already scored by all three refold engines.
 | binder length | 20–30 aa | 65–150 aa |
 | RFD3 diffusion steps | 20 | 200 |
 | Protein-Hunter cycles | 1 | 7–9 |
+| BindCraft 2 attempts (`max_trajectories`) | 3 | sized to the target |
+| PXDesign samples / Complexa designs | 2 / 2 | 1000 / 100 |
 | BindCraft filters | `no_filters` | `default_filters` |
 
 `no_filters` is deliberate: BindCraft's own filters reject most designs, and a

@@ -4925,6 +4925,10 @@ def _default_pxdesign_mode(tools_enabled: dict, cfg: dict | None = None) -> None
     print("  what the other eight tools mean by 'enabled'. Set pxdesign_output_dir to import.")
 
 
+# cfg keys that hold a filesystem path (restored to Path on load, written run-relative on save).
+PATH_CFG_KEYS = ("run_dir", "target_pdb", "target_pdb_src", "target_cif", "pxdesign_output_dir")
+
+
 def load_run_config(path: Path) -> tuple[dict, dict]:
     """Read a config.json back into (cfg, tools_enabled).
 
@@ -4967,14 +4971,26 @@ def load_run_config(path: Path) -> tuple[dict, dict]:
     cfg.pop("soluprot_filter", None)
     tools_enabled.pop("soluprot_filter", None)
 
-    for key in ("run_dir", "target_pdb", "target_pdb_src"):
+    # Relative paths never resolve against the cwd: the same file must mean the same
+    # thing from any working directory. The file says what they are relative to:
+    # `path_base` "repo" (the default, and what the config-builder page documents) is
+    # the BinderScout checkout; "config" is this file's own directory, which is what a
+    # config.json written into a run folder uses so that it follows the folder when it
+    # is moved.
+    path_base = payload.get("path_base", "repo")
+    if path_base not in ("repo", "config"):
+        print_fail(f"{path}: path_base must be 'repo' or 'config', not {path_base!r}.")
+        sys.exit(1)
+    base = BINDERSCOUT_DIR if path_base == "repo" else Path(path).expanduser().resolve().parent
+    for key in PATH_CFG_KEYS:
         if cfg.get(key):
             # .resolve() as well as .expanduser(): generated run scripts bake
             # absolute paths derived from run_dir, so a relative value produced
             # a run folder the configurator reported ready and that could not
             # execute from anywhere else. A config downloaded from a front-end
             # is exactly the thing most likely to carry one.
-            cfg[key] = Path(str(cfg[key])).expanduser().resolve()
+            given = Path(str(cfg[key])).expanduser()
+            cfg[key] = (given if given.is_absolute() else base / given).resolve()
 
     missing = [k for k in ("name", "run_dir", "target_pdb_src") if not cfg.get(k)]
     if missing:

@@ -1,6 +1,6 @@
 {
   "config_version": 1,
-  "_comment": "BinderScout smoke test - the smallest campaign that still exercises every design tool end to end. Replay with: binderscout configure --config examples/CALCA/smoke.json",
+  "_comment": "BinderScout smoke test - the smallest campaign that still exercises every design tool end to end. Replay with: binderscout configure --config examples/CALCA/smoke.json (from any directory). Relative paths in this file are relative to the BinderScout checkout, not the cwd (path_base 'repo', the default; a config.json written into a run folder says path_base 'config' instead). Every tool is bounded: BindCraft 2's number_of_final_designs is a quota of ACCEPTED designs, so bindcraft2_max_trajectories is what actually caps it.",
   "tools_enabled": {
     "bindcraft": true,
     "bindcraft2": true,
@@ -28,9 +28,14 @@
     "advanced_preset": "default_4stage_multimer",
 
     "bindcraft_n_designs": 1,
+    "bindcraft2_n_designs": 1,
+    "bindcraft2_max_trajectories": 3,
     "boltzgen_budget": 1,
     "mosaic_n_designs": 1,
     "pxdesign_binder_length": 25,
+    "pxdesign_n_samples": 2,
+    "complexa_n_designs": 2,
+    "complexa_replicas": 1,
     "rfd3_n_designs": 1,
     "rfd3_batch_size": 1,
     "rfd3_diffusion_steps": 20,
