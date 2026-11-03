@@ -61,6 +61,8 @@ class TestResolverRemapsAbsolutePaths:
         df = pd.DataFrame({"boltz_pae_file": [f"{FOREIGN}/refold_boltz2/d1_pae.npy"], "binder_length": [10]})
         with warnings.catch_warnings():
             warnings.simplefilter("error")
+            # The remap itself is announced (informational); anything else is still an error.
+            warnings.filterwarnings("ignore", message=".*REMAPPED.*")
             out = add_iptm_from_pae_files(
                 df, pae_file_col="boltz_pae_file", prefix="boltz", ordering="binder_target", base_dir=root
             )

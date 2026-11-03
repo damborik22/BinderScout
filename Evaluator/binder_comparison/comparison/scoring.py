@@ -18,6 +18,7 @@ Key findings implemented here:
 
 from __future__ import annotations
 
+import os
 import re
 import warnings
 from pathlib import Path
@@ -198,6 +199,11 @@ def _load_checked_pae(resolved: Path, L_b: int, target_sequence, ordering: str) 
     return pae
 
 
+# The per-engine output directories the runners and evaluate.sh create. A recorded path
+# that names one is never remapped to something below it (see _resolve_pae_path).
+_ENGINE_OUTPUT_DIRS: tuple[str, ...] = ("refold_boltz2", "refold_af3", "refold_esmfold2")
+
+
 def _resolve_pae_path(
     pae_path: str | None,
     base_dir: str | Path | None,
@@ -222,6 +228,17 @@ def _resolve_pae_path(
     Longest tail first, because engines reuse basenames: matching only the
     basename could hand back a different engine's matrix, which is worse than
     returning nothing.
+
+    The strip is BOUNDED, for the same reason. Export names are
+    ``<binder_id>_<engine>.pdb`` with no per-run uuid, so two runs of one design
+    write identically named files, and a tail that has shed its directory context
+    can bind a design to the other run's file with nothing to show it. When the
+    recorded path contains the engine's own output directory (``refold_boltz2`` /
+    ``refold_af3`` / ``refold_esmfold2``, the names ``evaluate.sh`` and the
+    runners use), no tail shorter than that directory is tried. A path with none
+    of those names never falls to a bare basename: at least the parent directory
+    and the file name must match. Unresolved is reported by the caller; a wrong
+    file is not.
     """
     if pae_path is None or (isinstance(pae_path, float) and np.isnan(pae_path)):
         return None
@@ -235,11 +252,68 @@ def _resolve_pae_path(
     if candidate.exists():
         return candidate
     parts = p.parts[1:] if p.is_absolute() else p.parts
-    for start in range(len(parts)):
+    engine_dir_at = max((i for i, part in enumerate(parts[:-1]) if part in _ENGINE_OUTPUT_DIRS), default=None)
+    last_start = engine_dir_at if engine_dir_at is not None else len(parts) - 2
+    for start in range(last_start + 1):
         tail = base.joinpath(*parts[start:])
         if tail.exists():
             return tail
     return None
+
+
+def _stripped_prefix(recorded: object, resolved: Path | None, base_dir: str | Path | None) -> str | None:
+    """The leading part of *recorded* that was dropped to find *resolved*, or None if none was.
+
+    None for a path that exists as written, one found relative to *base_dir*, and a miss.
+    """
+    if resolved is None or base_dir is None or not isinstance(recorded, (str, os.PathLike)):
+        return None
+    if Path(resolved) == Path(str(recorded)):
+        return None
+    parts = Path(str(recorded)).parts
+    try:
+        kept = Path(resolved).relative_to(Path(base_dir)).parts
+    except ValueError:
+        return None
+    if not kept or len(kept) >= len(parts) or parts[-len(kept) :] != kept:
+        return None
+    return str(Path(*parts[: -len(kept)]))
+
+
+def _track_remap(remapped: list[str], recorded: object, resolved: Path | None, base_dir: str | Path | None) -> None:
+    """Append the dropped prefix to *remapped* when resolving *recorded* had to shed one."""
+    prefix = _stripped_prefix(recorded, resolved, base_dir)
+    if prefix is not None:
+        remapped.append(prefix)
+
+
+def _warn_remapped(
+    tag: str,
+    column: str,
+    remapped: list[str],
+    n_listed: int,
+    base_dir: str | Path | None,
+) -> None:
+    """One informational line per column: how many cells were REMAPPED, and from where.
+
+    A remap is a guess that the files are the ones the CSV meant, found by shedding the
+    recorded leading directories. It is almost always right (a pool moved to another
+    account) and is the one place a wrong run's file could be picked up quietly, so it is
+    said once, with the prefix that was dropped, rather than not at all.
+    """
+    if not remapped:
+        return
+    try:
+        common = os.path.commonpath(remapped)
+    except ValueError:  # mixed absolute and relative prefixes
+        common = ""
+    warnings.warn(
+        f"[{tag}] {len(remapped)}/{n_listed} paths in '{column}' were REMAPPED under {base_dir}: the recorded "
+        f"location does not exist here, so the leading '{common or '(no common prefix)'}' was dropped and the "
+        f"file found beneath the results directory instead. Informational -- check that these are the files "
+        f"of THIS pool.",
+        stacklevel=3,
+    )
 
 
 def _warn_unresolved_pae(
@@ -307,6 +381,7 @@ def remap_structure_paths(
         engine = col.split("_", 1)[0] if col != "pdb" else "boltz"
         base_dir = base_dirs.get(engine)
         n_listed = n_unresolved = 0
+        remapped: list[str] = []
         resolved_cells: list[object] = []
         for cell in out[col]:
             if not isinstance(cell, str) or not cell.strip():
@@ -318,8 +393,10 @@ def remap_structure_paths(
                 n_unresolved += 1
                 resolved_cells.append(cell)
             else:
+                _track_remap(remapped, cell, resolved, base_dir)
                 resolved_cells.append(str(resolved))
         out[col] = pd.Series(resolved_cells, index=out.index, dtype=object)
+        _warn_remapped("structure", col, remapped, n_listed, base_dir)
         if n_unresolved:
             tried = f" (also tried relative to {base_dir})" if base_dir is not None else ""
             warnings.warn(
@@ -365,12 +442,14 @@ def add_boltz_ipsae_from_files(
 
     bt_ipsae_vals, tb_ipsae_vals, min_vals, max_vals = [], [], [], []
     n_unresolved = 0
+    remapped: list[str] = []
 
     for _, row in df.iterrows():
         pae_path = row.get(pae_file_col)
         L_b = row.get(binder_length_col)
 
         resolved = _resolve_pae_path(pae_path, base_dir)
+        _track_remap(remapped, pae_path, resolved, base_dir)
         if pd.isna(pae_path) or pd.isna(L_b) or resolved is None:
             if resolved is None and not pd.isna(pae_path):
                 n_unresolved += 1
@@ -397,6 +476,7 @@ def add_boltz_ipsae_from_files(
             max_vals.append(np.nan)
 
     _warn_unresolved_pae(n_unresolved, len(df), pae_file_col, base_dir)
+    _warn_remapped("pae", pae_file_col, remapped, len(df), base_dir)
 
     result["boltz_pae_bt_ipsae"] = bt_ipsae_vals
     result["boltz_pae_tb_ipsae"] = tb_ipsae_vals
@@ -446,12 +526,14 @@ def add_ipsae_from_pae_files(
 
     bt_ipsae_vals, tb_ipsae_vals, min_vals, max_vals = [], [], [], []
     n_unresolved = 0
+    remapped: list[str] = []
 
     for _, row in df.iterrows():
         pae_path = row.get(pae_file_col)
         L_b = row.get(binder_length_col)
 
         resolved = _resolve_pae_path(pae_path, base_dir)
+        _track_remap(remapped, pae_path, resolved, base_dir)
         if pd.isna(pae_path) or pd.isna(L_b) or resolved is None:
             if resolved is None and not pd.isna(pae_path):
                 n_unresolved += 1
@@ -478,6 +560,7 @@ def add_ipsae_from_pae_files(
             max_vals.append(np.nan)
 
     _warn_unresolved_pae(n_unresolved, len(df), pae_file_col, base_dir)
+    _warn_remapped("pae", pae_file_col, remapped, len(df), base_dir)
 
     result[f"{prefix}_bt_ipsae"] = bt_ipsae_vals
     result[f"{prefix}_tb_ipsae"] = tb_ipsae_vals
@@ -523,12 +606,14 @@ def add_iptm_from_pae_files(
     iptm_vals = []
     pinned_vals = []
     n_unresolved = 0
+    remapped: list[str] = []
 
     for _, row in df.iterrows():
         pae_path = row.get(pae_file_col)
         L_b = row.get(binder_length_col)
 
         resolved = _resolve_pae_path(pae_path, base_dir)
+        _track_remap(remapped, pae_path, resolved, base_dir)
         if pd.isna(pae_path) or pd.isna(L_b) or resolved is None:
             if resolved is None and not pd.isna(pae_path):
                 n_unresolved += 1
@@ -554,6 +639,7 @@ def add_iptm_from_pae_files(
             pinned_vals.append(np.nan)
 
     _warn_unresolved_pae(n_unresolved, len(df), pae_file_col, base_dir)
+    _warn_remapped("pae", pae_file_col, remapped, len(df), base_dir)
 
     result[f"{prefix}_pae_iptm"] = iptm_vals
     if pinned_binder_length is not None:
