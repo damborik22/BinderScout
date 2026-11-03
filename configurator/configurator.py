@@ -5538,19 +5538,25 @@ def run_pipeline(cfg: dict, tools_enabled: dict):
 def install_shortcut():
     """
     Write ~/.local/bin/binderscout-config pointing at this script.
-    Silent no-op if the shortcut already exists and is up to date.
+    Silent no-op if the shortcut already exists and is up to date -- and also when
+    HOME cannot be written (a read-only container, a locked-down login node): the
+    shortcut is a convenience, and failing to write it used to kill the wizard with
+    a PermissionError before its first prompt.
     """
-    shortcuts_dir = Path.home() / ".local" / "bin"
-    shortcut = shortcuts_dir / "binderscout-config"
-    script = Path(__file__).resolve()
-    target_line = f'exec python3 "{script}" "$@"\n'
+    try:
+        shortcuts_dir = Path.home() / ".local" / "bin"
+        shortcut = shortcuts_dir / "binderscout-config"
+        script = Path(__file__).resolve()
+        target_line = f'exec python3 "{script}" "$@"\n'
 
-    if shortcut.exists() and shortcut.read_text().endswith(target_line):
+        if shortcut.exists() and shortcut.read_text().endswith(target_line):
+            return
+
+        shortcuts_dir.mkdir(parents=True, exist_ok=True)
+        shortcut.write_text(f"#!/usr/bin/env bash\n# BinderScout Configurator shortcut — auto-generated\n{target_line}")
+        shortcut.chmod(0o755)
+    except (OSError, RuntimeError):  # RuntimeError: no resolvable home directory
         return
-
-    shortcuts_dir.mkdir(parents=True, exist_ok=True)
-    shortcut.write_text(f"#!/usr/bin/env bash\n# BinderScout Configurator shortcut — auto-generated\n{target_line}")
-    shortcut.chmod(0o755)
     print_ok(f"Shortcut installed: {shortcut}")
 
 
