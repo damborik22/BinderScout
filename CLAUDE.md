@@ -581,8 +581,9 @@ the parameter sweep.
 - **What `*_pae_iptm` is, and what the rank resolves (scoring audit, 2026-11).**
   - **It is a point-PAE re-derivation, not the engine's own ipTM.** `boltz_pae_iptm` / `af3_pae_iptm` /
     `esmfold2_pae_iptm` recompute ipTM from each engine's PAE matrix with one shared formula. **Measured
-    2026-11-03 on the archived 394-design three-engine TfR1 pool (n=450 PAE matrices per engine, wave-1
-    archive): the re-derived values sat ~0.08-0.13 BELOW** that engine's own reported `*_iptm`, and within
+    2026-11-03 on the TfR1 campaign (the deliverable pool had 394 designs; the wave-1 archive of PAE
+    matrices the kernel and level-shift measurements were taken on held 450 designs x 3 engines; the source
+    records are a note dated 2026-11-03 kept on the lab's private share): the re-derived values sat ~0.08-0.13 BELOW** that engine's own reported `*_iptm`, and within
     an engine the two were rank-equivalent (Spearman >= 0.994). **The sign and size of that offset are
     properties of that pool, not of the kernel** (for AF3 in particular they differ by pool), so do not
     use 0.08-0.13 as a correction. Across engines the columns share a *formula*, not a *scale*.
@@ -601,7 +602,7 @@ the parameter sweep.
   - **2-engine and 3-engine means are not on one scale** (`--min-engines 2` mixes them). Read
     `consensus_iptm_n` beside `rank`.
   - **d0 grows with the complex.** ipTM's d0 uses `L_binder + L_target`, so a longer binder gets a more
-    forgiving kernel: up to **+0.036** on the consensus (measured 2026-11-03 on the same TfR1 pool). Pinning d0 (`*_pae_iptm_pinned`,
+    forgiving kernel: up to **+0.036** on the consensus (measured 2026-11-03 on the same wave-1 TfR1 archive, 450 designs x 3 engines). Pinning d0 (`*_pae_iptm_pinned`,
     `consensus_iptm_mean_pinned`, pool-median binder length or `--d0-binder-length`) was **measured not to
     improve ranking** on the curated 563-design, 4-target labelled benchmark (measured 2026-11-03; macro AUC +0.0025, 95% CI -0.004..+0.010, sign
     split 2/2 across targets: it re-weights by length rather than correcting anything). So **`rank` stays on

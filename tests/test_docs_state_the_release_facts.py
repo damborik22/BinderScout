@@ -261,3 +261,19 @@ def test_master_ancestry_is_a_single_merge_base_not_one_shared_commit(doc):
         assert stale not in text, f"{doc} still says {stale!r}"
     for needle in ("single merge base", "602345a", "diverged"):
         assert needle in text, f"{doc} does not state {needle!r}"
+
+
+@pytest.mark.parametrize(
+    "doc", ["CLAUDE.md", "Evaluator/docs/evaluation/ranking.md", "Evaluator/docs/evaluation/metrics.md"]
+)
+def test_pae_iptm_measurements_name_the_right_pool_and_the_record(doc):
+    """394 (the deliverable pool) and 450 (the wave-1 PAE archive) were quoted as one pool.
+
+    Each number must be stated against its own pool, and the off-repo record must be named the way this
+    repo names off-repo evidence (a private-share record, dated), without a path.
+    """
+    text = _flat(doc)
+    assert "394-design three-engine" not in text, f"{doc} still calls the 394-design pool the three-engine pool"
+    assert "450 PAE matrices" not in text, f"{doc} still quotes 450 as a count of the 394-design pool"
+    for needle in ("394 designs", "450 designs", "wave-1", "private share", "2026-11-03"):
+        assert needle in text, f"{doc} does not state {needle!r}"

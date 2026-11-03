@@ -22,8 +22,9 @@ Read these before quoting a rank. All of them come from the scoring audit and no
 the ranking; they say what it is allowed to mean.
 
 - **`*_pae_iptm` is a point-PAE re-derivation, not the engine's own ipTM.** Each engine's
-  PAE matrix is pushed through one shared kernel. **Measured 2026-11-03 on the archived
-  394-design three-engine TfR1 pool** (450 PAE matrices per engine), the result sat
+  PAE matrix is pushed through one shared kernel. **Measured 2026-11-03 on the TfR1
+  campaign's wave-1 archive of PAE matrices (450 designs x 3 engines; the deliverable pool drawn from the
+  campaign had 394 designs; source records: a note dated 2026-11-03 on the lab's private share)**, the result sat
   **~0.08-0.13 below** that engine's own `*_iptm`. That offset is a property of that pool, not of the
   kernel (for AF3 its sign and size differ by pool), so it is not a correction to apply. Within
   an engine the two orderings were equivalent there (Spearman >= 0.994), so nothing is lost by
@@ -48,7 +49,7 @@ the ranking; they say what it is allowed to mean.
   next to `rank` and do not compare across that line.
 - **Length enters through d0.** ipTM's d0 uses `L_binder + L_target`, so a longer binder
   gets a more forgiving kernel: up to **+0.036** on the consensus (measured 2026-11-03 on the
-  same TfR1 pool). Pinning d0 to one
+  same wave-1 TfR1 archive, 450 designs x 3 engines). Pinning d0 to one
   reference length (`*_pae_iptm_pinned`, `consensus_iptm_mean_pinned`; the reference is the
   pool-median binder length unless `--d0-binder-length` says otherwise) was **measured not
   to improve the ranking** on the curated 563-design, 4-target labelled benchmark (measured
