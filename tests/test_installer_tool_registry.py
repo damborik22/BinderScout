@@ -13,6 +13,7 @@ default three-engine gate, and only said so at report time.
 These tests fail if a new tool is added to one place and not the others.
 """
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -145,7 +146,7 @@ def test_weight_downloads_are_retried(path):
 
 
 @pytest.mark.parametrize("path", INSTALLERS, ids=lambda p: p.name)
-def test_menu_does_not_spin_when_stdin_closes(path):
+def test_menu_does_not_spin_when_stdin_closes(path, tmp_path):
     """Piping `n` (select none) then EOF used to loop forever.
 
     Every read after EOF returns immediately with an empty choice, which hit the
@@ -155,6 +156,15 @@ def test_menu_does_not_spin_when_stdin_closes(path):
     """
     if not path.exists():
         pytest.skip(f"{path.name} not present")
+    # --verify is read-only and needs a conda to audit; it no longer provisions one. Give it a
+    # stand-in base so this test reaches the menu on a box (or a clean clone) with no conda,
+    # which is the only thing it is about.
+    fake_conda = tmp_path / "conda"
+    (fake_conda / "etc" / "profile.d").mkdir(parents=True)
+    (fake_conda / "etc" / "profile.d" / "conda.sh").write_text("# stand-in\n")
+    (fake_conda / "bin").mkdir()
+    (fake_conda / "bin" / "conda").write_text("#!/bin/sh\nexit 0\n")
+    (fake_conda / "bin" / "conda").chmod(0o755)
     proc = subprocess.run(
         ["bash", str(path), "--verify", "--yes"],
         input="n\n",
@@ -162,6 +172,7 @@ def test_menu_does_not_spin_when_stdin_closes(path):
         text=True,
         timeout=180,
         cwd=path.parent.parent,
+        env={**os.environ, "BINDERSCOUT_CONDA": str(fake_conda), "HOME": str(tmp_path / "home")},
     )
     out = (proc.stdout + proc.stderr).lower()
     assert proc.returncode != 0, "selecting no tools must not report success"

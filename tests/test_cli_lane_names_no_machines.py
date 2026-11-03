@@ -24,7 +24,7 @@ _SCANNED = (
 )
 
 _FORBIDDEN = {
-    "a numbered fleet box (bm1..bm9)": re.compile(r"\bbm[0-9]\b", re.IGNORECASE),
+    "a numbered fleet box": re.compile(r"\bbm[0-9]\b", re.IGNORECASE),
     "the cluster by name": re.compile(r"\bcl[a]ra\b", re.IGNORECASE),
     "the orchestrator workstation": re.compile(r"bindmaster[4]", re.IGNORECASE),
     "a guessed home-relative checkout directory": re.compile(r"dev/Bind(Master|Scout)\b"),
