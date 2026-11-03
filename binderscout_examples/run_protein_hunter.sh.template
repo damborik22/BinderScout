@@ -146,23 +146,33 @@ python boltz_ph/design.py \
     --name {{NAME}} \
     --save_dir "$RUN_DIR"
 
-# Output layout: design.py creates a {{NAME}}/ subdirectory under save_dir,
-# so the canonical CSV paths are:
-#   $RUN_DIR/{{NAME}}/summary_high_iptm.csv  — best-of-cycle rows passing
-#                                              the ipTM threshold (often
-#                                              > NUM_DESIGNS because every
-#                                              passing cycle gets a row)
-#   $RUN_DIR/{{NAME}}/summary_all_runs.csv   — one row per design (best
-#                                              cycle of that run; final-run
-#                                              row may be missing if no
-#                                              cycle satisfied the alanine
-#                                              cap — log says "No structure
-#                                              was generated", which is
-#                                              normal, not a failure)
-#   $RUN_DIR/{{NAME}}/*.pdb / *.yaml         — per-cycle outputs
+# Output layout differs between boltz_ph builds: some create a {{NAME}}/
+# subdirectory under save_dir, some write the summaries straight into save_dir.
+# Look at both levels ({{NAME}}/ child first) and say which one held them:
+#   <dir>/summary_high_iptm.csv  — best-of-cycle rows passing the ipTM
+#                                  threshold (often > NUM_DESIGNS because every
+#                                  passing cycle gets a row)
+#   <dir>/summary_all_runs.csv   — one row per design (best cycle of that run;
+#                                  final-run row may be missing if no cycle
+#                                  satisfied the alanine cap — log says "No
+#                                  structure was generated", which is normal,
+#                                  not a failure)
+#   <dir>/*.pdb / *.yaml         — per-cycle outputs
+PH_SUMMARY_DIR=""
+for _ph_d in "$RUN_DIR/{{NAME}}" "$RUN_DIR"; do
+    if [[ -f "$_ph_d/summary_high_iptm.csv" || -f "$_ph_d/summary_all_runs.csv" ]]; then
+        PH_SUMMARY_DIR="$_ph_d"
+        break
+    fi
+done
 
 echo ""
 echo "=== Protein-Hunter design complete ==="
-echo "  Outputs:    $RUN_DIR/{{NAME}}/"
-echo "  High-ipTM:  $RUN_DIR/{{NAME}}/summary_high_iptm.csv"
-echo "  All runs:   $RUN_DIR/{{NAME}}/summary_all_runs.csv"
+if [[ -n "$PH_SUMMARY_DIR" ]]; then
+    echo "  Summaries found in: $PH_SUMMARY_DIR"
+    echo "  High-ipTM:  $PH_SUMMARY_DIR/summary_high_iptm.csv"
+    echo "  All runs:   $PH_SUMMARY_DIR/summary_all_runs.csv"
+else
+    echo "WARNING: no summary_high_iptm.csv / summary_all_runs.csv in $RUN_DIR/{{NAME}} or $RUN_DIR;" >&2
+    echo "         native metrics (ipTM, pLDDT) will be missing from the pool." >&2
+fi

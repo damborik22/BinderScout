@@ -4085,8 +4085,9 @@ def write_run_protein_hunter(path: Path, cfg: dict):
       - --msa_mode accepts only "single" / "mmseqs" (NOT "single_sequence").
       - Boltz-2 cache must live at ~/.boltz with mols/ALA.pkl present;
         bootstrap with download_boltz2(cache=Path.home()/'.boltz').
-      - design.py creates a {name}/ subdirectory under save_dir; canonical
-        outputs are at <save_dir>/{name}/summary_high_iptm.csv and summary_all_runs.csv.
+      - Some boltz_ph builds create a {name}/ subdirectory under save_dir and some
+        write the summaries straight into save_dir; the generated script looks at
+        both levels and says which one it found.
     """
     name = cfg["name"]
     target_seq = cfg.get("target_sequence", "")
@@ -4223,13 +4224,26 @@ python boltz_ph/design.py \\
     --percent_X {percent_x} \\
     --save_dir "$PH_DIR_OUT"{contact_arg}
 
-# Output layout: design.py creates {{name}}/ subdir under --save_dir, so the
-# canonical CSV paths are:
-#   $PH_DIR_OUT/{name}/summary_high_iptm.csv  — best-of-cycle rows passing
-#                                                the iPTM threshold (often
-#                                                > num_designs because every
-#                                                passing cycle gets a row)
-#   $PH_DIR_OUT/{name}/summary_all_runs.csv   — one row per design
+# Output layout differs between boltz_ph builds: some create a {{name}}/ subdir
+# under --save_dir, some write the summaries straight into --save_dir. Look at
+# both levels (the {{name}}/ child first) and say which one held them:
+#   summary_high_iptm.csv  — best-of-cycle rows passing the iPTM threshold
+#                            (often > num_designs because every passing cycle
+#                            gets a row)
+#   summary_all_runs.csv   — one row per design
+PH_SUMMARY_DIR=""
+for _ph_d in "$PH_DIR_OUT/{name}" "$PH_DIR_OUT"; do
+    if [[ -f "$_ph_d/summary_high_iptm.csv" || -f "$_ph_d/summary_all_runs.csv" ]]; then
+        PH_SUMMARY_DIR="$_ph_d"
+        break
+    fi
+done
+if [[ -n "$PH_SUMMARY_DIR" ]]; then
+    echo "  Protein-Hunter summaries found in: $PH_SUMMARY_DIR"
+else
+    echo "WARNING: no summary_high_iptm.csv / summary_all_runs.csv in $PH_DIR_OUT/{name} or $PH_DIR_OUT;" >&2
+    echo "         native metrics (ipTM, pLDDT) will be missing from the pool." >&2
+fi
 
 echo ""
 echo "=== Collecting Protein-Hunter binder sequences ==="
@@ -4259,8 +4273,11 @@ def _row(design_id, seq, **extras):
         **extras,
     }}
 
-# Strategy 1: prefer summary_high_iptm.csv (canonical PH "best-of-cycle" filter).
-for csv_file in [out_dir / run_name / "summary_high_iptm.csv", out_dir / run_name / "summary_all_runs.csv"]:
+# Strategy 1: prefer summary_high_iptm.csv (canonical PH "best-of-cycle" filter). boltz_ph
+# builds differ on whether the summaries sit in a {{name}}/ child of --save_dir or in
+# --save_dir itself, so both levels are searched, child first.
+_summary_files = [d / n for d in (out_dir / run_name, out_dir) for n in ("summary_high_iptm.csv", "summary_all_runs.csv")]
+for csv_file in _summary_files:
     if csv_file.exists():
         with csv_file.open() as f:
             reader = csv.DictReader(f)
@@ -4283,11 +4300,16 @@ for csv_file in [out_dir / run_name / "summary_high_iptm.csv", out_dir / run_nam
                 if row is not None:
                     rows.append(row)
         if rows:
-            print(f"  Found {{len(rows)}} sequences in {{csv_file.name}}")
+            print(f"  Found {{len(rows)}} sequences in {{csv_file}}")
             break
 
 # Strategy 2: fall back to FASTA glob (older boltz_ph layouts).
 if not rows:
+    print(
+        f"WARNING: no usable summary_high_iptm.csv / summary_all_runs.csv under {{out_dir / run_name}} or {{out_dir}}; "
+        "falling back to FASTA/PDB files, so the native metrics (iptm, plddt) will be missing.",
+        file=sys.stderr,
+    )
     for fasta in sorted(out_dir.rglob("*.fasta")):
         try:
             text = fasta.read_text().splitlines()
