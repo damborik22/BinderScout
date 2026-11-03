@@ -3756,7 +3756,13 @@ else
     echo ""
     echo "=== BindCraft 2 finished with NO accepted designs ==="
     echo "    Per-attempt detail: $BC2_OUT/1_Trajectories/!_Trajectories.csv"
-    echo "    Rejected candidates and the filters they failed: $BC2_OUT/2_Refolded/!_Refolded.csv"
+    # 2_Refolded only exists once at least one trajectory got past the screen; naming a file
+    # that was never written sent the reader to look for something that is not there.
+    if [[ -f "$BC2_OUT/2_Refolded/!_Refolded.csv" ]]; then
+        echo "    Rejected candidates and the filters they failed: $BC2_OUT/2_Refolded/!_Refolded.csv"
+    else
+        echo "    No candidate got past the screen (no 2_Refolded/ was written); see the worker logs in $BC2_OUT"
+    fi
 fi
 """
     )

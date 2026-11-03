@@ -121,3 +121,6 @@ DIARY_*.md
 # configurator and the TUI. Machine state, not source: whether THIS checkout
 # finished installing a tool says nothing about any other checkout.
 .install_state/
+
+# RFD4 (hydra) writes this into whatever directory it was started from
+hydra_outputs/
