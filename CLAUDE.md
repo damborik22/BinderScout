@@ -431,8 +431,14 @@ the parameter sweep.
   or hostname, and never point at institution storage. GPU model names (GB10, H200, L40S,
   RTX 3090) stay: they are measurements. Use `$HOME` and repo-relative paths. Real values, and
   the alias list, live in machine-local gitignored files (`CLAUDE.local.md`, `docs/local/`)
-  or environment variables. `tests/test_public_docs_are_anonymous.py` enforces this for
-  documentation and tests.
+  or environment variables. `tests/test_public_docs_are_anonymous.py` enforces this for exactly:
+  `docs/**` `.md`/`.html` files (except the planning records below), `tests/**` and
+  `Evaluator/docs/**` text files, and the top-level `README.md`, `CLAUDE.md`, `CONTRIBUTING.md`,
+  `CHANGELOG.md`, `STAGES.md`, `THIRD_PARTY_NOTICES.md`, `2.0/README.md` and `Evaluator/README.md`.
+  **Known gaps, pending a decision, not covered by it:** `.claude/**` (tracked skills and agent
+  instructions), and the planning records `docs/PLAN_*`, `docs/INVESTIGATION_*`, `docs/REPORT_*`,
+  `docs/MORNING_DECISIONS*` and `docs/NEXT_STAGES*`. Installer, configurator and evaluator source
+  are also outside it. Do not read a green run as "the public tree is anonymous".
 
   **Scrub status — the previous "scrubbed from tree and history 2026-09-22" was not true.**
   Six tracked files still carried an absolute `/home/<username>` path on 2026-09-25

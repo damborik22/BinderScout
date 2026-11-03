@@ -122,6 +122,13 @@ def test_claude_md_does_not_list_the_aliases_it_forbids():
     assert not re.search(r"\bbm[0-9]\b", rule, re.I)
 
 
+def test_claude_md_states_what_the_anonymity_test_does_not_cover():
+    claude = " ".join(_text("CLAUDE.md").split())
+    rule = claude[claude.index("test_public_docs_are_anonymous.py") :][:1500]
+    for needle in (".claude/**", "planning records", "PLAN_*", "INVESTIGATION_*", "Known gaps"):
+        assert needle in rule, f"CLAUDE.md's anonymity-test sentence does not mention {needle!r}"
+
+
 def test_claude_md_documents_the_pae_iptm_facts():
     claude = _text("CLAUDE.md")
     for needle in (
