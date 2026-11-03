@@ -124,7 +124,10 @@ RFD3_ENV="binderscout_rfd3"
 # documentation + uninstall (FOUNDRY_DIR is cleaned on uninstall if present).
 # shellcheck disable=SC2034
 FOUNDRY_REPO="https://github.com/RosettaCommons/foundry.git"
-FOUNDRY_COMMIT="v0.1.9"
+# The pip specs in install_rfd3() use this, not a literal: the constant used to feed only
+# a log line while pip installed a hardcoded version, so bumping it changed the message
+# and not the install.
+FOUNDRY_VERSION="0.1.9"   # rc-foundry release pinned for RFD3 (matches install_aarch.sh)
 FOUNDRY_DIR="${BINDERSCOUT_DIR}/Foundry"
 FOUNDRY_WEIGHTS_DIR="${BINDERSCOUT_DIR}/weights/foundry"
 
@@ -3233,15 +3236,15 @@ install_rfd3() {
         || { print_fail "Failed to install PyTorch"; return 1; }
 
     # foundry + rfd3 extra (PyPI package name is `rc-foundry`)
-    run_logged "Installing rc-foundry[rfd3] ${FOUNDRY_COMMIT}" \
+    run_logged "Installing rc-foundry[rfd3]==${FOUNDRY_VERSION}" \
         "${CONDA_CMD}" run -n "${RFD3_ENV}" \
-        pip install -q "rc-foundry[rfd3]==0.1.9" \
+        pip install -q "rc-foundry[rfd3]==${FOUNDRY_VERSION}" \
         || { print_fail "Failed to install rc-foundry"; return 1; }
 
     # Also install MPNN extra for post-diffusion sequence design (ProteinMPNN + LigandMPNN)
-    run_logged "Installing rc-foundry[mpnn]" \
+    run_logged "Installing rc-foundry[mpnn]==${FOUNDRY_VERSION}" \
         "${CONDA_CMD}" run -n "${RFD3_ENV}" \
-        pip install -q "rc-foundry[mpnn]==0.1.9" \
+        pip install -q "rc-foundry[mpnn]==${FOUNDRY_VERSION}" \
         || print_warn "rc-foundry[mpnn] install failed — MPNN redesign step may not work"
 
     # atomworks arrives UNPINNED with rc-foundry, so pin it here -- before the weights
