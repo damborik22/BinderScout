@@ -25,6 +25,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from binderscout_paths import find_conda_base
+
 REPO = Path(__file__).resolve().parent
 
 # How to invoke this CLI *on this machine right now*. On a fresh clone the
@@ -136,24 +138,6 @@ def _install_binderscout_shortcut() -> None:
         pass  # ~/.local/bin not writable — BinderScout/bin/ is the primary location
 
 
-def _find_conda_base() -> Path | None:
-    """Return the conda base dir (local standalone install first, then system)."""
-    local = REPO / "conda"
-    candidates = [
-        local,
-        Path.home() / "miniforge3",
-        Path.home() / "mambaforge",
-        Path.home() / "miniconda3",
-        Path.home() / "anaconda3",
-        Path("/opt/conda"),
-        Path("/opt/miniforge3"),
-    ]
-    for base in candidates:
-        if (base / "etc" / "profile.d" / "conda.sh").exists() and (base / "bin" / "conda").exists():
-            return base
-    return None
-
-
 def _exec(path: str, argv: list) -> None:
     """os.execv, but do not lose what we printed. Never returns.
 
@@ -210,14 +194,16 @@ def _dispatch(cmd: str, args: list) -> None:
         _exec(sys.executable, [sys.executable, str(script)] + args)
 
     elif cmd == "evaluate":
-        conda_base = _find_conda_base()
-        if conda_base is None:
+        conda_base = find_conda_base(REPO)
+        conda_bin = conda_base / "bin" / "conda" if conda_base is not None else None
+        if conda_bin is None or not conda_bin.is_file():
+            found = f"{conda_bin} does not exist" if conda_bin else "conda not found"
             print(
-                f"{RED}✗ conda not found — install the evaluator first (`binderscout install --tool all`){RESET}",
+                f"{RED}✗ {found} — set BINDERSCOUT_CONDA to the conda base directory, "
+                f"or install the evaluator (`binderscout install --tool all`){RESET}",
                 file=sys.stderr,
             )
             sys.exit(1)
-        conda_bin = conda_base / "bin" / "conda"
         print(f"{BOLD}BinderScout → evaluate (binder-compare){RESET}")
         _exec(
             str(conda_bin),

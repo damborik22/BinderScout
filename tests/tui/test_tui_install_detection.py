@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from binderscout_paths import find_conda_base
+
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tui"))
 import app  # noqa: E402
@@ -71,7 +73,7 @@ def test_no_marker_points_at_a_path_that_cannot_exist(key, label, marker):
 
 def test_detection_agrees_with_the_installer_on_this_box():
     """Local cross-check. Skips where nothing is installed, so CI stays green."""
-    conda_base = app._find_conda_base(REPO)
+    conda_base = find_conda_base(REPO)
     if conda_base is None or not (conda_base / "envs" / "BindCraft").is_dir():
         pytest.skip("no local install to cross-check against")
     detected = app._detect_tools(REPO)

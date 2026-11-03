@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from binderscout_paths import find_conda_base
+
 # ── ANSI colours (fallback menu) ──────────────────────────────────────────────
 
 BOLD = "\033[1m"
@@ -95,7 +97,7 @@ def _detect_tools(repo: Path) -> dict[str, bool]:
     heavy -- but the rule and the marker keys are the same, which
     tests/test_the_three_installed_tool_readers_agree.py pins.
     """
-    conda_base = _find_conda_base(repo)
+    conda_base = find_conda_base(repo)
     state_dir = repo / ".install_state"
     markers_present = state_dir.is_dir() and any(state_dir.iterdir())
 
@@ -121,24 +123,6 @@ def _tool_outputs(run_dir: Path) -> list[str]:
         if tool_dir.is_dir() and any(tool_dir.iterdir()):
             labels.append(label)
     return labels
-
-
-def _find_conda_base(repo: Path) -> Path | None:
-    """Return conda base directory (local first, then system). Lightweight."""
-    local = repo / "conda"
-    if (local / "etc" / "profile.d" / "conda.sh").exists():
-        return local
-    for candidate in [
-        Path.home() / "miniforge3",
-        Path.home() / "mambaforge",
-        Path.home() / "miniconda3",
-        Path.home() / "anaconda3",
-        Path("/opt/conda"),
-        Path("/opt/miniforge3"),
-    ]:
-        if (candidate / "etc" / "profile.d" / "conda.sh").exists():
-            return candidate
-    return None
 
 
 def _list_runs(repo: Path) -> list[Path]:
