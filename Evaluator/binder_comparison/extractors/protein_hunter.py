@@ -116,10 +116,7 @@ class ProteinHunterExtractor(SequenceExtractor):
     def _extract_high_iptm(self, input_dir: Path) -> list[ExtractedBinder]:
         csv_path = self._find_csv(input_dir, _HIGH_IPTM_CSV)
         if csv_path is None:
-            warnings.warn(
-                f"Protein-Hunter: no {_HIGH_IPTM_CSV} found in {input_dir}. "
-                f"Fall back to --all-protein-hunter-designs to read {_ALL_RUNS_CSV}."
-            )
+            warnings.warn(self._no_high_iptm_message(input_dir))
             return []
 
         df = pd.read_csv(csv_path)
@@ -180,6 +177,31 @@ class ProteinHunterExtractor(SequenceExtractor):
                 )
             )
         return results
+
+    def _no_high_iptm_message(self, input_dir: Path) -> str:
+        """Say WHY there is no summary_high_iptm.csv when the run did write summary_all_runs.csv.
+
+        Protein-Hunter only writes the high-iPTM file when at least one cycle clears
+        --high_iptm_threshold (default 0.7), so its absence next to an all-runs file is a
+        result, not a missing file.
+        """
+        base = f"Protein-Hunter: no {_HIGH_IPTM_CSV} found in {input_dir}."
+        all_runs_path = self._find_csv(input_dir, _ALL_RUNS_CSV)
+        if all_runs_path is None:
+            return f"{base} Fall back to --all-protein-hunter-designs to read {_ALL_RUNS_CSV}."
+        try:
+            all_runs = pd.read_csv(all_runs_path)
+        except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError):
+            return f"{base} Fall back to --all-protein-hunter-designs to read {_ALL_RUNS_CSV}."
+        seq_col = "best_seq" if "best_seq" in all_runs.columns else "sequence"
+        n = int(all_runs[seq_col].notna().sum()) if seq_col in all_runs.columns else 0
+        iptm = pd.to_numeric(all_runs["best_iptm"], errors="coerce") if "best_iptm" in all_runs.columns else None
+        best = f"; best iPTM {iptm.max():.2f}" if iptm is not None and iptm.notna().any() else ""
+        return (
+            f"{base} No cycle cleared Protein-Hunter's --high_iptm_threshold (default 0.7), which is why "
+            f"that file was not written. {_ALL_RUNS_CSV} holds {n} design(s){best}. "
+            f"Pass --all-protein-hunter-designs to include them."
+        )
 
     def _extract_all_runs(self, input_dir: Path) -> list[ExtractedBinder]:
         """Read summary_all_runs.csv and return the best sequence per run."""
