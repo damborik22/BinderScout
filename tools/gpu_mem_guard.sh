@@ -158,7 +158,7 @@ cmd_verify () {
         cmd_stop >/dev/null
     fi
 
-    probe=$(mktemp /tmp/gmg_probe_XXXX.py)
+    probe=$(mktemp --suffix=.py "${TMPDIR:-/tmp}/gmg_probe_XXXXXXXX")
     cat > "$probe" <<'PY'
 import ctypes, sys
 gib = int(sys.argv[1])

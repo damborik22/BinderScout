@@ -71,3 +71,9 @@ def test_every_tmp_template_is_a_directory_or_file_made_by_mktemp(platform):
     for line in INSTALLERS[platform].read_text().splitlines():
         if "/tmp/" in line and not line.lstrip().startswith("#"):
             assert re.search(r"mktemp (-d )?\"?\$\{TMPDIR:-/tmp\}/\S*XXXXXXXX", line), line
+
+
+def test_gpu_mem_guard_probe_file_is_not_a_predictable_name_in_tmp():
+    text = (Path(__file__).resolve().parents[1] / "tools" / "gpu_mem_guard.sh").read_text()
+    assert "mktemp /tmp/gmg_probe_XXXX.py" not in text
+    assert re.search(r'mktemp [^\n]*"\$\{TMPDIR:-/tmp\}/gmg_probe_X{8}"', text)

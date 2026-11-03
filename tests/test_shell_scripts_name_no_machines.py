@@ -34,7 +34,7 @@ SCRIPTS = [
 # which is the thing being tested for.
 _NAMES = ["cla" + "ra", "ciir" + "c", "cvu" + "t", "ll" + "23"]
 _FORBIDDEN = re.compile(
-    r"\b(?:" + "|".join(_NAMES) + r")\b|\bbm[0-9]\b|\bbindmaster[0-9]\b|\bfleet\b|PLAN_bm[0-9]",
+    r"\b(?:" + "|".join(_NAMES) + r")\b|\bbm[0-9]\b|\bbindmaster[0-9]\b|\bfleet\b|PLAN_bm[0-9]|\bCIFS share\b",
     re.IGNORECASE,
 )
 

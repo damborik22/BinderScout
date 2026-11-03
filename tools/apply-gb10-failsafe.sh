@@ -65,7 +65,7 @@ if has watchdog; then
   # seconds", which is the failure that was actually observed.
   #
   # 180s, not 60s: the guard must have time to kill the job first. A watchdog reset is an
-  # UNCLEAN reboot -- it is the fallback, not the plan. This box also mounts a CIFS share, and
+  # UNCLEAN reboot -- it is the fallback, not the plan. This host may also mount network filesystems (CIFS/NFS), and
   # a stalled mount blocking PID 1 briefly must not trigger a reset.
   mkdir -p /etc/systemd/system.conf.d
   cat > /etc/systemd/system.conf.d/10-gb10-watchdog.conf <<'EOF'
