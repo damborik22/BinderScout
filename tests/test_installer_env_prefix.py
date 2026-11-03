@@ -42,6 +42,16 @@ def _env_with_python(prefix: Path, marker: Path) -> None:
     py.chmod(0o755)
 
 
+def _fake_base_listing(tmp_path: Path, listed: list[Path], envs_dirs: list[Path] | None) -> Path:
+    """A base whose conda answers `env list --json`, and `config --show envs_dirs --json` unless None."""
+    listing = json.dumps({"envs": [str(p) for p in listed]}, indent=2)
+    script = f"#!/bin/sh\nif [ \"$1 $2\" = 'env list' ]; then cat <<'EOF'\n{listing}\nEOF\n"
+    if envs_dirs is not None:
+        dirs = json.dumps({"envs_dirs": [str(p) for p in envs_dirs]}, indent=2)
+        script += f"elif [ \"$1 $2 $3\" = 'config --show envs_dirs' ]; then cat <<'EOF'\n{dirs}\nEOF\n"
+    return fake_base(tmp_path / "base", conda_script=script + "fi\n")
+
+
 @pytest.mark.parametrize("platform", sorted(INSTALLERS))
 class TestEnvLocation:
     def test_an_env_in_the_default_location_is_found(self, platform, tmp_path):
@@ -67,19 +77,47 @@ class TestEnvLocation:
 
     def test_an_env_conda_itself_lists_is_found_without_jq(self, platform, tmp_path):
         """A condarc envs_dirs / ~/.conda/envs env: only `conda env list --json` knows."""
-        elsewhere = tmp_path / "per-user" / "foo"
+        per_user = tmp_path / "per-user"
+        elsewhere = per_user / "foo"
         elsewhere.mkdir(parents=True)
-        listing = json.dumps({"envs": [str(tmp_path / "base"), str(elsewhere)]}, indent=2)
-        base = fake_base(
-            tmp_path / "base",
-            conda_script=f"#!/bin/sh\nif [ \"$1 $2\" = 'env list' ]; then cat <<'EOF'\n{listing}\nEOF\nfi\n",
-        )
+        base = _fake_base_listing(tmp_path, [tmp_path / "base", elsewhere], [tmp_path / "base" / "envs", per_user])
         r = run_bash(
             _program(INSTALLERS[platform], f'CONDA_BASE="{base}"; env_exists foo && echo "FOUND $BS_ENV_PREFIX"'),
             clean_env(tmp_path / "home", PATH="/usr/bin:/bin"),
             tmp_path,
         )
         assert f"FOUND {elsewhere}" in r.stdout, r.stderr
+
+    def test_a_same_named_env_outside_conda_envs_dirs_is_not_found(self, platform, tmp_path):
+        """`conda env list` also lists other bases' envs (~/.conda/environments.txt) and `-p` prefix envs.
+
+        Neither can be addressed with `-n foo` from this base, so the installer cannot use them; a
+        match on basename alone made env_exists true for an env that then could not be activated.
+        """
+        other_checkout = tmp_path / "other-checkout" / "conda" / "envs" / "foo"
+        prefix_env = tmp_path / "scratch" / "foo"
+        other_checkout.mkdir(parents=True)
+        prefix_env.mkdir(parents=True)
+        base = _fake_base_listing(tmp_path, [tmp_path / "base", other_checkout, prefix_env], [tmp_path / "base" / "envs"])
+        (base / "envs").mkdir()
+        r = run_bash(
+            _program(INSTALLERS[platform], f'CONDA_BASE="{base}"; env_exists foo && echo "FOUND $BS_ENV_PREFIX"'),
+            clean_env(tmp_path / "home", PATH="/usr/bin:/bin"),
+            tmp_path,
+        )
+        assert "FOUND" not in r.stdout, r.stdout
+
+    def test_an_unanswered_envs_dirs_query_accepts_no_listed_env(self, platform, tmp_path):
+        """Without conda's envs_dirs nothing vouches for a listed prefix, so none is accepted."""
+        elsewhere = tmp_path / "per-user" / "foo"
+        elsewhere.mkdir(parents=True)
+        base = _fake_base_listing(tmp_path, [tmp_path / "base", elsewhere], None)
+        r = run_bash(
+            _program(INSTALLERS[platform], f'CONDA_BASE="{base}"; env_exists foo && echo FOUND'),
+            clean_env(tmp_path / "home", PATH="/usr/bin:/bin"),
+            tmp_path,
+        )
+        assert "FOUND" not in r.stdout, r.stdout
 
     def test_a_missing_env_is_missing_and_the_old_path_is_the_fallback(self, platform, tmp_path):
         base = fake_base(tmp_path / "base")

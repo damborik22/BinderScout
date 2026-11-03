@@ -540,8 +540,12 @@ bs_source_conda() {
 # per-user ~/.conda/envs all put it elsewhere. Order: $CONDA_ENVS_PATH, <base>/envs, then
 # conda's own listing (parsed without jq). The old <base>/envs path stays the fallback
 # answer, so a caller that builds a path from it behaves exactly as before.
+# A listed env counts only when its parent directory is one of conda's envs_dirs: the listing
+# also carries envs of OTHER bases (~/.conda/environments.txt) and plain `-p` prefix envs, and
+# neither can be addressed with `-n <name>` from this base, so the installer cannot use them.
 BS_ENV_PREFIX=""
 BS_ENV_JSON=""    # `conda env list --json`, kept until a command that may change the envs ran
+BS_ENVS_DIRS=""   # `conda config --show envs_dirs --json`; "-" once asked and unanswered
 # shellcheck disable=SC2034  # BS_ENV_PREFIX is read by the callers, not here
 bs_env_lookup() {
     local base="${1:-}" name="$2" d line
@@ -558,12 +562,22 @@ bs_env_lookup() {
             BS_ENV_JSON="$("${base}/bin/conda" env list --json 2>/dev/null || true)"
             if [[ -z "${BS_ENV_JSON}" ]]; then BS_ENV_JSON="-"; fi
         fi
+        if [[ -z "${BS_ENVS_DIRS}" ]]; then
+            BS_ENVS_DIRS="$("${base}/bin/conda" config --show envs_dirs --json 2>/dev/null || true)"
+            if [[ -z "${BS_ENVS_DIRS}" ]]; then BS_ENVS_DIRS="-"; fi
+        fi
         while IFS= read -r line; do
             line="${line#*\"}"
             line="${line%\"*}"
             if [[ "${line}" == /* && "${line##*/}" == "${name}" && -d "${line}" ]]; then
-                BS_ENV_PREFIX="${line}"
-                return 0
+                while IFS= read -r d; do
+                    d="${d#*\"}"
+                    d="${d%\"*}"
+                    if [[ "${d}" == /* && -d "${d}" && "${line%/*}" -ef "${d}" ]]; then
+                        BS_ENV_PREFIX="${line}"
+                        return 0
+                    fi
+                done < <(printf '%s\n' "${BS_ENVS_DIRS}" | tr ',' '\n')
             fi
         done < <(printf '%s\n' "${BS_ENV_JSON}" | tr ',' '\n')
     fi
