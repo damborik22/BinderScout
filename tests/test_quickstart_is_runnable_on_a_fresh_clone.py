@@ -139,13 +139,16 @@ def test_the_shortcut_message_survives_a_non_tty_run(tmp_path):
     # bin/ is gitignored, so on CI (where it does not exist) the assertion passed
     # even with this whole fix reverted. Match on the PATH verdict, which only the
     # ~/.local/bin branch prints.
-    assert str(home / ".local" / "bin" / "binderscout") in proc.stdout, (
+    # The notice is on STDERR (not stdout) so that `status --json` and any other
+    # captured stdout stays machine-readable; stderr is unbuffered, so it also survives
+    # the execv. Pinned in tests/test_shortcut_install_keeps_stdout_clean.py.
+    assert str(home / ".local" / "bin" / "binderscout") in proc.stderr, (
         "nothing named the ~/.local/bin shortcut — this is the copy that makes the bare "
-        f"`binderscout` command work. stdout was:\n{proc.stdout[:2000]}"
+        f"`binderscout` command work. stderr was:\n{proc.stderr[:2000]}"
     )
-    assert "you can now run" in proc.stdout, (
+    assert "you can now run" in proc.stderr, (
         "the shortcut directory IS on PATH in this run, so the message must say the bare "
-        f"command now works. stdout was:\n{proc.stdout[:2000]}"
+        f"command now works. stderr was:\n{proc.stderr[:2000]}"
     )
     # The banner naming the selected installer is printed AFTER the shortcut notice
     # and immediately before os.execv. A flush at the top of _dispatch() does not
