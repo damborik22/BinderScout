@@ -186,6 +186,7 @@ FORCE=false      # --force: allow --yes to accept DESTRUCTIVE prompts (reclone /
 UNINSTALL_MODE=false
 VERIFY_ONLY=false        # --verify: audit what is on disk, install nothing
 REPAIR_MODE=false        # --repair: audit, then re-install only what is broken
+REPAIR_STALE=false       # --stale: let --repair ALSO rebuild tools built against another commit
 TOOL_SPECIFIED=false
 TOOL_ALL=false         # --tool all was given; uninstall widens this to every optional add-on   # set to true when --tool is passed on CLI
 STANDALONE="auto"      # auto | true | false — controls local Miniforge install
@@ -329,6 +330,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --verify)
             VERIFY_ONLY=true
+            shift
+            ;;
+        --stale)
+            REPAIR_STALE=true
             shift
             ;;
         --repair)
@@ -2997,7 +3002,7 @@ _rfd4_weights_match() {
     local f size got
     f="$(_rfd4_weights_file)"
     [[ -f "${f}" ]] || { print_fail "  missing: ${f}"; return 1; }
-    size="$(stat -c %s "${f}" 2>/dev/null)"
+    size="$(stat -Lc %s "${f}" 2>/dev/null)"
     if [[ "${size}" != "${RFD4_WEIGHTS_BYTES}" ]]; then
         print_fail "  ${f} is ${size} bytes, expected ${RFD4_WEIGHTS_BYTES} (truncated download?)"
         return 1
@@ -4301,7 +4306,7 @@ sys.exit(0 if (': str' in doc or 'DockingPartners' in src) else 1)"; then
             elif [[ ! -f "${_rfd4_w}" ]]; then
                 VERIFY_REASON="no model.safetensors for revision ${RFD4_HF_REVISION:0:7} under ${RFD4_WEIGHTS_DIR} — run: HF_HOME=${RFD4_WEIGHTS_DIR} ${RFD4_DIR}/.venv/bin/hf download ${RFD4_HF_REPO} config.json model.safetensors --revision ${RFD4_HF_REVISION}"
             else
-                _rfd4_sz="$(stat -c %s "${_rfd4_w}" 2>/dev/null)"
+                _rfd4_sz="$(stat -Lc %s "${_rfd4_w}" 2>/dev/null)"
                 [[ "${_rfd4_sz}" == "${RFD4_WEIGHTS_BYTES}" ]] \
                     || VERIFY_REASON="RFD4 model.safetensors is ${_rfd4_sz} bytes, expected ${RFD4_WEIGHTS_BYTES} (truncated download?)"
             fi ;;
@@ -4367,7 +4372,15 @@ sys.exit(0 if (': str' in doc or 'DockingPartners' in src) else 1)"; then
     [[ -z "${VERIFY_REASON}" ]]
 }
 
-# Verify every selected tool. Appends broken ones to the named array.
+# Tools that verified usable but whose marker records a commit other than HEAD.
+# A SEPARATE list from the broken one, and a global for the same reason
+# VERIFY_REASON is one: a stale tool RUNS, so reporting it as unusable would be a
+# lie and changing --verify's exit status for it would break every caller that
+# gates on "installed vs not". --repair reads this list too, and acts on it.
+VERIFY_STALE=()
+
+# Verify every selected tool. Appends broken ones to the named array, and stale
+# ones (usable, built against another commit) to VERIFY_STALE.
 # Returns 1 if anything is broken, so callers can gate on it.
 verify_selected_tools() {
     # The nameref parameter must not share a name with any caller's variable or
@@ -4375,14 +4388,25 @@ verify_selected_tools() {
     # empty -- which looked exactly like "nothing was broken".
     local -n __vst_out="$1"
     local any=false
+    VERIFY_STALE=()
     echo ""
     echo -e "${BOLD}=== Verifying installed tools ===${RESET}"
-    local spec tool flag fn
+    local spec tool flag fn mkey
     for spec in "${TOOL_REGISTRY[@]}"; do
         IFS='|' read -r flag tool fn _dflt _desc <<< "${spec}"
         [[ "${!flag}" == true ]] || continue
+        # The marker key is the DO_ flag lowercased -- the same formula
+        # run_install_step() and repair_tools() use, so it has to stay the same
+        # formula here or the audit would read a marker nobody writes.
+        mkey="${flag#DO_}"; mkey="${mkey,,}"
         if verify_tool "${tool}"; then
-            printf "  %b  %-20s %s\n" "${GREEN}✓${RESET}" "${tool}" "usable"
+            if tool_marker_is_stale "${mkey}"; then
+                printf "  %b  %-20s %s\n" "${YELLOW}⚠${RESET}" "${tool}" \
+                    "STALE — usable, but installed against $(marker_recorded_sha "${mkey}"); HEAD is $(current_repo_sha)"
+                VERIFY_STALE+=("${tool}")
+            else
+                printf "  %b  %-20s %s\n" "${GREEN}✓${RESET}" "${tool}" "usable"
+            fi
         else
             printf "  %b  %-20s %s\n" "${RED}✗${RESET}" "${tool}" "${VERIFY_REASON}"
             __vst_out+=("${tool}")
@@ -4390,6 +4414,17 @@ verify_selected_tools() {
         fi
     done
     [[ "${any}" == false ]]
+}
+
+# Print the stale list, if any, after a verify_selected_tools run. Takes the
+# remedy line to print under it, because the right remedy differs by caller: the
+# audit says "--repair", the repair itself cannot. Returns 0 even when the list
+# is empty, so it can sit on a success path without changing it.
+report_stale_tools() {
+    (( ${#VERIFY_STALE[@]} )) || return 0
+    print_warn "Built against another commit, usable but not from HEAD $(current_repo_sha): ${VERIFY_STALE[*]}"
+    [[ -n "${1:-}" ]] && echo -e "  $1"
+    return 0
 }
 
 # Re-install only the tools that failed verification, then verify again.
@@ -4457,6 +4492,48 @@ mark_tool_installed() {
 }
 
 is_tool_marked() { [[ -f "${INSTALL_STATE_DIR}/$1" ]]; }
+
+# The marker has recorded WHICH COMMIT the install succeeded against since it was
+# introduced, but nothing ever read that field back -- is_tool_marked() tests file
+# existence only. So a tool built against an older commit, before a schema change
+# or a patch to its own install function, audited identically to one built from
+# HEAD. The two helpers below read it.
+#
+# The current HEAD, abbreviated exactly the way mark_tool_installed() abbreviates
+# it. Empty -- not an error -- when this is not a git checkout, which is a
+# supported way to run the installer (a release tarball carries no .git).
+current_repo_sha() {
+    git -C "${BINDERSCOUT_DIR}" rev-parse --short HEAD 2>/dev/null || true
+}
+
+# The commit a tool's marker was written against, or nothing when that cannot be
+# known: no marker at all, a marker from before the SHA field existed (one field,
+# no tab -- which is why `cut -s` is right here, it drops undelimited lines), or
+# the literal "unknown" mark_tool_installed() writes when git is unavailable.
+marker_recorded_sha() {
+    local marker="${INSTALL_STATE_DIR}/$1" sha
+    [[ -f "${marker}" ]] || return 1
+    sha=$(cut -s -f2 < "${marker}" | head -n1)
+    [[ -n "${sha}" && "${sha}" != "unknown" ]] || return 1
+    printf '%s' "${sha}"
+}
+
+# True ONLY when both commits are known and they differ. Every "cannot tell" case
+# answers false, because this gates an audit and a repair: treating an unknowable
+# commit as stale would re-install every tool -- ~4 GB of AF2 weights among them --
+# on every tarball install and on every marker written before the field existed.
+# Compared on the shorter of the two abbreviations, because git lengthens --short
+# as the object count grows: a marker written at 7 characters must not read as
+# stale against an 8-character HEAD naming the same commit.
+tool_marker_is_stale() {
+    local recorded head n
+    recorded=$(marker_recorded_sha "$1") || return 1
+    head=$(current_repo_sha)
+    [[ -n "${head}" ]] || return 1
+    n=${#recorded}
+    (( ${#head} < n )) && n=${#head}
+    [[ "${recorded:0:n}" != "${head:0:n}" ]]
+}
 
 # Run one tool's installer, clearing its marker first and writing it only on
 # success. Cleared FIRST, because a re-install that fails must not leave the
@@ -4662,9 +4739,15 @@ main() {
     # because auditing needs no disk headroom and no network.
     if [[ "${VERIFY_ONLY}" == true ]]; then
         local _broken=()
-        verify_selected_tools _broken && { echo ""; print_ok "All selected tools verified usable."; exit 0; }
+        if verify_selected_tools _broken; then
+            echo ""
+            print_ok "All selected tools verified usable."
+            report_stale_tools "They run as-is. Rebuild them against HEAD with ${BOLD}--repair --stale${RESET}."
+            exit 0
+        fi
         echo ""
         print_fail "Unusable: ${_broken[*]}"
+        report_stale_tools
         echo -e "  Re-run with ${BOLD}--repair${RESET} to re-install just these."
         exit 1
     fi
@@ -4678,16 +4761,34 @@ main() {
     # ── Repair mode ──────────────────────────────────────────────────────────
     if [[ "${REPAIR_MODE}" == true ]]; then
         local _broken=()
-        if verify_selected_tools _broken; then
+        verify_selected_tools _broken || true
+        # Stale is REPORTED, not repaired, unless --stale is passed.
+        # Staleness is commit INEQUALITY, not "older than": mark_tool_installed
+        # stamps HEAD, so a single `git pull` -- even a docs-only commit -- makes
+        # EVERY marker stale at once. Merging that into the repair list turned
+        # --repair into a whole-fleet reinstall (AF2 weights included) after any
+        # pull, which is the opposite of its documented purpose ("the common case
+        # is one tool that lost a download to a network blip"). A stale tool still
+        # RUNS; rebuilding it is a deliberate act, so it needs a deliberate flag.
+        local _s
+        if [[ "${REPAIR_STALE:-false}" == true ]]; then
+            for _s in "${VERIFY_STALE[@]+"${VERIFY_STALE[@]}"}"; do _broken+=("${_s}"); done
+        elif (( ${#VERIFY_STALE[@]} )); then
+            print_warn "  ${#VERIFY_STALE[@]} tool(s) are built against another commit."
+            print_warn "  They run, so --repair leaves them alone. Re-install them with:"
+            print_warn "    --repair --stale"
+        fi
+        if (( ${#_broken[@]} == 0 )); then
             echo ""; print_ok "Nothing to repair — all selected tools verified usable."; exit 0
         fi
         repair_tools _broken
         local _still=()
-        if verify_selected_tools _still; then
+        if verify_selected_tools _still && (( ${#VERIFY_STALE[@]} == 0 )); then
             echo ""; print_ok "Repair complete — all selected tools verified usable."; exit 0
         fi
         echo ""
-        print_fail "Still unusable after repair: ${_still[*]}"
+        (( ${#_still[@]} )) && print_fail "Still unusable after repair: ${_still[*]}"
+        report_stale_tools "A re-install that succeeds rewrites the marker, so a tool still listed here did not re-install."
         echo -e "  Full log: ${LOG_FILE}"
         exit 1
     fi

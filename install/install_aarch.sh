@@ -24,15 +24,34 @@ MOSAIC_DIR="${BINDERSCOUT_DIR}/Mosaic"
 EVALUATOR_DIR="${BINDERSCOUT_DIR}/Evaluator"
 FOUNDRY_WEIGHTS_DIR="${BINDERSCOUT_DIR}/weights/foundry"
 
-# RFD4-Proteina. NOT installable on this platform (install_rfd4 refuses — see
-# there for why). These paths exist only so --verify and --uninstall can name
-# the tool on a tree copied from an x86 box, and so verify_tool() stays
-# byte-identical between the two installers.
+# RFD4-Proteina. INSTALLABLE here as of 2026-10-29 — opt-in, and newly so.
+# This entry previously REFUSED, on the grounds that upstream's
+# scripts/setup_venv.sh exits 1 for any non-x86_64 arch and that "the pinned
+# wheels (torch 2.14.1+cu130, cu13 ops) have never been built on aarch64".
+# The second half of that is false, measured 2026-10-29: every CUDA-13
+# dependency publishes a linux_aarch64 wheel --
+#   tmol 0.2.0                        manylinux_2_28_aarch64
+#   cuequivariance-torch 0.13.0       py3-none-any
+#   cuequivariance-ops-cu13 0.13.0    manylinux_2_28_aarch64
+#   cuequivariance-ops-torch-cu13     manylinux_2_28_aarch64
+# and a dry-run resolve of `.[all-cuda13] --torch-backend cu130` on GB10
+# returned the exact pinned set (torch 2.14.1+cu130, tmol 0.2.0,
+# tmol-ops-cu13 0.2.0, triton 3.8.0). Upstream's guard is stale, not load-
+# bearing, and we never invoke setup_venv.sh anyway -- install_rfd4 builds the
+# venv with uv directly, so the guard was never in our path.
+#
+# Kept OUT of --tool all: validated by a resolve plus an install on one GB10,
+# NOT by a design campaign. Promote it only after a real generation run here.
 RFD4_DIR="${BINDERSCOUT_DIR}/RFD4-Proteina"
+RFD4_REPO="https://github.com/RosettaCommons/RFD4-Proteina.git"
+RFD4_COMMIT="aaccdd2ad0720c180468df5f9cf037a713d403e5"
 RFD4_WEIGHTS_DIR="${BINDERSCOUT_DIR}/weights/rfd4"
 RFD4_HF_REPO="nvidia/RFD4-Proteina"
 RFD4_HF_REVISION="a06e2509c7033b010fc43614e9fd840303588502"
 RFD4_WEIGHTS_BYTES=1742660596
+RFD4_WEIGHTS_SHA256="5b549dd61adb2f6c6b5cb95bda13f40f5e31556b4e6c755edc0ca6f011c68fb0"
+# cu130, matching every other torch install on this platform.
+RFD4_TORCH_BACKEND="${RFD4_TORCH_BACKEND:-cu130}"
 # AlphaFold 3 (DeepMind, Evaluator refolding). NOT a real PyPI package — the
 # "alphafold3" PyPI name is an unrelated stub. Installed from the official repo
 # (pinned); refold_af3.py resolves run_alphafold.py at ${AF3_DIR}. alphafold3/ gitignored.
@@ -141,6 +160,7 @@ FORCE=false      # --force: allow --yes to accept DESTRUCTIVE prompts (reclone /
 UNINSTALL_MODE=false
 VERIFY_ONLY=false        # --verify: audit what is on disk, install nothing
 REPAIR_MODE=false        # --repair: audit, then re-install only what is broken
+REPAIR_STALE=false       # --stale: let --repair ALSO rebuild tools built against another commit
 TOOL_SPECIFIED=false
 TOOL_ALL=false         # --tool all was given; uninstall widens this to every optional add-on   # set to true when --tool is passed on CLI
 STANDALONE="auto"      # auto | true | false — controls local Miniforge install
@@ -160,7 +180,7 @@ DO_PROTEIN_HUNTER=false # opt-in via --tool protein-hunter. PyRosetta comes from
                         # aarch64 hardware, so it is kept out of --tool all.
 DO_RFD3=false           # opt-in via --tool rfd3. Should work (pip-only, no DGL) but is
                         # UNVALIDATED on aarch64 hardware, so it is kept out of --tool all.
-DO_RFD4=false           # NOT installable here: install_rfd4() refuses on this platform.
+DO_RFD4=false           # opt-in (--tool rfd4): installable here since 2026-10-29, not in --tool all.
                         # The flag exists so --verify and --uninstall can still name the
                         # tool, and so the two installers do not drift (tests/
                         # test_installers_do_not_drift.py).
@@ -205,7 +225,7 @@ TOOL_REGISTRY=(
     "DO_EVALUATOR|Evaluator|install_evaluator|true|Evaluate binders: refold, ranked report (requires Mosaic)"
     "DO_PXDESIGN|PXDesign|install_pxdesign|false|Protenix-based de novo binder design (conda, aarch64 post-install patches)"
     "DO_RFD3|RFD3|install_rfd3|false|RFD3 / foundry -- all-atom diffusion (conda); UNVALIDATED on aarch64 hardware"
-    "DO_RFD4|RFD4-Proteina|install_rfd4|false|RFD4-Proteina -- NOT installable on aarch64; the entry exists for --verify and --uninstall"
+    "DO_RFD4|RFD4-Proteina|install_rfd4|false|RFD4-Proteina -- flow-matching binder generation (uv venv, cu130; opt-in, newly validated on aarch64; weights licence unverified)"
     "DO_PROTEINA_COMPLEXA|Proteina-Complexa|install_proteina_complexa|false|NVIDIA flow matching + test-time compute (uv venv); runs here, throughput UNMEASURED"
     "DO_BINDCRAFT2|BindCraft 2|install_bindcraft2|false|AF2 hallucination rewritten for JAX, no PyRosetta (uv venv; ~7.4 min/trajectory here)"
     "DO_PROTEIN_HUNTER|Protein-Hunter|install_protein_hunter|false|Boltz/Chai hallucination: protein/cyclic/ligand/DNA/RNA binders (conda; PyRosetta from graylab conda)"
@@ -312,6 +332,10 @@ while [[ $# -gt 0 ]]; do
             VERIFY_ONLY=true
             shift
             ;;
+        --stale)
+            REPAIR_STALE=true
+            shift
+            ;;
         --repair)
             REPAIR_MODE=true
             shift
@@ -364,15 +388,15 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
                   rfd3                 RFD3 / foundry — opt-in on aarch64. Pure pip (no DGL),
                                        so it should work, but it is UNVALIDATED on aarch64
                                        hardware and is therefore not in --tool all.
-                  rfd4                 RFD4-Proteina — the ninth design tool, and NOT
-                                       installable on aarch64: this installer refuses it
-                                       rather than trying. Upstream's own
-                                       scripts/setup_venv.sh exits on any architecture
-                                       other than x86_64, and the pinned wheels (torch
-                                       2.14.1+cu130, cu13 ops) are x86. The name is still
-                                       accepted so --verify and --uninstall can reach a
-                                       tree synced from an x86 box. Install it with
-                                       install/install.sh --tool rfd4 over there.
+                  rfd4                 RFD4-Proteina — the ninth design tool. Installable
+                                       here since 2026-10-29, opt-in, NOT in --tool all.
+                                       Upstream's scripts/setup_venv.sh refuses non-x86_64,
+                                       but we never call it: the venv is built with uv and
+                                       wheels are selected with --torch-backend cu130. Every
+                                       CUDA-13 dependency publishes a linux_aarch64 wheel
+                                       (tmol, cuequivariance-ops-cu13, -torch-cu13), and a
+                                       resolve on GB10 returned the exact pinned set.
+                                       Validated by install, NOT by a design campaign.
                   af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
                                        gated AF3 weights you obtain from
                                        https://github.com/google-deepmind/alphafold3
@@ -3013,31 +3037,212 @@ EOF
     chmod +x "${SHORTCUTS_DIR}/rfd3"
 }
 
-# ─── RFD4-Proteina — x86_64 only, refused here ───────────────────────────────
+# ─── RFD4-Proteina — installable here since 2026-10-29 (opt-in) ──────────────
 
 # Same body as install.sh's copy: verify_tool() calls it on both platforms.
 _rfd4_weights_file() {
     printf '%s\n' "${RFD4_WEIGHTS_DIR}/hub/models--${RFD4_HF_REPO//\//--}/snapshots/${RFD4_HF_REVISION}/model.safetensors"
 }
 
-install_rfd4() {
-    # REFUSE rather than attempt. This is not caution about an unmeasured
-    # platform, it is upstream's own position: scripts/setup_venv.sh exits 1 for
-    # any architecture other than Linux x86_64 ("The native CUDA 13 dependency
-    # profile currently supports Linux x86_64 only"), and the set install.sh
-    # reproduces is torch 2.14.1+cu130 plus cu13 ops wheels from an x86 index.
-    # Nothing of it has been built on aarch64.
-    #
-    # Deliberately NOT offered as "opt-in and unvalidated" either. That label is
-    # how this repo has already been wrong three times about Proteina-Complexa
-    # on this hardware, and it does not make a wheel exist. Promote it only from
-    # a measured aarch64 install, not from a clean import.
-    print_fail "RFD4-Proteina is x86_64 only — not installing it here."
-    echo "    Upstream's own scripts/setup_venv.sh refuses any non-x86_64 architecture,"
-    echo "    and the pinned wheels (torch 2.14.1+cu130, cu13 ops) have never been built"
-    echo "    on aarch64. Install it on an x86_64 box instead:"
-    echo "        bash install/install.sh --tool rfd4"
+# Ported verbatim from install/install.sh (2026-10-29) — the body is arch-agnostic:
+# it builds the venv with uv and selects wheels via --torch-backend, so nothing in
+# it is x86-specific. Upstream's scripts/setup_venv.sh arch guard is never invoked.
+_rfd4_weights_match() {
+    local f size got
+    f="$(_rfd4_weights_file)"
+    [[ -f "${f}" ]] || { print_fail "  missing: ${f}"; return 1; }
+    size="$(stat -Lc %s "${f}" 2>/dev/null)"
+    if [[ "${size}" != "${RFD4_WEIGHTS_BYTES}" ]]; then
+        print_fail "  ${f} is ${size} bytes, expected ${RFD4_WEIGHTS_BYTES} (truncated download?)"
+        return 1
+    fi
+    got="$(sha256sum "${f}" | cut -d' ' -f1)"
+    [[ "${got}" == "${RFD4_WEIGHTS_SHA256}" ]] && return 0
+    print_fail "  ${f} sha256 ${got} != pinned ${RFD4_WEIGHTS_SHA256}"
     return 1
+}
+
+install_rfd4() {
+    print_step "Installing RFD4-Proteina"
+
+    # Clone + pin. The pin is load-bearing: it is the only commit this
+    # installer has ever been run against.
+    if [[ -d "${RFD4_DIR}" ]]; then
+        print_warn "Directory ${RFD4_DIR} already exists."
+        if confirm_destructive "Remove and reclone RFD4-Proteina?"; then
+            rm -rf "${RFD4_DIR}" || { print_fail "Failed to remove ${RFD4_DIR}"; return 1; }
+        else
+            print_warn "Skipping reclone; using existing checkout."
+        fi
+    fi
+    if [[ ! -d "${RFD4_DIR}" ]]; then
+        run_logged --retries 3 "Cloning RFD4-Proteina" \
+            git clone --quiet "${RFD4_REPO}" "${RFD4_DIR}" \
+            || { print_fail "Failed to clone RFD4-Proteina"; return 1; }
+        run_logged "Pinning RFD4-Proteina to ${RFD4_COMMIT:0:7}" \
+            git -C "${RFD4_DIR}" checkout --quiet "${RFD4_COMMIT}" \
+            || { print_fail "Could not pin RFD4-Proteina to ${RFD4_COMMIT}"; return 1; }
+    fi
+
+    # Ensure uv is available
+    print_step "Checking for uv package manager"
+    if ! command -v uv &>/dev/null; then
+        print_warn "uv not found — installing via official installer"
+        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh \
+            || { print_fail "Failed to install uv ${UV_VERSION}"; return 1; }
+        export PATH="${HOME}/.local/bin:${PATH}"
+        if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
+            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
+            print_ok "Added ~/.local/bin to PATH in ~/.bashrc"
+        fi
+    fi
+    command -v uv &>/dev/null || { print_fail "uv still not found after install; check PATH"; return 1; }
+    print_ok "uv is available: $(command -v uv)"
+
+    if [[ -x "${RFD4_DIR}/.venv/bin/python" ]]; then
+        print_ok "RFD4-Proteina venv already exists — skipping creation"
+    else
+        # Upstream pins >=3.12,<=3.12.10, and uv fetches that interpreter when
+        # the machine has none in range. Deliberately NOT a separate
+        # `uv python install` first: on the box this was installed on, that step
+        # only warned that it could not link ~/.local/bin/python3.12 (which it
+        # left alone), and `uv venv` downloads what it needs by itself.
+        run_logged "Creating RFD4-Proteina venv (Python >=3.12,<=3.12.10)" \
+            uv venv --clear --python ">=3.12,<=3.12.10" "${RFD4_DIR}/.venv" \
+            || { print_fail "Failed to create ${RFD4_DIR}/.venv"; return 1; }
+    fi
+
+    # Upstream pins uv 0.13.4 INSIDE the venv and then installs with that uv,
+    # because --torch-backend is what selects the CUDA wheel index and an older
+    # host uv does not have the flag at all. Skipping this is how an install
+    # lands on plain PyPI torch, which resolves cleanly and then runs nothing.
+    run_logged "Pinning uv 0.13.4 inside the venv" \
+        uv pip install --python "${RFD4_DIR}/.venv/bin/python" "uv==0.13.4" \
+        || { print_fail "Could not install uv 0.13.4 into ${RFD4_DIR}/.venv"; return 1; }
+
+    # Build-time torch constraint, read from upstream's own pyproject so it
+    # cannot drift: source-built dependencies have to compile against the same
+    # torch the runtime resolves.
+    local torch_pin constraint
+    torch_pin="$("${RFD4_DIR}/.venv/bin/python" -c \
+        "import tomllib; print(next(d for d in tomllib.load(open('${RFD4_DIR}/pyproject.toml','rb'))['project']['dependencies'] if d.startswith('torch')))")" \
+        || { print_fail "Could not read the torch pin from ${RFD4_DIR}/pyproject.toml"; return 1; }
+    constraint="$(mktemp)"
+    printf '%s\n' "${torch_pin}" > "${constraint}"
+
+    # env -u CONDA_PREFIX -u VIRTUAL_ENV: this installer activates conda for
+    # almost everything, and uv resolves a target environment from those before
+    # it falls back to ./.venv — so without it the whole ~7.6 GB set can land in
+    # an unrelated conda env. --python states the interpreter regardless.
+    run_logged "Installing RFD4-Proteina (editable, all-cuda13, torch ${RFD4_TORCH_BACKEND})" \
+        env -u CONDA_PREFIX -u VIRTUAL_ENV \
+            bash -c "cd '${RFD4_DIR}' && .venv/bin/uv pip install --python .venv/bin/python --build-constraint '${constraint}' --torch-backend '${RFD4_TORCH_BACKEND}' -e '.[all-cuda13]'" \
+        || { rm -f "${constraint}"; print_fail "RFD4-Proteina install failed — see ${LOG_FILE}"; return 1; }
+    rm -f "${constraint}"
+
+    # Weights. Public HF repo, no token needed, pinned to the revision
+    # upstream's own configs/inference.yaml names — so prefetching here gets
+    # exactly what a run would otherwise fetch on first use.
+    print_warn "RFD4-Proteina's WEIGHTS LICENCE HAS NOT BEEN VERIFIED."
+    print_warn "  The BSD-3 licence covers the CODE only. Read the terms on"
+    print_warn "  https://huggingface.co/${RFD4_HF_REPO} before any publication or commercial use."
+    mkdir -p "${RFD4_WEIGHTS_DIR}"
+    run_logged --retries 3 "Downloading RFD4 weights (1.7 GB, revision ${RFD4_HF_REVISION:0:7})" \
+        env HF_HOME="${RFD4_WEIGHTS_DIR}" "${RFD4_DIR}/.venv/bin/hf" \
+            download "${RFD4_HF_REPO}" config.json model.safetensors \
+            --revision "${RFD4_HF_REVISION}" \
+        || { print_fail "RFD4 weight download failed — retry: HF_HOME=${RFD4_WEIGHTS_DIR} ${RFD4_DIR}/.venv/bin/hf download ${RFD4_HF_REPO} config.json model.safetensors --revision ${RFD4_HF_REVISION}"; return 1; }
+
+    # The cu130 override and the build constraint both change what gets
+    # resolved, so assert the package set is still internally consistent
+    # rather than assuming upstream's pin held.
+    #
+    # ONE complaint is tolerated here and nowhere else: `uv pip check` reports
+    # `nvidia-cusparselt-cu13 was built for a different platform` on aarch64.
+    # That is a FALSE POSITIVE, verified on GB10 2026-10-29. torch pins
+    # nvidia-cusparselt-cu13==0.8.1, and the wheel that PyTorch's cu130 index
+    # serves for ARM is tagged `py3-none-manylinux2014_sbsa` — NVIDIA's
+    # ARM-server tag, which uv's platform matcher does not map to aarch64. The
+    # shipped libcusparseLt.so.0 is `ELF64 / AArch64` by readelf, torch reports
+    # cuda_available True on NVIDIA GB10, and a 512x512 GPU matmul returns.
+    # So the binary is right and only the tag is unrecognised.
+    # Any OTHER incompatibility, or more than this one, still fails: the check
+    # is narrowed, not disabled.
+    _rfd4_deps_consistent() {
+        local out
+        out="$(env -u CONDA_PREFIX -u VIRTUAL_ENV \
+                 "${RFD4_DIR}/.venv/bin/uv" pip check \
+                 --python "${RFD4_DIR}/.venv/bin/python" 2>&1)" && return 0
+        # Exactly one incompatibility, and it is the known sbsa-tag false positive.
+        if [[ "$(grep -c 'incompatib' <<< "${out}")" -eq 1 ]] \
+           && grep -q 'nvidia-cusparselt-cu13' <<< "${out}" \
+           && grep -q 'built for a different platform' <<< "${out}"; then
+            print_warn "  tolerated: nvidia-cusparselt-cu13 sbsa tag (binary verified AArch64)"
+            return 0
+        fi
+        printf '%s\n' "${out}"
+        return 1
+    }
+    smoke_test "RFD4 dependency set is consistent (uv pip check)" \
+        _rfd4_deps_consistent \
+        || { print_fail "RFD4-Proteina has an inconsistent dependency set"; return 1; }
+
+    # `import rfd4_proteina` and `rfd4-generate --help` BOTH pass on a GPU-less
+    # login node with no weights present at all (measured), so neither is a
+    # check — that is the same "green while the tool cannot generate" shape this
+    # installer already got wrong for RFD3. What they cannot see is a CPU-only
+    # torch, which is what you get if --torch-backend did not apply.
+    # torch.version.cuda is a property of the WHEEL, so it answers without a
+    # driver; torch.cuda.is_available() is NOT (it was False on the machine this
+    # was installed on, correctly) and is deliberately not asserted here.
+    smoke_test "RFD4 imports and its torch is a CUDA build" \
+        "${RFD4_DIR}/.venv/bin/python" -c \
+            'import sys, torch, rfd4_proteina; print(rfd4_proteina.__file__, torch.__version__, torch.version.cuda); sys.exit(0 if torch.version.cuda else 1)' \
+        || { print_fail "RFD4-Proteina does not import, or its torch has no CUDA build"; return 1; }
+
+    smoke_test "RFD4 weights are the pinned revision (size + sha256)" \
+        _rfd4_weights_match \
+        || { print_fail "RFD4-Proteina weights are missing or not the tested model"; return 1; }
+
+    _write_rfd4_shortcut
+
+    print_ok "RFD4-Proteina installation complete"
+    print_ok "  Usage: rfd4 inputs=input.yaml num_replicates=4 batch_size=1 out_dir=./runs/<name>"
+    print_warn "  Validated by ONE 4-design run on ONE x86 node. Treat the first campaign as a test,"
+    print_warn "  and check the weights licence (above) before relying on any output."
+}
+
+_write_rfd4_shortcut() {
+    mkdir -p "${SHORTCUTS_DIR}"
+    {
+        echo "#!/bin/bash"
+        echo "# RFD4-Proteina shortcut — runs 'rfd4-generate ...' from its own venv."
+        echo "# With no args: opens an interactive shell with that venv on PATH."
+        echo ""
+        echo "RFD4_DIR=\"${RFD4_DIR}\""
+        echo "RFD4_WEIGHTS_DIR=\"${RFD4_WEIGHTS_DIR}\""
+    } > "${SHORTCUTS_DIR}/rfd4"
+    cat >> "${SHORTCUTS_DIR}/rfd4" << 'EOF'
+
+# The model is resolved from the HF cache by repo id + revision, so HF_HOME has
+# to name the cache the installer filled or a run re-downloads 1.7 GB — or, on
+# an allocated node with no outbound network, fails. HF_HUB_OFFLINE defaults to
+# 1 for the same reason: the pinned revision is already there, so a hub lookup
+# mid-allocation is a stall, not a feature. Set HF_HUB_OFFLINE=0 to allow it.
+export HF_HOME="${RFD4_WEIGHTS_DIR}"
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+
+if [[ $# -eq 0 ]]; then
+    echo "RFD4-Proteina (${RFD4_DIR})"
+    echo "Weights: ${RFD4_WEIGHTS_DIR}"
+    echo "Example:"
+    echo "  rfd4 inputs=input.yaml num_replicates=4 batch_size=1 out_dir=./runs/smoke"
+    exec env PATH="${RFD4_DIR}/.venv/bin:${PATH}" bash
+fi
+
+exec "${RFD4_DIR}/.venv/bin/rfd4-generate" "$@"
+EOF
+    chmod +x "${SHORTCUTS_DIR}/rfd4"
 }
 
 install_esmfold2() {
@@ -4103,6 +4308,48 @@ mark_tool_installed() {
 
 is_tool_marked() { [[ -f "${INSTALL_STATE_DIR}/$1" ]]; }
 
+# The marker has recorded WHICH COMMIT the install succeeded against since it was
+# introduced, but nothing ever read that field back -- is_tool_marked() tests file
+# existence only. So a tool built against an older commit, before a schema change
+# or a patch to its own install function, audited identically to one built from
+# HEAD. The two helpers below read it.
+#
+# The current HEAD, abbreviated exactly the way mark_tool_installed() abbreviates
+# it. Empty -- not an error -- when this is not a git checkout, which is a
+# supported way to run the installer (a release tarball carries no .git).
+current_repo_sha() {
+    git -C "${BINDERSCOUT_DIR}" rev-parse --short HEAD 2>/dev/null || true
+}
+
+# The commit a tool's marker was written against, or nothing when that cannot be
+# known: no marker at all, a marker from before the SHA field existed (one field,
+# no tab -- which is why `cut -s` is right here, it drops undelimited lines), or
+# the literal "unknown" mark_tool_installed() writes when git is unavailable.
+marker_recorded_sha() {
+    local marker="${INSTALL_STATE_DIR}/$1" sha
+    [[ -f "${marker}" ]] || return 1
+    sha=$(cut -s -f2 < "${marker}" | head -n1)
+    [[ -n "${sha}" && "${sha}" != "unknown" ]] || return 1
+    printf '%s' "${sha}"
+}
+
+# True ONLY when both commits are known and they differ. Every "cannot tell" case
+# answers false, because this gates an audit and a repair: treating an unknowable
+# commit as stale would re-install every tool -- ~4 GB of AF2 weights among them --
+# on every tarball install and on every marker written before the field existed.
+# Compared on the shorter of the two abbreviations, because git lengthens --short
+# as the object count grows: a marker written at 7 characters must not read as
+# stale against an 8-character HEAD naming the same commit.
+tool_marker_is_stale() {
+    local recorded head n
+    recorded=$(marker_recorded_sha "$1") || return 1
+    head=$(current_repo_sha)
+    [[ -n "${head}" ]] || return 1
+    n=${#recorded}
+    (( ${#head} < n )) && n=${#head}
+    [[ "${recorded:0:n}" != "${head:0:n}" ]]
+}
+
 # Run one tool's installer, clearing its marker first and writing it only on
 # success. Cleared FIRST, because a re-install that fails must not leave the
 # previous run's marker standing as evidence for an env it has just half-rebuilt.
@@ -4372,7 +4619,7 @@ sys.exit(0 if (': str' in doc or 'DockingPartners' in src) else 1)"; then
             elif [[ ! -f "${_rfd4_w}" ]]; then
                 VERIFY_REASON="no model.safetensors for revision ${RFD4_HF_REVISION:0:7} under ${RFD4_WEIGHTS_DIR} — run: HF_HOME=${RFD4_WEIGHTS_DIR} ${RFD4_DIR}/.venv/bin/hf download ${RFD4_HF_REPO} config.json model.safetensors --revision ${RFD4_HF_REVISION}"
             else
-                _rfd4_sz="$(stat -c %s "${_rfd4_w}" 2>/dev/null)"
+                _rfd4_sz="$(stat -Lc %s "${_rfd4_w}" 2>/dev/null)"
                 [[ "${_rfd4_sz}" == "${RFD4_WEIGHTS_BYTES}" ]] \
                     || VERIFY_REASON="RFD4 model.safetensors is ${_rfd4_sz} bytes, expected ${RFD4_WEIGHTS_BYTES} (truncated download?)"
             fi ;;
@@ -4438,7 +4685,15 @@ sys.exit(0 if (': str' in doc or 'DockingPartners' in src) else 1)"; then
     [[ -z "${VERIFY_REASON}" ]]
 }
 
-# Verify every selected tool. Appends broken ones to the named array.
+# Tools that verified usable but whose marker records a commit other than HEAD.
+# A SEPARATE list from the broken one, and a global for the same reason
+# VERIFY_REASON is one: a stale tool RUNS, so reporting it as unusable would be a
+# lie and changing --verify's exit status for it would break every caller that
+# gates on "installed vs not". --repair reads this list too, and acts on it.
+VERIFY_STALE=()
+
+# Verify every selected tool. Appends broken ones to the named array, and stale
+# ones (usable, built against another commit) to VERIFY_STALE.
 # Returns 1 if anything is broken, so callers can gate on it.
 verify_selected_tools() {
     # The nameref parameter must not share a name with any caller's variable or
@@ -4446,14 +4701,25 @@ verify_selected_tools() {
     # empty -- which looked exactly like "nothing was broken".
     local -n __vst_out="$1"
     local any=false
+    VERIFY_STALE=()
     echo ""
     echo -e "${BOLD}=== Verifying installed tools ===${RESET}"
-    local spec tool flag
+    local spec tool flag mkey
     for spec in "${TOOL_REGISTRY[@]}"; do
         IFS='|' read -r flag tool _fn _dflt _desc <<< "${spec}"
         [[ "${!flag}" == true ]] || continue
+        # The marker key is the DO_ flag lowercased -- the same formula
+        # run_install_step() and repair_tools() use, so it has to stay the same
+        # formula here or the audit would read a marker nobody writes.
+        mkey="${flag#DO_}"; mkey="${mkey,,}"
         if verify_tool "${tool}"; then
-            printf "  %b  %-20s %s\n" "${GREEN}✓${RESET}" "${tool}" "usable"
+            if tool_marker_is_stale "${mkey}"; then
+                printf "  %b  %-20s %s\n" "${YELLOW}⚠${RESET}" "${tool}" \
+                    "STALE — usable, but installed against $(marker_recorded_sha "${mkey}"); HEAD is $(current_repo_sha)"
+                VERIFY_STALE+=("${tool}")
+            else
+                printf "  %b  %-20s %s\n" "${GREEN}✓${RESET}" "${tool}" "usable"
+            fi
         else
             printf "  %b  %-20s %s\n" "${RED}✗${RESET}" "${tool}" "${VERIFY_REASON}"
             __vst_out+=("${tool}")
@@ -4461,6 +4727,17 @@ verify_selected_tools() {
         fi
     done
     [[ "${any}" == false ]]
+}
+
+# Print the stale list, if any, after a verify_selected_tools run. Takes the
+# remedy line to print under it, because the right remedy differs by caller: the
+# audit says "--repair", the repair itself cannot. Returns 0 even when the list
+# is empty, so it can sit on a success path without changing it.
+report_stale_tools() {
+    (( ${#VERIFY_STALE[@]} )) || return 0
+    print_warn "Built against another commit, usable but not from HEAD $(current_repo_sha): ${VERIFY_STALE[*]}"
+    [[ -n "${1:-}" ]] && echo -e "  $1"
+    return 0
 }
 
 # Re-install only the tools that failed verification, then verify again.
@@ -4547,9 +4824,15 @@ main() {
     # because auditing needs no disk headroom and no network.
     if [[ "${VERIFY_ONLY}" == true ]]; then
         local _broken=()
-        verify_selected_tools _broken && { echo ""; print_ok "All selected tools verified usable."; exit 0; }
+        if verify_selected_tools _broken; then
+            echo ""
+            print_ok "All selected tools verified usable."
+            report_stale_tools "They run as-is. Rebuild them against HEAD with ${BOLD}--repair --stale${RESET}."
+            exit 0
+        fi
         echo ""
         print_fail "Unusable: ${_broken[*]}"
+        report_stale_tools
         echo -e "  Re-run with ${BOLD}--repair${RESET} to re-install just these."
         exit 1
     fi
@@ -4563,16 +4846,34 @@ main() {
     # ── Repair mode ──────────────────────────────────────────────────────────
     if [[ "${REPAIR_MODE}" == true ]]; then
         local _broken=()
-        if verify_selected_tools _broken; then
+        verify_selected_tools _broken || true
+        # Stale is REPORTED, not repaired, unless --stale is passed.
+        # Staleness is commit INEQUALITY, not "older than": mark_tool_installed
+        # stamps HEAD, so a single `git pull` -- even a docs-only commit -- makes
+        # EVERY marker stale at once. Merging that into the repair list turned
+        # --repair into a whole-fleet reinstall (AF2 weights included) after any
+        # pull, which is the opposite of its documented purpose ("the common case
+        # is one tool that lost a download to a network blip"). A stale tool still
+        # RUNS; rebuilding it is a deliberate act, so it needs a deliberate flag.
+        local _s
+        if [[ "${REPAIR_STALE:-false}" == true ]]; then
+            for _s in "${VERIFY_STALE[@]+"${VERIFY_STALE[@]}"}"; do _broken+=("${_s}"); done
+        elif (( ${#VERIFY_STALE[@]} )); then
+            print_warn "  ${#VERIFY_STALE[@]} tool(s) are built against another commit."
+            print_warn "  They run, so --repair leaves them alone. Re-install them with:"
+            print_warn "    --repair --stale"
+        fi
+        if (( ${#_broken[@]} == 0 )); then
             echo ""; print_ok "Nothing to repair — all selected tools verified usable."; exit 0
         fi
         repair_tools _broken
         local _still=()
-        if verify_selected_tools _still; then
+        if verify_selected_tools _still && (( ${#VERIFY_STALE[@]} == 0 )); then
             echo ""; print_ok "Repair complete — all selected tools verified usable."; exit 0
         fi
         echo ""
-        print_fail "Still unusable after repair: ${_still[*]}"
+        (( ${#_still[@]} )) && print_fail "Still unusable after repair: ${_still[*]}"
+        report_stale_tools "A re-install that succeeds rewrites the marker, so a tool still listed here did not re-install."
         echo -e "  Full log: ${LOG_FILE}"
         exit 1
     fi

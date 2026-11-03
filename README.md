@@ -270,7 +270,7 @@ binderscout install   [--tool bindcraft|bindcraft2|boltzgen|mosaic|pxdesign|prot
                      [--tool evaluator]                # the evaluator alone (binder-eval env + binder-compare)
                      [--tool af3|soluprot|tmprot]      # extra evaluator engines (esmfold2 ships in --tool all)
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
-                     [--skip-preflight] [--force] [--verify] [--repair]
+                     [--skip-preflight] [--force] [--verify] [--repair] [--stale]
 binderscout configure [options passed through to configurator.py]
 binderscout evaluate  <binder-compare args>             # passthrough, e.g. run / extract / report / autosize
 binderscout --help
@@ -300,6 +300,7 @@ Options:
 | `--skip-preflight` | Skip the disk / GPU / network / toolchain checks run before anything is downloaded |
 | `--verify` | Audit what is actually on disk for the selected tools and exit, checking the artifact each tool needs to **run** (weights, env, venv) rather than that its entry point answers. Non-zero exit if anything is unusable; installs nothing. |
 | `--repair` | The same audit, then re-install only the tools that failed it and verify again. The cheap recovery path for a half-built environment — far cheaper than `--force`. |
+| `--stale` | Only with `--repair`: ALSO re-install tools whose `.install_state` marker records a different commit than `HEAD`. Off by default on purpose — staleness is commit *inequality*, so one `git pull` marks every tool stale at once and this would rebuild the whole set. A stale tool still runs; `--verify` reports it either way. |
 | `--force` | Let `--yes` accept the destructive prompts too: re-clones tool repos and re-creates conda envs, **deleting what is there — including `BindCraft/params/*.npz`, ~4 GB of AF2 weights**. Reach for `--repair` first. |
 
 ### `binderscout configure`
