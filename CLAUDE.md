@@ -37,7 +37,7 @@ deliver. Read it before building a counter-screen from scratch.
 **What 2.0 is.** An *evaluation* release, not a feature release. The `v2.0.0` tag shipped no new
 design tool (the eighth, BindCraft 2, arrived in 1.1.0) and the same three-engine refold pipeline
 — Boltz-2 + AF3 + ESMFold2. **RFD4-Proteina, the ninth tool, was added to the branch on
-2026-10-27, after the tag** — it is opt-in, designed and run on x86_64 (installable on aarch64 since 2026-10-29, not yet run there); see its gotchas section. What changed is what the pipeline is allowed to claim:
+2026-10-27, after the tag** — it is opt-in, designed and run on x86_64 (installable on aarch64 since 2026-10-29; run there 2026-11-04: 5 designs, refolded by all three engines); see its gotchas section. What changed is what the pipeline is allowed to claim:
 
 - **One ranking, and no way to choose another** (Part U): cross-engine gate then
   `consensus_iptm_mean`, one `rank` column. `two_stage_rank`, `adaptyv_rank`, `consensus_rank`,
@@ -161,8 +161,8 @@ Target structure (.pdb / .mmcif)
        Protein-Hunter       (Boltz-2 / Chai-1; 6 modalities: protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA)
        RFD3                 (RosettaCommons foundry diffusion + ProteinMPNN)
        RFD4-Proteina        (IPD x NVIDIA latent-reasoning diffusion; backbone AND sequence
-                             in one pass, no MPNN step; opt-in; run on x86_64,
-                             installable but not yet run on aarch64)
+                             in one pass, no MPNN step; opt-in; run on x86_64
+                             and, since 2026-11-04, on aarch64 (needs num_workers=0))
     → Evaluator (canonical pipeline = Boltz-2 + AF3 + ESMFold2; SoluProt optional screen):
        1. Extract sequences from all tool outputs (one extractor per tool)
        1.5. (optional) Screen with SoluProt 1.0 (binder-eval-soluprot env)     [live, x86 + aarch64; LABEL ONLY — scores every design, never drops one]
@@ -246,7 +246,7 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `Proteina-Complexa/.venv` | Proteina-Complexa | 3.12 | uv | Flow matching + test-time compute binder design |
 | `binderscout_protein_hunter` | Protein-Hunter | 3.10 | conda | Boltz-2 / Chai-1 hallucination, 6 modalities |
 | `binderscout_rfd3` | RFD3 (`rc-foundry`) | 3.12 | conda | RosettaCommons foundry diffusion + ProteinMPNN |
-| `RFD4-Proteina/.venv` | RFD4-Proteina | 3.12 | **uv** | IPD × NVIDIA latent-reasoning diffusion. Run on **x86_64**; installable on aarch64 since 2026-10-29 (resolve + install on one GB10, no design campaign yet). Upstream's own `scripts/setup_venv.sh` exits 1 on any other arch, but our installers never call it: they build the venv with `uv` directly. No conda env; the checkout IS the installation, so moving or deleting it breaks `rfd4-generate`. Opt-in (`--tool rfd4`), **not** in `--tool all` |
+| `RFD4-Proteina/.venv` | RFD4-Proteina | 3.12 | **uv** | IPD × NVIDIA latent-reasoning diffusion. Run on **x86_64**; installable on aarch64 since 2026-10-29 and run there 2026-11-04 (5 designs in a few minutes under a memory cap; the generated script passes `num_workers=0`, because upstream's default of 4 DataLoader workers deadlocks on that host with no output and no error). Upstream's own `scripts/setup_venv.sh` exits 1 on any other arch, but our installers never call it: they build the venv with `uv` directly. No conda env; the checkout IS the installation, so moving or deleting it breaks `rfd4-generate`. Opt-in (`--tool rfd4`), **not** in `--tool all` |
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
 | `binder-eval-af3` | AF3 refolder | 3.10 | conda | AlphaFold 3 v3.0.2 refolding — **canonical 2nd engine** (Part K; live on Spark / H200 **and on 24 GB consumer GPUs**, checked on three x86_64 machines) |
 | `binder-eval-esmfold2` | ESMFold2 refolder | 3.10 | conda | **Default refold engine** (biohub). **Measured working: a 50-design pool refolded 50/50 on a 24 GB RTX 3090 (iptm 0.671–0.921, median 0.863), plus a 299-token monomer in 8.3 s and a 598-token dimer in 59.6 s.** ESMC-6B loads bf16 by default (~11.8 GiB resident from a 23.66 GiB fp32 checkpoint), which is why 24 GB suffices and a 12 GB card cannot run it at any size — the dev box was the constraint, never the engine. **That 11.8 GiB is the resident weights, NOT the run: a refold of a ~300-token complex held 18.86 GiB on a 3090 (measured 2026-10-31).** Read it as "ESMFold2 wants the whole card", not "11.8 of 24, so something else fits" — co-scheduling Boltz-2 (4.63 GiB) beside it filled the card and every binder from #12 on raised CUDA OOM. Worse, the run then wrote a full-length CSV with 8 of 100 scored and **exited 0**; `--resume` repairs it (it keys on a non-empty `iptm`), but nothing refuses. **Also: the biohub transformers fork is NOT on every box.** Two of the three x86_64 machines checked have `ESMFold2Model` with `load_esmc` under `transformers.models.esmfold2.modeling_esmfold2`; the third has PyPI transformers at the same version string (4.57.6) and no `esmfold2` module at all, so this engine cannot run there. `hasattr(transformers, "ESMFold2Model")` is the wrong probe — the class is in that submodule. Installed by `--tool all`, auto-detected by `evaluate.sh`; lightweight, no gated weights; feeds `consensus_iptm` + autosize gate |
@@ -838,7 +838,7 @@ binderscout install --tool proteina-complexa # install Proteina-Complexa
 binderscout install --tool protein-hunter    # install Protein-Hunter (Part L)
 binderscout install --tool rfd3              # install RFD3 / foundry (Part M)
 binderscout install --tool rfd4              # install RFD4-Proteina (ninth tool; opt-in,
-                                             # aarch64 installable but not yet run, NOT in --tool all; weights licence unverified)
+                                             # aarch64 installable and run, NOT in --tool all; weights licence unverified)
 binderscout install --tool bindcraft2        # install BindCraft 2 (eighth tool), cloned from upstream
 # Clones https://github.com/PacesaLab/BindCraft2 at v1.0.1. Its licence is its own
 # (hosting-restricted), so BindCraft2/ stays gitignored and nothing of it is committed here.

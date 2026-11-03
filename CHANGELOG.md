@@ -246,9 +246,17 @@ the pool refolded by all three engines and reported.
 
 ### Known issues in 2.0.3
 
-- **aarch64 was not re-tested end to end for this release.** The aarch64 installer gained RFD4-Proteina
-  (opt-in) and the new `--repair --stale`; both are covered by the test suite on x86_64 but the RFD4 install
-  and the evaluate chain were not run on an aarch64 host. Treat RFD4 on aarch64 as unvalidated.
+- **aarch64 coverage is partial.** On an aarch64 host (GB10) this release was verified read-only, RFD4-Proteina
+  was installed and run (5 designs, under a memory cap), and that pool was refolded by Boltz-2, AF3 and
+  ESMFold2 and reported (3 engines on every design, gate passed). The full test suite passed there (2331).
+  The other design tools were not run on aarch64 in this release.
+- **The RFD3 geometry gate is blind below 25 residues and can reject a short helix above it.** The CALCA smoke
+  binder (24 aa) gets "cannot verify"; a 26-30 aa helical binder was rejected (long-range contacts 0.00/res
+  is what a helix looks like). The smoke example therefore stays below the floor. Treat the gate as a
+  long-binder check.
+- RFD4 keeps the expression-tag residues and heteroatoms of the input in its contig for PD-L1-style
+  structures; `install_aarch.sh --tool rfd4` adds the checkout's `bin/` to `~/.bashrc` (a throwaway clone
+  used for verification should be removed, or the line deleted, afterwards).
 - A fully resumed Boltz-2 run (nothing left to fold) still loads the model and briefly reserves its XLA pool
   before exiting; harmless on an idle card, risky on a shared one. An early "nothing to do" exit is planned.
 - Proteina-Complexa raw-output copy-back and the per-row `structure` column (master) are not ported.
