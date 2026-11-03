@@ -46,6 +46,7 @@ def run_esmfold2_refold(
     use_msa: bool = True,
     msa_cache_dir: str | Path | None = None,
     allow_no_msa: bool = False,
+    save_pae_bins: bool = False,
 ) -> None:
     """Refold *sequences* against *target_sequence* using ESMFold2.
 
@@ -68,6 +69,9 @@ def run_esmfold2_refold(
         use_msa:               If True (default), fetch + cache the target MSA and
                                attach it to the target chain. False = single-sequence.
         msa_cache_dir:         Override MSA cache directory.
+        save_pae_bins:         If True, also store each design's PAE bin probabilities
+                               (``<design>_pae_bins.npz``) and a ``pae_bins_file`` CSV
+                               column. Default off: nothing changes unless asked.
     """
     output_dir = Path(output_dir).resolve()
     output_csv = Path(output_csv).resolve()
@@ -113,6 +117,7 @@ def run_esmfold2_refold(
                 use_msa=use_msa,
                 msa_cache_dir=str(msa_cache_dir) if msa_cache_dir else None,
                 allow_no_msa=allow_no_msa,
+                save_pae_bins=save_pae_bins,
             )
         except _esmfold2_script.PartialRefoldFailure as exc:
             partial = exc
@@ -122,7 +127,7 @@ def run_esmfold2_refold(
     if not output_csv.exists():
         raise FileNotFoundError(f"Expected refold_esmfold2 to write {output_csv} but it was not found.")
 
-    _absolutize_csv_paths(output_csv, output_dir, ["cif", "pdb", "pae_file"])
+    _absolutize_csv_paths(output_csv, output_dir, ["cif", "pdb", "pae_file", "pae_bins_file"])
     print(f"[esmfold2] Results → {output_csv}")
 
     if partial is not None:

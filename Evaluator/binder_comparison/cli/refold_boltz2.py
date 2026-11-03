@@ -51,6 +51,7 @@ def run(args: argparse.Namespace) -> None:
         recycling_steps=args.recycling_steps,
         scripts_path=args.scripts_path,
         resume=args.resume,
+        save_pae_bins=args.save_pae_bins,
     )
 
 
@@ -92,4 +93,11 @@ def add_parser(subparsers) -> None:
         "--scripts-path", default=None, metavar="DIR", help="Path to scripts/ directory (auto-detected if not set)"
     )
     p.add_argument("--resume", action="store_true", help="Skip binders already present in existing output CSV")
+    p.add_argument(
+        "--save-pae-bins",
+        action="store_true",
+        help="Also save each design's per-pair PAE bin probabilities (<design>_pae_bins.npz, float16, "
+        "~11.5 MB per 300-token design before compression) and record it in a pae_bins_file column. "
+        "Costs one extra forward pass per design. Off by default; not used for ranking.",
+    )
     p.set_defaults(func=run)

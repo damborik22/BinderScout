@@ -789,6 +789,70 @@ def compute_iptm_from_pae(
     return dict(bt_iptm=bt_iptm, tb_iptm=tb_iptm, iptm=float(max(bt_iptm, tb_iptm)))
 
 
+def compute_iptm_from_pae_bins(
+    bin_probs: np.ndarray,
+    bin_centres: np.ndarray,
+    binder_length: int,
+    *,
+    ordering: str = "binder_target",
+) -> dict[str, float]:
+    """ipTM from the predicted-error DISTRIBUTION instead of its mean (``--save-pae-bins``).
+
+    Same reduction as :func:`compute_iptm_from_pae` -- same global d0, same max over
+    residues of the mean over the other chain, same ``max(bt, tb)`` -- but each pair
+    contributes ``E[1/(1+(e/d0)^2)] = sum_b p_b * kernel(c_b)`` rather than the kernel
+    of ``E[e]``. The kernel is convex in ``e``, so the two differ whenever a pair's
+    distribution has spread, which is how our point-PAE ipTM drifts away from the one
+    an engine reports. A delta distribution at a bin centre ``e`` therefore reproduces
+    ``compute_iptm_from_pae`` on a PAE matrix of ``e`` exactly.
+
+    NOT used for ranking and not added to the report: it exists so the gap can be
+    measured on pools folded with ``--save-pae-bins``.
+
+    Args:
+        bin_probs:     ``[L_total, L_total, n_bins]`` probabilities (same token order as the
+                       PAE matrix). Rows are renormalised to sum to 1 first, because they
+                       are stored as float16; a pair whose probabilities sum to ~0 yields NaN.
+        bin_centres:   ``[n_bins]`` error in Angstrom each bin stands for.
+        binder_length: Number of binder residues.
+        ordering:      'binder_target' or 'target_binder'.
+
+    Returns:
+        dict with keys: bt_iptm, tb_iptm, iptm
+    """
+    probs = np.asarray(bin_probs, dtype=float)
+    centres = np.asarray(bin_centres, dtype=float)
+    if probs.ndim != 3 or probs.shape[0] != probs.shape[1]:
+        raise ValueError(f"bin_probs must be [L, L, n_bins], got shape {probs.shape}")
+    if centres.ndim != 1 or centres.shape[0] != probs.shape[2]:
+        raise ValueError(f"bin_centres must have {probs.shape[2]} entries, got shape {centres.shape}")
+    L = probs.shape[0]
+    L_b = binder_length
+    L_t = L - L_b
+
+    if L_b <= 0 or L_t <= 0:
+        return dict(bt_iptm=np.nan, tb_iptm=np.nan, iptm=np.nan)
+
+    d0 = max(1.0, 1.24 * float(np.cbrt(L_b + L_t - 15)) - 1.8)
+
+    total = probs.sum(axis=-1, keepdims=True)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        probs = np.where(total > 0, probs / total, np.nan)
+    expected_kernel = probs @ (1.0 / (1.0 + (centres / d0) ** 2))  # [L, L]
+
+    if ordering == "target_binder":
+        expected_kernel = np.block(
+            [
+                [expected_kernel[L_t:, L_t:], expected_kernel[L_t:, :L_t]],
+                [expected_kernel[:L_t, L_t:], expected_kernel[:L_t, :L_t]],
+            ]
+        )
+
+    bt_iptm = float(np.max(np.mean(expected_kernel[:L_b, L_b:], axis=1)))
+    tb_iptm = float(np.max(np.mean(expected_kernel[L_b:, :L_b], axis=1)))
+    return dict(bt_iptm=bt_iptm, tb_iptm=tb_iptm, iptm=float(max(bt_iptm, tb_iptm)))
+
+
 # ---------------------------------------------------------------------------
 # Multi-model agreement scoring
 # ---------------------------------------------------------------------------

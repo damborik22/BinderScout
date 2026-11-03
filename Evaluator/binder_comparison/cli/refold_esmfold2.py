@@ -51,6 +51,7 @@ def run(args: argparse.Namespace) -> None:
             use_msa=not args.no_msa,
             msa_cache_dir=args.msa_cache_dir,
             allow_no_msa=args.allow_no_msa,
+            save_pae_bins=args.save_pae_bins,
         )
     except MissingTargetMSA as exc:
         print(f"[refold-esmfold2] {exc}", file=sys.stderr)
@@ -117,5 +118,12 @@ def add_parser(subparsers) -> None:
         default=None,
         metavar="DIR",
         help="MSA cache directory (default: $BINDERSCOUT_MSA_CACHE or ~/.cache/binderscout/target_msa)",
+    )
+    p.add_argument(
+        "--save-pae-bins",
+        action="store_true",
+        help="Also save each design's per-pair PAE bin probabilities (<design>_pae_bins.npz, float16, "
+        "~11.5 MB per 300-token design before compression) and record it in a pae_bins_file column. "
+        "Off by default; not used for ranking.",
     )
     p.set_defaults(func=run)

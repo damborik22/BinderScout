@@ -177,11 +177,18 @@ def refold_batch(
     use_msa: bool = True,
     msa_cache_dir: str | os.PathLike | None = None,
     allow_no_msa: bool = False,
+    save_pae_bins: bool = False,
 ) -> None:
     """Refold each binder against *target_sequence* using ESMFold2.
 
     The PAE matrix is saved as a sidecar ``.npy``; the predicted complex is
     written as both CIF (native) and PDB (gemmi-converted).
+
+    *save_pae_bins* (default off) also stores the per-pair error-bin probabilities of the
+    kept sample as ``esmfold2_NNNN_pae_bins.npz`` and records it in a ``pae_bins_file``
+    column. The model already computes them (``pae_logits`` in its forward output) and the
+    SDK's ``fold()`` drops them, so a forward hook on the model captures them -- no engine
+    source is touched and no extra forward pass is made.
 
     Target MSA: when *use_msa* is True the target's MSA is fetched once (cached
     on disk via ``binder_comparison.refolding.target_msa``) and attached to the
@@ -191,6 +198,13 @@ def refold_batch(
     skip_indices = skip_indices or set()
     out_dir = Path(output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    if save_pae_bins:
+        # Fail before the (slow) model load: an unimportable helper or a CSV whose header
+        # cannot take the extra column are both certain, not data-dependent.
+        from binder_comparison.refolding.pae_bins import assert_csv_can_take_pae_bins
+
+        assert_csv_can_take_pae_bins(output_csv)
 
     jobs: list[tuple[int, str]] = []
     for i, seq in enumerate(binder_sequences, start=1):
@@ -255,7 +269,16 @@ def refold_batch(
         binder_ids, [f"esmfold2_{i:04d}" for i in range(1, len(binder_sequences) + 1)], engine="esmfold2"
     )
 
+    captured_logits: dict[str, Any] = {}
+    n_bins_saved = 0
+    if save_pae_bins:
+        _capture_pae_logits(model, captured_logits)
+
     fieldnames = _csv_fieldnames()
+    if save_pae_bins:
+        from binder_comparison.refolding.pae_bins import PAE_BINS_COLUMN
+
+        fieldnames = [*fieldnames, PAE_BINS_COLUMN]
     csv_path = Path(output_csv).resolve()
     write_header = not csv_path.exists() or csv_path.stat().st_size == 0
 
@@ -274,6 +297,8 @@ def refold_batch(
             binder_len = len(binder_seq)
             print(f"[esmfold2] Binder #{idx}  length={binder_len} aa")
 
+            captured_logits.clear()
+            sample_idx = 0
             try:
                 result = build_fn(
                     model=model,
@@ -318,6 +343,8 @@ def refold_batch(
                     return float(arr.mean()) if arr is not None and arr.size else float("-inf")
 
                 best = max(result, key=_rank_sample)
+                # Identity, not ==: the results hold tensors, whose == is not a bool.
+                sample_idx = next(i for i, r in enumerate(result) if r is best)
                 print(
                     f"[esmfold2] #{idx}: {len(result)} diffusion samples → kept best (score {_rank_sample(best):.4f})"
                 )
@@ -368,6 +395,10 @@ def refold_batch(
             pdb_path = out_dir / f"{stem}.pdb"
             pae_path = out_dir / f"{stem}_pae.npy"
             np.save(pae_path, pae.astype(np.float32, copy=False))
+            pae_bins_path = ""
+            if save_pae_bins:
+                pae_bins_path = _store_pae_bins(captured_logits, sample_idx, pae, pae_path, idx)
+                n_bins_saved += bool(pae_bins_path)
 
             if cif_str:
                 cif_path.write_text(cif_str)
@@ -401,6 +432,8 @@ def refold_batch(
                 "pdb": str(pdb_path) if cif_str and pdb_path.exists() else "",
                 "pae_file": str(pae_path),
             }
+            if save_pae_bins:
+                row["pae_bins_file"] = pae_bins_path
 
             print(
                 f"  iptm={iptm:.4f}  ptm={ptm:.4f}  "
@@ -454,6 +487,66 @@ def refold_batch(
             f"marginal card fails exactly the large ones). Re-run those indices on a larger card, "
             f"or drop the engine with --skip-esmfold2 --min-engines 2 rather than reporting blanks."
         )
+
+    # --save-pae-bins was asked for and not one design produced a file: the hook saw nothing
+    # (the model's forward output has no pae_logits) or every distribution disagreed with the
+    # PAE. The CSV would look complete with a column of blanks -- say so with a non-zero exit.
+    n_folded = len(jobs) - n_failed
+    if save_pae_bins and n_folded and not n_bins_saved:
+        raise RuntimeError(
+            f"--save-pae-bins: {n_folded} binder(s) folded but no PAE-bin file was written. "
+            "See the '[esmfold2] --save-pae-bins' warnings above for the reason."
+        )
+
+
+# ---------------------------------------------------------------------------
+# PAE bin probabilities (--save-pae-bins)
+# ---------------------------------------------------------------------------
+
+
+def _capture_pae_logits(model: Any, store: dict[str, Any]) -> None:
+    """Record ``pae_logits`` from every forward pass of *model* into *store*.
+
+    ``ESMFold2InputBuilder.fold()`` runs ``model(**features)`` and then ``decode()``, which
+    copies ``pae`` out of the output dict and discards ``pae_logits``. A forward hook sees
+    the dict before that happens, so the probabilities come from the very pass that produced
+    the saved PAE. Stored as float32 numpy ``[n_samples, N, N, n_bins]`` (on the CPU, so the
+    GPU copy is free to go).
+    """
+
+    def _hook(_module: Any, _args: Any, output: Any) -> None:
+        try:
+            logits = output.get("pae_logits") if hasattr(output, "get") else getattr(output, "pae_logits", None)
+            store["pae_logits"] = None if logits is None else logits.detach().float().cpu().numpy()
+        except Exception as exc:  # recorded by _store_pae_bins as a missing capture
+            store["pae_logits"] = None
+            store["error"] = repr(exc)
+
+    model.register_forward_hook(_hook)
+
+
+def _store_pae_bins(store: dict[str, Any], sample_idx: int, pae: np.ndarray, pae_path: Path, idx: int) -> str:
+    """Write ``<pae_path stem>_bins.npz`` for the kept sample; return its path, or "" on failure."""
+    from binder_comparison.refolding.pae_bins import (
+        PaeBinsMismatch,
+        bins_path_for,
+        save_pae_bins,
+        softmax,
+        uniform_bin_centres,
+    )
+
+    logits = store.get("pae_logits")
+    if logits is None:
+        why = store.get("error") or "the forward pass exposed no pae_logits"
+        print(f"  [esmfold2] --save-pae-bins: no bin probabilities for binder #{idx} ({why})")
+        return ""
+    try:
+        probs = softmax(logits[sample_idx])
+        path = save_pae_bins(bins_path_for(pae_path), probs, uniform_bin_centres(probs.shape[-1]), expected_pae=pae)
+    except (PaeBinsMismatch, ValueError, IndexError) as exc:
+        print(f"  [esmfold2] --save-pae-bins: binder #{idx} not saved ({exc})")
+        return ""
+    return str(path)
 
 
 # ---------------------------------------------------------------------------
@@ -822,6 +915,12 @@ if __name__ == "__main__":
         "Default is to abort — scores from an MSA-less engine are not comparable to the others.",
     )
     parser.add_argument("--msa-cache-dir", default=None, help="Override MSA cache directory")
+    parser.add_argument(
+        "--save-pae-bins",
+        action="store_true",
+        help="Also save the per-pair PAE bin probabilities (<design>_pae_bins.npz) and a pae_bins_file column. "
+        "Off by default; ~11.5 MB per 300-token design before compression.",
+    )
     args = parser.parse_args()
 
     # The header's first token is the binder_id, as 'extract' writes it; saved
@@ -860,6 +959,7 @@ if __name__ == "__main__":
             use_msa=not args.no_msa,
             msa_cache_dir=args.msa_cache_dir,
             allow_no_msa=args.allow_no_msa,
+            save_pae_bins=args.save_pae_bins,
         )
     except MissingTargetMSA as exc:
         print(f"\n{exc}", file=sys.stderr)

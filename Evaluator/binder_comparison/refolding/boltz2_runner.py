@@ -44,6 +44,7 @@ def run_boltz2_refold(
     scripts_path: str | Path | None = None,
     resume: bool = False,
     binder_ids: list[str] | None = None,
+    save_pae_bins: bool = False,
 ) -> None:
     """Refold *sequences* against *target_sequence* using Boltz2.
 
@@ -63,6 +64,9 @@ def run_boltz2_refold(
         scripts_path:    Path to the scripts/ directory containing refold_boltz2.py.
                          Defaults to <repo_root>/scripts/.
         resume:          If True, skip binders already present in existing output CSV.
+        save_pae_bins:   If True, also store each design's PAE bin probabilities
+                         (``<design>_pae_bins.npz``) and a ``pae_bins_file`` CSV column.
+                         Costs one extra forward pass per design. Default off.
     """
     output_dir = Path(output_dir).resolve()
     output_csv = Path(output_csv).resolve()
@@ -126,6 +130,7 @@ def run_boltz2_refold(
                 num_samples=num_samples,
                 recycling_steps=recycling_steps,
                 skip_indices=skip_indices,
+                save_pae_bins=save_pae_bins,
             )
         except _boltz2_script.PartialRefoldFailure as exc:
             partial = exc
@@ -158,7 +163,7 @@ def _publish_csv(generated_csv: Path, output_csv: Path, output_dir: Path) -> boo
     shutil.copy(str(generated_csv), str(output_csv))
     # refold_boltz2.py writes paths relative to output_dir (which was CWD).
     # Rewrite them as absolute so downstream tools can find the files.
-    _absolutize_csv_paths(output_csv, output_dir, ["pdb", "pae_file", "plddt_file"])
+    _absolutize_csv_paths(output_csv, output_dir, ["pdb", "pae_file", "plddt_file", "pae_bins_file"])
     return True
 
 

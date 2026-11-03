@@ -196,6 +196,30 @@ def _extract_prediction_metrics(prediction, binder_length):
     }
 
 
+def _store_pae_bins(folder, pssm, features, recycling_steps, pae, pae_file, idx):
+    """Write ``<pae_file stem>_bins.npz`` (``--save-pae-bins``); return its path, or "" on failure.
+
+    ``folder.predict()`` returns only the expected PAE. ``folder.model_output()`` is the
+    public call underneath it and carries ``pae_logits`` (``[N, N, 64]``) and ``pae_bins``;
+    called with the same features, recycling steps and key as ``predict()`` it is the same
+    deterministic pass, and ``save_pae_bins`` refuses the result if its expected value does
+    not reproduce the PAE already saved for the design. A failure here never costs the fold.
+    """
+    from binder_comparison.refolding.pae_bins import PaeBinsMismatch, bins_path_for, save_pae_bins, softmax
+
+    try:
+        out = folder.model_output(PSSM=pssm, features=features, recycling_steps=recycling_steps, key=jax.random.key(0))
+        probs = softmax(np.asarray(out.pae_logits, dtype=np.float32))
+        path = save_pae_bins(bins_path_for(pae_file), probs, np.asarray(out.pae_bins), expected_pae=pae)
+    except (PaeBinsMismatch, ValueError) as exc:
+        print(f"  [boltz2] --save-pae-bins: binder #{idx} not saved ({exc})")
+        return ""
+    except Exception as exc:
+        print(f"  [boltz2] --save-pae-bins: binder #{idx} not saved (bin extraction raised {exc!r})")
+        return ""
+    return str(path)
+
+
 def _nan_safe(obj):
     """Recursively replace float nan/inf with None for JSON serialisation."""
     if isinstance(obj, float):
@@ -357,6 +381,7 @@ def refold_batch(
     use_msa: bool = True,
     msa_cache_dir: str | None = None,
     allow_no_msa: bool = False,
+    save_pae_bins: bool = False,
 ):
     """Refold a batch of binder sequences against a target.
 
@@ -381,9 +406,22 @@ def refold_batch(
         msa_cache_dir:   Override the shared target-MSA cache directory.
         allow_no_msa:    True = proceed without a target MSA if it cannot be
                          obtained (air-gapped node).  Default is to abort.
+        save_pae_bins:   True = also store each design's per-pair PAE bin probabilities
+                         (``refold<idx>_<run_id>_pae_bins.npz``) and a ``pae_bins_file``
+                         column. Costs one extra forward pass per design (the Mosaic
+                         ``predict()`` keeps only the expected PAE; ``model_output()``,
+                         called with the same arguments and key, returns the logits).
+                         Default off.
     """
     if skip_indices is None:
         skip_indices = set()
+    if save_pae_bins:
+        # Fail before any work: an unimportable helper or a CSV whose header cannot take
+        # the extra column are both certain, not data-dependent.
+        from binder_comparison.refolding.pae_bins import assert_csv_can_take_pae_bins
+
+        assert_csv_can_take_pae_bins("refold_designs.csv")
+    n_bins_saved = 0
     run_id = str(uuid.uuid4())[:8]
     os.makedirs(output_dir, exist_ok=True)
 
@@ -546,7 +584,9 @@ def refold_batch(
     write_header = (not os.path.exists(csv_path)) or os.path.getsize(csv_path) == 0
     csv_file = open(csv_path, "a", newline="")
     try:
-        csv_writer = csv.DictWriter(csv_file, fieldnames=csv_columns)
+        csv_writer = csv.DictWriter(
+            csv_file, fieldnames=[*csv_columns, "pae_bins_file"] if save_pae_bins else csv_columns
+        )
         if write_header:
             csv_writer.writeheader()
             csv_file.flush()
@@ -711,6 +751,12 @@ def refold_batch(
                 f.write(prediction.st.make_pdb_string())
 
             np.save(pae_file, np.array(prediction.pae))
+            pae_bins_file = ""
+            if save_pae_bins:
+                pae_bins_file = _store_pae_bins(
+                    folder, pssm, boltz_features, recycling_steps, np.array(prediction.pae), pae_file, idx
+                )
+                n_bins_saved += bool(pae_bins_file)
 
             plddt_full = np.array(prediction.plddt)
             with open(plddt_file, "w", newline="") as f:
@@ -775,6 +821,8 @@ def refold_batch(
                 "pae_file": pae_file,
                 "plddt_file": plddt_file,
             }
+            if save_pae_bins:
+                row["pae_bins_file"] = pae_bins_file
             results_ref.append(row)
             csv_writer.writerow(row)
             csv_file.flush()
@@ -874,6 +922,14 @@ def refold_batch(
             f"than reporting a short pool as complete."
         )
 
+    # --save-pae-bins was asked for and not one design produced a file: the CSV would look
+    # complete with a column of blanks. Say so with a non-zero exit.
+    if save_pae_bins and n_todo - n_skipped > 0 and not n_bins_saved:
+        raise RuntimeError(
+            f"--save-pae-bins: {n_todo - n_skipped} binder(s) folded but no PAE-bin file was written. "
+            "See the '[boltz2] --save-pae-bins' warnings above for the reason."
+        )
+
 
 # ============================
 # MAIN
@@ -908,6 +964,13 @@ def main():
         "Default is to abort — scores from an MSA-less engine are not comparable to the others.",
     )
     parser.add_argument("--msa-cache-dir", default=None, help="Override MSA cache directory")
+    parser.add_argument(
+        "--save-pae-bins",
+        action="store_true",
+        help="Also save the per-pair PAE bin probabilities (<design>_pae_bins.npz) and a pae_bins_file column. "
+        "Off by default; costs one extra forward pass per design and ~11.5 MB per 300-token design "
+        "before compression.",
+    )
     args = parser.parse_args()
 
     print("=== Boltz2 Refolding Tool (Version 6) ===\n")
@@ -965,6 +1028,7 @@ def main():
             use_msa=not args.no_msa,
             msa_cache_dir=args.msa_cache_dir,
             allow_no_msa=args.allow_no_msa,
+            save_pae_bins=args.save_pae_bins,
         )
     except MissingTargetMSA as exc:
         print(f"\n{exc}", file=sys.stderr)
