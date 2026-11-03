@@ -8,20 +8,22 @@ BinderScout is a unified toolkit for GPU-accelerated **protein binder design**. 
 2026-10-04; 2.0.1 on 10-15). 2.0.2 adds RFD4-Proteina as the ninth tool and purges the
 internal lab material from the tree *and* the published history — **every commit SHA and
 tag below `v2.0.2` changed on 2026-10-27, so an older clone must be re-cloned, not pulled.**
-Shipped to the fleet
-only — **not published**, and deliberately **not merged to `master`**. `v2.0.x` is the working
+The tags `v2.0.0`–`v2.0.2` and the `v2.0.x` branch are on the public remote; `v2.0.3` is in
+preparation. The line is deliberately **not merged to `master`**. `v2.0.x` is the working
 branch: all work on these machines lands there, never on `master`.
 
 **`master` is NOT frozen at 1.0.3 — that claim is stale (corrected 2026-10-29).** Master is a
-**separate line with no common ancestry**: the 2026-10-28 history rewrite reset its numbering at
-1.0.0, so none of `v1.0.0`…`v2.0.2` is reachable from it (`git merge-base --is-ancestor v2.0.x
-master` is false) and `git describe` on master cannot see the old tags. As of 2026-10-29 master
-is at **`v1.2.1`** (1.0.6 → 1.0.7 → 1.0.8 → 1.2.0 → 1.2.1 all landed that day; `v1.2.0` added
-`binder-compare filter-tmprot`, `v1.0.8` added the refold-CSV target-mismatch guard).
+**separate line**: `v2.0.x` is not an ancestor of it (`git merge-base --is-ancestor v2.0.x
+master` is false). The two share exactly one commit, `602345a` (`v1.0.3`), and have diverged
+since, with paths that differ too (master still has `bindmaster.py`, this line `binderscout.py`).
+As of 2026-10-29 master is at **`v1.2.1`** (1.0.6 → 1.0.7 → 1.0.8 → 1.2.0 → 1.2.1 all landed
+that day; `v1.2.0` added `binder-compare filter-tmprot`, `v1.0.8` added the refold-CSV
+target-mismatch guard).
 **Consequence for porting: a fix cannot be cherry-picked between the lines** — diff the trees and
 re-apply. `v1.1.x` was retired to the tag `archive/v1.1.x` and no longer exists as a branch.
-Three master fixes are still absent from `v2.0.x`: `_refuse_mismatched_targets`,
-`refolding/resume.py` (sequence-keyed resume) and `filter-tmprot`.
+Of the three master fixes once missing here, two have been ported: `_refuse_mismatched_targets`
+(commit `a3e775c`) and `refolding/resume.py`, the sequence-keyed resume (commit `6791f0c`, which
+also keeps this line's score gate). `filter-tmprot` is still absent from `v2.0.x`.
 
 **Local-only branch worth knowing about:** `feat/d1-ligand-target`, 30 commits off `v2.0.2`,
 never merged and not on any remote. It carries the ligand-target support (`core/ligand.py`) and —
@@ -33,7 +35,7 @@ deliver. Read it before building a counter-screen from scratch.
 **What 2.0 is.** An *evaluation* release, not a feature release. The `v2.0.0` tag shipped no new
 design tool (the eighth, BindCraft 2, arrived in 1.1.0) and the same three-engine refold pipeline
 — Boltz-2 + AF3 + ESMFold2. **RFD4-Proteina, the ninth tool, was added to the branch on
-2026-10-27, after the tag** — it is opt-in and x86_64 only; see its gotchas section. What changed is what the pipeline is allowed to claim:
+2026-10-27, after the tag** — it is opt-in, designed and run on x86_64 (installable on aarch64 since 2026-10-29, not yet run there); see its gotchas section. What changed is what the pipeline is allowed to claim:
 
 - **One ranking, and no way to choose another** (Part U): cross-engine gate then
   `consensus_iptm_mean`, one `rank` column. `two_stage_rank`, `adaptyv_rank`, `consensus_rank`,
@@ -48,7 +50,7 @@ design tool (the eighth, BindCraft 2, arrived in 1.1.0) and the same three-engin
   benchmark on label censoring.
 
 **Where 2.0's own records live** — read these before re-deriving anything:
-`DIARY_2.0.md` (the 2.0 chapter; `REPO_DIARY.md` is the *historical* diary and is not where 2.0 work goes) — **both diaries live only on the MUNI share, in MUNI `Project-01-BINDMASTER/REPO_DIARY/`, and must never be added to this public repo (they hold sensitive data)**, `docs/PLAN_2.0_CONCLUSION.md` (§3 remaining work, **§4 findings that must
+`DIARY_2.0.md` (the 2.0 chapter; `REPO_DIARY.md` is the *historical* diary and is not where 2.0 work goes) — **both diaries live only on the lab's private share, never in this repo (they hold sensitive data)**, `docs/PLAN_2.0_CONCLUSION.md` (§3 remaining work, **§4 findings that must
 not be relearned**, §5 decisions), `docs/PLAN_2.0_PART_RESULTS.md` (per-part verdicts, including
 the parts that were deliberately *not* built), and `docs/PLAN_2.0_PART_AK_verify_the_rank.md`.
 
@@ -67,8 +69,9 @@ as of 2026-10-04 (opt-in; throughput still unmeasured — see the aarch64 entry,
 wrong three times). **Both BindCraft 1 and PXDesign run on the GPU on DGX Spark** — each
 previously reported itself healthy while being unusable there.
 
-**Fleet note.** The checkout on the fleet boxes is `~/dev/BindMaster` (the pre-rename directory
-name), not `~/dev/BinderScout`. BM4 is the orchestrator and owns the rollout.
+**Fleet note.** On the multi-machine fleet the checkout directory is machine-local: some boxes
+still use `~/dev/BindMaster` (the pre-rename name), others `~/dev/BinderScout`. Resolve it
+rather than naming one. One x86_64 machine with a discrete GPU orchestrates and owns the rollout.
 
 **Repository:** `github.com/damborik22/BinderScout` (the working-tree directory may be checked out as `BinderScout`; the CLI command and Python package are both `binderscout`. The old `damborik22/BinderScout` URL redirects.)
 
@@ -158,7 +161,8 @@ Target structure (.pdb / .mmcif)
        Protein-Hunter       (Boltz-2 / Chai-1; 6 modalities: protein / cyclic / ligand CCD / ligand SMILES / DNA / RNA)
        RFD3                 (RosettaCommons foundry diffusion + ProteinMPNN)
        RFD4-Proteina        (IPD x NVIDIA latent-reasoning diffusion; backbone AND sequence
-                             in one pass, no MPNN step; x86_64 only, opt-in)
+                             in one pass, no MPNN step; opt-in; run on x86_64,
+                             installable but not yet run on aarch64)
     → Evaluator (canonical pipeline = Boltz-2 + AF3 + ESMFold2; SoluProt optional screen):
        1. Extract sequences from all tool outputs (one extractor per tool)
        1.5. (optional) Screen with SoluProt 1.0 (binder-eval-soluprot env)     [live, x86 + aarch64; LABEL ONLY — scores every design, never drops one]
@@ -242,10 +246,10 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `Proteina-Complexa/.venv` | Proteina-Complexa | 3.12 | uv | Flow matching + test-time compute binder design |
 | `binderscout_protein_hunter` | Protein-Hunter | 3.10 | conda | Boltz-2 / Chai-1 hallucination, 6 modalities |
 | `binderscout_rfd3` | RFD3 (`rc-foundry`) | 3.12 | conda | RosettaCommons foundry diffusion + ProteinMPNN |
-| `RFD4-Proteina/.venv` | RFD4-Proteina | 3.12 | **uv** | IPD × NVIDIA latent-reasoning diffusion. **x86_64 only** — upstream's own `scripts/setup_venv.sh` exits 1 on any other arch. No conda env; the checkout IS the installation, so moving or deleting it breaks `rfd4-generate`. Opt-in (`--tool rfd4`), **not** in `--tool all` |
+| `RFD4-Proteina/.venv` | RFD4-Proteina | 3.12 | **uv** | IPD × NVIDIA latent-reasoning diffusion. Run on **x86_64**; installable on aarch64 since 2026-10-29 (resolve + install on one GB10, no design campaign yet). Upstream's own `scripts/setup_venv.sh` exits 1 on any other arch, but our installers never call it: they build the venv with `uv` directly. No conda env; the checkout IS the installation, so moving or deleting it breaks `rfd4-generate`. Opt-in (`--tool rfd4`), **not** in `--tool all` |
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
-| `binder-eval-af3` | AF3 refolder | 3.10 | conda | AlphaFold 3 v3.0.2 refolding — **canonical 2nd engine** (Part K; live on Spark / H200 **and on 24 GB consumer GPUs** — BM1/BM2/BM4) |
-| `binder-eval-esmfold2` | ESMFold2 refolder | 3.10 | conda | **Default refold engine** (biohub). **Measured working: a 50-design pool refolded 50/50 on a 24 GB RTX 3090 (iptm 0.671–0.921, median 0.863), plus a 299-token monomer in 8.3 s and a 598-token dimer in 59.6 s.** ESMC-6B loads bf16 by default (~11.8 GiB resident from a 23.66 GiB fp32 checkpoint), which is why 24 GB suffices and a 12 GB card cannot run it at any size — the dev box was the constraint, never the engine. **That 11.8 GiB is the resident weights, NOT the run: a refold of a ~300-token complex held 18.86 GiB on a 3090 (measured 2026-10-31).** Read it as "ESMFold2 wants the whole card", not "11.8 of 24, so something else fits" — co-scheduling Boltz-2 (4.63 GiB) beside it filled the card and every binder from #12 on raised CUDA OOM. Worse, the run then wrote a full-length CSV with 8 of 100 scored and **exited 0**; `--resume` repairs it (it keys on a non-empty `iptm`), but nothing refuses. **Also: the biohub transformers fork is NOT on every box.** bm2 and bm4 have `ESMFold2Model` with `load_esmc` under `transformers.models.esmfold2.modeling_esmfold2`; bm1 has PyPI transformers at the same version string (4.57.6) and no `esmfold2` module at all, so this engine cannot run there. `hasattr(transformers, "ESMFold2Model")` is the wrong probe — the class is in that submodule. Installed by `--tool all`, auto-detected by `evaluate.sh`; lightweight, no gated weights; feeds `consensus_iptm` + autosize gate |
+| `binder-eval-af3` | AF3 refolder | 3.10 | conda | AlphaFold 3 v3.0.2 refolding — **canonical 2nd engine** (Part K; live on Spark / H200 **and on 24 GB consumer GPUs**, checked on three x86_64 machines) |
+| `binder-eval-esmfold2` | ESMFold2 refolder | 3.10 | conda | **Default refold engine** (biohub). **Measured working: a 50-design pool refolded 50/50 on a 24 GB RTX 3090 (iptm 0.671–0.921, median 0.863), plus a 299-token monomer in 8.3 s and a 598-token dimer in 59.6 s.** ESMC-6B loads bf16 by default (~11.8 GiB resident from a 23.66 GiB fp32 checkpoint), which is why 24 GB suffices and a 12 GB card cannot run it at any size — the dev box was the constraint, never the engine. **That 11.8 GiB is the resident weights, NOT the run: a refold of a ~300-token complex held 18.86 GiB on a 3090 (measured 2026-10-31).** Read it as "ESMFold2 wants the whole card", not "11.8 of 24, so something else fits" — co-scheduling Boltz-2 (4.63 GiB) beside it filled the card and every binder from #12 on raised CUDA OOM. Worse, the run then wrote a full-length CSV with 8 of 100 scored and **exited 0**; `--resume` repairs it (it keys on a non-empty `iptm`), but nothing refuses. **Also: the biohub transformers fork is NOT on every box.** Two of the three x86_64 machines checked have `ESMFold2Model` with `load_esmc` under `transformers.models.esmfold2.modeling_esmfold2`; the third has PyPI transformers at the same version string (4.57.6) and no `esmfold2` module at all, so this engine cannot run there. `hasattr(transformers, "ESMFold2Model")` is the wrong probe — the class is in that submodule. Installed by `--tool all`, auto-detected by `evaluate.sh`; lightweight, no gated weights; feeds `consensus_iptm` + autosize gate |
 | `binder-eval-soluprot` | SoluProt screen | 3.7 | conda | Sequence-only *E. coli* solubility filter (Hon et al. 2021); x86 + aarch64 (aarch64 builds scikit-learn 0.20.4 + USEARCH v12 from source, uses the `--no_tmhmm` model). NOT a refold engine and NOT a filter; runs before refolding and labels every design with `soluprot_score` / `soluprot_passes`. `--soluprot-filter` was removed 2026-09-28 and now exits 1 |
 
 The `binderscout.py` CLI dispatcher uses `os.execv()` to launch sub-commands in their correct environment — `install` runs in bash, `configure` runs in system Python, and `evaluate` is a **passthrough to the `binder-compare` CLI** run in the `binder-eval` conda env (`binderscout evaluate <binder-compare args>`). The legacy single-file evaluator (`evaluator_legacy/evaluator.py`, formerly run in the Mosaic `.venv`) is retired and no longer dispatched.
@@ -254,10 +258,12 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
 
 ### Machines and platforms
 
-| Branch | Platform | Installer | CUDA default |
-|---|---|---|---|
-| `master` | x86_64 Linux + NVIDIA GPU | `install/install.sh` | 12.4 |
-| `aarch64` | NVIDIA DGX Spark / Grace-Hopper (GB10 Blackwell) | `install/install_aarch.sh` | 13.0 |
+There is **no `aarch64` branch**: one tree, two installers. Branches are release lines, not platforms.
+
+| Platform | Installer | CUDA default |
+|---|---|---|
+| x86_64 Linux + NVIDIA GPU | `install/install.sh` | 12.4 |
+| NVIDIA DGX Spark / Grace-Hopper (GB10 Blackwell), aarch64 | `install/install_aarch.sh` | 13.0 |
 
 **aarch64 specifics:**
 - BindCraft ARM64 binaries (`DAlphaBall.gcc`, `dssp`) bundled in `tools/aarch64/`
@@ -275,10 +281,10 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
   Caveat on the history: the env was byte-identical to May (untouched since 2026-03-07) and both runs used multimer, so why it compiled then is **unexplained**. The only changed variable is the driver (580.95.05 → 580.142 on 2026-06-30, now 580.159.03). Don't repeat that as fact.
 
 - **BindCraft 2: VALIDATED on GB10/sm_121, but opt-in and not in `--tool all`** — and the reason is throughput, not capability. `jax-cuda13` takes the GPU, `biotraj` (the only source build in its tree) compiles, and a campaign runs to completion with the two guard settings `run_bindcraft2.sh` injects (see the runtime gotchas below). It is kept out of `all` because a trajectory costs ~7.4 min here against ~90 s on a GH200. That still makes it the **only AF2-hallucination designer that runs on Spark at all** — BindCraft 1 cannot install here (no aarch64 jaxlib CUDA conda packages), so on this platform the two tools are not interchangeable. Install with `bash install/install_aarch.sh --tool bindcraft2 --bc2-source <zip|dir>`
-- BoltzGen: PyTorch from the **cu130 wheel index**, pinned (`torch==2.10.0+cu130`). Plain PyPI torch is **CPU-only** on aarch64 for the versions we pin — an earlier note here said the opposite, and acting on it silently replaced a working CUDA build with a CPU one. Verified on BM5: the live `BoltzGen` env is `torch 2.10.0+cu130` with `sm_120`/`compute_120` in its arch list.
+- BoltzGen: PyTorch from the **cu130 wheel index**, pinned (`torch==2.10.0+cu130`). Plain PyPI torch is **CPU-only** on aarch64 for the versions we pin — an earlier note here said the opposite, and acting on it silently replaced a working CUDA build with a CPU one. Verified on a GB10: the live `BoltzGen` env is `torch 2.10.0+cu130` with `sm_120`/`compute_120` in its arch list.
 - Mosaic: `esmj` excluded (no aarch64 wheel); `torchtext` also may fail
 - RFD3: installable on aarch64 via `install/install_aarch.sh --tool rfd3` (no DGL dependency; pip-installs cleanly). **Opt-in, not in `--tool all`, because it is unvalidated on aarch64 hardware** — validate on Spark and promote it once confirmed.
-- **Protein-Hunter: now installable on aarch64** (`bash install/install_aarch.sh --tool protein-hunter`) — opt-in, not in `--tool all`, because it is new here. Verified on BM5: PyRosetta imports, `boltz_ph` imports, and a 2-cycle design run completes on the GPU (`Using device: cuda:0`, torch 2.14.0+cu130 on GB10) with ipTM climbing 0.51 → 0.82 across cycles. Three platform deltas: PyRosetta comes from the graylab **conda** channel and must be in the env-creation solve (added afterwards it drags python 3.10.21 back to 3.10.14 over a zlib pin and orphans every pip-built C extension); torch uses the cu130 index; and **Chai-1 is skipped**, which costs nothing, since the Boltz-2 entrypoint `boltz_ph/design.py` never imports `chai_lab`. `gemmi 0.6.5` has no aarch64 wheel and builds from sdist, so a C/C++ toolchain is required. The old refusal said "PyRosetta publishes no aarch64 wheels" — **that was wrong**. PyRosetta does run here: BM5's `BindCraft` env imports it, runs `pyrosetta.init()` and scores a pose, from the native aarch64 *conda* build (`PyRosetta4.conda.aarch64...`, graylab JHU channel) that `install/install_aarch.sh` already installs. "No aarch64 wheels" was only ever true of PyPI. What is actually unresolved: Protein-Hunter's own installer takes the **wheel** path (`pyrosetta-installer` via pip) and nobody has tried repointing it at the conda build here, and its vendored Boltz-2 + Chai-1 stack has never been built on aarch64. So this is **untested, not blocked** — and do not upgrade "PyRosetta works" into "Protein-Hunter installs". Note also that a `binderscout_protein_hunter` env exists on BM5 but is an empty ~198 MB shell: the env name is not evidence of an install
+- **Protein-Hunter: now installable on aarch64** (`bash install/install_aarch.sh --tool protein-hunter`) — opt-in, not in `--tool all`, because it is new here. Verified on a GB10: PyRosetta imports, `boltz_ph` imports, and a 2-cycle design run completes on the GPU (`Using device: cuda:0`, torch 2.14.0+cu130 on GB10) with ipTM climbing 0.51 → 0.82 across cycles. Three platform deltas: PyRosetta comes from the graylab **conda** channel and must be in the env-creation solve (added afterwards it drags python 3.10.21 back to 3.10.14 over a zlib pin and orphans every pip-built C extension); torch uses the cu130 index; and **Chai-1 is skipped**, which costs nothing, since the Boltz-2 entrypoint `boltz_ph/design.py` never imports `chai_lab`. `gemmi 0.6.5` has no aarch64 wheel and builds from sdist, so a C/C++ toolchain is required. The old refusal said "PyRosetta publishes no aarch64 wheels" — **that was wrong**. PyRosetta does run here: a GB10's `BindCraft` env imports it, runs `pyrosetta.init()` and scores a pose, from the native aarch64 *conda* build (`PyRosetta4.conda.aarch64...`, graylab JHU channel) that `install/install_aarch.sh` already installs. "No aarch64 wheels" was only ever true of PyPI. What is actually unresolved: Protein-Hunter's own installer takes the **wheel** path (`pyrosetta-installer` via pip) and nobody has tried repointing it at the conda build here, and its vendored Boltz-2 + Chai-1 stack has never been built on aarch64. So this is **untested, not blocked** — and do not upgrade "PyRosetta works" into "Protein-Hunter installs". Note also that a `binderscout_protein_hunter` env existed on one GB10 but was an empty ~198 MB shell: the env name is not evidence of an install
 - **Proteina-Complexa on aarch64: INSTALLABLE since 2026-09-26, opt-in, and unvalidated end to end.** `bash install/install_aarch.sh --tool proteina-complexa`. It is NOT in `--tool all`.
   The history matters, because the reason was wrong twice. It was deprecated 2026-07-29 for "no CUDA `jaxlib` exists for aarch64" — **disproved 09-18**: the CUDA plugin exists and gives `backend: gpu` on jax 0.4.29. The real blocker, identified then, was that **jax 0.4.x cannot compile an AF2-class graph for sm_121** (`LLVM ERROR: Unsupported rounding mode for conversion`), reproduced in two environments. That blocker is now gone twice over on this hardware — BindCraft 1 runs AF2 on the GPU on `jax[cuda12]==0.6.2`, BindCraft 2 on `jax-cuda13 0.11.1` — and PC's AF2 reward **is the same ColabDesign**, so it inherits the fix. The installer therefore uses 0.6.2 rather than the manual Blackwell port's `jax[cpu]==0.4.29`, and applies no CPU-fallback patch.
   **RETRACTED 2026-10-04 — the install is fixed, throughput is STILL UNMEASURED.** A first
@@ -318,7 +324,7 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
   n=1, the 112.3 s includes a cold compile, and the archived CPU baselines were on a different
   target. Full evidence and the preserved original verdict are archived off-repo on the lab share.
 
-  **The superseded paragraph, for context:** throughput. The deprecation's real content was that the production MCTS recipe costs 3300 AF2 calls per 100-design replicate, which on a CPU reward meant 12.2 days against 2.25 h on an H200. With the reward on the GPU that arithmetic no longer applies, but nobody has measured the replacement. Run a short MCTS on Spark and time it before planning a campaign. The installer's smoke test compiles a jitted **bf16** graph — the exact lowering that used to abort — and refuses rather than reporting success if it fails; it deliberately does not claim more than that, because this repo has already once declared aarch64 support on the strength of `jax` reporting `gpu` plus a clean import. The production recipe is `search.algorithm=mcts, n_simulations=8`, whose budget is fixed at `nsamples × (1 + 8×4)` = **3300 AF2 calls per 100-design replicate** → **12.2 days on Spark vs 2.25 h on one H200** (PC-v3's 50 replicates ≈ 1.7 years). Threading cannot fix it — AF2-on-CPU asymptotes at ~4 of 20 cores. **Run Proteina-Complexa on x86 (Clara / BM1–BM4).** Do NOT "solve" it by switching to `best-of-n`: that is cheap only because it never consults the reward during generation, and MCTS was adopted because it beat best-of-n 10× at iPTM ≥ 0.85 in ⅓ the wall clock. **Reopen condition may already be met — see the jax 0.6.2 note in the BindCraft entry above.** PC's AF2 reward is the same ColabDesign that BindCraft runs on the GPU here; PC is simply pinned to `jax 0.4.29`, which predates sm_121. Whether upgrading PC's venv works is UNTESTED and needs Spark. Otherwise reopens if a GPU-native reward replaces AF2 (`rf3` is installed on Spark; the rf3 folding reward is commented out at `binder_generate.yaml:194-213` — a different objective, so not parity). Full verdict + evidence are archived off-repo on the lab share. **Not to be confused with `jproteina-complexa`**, the escalante-bio JAX reimplementation inside the Mosaic venv, which does work on aarch64 — different implementation, different weights.
+  **The superseded paragraph, for context:** throughput. The deprecation's real content was that the production MCTS recipe costs 3300 AF2 calls per 100-design replicate, which on a CPU reward meant 12.2 days against 2.25 h on an H200. With the reward on the GPU that arithmetic no longer applies, but nobody has measured the replacement. Run a short MCTS on Spark and time it before planning a campaign. The installer's smoke test compiles a jitted **bf16** graph — the exact lowering that used to abort — and refuses rather than reporting success if it fails; it deliberately does not claim more than that, because this repo has already once declared aarch64 support on the strength of `jax` reporting `gpu` plus a clean import. The production recipe is `search.algorithm=mcts, n_simulations=8`, whose budget is fixed at `nsamples × (1 + 8×4)` = **3300 AF2 calls per 100-design replicate** → **12.2 days on Spark vs 2.25 h on one H200** (PC-v3's 50 replicates ≈ 1.7 years). Threading cannot fix it — AF2-on-CPU asymptotes at ~4 of 20 cores. **Run Proteina-Complexa on x86_64.** Do NOT "solve" it by switching to `best-of-n`: that is cheap only because it never consults the reward during generation, and MCTS was adopted because it beat best-of-n 10× at iPTM ≥ 0.85 in ⅓ the wall clock. **Reopen condition may already be met — see the jax 0.6.2 note in the BindCraft entry above.** PC's AF2 reward is the same ColabDesign that BindCraft runs on the GPU here; PC is simply pinned to `jax 0.4.29`, which predates sm_121. Whether upgrading PC's venv works is UNTESTED and needs Spark. Otherwise reopens if a GPU-native reward replaces AF2 (`rf3` is installed on Spark; the rf3 folding reward is commented out at `binder_generate.yaml:194-213` — a different objective, so not parity). Full verdict + evidence are archived off-repo on the lab share. **Not to be confused with `jproteina-complexa`**, the escalante-bio JAX reimplementation inside the Mosaic venv, which does work on aarch64 — different implementation, different weights.
 - SoluProt: supported on aarch64 via `bash install/install_aarch.sh --tool soluprot` (the x86 `binderscout install` path redirects here). The installer builds scikit-learn 0.20.4 (the model pickle won't `predict()` under aarch64's 0.21/0.22) and open-source USEARCH v12 (`rcedgar/usearch12`, GPLv3) from source — **both platforms now source-build USEARCH**; the committed `usearch.x86_64` / `usearch.aarch64` binaries were removed so the MIT repo does not redistribute GPLv3 binaries, patches `soluprot.py` for biopython≥1.78, and uses the shipped `--no_tmhmm` model (TMHMM/USEARCH x86 binaries are not used). Needs a C/C++ toolchain. `binder-compare` itself runs in the `binder-eval` env and shells out to this py3.7 env via `$SOLUPROT_PYTHON`.
 - Pre-cached AF2 weights path: `Documents/OLD/BinderScout/bindcraft-tools`, then `Documents/OLD/BindMaster/bindcraft-tools`. Both installers, the configurator and `run_bindcraft2.sh.template` probe both spellings, new first: that archive lives OUTSIDE the repo and was never renamed on disk, so the new spelling alone misses the cache and re-downloads ~4 GB of AF2 weights (plus 5.3 GB for BindCraft 2).
 
@@ -332,8 +338,8 @@ In **standalone mode** (`--standalone` or auto-detected), all conda environments
   there will send you the wrong way, both measured 2026-10-31.** First, `torch` in every
   Mosaic venv on the fleet is `2.7.1+cpu`, so Boltz's data loader prints "no accelerator is
   found" — that is the data loader, not the fold, which runs on JAX and does use the GPU.
-  Second, a `binder-eval-boltz2` conda env **does exist** on bm1, bm2 and bm4 (this file
-  previously said no such env exists on the fleet) with `torch 2.14.0+cu130` and CUDA
+  Second, a `binder-eval-boltz2` conda env **does exist** on the x86_64 fleet machines (this file
+  previously said no such env exists) with `torch 2.14.0+cu130` and CUDA
   available — but no JAX stack, so `refold_boltz2.py` dies on `import equinox`. It is not a
   substitute for the Mosaic venv. On a shared card, `BOLTZ2_XLA_MEM_FRACTION` is the setting
   that matters: the runner's pool-aware default takes 0.75–0.80 of the device, which on a
@@ -414,15 +420,19 @@ the parameter sweep.
 
 ### Git and branching
 
-- **Primary branch:** `master` (x86_64)
-- **Platform branch:** `aarch64` (periodically rebased from master)
+- **Working branch:** `v2.0.x` — all work on these machines lands there. `master` is the separate 1.x
+  line (see Overview) and is not merged into it. There is no platform branch.
 - **Commit style:** `Part X: description` matching STAGES.md parts, or imperative mood for smaller changes
 - **PR conventions:** imperative title < 70 chars, body references STAGES.md items, CI must pass, one logical change per PR
 - **This repo is PUBLIC — no infrastructure identifiers in tracked files.** No machine IPs,
   DNS hostnames, Unix usernames, absolute `/home/<user>` paths, cluster account names or SSH
-  host-key fingerprints. Use the `~/.ssh/config` aliases (`bm1`/`bm2`/`bm4`/`bm5`, `clara`),
-  `$HOME`, and repo-relative paths. Real values live in machine-local, gitignored files
-  (`CLAUDE.local.md`, `docs/local/`).
+  host-key fingerprints. **Name machines only by architecture (`x86_64`, `aarch64`) or
+  generically ("a multi-user cluster", "a shared login node")** — never by cluster name, ssh alias
+  or hostname, and never point at institution storage. GPU model names (GB10, H200, L40S,
+  RTX 3090) stay: they are measurements. Use `$HOME` and repo-relative paths. Real values, and
+  the alias list, live in machine-local gitignored files (`CLAUDE.local.md`, `docs/local/`)
+  or environment variables. `tests/test_public_docs_are_anonymous.py` enforces this for
+  documentation and tests.
 
   **Scrub status — the previous "scrubbed from tree and history 2026-09-22" was not true.**
   Six tracked files still carried an absolute `/home/<username>` path on 2026-09-25
@@ -559,27 +569,51 @@ the parameter sweep.
   **Note which argument this is.** The case for three engines is **adversarial**, not variance reduction: a gamed engine is confidently wrong in a consistent direction, not noisily wrong, so averaging does not fix it the way it fixes noise — independent opinions do. Optimising a single metric harder is not a substitute, which is also why Part U's metric search made things worse.
 - **Do NOT re-litigate the engine set on one pool.** The 3-engine mean beats the *average* single engine (+0.047, p=0.0002) but **not the best one out of fold** (+0.0026, p=0.69), and `mean(boltz,esm)` out-scores it on the benchmark (0.7279 vs 0.7231; +14 binders at top-20). It is still not a reason to change anything: at the shortlist sizes we ship (N=3–8) the whole panel is within ±4 binders, the drop-AF3 effect does not keep its sign across leave-one-target-out folds of that same pool, and it inverts on the secondary pool. Four single-pool effects were retracted in the week of 2026-09-29 — helix, magnitude, shrinkage and `mean(af3,esm)`. **Treat a single-pool effect as a hypothesis, not a result.**
 - **Engine disagreement lowers the mean — but is NOT a useful stratifier.** For short binders (~60aa), refolding engines often disagree on interface quality, and `consensus_iptm_mean` captures that continuously (disagreement drags the mean down). That much holds. What does *not* hold is using disagreement to slice the pool: on Cao, splitting at the median engine spread changed AUC by −0.006/+0.005 against a random-split null of ±0.018 (p=0.71/0.81), and `agreement_count` scores macro-AUC 0.532 with 87.2% of designs tied at zero. Keep `agreement_count` as a diagnostic column; do not gate or stratify on it (Part U).
-- **DO NOT USE Cao 2022 as a benchmark (operator decision, 2026-10-03).** Its Kd labels are too censored to support a conclusion: **73.4 %** of its binder labels are one-sided (**94.2 %** across the full 654,716-design library), its own `kd_ok` quality flag keeps only ~495 designs, and **8 of 12 targets sit at the random-ordering noise floor** — so any Cao result is decided by ~4 informative targets. Measured 2026-10-03: a hand-rolled "two-sided Kd" slice admits designs with `kd_lb == 0` (a degenerate [0, X] interval), and swapping it for `kd_ok` **flips the sign** of an engine-set effect that had p=0.0078. **The canonical labelled benchmark is the curated Adaptyv/ProteinBase set** (563 designs with the full PAE panel, 4 targets, replicated binding calls), assembled 2026-10-02 on the MUNI share under `EVALUATOR/Benchmark/`; see its own `README.md` and `PROVENANCE.md`. Note that "Adaptyv" and "ProteinBase" are **one dataset**, not two corroborating ones. **Every Cao-derived figure below and in Parts T/U is therefore provisional and must be re-measured on that benchmark before it is relied on.**
+- **DO NOT USE Cao 2022 as a benchmark (operator decision, 2026-10-03).** Its Kd labels are too censored to support a conclusion: **73.4 %** of its binder labels are one-sided (**94.2 %** across the full 654,716-design library), its own `kd_ok` quality flag keeps only ~495 designs, and **8 of 12 targets sit at the random-ordering noise floor** — so any Cao result is decided by ~4 informative targets. Measured 2026-10-03: a hand-rolled "two-sided Kd" slice admits designs with `kd_lb == 0` (a degenerate [0, X] interval), and swapping it for `kd_ok` **flips the sign** of an engine-set effect that had p=0.0078. **The canonical labelled benchmark is the curated Adaptyv/ProteinBase set** (563 designs with the full PAE panel, 4 targets, replicated binding calls), assembled 2026-10-02 and kept on the lab's private share; see its own `README.md` and `PROVENANCE.md`. Note that "Adaptyv" and "ProteinBase" are **one dataset**, not two corroborating ones. **Every Cao-derived figure below and in Parts T/U is therefore provisional and must be re-measured on that benchmark before it is relied on.**
 - **The ranking is a triage filter, not a decision procedure.** Calibrate expectations before presenting a top-N as "the best". **(Cao-derived — see the preceding bullet; these specific numbers are provisional.)** On the Cao 2022 near-miss pool (4,442 Rosetta minibinders, 12 targets — the closest analogue to a real campaign pool: hundreds of same-tool, same-length designs against one target) the whole 72-metric field spans macro-AUC **0.471–0.560**, and taking the top decile by the best metric is worth ~**1.5–2× enrichment** (FGFR2 8.98 → 2.13 designs-per-hit) — but it beats a random ranking on only **6/12 targets**, and on TrkA and Tie2 it is *worse than not ranking at all*. Ranking looks much stronger on easier pools (Adaptyv 0.68–0.72, de novo BindCraft 0.72–0.78 macro) and on label-clean positives (Cao rises to 0.73 once one-sided-Kd "binders" are excluded — 73.4% of Cao's binder labels are one-sided; reproduced exactly 2026-10-03, and 94.2% on the full 654,716-design library). **Two of Part U's supporting claims about that were withdrawn on 2026-10-03** — the binary-assay corroboration is near-circular (`binder_4000_nm` is predicted by `kd_ub < 4000` at MCC 0.819, 0.075% error over 654,716 rows), and one-sided binders are NOT "experimentally indistinguishable" from non-binders: they pass at 8.7× the rate (p=4e-62), 32× at 400 nM. Weaker, not indistinguishable. So Cao answers "3 engines vs an *arbitrary* single engine" and must not be used for "vs the *best* single engine" without that caveat. See `docs/INVESTIGATION_coverage_premise_2026-10-03.md`. Part U.
 - **~~Binder length is a main driver — longer binders score lower on `ipsae_min` (r ≈ -0.78).~~ RETRACTED 2026-10-29: that correlation does not reproduce anywhere we can test it.** Measured over **12 engine-pools** (4 pools x 3 refold engines, 597 engine-design rows: CALCA/BC2, AK1b pd-l1, GF_asyn100, GF_asynfull), the strongest length correlation on `ipsae_min` is **-0.31** and **five of the twelve are POSITIVE**. `docs/PLAN_2.0_PART_RESULTS.md` had already found the same thing on two targets independently. Where a length effect *does* show up it is substantially a **normalization artifact, not biology**: `compute_iptm_from_pae` takes a global `d0` from `L_b + L_t`, so d0 grows with the complex and the kernel gets more forgiving for longer binders. Pinning d0 flips the sign of the length correlation on CALCA (+0.36 to -0.30) and reorders that pool (Spearman 0.67-0.82), while leaving AK1b and GF essentially unchanged (0.98-0.999) — the distortion scales with how much binder length varies *relative to the target*, so it is large for a wide length sweep against a small target and negligible for a narrow sweep against a big one. **Length is a variable to control for, not a driver to assume.** (Was never testable on Cao either: 75.1% of that set is exactly 65 aa.)
+- **What `*_pae_iptm` is, and what the rank resolves (scoring audit, 2026-11).**
+  - **It is a point-PAE re-derivation, not the engine's own ipTM.** `boltz_pae_iptm` / `af3_pae_iptm` /
+    `esmfold2_pae_iptm` recompute ipTM from each engine's PAE matrix with one shared formula. They sit
+    **~0.08-0.13 BELOW** that engine's own reported `*_iptm`. Within an engine the two are
+    rank-equivalent (Spearman >= 0.994), but across engines the columns share a *formula*, not a *scale*.
+  - **It is within-target only.** Compare designs against the same target; a mean on one target is not
+    comparable to a mean on another.
+  - **The top-N is an unordered tier.** The rank's resolution is ~150x finer than the disagreement between
+    engines, so the order inside a shortlist is below what the engines can tell apart.
+    Treat the top N as a set, not a leaderboard.
+  - **Rank reads the optimistic interface direction.** ipTM takes `max(binder->target, target->binder)`;
+    `ipsae_min` takes the minimum (the pessimistic direction). A high ipTM with a near-zero `ipsae_min` is a
+    one-directional interface, not a contradiction.
+  - **`quality_tier` is single-engine** (the primary engine, Boltz-2 by default, the most generous of the
+    three), not a cross-engine statement.
+  - **2-engine and 3-engine means are not on one scale** (`--min-engines 2` mixes them). Read
+    `consensus_iptm_n` beside `rank`.
+  - **d0 grows with the complex.** ipTM's d0 uses `L_binder + L_target`, so a longer binder gets a more
+    forgiving kernel: up to **+0.036** on the consensus. Pinning d0 (`*_pae_iptm_pinned`,
+    `consensus_iptm_mean_pinned`, pool-median binder length or `--d0-binder-length`) was **measured not to
+    improve ranking** on the 563-design labelled benchmark (macro AUC +0.0025, 95% CI -0.004..+0.010, sign
+    split 2/2 across targets: it re-weights by length rather than correcting anything). So **`rank` stays on
+    the per-design d0** and the pinned columns are *diagnostic*, there to make the size of the length
+    artifact visible per design.
 - **Mosaic designs.csv format** — Can mix column formats between workers (old 11-col / new 13-col). The parser must handle this carefully or columns misalign. The `is_top` column marks the ~40 refolded designs out of ~800 total; extractors filter to `is_top=1` by default.
 - **Mosaic `target_sequence` placeholder** — The Mosaic template (`hallucinate_binderscout.py`) writes `"REPLACE_ME"` as `target_sequence` when not configured. The legacy evaluator guards against using this as a real target sequence.
 - **AF3 memory: the ">=100 GB GPU" requirement was wrong — it fits a 24 GB card, and the small-pool abort was OUR BUG.** Both halves are now measured, and both earlier readings of this bullet were wrong.
-  **Memory.** On BM2 (RTX 3090, 24 GB) a 258-token complex peaks at **4,430 MiB**, and a 391-token complex peaks at the *same* 4,430 MiB. **That identity is not evidence AF3 is size-independent** — an earlier version of this bullet read it that way. Neither run passed `--buckets` at all (the flag did not enter this repo until 2026-09-10, `9a04dac`), so both padded to the **same 512-token shape** under AF3's stock ladder. It is one compiled shape measured twice. Corroboration that memory is genuinely not the constraint here: a 568-token, 50-design pool completed **50/50** on the same card under a hard `XLA_PYTHON_CLIENT_MEM_FRACTION=0.191` (~4.7 GB of 24,576 MiB). The old ">100 GB" figure came from measuring with `XLA_PYTHON_CLIENT_PREALLOCATE=true`, which reserves a fraction of the pool regardless of need — evidence about our env vars, not AF3's working set.
-  **The sm_86 abort: ours, not AF3's — settled 2026-09-29.** A 2026-09-27 run on an RTX 3060 aborted with `RESOURCE_EXHAUSTED: Shared memory size limit exceeded: requested 110592, available: 101376` (sm_86/sm_89 expose 101,376 bytes of shared memory per block; A100 164 KB, H100/GB10 228 KB). That was recorded as "AF3 cannot run on consumer Ampere". **It is not.** The variable was token shape: `refold_af3.py` computed `bucket = len(target) + max(len(binder))` with no lower bound, so the failing pool asked for `--buckets=60` (CALCA 32+28) while AF3's own ladder starts at **256**. Measured on BM2's 3090, one `input.json` reused byte-identically across two arms with a cold shared compile cache, only the bucket digits differing:
+  **Memory.** On an x86_64 box with an RTX 3090 (24 GB) a 258-token complex peaks at **4,430 MiB**, and a 391-token complex peaks at the *same* 4,430 MiB. **That identity is not evidence AF3 is size-independent** — an earlier version of this bullet read it that way. Neither run passed `--buckets` at all (the flag did not enter this repo until 2026-09-10, `9a04dac`), so both padded to the **same 512-token shape** under AF3's stock ladder. It is one compiled shape measured twice. Corroboration that memory is genuinely not the constraint here: a 568-token, 50-design pool completed **50/50** on the same card under a hard `XLA_PYTHON_CLIENT_MEM_FRACTION=0.191` (~4.7 GB of 24,576 MiB). The old ">100 GB" figure came from measuring with `XLA_PYTHON_CLIENT_PREALLOCATE=true`, which reserves a fraction of the pool regardless of need — evidence about our env vars, not AF3's working set.
+  **The sm_86 abort: ours, not AF3's — settled 2026-09-29.** A 2026-09-27 run on an RTX 3060 aborted with `RESOURCE_EXHAUSTED: Shared memory size limit exceeded: requested 110592, available: 101376` (sm_86/sm_89 expose 101,376 bytes of shared memory per block; A100 164 KB, H100/GB10 228 KB). That was recorded as "AF3 cannot run on consumer Ampere". **It is not.** The variable was token shape: `refold_af3.py` computed `bucket = len(target) + max(len(binder))` with no lower bound, so the failing pool asked for `--buckets=60` (CALCA 32+28) while AF3's own ladder starts at **256**. Measured on an RTX 3090, one `input.json` reused byte-identically across two arms with a cold shared compile cache, only the bucket digits differing:
 
   | arm | outcome |
   |---|---|
   | `--buckets=60` | **rc=1** in 43 s, the shared-memory abort, no structure |
   | `--buckets=256` | **rc=0** in 69 s, no shared-memory error, 2 structures, iptm 0.52 |
 
-  Below 256, tokamax's Pallas/Triton attention and gated-linear-unit kernels select a tile config whose shared-memory request exceeds sm_86's limit. **Fixed** by `AF3_MIN_BUCKET = 256` in `refold_af3.py`, pinned by `tests/test_af3_bucket_has_a_floor.py`. The floor costs nothing against AF3's documented behaviour — stock AF3 pads a 60-token complex to 256 anyway; we were requesting a shape that cannot run, not saving compute. **AF3 therefore runs fleet-wide (BM1/BM2/BM4) and the >=3-engine gate is not Spark-bound.** Caveat unchanged: this is our ~200–600-token regime, not a universal claim — AF3 documents 5,120 tokens on an 80 GB A100 and pair activations scale super-linearly.
+  Below 256, tokamax's Pallas/Triton attention and gated-linear-unit kernels select a tile config whose shared-memory request exceeds sm_86's limit. **Fixed** by `AF3_MIN_BUCKET = 256` in `refold_af3.py`, pinned by `tests/test_af3_bucket_has_a_floor.py`. The floor costs nothing against AF3's documented behaviour — stock AF3 pads a 60-token complex to 256 anyway; we were requesting a shape that cannot run, not saving compute. **AF3 therefore runs on every x86_64 machine we checked, and the >=3-engine gate is not Spark-bound.** Caveat unchanged: this is our ~200–600-token regime, not a universal claim — AF3 documents 5,120 tokens on an 80 GB A100 and pair activations scale super-linearly.
 - **pLDDT scale** — Boltz-2 returns [0,1]; AF3 native is [0,100] and is rescaled to [0,1] on ingest by the refold runner so report columns are directly comparable.
-- **PAE ordering** — Boltz-2 is native [binder|target]. AF3 is token-order so we always put target first in the input JSON, giving [target|binder] — the evaluator transposes internally. Column prefixes distinguish engines (`boltz_pae_*`, `af3_*`, `esmfold2_*`).
+- **PAE ordering** — Boltz-2 is native [binder|target]. AF3 is token-order so we always put target first in the input JSON, giving [target|binder] — the evaluator re-blocks it internally into [binder|target] (the four blocks are swapped; the matrix is not transposed). Column prefixes distinguish engines (`boltz_pae_*`, `af3_*`, `esmfold2_*`).
 - **Append-mode CSVs** — `refold_boltz2.py` appends to CSV. If rerun after partial failure, check for duplicate `run_id` entries.
 - **Refold structures are named `<binder_id>_<engine>`** — `<binder_id>_boltz2.pdb`, `<binder_id>_af3.pdb`, `<binder_id>_esmfold2.pdb`, alongside `_pae.npy` and `_plddt.csv` (Boltz-2) / `_model.cif` (AF3, ESMFold2), each in its own engine's output dir. The engine is in the *name*, not just the directory, because the directories get pooled — copying all three into one folder is the normal way to hand over "all the PDBs", and without the suffix a design's three structures are three files of the same name. The id is the first token of the FASTA header `extract` writes, and the one sanitiser is `binder_comparison/io/design_ids.py:safe_stem` — **shared with the Foldseek structural-family join**, so a second copy of that logic makes structures unfindable by id. Consequences worth knowing: a re-run into the same output dir **overwrites** a design's structure (the old names carried a per-run uuid and accumulated instead); a design whose id is missing or sanitises to nothing keeps the legacy index name (`refold7_<run_id>` / `af3_0007` / `esmfold2_0007`); two designs sharing an id get `__2`, `__3`. **AF3's own prediction directory is still index-based** (`af3_0007/`) — that layout belongs to AF3 and `_load_top_sample` globs it; only what we export carries the id.
 - **Target MSA is fetched ONCE PER TARGET, cached on disk, shared by all three refold engines.** `binder_comparison.refolding.target_msa.get_target_msa(seq)` queries ColabFold once, keyed by target-sequence SHA-256, and caches the a3m at `~/.cache/binderscout/target_msa/target_<hash>.a3m` (override with `$BINDERSCOUT_MSA_CACHE`). **AF3, ESMFold2, AND Boltz-2 all read this cache** (Boltz-2's `refold_boltz2.py` monkeypatches Boltz's `run_mmseqs2` to redirect the unpaired/target MSA to `get_target_msa` — the binder is `use_msa=False`). So a fresh refold process is a disk hit and **never** re-queries `api.colabfold.com`; this is what stops the ColabFold rate-limit ("Too many failed attempts for the MSA generation request") from crashing Boltz-2 across sessions. If you ever see that error, the target isn't cached yet — run any one engine once (or pre-warm via `get_target_msa`) and the other two are free. The cache directory on the fleet boxes is `~/.cache/bindmaster/target_msa/` — the
-  pre-2.0-rename spelling, not the `binderscout` path above (measured on bm1, bm2 and bm4
+  pre-2.0-rename spelling, not the `binderscout` path above (measured on three x86_64 machines
   on 2026-10-31; `_resolve_cache_dir` is what to ask, rather than either literal).
   **Pre-warm it once before starting engines in parallel**: three cold starts race the
   ColabFold server and the loser gets the rate-limit error above. One
@@ -591,8 +625,8 @@ the parameter sweep.
 
 - **AF2 weights path** (`AF2_DATA_DIR`): Must point to AlphaFold2 parameter files (~4 GB). Typically at `bindcraft-tools/af2_params`.
 - **DGX Spark specifics:** CUDA 13.0, sm_121 (Blackwell), aarch64 architecture. Pre-cached resources stored at `Documents/OLD/BindMaster/bindcraft-tools` — the directory was never renamed on disk, so the code probes the `BinderScout` spelling first and falls back to this one.
-- **Orchestrating the fleet:** **BM4 is the fleet orchestrator.** The fleet driver script — no longer in this repo, archived off-repo on the lab share — reads its machine list from `$FLEET_MACHINES`, so any box can drive the others; BM5 was the original and either works. Prefer BM4 — it is x86 with a *discrete* GPU, so an orchestrator's desktop session costs it nothing, whereas on BM5 those same processes come out of the GPU pool.
-- **Sizing GPU work for BM5 (GB10) — query, never quote.** The GPU pool IS system RAM there (121.69 GiB), so every "fraction of device memory" knob is a fraction of the whole machine and an uncapped job reboots the box rather than raising OOM (2026-08-18 AF3 at 0.8 → 97.4 GiB → hard reboot; 2026-08-19 Boltz-2 at JAX's 0.75 default → 91.3 GiB). Before sizing anything: `ssh bm5 'bash -lc "cd ~/dev/BindMaster 2>/dev/null || cd ~/dev/BinderScout; tools/gpurun --max"'` — the checkout directory is machine-local and spelled either way after the 2.0 rename, so resolve it rather than naming one. The ceiling moves with load — 92 GiB with a desktop up, 90 on a quiet box — so a number copied into a run script is already stale. Dispatch through `bin/<tool>` or `tools/gpurun --cap`, which join MPS and get a **driver-enforced** ceiling; a cap written into a script is advisory only. The static per-tool table is `tools/gb10-env.sh:gb10_budget` and the analysis is `docs/GB10_FREEZE_FAILSAFE.md`, both tracked — only the live ceiling needs the query. JAX budgets are reservations taken in full at import; PyTorch budgets are ceilings.
+- **Orchestrating the fleet:** one x86_64 machine orchestrates. `binderscout status` reads its machine list from `$BINDERSCOUT_FLEET` (falling back to `$FLEET_MACHINES`, which the archived fleet driver also used), so any box can drive the others. Prefer an x86_64 orchestrator with a *discrete* GPU: its desktop session costs it nothing, whereas on a unified-memory aarch64 box those same processes come out of the GPU pool.
+- **Sizing GPU work on a GB10 (aarch64) — query, never quote.** The GPU pool IS system RAM there (121.69 GiB), so every "fraction of device memory" knob is a fraction of the whole machine and an uncapped job reboots the box rather than raising OOM (2026-08-18 AF3 at 0.8 → 97.4 GiB → hard reboot; 2026-08-19 Boltz-2 at JAX's 0.75 default → 91.3 GiB). Before sizing anything: `ssh <aarch64-host> 'bash -lc "cd ~/dev/BindMaster 2>/dev/null || cd ~/dev/BinderScout; tools/gpurun --max"'` — the checkout directory is machine-local and spelled either way after the 2.0 rename, so resolve it rather than naming one. The ceiling moves with load — 92 GiB with a desktop up, 90 on a quiet box — so a number copied into a run script is already stale. Dispatch through `bin/<tool>` or `tools/gpurun --cap`, which join MPS and get a **driver-enforced** ceiling; a cap written into a script is advisory only. The static per-tool table is `tools/gb10-env.sh:gb10_budget` and the analysis is `docs/GB10_FREEZE_FAILSAFE.md`, both tracked — only the live ceiling needs the query. JAX budgets are reservations taken in full at import; PyTorch budgets are ceilings.
 - **Boltz-1 weights:** ~6 GB, auto-downloaded on first BoltzGen use. Resumable.
 - **Disk requirement:** ~60 GB free for full installation of all tools.
 
@@ -658,12 +692,12 @@ there:
 - **ProteinMPNN weights are NOT bundled with rfd3.** `foundry install rfd3` only fetches `rfd3_latest.ckpt` (~2.5 GB). Run `foundry install proteinmpnn` separately for the ~7 MB `proteinmpnn_v_48_020.pt` file. (For ligand binders you also need `foundry install ligandmpnn`.)
 - **Reinit warnings on weight load are benign.** `foundry.utils.weights: Failed to apply policy: 'copy' to 'model.token_initializer.chunked_pairwise_embedder.*': Falling back to policy: 'reinit'` — these come from the chunked low-memory code path that the v0.1.9 checkpoint wasn't trained with. Output structures verify clean (n_chainbreaks=0, n_clashing=0, helix_fraction~0.9 for our CALCA helix).
 - **MPNN best-of-N filter.** `mpnn --number_of_batches 5` writes 5 sequences per backbone in one `.fa` (each header tagged with `sequence_recovery=...`). To keep "best-of-5 per backbone", post-process: pick the highest-recovery sequence per file, strip the target prefix (first `len(target_seq)` chars), the remainder is the designed binder.
-- **24 GB Ampere OOM mid-run from fragmentation, not capacity.** With `diffusion_batch_size=10 low_memory_mode=true`, peak live allocation is ~15 GiB but PyTorch reserves another ~6 GiB unallocated. Around batch 7 the next 3 GiB alloc fails even though the live working set fits 24 GiB easily. Fix: `export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` before launching `rfd3 design`. The configurator's `write_run_rfd3` and `binderscout_examples/run_rfd3.sh.template` set this. (BM4 2VDY run: died at batch 7 of try-1; relaunched with this env var, completed all 20 batches cleanly in 23 h.)
+- **24 GB Ampere OOM mid-run from fragmentation, not capacity.** With `diffusion_batch_size=10 low_memory_mode=true`, peak live allocation is ~15 GiB but PyTorch reserves another ~6 GiB unallocated. Around batch 7 the next 3 GiB alloc fails even though the live working set fits 24 GiB easily. Fix: `export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` before launching `rfd3 design`. The configurator's `write_run_rfd3` and `binderscout_examples/run_rfd3.sh.template` set this. (An x86_64 2VDY run: died at batch 7 of try-1; relaunched with this env var, completed all 20 batches cleanly in 23 h.)
 - **`Found N existing example IDs` is informational, not skip-behavior.** RFD3 prints this at startup when example IDs already exist in `out_dir`, but it then re-runs all `n_batches` anyway and overwrites the existing files. There is no built-in resume — if a run crashes mid-way, expect a full re-run, not a delta. (Workaround if you only want the missing slice: move the completed `<id>.cif.gz`/`<id>.json` pairs aside, run with smaller `n_designs`, then put them back.)
 
 ### RFD4-Proteina runtime gotchas
 
-The ninth tool, added 2026-10-27. Installed and run on Clara first, with every command
+The ninth tool, added 2026-10-27. Installed and run on a multi-user cluster first, with every command
 logged; the configurator generates `run_rfd4.sh` from
 `binderscout_examples/run_rfd4.sh.template`.
 
@@ -698,6 +732,11 @@ logged; the configurator generates `run_rfd4.sh` from
   `uv pip check`, a non-null `torch.version.cuda`, and the weights' exact byte count and
   sha256; it deliberately does *not* assert `torch.cuda.is_available()`, which is
   correctly False on a login node.
+- **No root, and no `python3.12-dev`:** Triton JIT-compiles a C file that includes `Python.h` on the
+  first generate call. The generated script finds the headers via `sysconfig`, falls back to a
+  uv-managed interpreter's headers, and refuses up front (`uv python install <ver>`) if neither
+  exists. Without this the arm dies ~8 s in with `Python.h: No such file or directory`, which reads
+  like a CUDA fault and is not. `install --verify` cannot see it.
 - **Cost, measured on one L40S:** ~5 s per design, GPU peak ~3 GiB (360 designs in 37 min,
   330 in 27.5 min). Generation is cheap; refolding the pool is what costs.
 - **Deviations recorded rather than hidden:** we install the `cu130` torch backend where
@@ -787,8 +826,8 @@ binderscout install --tool all --yes --skip-examples  # non-interactive (CI)
 binderscout install --tool proteina-complexa # install Proteina-Complexa
 binderscout install --tool protein-hunter    # install Protein-Hunter (Part L)
 binderscout install --tool rfd3              # install RFD3 / foundry (Part M)
-binderscout install --tool rfd4              # install RFD4-Proteina (ninth tool; x86_64 only,
-                                             # opt-in, NOT in --tool all; weights licence unverified)
+binderscout install --tool rfd4              # install RFD4-Proteina (ninth tool; opt-in,
+                                             # aarch64 installable but not yet run, NOT in --tool all; weights licence unverified)
 binderscout install --tool bindcraft2        # install BindCraft 2 (eighth tool), cloned from upstream
 # Clones https://github.com/PacesaLab/BindCraft2 at v1.0.1. Its licence is its own
 # (hosting-restricted), so BindCraft2/ stays gitignored and nothing of it is committed here.
@@ -798,6 +837,8 @@ binderscout install --tool soluprot          # install SoluProt screen alone (al
 binderscout install --tool tmprot            # install the TmProt melting-temperature screen (opt-in,
                                              # NOT in --tool all; GPL-3.0, cloned not vendored)
 binderscout install --verify --tool all      # audit what is on disk and exit; installs nothing
+                                             # (tools built against another commit show as STALE)
+binderscout install --repair --stale --tool all  # rebuild the STALE ones; plain --repair does not
 binderscout install --repair --tool all      # audit, then re-install only what failed the audit
 binderscout install --uninstall --tool all   # remove envs + shortcuts (preserves runs/)
 binderscout install --standalone --tool all    # force local Miniforge install
@@ -813,6 +854,21 @@ binderscout configure --config run.json --run            # …and start the pipe
 binderscout configure --status    # show all runs and completion state
 binderscout configure --archive <run>  # tar.gz a run directory
 ```
+
+### Status
+
+```bash
+binderscout status                  # this machine + every ssh alias in $BINDERSCOUT_FLEET
+binderscout status --local          # this machine only
+binderscout status --watch          # redraw every 60 s
+binderscout status --json           # raw document; notices go to stderr, stdout is pure JSON
+binderscout status --html FILE      # self-contained page, written atomically; serve it, no push
+```
+
+Three signals per arm (design count, process/GPU liveness, log silence): designs land in batches,
+so a frozen count alone cannot tell a stalled arm from a healthy one. Campaign labels and deadlines
+come from a machine-local JSON file named by `$BINDERSCOUT_CAMPAIGNS`; do not commit it. Do not
+list the local machine in `$BINDERSCOUT_FLEET` (it is always probed).
 
 ### Evaluate
 
