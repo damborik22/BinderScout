@@ -1763,6 +1763,11 @@ _BOLTZGEN_INTERMEDIATE_FLOOR = 50
 _BOLTZGEN_INTERMEDIATE_PER_DESIGN = 100
 # Same 3090 measurement: 10 000 designs in ~14 h 53 m == 5.35 s of GPU time each.
 _BOLTZGEN_SECONDS_PER_DESIGN = 5.35
+# The one other BoltzGen step cost measured in this repo: the final diversity filter, ~15 s
+# whatever the pool size (see the BoltzGen tool notes under .claude/skills). The remaining
+# steps -- inverse folding, Boltz-2 folding, monomer re-folding, analysis -- have NO measured
+# cost here, which is why the estimate is stated as a floor.
+_BOLTZGEN_FILTER_SECONDS = 15
 
 
 def boltzgen_intermediate_default(n_designs: int) -> int:
@@ -1795,16 +1800,26 @@ def boltzgen_intermediate(cfg: dict) -> int:
 
 
 def boltzgen_cost_note(n_intermediate: int) -> str:
-    """ "10,000 intermediate designs (~15 h on one 24 GB GPU)" -- the GPU bill, before it is paid.
+    """ "10,000 intermediate designs (at least ~15 h on one 24 GB GPU ...)" -- a FLOOR, before it is paid.
 
     The intermediate pool IS the BoltzGen runtime, and it is the one number in the
     Step-8 summary that can turn a one-design smoke test into an overnight job.
     Evaluator/evaluate.sh already states its costs before spending them rather than
     reporting them afterwards; this is the same thing a prompt earlier.
+
+    Only the design step (5.35 s per intermediate design) and the final filter (~15 s) have a
+    measured cost in this repo. BoltzGen also runs inverse folding, Boltz-2 folding of the
+    complex and of the binder alone, and analysis, none of which is costed here -- the earlier
+    wording, "~N on one 24 GB GPU", priced only the first of them and understated a 1-design
+    smoke run by about 3x in a live demo. So this is a lower bound, and says so.
     """
-    hours = n_intermediate * _BOLTZGEN_SECONDS_PER_DESIGN / 3600
+    seconds = n_intermediate * _BOLTZGEN_SECONDS_PER_DESIGN + _BOLTZGEN_FILTER_SECONDS
+    hours = seconds / 3600
     span = f"~{round(hours * 60)} min" if hours < 1 else f"~{hours:.0f} h"
-    return f"{n_intermediate:,} intermediate designs ({span} on one 24 GB GPU)"
+    return (
+        f"{n_intermediate:,} intermediate designs (at least {span} on one 24 GB GPU: the design step and the "
+        "filter only; inverse folding, Boltz-2 folding and analysis come on top)"
+    )
 
 
 def write_boltzgen_yaml(path: Path, cfg: dict):
