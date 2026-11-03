@@ -126,9 +126,29 @@ class TestRemapStructurePaths:
         assert Path(out["boltz_pdb"].iloc[0]) == boltz_root / "refold_boltz2" / "d1_boltz2.pdb"
 
     def test_every_column_the_viewers_read_is_covered(self):
-        """The viewer / top20 / epitope code prefers these columns by name."""
-        needed = {"boltz_pdb", "af3_pdb", "af3_cif", "esmfold2_pdb", "esmfold2_cif", "pdb"}
-        assert needed <= set(_STRUCTURE_PATH_COLUMNS)
+        """Every structure column a consumer reads must be one ``remap_structure_paths`` rewrites.
+
+        ``needed`` is read off the consumers' own tables, not re-typed here: a hand-written
+        list is what let ``boltz_cif`` (read by the epitope scorer) go unchecked.
+        """
+        import inspect
+
+        from binder_comparison.cli import report as cli_report
+        from binder_comparison.comparison import foldseek, self_consistency
+        from binder_comparison.visualization import report as viz_report
+
+        needed: set[str] = set()
+        for cols in cli_report._ENGINE_PDB_PRIORITY.values():
+            needed.update(cols)
+        for cols, _chain in cli_report._ENGINE_STRUCT_COLS.values():
+            needed.update(cols)
+        for cols in viz_report._PRI.values():
+            needed.update(cols)
+        needed.update(inspect.signature(foldseek.build_tm_lookup).parameters["pdb_cols"].default)
+        needed.update(self_consistency._ENGINE_PDB_COLS.values())
+
+        assert {"boltz_cif", "boltz_pdb", "af3_cif", "esmfold2_cif"} <= needed, "consumer tables not read"
+        assert needed <= set(_STRUCTURE_PATH_COLUMNS), sorted(needed - set(_STRUCTURE_PATH_COLUMNS))
 
     def test_columns_absent_from_the_frame_are_ignored(self, tmp_path):
         out = remap_structure_paths(self._df(sequence=["A", "B"]), {"boltz": tmp_path})

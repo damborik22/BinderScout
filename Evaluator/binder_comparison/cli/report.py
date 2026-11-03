@@ -229,6 +229,15 @@ def _rank_and_report_the_gate(df: pd.DataFrame, min_engines: int) -> pd.DataFram
     return result
 
 
+# Per-engine structure column preference for the top-20 viewer copy. Module level so the
+# test that pins these against ``_STRUCTURE_PATH_COLUMNS`` can read the table itself.
+_ENGINE_PDB_PRIORITY: dict[str, list[str]] = {
+    "af3": ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"],
+    "esmfold2": ["esmfold2_pdb", "esmfold2_cif", "boltz_pdb", "pdb"],
+    "boltz": ["boltz_pdb", "pdb"],
+}
+
+
 def run(args: argparse.Namespace) -> None:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -702,11 +711,6 @@ def run(args: argparse.Namespace) -> None:
     # Prefer the *primary engine's* PDB so the viewer shows the structure
     # that was actually used for ranking. Fall back through the engine
     # priority order when a particular engine's file is missing.
-    _ENGINE_PDB_PRIORITY: dict[str, list[str]] = {
-        "af3": ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"],
-        "esmfold2": ["esmfold2_pdb", "esmfold2_cif", "boltz_pdb", "pdb"],
-        "boltz": ["boltz_pdb", "pdb"],
-    }
     pdb_cols = [c for c in _ENGINE_PDB_PRIORITY.get(primary_engine, ["boltz_pdb", "pdb"]) if c in df.columns]
     print(f"[report] Top-20 3D viewer source = {primary_engine} (column preference: {pdb_cols})")
     structures_dir = output_dir / "top20_structures"

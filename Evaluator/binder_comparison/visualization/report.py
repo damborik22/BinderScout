@@ -541,6 +541,13 @@ def _native_pdb_sort_key(tool: str, p: Path) -> tuple[int, int]:
     return (tier, 0 if p.suffix == ".pdb" else 1)
 
 
+# Engine-specific PDB column preference (mirrors cli/report.py _ENGINE_PDB_PRIORITY).
+_PRI: dict[str, list[str]] = {
+    "af3": ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"],
+    "boltz": ["boltz_pdb", "pdb"],
+}
+
+
 def _build_per_tool_refold_viewer(
     tool: str,
     tool_df: pd.DataFrame,
@@ -557,11 +564,6 @@ def _build_per_tool_refold_viewer(
     matching the target sequence.
     """
     colour = _TOOL_COLOURS_NGL.get(tool, _TOOL_COLOURS_NGL["unknown"])
-    # Engine-specific PDB column preference (mirrors cli/report.py _ENGINE_PDB_PRIORITY)
-    _PRI: dict[str, list[str]] = {
-        "af3": ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"],
-        "boltz": ["boltz_pdb", "pdb"],
-    }
     pdb_cols = [c for c in _PRI.get(primary_engine, ["boltz_pdb", "pdb"]) if c in tool_df.columns]
     if not pdb_cols:
         return ""
