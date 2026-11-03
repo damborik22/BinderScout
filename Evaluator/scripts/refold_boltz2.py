@@ -415,12 +415,15 @@ def refold_batch(
     """
     if skip_indices is None:
         skip_indices = set()
+    csv_path = "refold_designs.csv"
     if save_pae_bins:
         # Fail before any work: an unimportable helper or a CSV whose header cannot take
-        # the extra column are both certain, not data-dependent.
+        # the extra column are both certain, not data-dependent. The same csv_path the rows
+        # are appended to below: the helper returns silently for a path that does not exist,
+        # so a second spelling of the name would turn this guard into a no-op.
         from binder_comparison.refolding.pae_bins import assert_csv_can_take_pae_bins
 
-        assert_csv_can_take_pae_bins("refold_designs.csv")
+        assert_csv_can_take_pae_bins(csv_path)
     n_bins_saved = 0
     run_id = str(uuid.uuid4())[:8]
     os.makedirs(output_dir, exist_ok=True)
@@ -542,7 +545,6 @@ def refold_batch(
     print(f"Binders to refold: {len(binder_sequences)}")
     print(f"Output directory: {output_dir}\n")
 
-    csv_path = "refold_designs.csv"
     csv_columns = [
         "run_id",
         "idx",

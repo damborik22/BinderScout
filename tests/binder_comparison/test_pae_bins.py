@@ -390,6 +390,15 @@ class TestBoltz2Script:
         with pytest.raises(RuntimeError, match="no PAE-bin file was written"):
             boltz(save_pae_bins=True, agree=False)
 
+    def test_appending_to_a_csv_that_lacks_the_column_is_refused_before_any_work(self, boltz):
+        # The twin of the ESMFold2 test. The guard must be handed the SAME path the rows are
+        # appended to: the helper is silent for a path that does not exist, so a drifted
+        # copy of the name would pass every other test here.
+        Path("refold_designs.csv").write_text("run_id,idx,sequence,pae_file\nr,1,AAA,a.npy\n")
+        with pytest.raises(ValueError, match="pae_bins_file"):
+            boltz(save_pae_bins=True)
+        assert not list(Path("structures").glob("*_bins.npz"))
+
 
 # ---------------------------------------------------------------------------
 # Plumbing
