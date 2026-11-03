@@ -27,10 +27,51 @@ from ..extractors import (
     RFD4Extractor,
 )
 from ..io.write import write_fasta
-from ._tool_args import add_tool_args
+from ._tool_args import TOOL_FLAGS, add_tool_args, requested_tools
+
+_FLAG_OF = {dest: flag for flag, dest, _help in TOOL_FLAGS}
+
+# Tool-specific reasons a readable directory can still yield no designs, and the
+# flag that widens what is read. Anything not listed gets the generic reason only.
+_EMPTY_HINTS = {
+    "protein_hunter": (
+        "no cycle cleared Protein-Hunter's --high_iptm_threshold, or the run has not finished",
+        "--all-protein-hunter-designs",
+    ),
+    "mosaic": (
+        "no design is marked is_top=1 in designs.csv",
+        "--all-mosaic-designs",
+    ),
+}
+
+
+def _require_input_dirs(args: argparse.Namespace) -> None:
+    """Refuse a --<tool> path that is not a directory, before any extraction.
+
+    An absent path is a typo or an unmounted share, not a tool that found no
+    designs, so it stays a hard error even though an empty tool no longer is.
+    """
+    for dest, path in requested_tools(args):
+        if not Path(path).is_dir():
+            print(f"[extract] ERROR: {_FLAG_OF[dest]} {path} is not a directory. Check the path.", file=sys.stderr)
+            sys.exit(1)
+
+
+def _warn_empty_tool(args: argparse.Namespace, dest: str) -> None:
+    """Name a tool that contributed no designs, the directory read, and what to try."""
+    flag = _FLAG_OF[dest]
+    reason, widen = _EMPTY_HINTS.get(dest, (None, None))
+    why = reason or "the run has not finished, died before writing its output, or produced no accepted designs"
+    advice = f"Pass {widen} to read more of it, or remove {flag}" if widen else f"Remove {flag}"
+    print(
+        f"[extract] WARNING: {dest} produced 0 sequences from {getattr(args, dest)} and is EXCLUDED "
+        f"from the pool. Possible reason: {why}. {advice} if it is meant to be absent.",
+        file=sys.stderr,
+    )
 
 
 def run(args: argparse.Namespace) -> None:
+    _require_input_dirs(args)
     all_binders: list[ExtractedBinder] = []
     per_tool: dict[str, int] = {}
 
@@ -95,20 +136,24 @@ def run(args: argparse.Namespace) -> None:
         extracted = ProteinHunterExtractor(all_runs=all_runs, collapse_variants=collapse).extract(args.protein_hunter)
         _take("protein_hunter", extracted)
 
-    # A requested tool that yielded nothing is an ERROR, not a shrug. The old guard
-    # only fired when EVERY tool came up empty, so a typo in one of four --tool paths
-    # (or a tool whose run died before writing its CSV) printed "→ 0 sequences" and
-    # exited 0 — and run_evaluate.sh under `set -e` then spent hours of Boltz-2 + AF3 +
-    # ESMFold2 GPU time on a silently partial pool that looked complete in the report.
+    # A requested tool that yielded nothing is NAMED loudly. It only stops the run when
+    # no tool produced a design: throwing away every other tool's real pool because one
+    # tool came up empty (a Protein-Hunter run where no cycle cleared its iPTM threshold,
+    # say) cost a whole campaign's extraction. A tool whose path is not a directory was
+    # already refused above, which is what catches a mistyped path.
     empty = [dest for dest, n in per_tool.items() if n == 0]
-    if empty and not getattr(args, "allow_empty", False):
-        print(
-            f"[extract] ERROR: {', '.join(sorted(empty))} produced 0 sequences. "
-            f"Check the directory path, and that the run finished and wrote its output. "
-            f"Pass --allow-empty to continue anyway.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    if empty and len(empty) == len(per_tool):
+        if not getattr(args, "allow_empty", False):
+            print(
+                f"[extract] ERROR: {', '.join(sorted(empty))} produced 0 sequences. "
+                f"Check the directory path, and that the run finished and wrote its output. "
+                f"Pass --allow-empty to continue anyway.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    else:
+        for dest in empty:
+            _warn_empty_tool(args, dest)
 
     if not all_binders:
         print("[extract] ERROR: no binders found. Check input directories.", file=sys.stderr)
@@ -230,8 +275,9 @@ def add_parser(subparsers) -> None:
     p.add_argument(
         "--allow-empty",
         action="store_true",
-        help="Continue when a requested --<tool> directory yields 0 sequences (default: error out, "
-        "so a mistyped path cannot silently shrink the pool before hours of GPU refolding)",
+        help="Continue when every requested --<tool> directory yields 0 sequences (default: error out). "
+        "A tool that yields 0 while another yields designs is excluded with a named warning either way; "
+        "a --<tool> path that is not a directory is always an error",
     )
     p.add_argument(
         "--target-seq",
