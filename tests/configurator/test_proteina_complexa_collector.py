@@ -255,3 +255,6 @@ def test_the_collector_runs_from_a_run_folder_with_a_space_a_dollar_and_an_apost
     rows = _rows(run_dir)
     assert len(rows) == 1, f"stdout={proc.stdout} stderr={proc.stderr}"
     assert rows[0]["sequence"] == SEQ
+    # The python source sits in a double-quoted shell string, where a backtick in a comment is a
+    # command substitution: it ran a command called run_name and printed an error on every run.
+    assert proc.stderr == "", proc.stderr

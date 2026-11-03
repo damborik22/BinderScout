@@ -3270,7 +3270,7 @@ rows = []
 # Complexa writes evaluation_results/<pipeline>_<task_name>/ RELATIVE TO ITS OWN CWD
 # (we cd into PROTEINA_COMPLEXA_DIR above), and the run name appears in the CHILD
 # directory, never in 'evaluation_results' itself. The old probe tested
-# `run_name in str(p)` against the 'evaluation_results' path, so it could not match:
+# (run_name in str(p)) against the 'evaluation_results' path, so it could not match:
 # a COMPLETED 8-design run with 40 structures and 12 result CSVs reported
 # 'No binder sequences extracted' (measured 2026-10-30).
 searched = []
