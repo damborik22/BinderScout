@@ -32,6 +32,17 @@ the folder from `name` and prints one line saying so, so two campaigns with
 different names never share a folder. To use a different location, change the
 parent of `run_dir`; its last component always follows `name`.
 
+### Trimming an expression tag from a public target
+
+The wizard offers to trim a purification tag (His6, an `AAALE` linker, ...) from the
+target in Step 3. A `--config` replay never asks, so a deposited structure that still
+carries its tag keeps it as designable surface. Add `"trim_construct_tag": true` to the
+`cfg` block to answer that offer "yes": the tag is trimmed from `target_sequence` (read
+from the structure if the config has none) and then from the coordinates, using the
+depositor's own SEQADV / `_struct_ref_seq_dif` records first and a sequence pattern only
+as a fallback. `false`, or leaving the key out, keeps the sequence exactly as written. The
+generated run folder's `config.json` records the trimmed sequence, so it replays unchanged.
+
 ### Why this target
 
 `examples/CALCA/target.pdb` is **32 residues** — chain A of a real AlphaFold 3

@@ -1138,8 +1138,14 @@ def _annotated_construct_span(seq: str, struct_path: str, chain_id: str) -> tupl
     return start, end, f"the depositor's own {source} records in {p.name}", interior
 
 
-def _offer_tag_trim(seq: str, start: int, end: int, label: str, evidence: str, interior: int = 0) -> str:
-    """Report a detected construct region, say where the evidence came from, and ask."""
+def _offer_tag_trim(
+    seq: str, start: int, end: int, label: str, evidence: str, interior: int = 0, answer: bool | None = None
+) -> str:
+    """Report a detected construct region, say where the evidence came from, and ask.
+
+    `answer` is the pre-decided reply for a headless replay (`trim_construct_tag`): None asks,
+    as the wizard does; True trims without asking; False keeps the sequence.
+    """
     n_dropped = start + (len(seq) - end)
     print()
     print_warn(f"{label} detected — {n_dropped} residue(s) of {len(seq)}:")
@@ -1153,7 +1159,11 @@ def _offer_tag_trim(seq: str, start: int, end: int, label: str, evidence: str, i
     if interior:
         print(f"  {interior} further annotated residue(s) are INTERIOR and are KEPT — an interior")
         print("  annotation is a point mutation or a conflict, not added sequence.")
-    if not ask_yn(f"  Trim {n_dropped} residues?", default=True):
+    if answer is None:
+        answer = ask_yn(f"  Trim {n_dropped} residues?", default=True)
+    else:
+        print(f"  Trim {n_dropped} residues? {'yes' if answer else 'no'} (decided by trim_construct_tag)")
+    if not answer:
         print_warn("Keeping the tag — make sure that is what you want.")
         return seq
     trimmed = seq[start:end]
@@ -1164,7 +1174,9 @@ def _offer_tag_trim(seq: str, start: int, end: int, label: str, evidence: str, i
     return trimmed
 
 
-def warn_expression_tags(seq: str, struct_path: str | None = None, chain_id: str = "") -> str:
+def warn_expression_tags(
+    seq: str, struct_path: str | None = None, chain_id: str = "", answer: bool | None = None
+) -> str:
     """Offer to trim expression-tag residues from an extracted target sequence.
 
     Priority: the deposited file's own per-residue annotation (PDB SEQADV / mmCIF
@@ -1177,7 +1189,7 @@ def warn_expression_tags(seq: str, struct_path: str | None = None, chain_id: str
         annotated = _annotated_construct_span(seq, struct_path, chain_id)
         if annotated:
             start, end, evidence, interior = annotated
-            return _offer_tag_trim(seq, start, end, "Expression-tag residues", evidence, interior)
+            return _offer_tag_trim(seq, start, end, "Expression-tag residues", evidence, interior, answer)
 
     guess = "a sequence pattern — a GUESS; this file carries no per-residue tag annotation."
     for label, pat in _TAG_PATTERNS:
@@ -1187,7 +1199,7 @@ def warn_expression_tags(seq: str, struct_path: str | None = None, chain_id: str
         start, end = (m.end(), len(seq)) if m.start() == 0 else (0, m.start())
         if start >= end:
             continue  # a pattern that claims the whole chain is a false positive, not a tag
-        trimmed = _offer_tag_trim(seq, start, end, f"Possible {label} expression tag", guess)
+        trimmed = _offer_tag_trim(seq, start, end, f"Possible {label} expression tag", guess, answer=answer)
         if trimmed != seq:
             return trimmed
     return seq
@@ -1636,8 +1648,9 @@ def report_target_preparation(report: dict, dest_pdb: Path) -> None:
         print_warn(f"  Chain {cid} KEEPS {len(residues)} residue(s) the depositor flagged as construct: {shown}")
         print("    SEQADV marks these as an expression tag / cloning artifact / linker — not part")
         print("    of the biological target. They stay designable surface and go into the shared")
-        print("    target-MSA cache key. Re-run and accept the tag trim in Step 3, or keep")
-        print("    hotspots off them on purpose.")
+        print('    target-MSA cache key. Set "trim_construct_tag": true in the --config file (or')
+        print("    accept the tag trim in Step 3 of the wizard) and regenerate, or keep hotspots")
+        print("    off them on purpose.")
     if report["trim_failed"]:
         print_warn(f"  cfg['target_sequence'] is not a contiguous part of chain {report['trim_failed']} as built.")
         print("    No residues were trimmed from it, so sequence and coordinates may disagree.")
@@ -5272,6 +5285,36 @@ def refuse_run_dir_that_is_a_file(run_dir: Path) -> None:
         sys.exit(1)
 
 
+def apply_headless_tag_trim(cfg: dict) -> None:
+    """Honour `trim_construct_tag` in a headless replay: the wizard's tag-trim offer, pre-answered.
+
+    The wizard (Step 3) offers to trim a purification tag / linker from the target, using the
+    deposited file's own SEQADV / _struct_ref_seq_dif records first and a sequence pattern only
+    as a fallback. A `--config` replay never asked, so a public target kept its His6 tag as
+    designable surface. `"trim_construct_tag": true` in the config answers that offer "yes";
+    `false` or absent keeps the sequence exactly as written (the behaviour before this key
+    existed). The trim is applied to `target_sequence`, and generate() then trims the coordinates
+    to match, exactly as after the wizard. With no `target_sequence` in the config it is
+    extracted from `target_pdb_src` first, as the wizard does.
+    """
+    flag = cfg.get("trim_construct_tag", False)
+    if not isinstance(flag, bool):
+        print_fail(f"trim_construct_tag must be true or false, not {flag!r}.")
+        sys.exit(1)
+    if not flag:
+        return
+    chain = str(cfg.get("chains") or "A").split(",")[0].strip()
+    struct = str(cfg["target_pdb_src"])
+    seq = cfg.get("target_sequence") or extract_sequence_from_structure(struct, chain) or ""
+    if not seq:
+        print_warn(f"trim_construct_tag is true but no sequence could be read for chain {chain} of {struct}.")
+        return
+    trimmed = warn_expression_tags(seq, struct, chain, answer=True)
+    if trimmed == seq:
+        print_ok(f"trim_construct_tag is true: no expression tag detected on chain {chain}; nothing trimmed.")
+    cfg["target_sequence"] = trimmed
+
+
 def derive_run_dir_from_name(cfg: dict, config_path: Path) -> None:
     """Make a replayed config's run directory follow its `name`.
 
@@ -5304,6 +5347,7 @@ def cmd_from_config(config_path: str, run_now: bool) -> None:
     """Non-interactive path: generate a run directory straight from a saved config."""
     cfg, tools_enabled = load_run_config(Path(config_path))
     derive_run_dir_from_name(cfg, Path(config_path))
+    apply_headless_tag_trim(cfg)
     run_dir = Path(cfg["run_dir"])
     refuse_run_dir_that_is_a_file(run_dir)
 
