@@ -46,6 +46,8 @@ _NEEDED = (
     "verify_tool",
     # verify_tool asks these first whether the checkout was moved
     "_relocation_reason",
+    # ... and whether conda is there to look in at all
+    "_tool_needs_conda",
     "_stale_venv_reason",
     "_stale_mosaic_pointer",
     "_stale_editable_reason",
@@ -82,6 +84,8 @@ def _run_verify_tool(installer: Path, root: Path, tool: str, env_exists: bool = 
         f'EVALUATOR_DIR="{root}/Evaluator"',
         f'CONDA_BASE="{root}/conda"',
         'VERIFY_REASON=""',
+        'VERIFY_NOTE=""',
+        "NO_CONDA=false",
         # The real env lookup, from the installer's shared conda block. Whether the env
         # exists is decided by the fake tree (see `env_exists` below), not by a stub.
         _conda_block(installer),
