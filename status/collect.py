@@ -115,10 +115,18 @@ def checkout_marker_path() -> Path:
 
 
 def record_checkout(repo) -> None:
-    """Write the marker. Raises OSError; the caller decides whether that matters."""
+    """Write the marker. Raises OSError; the caller decides whether that matters.
+
+    Every CLI invocation calls this, from whatever checkout ran it. `runs/` is gitignored, so a
+    scratch clone or a linked worktree has none: such a checkout must not repoint a marker that
+    already names a working one, or the ssh probe would report zero runs.
+    """
     marker = checkout_marker_path()
-    text = str(Path(repo).resolve()) + "\n"
+    repo = Path(repo).resolve()
+    text = str(repo) + "\n"
     if marker.is_file() and marker.read_text() == text:
+        return
+    if not (repo / "runs").is_dir() and _read_marker() is not None:
         return
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(text)
@@ -133,17 +141,23 @@ def _read_marker() -> Path | None:
         recorded = Path(checkout_marker_path().read_text().strip())
     except (OSError, ValueError, RuntimeError):
         return None
-    return recorded if recorded.is_absolute() and _is_checkout(recorded, need_runs=False) else None
+    return recorded if recorded.is_absolute() and _is_checkout(recorded, need_runs=True) else None
 
 
 def _scan_for_checkout() -> Path | None:
-    """Breadth-first, shallowest first, name-agnostic, bounded. Hidden dirs and symlinks are skipped."""
+    """Breadth-first, shallowest first, name-agnostic, bounded. Hidden dirs are skipped.
+
+    A symlink directly under $HOME is followed (a checkout often lives on other storage and is
+    linked into the home directory); deeper symlinks are not. Every directory is entered once,
+    by realpath, so a link back to $HOME or two links to one checkout cost nothing extra.
+    """
     try:
         level = [Path.home()]
     except RuntimeError:  # no resolvable home directory
         return None
+    seen = {os.path.realpath(level[0])}
     visited = 0
-    for _ in range(_SCAN_MAX_DEPTH):
+    for depth in range(_SCAN_MAX_DEPTH):
         children = []
         for parent in level:
             try:
@@ -152,8 +166,12 @@ def _scan_for_checkout() -> Path | None:
             except OSError:
                 continue
             for entry in entries:
-                if entry.name.startswith(".") or not entry.is_dir(follow_symlinks=False):
+                if entry.name.startswith(".") or not entry.is_dir(follow_symlinks=depth == 0):
                     continue
+                real = os.path.realpath(entry.path)
+                if real in seen:
+                    continue
+                seen.add(real)
                 visited += 1
                 if visited > _SCAN_MAX_DIRS:
                     return None
