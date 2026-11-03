@@ -229,6 +229,36 @@ def _rank_and_report_the_gate(df: pd.DataFrame, min_engines: int) -> pd.DataFram
     return result
 
 
+def _refuse_when_every_pae_file_was_unreadable(df: pd.DataFrame) -> None:
+    """Exit 1 when PAE files were LISTED but not one yielded an ipTM.
+
+    That is a refold CSV separated from its PAE directory (copied alone, or relative
+    paths read from another working directory). The rank column is still written, from
+    tiebreakers alone, and the run used to exit 0 -- a complete-looking report that
+    says nothing. A pool with no PAE files at all (native metrics only) is not this and
+    passes.
+    """
+    listed = [
+        col
+        for col in ("boltz_pae_file", "af3_pae_file", "esmfold2_pae_file")
+        if col in df.columns and df[col].astype(str).str.strip().replace({"nan": "", "None": ""}).ne("").any()
+    ]
+    if not listed:
+        return
+    consensus = pd.to_numeric(df.get("consensus_iptm_mean"), errors="coerce")
+    if consensus is not None and consensus.notna().any():
+        return
+    print(
+        f"[report] ERROR: PAE files are listed in {', '.join(listed)} but none could be read, so no design has "
+        "an ipTM and there is nothing to rank. The refold CSV is probably separated from its PAE files "
+        "(copied without its refold directory, or a relative path read from another working directory). "
+        "Point --boltz2-results / --af3-results / --esmfold2-results at the CSV that sits next to its "
+        "structures, or re-run the refold.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 # Per-engine structure column preference for the top-20 viewer copy. Module level so the
 # test that pins these against ``_STRUCTURE_PATH_COLUMNS`` can read the table itself.
 _ENGINE_PDB_PRIORITY: dict[str, list[str]] = {
@@ -538,6 +568,7 @@ def run(args: argparse.Namespace) -> None:
     df = compute_consensus_ipsae(df)
     min_engines = getattr(args, "min_engines", None) or MIN_ENGINES_DEFAULT
     df = _rank_and_report_the_gate(df, min_engines)
+    _refuse_when_every_pae_file_was_unreadable(df)
     # The actionable form. Picking N designs for synthesis, two slots on one fold is
     # a wasted slot -- so name the swap rather than leaving the reader to find it.
     # A SUGGESTION: nothing here re-ranks or rewrites the selection, because fold
