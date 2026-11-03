@@ -25,8 +25,8 @@ inspection only · `NATIVE` is a design tool's own metric carried through untouc
 | `plddt_binder_mean/min` | binder fold confidence | ↑ | **RANKS** (key 5, min) | — |
 | `rank` | the single output ordering | ↓ | the result | — |
 | `agreement_count` | engines over an **absolute ipSAE 0.61** — **a different quantity from the ipTM that ranks** | ↑ | **WARNS**, note-only since 2026-10-03: it prints in `wetlab_reason` and cannot withhold the recommendation | macro-AUC **0.6295** on the registered pool's all-3-engine subset (70.5 % tied at zero). Monotone then saturating — binder rate 0.378 → 0.567 → **0.778** → 0.758, so *some vs none* carries the information and **2-vs-3 carries none**. The 0.532/87.2 % quoted elsewhere is a **Cao** figure, not this pool |
-| `*_pae_iptm` | per-engine ipTM recomputed from PAE by a point-PAE kernel; sits ~0.08-0.13 below the engine's own `*_iptm` (Spearman >= 0.994 within an engine; same formula, not the same scale). Within-target only | ↑ | **RANKS** (via the mean) | — |
-| `*_pae_iptm_pinned`, `consensus_iptm_mean_pinned` | the same, with d0 fixed at one reference binder length (pool median, or `--d0-binder-length`) | ↑ | REPORTS (diagnostic) | pinning does not improve ranking on the 563-design benchmark: macro AUC +0.0025, CI -0.004..+0.010, signs split 2/2. Rank stays on the per-design d0 |
+| `*_pae_iptm` | per-engine ipTM recomputed from PAE by a point-PAE kernel; sat ~0.08-0.13 below the engine's own `*_iptm` on the archived 394-design TfR1 pool, measured 2026-11-03 (a property of that pool, not of the kernel; Spearman >= 0.994 within an engine; same formula, not the same scale). Within-target only | ↑ | **RANKS** (via the mean) | — |
+| `*_pae_iptm_pinned`, `consensus_iptm_mean_pinned` | the same, with d0 fixed at one reference binder length (pool median, or `--d0-binder-length`) | ↑ | REPORTS (diagnostic) | pinning does not improve ranking on the curated 563-design, 4-target benchmark (2026-11-03): macro AUC +0.0025, CI -0.004..+0.010, signs split 2/2. Rank stays on the per-design d0 |
 | `*_iptm` | engine's **self-reported** ipTM | ↑ | REPORTS | scales differ sharply between engines |
 | `ipsae_min` | min(bt,tb) iPSAE, DunbrackLab 2025 | ↑ | REPORTS + GATES (affinity) | **measured INVERTED** on our SPOC data |
 | quality tiers (High/Medium/Low/Reject) | bands on `ipsae_min` | — | REPORTS | **measured INVERTED** — "Reject" held 6/10 CBG binders; "High" fired on none |
@@ -56,7 +56,7 @@ inspection only · `NATIVE` is a design tool's own metric carried through untouc
   `consensus_iptm_n` beside `rank`.
 - `quality_tier` is computed from one engine (Boltz-2 by default, the most generous), not from
   the consensus.
-- The top-N is an unordered tier: rank resolution is ~150x finer than engine disagreement.
+- The top-N is an unordered tier: rank resolution is ~150x finer than engine disagreement (an order-of-magnitude figure from the scoring audit; its pool was not recorded).
 
 ---
 

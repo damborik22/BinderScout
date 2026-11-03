@@ -22,16 +22,21 @@ Read these before quoting a rank. All of them come from the scoring audit and no
 the ranking; they say what it is allowed to mean.
 
 - **`*_pae_iptm` is a point-PAE re-derivation, not the engine's own ipTM.** Each engine's
-  PAE matrix is pushed through one shared kernel. The result sits **~0.08-0.13 below** that
-  engine's own `*_iptm`. Within an engine the two orderings are equivalent (Spearman
-  >= 0.994), so nothing is lost by ranking on the re-derivation; across engines the three
+  PAE matrix is pushed through one shared kernel. **Measured 2026-11-03 on the archived
+  394-design three-engine TfR1 pool** (450 PAE matrices per engine), the result sat
+  **~0.08-0.13 below** that engine's own `*_iptm`. That offset is a property of that pool, not of the
+  kernel (for AF3 its sign and size differ by pool), so it is not a correction to apply. Within
+  an engine the two orderings were equivalent there (Spearman >= 0.994), so nothing is lost by
+  ranking on the re-derivation; across engines the three
   columns share a *formula* but not a *scale*, which is why the mean is taken over
   re-derived values and never over the engines' self-reported ones.
 - **It is within-target only.** A `consensus_iptm_mean` on one target is not comparable to
   one on another; the binder-to-target kernel depends on the target's size.
 - **The top-N is an unordered tier.** Adjacent ranks are separated by ~150x less than the
   engines disagree about a single design, so the order *inside* a shortlist is below what
-  the engines can distinguish. Take the top N as a set.
+  the engines can distinguish. Take the top N as a set. (The ~150x ratio is from the same
+  scoring audit; the pool it was taken on was not recorded, so read it as an order of
+  magnitude.)
 - **Rank reads the optimistic interface direction.** ipTM takes the larger of
   binder->target and target->binder; `ipsae_min` takes the smaller. A high ipTM beside a
   near-zero `ipsae_min` is therefore a *one-directional* interface, not a contradiction
@@ -42,10 +47,12 @@ the ranking; they say what it is allowed to mean.
   designs scored by two engines beside designs scored by three; read `consensus_iptm_n`
   next to `rank` and do not compare across that line.
 - **Length enters through d0.** ipTM's d0 uses `L_binder + L_target`, so a longer binder
-  gets a more forgiving kernel: up to **+0.036** on the consensus. Pinning d0 to one
+  gets a more forgiving kernel: up to **+0.036** on the consensus (measured 2026-11-03 on the
+  same TfR1 pool). Pinning d0 to one
   reference length (`*_pae_iptm_pinned`, `consensus_iptm_mean_pinned`; the reference is the
   pool-median binder length unless `--d0-binder-length` says otherwise) was **measured not
-  to improve the ranking** on the 563-design labelled benchmark — macro AUC +0.0025, 95 % CI
+  to improve the ranking** on the curated 563-design, 4-target labelled benchmark (measured
+  2026-11-03) — macro AUC +0.0025, 95 % CI
   -0.004..+0.010, sign split 2/2 across targets — because it re-weights by length rather
   than correcting a bias. So **`rank` stays on the per-design d0**, and the pinned columns
   are diagnostic: they make the size of the length artifact visible per design.

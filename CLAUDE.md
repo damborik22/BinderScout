@@ -574,13 +574,18 @@ the parameter sweep.
 - **~~Binder length is a main driver — longer binders score lower on `ipsae_min` (r ≈ -0.78).~~ RETRACTED 2026-10-29: that correlation does not reproduce anywhere we can test it.** Measured over **12 engine-pools** (4 pools x 3 refold engines, 597 engine-design rows: CALCA/BC2, AK1b pd-l1, GF_asyn100, GF_asynfull), the strongest length correlation on `ipsae_min` is **-0.31** and **five of the twelve are POSITIVE**. `docs/PLAN_2.0_PART_RESULTS.md` had already found the same thing on two targets independently. Where a length effect *does* show up it is substantially a **normalization artifact, not biology**: `compute_iptm_from_pae` takes a global `d0` from `L_b + L_t`, so d0 grows with the complex and the kernel gets more forgiving for longer binders. Pinning d0 flips the sign of the length correlation on CALCA (+0.36 to -0.30) and reorders that pool (Spearman 0.67-0.82), while leaving AK1b and GF essentially unchanged (0.98-0.999) — the distortion scales with how much binder length varies *relative to the target*, so it is large for a wide length sweep against a small target and negligible for a narrow sweep against a big one. **Length is a variable to control for, not a driver to assume.** (Was never testable on Cao either: 75.1% of that set is exactly 65 aa.)
 - **What `*_pae_iptm` is, and what the rank resolves (scoring audit, 2026-11).**
   - **It is a point-PAE re-derivation, not the engine's own ipTM.** `boltz_pae_iptm` / `af3_pae_iptm` /
-    `esmfold2_pae_iptm` recompute ipTM from each engine's PAE matrix with one shared formula. They sit
-    **~0.08-0.13 BELOW** that engine's own reported `*_iptm`. Within an engine the two are
-    rank-equivalent (Spearman >= 0.994), but across engines the columns share a *formula*, not a *scale*.
+    `esmfold2_pae_iptm` recompute ipTM from each engine's PAE matrix with one shared formula. **Measured
+    2026-11-03 on the archived 394-design three-engine TfR1 pool (n=450 PAE matrices per engine, wave-1
+    archive): the re-derived values sat ~0.08-0.13 BELOW** that engine's own reported `*_iptm`, and within
+    an engine the two were rank-equivalent (Spearman >= 0.994). **The sign and size of that offset are
+    properties of that pool, not of the kernel** (for AF3 in particular they differ by pool), so do not
+    use 0.08-0.13 as a correction. Across engines the columns share a *formula*, not a *scale*.
   - **It is within-target only.** Compare designs against the same target; a mean on one target is not
     comparable to a mean on another.
   - **The top-N is an unordered tier.** The rank's resolution is ~150x finer than the disagreement between
-    engines, so the order inside a shortlist is below what the engines can tell apart.
+    engines, so the order inside a shortlist is below what the engines can tell apart. (The ~150x ratio is
+    from the same 2026-11 scoring audit; the pool it was taken on was not recorded, so read it as an order
+    of magnitude.)
     Treat the top N as a set, not a leaderboard.
   - **Rank reads the optimistic interface direction.** ipTM takes `max(binder->target, target->binder)`;
     `ipsae_min` takes the minimum (the pessimistic direction). A high ipTM with a near-zero `ipsae_min` is a
@@ -590,9 +595,9 @@ the parameter sweep.
   - **2-engine and 3-engine means are not on one scale** (`--min-engines 2` mixes them). Read
     `consensus_iptm_n` beside `rank`.
   - **d0 grows with the complex.** ipTM's d0 uses `L_binder + L_target`, so a longer binder gets a more
-    forgiving kernel: up to **+0.036** on the consensus. Pinning d0 (`*_pae_iptm_pinned`,
+    forgiving kernel: up to **+0.036** on the consensus (measured 2026-11-03 on the same TfR1 pool). Pinning d0 (`*_pae_iptm_pinned`,
     `consensus_iptm_mean_pinned`, pool-median binder length or `--d0-binder-length`) was **measured not to
-    improve ranking** on the 563-design labelled benchmark (macro AUC +0.0025, 95% CI -0.004..+0.010, sign
+    improve ranking** on the curated 563-design, 4-target labelled benchmark (measured 2026-11-03; macro AUC +0.0025, 95% CI -0.004..+0.010, sign
     split 2/2 across targets: it re-weights by length rather than correcting anything). So **`rank` stays on
     the per-design d0** and the pinned columns are *diagnostic*, there to make the size of the length
     artifact visible per design.

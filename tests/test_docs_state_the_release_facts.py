@@ -141,8 +141,23 @@ def test_claude_md_documents_the_pae_iptm_facts():
 @pytest.mark.parametrize("doc", ["Evaluator/docs/evaluation/ranking.md", "Evaluator/docs/evaluation/metrics.md"])
 def test_evaluator_docs_say_what_pae_iptm_is(doc):
     text = _text(doc)
-    for needle in ("point-PAE", "_pinned", "--min-engines 2", "optimistic"):
+    for needle in ("point-PAE", "_pinned", "--d0-binder-length", "--min-engines 2", "optimistic"):
         assert needle in text, f"{doc} does not state {needle!r}"
+
+
+@pytest.mark.parametrize(
+    "doc", ["CLAUDE.md", "Evaluator/docs/evaluation/ranking.md", "Evaluator/docs/evaluation/metrics.md"]
+)
+def test_pae_iptm_level_shift_carries_its_provenance(doc):
+    """The ``*_pae_iptm`` offset from the engine's own ipTM was once quoted as a bare range.
+
+    It is a measurement on one pool and (for AF3) differs by pool, so each document that quotes it must
+    say which pool, when, and that it is not a property of the kernel. The numbers themselves are not
+    pinned: re-measuring them must not break this test, dropping the provenance must.
+    """
+    text = " ".join(_text(doc).split())
+    for needle in ("2026-11-03", "TfR1", "563-design", "not of the kernel"):
+        assert needle in text, f"{doc} quotes the point-PAE measurements without {needle!r}"
 
 
 def test_evaluator_docs_count_nine_tools():
