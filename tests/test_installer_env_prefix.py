@@ -98,7 +98,9 @@ class TestEnvLocation:
         prefix_env = tmp_path / "scratch" / "foo"
         other_checkout.mkdir(parents=True)
         prefix_env.mkdir(parents=True)
-        base = _fake_base_listing(tmp_path, [tmp_path / "base", other_checkout, prefix_env], [tmp_path / "base" / "envs"])
+        base = _fake_base_listing(
+            tmp_path, [tmp_path / "base", other_checkout, prefix_env], [tmp_path / "base" / "envs"]
+        )
         (base / "envs").mkdir()
         r = run_bash(
             _program(INSTALLERS[platform], f'CONDA_BASE="{base}"; env_exists foo && echo "FOUND $BS_ENV_PREFIX"'),
