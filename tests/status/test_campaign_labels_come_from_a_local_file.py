@@ -43,7 +43,9 @@ def test_both_maps_reach_the_document(tmp_path, monkeypatch):
         )
     )
     monkeypatch.setenv("BINDERSCOUT_CAMPAIGNS", str(path))
-    monkeypatch.setattr("status.cli.collect_local", lambda host="local": {"reachable": True, "runs": {}})
+    monkeypatch.setattr(
+        "status.cli.collect_local", lambda repo_root=None, host="local": {"reachable": True, "runs": {}}
+    )
 
     doc = build_document([], timeout_s=5)
     assert doc["campaigns"]["tfr1_rfd4"] == "TfR1"
@@ -54,7 +56,9 @@ def test_unknown_keys_in_the_file_are_dropped(tmp_path, monkeypatch):
     path = tmp_path / "map.json"
     path.write_text(json.dumps({"campaigns": {"a": "A"}, "secrets": {"k": "v"}}))
     monkeypatch.setenv("BINDERSCOUT_CAMPAIGNS", str(path))
-    monkeypatch.setattr("status.cli.collect_local", lambda host="local": {"reachable": True, "runs": {}})
+    monkeypatch.setattr(
+        "status.cli.collect_local", lambda repo_root=None, host="local": {"reachable": True, "runs": {}}
+    )
 
     doc = build_document([], timeout_s=5)
     assert "secrets" not in doc

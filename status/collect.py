@@ -14,11 +14,13 @@ from status.schema import DEAD, DONE, QUEUED, RUNNING, SCHEMA_VERSION
 
 __all__ = [
     "cadence",
+    "checkout_marker_path",
     "classify",
     "collect_local",
     "eta_seconds",
     "home_relative",
     "probe_started",
+    "record_checkout",
     "resolve_repo",
 ]
 
@@ -26,9 +28,10 @@ __all__ = [
 # inside a single second, so anything from ~0.5 s up gives the same answer.
 _BURST_WINDOW_S = 2.0
 
-# Where a checkout lives, newest spelling first. Machine-local and not uniform:
-# the fleet boxes kept the pre-rename directory, Clara has no ~/dev at all.
-_REPO_CANDIDATES = ("dev/BinderScout", "dev/BindMaster", "BinderScout", "BindMaster")
+# Finding a checkout on a box that was not told where it is (the ssh-shipped probe). No
+# directory NAME is assumed: a checkout is a directory holding `binderscout.py` and `runs/`.
+_SCAN_MAX_DEPTH = 2  # ~/x and ~/x/y
+_SCAN_MAX_DIRS = 2000
 
 
 def classify(done: int, total, proc_alive: bool, started: bool, output_age_s=None) -> str:
@@ -100,18 +103,75 @@ def home_relative(path) -> str:
         return str(path)
 
 
+def checkout_marker_path() -> Path:
+    """Where the shortcut installer records which checkout this box uses."""
+    return Path.home() / ".config" / "binderscout" / "checkout"
+
+
+def record_checkout(repo) -> None:
+    """Write the marker. Raises OSError; the caller decides whether that matters."""
+    marker = checkout_marker_path()
+    text = str(Path(repo).resolve()) + "\n"
+    if marker.is_file() and marker.read_text() == text:
+        return
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(text)
+
+
+def _is_checkout(path: Path, need_runs: bool) -> bool:
+    return (path / "binderscout.py").is_file() and (not need_runs or (path / "runs").is_dir())
+
+
+def _read_marker() -> Path | None:
+    try:
+        recorded = Path(checkout_marker_path().read_text().strip())
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return recorded if recorded.is_absolute() and _is_checkout(recorded, need_runs=False) else None
+
+
+def _scan_for_checkout() -> Path | None:
+    """Breadth-first, shallowest first, name-agnostic, bounded. Hidden dirs and symlinks are skipped."""
+    try:
+        level = [Path.home()]
+    except RuntimeError:  # no resolvable home directory
+        return None
+    visited = 0
+    for _ in range(_SCAN_MAX_DEPTH):
+        children = []
+        for parent in level:
+            try:
+                with os.scandir(parent) as it:
+                    entries = sorted(it, key=lambda e: e.name)
+            except OSError:
+                continue
+            for entry in entries:
+                if entry.name.startswith(".") or not entry.is_dir(follow_symlinks=False):
+                    continue
+                visited += 1
+                if visited > _SCAN_MAX_DIRS:
+                    return None
+                child = Path(entry.path)
+                if _is_checkout(child, need_runs=True):
+                    return child
+                children.append(child)
+        level = children
+    return None
+
+
 def resolve_repo(explicit=None) -> Path | None:
-    """Find the checkout on THIS box without hard-coding a path."""
+    """Find the checkout on THIS box without hard-coding a path or a directory name.
+
+    Order: the caller's own root; $BINDERSCOUT_DIR; the marker the shortcut installer
+    wrote; a bounded scan of $HOME. The probe shipped over ssh has no checkout to ask,
+    so it relies on the last three.
+    """
     if explicit:
         return Path(explicit)
     env = os.environ.get("BINDERSCOUT_DIR")
     if env and Path(env).is_dir():
         return Path(env)
-    home = Path.home()
-    for rel in _REPO_CANDIDATES:
-        if (home / rel / "runs").is_dir():
-            return home / rel
-    return None
+    return _read_marker() or _scan_for_checkout()
 
 
 def _enabled_tools(run_dir: Path, cfg: dict) -> list:

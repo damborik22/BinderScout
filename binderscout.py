@@ -137,6 +137,16 @@ def _install_binderscout_shortcut() -> None:
     except (OSError, UnicodeDecodeError):
         pass  # ~/.local/bin not writable — BinderScout/bin/ is the primary location
 
+    # Tell `binderscout status` which checkout this box uses, so the probe shipped over ssh
+    # (which has no checkout to ask) does not have to guess a directory name. Silent: this
+    # must never write to stdout, and a box that cannot record it falls back to a scan.
+    try:
+        from status.collect import record_checkout
+
+        record_checkout(REPO)
+    except (OSError, UnicodeDecodeError):
+        pass
+
 
 def _exec(path: str, argv: list) -> None:
     """os.execv, but do not lose what we printed. Never returns.

@@ -14,7 +14,9 @@ def test_the_local_box_is_probed_alongside_the_remote_ones(monkeypatch):
     monkeypatch.setattr(
         "status.cli.probe_hosts", lambda hosts, t: {h: {"reachable": False, "error": "x"} for h in hosts}
     )
-    monkeypatch.setattr("status.cli.collect_local", lambda host="local": {"reachable": True, "host": host, "runs": {}})
+    monkeypatch.setattr(
+        "status.cli.collect_local", lambda repo_root=None, host="local": {"reachable": True, "host": host, "runs": {}}
+    )
 
     doc = build_document(["host-a", "host-b"], timeout_s=5)
     assert "local" in doc["hosts"], "the box we are standing on must appear"
@@ -23,6 +25,8 @@ def test_the_local_box_is_probed_alongside_the_remote_ones(monkeypatch):
 
 
 def test_a_local_only_run_still_works(monkeypatch):
-    monkeypatch.setattr("status.cli.collect_local", lambda host="local": {"reachable": True, "host": host, "runs": {}})
+    monkeypatch.setattr(
+        "status.cli.collect_local", lambda repo_root=None, host="local": {"reachable": True, "host": host, "runs": {}}
+    )
     doc = build_document([], timeout_s=5)
     assert set(doc["hosts"]) == {"local"}

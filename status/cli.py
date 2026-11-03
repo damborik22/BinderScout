@@ -15,6 +15,10 @@ from status.collect import collect_local
 from status.remote import DEFAULT_TIMEOUT_S, fleet_hosts, merge_host_results, probe_hosts
 from status.render_term import render
 
+# The checkout this CLI is running from: the local arm probes it directly. Derived here
+# and not in collect.py, whose source is also shipped to remote boxes and run from a temp dir.
+REPO = Path(__file__).resolve().parent.parent
+
 USAGE = """\
 binderscout status [options]
 
@@ -53,7 +57,7 @@ def load_campaign_map() -> dict:
     return {k: loaded[k] for k in _CAMPAIGN_MAP_KEYS if isinstance(loaded.get(k), dict)}
 
 
-def build_document(hosts, timeout_s: int) -> dict:
+def build_document(hosts, timeout_s: int, repo_root=None) -> dict:
     """Probe the remote boxes AND this one.
 
     This box is always included: it is a campaign box like any other, and
@@ -62,7 +66,7 @@ def build_document(hosts, timeout_s: int) -> dict:
     variable, or it is probed twice under two labels.
     """
     results = probe_hosts(hosts, timeout_s) if hosts else {}
-    results.setdefault("local", collect_local(host="local"))
+    results.setdefault("local", collect_local(repo_root=repo_root, host="local"))
     return {**merge_host_results(results), **load_campaign_map()}
 
 
@@ -101,7 +105,7 @@ def main(argv=None) -> int:
         hosts = fleet_hosts()
 
     while True:
-        doc = build_document(hosts, args.timeout)
+        doc = build_document(hosts, args.timeout, repo_root=REPO)
         if args.html:
             write_html(Path(args.html), doc)
         if args.json:

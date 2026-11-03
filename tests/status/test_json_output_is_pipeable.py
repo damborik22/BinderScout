@@ -17,8 +17,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 
 
-def test_the_json_arm_prints_no_banner():
-    env = {**os.environ, "BINDERSCOUT_FLEET": ""}
+def test_the_json_arm_prints_no_banner(tmp_path):
+    env = {**os.environ, "BINDERSCOUT_FLEET": "", "HOME": str(tmp_path)}
     proc = subprocess.run(
         [sys.executable, str(REPO / "binderscout.py"), "status", "--local", "--json"],
         capture_output=True,
@@ -33,8 +33,8 @@ def test_the_json_arm_prints_no_banner():
     assert "hosts" in doc
 
 
-def test_the_human_arm_still_announces_itself():
-    env = {**os.environ, "BINDERSCOUT_FLEET": ""}
+def test_the_human_arm_still_announces_itself(tmp_path):
+    env = {**os.environ, "BINDERSCOUT_FLEET": "", "HOME": str(tmp_path)}
     proc = subprocess.run(
         [sys.executable, str(REPO / "binderscout.py"), "status", "--local"],
         capture_output=True,
