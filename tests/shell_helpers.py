@@ -8,6 +8,7 @@ tests/test_install_state_tracks_the_commit.py does.
 from __future__ import annotations
 
 import os
+import platform
 import subprocess
 from pathlib import Path
 
@@ -43,7 +44,17 @@ def extract_block(script: Path) -> str:
     return BLOCK_BEGIN + text.split(BLOCK_BEGIN, 1)[1].split(BLOCK_END, 1)[0] + BLOCK_END
 
 
+def _arch_override(env: dict[str, str]) -> dict[str, str]:
+    """install/install.sh refuses an aarch64 host; tests drive its logic against stand-ins, so
+    they use its documented override there (and only there). Tests that build an env of their
+    own instead of inheriting os.environ never see the autouse fixture in tests/conftest.py."""
+    if platform.machine() == "aarch64":
+        return {"BINDERSCOUT_ALLOW_X86_INSTALLER": "1", **env}
+    return env
+
+
 def run_bash(program: str, env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess:
+    env = _arch_override(env)
     return subprocess.run(["bash", "-c", program], capture_output=True, text=True, env=env, cwd=str(cwd), timeout=120)
 
 
@@ -51,7 +62,7 @@ def clean_env(home: Path, path: str | None = None, **extra: str) -> dict[str, st
     """A minimal environment: no conda variables, a scratch HOME."""
     env = {"HOME": str(home), "PATH": path if path is not None else "/usr/bin:/bin", "LC_ALL": "C"}
     env.update(extra)
-    return env
+    return _arch_override(env)
 
 
 def fake_base(root: Path, *, conda_script: str | None = None) -> Path:
