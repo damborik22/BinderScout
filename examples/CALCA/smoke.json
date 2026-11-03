@@ -41,8 +41,9 @@
     "rfd3_batch_size": 1,
     "rfd3_diffusion_steps": 20,
     "rfd3_mpnn_samples": 1,
-    "protein_hunter_n_designs": 1,
-    "protein_hunter_num_cycles": 1,
+    "protein_hunter_n_designs": 3,
+    "protein_hunter_num_cycles": 3,
+    "protein_hunter_iptm_threshold": 0.5,
 
     "use_boltz": true,
     "use_af3": true,

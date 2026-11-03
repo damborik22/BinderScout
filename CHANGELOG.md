@@ -189,6 +189,7 @@ Work since `v2.0.2` (37 commits), in preparation as `v2.0.3`. Nothing here chang
 - **Configurator:** a copied `--config` with a new `name` gets its own run folder; the BoltzGen script stops its
   whole process group on termination; a headless config can set `trim_construct_tag`; the Protein-Hunter
   collector finds its summaries at either directory level.
+- **The CALCA smoke example now reliably produces a design.** Protein-Hunter at 1 design x 1 cycle with the default 0.7 iPTM threshold yielded a usable design about once in 12 tries, so a fresh `examples/CALCA/smoke.json` run usually died at extract. It now uses 3 designs x 3 cycles and an iPTM pass threshold of 0.5 (non-default, smoke only; 4 of 4 trials produced designs). Recorded in `examples/README.md`.
 - **Hygiene:** the machine-names guard no longer scans `__pycache__` (the suite failed on its second run), and
   a conda shell function on the host can no longer make the `evaluate.sh` parser test flaky.
 

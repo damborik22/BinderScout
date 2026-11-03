@@ -78,8 +78,9 @@ flags is kept from drifting out of step with the real one.</div>
 <div class="field"><label for="f_rfd3_batch_size"><code>rfd3_batch_size</code></label><input type="number" id="f_rfd3_batch_size" data-key="rfd3_batch_size" data-type="int" value="1"><p class='help'></p></div>
 <div class="field"><label for="f_rfd3_diffusion_steps"><code>rfd3_diffusion_steps</code></label><input type="number" id="f_rfd3_diffusion_steps" data-key="rfd3_diffusion_steps" data-type="int" value="20"><p class='help'>RFD3 denoising steps. 200 for a campaign; 20 only for a smoke test.</p></div>
 <div class="field"><label for="f_rfd3_mpnn_samples"><code>rfd3_mpnn_samples</code></label><input type="number" id="f_rfd3_mpnn_samples" data-key="rfd3_mpnn_samples" data-type="int" value="1"><p class='help'></p></div>
-<div class="field"><label for="f_protein_hunter_n_designs"><code>protein_hunter_n_designs</code></label><input type="number" id="f_protein_hunter_n_designs" data-key="protein_hunter_n_designs" data-type="int" value="1"><p class='help'></p></div>
-<div class="field"><label for="f_protein_hunter_num_cycles"><code>protein_hunter_num_cycles</code></label><input type="number" id="f_protein_hunter_num_cycles" data-key="protein_hunter_num_cycles" data-type="int" value="1"><p class='help'></p></div>
+<div class="field"><label for="f_protein_hunter_n_designs"><code>protein_hunter_n_designs</code></label><input type="number" id="f_protein_hunter_n_designs" data-key="protein_hunter_n_designs" data-type="int" value="3"><p class='help'></p></div>
+<div class="field"><label for="f_protein_hunter_num_cycles"><code>protein_hunter_num_cycles</code></label><input type="number" id="f_protein_hunter_num_cycles" data-key="protein_hunter_num_cycles" data-type="int" value="3"><p class='help'></p></div>
+<div class="field"><label for="f_protein_hunter_iptm_threshold"><code>protein_hunter_iptm_threshold</code></label><input type="text" id="f_protein_hunter_iptm_threshold" data-key="protein_hunter_iptm_threshold" data-type="str" value="0.5"><p class='help'></p></div>
 <div class="field"><label for="f_use_boltz"><code>use_boltz</code></label><input type="checkbox" id="f_use_boltz" data-key="use_boltz" data-type="bool" checked><p class='help'>Refold with Boltz-2.</p></div>
 <div class="field"><label for="f_use_af3"><code>use_af3</code></label><input type="checkbox" id="f_use_af3" data-key="use_af3" data-type="bool" checked><p class='help'>Refold with AlphaFold 3. Cheapest engine here (~5 GB), despite its reputation.</p></div>
 <div class="field"><label for="f_use_esmfold2"><code>use_esmfold2</code></label><input type="checkbox" id="f_use_esmfold2" data-key="use_esmfold2" data-type="bool" checked><p class='help'>Refold with ESMFold2. Needs ~14 GB even for small complexes — it cannot run on a 12 GB card.</p></div>
@@ -164,8 +165,9 @@ const DEFAULTS = {
   "rfd3_batch_size": 1,
   "rfd3_diffusion_steps": 20,
   "rfd3_mpnn_samples": 1,
-  "protein_hunter_n_designs": 1,
-  "protein_hunter_num_cycles": 1,
+  "protein_hunter_n_designs": 3,
+  "protein_hunter_num_cycles": 3,
+  "protein_hunter_iptm_threshold": 0.5,
   "use_boltz": true,
   "use_af3": true,
   "use_esmfold2": true,

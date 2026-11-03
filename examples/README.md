@@ -64,7 +64,8 @@ this same target, already scored by all three refold engines.
 | designs per tool | **1** | 50–700 |
 | binder length | 20–30 aa | 65–150 aa |
 | RFD3 diffusion steps | 20 | 200 |
-| Protein-Hunter cycles | 1 | 7–9 |
+| Protein-Hunter designs × cycles | 3 × 3 (about 2 min) | 100+ × 7–9 |
+| Protein-Hunter iPTM pass threshold | 0.5 | 0.7 |
 | BindCraft 2 attempts (`max_trajectories`) | 3 | sized to the target |
 | PXDesign samples / Complexa designs | 2 / 2 | 1000 / 100 |
 | BindCraft filters | `no_filters` | `default_filters` |
@@ -116,3 +117,5 @@ binderscout install --tool all --verify
 That checks the artifact each tool needs to **run** — a checkpoint on disk, an
 importable package — rather than that its entry point answers, and names the fix
 for anything unusable. `--repair` then re-installs only what failed.
+
+> **Why Protein-Hunter is not 1 × 1.** A smoke run only has to give the evaluator something to refold. At 1 design × 1 cycle and the default 0.7 iPTM pass threshold, a usable design came out about once in 12 tries on an RTX 3090 (cycle 0 is discarded, and the first real cycle often fails the filter), so a fresh smoke run usually died at extract with "0 sequences". At 3 × 3 with threshold 0.5, 4 of 4 runs produced at least 2 passing designs (6 attempts at 3 × 3 with the default 0.7 gave 4 of 6). The relaxed threshold only affects this smoke example; a real campaign should keep 0.7.
