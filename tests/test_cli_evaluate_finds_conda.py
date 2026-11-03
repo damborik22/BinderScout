@@ -130,3 +130,41 @@ def test_a_checkout_conda_without_a_conda_executable_does_not_shadow_a_working_o
 
     assert calls, "evaluate refused although a working conda was reachable"
     assert calls[0][0] == str(working / "bin" / "conda")
+
+
+def test_an_explicit_binderscout_conda_without_a_conda_executable_is_refused_not_skipped(
+    bare_box, tmp_path, monkeypatch, capsys
+):
+    """The refusal tells users to set BINDERSCOUT_CONDA, so an override that is set must not be bypassed.
+
+    `require` is for auto-discovered candidates; applied to the explicit one it made evaluate quietly run a
+    different conda than the one the operator named.
+    """
+    chosen = _base(tmp_path / "chosen", with_conda_bin=False)
+    working = _base(tmp_path / "system")
+    monkeypatch.setenv("BINDERSCOUT_CONDA", str(chosen))
+    monkeypatch.setenv("CONDA_EXE", str(working / "bin" / "conda"))
+    cli = _load_cli()
+    calls = _run_evaluate(cli, monkeypatch, bare_box)
+
+    with pytest.raises(SystemExit) as stop:
+        cli._dispatch("evaluate", ["--help"])
+
+    err = capsys.readouterr().err
+    assert stop.value.code == 1 and not calls
+    assert str(chosen / "bin" / "conda") in err and "BINDERSCOUT_CONDA" in err
+
+
+def test_an_explicit_binderscout_conda_with_a_conda_executable_still_beats_a_working_system_one(
+    bare_box, tmp_path, monkeypatch
+):
+    chosen = _base(tmp_path / "chosen")
+    working = _base(tmp_path / "system")
+    monkeypatch.setenv("BINDERSCOUT_CONDA", str(chosen))
+    monkeypatch.setenv("CONDA_EXE", str(working / "bin" / "conda"))
+    cli = _load_cli()
+    calls = _run_evaluate(cli, monkeypatch, bare_box)
+
+    cli._dispatch("evaluate", ["--help"])
+
+    assert calls and calls[0][0] == str(chosen / "bin" / "conda")

@@ -204,11 +204,18 @@ def _dispatch(cmd: str, args: list) -> None:
         _exec(sys.executable, [sys.executable, str(script)] + args)
 
     elif cmd == "evaluate":
-        # `require`: a base with conda.sh but no bin/conda (a checkout conda/ that was never
-        # finished) must not shadow a later candidate that has both.
-        conda_base = find_conda_base(REPO, require="bin/conda")
-        if conda_base is None:
-            partial = find_conda_base(REPO)
+        # An explicit $BINDERSCOUT_CONDA is the operator's choice: it is used, or refused by name, and
+        # never skipped for another conda. `require` applies only to auto-discovered candidates: a base
+        # with conda.sh but no bin/conda (a checkout conda/ that was never finished) must not shadow a
+        # later candidate that has both.
+        explicit = os.environ.get("BINDERSCOUT_CONDA")
+        if explicit:
+            conda_base = Path(explicit).expanduser()
+            partial = None if (conda_base / "bin" / "conda").is_file() else conda_base
+        else:
+            conda_base = find_conda_base(REPO, require="bin/conda")
+            partial = None if conda_base else find_conda_base(REPO)
+        if partial or conda_base is None:
             found = f"{partial / 'bin' / 'conda'} does not exist" if partial else "conda not found"
             print(
                 f"{RED}✗ {found} — set BINDERSCOUT_CONDA to the conda base directory, "
