@@ -267,6 +267,70 @@ def _warn_unresolved_pae(
     )
 
 
+# Columns of the merged refold frame that hold a path to a refolded STRUCTURE and are
+# read downstream: top20_structures/ + view_top20.pml, the 3D viewers and the inline
+# epitope scoring all pick from this list by name. The engine is the prefix; the bare
+# "pdb" fallback the consumers also try belongs to the anchor (Boltz-2) engine.
+_STRUCTURE_PATH_COLUMNS: tuple[str, ...] = (
+    "boltz_pdb",
+    "boltz_cif",
+    "af3_pdb",
+    "af3_cif",
+    "esmfold2_pdb",
+    "esmfold2_cif",
+    "pdb",
+)
+
+
+def remap_structure_paths(
+    df: pd.DataFrame,
+    base_dirs: dict[str, str | Path | None],
+) -> pd.DataFrame:
+    """Resolve every structure-path column against its own engine's results directory.
+
+    The PAE loaders already resolve and warn; the structure columns were passed to
+    ``Path.exists()`` as written, so a transplanted pool (folded elsewhere, absolute
+    paths baked into the CSV) lost the 3D viewer, ``top20_structures/`` and the PyMOL
+    script with exit 0. A resolved cell is rewritten to where the file is now; an
+    unresolved one is left as written and counted into ONE warning per column.
+
+    Args:
+        df:        merged refold frame (not mutated).
+        base_dirs: ``{"boltz": dir, "af3": dir, "esmfold2": dir}`` -- the directory of
+                   each engine's results CSV, the best guess at where its refold
+                   output directory now sits.
+    """
+    out = df.copy()
+    for col in _STRUCTURE_PATH_COLUMNS:
+        if col not in out.columns:
+            continue
+        engine = col.split("_", 1)[0] if col != "pdb" else "boltz"
+        base_dir = base_dirs.get(engine)
+        n_listed = n_unresolved = 0
+        resolved_cells: list[object] = []
+        for cell in out[col]:
+            if not isinstance(cell, str) or not cell.strip():
+                resolved_cells.append(cell)
+                continue
+            n_listed += 1
+            resolved = _resolve_pae_path(cell, base_dir)
+            if resolved is None:
+                n_unresolved += 1
+                resolved_cells.append(cell)
+            else:
+                resolved_cells.append(str(resolved))
+        out[col] = pd.Series(resolved_cells, index=out.index, dtype=object)
+        if n_unresolved:
+            tried = f" (also tried relative to {base_dir})" if base_dir is not None else ""
+            warnings.warn(
+                f"[structure] {n_unresolved}/{n_listed} structure files listed in '{col}' were not found{tried} "
+                f"-- those designs are missing from the 3D viewer, top20_structures/ and view_top20.pml. "
+                f"Check that the refold output directory still sits next to the CSV.",
+                stacklevel=2,
+            )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Boltz-2 ipSAE from saved PAE files
 # ---------------------------------------------------------------------------

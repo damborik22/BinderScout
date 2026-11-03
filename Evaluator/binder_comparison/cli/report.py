@@ -35,6 +35,7 @@ from ..comparison.epitope import epitope_match, extract_interface_residues, pars
 from ..comparison.merger import merge_refold_results
 from ..comparison.scoring import (
     _ENGINE_IPSAE_COLS,
+    _STRUCTURE_PATH_COLUMNS,  # noqa: F401  (re-exported: the columns remap_structure_paths covers)
     MIN_ENGINES_DEFAULT,
     MIN_ENGINES_FLOOR,
     add_boltz_ipsae_from_files,
@@ -49,6 +50,7 @@ from ..comparison.scoring import (
     compute_consensus_ipsae,
     compute_consensus_iptm,
     rank_designs,
+    remap_structure_paths,
 )
 from ..comparison.self_consistency import annotate_self_consistency
 from ..comparison.sequence_panel import annotate_composition, annotate_sequence_panel
@@ -238,6 +240,23 @@ def run(args: argparse.Namespace) -> None:
         sequences_fasta=args.sequences,
         af3_csv=args.af3_results,
         esmfold2_csv=args.esmfold2_results,
+    )
+
+    # A pool folded on another machine or account carries that machine's absolute
+    # structure paths. Resolve them against each engine's CSV directory now, once, so
+    # the top-20 copy, the 3D viewers and the inline epitope all see paths that exist
+    # -- and say so, once per column, when some do not.
+    df = remap_structure_paths(
+        df,
+        {
+            engine: Path(csv).resolve().parent
+            for engine, csv in (
+                ("boltz", args.boltz2_results),
+                ("af3", args.af3_results),
+                ("esmfold2", args.esmfold2_results),
+            )
+            if csv
+        },
     )
 
     # Attach native metrics from BindCraft CSV if provided
