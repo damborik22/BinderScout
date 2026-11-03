@@ -685,13 +685,13 @@ def plot_radar_iptm(df: pd.DataFrame, top_n: int = 10) -> Figure:
 
 
 def plot_max_vs_mean_iptm(df: pd.DataFrame, label_n: int = 20) -> Figure:
-    """Two-stage signature scatter: max engine iPTM (screen) vs mean engine iPTM (rank).
+    """Engine-agreement scatter: max engine iPTM vs mean engine iPTM (diagnostic).
 
-    x = ``consensus_iptm`` (max across engines), y = ``consensus_iptm_mean`` (the ranking key)
-    (the Stage-2 re-rank). The dashed y=x line is the upper bound (max ≥ mean) —
-    vertical distance below it = engine disagreement. The dotted vertical line is
-    the max-screen threshold (top 50%). Colour by tool; top designs are labelled
-    with their rank. Top-right = strong, agreed-upon binders.
+    x = ``consensus_iptm`` (max across engines), y = ``consensus_iptm_mean`` (the ranking key).
+    The dashed y=x line is the upper bound (max ≥ mean) — vertical distance below it =
+    engine disagreement. No screen is applied on x (the Stage-1 max screen was removed in
+    Part U). Colour by tool; top designs are labelled with their rank. Top-right = strong,
+    agreed-upon binders.
     """
     fig, ax = plt.subplots(figsize=(8, 7))
     if "consensus_iptm" not in df.columns or "consensus_iptm_mean" not in df.columns:
@@ -725,10 +725,10 @@ def plot_max_vs_mean_iptm(df: pd.DataFrame, label_n: int = 20) -> Figure:
         ax.annotate(lab, (r["_x"], r["_y"]), fontsize=7, xytext=(3, 3), textcoords="offset points")
 
     ax.set_xlabel("max engine iPTM = consensus_iptm")
-    ax.set_ylabel("mean engine iPTM = consensus_iptm_mean   (Stage-2 rank ↑)")
+    ax.set_ylabel("mean engine iPTM = consensus_iptm_mean   (the ranking key ↑)")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.set_title("Two-stage selection: max-screen (x) → mean-rank (y); top-right = best", fontsize=10)
+    ax.set_title("Engine agreement: max (x) vs mean (y) ipTM; top-right = best", fontsize=10)
     ax.legend(fontsize=7, loc="upper left", frameon=False, ncol=2)
     fig.tight_layout()
     return fig

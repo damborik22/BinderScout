@@ -1327,10 +1327,19 @@ def _build_per_tool_pdb_viewer(
 _TOOL_NATIVE_SORT: dict[str, str] = {
     "mosaic": "ipsae_min_aux",  # Mosaic Boltz-2 internal loss signal
     "boltzgen": "native_bg_design_ipsae_min",  # BoltzGen's own design_ipsae_min (per INVESTIGATION §5)
+    # Each of these tools' own design-time confidence, as attached by the extractor. Found
+    # unwired in the v2.0.3 end-to-end run: five tools had populated native columns and the
+    # report still said "no native column available".
+    "pxdesign": "native_pxdesign_af2_iptm",
+    "protein_hunter": "native_protein_hunter_iptm_best",
+    "proteina_complexa": "native_complexa_self_iptm",
 }
 _TOOL_NATIVE_SORT_DIR: dict[str, str] = {
     "mosaic": "desc",
     "boltzgen": "desc",
+    "pxdesign": "desc",
+    "protein_hunter": "desc",
+    "proteina_complexa": "desc",
 }
 
 
@@ -1931,14 +1940,13 @@ def generate_report(
 
     if scatter_b64:
         scatter_block = (
-            f"<h2>Two-stage selection — max-screen vs mean-rank</h2>\n"
+            f"<h2>Engine agreement — max vs mean ipTM (diagnostic)</h2>\n"
             f'<p style="font-size:0.85em;color:#555;margin:0.2em 0 0.6em 0;">'
-            f"Each point is a design: x = <b>max</b> engine iPTM (Stage-1 screen), "
-            f"y = <b>mean</b> engine iPTM (Stage-2 rank). The dotted red line is the "
-            f"top-50% max-screen cut; the dashed diagonal is the upper bound (max ≥ mean) — "
-            f"vertical distance below it = engine disagreement. Points near the diagonal in the "
-            f"top-right are strong, agreed-upon binders; points that clear the screen but sit low "
-            f"are single-engine spikes. Top-20 are labelled with their rank."
+            f"Each point is a design: x = <b>max</b> engine iPTM, y = <b>mean</b> engine iPTM "
+            f"(the ranking key). Nothing is screened out on x; the dashed diagonal is the upper bound "
+            f"(max ≥ mean) — vertical distance below it = engine disagreement. Points near the diagonal "
+            f"in the top-right are strong, agreed-upon binders; points far below it are single-engine "
+            f"spikes. Top-20 are labelled with their rank."
             f"</p>\n"
             f'<img src="data:image/png;base64,{scatter_b64}" alt="max vs mean engine iPTM scatter">'
         )
@@ -2181,6 +2189,11 @@ def _top_table_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float]
         (
             "consensus_iptm_mean ↑",
             "<b>The ranking metric</b> — mean of per-engine PAE-iPTM. Higher = stronger multi-engine consensus.",
+        ),
+        (
+            "consensus_iptm_n",
+            "How many engines contributed to the mean. 3-engine and 2-engine means are not on one scale: "
+            "read this beside the rank.",
         ),
         ("consensus_iptm ↑", "Max engine iPTM — diagnostic; ranking uses the mean (max-ranking is worse)."),
         ("consensus_iptm_min ↑", "Min engine iPTM — conservative lower bound."),
@@ -2799,6 +2812,7 @@ def _select_display_cols(df: pd.DataFrame) -> tuple[list[str], list[str]]:
         "binder_length",
         "passes_engine_gate",
         "consensus_iptm_mean",
+        "consensus_iptm_n",
         "consensus_iptm",
         "consensus_iptm_min",
         "consensus_iptm_spread",
