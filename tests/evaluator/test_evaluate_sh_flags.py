@@ -113,12 +113,20 @@ def test_evaluate_sh_parser_accepts_the_run_sh_invocation(tmp_path: Path) -> Non
     stub.chmod(0o755)
     (sandbox / "envs" / "mosaic_venv_path").write_text(f"{venv}\n")
 
-    # Stub conda so no real environment is ever touched.
-    stub_bin = tmp_path / "stubbin"
-    stub_bin.mkdir()
-    conda = stub_bin / "conda"
-    conda.write_text("#!/bin/sh\nexit 0\n")
-    conda.chmod(0o755)
+    # Stub conda so no real environment is ever touched. A conda on PATH is NOT enough: evaluate.sh
+    # sources the first conda.sh it finds, which defines `conda` as a shell FUNCTION, and a function
+    # beats every PATH entry -- on a box with a system conda the stub was never consulted and the
+    # script ran the real `conda env list` / `conda run`, which under load outlasts the timeout.
+    # So plant the function where the search looks first (`<checkout>/conda`, the sandbox's parent),
+    # and put a decoy "real" conda in the home directory the search would otherwise fall back to.
+    calls = tmp_path / "stub_conda_calls"
+    decoy_calls = tmp_path / "decoy_conda_calls"
+    conda_sh = tmp_path / "conda" / "etc" / "profile.d" / "conda.sh"
+    conda_sh.parent.mkdir(parents=True)
+    conda_sh.write_text(f'conda() {{\n  echo "$*" >> "{calls}"\n  return 0\n}}\n')
+    decoy_sh = tmp_path / "home" / "miniforge3" / "etc" / "profile.d" / "conda.sh"
+    decoy_sh.parent.mkdir(parents=True)
+    decoy_sh.write_text(f'conda() {{\n  echo "$*" >> "{decoy_calls}"\n  return 0\n}}\n')
 
     sequences = tmp_path / "seqs.fasta"
     sequences.write_text(">b1\nMKTAYIAKQRQ\n")
@@ -135,16 +143,31 @@ def test_evaluate_sh_parser_accepts_the_run_sh_invocation(tmp_path: Path) -> Non
         argv.append(flag)
         argv.append(values.get(flag, "dummy"))
 
-    env = {**os.environ, "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"}
-    proc = subprocess.run(
-        ["bash", str(sandbox / "evaluate.sh"), *argv],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-    )
+    # No inherited conda hint or exported shell function may reach a conda other than the planted one.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("CONDA_", "BASH_FUNC_")) and k not in {"BINDERSCOUT_CONDA", "BASH_ENV", "ENV"}
+    }
+    env["HOME"] = str(tmp_path / "home")
+    try:
+        proc = subprocess.run(
+            ["bash", str(sandbox / "evaluate.sh"), *argv],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(
+            f"evaluate.sh did not finish in {exc.timeout}s although conda is stubbed: it is reaching a real tool"
+        )
     combined = proc.stdout + proc.stderr
     assert "Unknown argument" not in combined, f"evaluate.sh rejected run.sh's own invocation: {combined.strip()}"
+    assert not decoy_calls.exists(), f"a conda other than the planted stub ran: {decoy_calls.read_text()}"
+    assert calls.exists(), (
+        f"evaluate.sh never reached the planted conda stub, so nothing was driven: {combined.strip()}"
+    )
 
 
 # --- Cross-engine gate vs. the engines that actually run ----------------------
