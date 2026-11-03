@@ -5267,9 +5267,10 @@ main() {
             fi
         fi
 
-        # Offer to remove local Miniforge when all tools are uninstalled
+        # Offer to remove local Miniforge when all tools are uninstalled. Not when conda was not
+        # found: a conda/ directory detect_conda rejected is partial, and its envs were not removed.
         if [[ "${DO_BINDCRAFT}" == true && "${DO_BOLTZGEN}" == true && \
-              "${DO_MOSAIC}" == true && "${DO_EVALUATOR}" == true ]]; then
+              "${DO_MOSAIC}" == true && "${DO_EVALUATOR}" == true && "${NO_CONDA}" != true ]]; then
             if [[ -d "${LOCAL_CONDA_DIR}" ]]; then
                 # This rm -rf takes every env with it, including any still in use.
                 if pgrep -f "${LOCAL_CONDA_DIR}/envs/" >/dev/null 2>&1; then
