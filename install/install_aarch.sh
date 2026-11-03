@@ -173,7 +173,7 @@ DO_BOLTZGEN=false
 DO_MOSAIC=false
 DO_EVALUATOR=false
 DO_PXDESIGN=false
-DO_AF3=false            # opt-in via --tool af3 (gated weights; not in --tool all)
+DO_AF3=false            # in --tool all (builds the env only -- the gated weights are NOT bundled or fetched)
 DO_BINDCRAFT2=false     # opt-in via --tool bindcraft2 + --bc2-source (see the note above)
 DO_PROTEIN_HUNTER=false # opt-in via --tool protein-hunter. PyRosetta comes from the graylab
                         # conda channel -- the same aarch64 build install_bindcraft() already
@@ -216,8 +216,9 @@ DO_TMPROT=false         # opt-in: sequence-only melting-temperature screen. GPL-
 #
 # The menu defaults are the aarch64 ones, not install.sh's. ESMFold2 is ON because it
 # is the DEFAULT refold engine. RFD3 is OFF here although install.sh defaults it ON --
-# it is unvalidated on this hardware. AF3 is OFF (weights gated by DeepMind),
-# BindCraft 2 OFF (hosting-restricted licence), RFD4-Proteina OFF (install_rfd4
+# it is unvalidated on this hardware. AF3 is ON beside ESMFold2 because the report's
+# gate wants three engines (its weights are gated by DeepMind, but install_af3 only
+# builds the env and prints where to request them). BindCraft 2 OFF (hosting-restricted licence), RFD4-Proteina OFF (install_rfd4
 # refuses on this platform), and Proteina-Complexa / Protein-Hunter OFF (installable
 # but unvalidated end to end here). Each of those is a deliberate opt-in.
 TOOL_REGISTRY=(
@@ -231,7 +232,7 @@ TOOL_REGISTRY=(
     "DO_PROTEINA_COMPLEXA|Proteina-Complexa|install_proteina_complexa|false|NVIDIA flow matching + test-time compute (uv venv); runs here, throughput UNMEASURED"
     "DO_BINDCRAFT2|BindCraft 2|install_bindcraft2|false|AF2 hallucination rewritten for JAX, no PyRosetta (uv venv; ~7.4 min/trajectory here)"
     "DO_PROTEIN_HUNTER|Protein-Hunter|install_protein_hunter|false|Boltz/Chai hallucination: protein/cyclic/ligand/DNA/RNA binders (conda; PyRosetta from graylab conda)"
-    "DO_AF3|AF3|install_af3|false|AlphaFold 3 refold engine -- needs gated weights from DeepMind (conda)"
+    "DO_AF3|AF3|install_af3|true|AlphaFold 3 refold engine -- builds the env; the weights are gated and requested separately (conda)"
     "DO_ESMFOLD2|ESMFold2|install_esmfold2|true|DEFAULT refold engine -- the cross-engine gate needs 3 engines (conda)"
     "DO_SOLUPROT|SoluProt|install_soluprot|false|Sequence-only E. coli solubility screen, pre-refold (conda, Python 3.7; source-builds USEARCH)"
     "DO_TMPROT|TmProt|install_tmprot|false|Sequence-only melting-temperature screen, advisory only (conda; GPL-3.0, not redistributed)"
@@ -250,6 +251,11 @@ while [[ $# -gt 0 ]]; do
                     # fewer engines than the cross-engine gate assumes.
                     DO_BINDCRAFT=true; DO_BOLTZGEN=true; DO_MOSAIC=true; DO_EVALUATOR=true; DO_PXDESIGN=true
                     DO_ESMFOLD2=true      # RFD3 is opt-in here: --tool rfd3 (see the note on DO_RFD3)
+                    # AF3 too: the report's cross-engine gate defaults to THREE engines, so
+                    # without it a default install ranks every design last. install_af3 only
+                    # BUILDS the env and prints where to request the gated weights; it does
+                    # not fetch them and does not fail without them.
+                    DO_AF3=true
                     # SoluProt labels every design with a solubility score that the
                     # report shows beside the refold numbers, so a full install without
                     # it produces a report missing a documented column. (It used to gate
@@ -399,9 +405,11 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
                                        (tmol, cuequivariance-ops-cu13, -torch-cu13), and a
                                        resolve on GB10 returned the exact pinned set.
                                        Validated by install, NOT by a design campaign.
-                  af3                  AlphaFold 3 v3.0.2 refolder — opt-in only;
-                                       gated AF3 weights you obtain from
+                  af3                  AlphaFold 3 v3.0.2 refolder — also in --tool
+                                       all. The install builds the env only: the gated
+                                       AF3 weights are never fetched, you obtain them from
                                        https://github.com/google-deepmind/alphafold3
+                                       (evaluate.sh skips AF3 until they are found)
                   esmfold2             ESMFold2 refolder — opt-in only;
                                        lightweight 4th refold engine, no gated weights
                   soluprot             SoluProt solubility screen — opt-in. aarch64
@@ -5209,9 +5217,10 @@ main() {
         confirm "Proceed with uninstall?" || { echo "Aborted."; exit 0; }
 
         # `--tool all` means "everything installed" when uninstalling. The install-side
-        # `all` deliberately omits AF3 (gated weights) and SoluProt (opt-in screen), so
-        # without this their envs — plus alphafold3/ and Evaluator/tools/soluprot —
-        # survived an "uninstall everything" and the script still said it was complete.
+        # `all` now covers AF3 and SoluProt, but once left them out, and then their
+        # envs — plus alphafold3/ and Evaluator/tools/soluprot — survived an
+        # "uninstall everything" while the script still said it was complete; so they
+        # stay re-asserted here.
         if [[ "${TOOL_ALL}" == true ]]; then
             DO_AF3=true
             DO_ESMFOLD2=true

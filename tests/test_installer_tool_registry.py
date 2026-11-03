@@ -3,7 +3,7 @@
 There used to be five hardcoded tool lists in install.sh and they had drifted
 apart: ``print_tool_status`` carried 6 entries, ``select_tools_interactive`` 8,
 ``--tool all`` 11, and the dispatch and uninstall blocks 12. Only the 11 was
-deliberate (AF3 is opt-in because its weights are gated).
+deliberate (AF3 was held out of `--tool all`; it is in it now).
 
 The 8 was the damaging one. A user who ran the interactive menu could not
 select ESMFold2 at all, and ESMFold2 is the *default* refold engine — so a
