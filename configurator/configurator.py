@@ -2416,9 +2416,12 @@ def _conda_head() -> str:
     is just the checkout's own, which is already listed relative to $BINDERSCOUT_DIR.
     """
     lines = [
-        '    "${BINDERSCOUT_CONDA:-}/etc/profile.d/conda.sh" \\',
+        # ${VAR:+...} yields "" when VAR is unset or empty, and -f "" is false. The old
+        # "${VAR:-}/etc/profile.d/conda.sh" spelling became /etc/profile.d/conda.sh, so a
+        # system-wide conda hook could win over the checkout's own conda.
+        '    "${BINDERSCOUT_CONDA:+$BINDERSCOUT_CONDA/etc/profile.d/conda.sh}" \\',
         '    "$BINDERSCOUT_DIR/conda/etc/profile.d/conda.sh" \\',
-        '    "${CONDA_EXE%/bin/*}/etc/profile.d/conda.sh" \\',
+        '    "${CONDA_EXE:+${CONDA_EXE%/bin/*}/etc/profile.d/conda.sh}" \\',
     ]
     if CONDA_BASE and CONDA_BASE != BINDERSCOUT_DIR / "conda":
         lines.append(f'    "{_dq(str(CONDA_BASE))}/etc/profile.d/conda.sh" \\')
