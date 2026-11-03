@@ -28,7 +28,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.append(str(_REPO_ROOT))
-from binderscout_paths import find_conda_base  # noqa: E402
+from binderscout_paths import find_conda_base, find_env_prefix  # noqa: E402
 
 # ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -290,10 +290,14 @@ def detect_installs() -> dict:
         """Marker AND probe once markers exist; probe alone before then."""
         return (_marked(key) and probe) if markers_present else probe
 
-    def _env_exists(name: str) -> bool:
+    def _env_prefix(name: str) -> Path | None:
+        """Where conda env `name` lives (CONDA_ENVS_PATH, <base>/envs, condarc envs_dirs), or None."""
         if CONDA_ENVS_DIR is None:
-            return False
-        return (CONDA_ENVS_DIR / name).is_dir()
+            return None
+        return find_env_prefix(name, CONDA_ENVS_DIR.parent)
+
+    def _env_exists(name: str) -> bool:
+        return _env_prefix(name) is not None
 
     def _env_has_package(env: str, package: str) -> bool:
         """True if `package` is importable-on-disk in `env`'s site-packages.
@@ -301,10 +305,10 @@ def detect_installs() -> dict:
         Checked by looking for the directory rather than by importing, because
         importing costs an interpreter start per tool on every wizard launch.
         """
-        if CONDA_ENVS_DIR is None:
+        prefix = _env_prefix(env)
+        if prefix is None:
             return False
-        libs = (CONDA_ENVS_DIR / env / "lib").glob("python3.*/site-packages")
-        return any((lib / package).is_dir() for lib in libs)
+        return any((lib / package).is_dir() for lib in (prefix / "lib").glob("python3.*/site-packages"))
 
     pxdesign_env = "binderscout_pxdesign"
     rfd3_env = "binderscout_rfd3"

@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from binderscout_paths import find_conda_base
+from binderscout_paths import find_conda_base, find_env_prefix
 
 # ── ANSI colours (fallback menu) ──────────────────────────────────────────────
 
@@ -103,7 +103,7 @@ def _detect_tools(repo: Path) -> dict[str, bool]:
 
     def _present(marker: str) -> bool:
         if marker.startswith("env:"):
-            return conda_base is not None and (conda_base / "envs" / marker[4:]).is_dir()
+            return conda_base is not None and find_env_prefix(marker[4:], conda_base) is not None
         return (repo / marker).exists()
 
     def _installed(key: str, marker: str) -> bool:
