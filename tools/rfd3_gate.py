@@ -94,14 +94,27 @@ def check_origin(pattern, limit=40):
     return ok
 
 
+# Fewest chain-B CA atoms the geometry thresholds below are meaningful for (calibrated on ~60-100 aa binders).
+MIN_BINDER_CA = 25
+
+
 def check_geometry(pattern, limit=40):
     rows = []
+    lengths = []
     for f in sorted(glob.glob(pattern))[:limit]:
         c = ca_chain(f)
-        if len(c) >= 25:
+        if len(c) >= MIN_BINDER_CA:
             rows.append(geom(c))
+        elif c:
+            lengths.append(len(c))
     if not rows:
-        print("  GEOMETRY GATE: no chain-B CA atoms found — CANNOT VERIFY (not a failure)")
+        if lengths:
+            print(
+                f"  GEOMETRY GATE: binder is {max(lengths)} aa, below the {MIN_BINDER_CA}-residue minimum "
+                "this gate needs — CANNOT VERIFY (not a failure)"
+            )
+        else:
+            print("  GEOMETRY GATE: no chain-B CA atoms found — CANNOT VERIFY (not a failure)")
         return None
     rgr = st.mean(r[0] for r in rows)
     lr = st.mean(r[1] for r in rows)
