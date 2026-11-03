@@ -144,6 +144,11 @@ def merge_refold_results(
 
     assert merged is not None  # engine_dfs non-empty guarantee
 
+    # The FASTA is the pool being reported on, so it is the universe. Restrict BEFORE the
+    # banner below and before anything is ranked.
+    if sequences_fasta:
+        merged = _restrict_to_pool(merged, sequences_fasta)
+
     if len(engine_dfs) > 1:
         iptm_cols = {name: f"{name}_iptm" for name in engine_dfs}
         present = [c for c in iptm_cols.values() if c in merged.columns]
@@ -159,6 +164,35 @@ def merge_refold_results(
     if sequences_fasta:
         merged = _attach_fasta_metadata(merged, sequences_fasta)
     return merged
+
+
+def _restrict_to_pool(df: pd.DataFrame, fasta_path: str | Path) -> pd.DataFrame:
+    """Drop engine rows whose sequence is not in *fasta_path*.
+
+    The FASTA is the pool being reported on, so it is the universe. An engine CSV may
+    legitimately hold more (it accumulates across runs, and `--resume` depends on that),
+    but those extra rows must not be ranked: an outer join carries them all into the
+    report, where they enter the near-duplicate collapse, the diversity families, the
+    Top-30 and the primary ranking column, computed over designs that were never in
+    the campaign.
+
+    Both sides are compared in the canonical form `_load_engine` already puts the join
+    key in (stripped, upper case), so a hand-edited CSV does not lose a real design.
+    """
+    pool = {seq.strip().upper() for _, seq in read_fasta(fasta_path) if seq.strip()}
+    if not pool or "sequence" not in df.columns:
+        return df
+
+    in_pool = df["sequence"].astype(str).str.strip().str.upper().isin(pool)
+    n_off = int((~in_pool).sum())
+    if n_off:
+        warnings.warn(
+            f"[merger] {n_off} refold row(s) are not in {fasta_path} and were dropped from "
+            f"the report ({int(in_pool.sum())} of {len(pool)} pool design(s) kept). An engine "
+            "CSV holding another pool's designs usually means a stale output directory.",
+            stacklevel=2,
+        )
+    return df[in_pool].reset_index(drop=True)
 
 
 def _load_engine(path: str | Path, prefix: str) -> pd.DataFrame:
