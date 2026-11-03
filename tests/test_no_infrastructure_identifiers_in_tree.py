@@ -49,9 +49,7 @@ _FINGERPRINT = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
 
 
 def _tracked_text_files():
-    out = subprocess.run(
-        ["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True, text=True, check=True
-    ).stdout
+    out = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True, text=True, check=True).stdout
     for rel in filter(None, out.split("\0")):
         if rel in KNOWN_EXEMPT:
             continue

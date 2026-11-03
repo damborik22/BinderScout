@@ -57,11 +57,11 @@ def _run(script: Path, marker_body: str | None, head: str) -> bool:
         # stub the two things the helpers read from the environment
         f'current_repo_sha() {{ printf "%s" "{head}"; }}',
         'INSTALL_STATE_DIR="$PWD/.install_state"',
-        "mkdir -p \"$INSTALL_STATE_DIR\"",
+        'mkdir -p "$INSTALL_STATE_DIR"',
     ]
     if marker_body is not None:
-        prog.append(f'printf \'{marker_body}\' > "$INSTALL_STATE_DIR/demo"')
-    prog.append('if tool_marker_is_stale demo; then echo STALE; else echo FRESH; fi')
+        prog.append(f"printf '{marker_body}' > \"$INSTALL_STATE_DIR/demo\"")
+    prog.append("if tool_marker_is_stale demo; then echo STALE; else echo FRESH; fi")
     r = subprocess.run(["bash", "-c", "\n".join(prog)], capture_output=True, text=True, cwd="/tmp")
     assert r.returncode == 0, r.stderr
     return r.stdout.strip().endswith("STALE")
