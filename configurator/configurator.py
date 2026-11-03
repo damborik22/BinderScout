@@ -274,8 +274,8 @@ def detect_installs() -> dict:
     not OR: a marker alone would trust a tool whose env was deleted afterwards, and
     a probe alone is the bug.
 
-    The markers are only consulted once at least one exists. Every env on this fleet
-    predates them, so requiring one unconditionally would report a working
+    The markers are only consulted once at least one exists. Every env installed before the
+    markers existed lacks one, so requiring one unconditionally would report a working
     installation as absent and refuse to configure any of it. That makes the marker
     directory a one-way upgrade: the first install after this change starts
     enforcing, and nothing has to be migrated.
@@ -305,22 +305,9 @@ def detect_installs() -> dict:
         libs = (CONDA_ENVS_DIR / env / "lib").glob("python3.*/site-packages")
         return any((lib / package).is_dir() for lib in libs)
 
-    def _resolve_env(name: str) -> str:
-        """Return `name`, or its pre-rename `bindmaster_*` twin when only that exists.
-
-        2.0 renamed three envs. The installer resolves a legacy env in place
-        rather than cloning 13 GB of it, so the wizard has to probe the name the
-        installer will actually use -- otherwise it reports a working tool as
-        not installed and refuses to configure it.
-        """
-        if CONDA_ENVS_DIR is None or _env_exists(name):
-            return name
-        legacy = name.replace("binderscout_", "bindmaster_", 1)
-        return legacy if legacy != name and _env_exists(legacy) else name
-
-    pxdesign_env = _resolve_env("binderscout_pxdesign")
-    rfd3_env = _resolve_env("binderscout_rfd3")
-    protein_hunter_env = _resolve_env("binderscout_protein_hunter")
+    pxdesign_env = "binderscout_pxdesign"
+    rfd3_env = "binderscout_rfd3"
+    protein_hunter_env = "binderscout_protein_hunter"
 
     # The marker key is the installer's DO_ flag lowercased, which is this dict's
     # own key everywhere except pxdesign_local -- "local" is a configurator-side
@@ -340,7 +327,7 @@ def detect_installs() -> dict:
         # The console script, not the checkout: RFD4-Proteina is installed editable
         # into its own venv, so the clone exists before anything is importable.
         "rfd4": _installed("rfd4", (RFD4_VENV / "bin" / "rfd4-generate").exists()),
-        # An env directory is not an install: BM5 carried a `binderscout_protein_hunter`
+        # An env directory is not an install: an aarch64 box carried a `binderscout_protein_hunter`
         # env for months that held only pip and setuptools — no PyRosetta, no boltz_ph —
         # and this probe reported the tool as ready. Look for PyRosetta, which is the
         # part that actually fails to install, and which design.py imports at startup.
@@ -2371,8 +2358,8 @@ GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i {gpu_id_var} 2>/
 GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i {gpu_id_var} 2>/dev/null | head -1 || echo 0)
 # GB10 (DGX Spark) answers this query SUCCESSFULLY and returns the string "[N/A]",
 # so the `|| echo 0` above never fires. gpu_memory_mib is the one unquoted value in
-# the JSON, so that string lands bare and settings.json stops parsing — on the very
-# machine that orchestrates the fleet. Keep the reading only when it is a number.
+# the JSON, so that string lands bare and settings.json stops parsing, on exactly the
+# hardware this campaign is meant to run on. Keep the reading only when it is a number.
 GPU_MEM=$(printf '%s' "$GPU_MEM" | grep -E '^[0-9]+$' || echo 0)
 PY_VER=$(python -c 'import sys;print(".".join(map(str,sys.version_info[:3])))' 2>/dev/null || echo "unknown"){extra_env_inner}
 cat > "${settings_dir_var}/settings.json" <<SETTINGS_JSON_EOF
@@ -2425,19 +2412,7 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
-# The env name is RESOLVED, not hardcoded. These envs predate the 2.0 rename on
-# the HPC cluster, where they are still `bindmaster_*` (CLAUDE.local.md). A
-# hardcoded `binderscout_pxdesign` there dies in 0 s with
-# `EnvironmentNameNotFound`, which in sacct is indistinguishable from a fast
-# crash -- that is exactly how one campaign silently lost an arm.
-_bs_env=binderscout_pxdesign
-if ! conda env list 2>/dev/null | awk '{{print $1}}' | grep -qx "$_bs_env"; then
-    if conda env list 2>/dev/null | awk '{{print $1}}' | grep -qx bindmaster_pxdesign; then
-        _bs_env=bindmaster_pxdesign
-        echo "NOTE: using pre-rename env $_bs_env (no binderscout_pxdesign on this host)."
-    fi
-fi
-conda activate "$_bs_env"
+conda activate binderscout_pxdesign
 export CUDA_HOME="$CONDA_PREFIX"
 
 # Surface CUDA dev headers + libs for PyTorch's JIT compiler.
@@ -2757,10 +2732,10 @@ for LENGTH in $(seq "$MIN_LENGTH" "$LENGTH_STEP" "$MAX_LENGTH"); do
     printf 'binder_length: %d\\ntarget:\\n  file: %s\\n  chains:\\n{chain_lines}' \\
         "$LENGTH" "$TARGET_PDB" > "$INPUT_YAML"
 
-    # $CONDA_PREFIX/bin, never a bare name: on the HPC cluster `bin/pxdesign` is
-    # `exec mamba run -n <env> bash`, which DISCARDS its arguments and exits 0 --
-    # designing nothing and reporting no error (CLAUDE.local.md). `which pxdesign`
-    # actively misleads there, because the shortcut dir precedes the env on PATH.
+    # $CONDA_PREFIX/bin, never a bare name: a `bin/pxdesign` shortcut can be an
+    # interactive-shell launcher (`exec mamba run -n <env> bash`), which DISCARDS its
+    # arguments and exits 0 -- designing nothing and reporting no error. `which pxdesign`
+    # actively misleads there, because the shortcut dir can precede the env on PATH.
     "$CONDA_PREFIX/bin/pxdesign" pipeline \\
         --preset {preset} \\
         --N_sample "$N_SAMPLES" \\
@@ -3152,7 +3127,7 @@ rows = []
 # directory, never in 'evaluation_results' itself. The old probe tested
 # `run_name in str(p)` against the 'evaluation_results' path, so it could not match:
 # a COMPLETED 8-design run with 40 structures and 12 result CSVs reported
-# 'No binder sequences extracted' (measured 2026-10-30, Clara job 261240).
+# 'No binder sequences extracted' (measured 2026-10-30).
 searched = []
 eval_dir = Path('outputs') / run_name
 if not eval_dir.exists():
@@ -3330,9 +3305,9 @@ def write_run_bindcraft2(path: Path, cfg: dict):
         ValueError, so every campaign dies just after preflight. Two documented
         settings avoid it, and they are injected HERE rather than written into
         campaign.json, because configs are generated on one machine and run on
-        another: baking them in would disable multi-GPU packing on the x86 boxes
-        whenever BM5 generated the config, and omitting them would still crash on
-        Spark whenever an x86 box did.
+        another: baking them in would disable multi-GPU packing on x86_64 whenever
+        an aarch64 box generated the config, and omitting them would still crash on
+        Spark whenever an x86_64 box did.
     """
     run_dir = cfg["run_dir"]
     name = cfg["name"]
@@ -3734,19 +3709,7 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
-# The env name is RESOLVED, not hardcoded. These envs predate the 2.0 rename on
-# the HPC cluster, where they are still `bindmaster_*` (CLAUDE.local.md). A
-# hardcoded `binderscout_rfd3` there dies in 0 s with
-# `EnvironmentNameNotFound`, which in sacct is indistinguishable from a fast
-# crash -- that is exactly how one campaign silently lost an arm.
-_bs_env=binderscout_rfd3
-if ! conda env list 2>/dev/null | awk '{{print $1}}' | grep -qx "$_bs_env"; then
-    if conda env list 2>/dev/null | awk '{{print $1}}' | grep -qx bindmaster_rfd3; then
-        _bs_env=bindmaster_rfd3
-        echo "NOTE: using pre-rename env $_bs_env (no binderscout_rfd3 on this host)."
-    fi
-fi
-conda activate "$_bs_env"
+conda activate binderscout_rfd3
 
 # foundry's checkpoint registry reads FOUNDRY_CHECKPOINT_DIRS / FOUNDRY_CHECKPOINTS_DIR.
 # Singular FOUNDRY_CHECKPOINT_DIR is silently ignored (rfd3 design then aborts with
@@ -3755,7 +3718,7 @@ export FOUNDRY_CHECKPOINT_DIRS="$WEIGHTS_DIR"
 # Avoid VRAM fragmentation on 24 GB cards: with diffusion_batch_size=10 and
 # low_memory_mode=true, peak live allocation is ~15 GiB but PyTorch reserves
 # another ~6 GiB unallocated, pushing the next 3 GiB allocation over the cliff
-# mid-run (BM4 RTX 3090 OOMed on its 7th batch on the 2VDY run).
+# mid-run (an RTX 3090 OOMed on its 7th batch of a 2VDY run).
 # expandable_segments lets the allocator hand back reserved-but-unallocated
 # memory instead of fragmenting forever.
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -4069,19 +4032,7 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
-# The env name is RESOLVED, not hardcoded. These envs predate the 2.0 rename on
-# the HPC cluster, where they are still `bindmaster_*` (CLAUDE.local.md). A
-# hardcoded `binderscout_protein_hunter` there dies in 0 s with
-# `EnvironmentNameNotFound`, which in sacct is indistinguishable from a fast
-# crash -- that is exactly how one campaign silently lost an arm.
-_bs_env=binderscout_protein_hunter
-if ! conda env list 2>/dev/null | awk '{{print $1}}' | grep -qx "$_bs_env"; then
-    if conda env list 2>/dev/null | awk '{{print $1}}' | grep -qx bindmaster_protein_hunter; then
-        _bs_env=bindmaster_protein_hunter
-        echo "NOTE: using pre-rename env $_bs_env (no binderscout_protein_hunter on this host)."
-    fi
-fi
-conda activate "$_bs_env"
+conda activate binderscout_protein_hunter
 set -u
 
 # Gotcha: boltz_ph reads Boltz-2 weights + CCD library from ~/.boltz. The
@@ -4562,7 +4513,7 @@ fi
 #   fatal error: Python.h: No such file or directory
 #   torch._inductor.exc.InductorError: CalledProcessError ... driver.c
 # which reads like a CUDA fault but is not: libcuda.so.1 resolves fine.
-# Measured 2026-10-30 on BM1/BM2/BM4, none of which carry python3.12-dev.
+# Measured 2026-10-30 on x86_64 boxes, none of which carried python3.12-dev.
 _py_inc="$("$RFD4_PY" -c 'import sysconfig; print(sysconfig.get_paths()["include"])' 2>/dev/null || true)"
 if [[ -n "${{_py_inc}}" && ! -f "${{_py_inc}}/Python.h" ]]; then
     _py_tag="$(basename "${{_py_inc}}")"

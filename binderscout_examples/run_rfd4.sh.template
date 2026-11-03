@@ -2,7 +2,7 @@
 # RFD4-Proteina binder-design template — copy to runs/<name>/run_rfd4.sh and fill
 # the placeholders. `binderscout configure` generates this script and its input
 # spec for you; this file is the canonical hand-written pattern, taken from the
-# PD-L1 / TrkA pool run of 2026-10-23 (690 designs, two Clara L40S jobs).
+# PD-L1 / TrkA pool run of 2026-10-23 (690 designs, two L40S jobs).
 #
 # One stage: rfd4-generate reads a condition spec and writes one mmCIF per design
 # holding the preserved target plus the designed binder on its own chain.
