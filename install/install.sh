@@ -3066,6 +3066,7 @@ EOF
 # dataloader. The assertion below is therefore on the SIGNATURE, not the version string.
 _pin_rfd3_atomworks() {
     env_exists "${RFD3_ENV}" || { print_warn "No ${RFD3_ENV} env — skipping atomworks pin"; return 0; }
+    bs_env_lookup "${CONDA_BASE}" "${RFD3_ENV}"
     local py="${BS_ENV_PREFIX}/bin/python"
 
     local have

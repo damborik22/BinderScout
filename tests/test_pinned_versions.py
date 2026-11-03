@@ -56,6 +56,12 @@ def _function_source(path: Path, name: str) -> str:
     return m.group(0)
 
 
+def _conda_block(path: Path) -> str:
+    text = path.read_text()
+    begin, end = "# >>> binderscout-conda-block >>>", "# <<< binderscout-conda-block <<<"
+    return begin + text.split(begin, 1)[1].split(end, 1)[0] + end
+
+
 def _run_bash(lines: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(["bash", "-c", "\n".join(lines)], capture_output=True, text=True, timeout=180)
 
@@ -262,6 +268,9 @@ class TestRfd3GetsTheAtomworksPinToo:
                     f'CONDA_BASE="{tmp_path / label}"',
                     'RFD3_ENV="binderscout_rfd3"',
                     'ATOMWORKS_VERSION="2.2.1"',
+                    # the installer's own env lookup: _env_python_ok and the pin resolve the
+                    # env through it, so the stub env above is found where conda would put it
+                    _conda_block(path),
                     _function_source(path, "_env_python_ok"),
                     _function_source(path, "_pin_rfd3_atomworks"),
                     "_pin_rfd3_atomworks; echo RC=$?",
