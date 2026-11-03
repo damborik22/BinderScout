@@ -389,7 +389,26 @@ def _stub_checkout(tmp_path, with_conda_gcc):
         gcc.chmod(0o755)
     tools = tmp_path / "pathbin"
     tools.mkdir()
-    for tool in ("awk", "basename", "date", "dirname", "find", "git", "grep", "head", "mkdir", "sort", "cat", "readlink", "sed", "tr", "wc", "ls", "id", "uname"):
+    for tool in (
+        "awk",
+        "basename",
+        "date",
+        "dirname",
+        "find",
+        "git",
+        "grep",
+        "head",
+        "mkdir",
+        "sort",
+        "cat",
+        "readlink",
+        "sed",
+        "tr",
+        "wc",
+        "ls",
+        "id",
+        "uname",
+    ):
         found = shutil.which(tool)
         assert found, tool
         (tools / tool).symlink_to(found)

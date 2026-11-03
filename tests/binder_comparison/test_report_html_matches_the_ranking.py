@@ -24,12 +24,7 @@ GOLDEN = REPO / "tests" / "integration" / "golden_pool"
 
 def test_no_visualization_text_presents_the_removed_stage_one_screen_as_live():
     banned = ("Two-stage selection", "(Stage-1 screen)", "(Stage-2 rank)", "top-50% max-screen cut", "max-screen (x)")
-    hits = [
-        f"{p.name}: {phrase}"
-        for p in sorted(VIS.glob("*.py"))
-        for phrase in banned
-        if phrase in p.read_text()
-    ]
+    hits = [f"{p.name}: {phrase}" for p in sorted(VIS.glob("*.py")) for phrase in banned if phrase in p.read_text()]
     assert not hits, hits
 
 

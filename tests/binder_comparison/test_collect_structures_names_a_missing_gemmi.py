@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("pandas")
 
-from binder_comparison.structures import collect_design_structures  # noqa: E402
+from binder_comparison.structures import collect_design_structures
 
 CIF = "data_x\n_cell.length_a 1\n"
 

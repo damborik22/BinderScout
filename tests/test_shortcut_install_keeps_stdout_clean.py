@@ -114,7 +114,7 @@ def test_a_query_from_another_checkout_does_not_take_over_the_account_command(tm
 
 def test_install_may_take_the_command_over(tmp_path, monkeypatch):
     cli = _load_cli()
-    shim, a, b = _two_checkouts(cli, tmp_path, monkeypatch)
+    shim, _a, b = _two_checkouts(cli, tmp_path, monkeypatch)
     cli._install_binderscout_shortcut(repoint=True)
     assert str(b / "binderscout.py") in shim.read_text()
 
