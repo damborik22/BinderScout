@@ -73,19 +73,124 @@
 
 set -euo pipefail
 
-# Initialise conda — prefer local standalone install, then system locations
+# Initialise conda: one discovery order, shared with the installers and the Python CLI.
 _BINDERSCOUT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-for _conda_sh in \
-    "${_BINDERSCOUT_DIR}/conda/etc/profile.d/conda.sh" \
-    "${HOME}/miniforge3/etc/profile.d/conda.sh" \
-    "${HOME}/mambaforge/etc/profile.d/conda.sh" \
-    "${HOME}/miniconda3/etc/profile.d/conda.sh" \
-    "${HOME}/anaconda3/etc/profile.d/conda.sh" \
-    "/opt/conda/etc/profile.d/conda.sh" \
-    "/opt/miniforge3/etc/profile.d/conda.sh"; do
+
+# >>> binderscout-conda-block >>>
+# ONE answer to "where is conda?" for shell, in the same order as
+# binderscout_paths.find_conda_base: $BINDERSCOUT_CONDA, <checkout>/conda, $CONDA_EXE,
+# $CONDA_PREFIX, conda/mamba/micromamba on PATH, then the usual install locations. A base
+# is valid when it has etc/profile.d/conda.sh (the file every generated script sources).
+# No subprocess is run to find it.
+# This text is copied VERBATIM into every script that needs it, because the scripts cannot
+# share a file (the installer runs before anything else exists). Edit all copies together:
+# tests/test_shell_conda_block_is_identical.py fails when they drift.
+
+# bs_conda_candidates [checkout-dir]  -> every directory worth trying, best first
+bs_conda_candidates() {
+    local repo="${1:-}" home="${HOME:-}" p t
+    if [[ -n "${BINDERSCOUT_CONDA:-}" ]]; then
+        p="${BINDERSCOUT_CONDA}"
+        if [[ "${p}" == \~ || "${p}" == \~/* ]]; then p="${home}${p#\~}"; fi
+        printf '%s\n' "${p}"
+    fi
+    if [[ -n "${repo}" ]]; then printf '%s\n' "${repo}/conda"; fi
+    if [[ -n "${CONDA_EXE:-}" ]]; then
+        p="$(readlink -f -- "${CONDA_EXE}" 2>/dev/null || true)"
+        if [[ -n "${p}" ]]; then printf '%s\n' "${p%/*/*}"; fi
+    fi
+    if [[ -n "${CONDA_PREFIX:-}" ]]; then
+        p="${CONDA_PREFIX%/}"
+        if [[ "$(basename -- "$(dirname -- "${p}")")" == "envs" ]]; then
+            printf '%s\n' "${p%/*/*}"
+        else
+            printf '%s\n' "${p}"
+        fi
+    fi
+    for t in conda mamba micromamba; do
+        p="$(type -P "${t}" 2>/dev/null || true)"
+        if [[ -n "${p}" ]]; then
+            p="$(readlink -f -- "${p}" 2>/dev/null || true)"
+            if [[ -n "${p}" ]]; then printf '%s\n' "${p%/*/*}"; fi
+        fi
+    done
+    if [[ -n "${home}" ]]; then
+        for t in miniforge3 mambaforge miniconda3 anaconda3 conda; do printf '%s\n' "${home}/${t}"; done
+    fi
+    for t in /opt/conda /opt/miniforge3 /opt/miniconda3 /opt/anaconda3; do printf '%s\n' "${t}"; done
+}
+
+# bs_valid_conda_bases [checkout-dir]  -> the candidates that really are a conda base, once each
+bs_valid_conda_bases() {
+    local c seen=$'\n'
+    while IFS= read -r c; do
+        if [[ -f "${c}/etc/profile.d/conda.sh" && "${seen}" != *$'\n'"${c}"$'\n'* ]]; then
+            seen+="${c}"$'\n'
+            printf '%s\n' "${c}"
+        fi
+    done < <(bs_conda_candidates "${1:-}")
+}
+
+# bs_find_conda_base [checkout-dir]  -> the first valid base; status 1 when there is none
+bs_find_conda_base() {
+    local c
+    while IFS= read -r c; do
+        printf '%s\n' "${c}"
+        return 0
+    done < <(bs_valid_conda_bases "${1:-}")
+    return 1
+}
+
+# bs_source_conda [checkout-dir]  -> find a base, remember it in BS_CONDA_BASE, source its conda.sh
+bs_source_conda() {
+    local base
+    base="$(bs_find_conda_base "${1:-}")" || return 1
+    # shellcheck disable=SC2034  # read by the scripts that carry this block
+    BS_CONDA_BASE="${base}"
     # shellcheck source=/dev/null
-    [[ -f "$_conda_sh" ]] && { source "$_conda_sh"; break; }
-done
+    source "${base}/etc/profile.d/conda.sh"
+}
+
+# bs_env_lookup <conda-base> <env-name>  -> sets BS_ENV_PREFIX; status 0 when the env exists
+# An env is not always <base>/envs/<name>: $CONDA_ENVS_PATH, a condarc envs_dirs and the
+# per-user ~/.conda/envs all put it elsewhere. Order: $CONDA_ENVS_PATH, <base>/envs, then
+# conda's own listing (parsed without jq). The old <base>/envs path stays the fallback
+# answer, so a caller that builds a path from it behaves exactly as before.
+BS_ENV_PREFIX=""
+BS_ENV_JSON=""    # `conda env list --json`, kept until a command that may change the envs ran
+# shellcheck disable=SC2034  # BS_ENV_PREFIX is read by the callers, not here
+bs_env_lookup() {
+    local base="${1:-}" name="$2" d line
+    local -a dirs=()
+    if [[ -n "${CONDA_ENVS_PATH:-}" ]]; then
+        IFS=: read -r -a dirs <<< "${CONDA_ENVS_PATH}"
+        for d in "${dirs[@]}"; do
+            if [[ -n "${d}" && -d "${d}/${name}" ]]; then BS_ENV_PREFIX="${d}/${name}"; return 0; fi
+        done
+    fi
+    if [[ -n "${base}" && -d "${base}/envs/${name}" ]]; then BS_ENV_PREFIX="${base}/envs/${name}"; return 0; fi
+    if [[ -n "${base}" && -x "${base}/bin/conda" ]]; then
+        if [[ -z "${BS_ENV_JSON}" ]]; then
+            BS_ENV_JSON="$("${base}/bin/conda" env list --json 2>/dev/null || true)"
+            if [[ -z "${BS_ENV_JSON}" ]]; then BS_ENV_JSON="-"; fi
+        fi
+        while IFS= read -r line; do
+            line="${line#*\"}"
+            line="${line%\"*}"
+            if [[ "${line}" == /* && "${line##*/}" == "${name}" && -d "${line}" ]]; then
+                BS_ENV_PREFIX="${line}"
+                return 0
+            fi
+        done < <(printf '%s\n' "${BS_ENV_JSON}" | tr ',' '\n')
+    fi
+    BS_ENV_PREFIX="${base}/envs/${name}"
+    return 1
+}
+# <<< binderscout-conda-block <<<
+
+# A miss is not fatal HERE (--help and argument errors need no conda); it is reported per engine
+# and then fatally, further down, once the arguments are known to be valid.
+bs_source_conda "${_BINDERSCOUT_DIR}" || true
 
 # aarch64/Blackwell: PyTorch CUDA compilation target.
 #
@@ -257,10 +362,29 @@ echo "Sequences : $SEQUENCES"
 echo "Output    : $OUTPUT"
 echo ""
 
+# _env_missing_reason <env>: prints why <env> cannot be used and succeeds; fails (prints nothing)
+# when it can. "No conda" is its own answer: it used to read as "env not found", which blamed the
+# install of every optional engine for what is a failure to find conda itself.
+_env_missing_reason() {
+    if ! command -v conda >/dev/null 2>&1; then
+        echo "conda not found"
+        return 0
+    fi
+    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "$1"; then
+        echo "conda env '$1' not found"
+        return 0
+    fi
+    return 1
+}
+
+# Every optional engine / screen skipped for want of an env, with the reason, for one summary.
+_SKIPPED=()
+
 # Auto-detect AF3 availability unless user skipped it
 if [[ $SKIP_AF3 -eq 0 ]]; then
-    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${AF3_ENV}"; then
-        echo "[note] conda env '${AF3_ENV}' not found — AF3 refolding will be skipped."
+    if _why="$(_env_missing_reason "${AF3_ENV}")"; then
+        echo "[note] ${_why} — AF3 refolding will be skipped."
+        _SKIPPED+=("AF3: ${_why}")
         echo "        (install with 'binderscout install --tool af3'; runs on 24 GB GPUs — see Evaluator/envs/binder-eval-af3.yml)"
         echo ""
         SKIP_AF3=1
@@ -269,8 +393,9 @@ fi
 
 # Auto-detect ESMFold2 availability unless user skipped it
 if [[ $SKIP_ESMFOLD2 -eq 0 ]]; then
-    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${ESMFOLD2_ENV}"; then
-        echo "[note] conda env '${ESMFOLD2_ENV}' not found — ESMFold2 refolding will be skipped."
+    if _why="$(_env_missing_reason "${ESMFOLD2_ENV}")"; then
+        echo "[note] ${_why} — ESMFold2 refolding will be skipped."
+        _SKIPPED+=("ESMFold2: ${_why}")
         echo "        (install with: binderscout install --tool esmfold2; see Evaluator/envs/binder-eval-esmfold2.yml)"
         echo ""
         SKIP_ESMFOLD2=1
@@ -279,8 +404,9 @@ fi
 
 # Auto-detect SoluProt availability unless user skipped it
 if [[ $SKIP_SOLUPROT -eq 0 ]]; then
-    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${SOLUPROT_ENV}"; then
-        echo "[note] conda env '${SOLUPROT_ENV}' not found — SoluProt solubility screen will be skipped."
+    if _why="$(_env_missing_reason "${SOLUPROT_ENV}")"; then
+        echo "[note] ${_why} — SoluProt solubility screen will be skipped."
+        _SKIPPED+=("SoluProt: ${_why}")
         echo "        (install with: binderscout install --tool soluprot — ranking is unaffected)"
         echo ""
         SKIP_SOLUPROT=1
@@ -322,8 +448,9 @@ fi
 
 # Auto-detect TmProt availability unless the user skipped it
 if [[ $SKIP_TMPROT -eq 0 ]]; then
-    if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "${TMPROT_ENV}"; then
-        echo "[note] conda env '${TMPROT_ENV}' not found — TmProt melting-temperature screen will be skipped."
+    if _why="$(_env_missing_reason "${TMPROT_ENV}")"; then
+        echo "[note] ${_why} — TmProt melting-temperature screen will be skipped."
+        _SKIPPED+=("TmProt: ${_why}")
         echo "        (install with: binderscout install --tool tmprot — ranking is unaffected)"
         echo ""
         SKIP_TMPROT=1
@@ -344,6 +471,22 @@ if [[ $SKIP_TMPROT -eq 0 ]]; then
         echo ""
         SKIP_TMPROT=1
     fi
+fi
+
+# Name every optional engine skipped for want of an env, with the reason. The [note] lines above
+# are easy to miss in a long log, and a skipped engine changes what the ranking means.
+if (( ${#_SKIPPED[@]} )); then
+    for _s in "${_SKIPPED[@]}"; do
+        echo "[skipped] ${_s}"
+    done
+    echo ""
+fi
+
+# Nothing below runs without conda (every step is a `conda run -n binder-eval ...`).
+if ! command -v conda >/dev/null 2>&1; then
+    echo "Error: conda not found (looked at \$BINDERSCOUT_CONDA, ${_BINDERSCOUT_DIR}/conda, \$CONDA_EXE, \$CONDA_PREFIX, PATH and the usual install locations)." >&2
+    echo "       Install it with 'binderscout install --tool evaluator', or export BINDERSCOUT_CONDA=<its base directory>." >&2
+    exit 1
 fi
 
 # --- Cross-engine gate vs. the engines that will actually run ---------------

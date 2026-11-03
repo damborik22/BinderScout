@@ -534,6 +534,7 @@ bs_source_conda() {
 # answer, so a caller that builds a path from it behaves exactly as before.
 BS_ENV_PREFIX=""
 BS_ENV_JSON=""    # `conda env list --json`, kept until a command that may change the envs ran
+# shellcheck disable=SC2034  # BS_ENV_PREFIX is read by the callers, not here
 bs_env_lookup() {
     local base="${1:-}" name="$2" d line
     local -a dirs=()
