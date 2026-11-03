@@ -56,7 +56,7 @@ def test_bindcraft2_counts_accepted_rows_not_files_on_disk(tmp_path):
 
 
 def test_boltzgen_intermediates_are_generation_progress_not_banked_designs(tmp_path):
-    # Measured on an x86_64 box 2026-10-30: 3430 .cif files, all under
+    # Measured 2026-10-30: 3430 .cif files, all under
     # intermediate_designs/, and no metrics table. They are raw generated
     # designs, not the filtered pool, so they count against --num_designs and
     # the phase says which number this is. See test_boltzgen_is_a_two_phase_tool.

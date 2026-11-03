@@ -7,8 +7,8 @@ from the process table and the GPU, not from output files.
 
 DELIBERATELY NOT using the `-f` full-command-line process matcher: it matches
 its own command line, so it reports every arm as running -- including the dead
-ones -- which silently defeats the whole module. This is the bug recorded in
-CLAUDE.local.md and the reason tfr1_queue.sh waits with `kill -0`. We scan /proc
+ones -- which silently defeats the whole module. This is a known trap, and the
+reason a queue script should wait with `kill -0`. We scan /proc
 ourselves and exclude our own process lineage, which is the part a shell-out
 cannot do.
 """

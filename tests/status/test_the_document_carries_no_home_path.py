@@ -17,7 +17,7 @@ def test_a_home_path_becomes_tilde_relative():
     import pathlib
 
     home = pathlib.Path.home()
-    assert home_relative(home / "dev" / "BindMaster") == "~/dev/BindMaster"
+    assert home_relative(home / "dev" / "checkout") == "~/dev/checkout"
     assert home_relative(home) == "~"
 
 

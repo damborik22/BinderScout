@@ -38,7 +38,7 @@ def _has_evidence(arm) -> bool:
     """Did this arm ever actually run on this box?
 
     Every box carries the run directory, but each arm runs on exactly one of
-    them. Without this, a finished arm on bm1 also renders as `queued` on the
+    them. Without this, a finished arm on host-a also renders as `queued` on the
     four boxes whose copy of the directory is empty -- ten noise rows per box,
     burying the two that matter.
     """

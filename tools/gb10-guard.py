@@ -325,7 +325,7 @@ def announce(pid, why, free, avail, psi):
         "explain": (
             "Killed by gb10-guard: GB10 unified memory was exhausted and this process "
             "was the best candidate. See /var/log/gb10-guard.log and "
-            "~/dev/BinderScout/docs/GB10_FREEZE_FAILSAFE.md"
+            "docs/GB10_FREEZE_FAILSAFE.md in the BinderScout checkout"
         ),
     }
     try:
