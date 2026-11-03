@@ -2828,8 +2828,11 @@ else:
         print(f'  Found {{len(rows)}} sequences from CIF files (fallback)')
 
 if not rows:
-    print('WARNING: No binder sequences extracted', file=sys.stderr)
-    sys.exit(0)
+    # Non-zero: a design step that yields no designs must not report success, or the
+    # tool vanishes from the pool with nothing but a warning buried in the log.
+    # run_all.sh carries on past a failed step and names it at the end.
+    print('ERROR: No binder sequences extracted', file=sys.stderr)
+    sys.exit(1)
 
 out_csv = pxd_dir / 'sequences.csv'
 with open(out_csv, 'w', newline='') as f:
@@ -3318,11 +3321,15 @@ echo "=== Proteina-Complexa design complete ==="
 
 # Collect binder sequences from outputs
 echo "=== Collecting binder sequences ==="
-# Read from the environment, never pasted into the Python source: a run folder holding an
-# apostrophe would end the string literal and make the collector a SyntaxError after the
-# design step had already run.
-export RUN_DIR
-python3 -c "
+# The harvest goes through a QUOTED heredoc, never an inline `-c "..."` string. Inside a
+# double-quoted shell word a quote character ends the string and a backquoted word runs
+# as a command, and this program's comments are full of both -- one stray pair makes the
+# generated script fail `bash -n`, or hands python3 a truncated program, AFTER the design
+# step has run. Quoting the delimiter makes bash pass the body through untouched, so no
+# future comment can break it. $RUN_DIR is the one value that needs expanding, and it is
+# read from the environment rather than pasted into the Python source (an apostrophe in
+# the run folder would otherwise end a string literal).
+RUN_DIR="$RUN_DIR" python3 - <<'PY'
 import csv, glob, os, sys
 from pathlib import Path
 
@@ -3407,11 +3414,15 @@ if not rows:
         print(f'  Found {{len(rows)}} sequences from PDB files (fallback)')
 
 if not rows:
-    print('WARNING: No binder sequences extracted from Proteina-Complexa', file=sys.stderr)
+    # Exit NON-ZERO. A run that generated backbones but harvested nothing used to print
+    # one warning and report success: run_all.sh counted the step as passed, the
+    # Evaluator logged "no CSV found" and dropped the tool, and the report simply had no
+    # Proteina-Complexa column. A design step that produces no designs is a failure.
+    print('ERROR: No binder sequences extracted from Proteina-Complexa', file=sys.stderr)
     probed = ', '.join(str(d) for d in searched) or '[none]'
     print('  looked in: ' + str(eval_dir) + ' [cwd ' + str(Path.cwd()) + ']', file=sys.stderr)
     print('  candidates probed: ' + probed, file=sys.stderr)
-    sys.exit(0)
+    sys.exit(1)
 
 out_csv = pc_dir / 'sequences.csv'
 with open(out_csv, 'w', newline='') as f:
@@ -3419,7 +3430,7 @@ with open(out_csv, 'w', newline='') as f:
     w.writeheader()
     w.writerows(rows)
 print(f'  -> {{len(rows)}} binder sequences written to {{out_csv}}')
-"
+PY
 """
     )
 
