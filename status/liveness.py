@@ -130,7 +130,13 @@ def tool_alive(tool: str, run_dir, table: dict | None = None, gpu_mem: dict | No
     #
     # The lookahead is load-bearing: `<run>/bindcraft` is a prefix of
     # `<run>/bindcraft2`, and `rfd3` of nothing but the same trap waits there.
-    needle = re.compile(re.escape(str(Path(run_dir) / tool)) + r"(?![A-Za-z0-9])")
+    #
+    # Both spellings of the path are matched. Generated scripts bake the RESOLVED path,
+    # while a run directory reached through a symlinked $HOME or checkout is spelled
+    # the other way, and a needle built from only one of them reports a live arm as dead.
+    arm = Path(run_dir) / tool
+    spellings = dict.fromkeys((str(arm), str(arm.resolve())))
+    needle = re.compile("(?:" + "|".join(re.escape(sp) for sp in spellings) + r")(?![A-Za-z0-9])")
     for pid, argv in table.items():
         if needle.search(argv):
             return {"alive": True, "pid": pid, "gpu_mem_mib": gpu_mem.get(pid)}

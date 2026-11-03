@@ -92,15 +92,21 @@ def home_relative(path) -> str:
     the Unix account. Captured across the fleet it named four of them. Which
     checkout a box used is still worth reporting -- the spellings differ per box
     -- so it is reported against $HOME rather than dropped.
+
+    $HOME is tried as spelled AND resolved: when it is a symlink, a checkout path
+    that has been resolved no longer sits under the spelled home, and publishing it
+    whole would name the account (and the storage behind the link).
     """
     path = Path(path)
     home = Path.home()
-    if path == home:
-        return "~"
-    try:
-        return "~/" + str(path.relative_to(home))
-    except ValueError:
-        return str(path)
+    for base in dict.fromkeys((home, home.resolve())):
+        if path == base:
+            return "~"
+        try:
+            return "~/" + str(path.relative_to(base))
+        except ValueError:
+            continue
+    return str(path)
 
 
 def checkout_marker_path() -> Path:
