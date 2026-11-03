@@ -432,8 +432,9 @@ the parameter sweep.
   RTX 3090) stay: they are measurements. Use `$HOME` and repo-relative paths. Real values, and
   the alias list, live in machine-local gitignored files (`CLAUDE.local.md`, `docs/local/`)
   or environment variables. `tests/test_public_docs_are_anonymous.py` enforces this for exactly:
-  `docs/**` `.md`/`.html` files (except the planning records below), `tests/**` and
-  `Evaluator/docs/**` text files, and the top-level `README.md`, `CLAUDE.md`, `CONTRIBUTING.md`,
+  `docs/**` files ending `.md` or `.html` (except the planning records below), `tests/**` and
+  `Evaluator/docs/**` files ending `.md`, `.py`, `.fasta`, `.json` or `.txt` (so not the `.pdb`/`.cif`/`.npy`/`.csv`
+  fixtures), and the top-level `README.md`, `CLAUDE.md`, `CONTRIBUTING.md`,
   `CHANGELOG.md`, `STAGES.md`, `THIRD_PARTY_NOTICES.md`, `2.0/README.md` and `Evaluator/README.md`.
   **Known gaps, pending a decision, not covered by it:** `.claude/**` (tracked skills and agent
   instructions), and the planning records `docs/PLAN_*`, `docs/INVESTIGATION_*`, `docs/REPORT_*`,

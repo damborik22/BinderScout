@@ -277,3 +277,26 @@ def test_pae_iptm_measurements_name_the_right_pool_and_the_record(doc):
     assert "450 PAE matrices" not in text, f"{doc} still quotes 450 as a count of the 394-design pool"
     for needle in ("394 designs", "450 designs", "wave-1", "private share", "2026-11-03"):
         assert needle in text, f"{doc} does not state {needle!r}"
+
+
+def test_claude_md_anonymity_scope_names_exactly_what_the_test_scans():
+    """The sentence claims to state "exactly" what the test covers, so derive that from ``_in_scope``."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_anon", REPO / "tests" / "test_public_docs_are_anonymous.py")
+    anon = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(anon)
+    text = _flat("CLAUDE.md")
+    sentence = text[text.index("test_public_docs_are_anonymous.py") :][:1500]
+    assert "`tests/**` and `Evaluator/docs/**` text files" not in sentence, "the vague 'text files' wording is back"
+    for ext in (".md", ".html", ".py", ".fasta", ".json", ".txt"):
+        assert f"`{ext}`" in sentence, f"the scope sentence omits {ext}"
+    for root in ("`docs/**`", "`tests/**`", "`Evaluator/docs/**`"):
+        assert root in sentence, f"the scope sentence omits {root}"
+    # The extensions really are what the sentence says: probe the predicate itself.
+    assert anon._in_scope(REPO / "docs/x.md") and anon._in_scope(REPO / "docs/x.html")
+    assert not anon._in_scope(REPO / "docs/x.py")
+    for ext in (".py", ".fasta", ".json", ".txt", ".md"):
+        assert anon._in_scope(REPO / f"tests/x{ext}")
+        assert anon._in_scope(REPO / f"Evaluator/docs/x{ext}")
+    assert not anon._in_scope(REPO / "tests/x.pdb") and not anon._in_scope(REPO / "Evaluator/docs/x.html")
