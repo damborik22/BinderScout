@@ -310,9 +310,22 @@ def detect_installs() -> dict:
             return False
         return any((lib / package).is_dir() for lib in (prefix / "lib").glob("python3.*/site-packages"))
 
-    pxdesign_env = "binderscout_pxdesign"
-    rfd3_env = "binderscout_rfd3"
-    protein_hunter_env = "binderscout_protein_hunter"
+    def _resolve_env(name: str) -> str:
+        """Return `name`, or its pre-rename `bindmaster_*` twin when only that exists.
+
+        2.0 renamed three envs. The installer reuses an env created under the previous
+        project name in place rather than cloning 13 GB of it, so the wizard has to probe
+        the name the installer will actually use -- otherwise it reports a working tool as
+        not installed and refuses to configure it.
+        """
+        if CONDA_ENVS_DIR is None or _env_exists(name):
+            return name
+        legacy = name.replace("binderscout_", "bindmaster_", 1)
+        return legacy if legacy != name and _env_exists(legacy) else name
+
+    pxdesign_env = _resolve_env("binderscout_pxdesign")
+    rfd3_env = _resolve_env("binderscout_rfd3")
+    protein_hunter_env = _resolve_env("binderscout_protein_hunter")
 
     # The marker key is the installer's DO_ flag lowercased, which is this dict's
     # own key everywhere except pxdesign_local -- "local" is a configurator-side
@@ -2412,6 +2425,27 @@ def _conda_head() -> str:
     return "\n".join(lines)
 
 
+def _activate_env(canonical: str) -> str:
+    """Shell lines that `conda activate` `canonical`, or its pre-rename twin when only that exists.
+
+    The env name is RESOLVED, not hardcoded. A box whose env was created under a previous
+    project name (`bindmaster_<tool>`) has no `binderscout_<tool>`: the installer reuses the old
+    env in place, so a hardcoded name dies in 0 s with `EnvironmentNameNotFound` -- which in a
+    scheduler's accounting is indistinguishable from a fast crash. The listing is read by awk
+    without an early exit, so `set -o pipefail` cannot turn a match into a SIGPIPE failure.
+    """
+    legacy = canonical.replace("binderscout_", "bindmaster_", 1)
+    return (
+        f"_bs_env={canonical}\n"
+        "_bs_has_env() { conda env list 2>/dev/null | awk -v n=\"$1\" '$1 == n { f = 1 } END { exit !f }'; }\n"
+        f'if ! _bs_has_env "$_bs_env" && _bs_has_env {legacy}; then\n'
+        f"    _bs_env={legacy}\n"
+        '    echo "NOTE: using the environment created under a previous project name: $_bs_env" >&2\n'
+        "fi\n"
+        'conda activate "$_bs_env"'
+    )
+
+
 def _settings_json_block(
     *,
     tool: str,
@@ -2515,7 +2549,7 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
-conda activate binderscout_pxdesign
+{_activate_env("binderscout_pxdesign")}
 export CUDA_HOME="$CONDA_PREFIX"
 
 # Surface CUDA dev headers + libs for PyTorch's JIT compiler.
@@ -3812,7 +3846,7 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
-conda activate binderscout_rfd3
+{_activate_env("binderscout_rfd3")}
 
 # foundry's checkpoint registry reads FOUNDRY_CHECKPOINT_DIRS / FOUNDRY_CHECKPOINTS_DIR.
 # Singular FOUNDRY_CHECKPOINT_DIR is silently ignored (rfd3 design then aborts with
@@ -4133,7 +4167,7 @@ for _conda_sh in \\
     [[ -f "$_conda_sh" ]] && {{ source "$_conda_sh"; _conda_found=true; break; }}
 done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
-conda activate binderscout_protein_hunter
+{_activate_env("binderscout_protein_hunter")}
 set -u
 
 # Gotcha: boltz_ph reads Boltz-2 weights + CCD library from ~/.boltz. The

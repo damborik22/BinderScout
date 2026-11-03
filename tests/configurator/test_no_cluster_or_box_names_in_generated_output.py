@@ -1,10 +1,12 @@
 """Nothing the configurator ships or generates may name a cluster, a box or a job.
 
 The repo is public and the generated run folders get copied around. The generators
-carried a fallback to a pre-rename `bindmaster_*` conda-env name that only exists on
-one multi-user cluster, a pointer to a machine-local notes file, a scheduler job id
-and fleet box names inside comments. Each of those is an infrastructure identifier
-(or, for the env fallback, a cluster-only special case emitted into three scripts).
+carried a pointer to a machine-local notes file, a scheduler job id and fleet box names
+inside comments. Each of those is an infrastructure identifier.
+
+(The `bindmaster_*` conda-env fallback is deliberately NOT banned: it is a former env
+name, not an infrastructure identifier, and both installers still reuse such an env in
+place, so the wizard and the generated scripts must resolve it too.)
 
 The forbidden words are assembled from pieces so this file does not itself contain
 the identifiers it bans.
@@ -26,7 +28,6 @@ FORBIDDEN = re.compile(
             r"\bbm[0-9]\b",
             r"bindmaster[0-9]",
             _NOTES,
-            r"(?-i:bindmaster_)",  # case-sensitive: BINDMASTER_DIR is the legacy env spelling
             r"\bsacct\b",
             r"\bslurm\b",
             r"\bHPC\b",
@@ -53,7 +54,7 @@ def test_the_run_script_templates_and_examples_name_no_cluster_or_box():
     assert {k: v for k, v in bad.items() if v} == {}
 
 
-def test_generated_scripts_carry_no_cluster_names_or_prerename_env_fallback(tmp_path, fake_checkout, replay):
+def test_generated_scripts_carry_no_cluster_names(tmp_path, fake_checkout, replay):
     payload = json.loads((REPO / "examples" / "CALCA" / "smoke.json").read_text())
     payload["cfg"]["run_dir"] = str(tmp_path / "run")
     payload["cfg"]["target_pdb_src"] = str(REPO / "examples" / "CALCA" / "target.pdb")
@@ -68,15 +69,10 @@ def test_generated_scripts_carry_no_cluster_names_or_prerename_env_fallback(tmp_
     # The scratch path itself carries this account's name; it is the test's, not the script's.
     offenders = {s.name: _hits(s.read_text().replace(str(tmp_path), "<tmp>")) for s in scripts}
     assert {k: v for k, v in offenders.items() if v} == {}
-    for name in ("run_pxdesign.sh", "run_rfd3.sh", "run_protein_hunter.sh"):
-        text = (tmp_path / "run" / name).read_text()
-        assert "_bs_env" not in text, f"{name} still resolves the env name through a fallback"
-        # (assembled, so the env-name audit in tests/ does not read this as an instruction)
-        assert re.search(r"^conda activate " + r"binderscout_\w+$", text, re.M), name
 
 
-def test_a_prerename_env_is_not_reported_as_the_installed_tool(tmp_path, monkeypatch):
-    """detect_installs resolves the canonical env names only, with no `bindmaster_*` twin."""
+def test_a_prerename_env_is_reported_as_the_installed_tool(tmp_path, monkeypatch):
+    """Both installers reuse a pre-rename env in place and write the marker, so the wizard must see it."""
     import sys
 
     sys.path.insert(0, str(REPO / "configurator"))
@@ -85,7 +81,12 @@ def test_a_prerename_env_is_not_reported_as_the_installed_tool(tmp_path, monkeyp
     envs = tmp_path / "envs"
     (envs / ("bindmaster" + "_pxdesign")).mkdir(parents=True)
     monkeypatch.setattr(conf, "CONDA_ENVS_DIR", envs)
-    assert conf.detect_installs()["pxdesign_local"] is False
+    assert conf.detect_installs()["pxdesign_local"] is True
 
+    # ...and the canonical name wins when both exist; with neither, the tool is absent.
     (envs / "binderscout_pxdesign").mkdir()
     assert conf.detect_installs()["pxdesign_local"] is True
+    other = tmp_path / "other" / "envs"
+    other.mkdir(parents=True)
+    monkeypatch.setattr(conf, "CONDA_ENVS_DIR", other)
+    assert conf.detect_installs()["pxdesign_local"] is False
