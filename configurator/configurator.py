@@ -4081,10 +4081,14 @@ if [[ -f "$GATE" ]]; then
     # Exit 2 means the check could NOT RUN (a renamed metric, a binder chain
     # that is not B) -- which is not the same as the backbones being bad, and
     # must not abort a campaign with a confident wrong diagnosis.
-    python3 "$GATE" origin   "$DIFF_DIR/*.json"
-    case $? in 0) ;; 2) GATE_UNVERIFIED=1 ;; *) GATE_FAIL=1 ;; esac
-    python3 "$GATE" geometry "$DIFF_DIR/*.cif.gz"
-    case $? in 0) ;; 2) GATE_UNVERIFIED=1 ;; *) GATE_FAIL=1 ;; esac
+    # `|| rc=$?` is load-bearing: under `set -e` a bare non-zero exit kills the script
+    # before the `case` below can read it, so exit 2 would never reach the warn branch.
+    rc=0
+    python3 "$GATE" origin   "$DIFF_DIR/*.json" || rc=$?
+    case $rc in 0) ;; 2) GATE_UNVERIFIED=1 ;; *) GATE_FAIL=1 ;; esac
+    rc=0
+    python3 "$GATE" geometry "$DIFF_DIR/*.cif.gz" || rc=$?
+    case $rc in 0) ;; 2) GATE_UNVERIFIED=1 ;; *) GATE_FAIL=1 ;; esac
     if [[ $GATE_FAIL -eq 0 && $GATE_UNVERIFIED -ne 0 ]]; then
         echo ""
         echo "  [warn] The geometry gate could not verify these backbones -- it found no"
