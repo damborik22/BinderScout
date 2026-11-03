@@ -159,6 +159,7 @@ SKIP_PREFLIGHT=false
 FORCE=false      # --force: allow --yes to accept DESTRUCTIVE prompts (reclone / env re-create)
 UNINSTALL_MODE=false
 VERIFY_ONLY=false        # --verify: audit what is on disk, install nothing
+CONDA_READONLY=false     # set by main for --verify / --uninstall: never install conda, never create a directory
 REPAIR_MODE=false        # --repair: audit, then re-install only what is broken
 REPAIR_STALE=false       # --stale: let --repair ALSO rebuild tools built against another commit
 TOOL_SPECIFIED=false
@@ -451,8 +452,13 @@ if [[ "${CUDA_VERSION}" != "13.0" ]]; then
 fi
 
 # ─── Logging setup ────────────────────────────────────────────────────────────
-mkdir -p "${BINDERSCOUT_DIR}"
-exec > >(tee -a "${LOG_FILE}") 2>&1
+# --verify audits and installs nothing, so it also writes nothing: no install.log.
+if [[ "${VERIFY_ONLY}" == true ]]; then
+    LOG_FILE=/dev/null
+else
+    mkdir -p "${BINDERSCOUT_DIR}"
+    exec > >(tee -a "${LOG_FILE}") 2>&1
+fi
 
 # >>> binderscout-conda-block >>>
 # ONE answer to "where is conda?" for shell, in the same order as
@@ -942,6 +948,11 @@ install_local_conda() {
         return 0
     fi
 
+    if [[ "${CONDA_READONLY}" == true ]]; then
+        _conda_not_found
+        return 1
+    fi
+
     print_step "Installing local Miniforge3 into ${LOCAL_CONDA_DIR}"
 
     local installer_url
@@ -996,26 +1007,39 @@ _use_conda_base() {
     CONDA_BASE="${base}"
 }
 
+# _conda_not_found
+# The result --verify and --uninstall report when there is no conda: a finding, not a
+# reason to go and fetch one.
+_conda_not_found() {
+    print_fail "conda not found (looked at \$BINDERSCOUT_CONDA, ${BINDERSCOUT_DIR}/conda, \$CONDA_EXE, \$CONDA_PREFIX, PATH and the usual install locations)."
+    print_fail "  --verify and --uninstall never download or write anything, so no Miniforge was installed."
+    print_fail "  If conda lives somewhere unusual: export BINDERSCOUT_CONDA=<its base directory> and re-run."
+}
+
 # detect_conda
 # Finds conda/mamba and sets CONDA_BASE + CONDA_CMD, using the shared discovery order
 # (bs_valid_conda_bases above) so this script, evaluate.sh and the Python CLI agree.
 # --standalone: the checkout's own Miniforge, installed on the spot when missing.
 # Otherwise: the first discovered base that is writable (or any, under --system-conda),
 # else a local Miniforge unless --system-conda forbids it.
+# CONDA_READONLY (--verify / --uninstall): never install and never create a directory.
 detect_conda() {
     local base
 
     if [[ "${STANDALONE}" == "true" ]]; then
         if _use_conda_base "${LOCAL_CONDA_DIR}"; then return 0; fi
+        if [[ "${CONDA_READONLY}" == true ]]; then _conda_not_found; return 1; fi
         install_local_conda
         return $?
     fi
 
     while IFS= read -r base; do
         _use_conda_base "${base}" || continue
+        if [[ "${CONDA_READONLY}" == true ]]; then return 0; fi
         _check_system_conda_writable && return 0
     done < <(bs_valid_conda_bases "${BINDERSCOUT_DIR}")
 
+    if [[ "${CONDA_READONLY}" == true ]]; then _conda_not_found; return 1; fi
 
     # No usable conda found — install locally if allowed
     if [[ "${STANDALONE}" != "false" ]]; then
@@ -4888,7 +4912,17 @@ main() {
     echo -e "Platform: ${ARCH} | CUDA: ${CUDA_VERSION} | Standalone: ${STANDALONE}"
 
     check_arch
-    detect_conda || exit 1
+    # --verify and --uninstall must not provision conda: an audit that first downloads and
+    # installs a Miniforge is not an audit, and "conda not found" is itself the finding.
+    if [[ "${VERIFY_ONLY}" == true || "${UNINSTALL_MODE}" == true ]]; then
+        CONDA_READONLY=true
+    fi
+    if ! detect_conda; then
+        if [[ "${VERIFY_ONLY}" == true ]]; then
+            print_fail "Verification result: nothing can be verified without conda."
+        fi
+        exit 1
+    fi
     local _name _ver
     _name="$(basename "${CONDA_CMD}")"; _ver="$("${CONDA_CMD}" --version 2>/dev/null | awk '{print $2}')"
     print_ok "${_name} ${_ver} at: ${CONDA_BASE}"
