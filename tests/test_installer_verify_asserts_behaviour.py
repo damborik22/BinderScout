@@ -49,13 +49,20 @@ def _function_source(path: Path, name: str) -> str:
     return m.group(0)
 
 
+def _conda_block(path: Path) -> str:
+    text = path.read_text()
+    begin, end = "# >>> binderscout-conda-block >>>", "# <<< binderscout-conda-block <<<"
+    return begin + text.split(begin, 1)[1].split(end, 1)[0] + end
+
+
 def _run_verify_tool(installer: Path, root: Path, tool: str, env_exists: bool = False) -> tuple[int, str]:
     """Call the installer's own verify_tool() against a fake tree under `root`.
 
     `env_exists=False` is the "nothing is installed" case. Pass True when the fake
-    tree has an interpreter at ${CONDA_BASE}/envs/<env>/bin/python: _env_python_ok
-    returns 1 on a missing env BEFORE it runs any code, so with the default the
-    probe expressions are never evaluated and a mutated probe still passes.
+    tree has an interpreter at ${CONDA_BASE}/envs/<env>/bin/python (the tree is what
+    decides, the lookup is the installer's own): _env_python_ok returns 1 on a missing
+    env BEFORE it runs any code, so with the default the probe expressions are never
+    evaluated and a mutated probe still passes.
     """
     harness = [
         "set -u",
@@ -63,8 +70,9 @@ def _run_verify_tool(installer: Path, root: Path, tool: str, env_exists: bool = 
         f'MOSAIC_DIR="{root}/Mosaic"',
         f'CONDA_BASE="{root}/conda"',
         'VERIFY_REASON=""',
-        # A verifier that needs a conda env must say so instead of returning 0.
-        f"env_exists() {{ return {0 if env_exists else 1}; }}",
+        # The real env lookup, from the installer's shared conda block. Whether the env
+        # exists is decided by the fake tree (see `env_exists` below), not by a stub.
+        _conda_block(installer),
     ]
     harness += [_function_source(installer, n) for n in _NEEDED]
     harness += [

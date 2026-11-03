@@ -446,6 +446,117 @@ done
 mkdir -p "${BINDERSCOUT_DIR}"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
+# >>> binderscout-conda-block >>>
+# ONE answer to "where is conda?" for shell, in the same order as
+# binderscout_paths.find_conda_base: $BINDERSCOUT_CONDA, <checkout>/conda, $CONDA_EXE,
+# $CONDA_PREFIX, conda/mamba/micromamba on PATH, then the usual install locations. A base
+# is valid when it has etc/profile.d/conda.sh (the file every generated script sources).
+# No subprocess is run to find it.
+# This text is copied VERBATIM into every script that needs it, because the scripts cannot
+# share a file (the installer runs before anything else exists). Edit all copies together:
+# tests/test_shell_conda_block_is_identical.py fails when they drift.
+
+# bs_conda_candidates [checkout-dir]  -> every directory worth trying, best first
+bs_conda_candidates() {
+    local repo="${1:-}" home="${HOME:-}" p t
+    if [[ -n "${BINDERSCOUT_CONDA:-}" ]]; then
+        p="${BINDERSCOUT_CONDA}"
+        if [[ "${p}" == \~ || "${p}" == \~/* ]]; then p="${home}${p#\~}"; fi
+        printf '%s\n' "${p}"
+    fi
+    if [[ -n "${repo}" ]]; then printf '%s\n' "${repo}/conda"; fi
+    if [[ -n "${CONDA_EXE:-}" ]]; then
+        p="$(readlink -f -- "${CONDA_EXE}" 2>/dev/null || true)"
+        if [[ -n "${p}" ]]; then printf '%s\n' "${p%/*/*}"; fi
+    fi
+    if [[ -n "${CONDA_PREFIX:-}" ]]; then
+        p="${CONDA_PREFIX%/}"
+        if [[ "$(basename -- "$(dirname -- "${p}")")" == "envs" ]]; then
+            printf '%s\n' "${p%/*/*}"
+        else
+            printf '%s\n' "${p}"
+        fi
+    fi
+    for t in conda mamba micromamba; do
+        p="$(type -P "${t}" 2>/dev/null || true)"
+        if [[ -n "${p}" ]]; then
+            p="$(readlink -f -- "${p}" 2>/dev/null || true)"
+            if [[ -n "${p}" ]]; then printf '%s\n' "${p%/*/*}"; fi
+        fi
+    done
+    if [[ -n "${home}" ]]; then
+        for t in miniforge3 mambaforge miniconda3 anaconda3 conda; do printf '%s\n' "${home}/${t}"; done
+    fi
+    for t in /opt/conda /opt/miniforge3 /opt/miniconda3 /opt/anaconda3; do printf '%s\n' "${t}"; done
+}
+
+# bs_valid_conda_bases [checkout-dir]  -> the candidates that really are a conda base, once each
+bs_valid_conda_bases() {
+    local c seen=$'\n'
+    while IFS= read -r c; do
+        if [[ -f "${c}/etc/profile.d/conda.sh" && "${seen}" != *$'\n'"${c}"$'\n'* ]]; then
+            seen+="${c}"$'\n'
+            printf '%s\n' "${c}"
+        fi
+    done < <(bs_conda_candidates "${1:-}")
+}
+
+# bs_find_conda_base [checkout-dir]  -> the first valid base; status 1 when there is none
+bs_find_conda_base() {
+    local c
+    while IFS= read -r c; do
+        printf '%s\n' "${c}"
+        return 0
+    done < <(bs_valid_conda_bases "${1:-}")
+    return 1
+}
+
+# bs_source_conda [checkout-dir]  -> find a base, remember it in BS_CONDA_BASE, source its conda.sh
+bs_source_conda() {
+    local base
+    base="$(bs_find_conda_base "${1:-}")" || return 1
+    # shellcheck disable=SC2034  # read by the scripts that carry this block
+    BS_CONDA_BASE="${base}"
+    # shellcheck source=/dev/null
+    source "${base}/etc/profile.d/conda.sh"
+}
+
+# bs_env_lookup <conda-base> <env-name>  -> sets BS_ENV_PREFIX; status 0 when the env exists
+# An env is not always <base>/envs/<name>: $CONDA_ENVS_PATH, a condarc envs_dirs and the
+# per-user ~/.conda/envs all put it elsewhere. Order: $CONDA_ENVS_PATH, <base>/envs, then
+# conda's own listing (parsed without jq). The old <base>/envs path stays the fallback
+# answer, so a caller that builds a path from it behaves exactly as before.
+BS_ENV_PREFIX=""
+BS_ENV_JSON=""    # `conda env list --json`, kept until a command that may change the envs ran
+bs_env_lookup() {
+    local base="${1:-}" name="$2" d line
+    local -a dirs=()
+    if [[ -n "${CONDA_ENVS_PATH:-}" ]]; then
+        IFS=: read -r -a dirs <<< "${CONDA_ENVS_PATH}"
+        for d in "${dirs[@]}"; do
+            if [[ -n "${d}" && -d "${d}/${name}" ]]; then BS_ENV_PREFIX="${d}/${name}"; return 0; fi
+        done
+    fi
+    if [[ -n "${base}" && -d "${base}/envs/${name}" ]]; then BS_ENV_PREFIX="${base}/envs/${name}"; return 0; fi
+    if [[ -n "${base}" && -x "${base}/bin/conda" ]]; then
+        if [[ -z "${BS_ENV_JSON}" ]]; then
+            BS_ENV_JSON="$("${base}/bin/conda" env list --json 2>/dev/null || true)"
+            if [[ -z "${BS_ENV_JSON}" ]]; then BS_ENV_JSON="-"; fi
+        fi
+        while IFS= read -r line; do
+            line="${line#*\"}"
+            line="${line%\"*}"
+            if [[ "${line}" == /* && "${line##*/}" == "${name}" && -d "${line}" ]]; then
+                BS_ENV_PREFIX="${line}"
+                return 0
+            fi
+        done < <(printf '%s\n' "${BS_ENV_JSON}" | tr ',' '\n')
+    fi
+    BS_ENV_PREFIX="${base}/envs/${name}"
+    return 1
+}
+# <<< binderscout-conda-block <<<
+
 # ─── Helper Functions ─────────────────────────────────────────────────────────
 
 print_step() {
@@ -491,6 +602,7 @@ run_logged() {
     # terminal on the very first call, when the log does not exist yet.
     start_line=$(( $(wc -l 2>/dev/null < "${LOG_FILE}" || echo 0) + 1 ))
 
+    BS_ENV_JSON=""   # this command may create or remove a conda env; forget the cached listing
     local rc=0
     for attempt in $(seq 1 "${retries}"); do
         "$@" >> "${LOG_FILE}" 2>&1 &
@@ -724,7 +836,7 @@ shortcut_conda() {
 }
 
 env_exists() {
-    [[ -d "${CONDA_BASE}/envs/$1" ]]
+    bs_env_lookup "${CONDA_BASE}" "$1"
 }
 
 # resolve_env_names
@@ -766,7 +878,7 @@ _resolve_env_name() {
 _refuse_if_env_in_use() {
     local name="$1"
     env_exists "${name}" || return 0
-    if pgrep -f "${CONDA_BASE}/envs/${name}/" >/dev/null 2>&1; then
+    if pgrep -f "${BS_ENV_PREFIX}/" >/dev/null 2>&1; then
         print_fail "Conda env '${name}' is IN USE by a running process — refusing to install into it."
         print_warn "  Installing would force-reinstall packages under the live interpreter."
         print_warn "  Wait for that job to finish, then re-run."
@@ -856,69 +968,43 @@ install_local_conda() {
     print_ok "Miniforge3 installed at ${LOCAL_CONDA_DIR}"
 }
 
-# detect_conda
-# Finds conda/mamba and sets CONDA_BASE + CONDA_CMD.
-# Priority: local conda → system conda (if writable) → auto-install local.
-detect_conda() {
-    # shellcheck disable=SC2034
-    local base cmd
-
-    # Helper: try a specific binary on PATH
-    _try_cmd() {
-        local bin="$1"
-        if command -v "${bin}" &>/dev/null; then
-            base=$(${bin} info --base 2>/dev/null | awk '/\// {print $NF}' | tail -1) && [[ -n "${base}" ]] && {
-                CONDA_BASE="${base}"
-                CONDA_CMD="$(command -v "${bin}")"
-                return 0
-            }
-        fi
+# _use_conda_base <base-dir>
+# Points CONDA_BASE / CONDA_CMD (mamba preferred, it solves far faster) at a base directory.
+# Fails when the base has neither binary, so a half-deleted install is skipped, not chosen.
+_use_conda_base() {
+    local base="$1"
+    if [[ -x "${base}/bin/mamba" ]]; then
+        CONDA_CMD="${base}/bin/mamba"
+    elif [[ -x "${base}/bin/conda" ]]; then
+        CONDA_CMD="${base}/bin/conda"
+    else
         return 1
-    }
-
-    # 1. Check for local (standalone) conda first
-    if [[ -x "${LOCAL_CONDA_DIR}/bin/conda" ]]; then
-        CONDA_BASE="${LOCAL_CONDA_DIR}"
-        if [[ -x "${LOCAL_CONDA_DIR}/bin/mamba" ]]; then
-            CONDA_CMD="${LOCAL_CONDA_DIR}/bin/mamba"
-        else
-            CONDA_CMD="${LOCAL_CONDA_DIR}/bin/conda"
-        fi
-        return 0
     fi
+    CONDA_BASE="${base}"
+}
 
-    # 2. If --standalone was explicitly requested, install local conda now
+# detect_conda
+# Finds conda/mamba and sets CONDA_BASE + CONDA_CMD, using the shared discovery order
+# (bs_valid_conda_bases above) so this script, evaluate.sh and the Python CLI agree.
+# --standalone: the checkout's own Miniforge, installed on the spot when missing.
+# Otherwise: the first discovered base that is writable (or any, under --system-conda),
+# else a local Miniforge unless --system-conda forbids it.
+detect_conda() {
+    local base
+
     if [[ "${STANDALONE}" == "true" ]]; then
+        if _use_conda_base "${LOCAL_CONDA_DIR}"; then return 0; fi
         install_local_conda
         return $?
     fi
 
-    # 3. Try system conda/mamba on PATH
-    _try_cmd mamba && { _check_system_conda_writable && return 0; }
-    _try_cmd conda && { _check_system_conda_writable && return 0; }
-
-    # 4. Probe common install locations
-    for candidate in \
-        "$HOME/miniforge3" \
-        "$HOME/mambaforge" \
-        "$HOME/miniconda3" \
-        "$HOME/anaconda3" \
-        "$HOME/conda" \
-        "/opt/conda" \
-        "/opt/miniforge3" \
-        "/opt/miniconda3" \
-        "/opt/anaconda3"; do
-        [[ -f "${candidate}/etc/profile.d/conda.sh" ]] || continue
-        CONDA_BASE="${candidate}"
-        if [[ -x "${candidate}/bin/mamba" ]]; then
-            CONDA_CMD="${candidate}/bin/mamba"
-        else
-            CONDA_CMD="${candidate}/bin/conda"
-        fi
+    while IFS= read -r base; do
+        _use_conda_base "${base}" || continue
         _check_system_conda_writable && return 0
-    done
+    done < <(bs_valid_conda_bases "${BINDERSCOUT_DIR}")
 
-    # 5. No usable conda found — install locally if allowed
+
+    # No usable conda found — install locally if allowed
     if [[ "${STANDALONE}" != "false" ]]; then
         print_warn "No writable conda found — installing local Miniforge3"
         install_local_conda
@@ -2852,7 +2938,7 @@ EOF
 # dataloader. The assertion below is therefore on the SIGNATURE, not the version string.
 _pin_rfd3_atomworks() {
     env_exists "${RFD3_ENV}" || { print_warn "No ${RFD3_ENV} env — skipping atomworks pin"; return 0; }
-    local py="${CONDA_BASE}/envs/${RFD3_ENV}/bin/python"
+    local py="${BS_ENV_PREFIX}/bin/python"
 
     local have
     have="$("${py}" -c "import importlib.metadata as m; print(m.version('atomworks'))" 2>/dev/null || true)"
@@ -3990,7 +4076,7 @@ BSEOF
 _remove_legacy_env() {
     local name="$1"
     env_exists "${name}" || return 0
-    if pgrep -f "${CONDA_BASE}/envs/${name}/" >/dev/null 2>&1; then
+    if pgrep -f "${BS_ENV_PREFIX}/" >/dev/null 2>&1; then
         print_warn "Legacy conda env '${name}' is IN USE by a running process — left in place."
         return 0
     fi
@@ -4191,8 +4277,8 @@ VERIFY_REASON=""
 # worse than none, because it reports green.
 _env_python_ok() {
     local env="$1" code="$2"
-    env_exists "${env}" || return 1
-    ( cd / && "${CONDA_BASE}/envs/${env}/bin/python" -c "${code}" ) >/dev/null 2>&1
+    bs_env_lookup "${CONDA_BASE}" "${env}" || return 1
+    ( cd / && "${BS_ENV_PREFIX}/bin/python" -c "${code}" ) >/dev/null 2>&1
 }
 
 # The refold envs are driven through the `binder-compare` console script
@@ -4207,8 +4293,8 @@ _env_python_ok() {
 # --no-deps` therefore leaves the CLI unable to start.
 _env_refold_cli_ok() {
     local env="$1" sub="$2"
-    env_exists "${env}" || return 1
-    ( cd / && "${CONDA_BASE}/envs/${env}/bin/binder-compare" "${sub}" --help ) >/dev/null 2>&1
+    bs_env_lookup "${CONDA_BASE}" "${env}" || return 1
+    ( cd / && "${BS_ENV_PREFIX}/bin/binder-compare" "${sub}" --help ) >/dev/null 2>&1
 }
 
 # build_data's output. `import alphafold3` succeeds without it and AF3 then
@@ -4216,7 +4302,8 @@ _env_refold_cli_ok() {
 # so the import check alone cannot see this.
 _af3_ccd_built() {
     local sp
-    sp=$( cd / && "${CONDA_BASE}/envs/binder-eval-af3/bin/python" -c \
+    bs_env_lookup "${CONDA_BASE}" binder-eval-af3 || return 1
+    sp=$( cd / && "${BS_ENV_PREFIX}/bin/python" -c \
         "import alphafold3, os; print(os.path.dirname(alphafold3.__file__))" 2>/dev/null ) || return 1
     [[ -n "${sp}" && -f "${sp}/constants/converters/chemical_component_sets.pickle" ]]
 }
@@ -4225,7 +4312,8 @@ _af3_ccd_built() {
 # patch AF3 still runs and still produces plausible numbers, just rounded to two decimals, so
 # nothing else can see it: `import alphafold3` and the CCD check both pass.
 _af3_full_precision() {
-    "${CONDA_BASE}/envs/binder-eval-af3/bin/python" \
+    bs_env_lookup "${CONDA_BASE}" binder-eval-af3 || return 1
+    "${BS_ENV_PREFIX}/bin/python" \
         "${BINDERSCOUT_DIR}/install/patches/af3_full_precision.py" --check >/dev/null 2>&1
 }
 
@@ -4890,9 +4978,10 @@ main() {
         # size is the pointer an operator reclaiming space otherwise lacks: on a
         # half-migrated box these three envs are ~28 GB and nothing else in the
         # 2.0 tree mentions their names.
-        local _legacy_env
-        for _legacy_env in "${CONDA_BASE}"/envs/bindmaster_*; do
-            [[ -d "${_legacy_env}" ]] || continue
+        local _legacy_env _legacy_name
+        for _legacy_name in bindmaster_pxdesign bindmaster_protein_hunter bindmaster_rfd3; do
+            bs_env_lookup "${CONDA_BASE}" "${_legacy_name}" || continue
+            _legacy_env="${BS_ENV_PREFIX}"
             print_warn "  ${_legacy_env}/ ($(du -sh "${_legacy_env}" 2>/dev/null | cut -f1)) — pre-rename conda env"
         done
         grep -q "${SHORTCUTS_DIR}" "${HOME}/.bashrc" 2>/dev/null && \
