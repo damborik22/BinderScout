@@ -94,19 +94,27 @@ def test_mosaic_pointer_file_naming_a_vanished_venv_is_broken(platform, tmp_path
     (repo / "Evaluator" / "envs").mkdir(parents=True)
     (repo / "Evaluator" / "envs" / "mosaic_venv_path").write_text(str(tmp_path / "old-name" / "Mosaic" / ".venv"))
 
-    rc, out = _verify(script, repo, env, "mosaic")
+    rc, out = _verify(script, repo, env, "evaluator")
 
     assert rc != 0 and "BROKEN" in out and "mosaic_venv_path" in out, out
 
 
-def _editable_env(base: Path, env_name: str, url: str) -> None:
-    dist = base / "envs" / env_name / "lib" / "python3.10" / "site-packages" / "binder_comparison-0.1.0.dist-info"
-    dist.mkdir(parents=True)
+def _editable_env(base: Path, env_name: str, url: str, dist_name: str = "binder_comparison-0.1.0") -> None:
+    dist = base / "envs" / env_name / "lib" / "python3.10" / "site-packages" / f"{dist_name}.dist-info"
+    dist.mkdir(parents=True, exist_ok=True)
     (dist / "direct_url.json").write_text(json.dumps({"url": url, "dir_info": {"editable": True}}))
 
 
 @pytest.mark.parametrize("platform", sorted(INSTALLERS))
-@pytest.mark.parametrize(("tool", "env_name"), [("evaluator", "binder-eval"), ("af3", "binder-eval-af3")])
+@pytest.mark.parametrize(
+    ("tool", "env_name"),
+    [
+        ("evaluator", "binder-eval"),
+        ("af3", "binder-eval-af3"),
+        ("esmfold2", "binder-eval-esmfold2"),
+        ("tmprot", "binder-eval-tmprot"),
+    ],
+)
 class TestEditableEvaluator:
     def test_binder_compare_installed_from_a_moved_evaluator_is_broken(self, platform, tool, env_name, tmp_path):
         repo, script, env, base = _sandbox(tmp_path, platform)
@@ -128,6 +136,100 @@ class TestEditableEvaluator:
         _, out = _verify(spaced_script, spaced, env, tool)
 
         assert "BROKEN" not in out, out
+
+
+# Tool checkouts that are pip-installed -e into their own conda env: (tool, env, dist, tail of the checkout path)
+_EDITABLE_CHECKOUTS = [
+    ("boltzgen", "BoltzGen", "boltzgen-0.1", "BoltzGen"),
+    ("pxdesign", "binderscout_pxdesign", "pxdesign-0.1", "PXDesign"),
+    ("protein-hunter", "binderscout_protein_hunter", "boltz-2.0", "Protein-Hunter/boltz_ph"),
+    ("tmprot", "binder-eval-tmprot", "tmprot-1.0", "TmProt/tmprot-1.0"),
+]
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+@pytest.mark.parametrize(("tool", "env_name", "dist", "tail"), _EDITABLE_CHECKOUTS)
+class TestEditableToolCheckouts:
+    def test_a_moved_checkout_is_broken(self, platform, tool, env_name, dist, tail, tmp_path):
+        repo, script, env, base = _sandbox(tmp_path, platform)
+        _editable_env(base, env_name, f"file://{tmp_path}/old-name/{tail}", dist)
+
+        rc, out = _verify(script, repo, env, tool)
+
+        assert rc != 0 and "BROKEN" in out, out
+        assert f"{tmp_path}/old-name/{tail}" in out and "--repair" in out, out
+
+    def test_an_editable_install_at_the_current_path_is_not_flagged(
+        self, platform, tool, env_name, dist, tail, tmp_path
+    ):
+        repo, script, env, base = _sandbox(tmp_path, platform)
+        _editable_env(base, env_name, f"file://{repo}/{tail}", dist)
+
+        _, out = _verify(script, repo, env, tool)
+
+        assert "BROKEN" not in out, out
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_an_unrelated_editable_package_in_the_env_is_ignored(platform, tmp_path):
+    repo, script, env, base = _sandbox(tmp_path, platform)
+    _editable_env(base, "BoltzGen", "file:///somewhere/else/my-own-project", "my_own_project-1.0")
+
+    _, out = _verify(script, repo, env, "boltzgen")
+
+    assert "BROKEN" not in out, out
+
+
+# --- the install function that writes a recorded path is the one whose verify arm checks it -------
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_the_mosaic_pointer_is_checked_by_the_tool_whose_install_can_rewrite_it(platform):
+    """install_evaluator writes Evaluator/envs/mosaic_venv_path; install_mosaic only reads it.
+
+    Checking it under `mosaic` made `--repair --tool mosaic` rebuild the venv, leave the pointer
+    stale, and end in "Still unusable after repair".
+    """
+    text = INSTALLERS[platform].read_text()
+    writers = [
+        fn
+        for fn in ("install_mosaic", "install_evaluator")
+        if 'echo "${MOSAIC_VENV}" > "${EVALUATOR_DIR}/envs/mosaic_venv_path"'
+        in extract_functions(INSTALLERS[platform], fn)
+    ]
+    assert writers == ["install_evaluator"], writers
+    arms = extract_functions(INSTALLERS[platform], "_relocation_reason")
+    mosaic_arm = arms.split("mosaic)")[1].split("rfd4|")[0]
+    evaluator_arm = arms.split("evaluator)")[1].split("af3)")[0]
+    assert "_stale_mosaic_pointer" in evaluator_arm and "_stale_mosaic_pointer" not in mosaic_arm
+    assert text.count("_stale_mosaic_pointer") >= 2
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+@pytest.mark.parametrize(
+    ("fn", "needle"),
+    [
+        ("install_evaluator", 'pip install -q -e "${EVALUATOR_DIR}[report]"'),
+        ("install_af3", 'pip install -q -e "${EVALUATOR_DIR}[report]"'),
+        ("install_esmfold2", 'pip install -q -e "${EVALUATOR_DIR}[report]"'),
+        ("install_tmprot", 'pip install -q -e "${EVALUATOR_DIR}"'),
+        ("install_tmprot", 'pip install -q -e "${_pkg}"'),
+        ("install_boltzgen", 'pip install -e "${BOLTZGEN_DIR}"'),
+        ("install_pxdesign", 'pip install -q -e "${PXDESIGN_DIR}"'),
+        ("install_protein_hunter", "pip install -q -e './boltz_ph'"),
+    ],
+)
+def test_repair_reaches_the_editable_install_that_re_points_each_env(platform, fn, needle):
+    """--repair can only fix a moved checkout if the install function re-runs `pip install -e`.
+
+    Each of these functions says "env already exists -- skipping creation" and carries on; none
+    returns early. Pinned textually, so a refactor that wraps the pip step in "only on a fresh env"
+    fails here instead of silently turning --repair into a no-op for a moved checkout.
+    """
+    body = extract_functions(INSTALLERS[platform], fn)
+    assert needle in body, f"{fn} no longer runs `{needle}`"
+    before = body.split(needle)[0]
+    assert "return 0" not in before.split("already exists")[-1], f"{fn} can return before re-pointing the editable"
 
 
 # --- --repair must be able to repair it -------------------------------------

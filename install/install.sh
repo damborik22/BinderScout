@@ -604,23 +604,25 @@ _stale_mosaic_pointer() {
     printf '%s' "BROKEN — ${f} still names ${rec}, which no longer exists (the checkout was moved or renamed), so evaluate.sh cannot find Boltz-2. Run --repair to rewrite it."
 }
 
-# _stale_editable_reason <conda-env>: binder-compare is an editable install of Evaluator/
+# _stale_editable_reason <conda-env> <expected-dir>
+# An editable install in <env> whose directory has <expected-dir>'s name but sits at another path
+# (the checkout moved or was renamed). Editable installs of OTHER packages are not its business.
 _stale_editable_reason() {
-    local du url root
+    local du url root bad=""
     bs_env_lookup "${CONDA_BASE}" "$1" || return 0
-    for du in "${BS_ENV_PREFIX}"/lib/python*/site-packages/binder_comparison*.dist-info/direct_url.json; do
+    for du in "${BS_ENV_PREFIX}"/lib/python*/site-packages/*.dist-info/direct_url.json; do
         [[ -f "${du}" ]] || continue
         grep -q '"editable": *true' "${du}" || continue
         url="$(grep -o '"url": *"file://[^"]*"' "${du}" | head -1)"
         root="${url#*file://}"
         root="${root%\"}"
         root="$(printf '%b' "${root//%/\\x}")"
-        [[ -n "${root}" ]] || continue
-        if [[ "$(_canon_path "${root}")" == "$(_canon_path "${EVALUATOR_DIR}")" ]]; then return 0; fi
-        printf '%s' "BROKEN — binder-compare in the ${1} env is an editable install of ${root}, but the Evaluator is now at ${EVALUATOR_DIR}. Run --repair to point it here."
-        return 0
+        [[ "${root##*/}" == "${2##*/}" ]] || continue
+        if [[ "$(_canon_path "${root}")" == "$(_canon_path "$2")" ]]; then return 0; fi
+        bad="${root}"
     done
-    return 0
+    [[ -n "${bad}" ]] || return 0
+    printf '%s' "BROKEN — the ${1} env has an editable install of ${bad}, but that checkout is now at $2. Run --repair to point it here."
 }
 
 # _relocation_reason <tool>: the reason this tool's recorded location no longer matches
@@ -628,15 +630,22 @@ _relocation_reason() {
     local r=""
     case "${1,,}" in
         "bindcraft 2"|bindcraft2) r="$(_stale_venv_reason "${BINDCRAFT2_DIR}")" ;;
-        mosaic)
-            r="$(_stale_venv_reason "${MOSAIC_DIR}")"
-            if [[ -z "${r}" ]]; then r="$(_stale_mosaic_pointer)"; fi ;;
+        mosaic) r="$(_stale_venv_reason "${MOSAIC_DIR}")" ;;
         rfd4|rfd4-proteina) r="$(_stale_venv_reason "${RFD4_DIR}")" ;;
         proteina-complexa) r="$(_stale_venv_reason "${PROTEINA_COMPLEXA_DIR}")" ;;
-        evaluator) r="$(_stale_editable_reason binder-eval)" ;;
-        af3) r="$(_stale_editable_reason binder-eval-af3)" ;;
-        esmfold2) r="$(_stale_editable_reason binder-eval-esmfold2)" ;;
-        tmprot) r="$(_stale_editable_reason binder-eval-tmprot)" ;;
+        boltzgen) r="$(_stale_editable_reason BoltzGen "${BOLTZGEN_DIR}")" ;;
+        pxdesign) r="$(_stale_editable_reason "${PXDESIGN_ENV}" "${PXDESIGN_DIR}")" ;;
+        protein-hunter) r="$(_stale_editable_reason "${PROTEIN_HUNTER_ENV}" "${PROTEIN_HUNTER_DIR}/boltz_ph")" ;;
+        # install_evaluator is what writes mosaic_venv_path, so the evaluator is the tool whose
+        # --repair can fix a stale one (install_mosaic only reads it).
+        evaluator)
+            r="$(_stale_editable_reason binder-eval "${EVALUATOR_DIR}")"
+            if [[ -z "${r}" ]]; then r="$(_stale_mosaic_pointer)"; fi ;;
+        af3) r="$(_stale_editable_reason binder-eval-af3 "${EVALUATOR_DIR}")" ;;
+        esmfold2) r="$(_stale_editable_reason binder-eval-esmfold2 "${EVALUATOR_DIR}")" ;;
+        tmprot)
+            r="$(_stale_editable_reason binder-eval-tmprot "${EVALUATOR_DIR}")"
+            if [[ -z "${r}" ]]; then r="$(_stale_editable_reason binder-eval-tmprot "${TMPROT_DIR}/tmprot-1.0")"; fi ;;
     esac
     printf '%s' "${r}"
 }

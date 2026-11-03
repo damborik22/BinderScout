@@ -106,3 +106,27 @@ def test_verify_with_a_conda_present_creates_nothing_either(platform, tmp_path):
     assert "conda not found" not in r.stdout + r.stderr
     assert not calls.exists()
     assert _snapshot(tmp_path) == before, f"--verify wrote files: {sorted(_snapshot(tmp_path) - before)}"
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_verify_that_finds_a_working_tool_still_writes_nothing(platform, tmp_path):
+    """A passing probe must not leave a marker behind (.install_state/) or any other file.
+
+    The empty-checkout cases above never get a tool to verify as usable, so a marker write on the
+    success path would go unseen.
+    """
+    repo, script, env, _calls = _sandbox(tmp_path, platform)
+    env["BINDERSCOUT_CONDA"] = str(fake_base(tmp_path / "conda-base"))
+    bin_dir = repo / "Mosaic" / ".venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    python = bin_dir / "python"
+    python.write_text("#!/bin/sh\nexit 0\n")  # every import "succeeds"
+    python.chmod(0o755)
+    before = _snapshot(tmp_path)
+
+    r = run_bash(f'bash "{script}" --verify --tool mosaic --yes </dev/null', env, repo)
+
+    assert r.returncode == 0, r.stdout + r.stderr  # it really did verify as usable
+    assert "usable" in r.stdout
+    assert not (repo / ".install_state").exists()
+    assert _snapshot(tmp_path) == before, f"--verify wrote files: {sorted(_snapshot(tmp_path) - before)}"
