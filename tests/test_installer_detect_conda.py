@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tests.shell_helpers import (  # noqa: E402
+from tests.shell_helpers import (
     INSTALLERS,
     clean_env,
     extract_block,
@@ -39,7 +39,7 @@ def _detect(platform: str, tmp_path: Path, *, standalone: str = "auto", **extra:
             extract_functions(script, *_FUNCS),
             f'BINDERSCOUT_DIR="{repo}"; LOCAL_CONDA_DIR="{repo}/conda"; STANDALONE={standalone}',
             "CONDA_READONLY=false; CONDA_BASE=''; CONDA_CMD=''",
-            "print_warn() { echo \"WARN $*\"; }; print_fail() { echo \"FAIL $*\"; }",
+            'print_warn() { echo "WARN $*"; }; print_fail() { echo "FAIL $*"; }',
             'install_local_conda() { echo "WOULD-DOWNLOAD"; return 1; }',
             'if detect_conda; then echo "BASE=$CONDA_BASE CMD=$CONDA_CMD"; else echo "NONE"; fi',
         ]

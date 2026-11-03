@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tests.shell_helpers import INSTALLERS, run_bash, system_conda_present  # noqa: E402
+from tests.shell_helpers import INSTALLERS, run_bash, system_conda_present
 
 
 def _sandbox(tmp_path: Path, platform: str) -> tuple[Path, Path, dict[str, str], Path]:
@@ -45,7 +45,9 @@ def _sandbox(tmp_path: Path, platform: str) -> tuple[Path, Path, dict[str, str],
 def test_a_spaced_path_is_refused_before_the_download_and_says_what_to_do(platform, mode, tmp_path):
     repo, script, env, calls = _sandbox(tmp_path, platform)
 
-    r = run_bash(f'bash "{script}" --tool evaluator --yes --skip-preflight ' + " ".join(mode) + " </dev/null", env, repo)
+    r = run_bash(
+        f'bash "{script}" --tool evaluator --yes --skip-preflight ' + " ".join(mode) + " </dev/null", env, repo
+    )
     out = r.stdout + r.stderr
 
     assert r.returncode != 0, out

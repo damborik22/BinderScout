@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import binderscout_paths as bp  # noqa: E402
-from tests.shell_helpers import X86, clean_env, extract_block, fake_base, run_bash, system_conda_present  # noqa: E402
+import binderscout_paths as bp
+from tests.shell_helpers import X86, clean_env, extract_block, fake_base, run_bash, system_conda_present
 
 pytestmark = pytest.mark.skipif(
     bool(system_conda_present()) or bool(shutil.which("conda", path="/usr/bin:/bin")),

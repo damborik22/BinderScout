@@ -44,9 +44,7 @@ def extract_block(script: Path) -> str:
 
 
 def run_bash(program: str, env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["bash", "-c", program], capture_output=True, text=True, env=env, cwd=str(cwd), timeout=120
-    )
+    return subprocess.run(["bash", "-c", program], capture_output=True, text=True, env=env, cwd=str(cwd), timeout=120)
 
 
 def clean_env(home: Path, path: str | None = None, **extra: str) -> dict[str, str]:

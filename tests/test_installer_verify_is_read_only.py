@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tests.shell_helpers import INSTALLERS, fake_base, run_bash, system_conda_present  # noqa: E402
+from tests.shell_helpers import INSTALLERS, fake_base, run_bash, system_conda_present
 
 pytestmark = pytest.mark.skipif(bool(system_conda_present()), reason="a conda under /opt would be found")
 

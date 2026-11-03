@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tests.shell_helpers import BLOCK_BEGIN, BLOCK_END, REPO, extract_block  # noqa: E402
+from tests.shell_helpers import BLOCK_BEGIN, BLOCK_END, REPO, extract_block
 
 CARRIERS = [
     REPO / "install" / "install.sh",
@@ -43,6 +43,8 @@ def test_no_script_has_a_private_candidate_list(script):
     """The old loops spelled the conda.sh locations out; only the shared block may."""
     text = script.read_text()
     outside = text.split(BLOCK_BEGIN)[0] + text.split(BLOCK_END, 1)[1]
-    offenders = re.findall(r"^.*(?:miniforge3|mambaforge|miniconda3|anaconda3|/opt/conda)\S*/etc/profile\.d.*$", outside, re.M)
+    offenders = re.findall(
+        r"^.*(?:miniforge3|mambaforge|miniconda3|anaconda3|/opt/conda)\S*/etc/profile\.d.*$", outside, re.M
+    )
     offenders = [line.strip() for line in offenders if not line.lstrip().startswith("#")]
     assert not offenders, f"{script.name} still carries its own conda search list: {offenders}"

@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tests.shell_helpers import REPO, system_conda_present  # noqa: E402
+from tests.shell_helpers import REPO, system_conda_present
 
 EVALUATE_SH = REPO / "Evaluator" / "evaluate.sh"
 RUN_SH = REPO / "Evaluator" / "run.sh"
@@ -109,7 +109,12 @@ def test_the_other_evaluator_scripts_stop_at_once_when_there_is_no_conda(script,
     (tmp_path / "home").mkdir()
     env = {"HOME": str(tmp_path / "home"), "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
     r = subprocess.run(
-        ["bash", str(sandbox / script.name)], capture_output=True, text=True, env=env, timeout=60, stdin=subprocess.DEVNULL
+        ["bash", str(sandbox / script.name)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        stdin=subprocess.DEVNULL,
     )
     out = r.stdout + r.stderr
     assert r.returncode != 0, out

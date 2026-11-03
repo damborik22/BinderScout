@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tests.shell_helpers import REPO  # noqa: E402
+from tests.shell_helpers import REPO
 
 # Everything in the installers-and-shell lane: the two installers, the Evaluator shell entry
 # points, the Docker test harness, and every non-Python file under tools/.

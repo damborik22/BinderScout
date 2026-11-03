@@ -11,13 +11,14 @@ These drive the real functions, extracted from each installer, in a subshell.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tests.shell_helpers import INSTALLERS, clean_env, extract_block, extract_functions, fake_base, run_bash  # noqa: E402
+from tests.shell_helpers import INSTALLERS, clean_env, extract_block, extract_functions, fake_base, run_bash
 
 _PROBES = ("env_exists", "_env_python_ok", "_env_refold_cli_ok")
 
@@ -67,7 +68,7 @@ class TestEnvLocation:
         """A condarc envs_dirs / ~/.conda/envs env: only `conda env list --json` knows."""
         elsewhere = tmp_path / "per-user" / "foo"
         elsewhere.mkdir(parents=True)
-        listing = '{\n  "envs": [\n    "%s",\n    "%s"\n  ]\n}' % (tmp_path / "base", elsewhere)
+        listing = json.dumps({"envs": [str(tmp_path / "base"), str(elsewhere)]}, indent=2)
         base = fake_base(
             tmp_path / "base",
             conda_script=f"#!/bin/sh\nif [ \"$1 $2\" = 'env list' ]; then cat <<'EOF'\n{listing}\nEOF\nfi\n",

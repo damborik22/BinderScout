@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tests.shell_helpers import INSTALLERS, extract_functions, fake_base, run_bash, system_conda_present  # noqa: E402
+from tests.shell_helpers import INSTALLERS, extract_functions, fake_base, run_bash, system_conda_present
 
 pytestmark = pytest.mark.skipif(bool(system_conda_present()), reason="a conda under /opt would be found")
 
@@ -118,7 +118,7 @@ class TestEditableEvaluator:
         assert f"{tmp_path}/old-name/Evaluator" in out and "--repair" in out, out
 
     def test_a_percent_encoded_path_with_a_space_matches_itself(self, platform, tool, env_name, tmp_path):
-        repo, script, env, base = _sandbox(tmp_path, platform)
+        _, script, env, base = _sandbox(tmp_path, platform)
         spaced = tmp_path / "with space"
         (spaced / "install").mkdir(parents=True)
         spaced_script = spaced / "install" / script.name
@@ -137,7 +137,9 @@ def _discard(script: Path, checkout: Path) -> str:
     prog = "\n".join(
         [
             "set -u",
-            extract_functions(script, "_canon_path", "_venv_recorded_path", "_stale_venv_reason", "_discard_relocated_venv"),
+            extract_functions(
+                script, "_canon_path", "_venv_recorded_path", "_stale_venv_reason", "_discard_relocated_venv"
+            ),
             'print_warn() { echo "WARN $*"; }',
             f'_discard_relocated_venv "{checkout}"',
         ]
@@ -171,9 +173,7 @@ def test_a_healthy_venv_is_left_alone(platform, tmp_path):
         ("install_mosaic", "MOSAIC_DIR", "Setting up Mosaic venv"),
     ],
 )
-def test_the_install_steps_discard_a_relocated_venv_before_they_would_skip_it(
-    platform, fn, dir_var, skip_marker
-):
+def test_the_install_steps_discard_a_relocated_venv_before_they_would_skip_it(platform, fn, dir_var, skip_marker):
     body = extract_functions(INSTALLERS[platform], fn)
     call = f'_discard_relocated_venv "${{{dir_var}}}"'
     assert call in body, f"{fn} never discards a relocated venv"
