@@ -206,6 +206,7 @@ def test_the_cli_hands_the_runner_the_ids_it_parsed(module, runner, tmp_path, mo
         num_sampling_steps=1,
         num_diffusion_samples=1,
         seed=0,
+        save_pae_bins=False,
     )
     cli.run(args)
 
