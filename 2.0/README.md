@@ -6,16 +6,16 @@ drifts from the first within a week. The diaries are deliberately not in the rep
 
 | | |
 |---|---|
-| **Branch** | `v2.0.x` — all 2.0 work. `master` is frozen at 1.0.3, `v1.1.x` is the BindCraft 2 line |
-| **Version** | **2.0.0**, carried in `binderscout.py`. **Not tagged** — newest tag is still `v1.1.1` |
-| **State** | 887 tests passing, 7 skipped; ruff + shellcheck clean; working tree clean; CI green |
+| **Branch** | `v2.0.x` — all 2.0 work. `master` is a **separate `v1.2.x` line** (it shares one commit with this line and cannot be cherry-picked from); `v1.1.x` was retired to the `archive/v1.1.x` tag |
+| **Version** | Tags `v2.0.0`, `v2.0.1` and `v2.0.2` exist; **`v2.0.3` is in preparation**. The version is carried in `binderscout.py` |
+| **State** | 1839 tests passing, 10 skipped, 1 xfailed; ruff + shellcheck clean; working tree clean |
 
 ---
 
 ## Read in this order
 
 ### 1. Start here — what 2.0 is and where it stands
-**[`docs/PLAN_2.0_CONCLUSION.md`](../docs/PLAN_2.0_CONCLUSION.md)**
+**[`docs/PLAN_2.0_CONCLUSION.md`](../docs/PLAN_2.0_CONCLUSION.md)** *(a historical planning record — its status table is as of 2026-10-09 and is not current; the table above is)*
 
 Self-contained. What was done, what is left and why, the three open decisions,
 the findings that cost real time, the platform reality, and what needs a machine
@@ -91,7 +91,7 @@ which 2,098 predate 2.0.
 ```bash
 git rev-parse --abbrev-ref HEAD          # v2.0.x
 git status --short                       # empty
-./conda/envs/binder-eval/bin/python -m pytest tests/ -q   # 887 passed, 7 skipped
+./conda/envs/binder-eval/bin/python -m pytest tests/ -q   # 1839 passed, 10 skipped, 1 xfailed
 uvx ruff check . && uvx ruff format --check .
 ./install/install.sh --tool all --verify # audits what is actually on disk
 ```

@@ -83,6 +83,25 @@ def test_readme_counts_nine_design_tools_where_it_counts_them():
     assert "Five of eight tools" not in readme
 
 
+# --- 2.0/README.md (the handoff index) ---------------------------------------
+
+
+def test_handoff_index_states_the_branch_and_tag_layout():
+    index = _text("2.0/README.md")
+    for stale in ("frozen at", "Not tagged", "newest tag is still", "is the BindCraft 2 line"):
+        assert stale not in index, f"2.0/README.md still says {stale!r}"
+    assert "887" not in index, "2.0/README.md still quotes the 2.0.0-era test count"
+    top = index.split("## Read in this order")[0]
+    for needle in ("v2.0.0", "v2.0.2", "v2.0.3", "master", "v1.2", "archive/v1.1.x"):
+        assert needle in top, f"the 2.0/README.md state table does not mention {needle!r}"
+
+
+def test_handoff_index_does_not_present_the_conclusion_as_current_status():
+    index = _text("2.0/README.md")
+    link = index[index.index("PLAN_2.0_CONCLUSION.md") :].splitlines()[0]
+    assert "historical" in link.lower(), "the conclusion is a planning record and must be linked as one"
+
+
 # --- CLAUDE.md ---------------------------------------------------------------
 
 
