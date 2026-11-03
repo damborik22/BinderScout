@@ -22,6 +22,13 @@ import sys
 import tarfile
 from pathlib import Path
 
+# This file is launched by path, so the repo root (where binderscout_paths.py lives) is
+# not on sys.path. Appended, never prepended: nothing here may shadow a module.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.append(str(_REPO_ROOT))
+from binderscout_paths import find_conda_base  # noqa: E402
+
 # ─── Colors ──────────────────────────────────────────────────────────────────
 
 RED = "\033[0;31m"
@@ -71,43 +78,8 @@ def print_fail(msg):
 
 
 def _find_conda_base() -> Path | None:
-    """Find conda/mamba base directory. Prefers mamba (faster installs)."""
-    # Check local standalone conda first (BinderScout/conda/)
-    local_conda = Path(__file__).resolve().parent.parent / "conda"
-    if (local_conda / "etc" / "profile.d" / "conda.sh").exists():
-        return local_conda
-    for cmd in ("mamba", "conda"):
-        try:
-            result = subprocess.run(
-                [cmd, "info", "--base"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                base = result.stdout.strip()
-                # mamba 2.x outputs "base environment : /path" instead of just "/path"
-                if ":" in base:
-                    base = base.rsplit(":", 1)[-1].strip()
-                p = Path(base)
-                if p.is_dir():
-                    return p
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            continue
-    for candidate in [
-        Path.home() / "miniforge3",
-        Path.home() / "mambaforge",
-        Path.home() / "miniconda3",
-        Path.home() / "anaconda3",
-        Path.home() / "conda",
-        Path("/opt/conda"),
-        Path("/opt/miniforge3"),
-        Path("/opt/miniconda3"),
-        Path("/opt/anaconda3"),
-    ]:
-        if (candidate / "etc" / "profile.d" / "conda.sh").exists():
-            return candidate
-    return None
+    """Find the conda base directory -- the one answer shared with the CLI and the TUI."""
+    return find_conda_base(BINDERSCOUT_DIR)
 
 
 def _find_binderscout_dir() -> Path:
@@ -152,10 +124,9 @@ def _find_binderscout_dir() -> Path:
 
 # ─── Paths ───────────────────────────────────────────────────────────────────
 
+BINDERSCOUT_DIR = _find_binderscout_dir()
 CONDA_BASE = _find_conda_base()
 CONDA_ENVS_DIR = (CONDA_BASE / "envs") if CONDA_BASE else None
-
-BINDERSCOUT_DIR = _find_binderscout_dir()
 BINDCRAFT_DIR = BINDERSCOUT_DIR / "BindCraft"
 BOLTZGEN_DIR = BINDERSCOUT_DIR / "BoltzGen"
 MOSAIC_DIR = BINDERSCOUT_DIR / "Mosaic"
