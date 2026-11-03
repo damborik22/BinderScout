@@ -251,6 +251,18 @@ def run(args: argparse.Namespace) -> None:
         esmfold2_csv=args.esmfold2_results,
     )
 
+    # The merger treats the --sequences FASTA as the pool and drops engine rows outside it. If that
+    # leaves nothing, the engine CSVs belong to a different pool (a stale, shared output directory):
+    # writing a complete-looking but EMPTY report with exit 0 is the silent success this tool refuses.
+    if df.empty:
+        print(
+            "[report] ERROR: none of the refold results match a design in the --sequences pool, so there "
+            "is nothing to report. The engine CSVs were probably written for a different pool (a stale or "
+            "shared output directory). Re-run the refold into a per-run --output-dir.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # A pool folded on another machine or account carries that machine's absolute
     # structure paths. Resolve them against each engine's CSV directory now, once, so
     # the top-20 copy, the 3D viewers and the inline epitope all see paths that exist

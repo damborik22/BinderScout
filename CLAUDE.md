@@ -818,12 +818,12 @@ does not exist until the installer has run once (see Quick start above).
 ```bash
 binderscout install                          # interactive tool selection
 binderscout install --tool all               # install all current-generation tools
-# NOTE: `all` does NOT include AF3 (its weights are gated — you request them from
-# Google DeepMind yourself) or TmProt. So a fresh `--tool all` gives TWO refold
-# engines (Boltz-2 + ESMFold2) against the report's default `--min-engines 3`, and
-# every design then fails the cross-engine gate and is ranked last. The report says
-# so loudly rather than silently. Either add `--tool af3` once you have the weights,
-# or pass `--min-engines 2`. Verified 2026-09-27.
+# NOTE: `all` includes the AF3 *environment* (since v2.0.3, ported from master 1.0.6): it
+# only clones the public repo and builds it. AF3's WEIGHTS are gated -- you request them from
+# Google DeepMind yourself -- and until they are in place `evaluate.sh` resolves them up front
+# and skips AF3 BY NAME (it no longer fails after hours of other engines). TmProt is not in
+# `all`. With AF3 skipped the default `--min-engines 3` gate cannot be met: every design is
+# ranked last and the report says so; pass `--min-engines 2` or put the weights in place.
 binderscout install --tool mosaic            # install one tool
 binderscout install --tool all --yes --skip-examples  # non-interactive (CI)
 binderscout install --tool proteina-complexa # install Proteina-Complexa

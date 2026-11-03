@@ -168,3 +168,19 @@ class TestItComposesWithTheOtherMergerGuards:
             merge_refold_results(boltz, fasta, af3_csv=af3)
 
         assert "1 unique sequences" in capsys.readouterr().out
+
+
+def test_a_lowercase_or_padded_fasta_entry_still_matches_an_uppercase_engine_row(tmp_path):
+    """The POOL side of the comparison is normalised too (found in review: nothing pinned it).
+
+    On this line `_load_engine` already canonicalises the engine CSV, so only the FASTA side can differ; without
+    normalising it a real pool design was silently dropped from the report.
+    """
+    fasta = tmp_path / "pool.fasta"
+    fasta.write_text(">b1 source=mosaic\n  aaaa \n")
+    csv = tmp_path / "boltz.csv"
+    pd.DataFrame([{"idx": 1, "sequence": "AAAA", "target_sequence": "T" * 10, "binder_length": 4, "iptm": 0.8}]).to_csv(
+        csv, index=False
+    )
+    merged = merge_refold_results(csv, sequences_fasta=fasta)
+    assert len(merged) == 1, "a real pool design was dropped because the FASTA entry was lower-case / padded"

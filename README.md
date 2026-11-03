@@ -31,7 +31,7 @@ A unified toolkit for GPU-accelerated protein binder design — installer, confi
 
 | Component | What it does | Runs in |
 |---|---|---|
-| `binderscout install` | Installs design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3; RFD4-Proteina is a separate opt-in `--tool rfd4` add) plus the default refold engine ESMFold2 and the SoluProt solubility screen; BindCraft 2 needs its source handed to `--bc2-source`, and AF3 is a separate `--tool` add (gated weights) | bash |
+| `binderscout install` | Installs design tools (BindCraft, BindCraft 2, BoltzGen, Mosaic, PXDesign, Proteina-Complexa, Protein-Hunter, RFD3; RFD4-Proteina is a separate opt-in `--tool rfd4` add) plus the refold engines ESMFold2 and AlphaFold 3 (the AF3 environment builds; its gated weights you request yourself) and the SoluProt solubility screen; BindCraft 2 needs its source handed to `--bc2-source`, and AF3 is a separate `--tool` add (gated weights) | bash |
 | `binderscout configure` | Interactive wizard: target → configs → run scripts | system Python |
 | `binderscout evaluate` | Passthrough to `binder-compare`: parse tool outputs, optionally screen with SoluProt, refold with Boltz-2 / AF3 / ESMFold2, rank by cross-engine iPTM, generate HTML report | conda env `binder-eval` |
 
@@ -80,7 +80,7 @@ The evaluator (`binderscout evaluate` / `binder-compare`) runs on top of the des
 |---|---|---|---|---|
 | **Boltz-2** | Primary refold engine; ranking reference | `Mosaic/.venv` (rides Mosaic install) | x86_64 + aarch64 | default (with Mosaic) |
 | **ESMFold2** | Default refold engine; lightweight, no gated weights; also the `autosize` gate (`chain_iptm_interface`) | conda env `binder-eval-esmfold2` (Python 3.10) | x86_64 + aarch64 | default (in `--tool all`) |
-| **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.10, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | `--tool af3` (gated weights) |
+| **AlphaFold 3 v3.0.2** | Canonical cross-engine 2nd opinion | conda env `binder-eval-af3` (Python 3.10, gated weights) | x86_64 + aarch64; fits a 24 GB card in our size regime — the gate is the **gated weights**, not VRAM | in `--tool all` (the env builds; the **weights** you request yourself; `evaluate.sh` skips AF3 by name when they are missing) |
 | **SoluProt 1.0** | Sequence-only *E. coli* solubility screen (Hon et al. 2021); **label only** — neither filters nor re-ranks | conda env `binder-eval-soluprot` (Python 3.7, scikit-learn 0.20.x) | x86_64 + aarch64. **Both platforms source-build USEARCH v12** (GPLv3; not redistributed here), so `--tool soluprot` needs a C/C++ toolchain — a failed build fails the install rather than leaving SoluProt silently unable to score. aarch64 additionally source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model | in `--tool all` |
 
 ### Architecture
@@ -125,7 +125,7 @@ flowchart LR
     ESMFold2 --> Report
 ```
 
-ESMFold2 and SoluProt are in `--tool all`; AF3 is an explicit `--tool af3` install (gated weights). All three refold engines are then auto-detected by `evaluate.sh` from their conda envs.
+ESMFold2, AF3 and SoluProt are in `--tool all` (AF3's *weights* are gated: you request them from Google DeepMind yourself; until they are in place `evaluate.sh` skips AF3 by name and the default 3-engine gate then needs `--min-engines 2`). All three refold engines are auto-detected by `evaluate.sh` from their conda envs.
 
 **SoluProt is a label, not a filter, and no longer has a filter mode.** Its `soluprot_score` / `soluprot_passes` columns land in `metrics.csv` beside the refold scores, and a sub-threshold design is annotated in the report rather than removed. The old `--soluprot-filter` dropped designs from the FASTA before any engine ran; measured against experimental results on two targets it discarded several of the tightest measured binders, and no threshold above 0.0 met the recall bar. The flag is now **refused with an error** rather than ignored, so anything that scripted it finds out instead of quietly receiving different data.
 
@@ -174,7 +174,7 @@ flowchart TB
     EvaluateSh -->|conda run -n …| EvalEnvs
 ```
 
-Solid blue boxes are the nine design tools' isolated environments; green / yellow boxes are the four evaluator environments (ESMFold2 and SoluProt ship in `--tool all`; AF3 is opt-in via `--tool af3`). The grey panel shows the per-run output layout the configurator generates and `evaluate.sh` fills in.
+Solid blue boxes are the nine design tools' isolated environments; green / yellow boxes are the four evaluator environments (ESMFold2, AF3 and SoluProt ship in `--tool all`; AF3's weights are requested separately). The grey panel shows the per-run output layout the configurator generates and `evaluate.sh` fills in.
 
 ---
 
@@ -268,7 +268,7 @@ binderscout install   [--tool bindcraft|bindcraft2|boltzgen|mosaic|pxdesign|prot
                      [--tool rfd4]                     # ninth design tool, opt-in, not in --tool all
                      [--bc2-source <zip|dir|git-url>]  # override BindCraft 2's source (default: upstream)
                      [--tool evaluator]                # the evaluator alone (binder-eval env + binder-compare)
-                     [--tool af3|soluprot|tmprot]      # extra evaluator engines (esmfold2 ships in --tool all)
+                     [--tool af3|soluprot|tmprot]      # extra evaluator engines (esmfold2, af3 and soluprot ship in --tool all)
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
                      [--skip-preflight] [--force] [--verify] [--repair] [--stale]
 binderscout configure [options passed through to configurator.py]
@@ -291,7 +291,7 @@ Options:
 | `--tool rfd4\|rfd4-proteina` | RFD4-Proteina, the ninth design tool. **Not** in `--tool all`: it is new here, validated by one 4-design run on one node, and its **weights licence is unverified** — the BSD-3 licence covers the code only. Upstream's `setup_venv.sh` refuses non-x86_64 hosts, but we never call it: the installer builds the venv with `uv` directly, and on aarch64 (`install_aarch.sh`) resolves the pinned set against the cu130 wheel index. On aarch64 that is validated by a dependency resolve and an install on one GB10, **not by a design campaign**. |
 | `--tool evaluator` | Evaluator pipeline only — the `binder-eval` conda env and the `binder-compare` CLI (already in `--tool all`). This is the one to use when someone else ran the designs and you only want to refold, rank and report them. |
 | `--tool esmfold2` | ESMFold2 refolder — **default** (already in `--tool all`); lightweight, no gated weights; also the `autosize` gate. Listed here for explicit re-install. |
-| `--tool af3\|soluprot\|tmprot` | Evaluator-side tools, each in its own env. `af3` = AlphaFold 3 v3.0.2, **opt-in** (gated weights — canonical cross-check). `soluprot` = solubility screen, **already in `--tool all`**; listed here for an explicit re-install (both platforms source-build USEARCH v12, so a C/C++ toolchain is needed; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it also source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model). `tmprot` = sequence-only melting-temperature screen, **opt-in**, cloned rather than vendored (GPL-3.0); advisory label only, it never filters or ranks. |
+| `--tool af3\|soluprot\|tmprot` | Evaluator-side tools, each in its own env. `af3` = AlphaFold 3 v3.0.2, **in `--tool all`** (the env builds; the weights are gated and requested separately — canonical cross-check). `soluprot` = solubility screen, **already in `--tool all`**; listed here for an explicit re-install (both platforms source-build USEARCH v12, so a C/C++ toolchain is needed; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it also source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model). `tmprot` = sequence-only melting-temperature screen, **opt-in**, cloned rather than vendored (GPL-3.0); advisory label only, it never filters or ranks. |
 | `--cuda VERSION` | CUDA version for conda package resolution (default: 12.4) |
 | `--skip-examples` | Do not prompt to run bundled examples after install |
 | `--standalone` | Force local Miniforge3 install (no system conda needed) |

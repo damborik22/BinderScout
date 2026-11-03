@@ -154,6 +154,28 @@ Work since `v2.0.2` (37 commits), in preparation as `v2.0.3`. Nothing here chang
 - `tests/test_version_matches_changelog.py` pins `binderscout.__version__` to the newest numbered
   changelog heading. It is `xfail(strict=True)` until the release commit bumps the version.
 
+### Ported from `master` (1.0.6-1.0.8), re-applied on this line
+
+- **One NaN guard for every extractor's sequence cell.** An empty CSV cell is NaN and
+  `str(nan).strip().upper()` is `"NAN"`, whose letters are all standard residues: a blank cell passed
+  validation and the string was folded as a design. Every CSV-reading extractor now goes through
+  `SequenceExtractor._sequence_cell`.
+- **`merge_refold_results` treats the `--sequences` FASTA as the pool.** Engine rows whose sequence is not
+  in the pool are dropped with a named warning before anything is ranked (an engine CSV accumulates
+  across runs and may hold more than the pool being reported).
+- **`evaluate.sh` checks pool coverage, not a row delta**, and **resolves AF3's weights up front**
+  (AF3 is skipped by name when they are missing instead of failing late). **AF3 is now in `--tool all`**
+  (the environment only; the gated weights are still yours to request).
+- **Proteina-Complexa:** `dm-haiku` is pinned and asserted by importing `colabdesign`; the generated
+  harvest keeps the metrics Complexa computed (accepts `binder_sequence`, scans every output directory),
+  and a harvest that finds no designs now exits non-zero (PXDesign too).
+- **RFD3:** a run with no hotspots is refused at configure time (the previous `infer_ori_strategy:
+  hotspots` assertion fired inside RFD3 after the model had loaded). The x86_64 `rc-foundry` pin is now
+  load-bearing (one constant in both pip specs).
+- **Every script the configurator generates must `bash -n` parse**, enforced by a test.
+- **Not ported (known gap):** master's Proteina-Complexa raw-output copy-back and the per-row `structure`
+  column that links a design id to its PDB. Tracked for 2.0.4.
+
 ### Removed
 
 - **The 16 planning records under `docs/`** (`PLAN_*`, `INVESTIGATION_*`, `REPORT_*`,
