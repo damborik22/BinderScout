@@ -659,7 +659,7 @@ _stale_editable_reason() {
 
 # _relocation_reason <tool>: the reason this tool's recorded location no longer matches
 _relocation_reason() {
-    local r=""
+    local r="" r2=""
     case "${1,,}" in
         "bindcraft 2"|bindcraft2) r="$(_stale_venv_reason "${BINDCRAFT2_DIR}")" ;;
         mosaic) r="$(_stale_venv_reason "${MOSAIC_DIR}")" ;;
@@ -672,12 +672,20 @@ _relocation_reason() {
         # --repair can fix a stale one (install_mosaic only reads it).
         evaluator)
             r="$(_stale_editable_reason binder-eval "${EVALUATOR_DIR}")"
-            if [[ -z "${r}" ]]; then r="$(_stale_mosaic_pointer)"; fi ;;
+            # A foreign-checkout NOTE is not a verdict: a BROKEN pointer still replaces it.
+            if [[ -z "${r}" || "${r}" == "NOTE: "* ]]; then
+                r2="$(_stale_mosaic_pointer)"
+                if [[ -n "${r2}" ]]; then r="${r2}"; fi
+            fi ;;
         af3) r="$(_stale_editable_reason binder-eval-af3 "${EVALUATOR_DIR}")" ;;
         esmfold2) r="$(_stale_editable_reason binder-eval-esmfold2 "${EVALUATOR_DIR}")" ;;
         tmprot)
             r="$(_stale_editable_reason binder-eval-tmprot "${EVALUATOR_DIR}")"
-            if [[ -z "${r}" ]]; then r="$(_stale_editable_reason binder-eval-tmprot "${TMPROT_DIR}/tmprot-1.0")"; fi ;;
+            # A foreign-checkout NOTE is not a verdict: a BROKEN tmprot-1.0 editable replaces it.
+            if [[ -z "${r}" || "${r}" == "NOTE: "* ]]; then
+                r2="$(_stale_editable_reason binder-eval-tmprot "${TMPROT_DIR}/tmprot-1.0")"
+                if [[ -z "${r}" || "${r2}" == "BROKEN"* ]]; then r="${r2}"; fi
+            fi ;;
     esac
     printf '%s' "${r}"
 }
