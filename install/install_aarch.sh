@@ -615,6 +615,8 @@ _stale_venv_reason() {
     local dir="$1" rec
     rec="$(_venv_recorded_path "${dir}/.venv")" || return 0
     if [[ "$(_canon_path "${rec}")" == "$(_canon_path "${dir}/.venv")" ]]; then return 0; fi
+    # A bind mount or an automount alias of the SAME directory resolves to a different string.
+    if [[ "${rec}" -ef "${dir}/.venv" ]]; then return 0; fi
     printf '%s' "BROKEN — ${dir}/.venv was built at ${rec}, but the checkout is now at ${dir}. The checkout IS the installation (editable, absolute paths baked in), so a moved or renamed checkout breaks it while every file still exists. Run --repair to rebuild it here, or move the checkout back."
 }
 
@@ -630,8 +632,11 @@ _stale_mosaic_pointer() {
 # _stale_editable_reason <conda-env> <expected-dir>
 # An editable install in <env> whose directory has <expected-dir>'s name but sits at another path
 # (the checkout moved or was renamed). Editable installs of OTHER packages are not its business.
+# When the recorded checkout STILL EXISTS it was not moved: it is a second checkout sharing this
+# conda, and the env is its. That is a NOTE (the "NOTE: " prefix is how verify_tool tells it from
+# a BROKEN reason), never a reason to re-point the env here and break the other checkout.
 _stale_editable_reason() {
-    local du url root bad=""
+    local du url root bad="" foreign=""
     bs_env_lookup "${CONDA_BASE}" "$1" || return 0
     for du in "${BS_ENV_PREFIX}"/lib/python*/site-packages/*.dist-info/direct_url.json; do
         [[ -f "${du}" ]] || continue
@@ -641,11 +646,15 @@ _stale_editable_reason() {
         root="${root%\"}"
         root="$(printf '%b' "${root//%/\\x}")"
         [[ "${root##*/}" == "${2##*/}" ]] || continue
-        if [[ "$(_canon_path "${root}")" == "$(_canon_path "$2")" ]]; then return 0; fi
-        bad="${root}"
+        if [[ "$(_canon_path "${root}")" == "$(_canon_path "$2")" || "${root}" -ef "$2" ]]; then return 0; fi
+        if [[ -d "${root}" ]]; then foreign="${root}"; else bad="${root}"; fi
     done
-    [[ -n "${bad}" ]] || return 0
-    printf '%s' "BROKEN — the ${1} env has an editable install of ${bad}, but that checkout is now at $2. Run --repair to point it here."
+    if [[ -n "${bad}" ]]; then
+        printf '%s' "BROKEN — the ${1} env has an editable install of ${bad}, but that checkout is now at $2. Run --repair to point it here."
+    elif [[ -n "${foreign}" ]]; then
+        printf '%s' "NOTE: owned by another checkout at ${foreign} — the ${1} env's editable install points there, not at $2. Left alone: re-pointing it would break that checkout."
+    fi
+    return 0
 }
 
 # _relocation_reason <tool>: the reason this tool's recorded location no longer matches
@@ -4819,6 +4828,11 @@ verify_tool() {
         return 1
     fi
     VERIFY_REASON="$(_relocation_reason "${tool}")"
+    VERIFY_NOTE=""
+    if [[ "${VERIFY_REASON}" == "NOTE: "* ]]; then
+        VERIFY_NOTE="${VERIFY_REASON#NOTE: }"
+        VERIFY_REASON=""
+    fi
     [[ -z "${VERIFY_REASON}" ]] || return 1
     case "${tool,,}" in
         bindcraft)
@@ -4961,6 +4975,9 @@ sys.exit(0 if (': str' in doc or 'DockingPartners' in src) else 1)"; then
 # lie and changing --verify's exit status for it would break every caller that
 # gates on "installed vs not". --repair reads this list too, and acts on it.
 VERIFY_STALE=()
+# Set by verify_tool for a tool that is usable but whose env belongs to another checkout. Neither
+# broken nor stale: it is reported and never offered to --repair.
+VERIFY_NOTE=""
 
 # Verify every selected tool. Appends broken ones to the named array, and stale
 # ones (usable, built against another commit) to VERIFY_STALE.
@@ -4983,7 +5000,9 @@ verify_selected_tools() {
         # formula here or the audit would read a marker nobody writes.
         mkey="${flag#DO_}"; mkey="${mkey,,}"
         if verify_tool "${tool}"; then
-            if tool_marker_is_stale "${mkey}"; then
+            if [[ -n "${VERIFY_NOTE}" ]]; then
+                printf "  %b  %-20s %s\n" "${YELLOW}⚠${RESET}" "${tool}" "usable — ${VERIFY_NOTE}"
+            elif tool_marker_is_stale "${mkey}"; then
                 printf "  %b  %-20s %s\n" "${YELLOW}⚠${RESET}" "${tool}" \
                     "STALE — usable, but installed against $(marker_recorded_sha "${mkey}"); HEAD is $(current_repo_sha)"
                 VERIFY_STALE+=("${tool}")
