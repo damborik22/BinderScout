@@ -50,9 +50,10 @@
 #   --min-engines N        how many independent engines must have refolded a design for it
 #                          to be eligible for the ranking (default 3 = all of Boltz-2 / AF3 /
 #                          ESMFold2; floor 2). Designs below the gate are ranked LAST, not
-#                          dropped. On a host without AF3 — the common case, it needs >100 GB
-#                          of GPU memory — only two engines run and the default gate fails
-#                          EVERY design, so this script says so up front and names the flag.
+#                          dropped. On a host without AF3 — which usually means the gated
+#                          weights were never placed, NOT a GPU limit; AF3 fits a 24 GB card
+#                          in our size regime — only two engines run and the default gate
+#                          fails EVERY design, so this script says so up front and names the flag.
 #                          The gate is never lowered automatically: that would make two
 #                          operators with the same designs produce different rankings
 #                          depending on what happens to be installed.
@@ -400,6 +401,48 @@ if [[ $SKIP_AF3 -eq 0 ]]; then
         echo "[note] ${_why} — AF3 refolding will be skipped."
         _SKIPPED+=("AF3: ${_why}")
         echo "        (install with 'binderscout install --tool af3'; runs on 24 GB GPUs — see Evaluator/envs/binder-eval-af3.yml)"
+        echo ""
+        SKIP_AF3=1
+    fi
+fi
+
+# The env is not enough: AF3's weights are gated, so the installer can neither bundle nor
+# fetch them -- it only PRINTS where to put them, at the end of a long install. Detecting the
+# env but not the weights meant a pool refolded through Boltz-2 and ESMFold2 for hours and
+# only then died in the AF3 step on FileNotFoundError. Resolve them here instead, in the order
+# refold_af3.py's _resolve_model_dir uses ($AF3_MODEL_DIR when it is a directory -- taken
+# as-is, so an EMPTY one is a failure there too -- then the default directories, each only
+# when non-empty), and drop AF3 NOW, by name, rather than in hour 3.
+_af3_weights_dir () {   # prints the models directory refold_af3.py will use; fails if it has none
+    local cand
+    if [[ -n "${AF3_MODEL_DIR:-}" && -d "${AF3_MODEL_DIR}" ]]; then
+        [[ -n "$(ls -A "${AF3_MODEL_DIR}" 2>/dev/null)" ]] || return 1
+        echo "${AF3_MODEL_DIR}"; return 0
+    fi
+    for cand in "${HOME}/.alphafold3/models" "${HOME}/af3_models" /opt/alphafold3/models; do
+        if [[ -d "${cand}" && -n "$(ls -A "${cand}" 2>/dev/null)" ]]; then
+            echo "${cand}"; return 0
+        fi
+    done
+    return 1
+}
+
+if [[ $SKIP_AF3 -eq 0 ]]; then
+    if _af3_models="$(_af3_weights_dir)"; then
+        echo "[note] AF3 weights found: ${_af3_models}"
+        echo ""
+    else
+        echo "[note] '${AF3_ENV}' is installed but no AF3 weights were found — AF3 refolding will be skipped."
+        _SKIPPED+=("AF3: no AF3 weights found (env '${AF3_ENV}' is installed)")
+        echo "        Searched: \$AF3_MODEL_DIR, ~/.alphafold3/models, ~/af3_models, /opt/alphafold3/models"
+        if [[ -n "${AF3_MODEL_DIR:-}" && -d "${AF3_MODEL_DIR}" ]]; then
+            echo "        AF3_MODEL_DIR is set to ${AF3_MODEL_DIR} but that directory is empty;"
+            echo "        refold_af3.py would use it as-is, so the defaults are not tried."
+        fi
+        echo "        The weights are gated and are NOT shipped with this repo: request access from the"
+        echo "        AlphaFold 3 project (https://github.com/google-deepmind/alphafold3), place them in one of"
+        echo "        the paths above, or export AF3_MODEL_DIR=/path/to/models, and re-run."
+        echo "        Skipping now rather than failing after the Boltz-2 / ESMFold2 refolds."
         echo ""
         SKIP_AF3=1
     fi

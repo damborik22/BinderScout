@@ -150,11 +150,17 @@ def test_evaluate_sh_parser_accepts_the_run_sh_invocation(tmp_path: Path) -> Non
 # --- Cross-engine gate vs. the engines that actually run ----------------------
 
 
-def _run_evaluate_sh(tmp_path: Path, envs: list[str], argv: list[str]):
+def _run_evaluate_sh(tmp_path: Path, envs: list[str], argv: list[str], *, af3_weights: bool = True):
     """Drive evaluate.sh's real parser with a stub conda reporting *envs*.
 
     Everything past argument parsing shells out through the stub, so this exercises
     engine auto-detection and the gate warning only — no conda env, no GPU.
+
+    `af3_weights` says whether AF3's gated model parameters appear to be present.
+    evaluate.sh counts AF3 as an engine only when BOTH its conda env and its weights
+    resolve, and the weight search falls back to `$HOME/.alphafold3/models`, so both
+    are pinned here (HOME is redirected into tmp_path) -- otherwise the outcome would
+    depend on whether the machine running the tests happens to hold the weights.
     """
     sandbox = tmp_path / "Evaluator"
     (sandbox / "envs").mkdir(parents=True, exist_ok=True)
@@ -198,7 +204,18 @@ def _run_evaluate_sh(tmp_path: Path, envs: list[str], argv: list[str]):
     sequences = tmp_path / "seqs.fasta"
     sequences.write_text(">b1\nMKTAYIAKQRQ\n")
 
-    env = {**os.environ, "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"}
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(exist_ok=True)
+    models = tmp_path / "af3_models"
+    models.mkdir(exist_ok=True)
+    if af3_weights:
+        (models / "af3.bin").write_text("stub")
+    env = {
+        **os.environ,
+        "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(fake_home),
+        "AF3_MODEL_DIR": str(models),
+    }
     proc = subprocess.run(
         [
             "bash",

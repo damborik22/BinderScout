@@ -32,12 +32,17 @@ needs_no_system_conda = pytest.mark.skipif(
 )
 
 
-def _evaluate(tmp_path: Path, envs: list[str] | None, extra: list[str] | None = None) -> subprocess.CompletedProcess:
+def _evaluate(
+    tmp_path: Path,
+    envs: list[str] | None,
+    extra: list[str] | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     """Run evaluate.sh in a sandbox. envs=None means there is no conda at all."""
     sandbox = tmp_path / "Evaluator"
     (sandbox / "envs").mkdir(parents=True)
     shutil.copy(EVALUATE_SH, sandbox / "evaluate.sh")
-    env = {"HOME": str(tmp_path / "home"), "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+    env = {"HOME": str(tmp_path / "home"), "PATH": "/usr/bin:/bin", "LC_ALL": "C", **(extra_env or {})}
     (tmp_path / "home").mkdir()
     if envs is not None:
         listing = "\n".join(f"echo '{name} /x'" for name in envs)
@@ -81,7 +86,16 @@ def test_an_engine_the_user_skipped_is_not_reported_as_missing(tmp_path):
 
 
 def test_an_installed_engine_is_not_listed(tmp_path):
-    r = _evaluate(tmp_path, ["binder-eval", "binder-eval-af3", "binder-eval-esmfold2"])
+    # An installed AF3 env is not enough: its gated weights must resolve too (see
+    # test_shell_evaluate_af3_weights_preflight.py), so give it a model directory.
+    models = tmp_path / "af3_models"
+    models.mkdir()
+    (models / "af3.bin").write_bytes(b"x")
+    r = _evaluate(
+        tmp_path,
+        ["binder-eval", "binder-eval-af3", "binder-eval-esmfold2"],
+        extra_env={"AF3_MODEL_DIR": str(models)},
+    )
     out = r.stdout + r.stderr
     assert "[skipped] AF3" not in out and "[skipped] ESMFold2" not in out, out
 
