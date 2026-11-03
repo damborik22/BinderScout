@@ -56,6 +56,7 @@ def test_the_run_script_templates_and_examples_name_no_cluster_or_box():
 
 def test_generated_scripts_carry_no_cluster_names(tmp_path, fake_checkout, replay):
     payload = json.loads((REPO / "examples" / "CALCA" / "smoke.json").read_text())
+    payload["cfg"]["name"] = "run"  # the run folder is derived from name; keep them equal
     payload["cfg"]["run_dir"] = str(tmp_path / "run")
     payload["cfg"]["target_pdb_src"] = str(REPO / "examples" / "CALCA" / "target.pdb")
     config = tmp_path / "cfg.json"

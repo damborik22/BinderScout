@@ -33,7 +33,7 @@ def _cfg(tmp_path, tools, extra=None):
     pdb = tmp_path / "t.pdb"
     pdb.write_text(PDB)
     cfg = {
-        "name": "T",
+        "name": "run",
         "run_dir": str(tmp_path / "run"),
         "target_pdb_src": str(pdb),
         "target_sequence": "AAAAA",

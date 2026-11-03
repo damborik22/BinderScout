@@ -34,7 +34,12 @@ def _write_cfg(tmp_path, run_dir_value):
     payload = {
         "config_version": 1,
         "tools_enabled": {"bindcraft2": True},
-        "cfg": {"name": "T", "run_dir": run_dir_value, "target_pdb_src": str(pdb), "target_sequence": "AAAA"},
+        "cfg": {
+            "name": Path(run_dir_value).name,
+            "run_dir": run_dir_value,
+            "target_pdb_src": str(pdb),
+            "target_sequence": "AAAA",
+        },
     }
     p = tmp_path / "c.json"
     p.write_text(json.dumps(payload))

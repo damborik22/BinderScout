@@ -24,6 +24,14 @@ To exercise one tool instead of all eight:
 bash runs/CALCA_smoke/run_rfd3.sh
 ```
 
+### Reusing the config for another campaign
+
+Copy it and change `name`; the run folder follows the name (`runs/<name>`). If
+the last component of `run_dir` does not match `name`, the configurator derives
+the folder from `name` and prints one line saying so, so two campaigns with
+different names never share a folder. To use a different location, change the
+parent of `run_dir`; its last component always follows `name`.
+
 ### Why this target
 
 `examples/CALCA/target.pdb` is **32 residues** — chain A of a real AlphaFold 3

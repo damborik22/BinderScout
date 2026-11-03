@@ -5221,9 +5221,38 @@ def refuse_run_dir_that_is_a_file(run_dir: Path) -> None:
         sys.exit(1)
 
 
+def derive_run_dir_from_name(cfg: dict, config_path: Path) -> None:
+    """Make a replayed config's run directory follow its `name`.
+
+    Copying `examples/CALCA/smoke.json` and changing only `name` used to write the new
+    campaign into the example's directory (`run_dir` still said `runs/CALCA_smoke`), so
+    two differently named campaigns collided on one folder and overwrote each other. When
+    the last component of `run_dir` is not `name`, the directory is derived from `name`
+    instead -- same parent, new leaf -- and one note says so.
+
+    Left alone: a `run_dir` that IS the config's own folder (what `config.json` inside a
+    generated run folder says, `.`, so a renamed or moved run folder replays onto itself),
+    and a `name` that is not a single path component (it cannot be a directory name).
+    The wizard derives the folder from the name itself and never comes through here.
+    """
+    name = str(cfg["name"])
+    run_dir = Path(cfg["run_dir"])
+    if run_dir.name == name or Path(name).name != name or name in (".", ".."):
+        return
+    if run_dir == Path(config_path).expanduser().resolve().parent:
+        return
+    derived = run_dir.parent / name
+    print_warn(f"run_dir ends in {run_dir.name!r} but name is {name!r}: using the run folder derived from the name.")
+    print(f"  {run_dir}  ->  {derived}")
+    print("  (Two campaigns with different names must not share a folder. To keep the old folder,")
+    print("   set name to match the last component of run_dir.)")
+    cfg["run_dir"] = derived
+
+
 def cmd_from_config(config_path: str, run_now: bool) -> None:
     """Non-interactive path: generate a run directory straight from a saved config."""
     cfg, tools_enabled = load_run_config(Path(config_path))
+    derive_run_dir_from_name(cfg, Path(config_path))
     run_dir = Path(cfg["run_dir"])
     refuse_run_dir_that_is_a_file(run_dir)
 
