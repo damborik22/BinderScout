@@ -25,8 +25,8 @@ DEFAULT_TIMEOUT_S = 25
 
 
 def fleet_hosts() -> list:
-    """Aliases to probe. Empty means local-only, which is the safe default."""
-    raw = os.environ.get("BINDERSCOUT_FLEET") or os.environ.get("FLEET_MACHINES") or ""
+    """Aliases to probe, from $BINDERSCOUT_FLEET only. Empty means local-only, the safe default."""
+    raw = os.environ.get("BINDERSCOUT_FLEET") or ""
     return [h for h in raw.replace(",", " ").split() if h]
 
 
