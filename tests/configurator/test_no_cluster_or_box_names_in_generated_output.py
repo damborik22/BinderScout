@@ -82,6 +82,9 @@ def test_a_prerename_env_is_reported_as_the_installed_tool(tmp_path, monkeypatch
     envs = tmp_path / "envs"
     (envs / ("bindmaster" + "_pxdesign")).mkdir(parents=True)
     monkeypatch.setattr(conf, "CONDA_ENVS_DIR", envs)
+    # Hermetic: detect_installs() enforces the per-tool markers once ANY exists, so a checkout
+    # that has ever installed something (a real .install_state/) would fail this test.
+    monkeypatch.setattr(conf, "INSTALL_STATE_DIR", tmp_path / "no_markers")
     assert conf.detect_installs()["pxdesign_local"] is True
 
     # ...and the canonical name wins when both exist; with neither, the tool is absent.
