@@ -96,6 +96,7 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "monomer_rmsd": ("Monomer RMSD", "Å", "↓"),
     # ── Ranking / screen ────────────────────────────────────────────────────
     "passes_engine_gate": ("Clears cross-engine gate", "", ""),
+    "consensus_iptm_n": ("Engines", "[count]", ""),
     "consensus_iptm": ("Max ipTM", "[0–1]", "↑"),
     "consensus_iptm_min": ("Min ipTM", "[0–1]", "↑"),
     "consensus_iptm_spread": ("ipTM spread", "[0–1]", "↓"),
