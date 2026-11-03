@@ -48,8 +48,10 @@ generated run folder's `config.json` records the trimmed sequence, so it replays
 `examples/CALCA/target.pdb` is **32 residues** — chain A of a real AlphaFold 3
 refold from `tests/integration/golden_pool/`, so it is genuine campaign output
 rather than a toy. Size is the point: every design tool's cost scales with
-target length, and at 32 residues with `n_designs: 1` each tool finishes a
-smoke run in minutes instead of hours.
+target length, and at 32 residues with `n_designs: 1` most tools finish a
+smoke run in minutes instead of hours. BoltzGen is the exception: it
+over-generates and filters down to its budget, so a budget of 1 still runs a
+100-design intermediate pool (see [Cost](#cost)).
 
 It is also the target behind the committed golden pool, so a smoke run is
 directly comparable with `tests/integration/golden_pool/` — real binders against
@@ -78,8 +80,12 @@ and 20 diffusion steps will not produce a binder worth ordering.
 ### Cost
 
 A smoke run still needs a GPU and still loads every model. Expect minutes per
-tool, dominated by model loading rather than by the design itself, and note that
-the refold step has real memory requirements — see the measured table in the
+tool, dominated by model loading rather than by the design itself. **BoltzGen is
+the slow one:** `boltzgen_budget: 1` becomes `--num_designs 100` (the configurator
+scales the intermediate pool at 100 per requested design, with a floor of 50), and
+at the measured 5.35 s per intermediate design on a 24 GB card that is about 9
+minutes for the design step alone, before inverse folding, Boltz-2 folding and
+analysis. Note also that the refold step has real memory requirements — see the measured table in the
 main README. On a 12 GB card ESMFold2 cannot run at any size, so use
 `--skip-esmfold2` there.
 

@@ -137,6 +137,23 @@ Work since `v2.0.2` (37 commits), in preparation as `v2.0.3`. Nothing here chang
   the target). Every chain is now passed; `--contact_residues` stays one group on the first chain.
   Mosaic's template can take only one sequence, so it now refuses and names the chains it would have
   dropped.
+- **The machine-names guard no longer fails on its second run.**
+  `tests/test_shell_scripts_name_no_machines.py` scanned `tools/__pycache__/*.pyc` as a shell script,
+  and a `.pyc` embeds the absolute path of the runner's own account. Its `tools/` lane is now
+  tracked files only, with bytecode excluded.
+- **The `evaluate.sh` parser test no longer depends on the conda on the machine running it.** Its
+  stub `conda` binary lost to the `conda` shell function that `evaluate.sh` sources, so on a host with
+  a system conda it ran the real `conda env list` / `conda run` and could outlast its timeout under
+  load. It now plants a stub function where the search looks first and asserts that a decoy conda was
+  never called.
+- **Documentation:** manual `conda run` commands now say to source `conda.sh` first (in standalone
+  mode conda is not on `PATH` and they exit 127); the README's `binder-compare run` example goes
+  through `binderscout evaluate`; the `examples/` smoke-run text says BoltzGen with a budget of 1 still
+  runs a 100-design pool (about 9 minutes for its design step alone); the subcommand count is 23;
+  `screen-tmprot` is named as this line's counterpart of `master`'s `filter-tmprot`; the MSA pre-warm
+  advice now points at `target_msa_cache_path` (`get_target_msa` returns the a3m text, not a path) and
+  says both cache-directory spellings may exist; and CLAUDE.md records the 2026-11-03 measurement that
+  `*_pae_iptm` reads well below the engine's own ipTM on small complexes (n=1 and n=3, a hypothesis).
 
 ### Changed
 

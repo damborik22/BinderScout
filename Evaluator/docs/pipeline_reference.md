@@ -30,6 +30,10 @@ BinderScout/
 ## Quick CLI Reference
 
 ```bash
+# Standalone install: conda is not on PATH, so each `conda run` below exits 127 until you
+# source it (run from the checkout root; the generated run scripts do the same lookup).
+source "${BINDERSCOUT_CONDA:-$PWD/conda}/etc/profile.d/conda.sh"
+
 # Step 1: Extract sequences (any tool combination)
 conda run -n binder-eval binder-compare extract \
     --bindcraft DIR --bindcraft2 DIR --boltzgen DIR --mosaic DIR --pxdesign DIR \

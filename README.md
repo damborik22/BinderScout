@@ -439,9 +439,14 @@ Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). Ther
 `binderscout evaluate <args>` runs the `binder-compare` CLI in the `binder-eval` conda env. The full pipeline (extract → refold → report) is one command:
 
 ```bash
-binder-compare run --mosaic runs/PDL1/mosaic --bindcraft runs/PDL1/bindcraft \
-                   --target-seq "MKTAYIAKQR…" -o runs/PDL1/evaluate
+binderscout evaluate run --mosaic runs/PDL1/mosaic --bindcraft runs/PDL1/bindcraft \
+                         --target-seq "MKTAYIAKQR…" -o runs/PDL1/evaluate
 ```
+
+(`binder-compare` itself is not on `PATH` in a standalone install, which is why the command above goes
+through `binderscout evaluate`. To call it by hand, run `source conda/etc/profile.d/conda.sh` first —
+or `source "$BINDERSCOUT_CONDA/etc/profile.d/conda.sh"` — and then `conda run -n binder-eval binder-compare …`;
+without it `conda run` exits 127.)
 
 The configurator-generated `runs/<name>/run_evaluate.sh` wraps `Evaluator/evaluate.sh`, which auto-detects the installed engines and drives the whole thing.
 
@@ -884,7 +889,7 @@ packages are an operating manual, not a requirement. Two gaps affect scripted us
   directory with no prompts (`--run` also starts the pipeline). Replays are
   byte-identical.
 - ~~**15 of the 22 `binder-compare` subcommands have no human-facing documentation.**~~
-  **Fixed:** all 22 are listed under
+  **Fixed:** every subcommand (23 now) is listed under
   [All `binder-compare` subcommands](#all-binder-compare-subcommands), and a test
   fails if the table and the parser disagree in either direction. `--help` on any
   subcommand remains the detailed reference.
