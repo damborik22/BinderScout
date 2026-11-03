@@ -940,6 +940,17 @@ install_local_conda() {
         return 1
     fi
 
+    # Miniforge's own installer refuses a prefix that contains whitespace, and the bare
+    # failure it produced ("Miniforge3 installation failed") named neither the cause nor
+    # the way out. Refuse here, before an ~80 MB download, and say what to do.
+    if [[ "${LOCAL_CONDA_DIR}" =~ [[:space:]] ]]; then
+        print_fail "Cannot install Miniforge3 into '${LOCAL_CONDA_DIR}': the path contains a space, and Miniforge's installer refuses such a path."
+        print_fail "  Nothing was downloaded. Either:"
+        print_fail "    1. put the checkout at a path without spaces (for example ~/BinderScout) and re-run, or"
+        print_fail "    2. use a conda you already have: export BINDERSCOUT_CONDA=<its base directory> and re-run with --system-conda."
+        return 1
+    fi
+
     print_step "Installing local Miniforge3 into ${LOCAL_CONDA_DIR}"
 
     local installer_url
@@ -949,19 +960,21 @@ install_local_conda() {
         installer_url="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
     fi
 
-    local installer_path
-    installer_path="$(mktemp /tmp/miniforge3-XXXXXXXX.sh)"
+    local installer_dir installer_path
+    installer_dir="$(mktemp -d "${TMPDIR:-/tmp}/miniforge3.XXXXXXXX")" \
+        || { print_fail "Could not create a temporary directory for the Miniforge3 installer"; return 1; }
+    installer_path="${installer_dir}/miniforge3.sh"
 
     run_logged --retries 3 "Downloading Miniforge3 (~80 MB)" \
         curl -fSL -o "${installer_path}" "${installer_url}" \
-        || { print_fail "Failed to download Miniforge3"; rm -f "${installer_path}"; return 1; }
+        || { print_fail "Failed to download Miniforge3"; rm -rf "${installer_dir}"; return 1; }
 
     # Batch mode (-b): no prompts, no license question, no PATH modification
     run_logged "Installing Miniforge3 (batch mode)" \
         bash "${installer_path}" -b -p "${LOCAL_CONDA_DIR}" \
-        || { print_fail "Miniforge3 installation failed"; rm -f "${installer_path}"; return 1; }
+        || { print_fail "Miniforge3 installation failed"; rm -rf "${installer_dir}"; return 1; }
 
-    rm -f "${installer_path}"
+    rm -rf "${installer_dir}"
 
     CONDA_BASE="${LOCAL_CONDA_DIR}"
     if [[ -x "${LOCAL_CONDA_DIR}/bin/mamba" ]]; then
