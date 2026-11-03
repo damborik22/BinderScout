@@ -119,7 +119,9 @@ def compute_ipsae_from_pae(
     L_b = binder_length
     L_t = L - L_b
 
-    if L_b <= 0 or L_t <= 0:
+    if L_b <= 0 or L_t <= 0 or not np.isfinite(pae).all():
+        # Non-finite input is MISSING DATA, not "no interface": returning 0.0 here would
+        # file an unreadable matrix under the Reject tier instead of leaving it unscored.
         return dict(bt_ipsae=np.nan, tb_ipsae=np.nan, ipsae_min=np.nan, ipsae_max=np.nan, ipsae_valid=0)
 
     # Normalise to [binder | target] ordering
@@ -156,6 +158,44 @@ def compute_ipsae_from_pae(
         ipsae_max=ipsae_max,
         ipsae_valid=ipsae_valid,
     )
+
+
+def _load_checked_pae(resolved: Path, L_b: int, target_sequence, ordering: str) -> np.ndarray:
+    """Load a saved PAE matrix and REFUSE one that cannot be what it is labelled.
+
+    A wrong-sized or placeholder matrix does not fail downstream -- it scores. Measured
+    2026-11-03: miscounting ``binder_length`` by one residue inflates the ipTM by up to
+    +0.31 (three residues: +0.73), always upward, so it lands at the top of the ranking
+    looking like the best design; and an all-zero interface block scores a perfect 1.0.
+    The caller's ``except Exception`` turns the ValueError into a NaN plus a named
+    warning, so the design loses this engine's score instead of gaining a false one.
+
+    Checks, in order: square 2-D; every entry finite; size == binder_length + target
+    length (when the row carries ``target_sequence``); the interface blocks are not both
+    identically zero (no real PAE has a zero interface -- that is a placeholder file).
+    """
+    pae = np.load(str(resolved))
+    if pae.ndim != 2 or pae.shape[0] != pae.shape[1]:
+        raise ValueError(f"PAE is not a square matrix (shape {pae.shape})")
+    if not np.isfinite(pae).all():
+        raise ValueError("PAE contains NaN/inf")
+    n = pae.shape[0]
+    if isinstance(target_sequence, str) and target_sequence.strip():
+        expected = int(L_b) + len(target_sequence.strip())
+        if n != expected:
+            raise ValueError(
+                f"PAE is {n}x{n} but binder_length {int(L_b)} + target {len(target_sequence.strip())} = {expected}; "
+                "refusing to guess which axis is the binder"
+            )
+    L_b = int(L_b)
+    if 0 < L_b < n:
+        if ordering == "target_binder":
+            bt, tb = pae[n - L_b :, : n - L_b], pae[: n - L_b, n - L_b :]
+        else:
+            bt, tb = pae[:L_b, L_b:], pae[L_b:, :L_b]
+        if not bt.any() and not tb.any():
+            raise ValueError("PAE interface block is identically zero (placeholder or corrupt file)")
+    return pae
 
 
 def _resolve_pae_path(
@@ -277,7 +317,7 @@ def add_boltz_ipsae_from_files(
             continue
 
         try:
-            pae = np.load(str(resolved))
+            pae = _load_checked_pae(resolved, L_b, row.get("target_sequence"), "binder_target")
             scores = compute_ipsae_from_pae(pae, int(L_b), pae_cutoff, ordering="binder_target")
             bt_ipsae_vals.append(scores["bt_ipsae"])
             tb_ipsae_vals.append(scores["tb_ipsae"])
@@ -358,7 +398,7 @@ def add_ipsae_from_pae_files(
             continue
 
         try:
-            pae = np.load(str(resolved))
+            pae = _load_checked_pae(resolved, L_b, row.get("target_sequence"), ordering)
             scores = compute_ipsae_from_pae(pae, int(L_b), pae_cutoff, ordering=ordering)
             bt_ipsae_vals.append(scores["bt_ipsae"])
             tb_ipsae_vals.append(scores["tb_ipsae"])
@@ -428,7 +468,7 @@ def add_iptm_from_pae_files(
             continue
 
         try:
-            pae = np.load(str(resolved))
+            pae = _load_checked_pae(resolved, L_b, row.get("target_sequence"), ordering)
             scores = compute_iptm_from_pae(pae, int(L_b), ordering=ordering)
             iptm_vals.append(scores["iptm"])
         except Exception as e:
@@ -629,7 +669,7 @@ def compute_iptm_from_pae(
     L_b = binder_length
     L_t = L - L_b
 
-    if L_b <= 0 or L_t <= 0:
+    if L_b <= 0 or L_t <= 0 or not np.isfinite(pae).all():
         return dict(bt_iptm=np.nan, tb_iptm=np.nan, iptm=np.nan)
 
     # Normalise to [binder | target] ordering
