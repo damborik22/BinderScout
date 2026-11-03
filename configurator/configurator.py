@@ -3336,80 +3336,114 @@ from pathlib import Path
 pc_dir = Path(os.environ['RUN_DIR']) / 'proteina_complexa'
 run_name = '{cfg["name"]}'
 
-# Find evaluation result CSVs from Complexa outputs
+# Find every directory Complexa wrote designs or metrics into, and scan ALL of them.
+#
+# Complexa writes two trees, RELATIVE TO ITS OWN CWD (we cd into PROTEINA_COMPLEXA_DIR
+# above), and they hold different things:
+#   inference/<config>_<task>_<run>/           one subdirectory per design with its .pdb,
+#                                              and no sequence-bearing CSV
+#   evaluation_results/<config>_<task>/        the metrics CSVs
+# The run name sits in the CHILD directory, never in `evaluation_results` itself, so a
+# `run_name in str(p)` test on the parent can never match. Committing to the first
+# directory that existed reached the PDBs and never the metrics, so the harvest always
+# fell through to the chain-B fallback below and shipped designs with no iPTM, pLDDT or
+# scRMSD -- a tool with 2 populated native metric columns where the others had 4-9.
 rows = []
-# Complexa writes evaluation_results/<pipeline>_<task_name>/ RELATIVE TO ITS OWN CWD
-# (we cd into PROTEINA_COMPLEXA_DIR above), and the run name appears in the CHILD
-# directory, never in 'evaluation_results' itself. The old probe tested
-# (run_name in str(p)) against the 'evaluation_results' path, so it could not match:
-# a COMPLETED 8-design run with 40 structures and 12 result CSVs reported
-# 'No binder sequences extracted' (measured 2026-10-30).
-searched = []
-eval_dir = Path('outputs') / run_name
-if not eval_dir.exists():
-    for root in sorted(Path('.').rglob('evaluation_results')):
-        hits = sorted(d for d in root.iterdir() if d.is_dir() and run_name in d.name)
-        searched.extend(hits)
-        searched.append(root)
-    eval_dir = next((d for d in searched if d.exists()), eval_dir)
+search_dirs = []
+for base in (Path('inference'), Path('outputs')):
+    if base.is_dir():
+        search_dirs += [p for p in sorted(base.iterdir()) if p.is_dir() and run_name in p.name]
+for _ev in sorted(Path('.').rglob('evaluation_results')):
+    if not _ev.is_dir():
+        continue
+    _subs = [p for p in sorted(_ev.iterdir()) if p.is_dir() and run_name in p.name]
+    search_dirs += _subs or [_ev]
+if (Path('outputs') / run_name).is_dir():
+    search_dirs.append(Path('outputs') / run_name)
+_seen_dirs = set()
+search_dirs = [p for p in search_dirs if p.resolve() not in _seen_dirs and not _seen_dirs.add(p.resolve())]
+for p in search_dirs:
+    print('  Reading Complexa outputs from ' + str(p))
 
-# Strategy 1: Parse evaluation_results CSVs
-for csv_path in sorted(eval_dir.rglob('*.csv')) if eval_dir.exists() else []:
-    try:
-        with open(csv_path) as f:
-            reader = csv.DictReader(f)
-            for r in reader:
-                seq = (r.get('sequence') or r.get('self_sequence') or '').strip()
-                if not seq or set(seq) == {{'X'}}:
-                    continue
-                name = r.get('name', r.get('sample_id', csv_path.stem))
-                ipae = r.get('self_complex_i_pAE', '')
-                iptm = r.get('self_complex_i_pTM', '')
-                plddt = r.get('self_complex_pLDDT', '')
-                scrmsd = r.get('self_binder_scRMSD', '')
-                rows.append({{
-                    'design_id': f'complexa_{{name}}',
-                    'sequence': seq,
-                    'length': len(seq),
-                    'iptm': iptm,
-                    'plddt_binder_mean': plddt,
-                    'pae_bt_mean': ipae,
-                    'scrmsd_binder': scrmsd,
-                    'source': 'proteina_complexa',
-                }})
-    except Exception as e:
-        print(f'  Warning: could not parse {{csv_path}}: {{e}}', file=sys.stderr)
+AA3TO1 = {{
+    'ALA':'A','ARG':'R','ASN':'N','ASP':'D','CYS':'C','GLN':'Q','GLU':'E',
+    'GLY':'G','HIS':'H','ILE':'I','LEU':'L','LYS':'K','MET':'M','PHE':'F',
+    'PRO':'P','SER':'S','THR':'T','TRP':'W','TYR':'Y','VAL':'V','MSE':'M',
+}}
 
-# Strategy 2: Fall back to PDB sequence extraction
-if not rows:
-    AA3TO1 = {{
-        'ALA':'A','ARG':'R','ASN':'N','ASP':'D','CYS':'C','GLN':'Q','GLU':'E',
-        'GLY':'G','HIS':'H','ILE':'I','LEU':'L','LYS':'K','MET':'M','PHE':'F',
-        'PRO':'P','SER':'S','THR':'T','TRP':'W','TYR':'Y','VAL':'V','MSE':'M',
-    }}
-    for pdb_path in sorted(eval_dir.rglob('*.pdb')) if eval_dir.exists() else []:
+def chain_b_seq(pdb_path):
+    seen = {{}}
+    with open(pdb_path) as f:
+        for line in f:
+            if line[:4] != 'ATOM' or line[12:16].strip() != 'CA':
+                continue
+            if line[21].strip().upper() != 'B':
+                continue
+            key = (line[22:26].strip(), line[26].strip())
+            if key not in seen:
+                seen[key] = AA3TO1.get(line[17:20].strip().upper(), 'X')
+    return ''.join(seen.values())
+
+# Binder sequence -> the PDB holding it. The metrics CSVs carry no design name, so
+# without this every row of a CSV would get the same id (its file name).
+pdb_by_seq = {{}}
+for _d in search_dirs:
+    for _p in sorted(_d.rglob('*.pdb')):
         try:
-            seen = {{}}
-            with open(pdb_path) as f:
-                for line in f:
-                    if line[:4] != 'ATOM' or line[12:16].strip() != 'CA':
-                        continue
-                    if line[21].strip().upper() != 'B':
-                        continue
-                    res = line[17:20].strip().upper()
-                    key = (line[22:26].strip(), line[26].strip())
-                    if key not in seen:
-                        seen[key] = AA3TO1.get(res, 'X')
-            seq = ''.join(seen.values())
-            if seq and set(seq) != {{'X'}}:
-                rows.append({{
-                    'design_id': f'complexa_{{pdb_path.stem}}',
-                    'sequence': seq,
-                    'length': len(seq),
-                    'source': 'proteina_complexa',
-                }})
+            _s = chain_b_seq(_p)
         except Exception:
-            pass
+            continue
+        if _s and set(_s) != {{'X'}} and _s not in pdb_by_seq:
+            pdb_by_seq[_s] = _p
+
+# Strategy 1: the metrics CSVs. Complexa names the binder column `binder_sequence`;
+# `self_sequence` and `sequence` are what other revisions and hand-made tables use.
+SEQ_COLS = ('binder_sequence', 'self_sequence', 'sequence')
+_seen_seqs = set()
+for _d in search_dirs:
+    for csv_path in sorted(_d.rglob('*.csv')):
+        try:
+            with open(csv_path) as f:
+                reader = csv.DictReader(f)
+                col = next((c for c in SEQ_COLS if reader.fieldnames and c in reader.fieldnames), None)
+                if not col:
+                    continue
+                for i, r in enumerate(reader):
+                    seq = (r.get(col) or '').strip()
+                    if not seq or set(seq) == {{'X'}}:
+                        continue
+                    # The same design is listed in several of Complexa's CSVs (a combined
+                    # file and an all-successes file); keep the first.
+                    if seq in _seen_seqs:
+                        continue
+                    _seen_seqs.add(seq)
+                    _hit = pdb_by_seq.get(seq)
+                    name = r.get('name') or r.get('sample_name') or r.get('sample_id') \
+                        or (_hit.stem if _hit is not None else csv_path.stem + '_' + str(i))
+                    rows.append({{
+                        'design_id': f'complexa_{{name}}',
+                        'sequence': seq,
+                        'length': len(seq),
+                        'iptm': r.get('self_complex_i_pTM', ''),
+                        'plddt_binder_mean': r.get('self_complex_pLDDT', ''),
+                        'pae_bt_mean': r.get('self_complex_i_pAE', ''),
+                        'scrmsd_binder': r.get('self_binder_scRMSD', ''),
+                        'source': 'proteina_complexa',
+                    }})
+        except Exception as e:
+            print(f'  Warning: could not parse {{csv_path}}: {{e}}', file=sys.stderr)
+if rows:
+    print(f'  Found {{len(rows)}} sequences with metrics from Complexa CSVs')
+
+# Strategy 2: fall back to the binder chain in the PDBs (no metrics)
+if not rows:
+    for _s, _p in sorted(pdb_by_seq.items(), key=lambda kv: str(kv[1])):
+        rows.append({{
+            'design_id': f'complexa_{{_p.stem}}',
+            'sequence': _s,
+            'length': len(_s),
+            'source': 'proteina_complexa',
+        }})
     if rows:
         print(f'  Found {{len(rows)}} sequences from PDB files (fallback)')
 
@@ -3419,8 +3453,8 @@ if not rows:
     # Evaluator logged "no CSV found" and dropped the tool, and the report simply had no
     # Proteina-Complexa column. A design step that produces no designs is a failure.
     print('ERROR: No binder sequences extracted from Proteina-Complexa', file=sys.stderr)
-    probed = ', '.join(str(d) for d in searched) or '[none]'
-    print('  looked in: ' + str(eval_dir) + ' [cwd ' + str(Path.cwd()) + ']', file=sys.stderr)
+    probed = ', '.join(str(d) for d in search_dirs) or '[none]'
+    print('  looked in: ' + (probed if search_dirs else 'outputs/' + run_name) + ' [cwd ' + str(Path.cwd()) + ']', file=sys.stderr)
     print('  candidates probed: ' + probed, file=sys.stderr)
     sys.exit(1)
 
