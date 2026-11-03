@@ -348,3 +348,100 @@ def test_the_generated_script_finds_python_headers_without_sudo(cif_cfg, tmp_pat
     assert "sudo apt" not in text
     assert "apt install" not in text
     assert "dnf install" not in text
+
+
+# --------------------------------------------- the two ways a started run hung or died late
+
+
+def _stub_checkout(tmp_path, with_conda_gcc):
+    """A checkout that holds just enough for run_rfd4.sh to reach rfd4-generate.
+
+    rfd4-generate is a stub that records its arguments and the CC it was given, then
+    writes one structure so the script's own "designed nothing" guard stays quiet. PATH
+    carries symlinks to the handful of tools the script needs and NO compiler.
+    """
+    import shutil
+
+    checkout = tmp_path / "checkout"
+    venv_bin = checkout / "RFD4-Proteina" / ".venv" / "bin"
+    (checkout / "binderscout.py").parent.mkdir(parents=True, exist_ok=True)
+    (checkout / "binderscout.py").write_text("")
+    venv_bin.mkdir(parents=True)
+    inc = tmp_path / "pyinc"
+    inc.mkdir()
+    (inc / "Python.h").write_text("")
+    (venv_bin / "python").write_text(
+        f'#!/bin/bash\ncase "$*" in *sysconfig*) echo {inc};; *) exec {sys.executable} "$@";; esac\n'
+    )
+    (venv_bin / "rfd4-generate").write_text(
+        "#!/bin/bash\n"
+        f'echo "CC=${{CC:-}}" > {tmp_path}/seen\n'
+        f'echo "$@" >> {tmp_path}/seen\n'
+        'out=""; for a in "$@"; do case "$a" in out_dir=*) out="${a#out_dir=}";; esac; done\n'
+        'mkdir -p "$out/x"; echo data_x > "$out/x/x_generated.cif"\n'
+    )
+    for f in ("python", "rfd4-generate"):
+        (venv_bin / f).chmod(0o755)
+    if with_conda_gcc:
+        gcc = checkout / "conda" / "envs" / "toolchain" / "bin" / "x86_64-conda-linux-gnu-gcc"
+        gcc.parent.mkdir(parents=True)
+        gcc.write_text("#!/bin/bash\n")
+        gcc.chmod(0o755)
+    tools = tmp_path / "pathbin"
+    tools.mkdir()
+    for tool in ("awk", "basename", "date", "dirname", "find", "git", "grep", "head", "mkdir", "sort", "cat", "readlink", "sed", "tr", "wc", "ls", "id", "uname"):
+        found = shutil.which(tool)
+        assert found, tool
+        (tools / tool).symlink_to(found)
+    return checkout, tools
+
+
+def _run_generated(cif_cfg, tmp_path, checkout, tools):
+    import os
+
+    spec = cif_cfg["run_dir"] / "rfd4" / "input.yaml"
+    conf.write_rfd4_input_yaml(spec, cif_cfg)
+    script = cif_cfg["run_dir"] / "run_rfd4.sh"
+    conf.write_run_rfd4(script, cif_cfg)
+    # the script refuses a folder that moved since it was generated; record this one
+    (cif_cfg["run_dir"] / conf.RUN_LOCATION_FILE).write_text(str(cif_cfg["run_dir"].resolve()))
+    env = {"PATH": str(tools), "HOME": str(tmp_path), "BINDERSCOUT_DIR": str(checkout)}
+    return subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, env=os.environ | env | {"CC": ""})
+
+
+def test_the_generated_script_turns_off_dataloader_workers(cif_cfg, tmp_path):
+    """RFD4's default of 4 DataLoader workers deadlocked on aarch64: 10 minutes, GPU
+    idle, no output and no error, then the same command with 0 gave 10/10 designs
+    (measured in the v2.0.3 end-to-end run). Generation is one task per replicate, so
+    parallel loading buys nothing.
+
+    Asserted on what rfd4-generate is actually handed, not on the script's text."""
+    checkout, tools = _stub_checkout(tmp_path, with_conda_gcc=True)
+    proc = _run_generated(cif_cfg, tmp_path, checkout, tools)
+    seen = (tmp_path / "seen").read_text()  # absent => the stub never ran => the path was not reached
+    assert "num_workers=0" in seen, proc.stdout + proc.stderr
+
+
+def test_the_template_also_turns_off_dataloader_workers():
+    body = TestTemplateAndWriterAgree.TEMPLATE.read_text()
+    assert "num_workers=0" in body
+
+
+def test_a_host_with_no_c_compiler_is_refused_up_front_naming_cc(cif_cfg, tmp_path):
+    """Triton needs a C compiler too, and its failure ('Failed to find C compiler')
+    arrives ~45 s in, after the model has loaded, wrapped in an InductorError."""
+    checkout, tools = _stub_checkout(tmp_path, with_conda_gcc=False)
+    proc = _run_generated(cif_cfg, tmp_path, checkout, tools)
+    assert proc.returncode != 0
+    assert "C compiler" in proc.stderr and "CC" in proc.stderr, proc.stderr
+    assert not (tmp_path / "seen").exists(), "rfd4-generate must not have started"
+
+
+def test_a_conda_toolchain_in_the_checkout_stands_in_for_a_missing_compiler(cif_cfg, tmp_path):
+    checkout, tools = _stub_checkout(tmp_path, with_conda_gcc=True)
+    proc = _run_generated(cif_cfg, tmp_path, checkout, tools)
+    # what matters is the CC rfd4-generate was started with (the later pool-reading step
+    # needs a real python3 this stub PATH does not carry, so the exit code is not asserted)
+    seen = tmp_path / "seen"
+    assert seen.exists(), proc.stdout + proc.stderr
+    assert "x86_64-conda-linux-gnu-gcc" in seen.read_text().splitlines()[0]

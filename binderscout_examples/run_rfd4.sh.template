@@ -58,6 +58,26 @@ mkdir -p "$GEN_DIR"
 [[ -x "$RFD4_BIN" ]] || { echo "ERROR: RFD4-Proteina not installed at $RFD4_REPO" >&2; exit 1; }
 [[ -f "$INPUT_YAML" ]] || { echo "ERROR: $INPUT_YAML is missing" >&2; exit 1; }
 
+# Triton also needs a C COMPILER for that same shim. Without one the run dies ~45 s in
+# with `InductorError: Failed to find C compiler`, after the model has loaded. Triton
+# honours $CC, then looks for cc / gcc / clang. A conda toolchain under this checkout's
+# own conda/ (standalone mode) is a zero-sudo substitute, so use one if it is there.
+if [[ -z "${CC:-}" ]] && ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 \
+        && ! command -v clang >/dev/null 2>&1; then
+    for _cand in "$(dirname "$RFD4_REPO")"/conda/envs/*/bin/*-conda-linux-gnu-gcc; do
+        if [[ -x "${_cand}" ]]; then
+            export CC="${_cand}"
+            echo "  NOTE: no C compiler on PATH; using ${_cand} (Triton needs one)"
+            break
+        fi
+    done
+    if [[ -z "${CC:-}" ]]; then
+        echo "ERROR: Triton needs a C compiler and none was found (no \$CC, cc, gcc or clang)." >&2
+        echo "       Install one, or point CC at one: export CC=/path/to/gcc" >&2
+        exit 1
+    fi
+fi
+
 # Read the spec back rather than restating it here: it is editable, and
 # settings.json has to record the run that actually ran. awk, not `grep | head`,
 # so nothing can trip `set -o pipefail`.
@@ -129,11 +149,16 @@ echo "============================================================"
 # '~metrics' is LOAD-BEARING and is quoted. It removes RFD4's native metrics
 # block, which runs AF2/AF3 oracles out of environments this install does not
 # create; the run fails without it. The quotes stop the shell touching the '~'.
+# num_workers=0 is LOAD-BEARING too: upstream's default of 4 DataLoader workers
+# deadlocked on aarch64 (GB10) -- 10 min, GPU idle, no output, no error -- while the
+# same command with 0 produced 10/10 designs. Generation is one task per replicate,
+# so parallel loading buys nothing.
 "$RFD4_BIN" \
     inputs="$INPUT_YAML" \
     num_replicates={{NUM_REPLICATES}} \
     batch_size=1 \
     seed={{SEED}} \
+    num_workers=0 \
     out_dir="$GEN_DIR" \
     '~metrics'
 

@@ -4761,8 +4761,12 @@ def write_run_rfd4(path: Path, cfg: dict):
     settings.json has to record the run that actually ran.
     """
     name = cfg["name"]
-    target_seq = cfg.get("target_sequence", "")
     primary_chain = cfg.get("chains", "A").split(",")[0].strip()
+    target_seq = cfg.get("target_sequence", "")
+    if not target_seq and cfg.get("target_pdb"):
+        # A headless replay may carry no sequence; settings.json should still record
+        # the one the design actually ran against, so read it from the structure.
+        target_seq = extract_sequence_from_structure(str(cfg["target_pdb"]), primary_chain) or ""
     n_designs = int(cfg.get("rfd4_n_designs", cfg.get("n_designs", 50)))
     seed = int(cfg.get("rfd4_seed", 1))
 
@@ -4789,6 +4793,9 @@ def write_run_rfd4(path: Path, cfg: dict):
     "seed": {seed},
     "native_metrics": "removed (~metrics)\"""",
         extra_env_inner=(
+            # PY_VER above ran the bare `python`, which is not RFD4's interpreter (uv venv).
+            '\nPY_VER=$("$RFD4_PY" -c \'import sys;print(".".join(map(str,sys.version_info[:3])))\''
+            ' 2>/dev/null || echo "unknown")'
             f'\nRFD4_SHA=$(git -C "{_ref(RFD4_DIR)}" rev-parse HEAD 2>/dev/null || echo "unknown")'
             '\nRFD4_VER=$("$RFD4_PY" -c'
             " 'import importlib.metadata;print(importlib.metadata.version(\"rfd4-proteina\"))'"
@@ -4859,6 +4866,26 @@ if [[ -n "${{_py_inc}}" && ! -f "${{_py_inc}}/Python.h" ]]; then
     fi
 fi
 
+# Triton also needs a C COMPILER for that same shim. Without one the run dies ~45 s in
+# with `InductorError: Failed to find C compiler`, after the model has loaded. Triton
+# honours $CC, then looks for cc / gcc / clang. A conda toolchain under this checkout's
+# own conda/ (standalone mode) is a zero-sudo substitute, so use one if it is there.
+if [[ -z "${{CC:-}}" ]] && ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 \\
+        && ! command -v clang >/dev/null 2>&1; then
+    for _cand in "$(dirname "$RFD4_REPO")"/conda/envs/*/bin/*-conda-linux-gnu-gcc; do
+        if [[ -x "${{_cand}}" ]]; then
+            export CC="${{_cand}}"
+            echo "  NOTE: no C compiler on PATH; using ${{_cand}} (Triton needs one)"
+            break
+        fi
+    done
+    if [[ -z "${{CC:-}}" ]]; then
+        echo "ERROR: Triton needs a C compiler and none was found (no \\$CC, cc, gcc or clang)." >&2
+        echo "       Install one, or point CC at one: export CC=/path/to/gcc" >&2
+        exit 1
+    fi
+fi
+
 # Read the spec back instead of restating it: it is editable after generation.
 # awk rather than `grep | head`, so nothing can trip `set -o pipefail`.
 CONTIG=$(awk -F'"' '/^  contig: /{{print $2; exit}}' "$INPUT_YAML")
@@ -4888,11 +4915,16 @@ echo ""
 # '~metrics' is LOAD-BEARING and is quoted. It removes RFD4's native metrics
 # block, which runs AF2/AF3 oracles out of environments this install does not
 # create; the run fails without it. The quotes stop the shell touching the '~'.
+# num_workers=0 is LOAD-BEARING too: upstream's default of 4 DataLoader workers
+# deadlocked on aarch64 (GB10) -- 10 min, GPU idle, no output, no error -- while the
+# same command with 0 produced 10/10 designs. Generation is one task per replicate,
+# so parallel loading buys nothing.
 "$RFD4_BIN" \\
     inputs="$INPUT_YAML" \\
     num_replicates={n_designs} \\
     batch_size=1 \\
     seed={seed} \\
+    num_workers=0 \\
     out_dir="$GEN_DIR" \\
     '~metrics'
 
