@@ -32,8 +32,8 @@ def _interface_analyzer(spec):
 
     Recent PyRosetta replaced both the string constructor overload and the
     string ``set_interface`` with a ``core.pose.DockingPartners`` object, so
-    ``InterfaceAnalyzerMover("B_A")`` raises TypeError. Older builds on the
-    fleet still take the string, so try the new form and fall back rather than
+    ``InterfaceAnalyzerMover("B_A")`` raises TypeError. Older builds still
+    take the string, so try the new form and fall back rather than
     pinning either one.
     """
     from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover

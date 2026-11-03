@@ -212,7 +212,7 @@ def _resolve_pae_path(
 
     Step 3 exists because refold CSVs record absolute paths
     (``/home/<user>/eval_workdir/<run>/af3_out/x_pae.npy``) and the normal
-    workflow is to refold on a fleet box and analyse the archive somewhere
+    workflow is to refold on one machine and analyse the archive somewhere
     else. For an absolute path step 2 is a no-op — ``Path(base) / "/abs/x"``
     returns ``/abs/x`` — so a transplanted pool used to lose every PAE file
     while they sat in *base_dir* under the same relative layout. That is not
@@ -251,7 +251,7 @@ def _warn_unresolved_pae(
     """Warn once per loader call about PAE files named in the CSV but absent on disk.
 
     Each loader used to append NaN and move on, so a results directory that had been
-    moved (a `fleet.sh fetch`, an archived run, a CSV copied without its .npy files)
+    moved (a copied results directory, an archived run, a CSV copied without its .npy files)
     produced a full-looking metrics.csv in which every engine column was empty — and
     nothing said so. One aggregate line rather than one per row: a real pool is
     thousands of designs.

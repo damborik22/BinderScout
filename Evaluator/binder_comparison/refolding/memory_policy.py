@@ -23,9 +23,8 @@ shipped.  XLA *has* the capability internally (``gpu_system_memory_size`` in
 fraction ourselves from an absolute GiB target and the real pool size.
 
 This is defense in depth, NOT the primary guard.  The hard ceiling is a CUDA MPS
-per-client limit -- see ``tools/gpu_mem_guard.sh`` (the unified-memory analysis
-behind it is archived off-repo on the lab share).  This module covers the case where MPS is
-not running, in which every client silently reverts to uncapped direct mode.
+per-client limit -- see ``tools/gpu_mem_guard.sh``.  This module covers the case
+where MPS is not running, in which every client silently reverts to uncapped direct mode.
 """
 
 from __future__ import annotations
@@ -52,7 +51,7 @@ def _nvidia_smi_total_gib() -> float:
     """Device-0 total memory via nvidia-smi, in GiB.  0.0 if unavailable.
 
     Second opinion for when ``libcudart`` is not on the loader path.  That is not
-    hypothetical: the Mosaic uv venv on the x86 fleet cannot dlopen libcudart at
+    hypothetical: the Mosaic uv venv on x86_64 hosts cannot dlopen libcudart at
     all, so ``_cuda_pool_gib()`` returns 0 there while the card is perfectly usable.
     """
     import shutil
@@ -115,7 +114,7 @@ def resolve_mem_fraction(
     # NEVER fall back to system RAM here.  A RAM-derived "pool" passes the unified
     # test below *by construction* (pool == ram), so an UNKNOWN pool was always
     # classified as unified and handed the OS floor.  On a discrete card that is the
-    # wrong number entirely: BM2 (24 GB RTX 3090, 62.7 GiB RAM) could not dlopen
+    # wrong number entirely: a 24 GB RTX 3090 host (62.7 GiB RAM) could not dlopen
     # libcudart from the Mosaic venv, resolved "unified 62.7 GiB", applied the 40 GiB
     # floor for a fraction of 0.362, and JAX then took 0.362 of the *card* -- 8.5 GiB
     # of 23.6 -- so Boltz-2 OOMed at 9 GB and it read as "this target is too big".
@@ -203,7 +202,7 @@ def apply_jax_memory_policy(engine: str, target_gib: float, *, env=None, verbose
 # exits 0.  Every one of those designs then drops to a 2-engine mean and fails the
 # >=3-engine gate -- demoted for a hardware reason, reported as if it were a
 # quality judgement.  Recorded in docs/data/gpu_benchmark_2026-09-18/README.md and
-# in docs/PLAN_binderscout_v2.md, where it is the reason BM3 "cannot refold".
+# in the plan notes, where it is the reason a 12 GB card "cannot refold".
 #
 # ONLY ESMFOLD2 HAS A FLOOR, and the asymmetry is the point.
 #   ESMFold2 is dominated by getting ESMC-6B onto the card, so its 150-token peak
@@ -223,7 +222,7 @@ def apply_jax_memory_policy(engine: str, target_gib: float, *, env=None, verbose
 #   accounting in its runner, which MEASURES rather than predicts.
 #
 #   AF3 gets none because it never exceeded 5,224 MiB anywhere in the sweep, flat
-#   across 150-900 tokens.  No card in the fleet is below that.
+#   across 150-900 tokens.  No card we measured is below that.
 ENGINE_MIN_DEVICE_MIB: dict[str, int] = {"esmfold2": 14248}
 
 ALLOW_SMALL_GPU_ENV = "BINDERSCOUT_ALLOW_SMALL_GPU"
