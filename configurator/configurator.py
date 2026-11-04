@@ -4662,6 +4662,65 @@ PYEOF
 """
 
 
+def _rfd4_construct_span(cif: Path, chain: str, target_sequence: str) -> tuple[int, int] | None:
+    """(label_lo, label_hi) of the residues of `chain` to PRESERVE, trimmed to `target_sequence`.
+
+    A stock RCSB entry is the crystallised CONSTRUCT: on 5O45 chain A's label_seq_id 1-129
+    ends in AAALE + His6 (119-129, the depositor's own `_struct_ref_seq_dif` expression-tag
+    rows). The contig used to be the chain's whole label range, so RFD4 preserved the tag as
+    part of the target, and designed against a cloning linker that does not exist in vivo.
+
+    `target_sequence` is where the user's decision lives: the wizard's tag-trim offer, and
+    `"trim_construct_tag": true` in a headless replay, both trim it. When it is a proper
+    contiguous part of the chain's sequence the contig follows it, exactly as
+    prepare_target_pdb does for the PDB path. label_seq_id numbering is kept, since that is
+    what RFD4 resolves. Prints what was trimmed, and warns about construct residues the
+    contig still keeps. None means "no opinion": the caller keeps the chain's full range.
+    """
+    try:
+        text = cif.expanduser().read_text(errors="replace")
+    except OSError:
+        return None
+    ids, seq = _cif_chain_ca_residues(text, chain)
+    if not ids:
+        return None
+    kept = ids
+    if target_sequence and target_sequence != seq:
+        off = seq.find(target_sequence)
+        if off < 0:
+            print_warn(
+                f"RFD4: cfg['target_sequence'] is not a contiguous part of chain {chain} in {cif.name}; "
+                f"the contig keeps the whole chain, so sequence and coordinates may disagree."
+            )
+        else:
+            kept = ids[off : off + len(target_sequence)]
+            dropped = [(ids[:off], seq[:off]), (ids[off + len(target_sequence) :], seq[off + len(target_sequence) :])]
+            for d_ids, d_seq in dropped:
+                if d_ids:
+                    print_ok(
+                        f"RFD4: trimmed {len(d_ids)} residue(s) {d_seq} (label_seq_id {d_ids[0]}-{d_ids[-1]}) "
+                        f"from the preserved segment of chain {chain} (construct tag; target_sequence has "
+                        f"no room for them)."
+                    )
+    # Backstop: the depositor's own records name construct residues; any still inside the
+    # contig means the trim was not applied (declined, or a replay without the switch).
+    flagged = _cif_seqdif_construct(text, chain)
+    pos = {rid: i for i, rid in enumerate(ids)}
+    still = [
+        rid
+        for rid in kept
+        if rid in flagged and AA3TO1.get(flagged[rid], "X") == seq[pos[rid]]  # name must agree: author/label ids
+    ]
+    if still:
+        print_warn(
+            f"RFD4: the preserved segment of chain {chain} KEEPS {len(still)} residue(s) the depositor flagged "
+            f"as construct (expression tag / linker), label_seq_id {still[0]}-{still[-1]}. They stay part of "
+            f'the target RFD4 designs against. Set "trim_construct_tag": true in the --config file (or accept '
+            f"the tag trim in Step 3 of the wizard) and regenerate, or keep it on purpose."
+        )
+    return kept[0], kept[-1]
+
+
 def _rfd4_preserved_segment(cfg: dict) -> tuple[Path, list[tuple[str, int, int]]]:
     """(mmCIF, chain, lo, hi) for the contig's preserved target segment, in label_seq_id.
 
@@ -4693,20 +4752,29 @@ def _rfd4_preserved_segment(cfg: dict) -> tuple[Path, list[tuple[str, int, int]]
             f"cfg['chains'] (currently {cfg.get('chains', 'A')!r})."
         )
     segments: list[tuple[str, int, int]] = []
-    for ch in chains:
+    for idx, ch in enumerate(chains):
         ch_info = cif_chain_numbering(str(cif), ch) if ch != chain else info
         if ch_info is None:
             raise RuntimeError(
                 f"RFD4: chain {ch!r} has no CA records in {Path(cif).name}, but cfg['chains'] "
                 f"({cfg.get('chains')!r}) names it. Correct cfg['chains']."
             )
-        c_lo, c_hi = ch_info["label_lo"], ch_info["label_hi"]
-        if ch_info["auth_lo"] is not None and (ch_info["auth_lo"], ch_info["auth_hi"]) != (c_lo, c_hi):
+        full_lo, full_hi = ch_info["label_lo"], ch_info["label_hi"]
+        # target_sequence belongs to the FIRST chain only (it is what the wizard / the
+        # headless trim_construct_tag switch trimmed), so only that chain can be trimmed
+        # to it. The other chains still get the "KEEPS construct residues" warning.
+        span = _rfd4_construct_span(Path(cif), ch, (cfg.get("target_sequence") or "") if idx == 0 else "")
+        c_lo, c_hi = span or (full_lo, full_hi)
+        if ch_info["auth_lo"] is not None and (ch_info["auth_lo"], ch_info["auth_hi"]) != (full_lo, full_hi):
             print_warn(
                 f"Chain {ch} is numbered {ch_info['auth_lo']}-{ch_info['auth_hi']} by the author "
-                f"(auth_seq_id) but {c_lo}-{c_hi} in label_seq_id. RFD4 resolves the contig against "
-                f"label_seq_id, so the generated contig preserves {ch}{c_lo}-{c_hi} — the same "
-                f"{ch_info['n_residues']} residues, named the way RFD4 reads them."
+                f"(auth_seq_id) but {full_lo}-{full_hi} in label_seq_id. RFD4 resolves the contig against "
+                f"label_seq_id, so the generated contig preserves {ch}{c_lo}-{c_hi} — "
+                + (
+                    "the target residues without the construct tag, named the way RFD4 reads them."
+                    if (c_lo, c_hi) != (full_lo, full_hi)
+                    else f"the same {ch_info['n_residues']} residues, named the way RFD4 reads them."
+                )
             )
         segments.append((ch, c_lo, c_hi))
     return Path(cif).resolve(), segments
