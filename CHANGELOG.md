@@ -25,6 +25,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (table in `tests/test_rfd3_gate_helix_aware.py`): against the CALCA helix target the mis-centred runs are
   still helical, so only the origin gate tells them apart, and the geometry gate says so.
 
+- **Protein-Hunter `sequences.csv` design ids are unique.** `summary_high_iptm.csv` has one row per
+  passing cycle, and the collector built `ph_<run_id>` from the run id alone, so different designs
+  shared an id. The id is now `ph_<run>_c<cycle>` (repeats from cycle-less sources are numbered).
+  Nothing joined on the old id: the extractor reads the summary CSV itself.
+- **RFD4 no longer preserves the structure's expression tag.** On 5O45 the contig was the chain's
+  whole label range `A1-129`, which includes AAALE + His6 (119-129, the depositor's own
+  `_struct_ref_seq_dif` rows). The contig now follows `target_sequence` (the wizard's tag-trim offer
+  and `trim_construct_tag` both trim it), keeping `label_seq_id` numbering (`A1-118`), says what was
+  dropped, and warns when a flagged tag is still inside the contig.
+- **`run_rfd4.sh` starts `rfd4-generate` inside its generate dir**, so Hydra's `hydra_outputs/`
+  and `runs/` land in the run folder instead of the operator's current directory.
+- **Installers no longer take over an account's PATH.** The shortcuts-dir `export PATH=` line is
+  appended to `~/.bashrc` only for an interactive install or with the new `--add-to-path`; a `--yes`
+  or non-TTY run (CI, a verification clone) prints the line and leaves the file alone.
+- **The "run folder follows the name" note** for a copied config that only changes `name` no longer
+  reads as a warning about `run_dir`; it states the resulting folder and that nothing is wrong.
+- **A run with design tools but no Evaluator** now prints one line saying how to get
+  `run_evaluate.sh`.
+
 ## [2.0.3] — 2026-11-03
 
 Work since `v2.0.2` (137 commits). Nothing here changes the ranking:
