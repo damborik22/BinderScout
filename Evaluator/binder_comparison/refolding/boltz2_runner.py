@@ -85,6 +85,11 @@ def run_boltz2_refold(
         already_complete, n_foreign = pool_resume_state(
             output_dir / "refold_designs.csv", list(sequences), target_sequence
         )
+        # --save-pae-bins has a header check (assert_csv_can_take_pae_bins) that lives past the early
+        # exit. A finished pool must not skip it and report success with no bins written, so with the
+        # flag set the full path runs (it folds nothing, but it refuses what it used to refuse).
+        if save_pae_bins:
+            already_complete = False
         if n_foreign:
             raise ResumeTargetMismatch(
                 f"{n_foreign} of {len(sequences)} pool design(s) already have scores in "

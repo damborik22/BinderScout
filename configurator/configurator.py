@@ -3533,15 +3533,20 @@ def copy_structure(src):
     # from different replicate directories can share a file name; the column must name
     # the file that holds THIS design, so a name taken by different bytes gets its
     # parent directory as a prefix instead of being skipped.
-    for name in (src.name, src.parent.name + '__' + src.name):
+    # A third (or later) design with the same file name AND parent directory name gets a numbered
+    # name; it must never overwrite a copy that already holds another design's binder.
+    n = 1
+    while True:
+        name = (src.name if n == 1 else
+                src.parent.name + '__' + src.name if n == 2 else
+                src.parent.name + '__' + str(n - 1) + '__' + src.name)
         dest = struct_dir / name
         if not dest.exists():
             shutil.copy2(src, dest)
             return name, True
         if filecmp.cmp(src, dest, shallow=False):
             return name, False
-    shutil.copy2(src, dest)
-    return dest.name, True
+        n += 1
 
 n_pdb = n_csv = 0
 copied_as = {{}}

@@ -291,6 +291,35 @@ def test_two_designs_sharing_a_pdb_file_name_each_keep_their_own_structure(tmp_p
         assert _chain_b(copy.read_text()) == r["sequence"]
 
 
+def test_three_designs_sharing_file_and_parent_names_keep_three_structures(tmp_path):
+    """The third same-named PDB used to overwrite the second's copy while the harvest reported 3 of 3 linked."""
+    run_dir = tmp_path / "run"
+    (run_dir / "proteina_complexa").mkdir(parents=True)
+    clone = tmp_path / "clone"
+    third = "ACDEFGHIKLMNPQRSTVWYACDEFG"
+    inf = clone / "inference"
+    for parent, seq in (
+        (f"search_binder_local_pipeline_{RUN_NAME}_a", BINDER_A),
+        (f"search_binder_local_pipeline_{RUN_NAME}_b", BINDER_B),
+    ):
+        (inf / parent / "seed_1").mkdir(parents=True)
+        (inf / parent / "seed_1" / "sample.pdb").write_text(_pdb(seq))
+    (clone / "outputs" / f"search_binder_local_pipeline_{RUN_NAME}_c" / "seed_1").mkdir(parents=True)
+    (clone / "outputs" / f"search_binder_local_pipeline_{RUN_NAME}_c" / "seed_1" / "sample.pdb").write_text(_pdb(third))
+    ev = clone / "evaluation_results" / TASK
+    ev.mkdir(parents=True)
+    _write_csv(ev / "RAW_protein_binder_results_combined.csv", _metric_rows("binder_sequence"))
+    proc = _harvest_in(tmp_path, run_dir, clone)
+    assert proc.returncode == 0, proc.stderr
+    rows = list(csv.DictReader((run_dir / "proteina_complexa" / "sequences.csv").open()))
+    linked = [r for r in rows if r["structure"]]
+    names = [r["structure"] for r in linked]
+    assert len(set(names)) == len(names), f"two designs share one structure file: {names}"
+    for r in linked:
+        copy = run_dir / "proteina_complexa" / "structures" / r["structure"]
+        assert _chain_b(copy.read_text()) == r["sequence"]
+
+
 def test_nothing_is_copied_when_the_harvest_finds_no_designs(tmp_path):
     run_dir = tmp_path / "run"
     (run_dir / "proteina_complexa").mkdir(parents=True)

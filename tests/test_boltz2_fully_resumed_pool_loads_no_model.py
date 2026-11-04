@@ -74,7 +74,7 @@ def heavy_imports_raise(monkeypatch):
     monkeypatch.setattr(os, "environ", os.environ.copy())  # the script's memory policy writes XLA_* variables
 
 
-def _run(tmp_path: Path, seqs=POOL, *, target=TARGET, resume=True):
+def _run(tmp_path: Path, seqs=POOL, *, target=TARGET, resume=True, save_pae_bins=False):
     out_dir = tmp_path / "refold"
     out_csv = tmp_path / "published" / "boltz2.csv"
     boltz2_runner.run_boltz2_refold(
@@ -84,6 +84,7 @@ def _run(tmp_path: Path, seqs=POOL, *, target=TARGET, resume=True):
         output_csv=out_csv,
         scripts_path=SCRIPTS,
         resume=resume,
+        save_pae_bins=save_pae_bins,
     )
     return out_dir, out_csv
 
@@ -110,6 +111,12 @@ class TestRunnerEarlyExit:
         _write_results(tmp_path / "refold" / "refold_designs.csv", rows)
         with pytest.raises(ImportError):
             _run(tmp_path)
+
+    def test_save_pae_bins_on_a_finished_pool_does_not_take_the_early_exit(self, tmp_path, heavy_imports_raise):
+        """The bins header check lives past the early exit; skipping it reported success with no bins."""
+        _write_results(tmp_path / "refold" / "refold_designs.csv", _scored(POOL))
+        with pytest.raises(ImportError):  # reached the script instead of returning 'already complete'
+            _run(tmp_path, save_pae_bins=True)
 
     def test_a_design_with_a_blank_score_is_not_skipped_and_not_called_complete(self, tmp_path, heavy_imports_raise):
         rows = _scored(POOL[:2]) + [{"sequence": POOL[2], "target_sequence": TARGET, "iptm": "  "}]
@@ -248,6 +255,12 @@ class TestScriptEarlyExit:
         script.refold_batch(POOL, TARGET, output_dir=str(tmp_path / "s"), skip_indices={1, 2, 3})
         assert "already complete" in capsys.readouterr().out
         assert not (tmp_path / "s").exists(), "work directories were created for a pool with nothing to do"
+
+    def test_save_pae_bins_refuses_a_finished_csv_without_the_bins_column(self, script, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_results(tmp_path / "refold_designs.csv", _scored(POOL))
+        with pytest.raises(ValueError, match="pae_bins_file"):
+            script.refold_batch(POOL, TARGET, output_dir=str(tmp_path / "s"), skip_indices={1, 2, 3}, save_pae_bins=True)
 
     def test_control_one_design_left_reaches_the_first_forbidden_step(self, script, tmp_path, monkeypatch):
         """Proves the stand-ins are wired in and that the guard, not luck, is what stopped the run above."""
