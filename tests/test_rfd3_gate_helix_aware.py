@@ -37,11 +37,16 @@ What the table says, and what the gate therefore does:
     broken coil pool of the 389-aa target, polyproline 0.23; this gate's CA-based measure gives a polyproline
     chain 0.00, see the coil test), so a helix-dominated binder (mean hx >= 0.40) is passed with a plain
     statement of what was not verified, and anything below keeps the original two criteria.
-  * On THIS target the broken set is NOT geometrically a coil: it is as helical as the good set. Only
+  * On THIS target the broken set (measured at T=20 only; no T=200 broken run completed) is NOT
+    geometrically a coil: it is as helical as the good set. Only
     |fixed_com| (0.10 vs ~22.7 A, no overlap at any length) and d_com (<= 10 vs >= 17 A) tell them
     apart. So the geometry gate cannot catch a mis-centred helical run; the origin gate does, and the
     gate says so rather than implying otherwise. d_com is NOT added as a criterion: its threshold
     depends on the target's size and one target is not a calibration.
+  * NOT measured here: a real coil. The 389-aa target whose broken run gave the coil (Rg/expected 1.90,
+    contacts 0.28/res) is not in this tree, so the coil verdict is shown on a synthetic polyproline chain and
+    rests on those recorded numbers; the 0.40 cut sits between the lowest pooled good mean measured here
+    (0.54) and that pool's recorded 0.27, which was a DSSP value, not this gate's CA-based one.
 """
 
 from __future__ import annotations
