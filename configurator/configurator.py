@@ -5566,10 +5566,13 @@ def derive_run_dir_from_name(cfg: dict, config_path: Path) -> None:
     if run_dir == Path(config_path).expanduser().resolve().parent:
         return
     derived = run_dir.parent / name
-    print_warn(f"run_dir ends in {run_dir.name!r} but name is {name!r}: using the run folder derived from the name.")
-    print(f"  {run_dir}  ->  {derived}")
-    print("  (Two campaigns with different names must not share a folder. To keep the old folder,")
-    print("   set name to match the last component of run_dir.)")
+    # Not a warning and not an error: this is the intended behaviour, and the usual cause is a
+    # copied config whose only change is `name`. Say what happens and why, in that order.
+    print_ok(f"Run folder is {derived} -- derived from the name {name!r}, not taken from run_dir.")
+    print(f"  (the copied config's run_dir said {run_dir}; a campaign's folder follows its name,")
+    print("   so two differently named campaigns never share one and nothing is overwritten.")
+    print("   Nothing is wrong with the config. To use the old folder instead, set name to")
+    print(f"   {run_dir.name!r}.)")
     cfg["run_dir"] = derived
 
 

@@ -74,3 +74,16 @@ def test_a_config_inside_its_own_run_folder_replays_onto_itself_even_if_renamed(
     assert "derived from the name" not in proc.stdout
     assert (new / "run_all.sh").is_file()
     assert not old.exists(), "replaying a renamed run folder must not resurrect the old name beside it"
+
+
+def test_the_rename_note_reads_as_information_not_as_an_error(tmp_path, fake_checkout, replay):
+    """The behaviour is right and the usual cause is a copied config; the old wording
+    ('run_dir ends in X but name is Y') was a yellow warning that read like a mistake."""
+    proc = replay(_copy(tmp_path, "delta.json", name="delta"), fake_checkout, tmp_path)
+    assert proc.returncode == 0, (proc.stdout + proc.stderr)[-2000:]
+    out = proc.stdout
+    assert "derived from the name" in out, "control: the note was printed"
+    assert "⚠" not in out.split("derived from the name")[0].splitlines()[-1], "the note is a warning again"
+    assert "ends in" not in out and "but name is" not in out, "the old error-shaped wording is back"
+    assert "Nothing is wrong with the config" in out
+    assert str(fake_checkout / "runs" / "delta") in out
