@@ -75,9 +75,23 @@ def run_boltz2_refold(
     scripts_dir = _resolve_scripts_path(scripts_path)
 
     skip_indices: set[int] = set()
+    already_complete = False
     if resume:
-        from .resume import resume_plan
+        from .resume import ResumeTargetMismatch, pool_resume_state, resume_plan
 
+        # Target-aware, and BEFORE anything is published or imported. resume_plan keys on the
+        # sequence alone, so rows scored against another target would be skipped here and then
+        # published as this run's result.
+        already_complete, n_foreign = pool_resume_state(
+            output_dir / "refold_designs.csv", list(sequences), target_sequence
+        )
+        if n_foreign:
+            raise ResumeTargetMismatch(
+                f"{n_foreign} of {len(sequences)} pool design(s) already have scores in "
+                f"{output_dir / 'refold_designs.csv'} that were folded against a DIFFERENT target than this "
+                f"run's. --resume would skip them and report the other target's scores as this one's. "
+                f"Refold into a per-run --output-dir, or remove that file."
+            )
         skip_indices, n_rerun = resume_plan(output_dir / "refold_designs.csv", list(sequences))
         if skip_indices:
             print(f"[boltz2] Resuming — skipping {len(skip_indices)} already-completed binders")
@@ -100,6 +114,17 @@ def run_boltz2_refold(
     # help either, because a C++ CHECK raises SIGABRT which Python never sees.
     # Publishing first makes a re-run recover the earlier work even if it aborts again.
     _publish_csv(output_dir / "refold_designs.csv", output_csv, output_dir)
+
+    if already_complete:
+        # Every pool design already has a scored row against this target: there is nothing to
+        # fold. Return BEFORE the script is imported -- importing it pulls in jax/equinox/mosaic,
+        # and loading the model reserves the whole XLA pool (~19 GB on a 24 GB card) for the few
+        # seconds it takes to find that out.
+        print(
+            f"[boltz2] already complete: all {len(sequences)} pool design(s) are scored against this target in "
+            f"{output_dir / 'refold_designs.csv'}; nothing to fold, model not loaded"
+        )
+        return
 
     # refold_boltz2.refold_batch writes refold_designs.csv relative to CWD.
     # Change to output_dir so the CSV lands there.

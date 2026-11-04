@@ -44,6 +44,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **A run with design tools but no Evaluator** now prints one line saying how to get
   `run_evaluate.sh`.
 
+- **A fully resumed Boltz-2 refold no longer loads the model to find nothing to do.** `evaluate.sh`
+  always passes `--resume`; on a finished run the engine still imported jax/equinox/mosaic, built
+  `Boltz2()` and reserved its XLA pool (~19 GB on a 24 GB card, ~9 s) before exiting. `refold-boltz2`
+  now checks, before it imports the script, whether every pool design already has a scored row
+  (the sequence-plus-score key of `refolding/resume.py`, narrowed by `target_sequence` exactly as
+  `evaluate.sh`'s `pool_coverage` does, with a parity test between the two), prints
+  `already complete ... model not loaded` and exits 0 after publishing the existing rows. A design with a
+  blank or missing score is still folded. A pool whose scores were folded against a DIFFERENT target is now
+  refused by the engine itself (exit 1, nothing published) instead of being skipped by sequence and left
+  for `evaluate.sh` to catch afterwards. `refold_batch` in `scripts/refold_boltz2.py` also returns before
+  the target MSA, the weights and `Boltz2()` when every index is skipped. No score, rank or CSV column changes.
+  AF3 and ESMFold2 resume are not changed.
+
 - **Proteina-Complexa: the run directory now keeps its raw output, and each design names its structure.**
   Ported by hand from the 1.x line (the two lines share no ancestry past `v1.0.3`, so nothing could be
   cherry-picked). Complexa writes its PDBs and metrics CSVs inside its own gitignored clone, which

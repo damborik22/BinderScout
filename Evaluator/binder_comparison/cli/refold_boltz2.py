@@ -21,6 +21,7 @@ import sys
 from ..io.design_ids import header_binder_id
 from ..io.read import read_fasta
 from ..refolding.boltz2_runner import run_boltz2_refold
+from ..refolding.resume import ResumeTargetMismatch
 
 
 def run(args: argparse.Namespace) -> None:
@@ -40,19 +41,23 @@ def run(args: argparse.Namespace) -> None:
     else:
         print("[refold-boltz2] Sequence-only mode: target predicted de novo")
 
-    run_boltz2_refold(
-        sequences=sequences,
-        binder_ids=binder_ids,
-        target_sequence=args.target_seq,
-        output_dir=args.output_dir,
-        output_csv=args.output,
-        target_pdb=args.target_pdb,
-        num_samples=args.num_samples,
-        recycling_steps=args.recycling_steps,
-        scripts_path=args.scripts_path,
-        resume=args.resume,
-        save_pae_bins=args.save_pae_bins,
-    )
+    try:
+        run_boltz2_refold(
+            sequences=sequences,
+            binder_ids=binder_ids,
+            target_sequence=args.target_seq,
+            output_dir=args.output_dir,
+            output_csv=args.output,
+            target_pdb=args.target_pdb,
+            num_samples=args.num_samples,
+            recycling_steps=args.recycling_steps,
+            scripts_path=args.scripts_path,
+            resume=args.resume,
+            save_pae_bins=args.save_pae_bins,
+        )
+    except ResumeTargetMismatch as exc:
+        print(f"[refold-boltz2] ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 def add_parser(subparsers) -> None:

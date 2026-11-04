@@ -104,3 +104,66 @@ def resume_plan(csv_path: str | Path, sequences: list[str], score_col: str = SCO
     skip = skip_indices_for_pool(sequences, scored)
     rerun = sum(1 for seq in sequences if _normalise(seq) in blank)
     return skip, rerun
+
+
+class ResumeTargetMismatch(ValueError):
+    """The CSV being resumed holds scores for these designs against ANOTHER target."""
+
+
+def sequences_scored_by_target(
+    csv_path: str | Path, target_sequence: str, score_col: str = SCORE_COL
+) -> tuple[set[str], set[str]]:
+    """``(scored_here, scored_elsewhere)`` binder sequences in *csv_path*.
+
+    ``scored_here`` is the sequence-plus-score key of :func:`completed_sequences`, narrowed by the
+    row's ``target_sequence`` when the CSV has that column: a row folded against another target is
+    not a result for this run. A CSV with no such column cannot be checked and counts, as it does
+    in ``evaluate.sh``'s ``pool_coverage`` (which this mirrors, cell for cell). ``scored_elsewhere``
+    holds the sequences scored ONLY against a different, non-blank target. A sequence scored
+    against both is "here". Any failure to read returns two empty sets: nothing is complete.
+    """
+    path = Path(csv_path)
+    if not path.exists():
+        return set(), set()
+    target = _normalise(target_sequence)
+    here: set[str] = set()
+    elsewhere: set[str] = set()
+    try:
+        with open(path) as fh:
+            reader = csv.DictReader(fh)
+            has_target = "target_sequence" in (reader.fieldnames or [])
+            for row in reader:
+                seq = _normalise(row.get("sequence") or "")
+                if not seq or not (row.get(score_col) or "").strip():
+                    continue
+                if not has_target:
+                    here.add(seq)
+                    continue
+                row_target = "".join(_normalise(row.get("target_sequence") or "").split())
+                if row_target == "".join(target.split()):
+                    here.add(seq)
+                elif row_target:
+                    elsewhere.add(seq)
+    except Exception:
+        return set(), set()
+    return here, elsewhere - here
+
+
+def pool_resume_state(
+    csv_path: str | Path, sequences: list[str], target_sequence: str, score_col: str = SCORE_COL
+) -> tuple[bool, int]:
+    """``(complete, n_foreign)`` for *sequences* against an existing *csv_path*.
+
+    ``complete``: the pool is non-empty and EVERY design has a scored row against this target, so a
+    refold has nothing to do and must not load a model to find that out. A design with no score
+    (absent or blank row) makes it False -- that is the design a resume exists to fold.
+
+    ``n_foreign``: pool designs whose only scored rows are against ANOTHER target. Resume keys on
+    the sequence, so it would skip them and publish that other target's scores as this run's;
+    a caller must refuse rather than carry on.
+    """
+    here, elsewhere = sequences_scored_by_target(csv_path, target_sequence, score_col)
+    pool = [_normalise(s) for s in sequences]
+    complete = bool(pool) and all(s in here for s in pool)
+    n_foreign = sum(1 for s in pool if s in elsewhere)
+    return complete, n_foreign

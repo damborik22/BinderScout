@@ -423,6 +423,14 @@ def refold_batch(
     """
     if skip_indices is None:
         skip_indices = set()
+    # Nothing left to fold: leave BEFORE the target MSA, the weights and the model. Constructing
+    # Boltz2() below is what reserves the XLA pool (~19 GB on a 24 GB card), and a fully resumed
+    # pool would pay that, plus the load, only to find an empty loop. skip_indices is derived by
+    # binder_comparison.refolding.resume (sequence + score), the same key evaluate.sh's
+    # pool_coverage counts on; the runner checks the target before it gets here.
+    if binder_sequences and all(i in skip_indices for i in range(1, len(binder_sequences) + 1)):
+        print(f"[boltz2] already complete: all {len(binder_sequences)} binder(s) have a scored row; model not loaded")
+        return
     csv_path = "refold_designs.csv"
     if save_pae_bins:
         # Fail before any work: an unimportable helper or a CSV whose header cannot take
