@@ -2675,6 +2675,23 @@ done
 [[ "$_conda_found" == true ]] || {{ echo "ERROR: conda not found." >&2; exit 1; }}
 {_activate_env("binderscout_pxdesign")}
 export CUDA_HOME="$CONDA_PREFIX"
+# deepspeed (reached through protenix) asks for $CUDA_HOME/bin/nvcc at import. The x86_64 env carries one; the
+# aarch64 env does not (CUDA is system-wide there), and the run then died in seconds with FileNotFoundError.
+# Use the env's CUDA only if it has an nvcc, else the nvcc on PATH, else the system install.
+if [[ ! -x "$CUDA_HOME/bin/nvcc" ]]; then
+    _nvcc="$(command -v nvcc 2>/dev/null || true)"
+    if [[ -n "$_nvcc" ]]; then
+        CUDA_HOME="$(dirname "$(dirname "$(readlink -f "$_nvcc")")")"
+    elif [[ -x /usr/local/cuda/bin/nvcc ]]; then
+        CUDA_HOME=/usr/local/cuda
+    fi
+    export CUDA_HOME
+fi
+# conda-forge's cuda target dir is named for the platform: targets/x86_64-linux on x86_64, targets/sbsa-linux on aarch64.
+CUDA_TARGET_DIR="$CONDA_PREFIX/targets/x86_64-linux"
+for _t in "$CONDA_PREFIX"/targets/*-linux; do
+    [[ -d "$_t" ]] && {{ CUDA_TARGET_DIR="$_t"; break; }}
+done
 
 # Surface CUDA dev headers + libs for PyTorch's JIT compiler.
 # - cuda_runtime_api.h ships only under $CONDA_PREFIX/targets/x86_64-linux/include
@@ -2688,8 +2705,8 @@ NVIDIA_DIR="$CONDA_PREFIX/lib/python3.11/site-packages/nvidia"
 if [[ -d "$NVIDIA_DIR" ]]; then
     NVIDIA_INC=$(ls -d "$NVIDIA_DIR"/*/include 2>/dev/null | tr '\\n' ':' | sed 's/:$//')
     NVIDIA_LIB=$(ls -d "$NVIDIA_DIR"/*/lib 2>/dev/null | tr '\\n' ':' | sed 's/:$//')
-    export CPATH="${{NVIDIA_INC}}:$CONDA_PREFIX/targets/x86_64-linux/include${{CPATH:+:$CPATH}}"
-    export LIBRARY_PATH="${{NVIDIA_LIB}}:$CONDA_PREFIX/targets/x86_64-linux/lib${{LIBRARY_PATH:+:$LIBRARY_PATH}}"
+    export CPATH="${{NVIDIA_INC}}:$CUDA_TARGET_DIR/include${{CPATH:+:$CPATH}}"
+    export LIBRARY_PATH="${{NVIDIA_LIB}}:$CUDA_TARGET_DIR/lib${{LIBRARY_PATH:+:$LIBRARY_PATH}}"
     export LD_LIBRARY_PATH="${{NVIDIA_LIB}}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
 fi
 set -u
@@ -3318,8 +3335,11 @@ cd "${{PROTEINA_COMPLEXA_DIR}}"
 if [[ ! -f env.sh ]]; then
     complexa init uv --force
 fi
+# env.sh reads ${{SC_EXEC}} unguarded when the install's .env does not define it; this script is set -u.
+set +u
 # shellcheck disable=SC1091
 source env.sh
+set -u
 """
         + settings_block
         + f"""
