@@ -270,7 +270,7 @@ binderscout install   [--tool bindcraft|bindcraft2|boltzgen|mosaic|pxdesign|prot
                      [--tool evaluator]                # the evaluator alone (binder-eval env + binder-compare)
                      [--tool af3|soluprot|tmprot]      # extra evaluator engines (esmfold2, af3 and soluprot ship in --tool all)
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
-                     [--skip-preflight] [--force] [--verify] [--repair] [--stale]
+                     [--skip-preflight] [--force] [--verify] [--repair] [--stale] [--add-to-path]
 binderscout configure [options passed through to configurator.py]
 binderscout status    [--hosts a,b] [--local] [--json] [--html FILE] [--watch [SECS]] [--timeout SECS]
 binderscout evaluate  <binder-compare args>             # passthrough, e.g. run / extract / report / autosize
@@ -299,6 +299,7 @@ Options:
 | `--uninstall` | Remove tool environments, directories, and shortcuts |
 | `--yes` / `-y` | Non-interactive mode: auto-confirms the **safe** prompts only. Destructive ones (re-clone a repo, re-create an env, remove the local Miniforge) are auto-answered **no**, so a repeat install keeps what is already downloaded. |
 | `--skip-preflight` | Skip the disk / GPU / network / toolchain checks run before anything is downloaded |
+| `--add-to-path` | Append the shortcuts dir to `PATH` in `~/.bashrc`. An interactive install does this anyway; a `--yes` or non-TTY run (CI, a verification clone) leaves `~/.bashrc` alone and only prints the `export PATH=` line, so it cannot take over an account's `PATH`. |
 | `--verify` | Audit what is actually on disk for the selected tools and exit, checking the artifact each tool needs to **run** (weights, env, venv) rather than that its entry point answers. Non-zero exit if anything is unusable; installs nothing. |
 | `--repair` | The same audit, then re-install only the tools that failed it and verify again. The cheap recovery path for a half-built environment — far cheaper than `--force`. |
 | `--stale` | Only with `--repair`: ALSO re-install tools whose `.install_state` marker records a different commit than `HEAD`. Off by default on purpose — staleness is commit *inequality*, so one `git pull` marks every tool stale at once and this would rebuild the whole set. A stale tool still runs; `--verify` reports it either way. |
