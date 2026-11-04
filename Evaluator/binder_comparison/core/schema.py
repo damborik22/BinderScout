@@ -248,6 +248,11 @@ class ExtractedBinder:
     generation_index: int | None = None
     generation_index_source: str = "unavailable"
 
+    # The structure file the extractor knows this design came from, when the structure does not
+    # carry the final sequence itself (RFD3: backbone first, ProteinMPNN sequence after). Optional
+    # and only a hint: `extract --collect-structures` still matches by sequence first.
+    structure_path: str | None = None
+
 
 @dataclass
 class MetricResult:

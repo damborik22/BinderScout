@@ -316,6 +316,24 @@ the pool refolded by all three engines and reported.
   (it read `?`).
 - **The CALCA smoke config fits a 30 minute budget per tool.** It pins `boltzgen_intermediate: 8` (the default pool
   of 100 is folded by Boltz-2 at about 23 s per design on a GB10, well over 50 minutes) and one Mosaic length.
+- **Mosaic can resume.** `run_mosaic.sh --resume` (extra arguments now reach `hallucinate.py`) skips every binder
+  length already in `designs.csv` for the same target and, for a length whose stage 1 finished, refolds from its
+  checkpoint instead of redoing the hallucination. A plain re-run still appends more designs, as it always has. Doing
+  this exposed a bug that had made resuming impossible: `_load_checkpoint` unpacked exactly two values, but every
+  checkpoint the script writes holds three, so loading any of them raised `too many values to unpack`.
+- **Proteina-Complexa leaves the checkout as it found it when a run fails.** `complexa target add` writes into the
+  checkout's `configs/targets/targets_dict.yaml`. The script now refuses by name if that file is not writable (a
+  read-only or shared checkout), and restores it when the design step fails; a run that succeeds keeps the entry so
+  a re-run reuses it. `logs/` and `inference/` are still written there, and the harvest still copies out of them.
+- **RFD3 structures are collected from the backbone each row names.** The diffusion backbone is written before
+  ProteinMPNN designs the sequence, so a lookup by sequence found nothing and `extract --collect-structures` reported
+  0 collected. The extractor now records the backbone beside each design (`ExtractedBinder.structure_path`) and the
+  collector uses it when the sequence index has no hit. A sequence match still wins.
+- **`settings.json` names the branch or tag** (`binderscout_git_branch`). On a detached tag it recorded the word
+  `HEAD`; it now records the exact tag, or `detached` when HEAD is neither.
+- **The installers' `uv` bootstrap no longer edits `~/.bashrc` on its own.** It went through the same gate as the
+  shortcuts directory (an interactive install or `--add-to-path`), and `UV_NO_MODIFY_PATH=1` stops uv's own installer
+  editing shell profiles. An account that already has the `~/.local/bin` line does not get a second one.
 - **Review fixes to the above:** the RFD3 helix exemption is per backbone and capped at 60 aa (a 60-150 aa straight
   helix, and a coil mixed into a helical pool, are still judged); a third Proteina-Complexa PDB with the same file
   and parent-directory name keeps its own copy; `--resume --save-pae-bins` on a finished Boltz-2 pool no longer takes
@@ -330,19 +348,13 @@ the pool refolded by all three engines and reported.
   nothing. **BindCraft 2** ran but accepted 0 designs in 3 trajectories (the accepted-design path was not exercised
   there). **Proteina-Complexa is blocked on aarch64**: with the script fixes above, its AF2 reward fails on the removed
   `jax.clear_backends` (ColabDesign 1.1.1.1 on jax 0.6.2) and the tool correctly refuses to continue. Mosaic and
-  BoltzGen needed the bounded smoke settings above to fit a 30 minute budget; Mosaic restarts from the first length on
-  a re-run instead of resuming. The test suite passed there (2331 at e234cd7).
+  BoltzGen needed the bounded smoke settings above to fit a 30 minute budget. The test suite passed there (2331 at e234cd7).
 - The RFD3 geometry gate passes a helical backbone of 20-60 aa without judging compactness (it says so); the origin
   gate (`|fixed_com|`) is what catches a mis-centred run on a helical target. Measured on one 32-aa helix target only.
-- Proteina-Complexa registers its target in the shared checkout (`configs/targets/targets_dict.yaml`, `logs/`,
-  `inference/`) even when a run fails; a symlinked or read-only checkout is therefore written to.
-- RFD3 backbones are collected into `design_structures` by sequence, so a diffusion backbone that does not carry the
-  MPNN sequence reports 0 collected.
-- `settings.json` records `binderscout_git_branch: HEAD` when run from a detached tag.
+- Proteina-Complexa still writes `logs/` and `inference/` into its checkout (only the target registration is undone
+  on failure); a read-only checkout is refused by name.
 - A fresh clone has no `Evaluator/envs/mosaic_venv_path` until the installer runs (the error says so); on one
   aarch64 host the pointer references the `binder-eval-boltz2` env, which has jax and equinox there.
-- The installers' own `uv` bootstrap still appends `~/.local/bin` to `~/.bashrc` (the shortcuts-dir line is gated,
-  that one is not).
 - Only the CALCA smoke example, a PD-L1 contig check and the aarch64 run above were exercised live; the x86_64 demo
   ran on one host (RTX 3090).
 

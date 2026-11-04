@@ -72,7 +72,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # self-describing settings.json into its output subdir BEFORE launching the
 # design step.
 GIT_SHA=$(git -C "$BMDIR" rev-parse HEAD 2>/dev/null || echo "unknown")
-GIT_BRANCH=$(git -C "$BMDIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git -C "$BMDIR" symbolic-ref --short -q HEAD 2>/dev/null || git -C "$BMDIR" describe --tags --exact-match HEAD 2>/dev/null || echo "detached")
 # `|| echo` is load-bearing: this script runs under `set -euo pipefail`, so a failing
 # nvidia-smi in a command substitution would kill it BEFORE the design step, in the
 # provenance block that exists to improve reproducibility.

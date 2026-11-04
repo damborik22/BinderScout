@@ -199,12 +199,57 @@ def _load_checkpoint(path):
     raw_candidates = data.get("candidates", [])
     candidates = []
     for item in raw_candidates:
-        seq, lv = item
+        # (sequence, loss) from checkpoints that predate generation_index, (sequence, loss,
+        # generation_index) from every current one. Unpacking exactly two made every current
+        # checkpoint unloadable ("too many values to unpack"), so resuming from one crashed.
+        seq, lv, *rest = item
         if lv is None:
             lv = float("nan")
-        candidates.append((seq, float(lv)))
+        candidates.append((seq, float(lv), *rest))
     data["candidates"] = candidates
     return data
+
+
+def _length_already_designed(binder_length, target_sequence, csv_path="designs.csv"):
+    """True when designs.csv already holds rows for this length AGAINST THIS TARGET.
+
+    design() appends a length's rows once, at the very end, so any row means that length finished.
+    Rows for another target do not count: a re-used folder must not skip a length because a
+    different target once ran it.
+    """
+    if not os.path.exists(csv_path) or os.path.getsize(csv_path) == 0:
+        return False
+    with open(csv_path, newline="") as f:
+        for row in csv.DictReader(f):
+            try:
+                same_length = int(float(row.get("binder_length") or -1)) == int(binder_length)
+            except (TypeError, ValueError):
+                continue
+            if same_length and row.get("target_sequence") == target_sequence:
+                return True
+    return False
+
+
+def _usable_checkpoint(path, binder_length, target_sequence, n_designs):
+    """True when *path* is a COMPLETE stage-1 checkpoint for exactly this run's length, target and size.
+
+    An interrupted checkpoint (written by the SIGINT handler) holds a partial candidate list, and
+    refolding that would silently deliver fewer designs than asked for, so it is regenerated instead.
+    """
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return (
+        data.get("interrupted") is False
+        and data.get("binder_length") == binder_length
+        and data.get("target_sequence") == target_sequence
+        and data.get("n_designs") == n_designs
+        and bool(data.get("candidates"))
+    )
 
 
 def _install_signal_handler(get_candidates_fn, checkpoint_path_fn):
@@ -973,10 +1018,24 @@ def main():
         checkpoint_path_fn=lambda: _interrupt_state["checkpoint_path"],
     )
 
+    # --resume: a re-run no longer starts from the first length. A length whose rows are already in
+    # designs.csv is skipped, and one that finished stage 1 (a complete checkpoint) skips straight to
+    # the refold. Opt-in, because a plain re-run has always meant "append more designs".
+    resume = "--resume" in sys.argv[1:]
+
     summary_rows = []
     for binder_length in binder_lengths:
         output_dir = f"structures_{binder_length}aa_{n_designs}_top{top_k}"
         ckpt_path = f"checkpoint_{binder_length}aa.json"
+
+        resume_from = None
+        if resume:
+            if _length_already_designed(binder_length, target_sequence):
+                print(f"[resume] {binder_length} aa: already in designs.csv for this target — skipping")
+                continue
+            if _usable_checkpoint(ckpt_path, binder_length, target_sequence, n_designs):
+                print(f"[resume] {binder_length} aa: stage 1 finished — refolding from {ckpt_path}")
+                resume_from = ckpt_path
 
         result = design(
             n_designs,
@@ -986,6 +1045,7 @@ def main():
             output_dir,
             template_chain=template_chain,
             checkpoint_path=ckpt_path,
+            resume_from=resume_from,
             epitope_idx=EPITOPE_IDX,
             ss_bias=SS_BIAS,
             esm2_pll=esm2_pll,

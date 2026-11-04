@@ -127,7 +127,7 @@ CAMPAIGN_EOF
 # Written BEFORE the design step, so a future session can answer "what produced
 # these designs" without trusting this script, which may have been edited since.
 GIT_SHA=$(git -C "$RUN_DIR/../.." rev-parse HEAD 2>/dev/null || echo "unknown")
-GIT_BRANCH=$(git -C "$RUN_DIR/../.." rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git -C "$RUN_DIR/../.." symbolic-ref --short -q HEAD 2>/dev/null || git -C "$RUN_DIR/../.." describe --tags --exact-match HEAD 2>/dev/null || echo "detached")
 GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i 0 2>/dev/null | head -1 || echo "unknown")
 GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i 0 2>/dev/null | head -1 || echo 0)
 # GB10 answers this query SUCCESSFULLY with the string "[N/A]", so the fallback

@@ -207,14 +207,17 @@ def run(args: argparse.Namespace) -> None:
             "protein_hunter": args.protein_hunter,
         }
         by_tool: dict[str, list[str]] = {}
+        hints_by_tool: dict[str, dict[str, str]] = {}
         for b in all_binders:
             by_tool.setdefault(b.source_tool, []).append(b.sequence)
+            if b.structure_path:
+                hints_by_tool.setdefault(b.source_tool, {}).setdefault(b.sequence, b.structure_path)
         cdir = Path(args.collect_structures)
         for tool, seqs in by_tool.items():
             idir = tool_dir.get(tool)
             if not idir:
                 continue
-            n = collect_design_structures(idir, seqs, cdir / tool)
+            n = collect_design_structures(idir, seqs, cdir / tool, hints=hints_by_tool.get(tool))
             print(f"[extract] {tool}: collected {n}/{len(seqs)} original structures → {cdir / tool}")
 
 

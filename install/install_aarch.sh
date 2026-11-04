@@ -2152,13 +2152,10 @@ install_mosaic() {
 
     if ! command -v uv &>/dev/null; then
         print_warn "uv not found — installing via official installer"
-        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh \
+        # UV_NO_MODIFY_PATH: uv's own installer edits shell profiles otherwise.
+        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | UV_NO_MODIFY_PATH=1 sh \
             || { print_fail "Failed to install uv ${UV_VERSION}"; return 1; }
-        export PATH="${HOME}/.local/bin:${PATH}"
-        if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
-            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
-            print_ok "Added ~/.local/bin to PATH in ~/.bashrc"
-        fi
+        _persist_path_dir "${HOME}/.local/bin" '.local/bin'
     fi
     if ! command -v uv &>/dev/null; then
         print_fail "uv still not found after install; check PATH"; return 1
@@ -2907,13 +2904,10 @@ install_bindcraft2() {
     print_step "Checking for uv package manager"
     if ! command -v uv &>/dev/null; then
         print_warn "uv not found — installing via official installer"
-        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh \
+        # UV_NO_MODIFY_PATH: uv's own installer edits shell profiles otherwise.
+        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | UV_NO_MODIFY_PATH=1 sh \
             || { print_fail "Failed to install uv ${UV_VERSION}"; return 1; }
-        export PATH="${HOME}/.local/bin:${PATH}"
-        if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
-            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
-            print_ok "Added ~/.local/bin to PATH in ~/.bashrc"
-        fi
+        _persist_path_dir "${HOME}/.local/bin" '.local/bin'
     fi
     command -v uv &>/dev/null || { print_fail "uv still not found after install; check PATH"; return 1; }
     print_ok "uv is available: $(command -v uv)"
@@ -3399,13 +3393,10 @@ install_rfd4() {
     print_step "Checking for uv package manager"
     if ! command -v uv &>/dev/null; then
         print_warn "uv not found — installing via official installer"
-        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh \
+        # UV_NO_MODIFY_PATH: uv's own installer edits shell profiles otherwise.
+        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | UV_NO_MODIFY_PATH=1 sh \
             || { print_fail "Failed to install uv ${UV_VERSION}"; return 1; }
-        export PATH="${HOME}/.local/bin:${PATH}"
-        if ! grep -q '.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
-            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
-            print_ok "Added ~/.local/bin to PATH in ~/.bashrc"
-        fi
+        _persist_path_dir "${HOME}/.local/bin" '.local/bin'
     fi
     command -v uv &>/dev/null || { print_fail "uv still not found after install; check PATH"; return 1; }
     print_ok "uv is available: $(command -v uv)"
@@ -5164,30 +5155,34 @@ CLIEOF
 # stand in for a terminal.
 _is_interactive() { [[ -t 0 ]]; }
 
-# _persist_shortcuts_path
-# Put the shortcuts dir on PATH for FUTURE shells by appending to ~/.bashrc -- but only when a
-# person asked for it or is sitting at the install: interactively, or with --add-to-path.
-# A --yes / non-TTY run (CI, a verification clone, a script driving the installer) must not
-# take over an account's PATH. The `export PATH=` line is printed either way, so nothing is
-# lost: it is the hint for the shell that is open now.
-_persist_shortcuts_path() {
-    local path_line="export PATH=\"${SHORTCUTS_DIR}:\$PATH\""
-    if grep -qF "${SHORTCUTS_DIR}" "${HOME}/.bashrc" 2>/dev/null; then
-        print_ok "${SHORTCUTS_DIR} already in ~/.bashrc"
+# _persist_path_dir DIR [PATTERN]
+# Put DIR on PATH for FUTURE shells by appending to ~/.bashrc -- but only when a person asked
+# for it or is sitting at the install: interactively, or with --add-to-path. A --yes / non-TTY
+# run (CI, a verification clone, a script driving the installer) must not take over an
+# account's PATH. The `export PATH=` line is printed either way, so nothing is lost: it is the
+# hint for the shell that is open now. PATTERN (default DIR) is what counts as "already there".
+_persist_path_dir() {
+    local dir="$1" pattern="${2:-$1}"
+    local path_line="export PATH=\"${dir}:\$PATH\""
+    if grep -qF "${pattern}" "${HOME}/.bashrc" 2>/dev/null; then
+        print_ok "${dir} already in ~/.bashrc"
     elif [[ "${ADD_TO_PATH}" == true ]] || { [[ "${AUTO_YES}" != true ]] && _is_interactive; }; then
         {
             echo ""
             echo "# BinderScout shortcuts"
             echo "${path_line}"
         } >> "${HOME}/.bashrc"
-        print_ok "Added ${SHORTCUTS_DIR} to PATH in ~/.bashrc"
+        print_ok "Added ${dir} to PATH in ~/.bashrc"
     else
-        print_warn "Left ~/.bashrc alone (--yes or no terminal): ${SHORTCUTS_DIR} is not on PATH for new shells."
+        print_warn "Left ~/.bashrc alone (--yes or no terminal): ${dir} is not on PATH for new shells."
         echo "  Pass --add-to-path to have the installer add it, or add the line yourself."
     fi
-    echo "  To use the shortcuts in this shell:  ${path_line}"
-    export PATH="${SHORTCUTS_DIR}:${PATH}"
+    echo "  To use it in this shell:  ${path_line}"
+    export PATH="${dir}:${PATH}"
 }
+
+# _persist_shortcuts_path: the shortcuts dir through the same gate.
+_persist_shortcuts_path() { _persist_path_dir "${SHORTCUTS_DIR}"; }
 
 main() {
     echo ""

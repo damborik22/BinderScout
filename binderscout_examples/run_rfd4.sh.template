@@ -90,7 +90,7 @@ INPUT_CIF=$(awk '/^  input: /{sub(/^  input: /, ""); print; exit}' "$INPUT_YAML"
 # Convention (CLAUDE.md "Per-run settings.json"): every tool run writes a
 # self-describing settings.json into its output subdir BEFORE the design step.
 GIT_SHA=$(git -C "$RUN_DIR/../.." rev-parse HEAD 2>/dev/null || echo "unknown")
-GIT_BRANCH=$(git -C "$RUN_DIR/../.." rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git -C "$RUN_DIR/../.." symbolic-ref --short -q HEAD 2>/dev/null || git -C "$RUN_DIR/../.." describe --tags --exact-match HEAD 2>/dev/null || echo "detached")
 # `|| echo` is load-bearing: under `set -euo pipefail` a failing nvidia-smi in a
 # command substitution would kill the script BEFORE the design step, inside the
 # provenance block that exists to make the run reproducible.

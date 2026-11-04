@@ -88,12 +88,18 @@ def collect_design_structures(
     out_dir: str | Path,
     *,
     max_files: int = 8000,
+    hints: dict[str, str | Path] | None = None,
 ) -> int:
     """Copy each design's ORIGINAL complex structure (matched by binder sequence)
     into *out_dir* as PDB. Returns the number matched + written.
 
     Tools whose structures don't carry the design sequence simply match nothing → 0
     collected → the report falls back to the refold structure for them, which is correct.
+
+    *hints* maps a binder sequence to the structure its extractor KNEW it came from. It is
+    consulted when the sequence index has no hit, so a tool whose structure file does not carry the
+    final sequence (RFD3: the diffusion backbone has no side chains, ProteinMPNN designs the
+    sequence afterwards) still gets its design shown rather than reporting 0 collected.
     mmCIF structures cannot be read without gemmi; that case is warned about by name
     rather than reported as a bare zero.
     """
@@ -109,7 +115,8 @@ def collect_design_structures(
 
     out_dir = Path(out_dir)
     index = seq_to_structure_index(input_dir, max_files=max_files)
-    if not index:
+    hints = {_clean(s): Path(h) for s, h in (hints or {}).items() if h and Path(h).is_file()}
+    if not index and not hints:
         if gemmi is None:
             # An empty index with gemmi absent is NOT "this tool's structures don't carry the
             # design sequence": every mmCIF is unreadable without it, so a pool of mmCIF
@@ -134,7 +141,7 @@ def collect_design_structures(
     n = 0
     for i, seq in enumerate(sequences):
         key = _clean(seq)
-        hit = index.get(key)
+        hit = index.get(key) or hints.get(key)
         if hit is None or key in written:
             continue
         dest = out_dir / f"design_{i:04d}.pdb"

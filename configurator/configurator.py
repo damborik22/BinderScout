@@ -2405,7 +2405,8 @@ mkdir -p "$MOSAIC_DIR"
 echo "=== Running Mosaic for {cfg["name"]} ==="
 echo "  Settings persisted: $MOSAIC_DIR/settings.json"
 cd "$MOSAIC_DIR"
-"$MOSAIC_PYTHON" hallucinate.py
+# Extra arguments pass through: `run_mosaic.sh --resume` skips the lengths already in designs.csv.
+"$MOSAIC_PYTHON" hallucinate.py "$@"
 """
     )
     path.write_text(content)
@@ -2610,7 +2611,7 @@ def _settings_json_block(
 # design step, so future sessions can audit `cat <tool>/settings.json` instead
 # of grepping run.log.
 GIT_SHA=$(git -C "$BINDERSCOUT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
-GIT_BRANCH=$(git -C "$BINDERSCOUT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git -C "$BINDERSCOUT_DIR" symbolic-ref --short -q HEAD 2>/dev/null || git -C "$BINDERSCOUT_DIR" describe --tags --exact-match HEAD 2>/dev/null || echo "detached")
 # `|| echo` is load-bearing: every generated script runs under `set -euo pipefail`, and
 # with pipefail a failing nvidia-smi in a command substitution kills the script (exit 127)
 # BEFORE the design step. GIT_SHA/GIT_BRANCH/PY_VER above are already guarded this way;
@@ -3358,11 +3359,34 @@ echo "  Settings persisted: $SETTINGS_DIR/settings.json"
 #
 # So use Complexa's own target CLI, which appends into the dict that group reads.
 # Guarded by `target show` because there is no `target remove`: re-running is a
-# no-op rather than a duplicate entry. If this run's parameters change, edit or
-# delete the entry in Complexa's configs/targets/targets_dict.yaml by hand.
+# no-op rather than a duplicate entry.
+#
+# `target add` WRITES INTO THE CHECKOUT (configs/targets/targets_dict.yaml), and a checkout can be
+# shared, symlinked or read-only. So: refuse up front, by name, when the file cannot be written
+# (rather than a traceback from inside complexa), and if the design step then fails, put the file
+# back as it was -- a failed run must not leave its target registered in someone else's checkout.
+# A run that succeeds keeps the entry, which is what makes a re-run reuse it.
+_TD="${{PROTEINA_COMPLEXA_DIR}}/configs/targets/targets_dict.yaml"
+_TD_BACKUP=""
+_pc_unregister() {{
+    local rc=$?
+    if [[ $rc -ne 0 && -n "$_TD_BACKUP" && -f "$_TD_BACKUP" ]]; then
+        cp -p "$_TD_BACKUP" "$_TD" && echo "  Run failed (exit $rc): removed the target this run registered from $_TD."
+    fi
+    [[ -n "$_TD_BACKUP" ]] && rm -f "$_TD_BACKUP"
+    return $rc
+}}
 if "${{PROTEINA_COMPLEXA_DIR}}/.venv/bin/complexa" target show "binderscout_{cfg["name"]}" >/dev/null 2>&1; then
     echo "  Target binderscout_{cfg["name"]} already registered with Complexa — reusing it."
 else
+    if [[ ! -w "$_TD" ]]; then
+        echo "ERROR: $_TD is not writable. Complexa registers each target by appending to it, so" >&2
+        echo "       this checkout cannot be used as it is (read-only, or a symlink to a shared one)." >&2
+        exit 1
+    fi
+    _TD_BACKUP="$(mktemp)"
+    cp -p "$_TD" "$_TD_BACKUP"
+    trap _pc_unregister EXIT
     "${{PROTEINA_COMPLEXA_DIR}}/.venv/bin/complexa" target add "binderscout_{cfg["name"]}" \\
         --source binderscout \\
         --target-filename "{cfg["name"]}" \\
@@ -3392,6 +3416,10 @@ echo ""
     ++generation.search.algorithm={search_algo} \\
     ++generation.search.best_of_n.replicas={replicas} \\
     ++generation.filter.filter_samples_limit={n_designs}{extra_overrides}
+
+# The design ran to the end: the registered target stays, so a re-run reuses it.
+trap - EXIT
+[[ -n "$_TD_BACKUP" ]] && rm -f "$_TD_BACKUP"
 
 echo ""
 echo "=== Proteina-Complexa design complete ==="

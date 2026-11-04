@@ -158,12 +158,34 @@ class RFD3Extractor(SequenceExtractor):
                     sequence=seq,
                     source_tool="rfd3",
                     native=self._extract_native(row, sidecar),
+                    structure_path=self._find_backbone(csv_path, row),
                 )
             )
             order_keys.append(_parse_batch_model(str(row.get("design_id", "")) or str(row.get("backbone", ""))))
 
         _assign_generation_ordinals(results, order_keys)
         return results
+
+    def _find_backbone(self, csv_path: Path, row: pd.Series) -> str | None:
+        """The diffusion backbone this design's sequence was threaded onto, or None.
+
+        RFD3 writes the backbone first (``diffusion/<stem>.cif.gz``, no side chains) and ProteinMPNN
+        designs the sequence afterwards, so the structure never carries the sequence and a lookup by
+        sequence finds nothing. The row's ``design_id`` names the backbone, so use that.
+        """
+        design_id = str(row.get("design_id", "")) if "design_id" in row.index else ""
+        if not design_id:
+            return None
+        stem = design_id.removeprefix("rfd3_")
+        base = csv_path.parent / _SIDECAR_SUBDIR
+        for ext in (".cif.gz", ".cif", ".pdb", ".pdb.gz"):
+            if (base / f"{stem}{ext}").is_file():
+                return str(base / f"{stem}{ext}")
+        for ext in (".cif.gz", ".cif", ".pdb"):
+            hits = sorted(csv_path.parent.rglob(f"{stem}{ext}"))
+            if hits:
+                return str(hits[0])
+        return None
 
     def _read_sidecar(self, csv_path: Path, row: pd.Series) -> dict:
         """Read the per-design JSON sidecar's `metrics` block.

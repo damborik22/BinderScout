@@ -28,7 +28,7 @@ def _drive(script: Path, tmp_path: Path, *, auto_yes: bool, add_to_path: bool, t
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     shortcuts = tmp_path / "ck" / "bin"
-    funcs = extract_functions(script, "_is_interactive", "_persist_shortcuts_path")
+    funcs = extract_functions(script, "_is_interactive", "_persist_path_dir", "_persist_shortcuts_path")
     program = (
         "set -u\n"
         'print_ok() { echo "OK: $*"; }\n'
@@ -100,3 +100,42 @@ def test_the_flag_is_parsed_and_documented(which):
     text = INSTALLERS[which].read_text()
     assert re.search(r"--add-to-path\)\n\s+ADD_TO_PATH=true", text), "--add-to-path is not parsed"
     assert "--add-to-path Append the shortcuts dir" in text, "--add-to-path is missing from --help"
+
+
+@pytest.mark.parametrize("which", INSTALLERS)
+def test_the_uv_bootstrap_goes_through_the_same_gate(which):
+    """The `uv` bootstrap used to append ~/.local/bin to ~/.bashrc unconditionally, and uv's own
+    installer edits shell profiles unless told not to. Nothing but the gate may write ~/.bashrc."""
+    text = INSTALLERS[which].read_text()
+    curls = re.findall(r"curl -LsSf \"https://astral\.sh/uv/[^\n]*", text)
+    assert curls, "control: the uv bootstrap is still there"
+    assert all("UV_NO_MODIFY_PATH=1 sh" in c for c in curls), curls
+    helper = text.split("_persist_path_dir() {\n", 1)[1].split("\n}\n", 1)[0]
+    outside = text.replace(helper, "")
+    assert not re.search(r">>\s*\"\$\{HOME\}/\.bashrc\"", outside), "something other than the gate appends to ~/.bashrc"
+    assert outside.count('_persist_path_dir "${HOME}/.local/bin"') == len(curls)
+
+
+@pytest.mark.parametrize("which", INSTALLERS)
+def test_the_local_bin_line_is_not_added_twice_to_an_existing_bashrc(which, tmp_path):
+    """An account that already has the old `${HOME}/.local/bin` line must not get a second one."""
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".bashrc").write_text('export PATH="${HOME}/.local/bin:${PATH}"\n')
+    funcs = extract_functions(INSTALLERS[which], "_is_interactive", "_persist_path_dir")
+    program = (
+        'print_ok() { echo "OK: $*"; }\nprint_warn() { echo "WARN: $*"; }\n'
+        f"{funcs}\n_is_interactive() {{ return 0; }}\nAUTO_YES=false\nADD_TO_PATH=true\n"
+        "_persist_path_dir \"${HOME}/.local/bin\" '.local/bin'\n"
+    )
+    proc = subprocess.run(
+        ["bash", "-c", program],
+        capture_output=True,
+        text=True,
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        stdin=subprocess.DEVNULL,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert (home / ".bashrc").read_text().count(".local/bin") == 1
