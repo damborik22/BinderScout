@@ -200,6 +200,7 @@ RESET='\033[0m'
 CUDA_VERSION="12.4"
 SKIP_EXAMPLES=false
 AUTO_YES=false
+ADD_TO_PATH=false        # --add-to-path: append the shortcuts dir to ~/.bashrc even for a --yes / non-TTY run
 SKIP_PREFLIGHT=false
 FORCE=false      # --force: allow --yes to accept DESTRUCTIVE prompts (reclone / env re-create)
 UNINSTALL_MODE=false
@@ -353,6 +354,10 @@ while [[ $# -gt 0 ]]; do
             FORCE=true
             shift
             ;;
+        --add-to-path)
+            ADD_TO_PATH=true
+            shift
+            ;;
         --skip-preflight)
             SKIP_PREFLIGHT=true
             shift
@@ -444,6 +449,9 @@ Usage: $0 [--tool TOOL] [--cuda VERSION] [--skip-examples] [--yes] [--force]
                 auto-answered NO, so a repeat install keeps existing files and
                 downloaded weights. Pair with --force to replace them.
   --skip-preflight  Skip the disk/GPU/network checks run before downloading.
+  --add-to-path Append the shortcuts dir to PATH in ~/.bashrc. Done by default only for an
+                interactive install; a --yes or non-TTY run leaves ~/.bashrc alone (the
+                `export PATH=` line is printed either way).
   --verify      Check what is actually on disk for the selected tools and exit.
                 Verifies the artifact each tool needs to RUN (weights, env,
                 venv) rather than that its entry point exists: an rfd3 CLI that
@@ -5044,6 +5052,37 @@ preflight() {
     return 0
 }
 
+# _is_interactive
+# True when a person is at the keyboard. stdin only: by the time main runs, stdout and stderr
+# are a pipe into `tee install.log`, so they are never terminals. A function so a test can
+# stand in for a terminal.
+_is_interactive() { [[ -t 0 ]]; }
+
+# _persist_shortcuts_path
+# Put the shortcuts dir on PATH for FUTURE shells by appending to ~/.bashrc -- but only when a
+# person asked for it or is sitting at the install: interactively, or with --add-to-path.
+# A --yes / non-TTY run (CI, a verification clone, a script driving the installer) must not
+# take over an account's PATH. The `export PATH=` line is printed either way, so nothing is
+# lost: it is the hint for the shell that is open now.
+_persist_shortcuts_path() {
+    local path_line="export PATH=\"${SHORTCUTS_DIR}:\$PATH\""
+    if grep -qF "${SHORTCUTS_DIR}" "${HOME}/.bashrc" 2>/dev/null; then
+        print_ok "${SHORTCUTS_DIR} already in ~/.bashrc"
+    elif [[ "${ADD_TO_PATH}" == true ]] || { [[ "${AUTO_YES}" != true ]] && _is_interactive; }; then
+        {
+            echo ""
+            echo "# BinderScout shortcuts"
+            echo "${path_line}"
+        } >> "${HOME}/.bashrc"
+        print_ok "Added ${SHORTCUTS_DIR} to PATH in ~/.bashrc"
+    else
+        print_warn "Left ~/.bashrc alone (--yes or no terminal): ${SHORTCUTS_DIR} is not on PATH for new shells."
+        echo "  Pass --add-to-path to have the installer add it, or add the line yourself."
+    fi
+    echo "  To use the shortcuts in this shell:  ${path_line}"
+    export PATH="${SHORTCUTS_DIR}:${PATH}"
+}
+
 main() {
     echo ""
     echo -e "${BOLD}=== BinderScout Installer — $(date) ===${RESET}"
@@ -5373,17 +5412,8 @@ main() {
     [[ "${DO_PXDESIGN}"  == true ]] && echo -e "  ${GREEN}pxdesign${RESET}   — open PXDesign shell"
     [[ "${DO_PROTEINA_COMPLEXA}" == true ]] && echo -e "  ${GREEN}complexa${RESET}   — open Proteina-Complexa shell"
     [[ "${DO_PROTEIN_HUNTER}" == true ]] && echo -e "  ${GREEN}protein-hunter${RESET} — open Protein-Hunter shell"
-    # Add shortcuts dir to PATH in .bashrc (idempotent)
-    local path_line="export PATH=\"${SHORTCUTS_DIR}:\$PATH\""
-    if ! grep -qF "${SHORTCUTS_DIR}" "${HOME}/.bashrc" 2>/dev/null; then
-        echo "" >> "${HOME}/.bashrc"
-        echo "# BinderScout shortcuts" >> "${HOME}/.bashrc"
-        echo "${path_line}" >> "${HOME}/.bashrc"
-        print_ok "Added ${SHORTCUTS_DIR} to PATH in ~/.bashrc"
-    else
-        print_ok "${SHORTCUTS_DIR} already in ~/.bashrc"
-    fi
-    export PATH="${SHORTCUTS_DIR}:${PATH}"
+    # Shortcuts dir on PATH: ~/.bashrc only for an interactive install or --add-to-path
+    _persist_shortcuts_path
     echo ""
     echo -e "Full log: ${LOG_FILE}"
 
