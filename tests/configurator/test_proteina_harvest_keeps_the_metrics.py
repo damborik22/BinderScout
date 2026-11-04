@@ -188,3 +188,137 @@ def test_control_without_a_metrics_csv_the_pdb_fallback_is_what_runs(harvested):
     assert "(fallback)" in proc.stdout
     assert {r["sequence"] for r in rows} == set(DESIGNS)
     assert all(not r.get("iptm") for r in rows)
+
+
+# ---------------------------------------------------------------------------------------------
+# Copy-back and the `structure` column
+#
+# Complexa writes its PDBs and metrics CSVs inside its own gitignored clone, which
+# `install --uninstall` deletes. The harvest used to leave the run directory holding
+# sequences.csv and nothing else, and nothing tied a design id to its structure file. The
+# harvest now copies both into runs/<name>/proteina_complexa/{structures,raw}/ and writes a
+# `structure` column naming the copy that holds that design.
+# ---------------------------------------------------------------------------------------------
+
+
+def _chain_b(pdb_text: str) -> str:
+    inv = {v: k for k, v in AA3.items()}
+    return "".join(
+        inv[ln[17:20].strip()] for ln in pdb_text.splitlines() if ln[12:16].strip() == "CA" and ln[21] == "B"
+    )
+
+
+def _pc(tmp_path: Path) -> Path:
+    return tmp_path / "run" / "proteina_complexa"
+
+
+def _harvest_in(tmp_path: Path, run_dir: Path, clone: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", "-c", _snippet(tmp_path, run_dir)],
+        capture_output=True,
+        text=True,
+        cwd=clone,
+        env={"PATH": "/usr/bin:/bin", "RUN_DIR": str(run_dir), "HOME": str(tmp_path)},
+        timeout=120,
+    )
+
+
+def test_every_design_names_a_structure_that_was_copied_and_holds_its_binder(harvested, tmp_path):
+    rows, proc = harvested()
+    assert proc.returncode == 0, proc.stderr
+    assert len(rows) == len(DESIGNS)  # control: the path under test was reached
+    for r in rows:
+        copy = _pc(tmp_path) / "structures" / r["structure"]
+        assert copy.is_file(), r["structure"]
+        assert _chain_b(copy.read_text()) == r["sequence"], "the column names another design's structure"
+    assert "2 of 2 designs linked to a structure" in proc.stdout
+
+
+def test_the_pdb_fallback_rows_carry_a_structure_too(harvested, tmp_path):
+    rows, proc = harvested(metrics=False)
+    assert proc.returncode == 0, proc.stderr
+    assert "(fallback)" in proc.stdout  # control: this is the other strategy
+    assert len(rows) == len(DESIGNS)
+    for r in rows:
+        assert _chain_b((_pc(tmp_path) / "structures" / r["structure"]).read_text()) == r["sequence"]
+
+
+def test_raw_metrics_csvs_and_structures_land_in_the_run_directory(harvested, tmp_path):
+    _, proc = harvested()
+    assert proc.returncode == 0, proc.stderr
+    pc = _pc(tmp_path)
+    assert sorted(p.name for p in (pc / "structures").glob("*.pdb")) == sorted(
+        f"{d['id']}.pdb" for d in DESIGNS.values()
+    )
+    raw = {p.name for p in (pc / "raw").glob("*.csv")}
+    assert any("RAW_protein_binder_results_combined" in n for n in raw), raw
+    assert any("all_successes_protein_binder" in n for n in raw), raw
+    assert "copied 2 structure(s)" in proc.stdout
+
+
+def test_a_rerun_neither_duplicates_nor_relinks(harvested, tmp_path):
+    """Run the harvest twice over the same clone: same files, same column."""
+    rows1, proc = harvested()
+    assert proc.returncode == 0, proc.stderr
+    files1 = sorted(p.name for p in _pc(tmp_path).rglob("*") if p.is_file())
+    rerun = _harvest_in(tmp_path, tmp_path / "run", tmp_path / "clone")
+    assert rerun.returncode == 0, rerun.stderr
+    assert "copied 0 structure(s) and 0 raw CSV(s)" in rerun.stdout
+    assert sorted(p.name for p in _pc(tmp_path).rglob("*") if p.is_file()) == files1
+    rows2 = list(csv.DictReader((_pc(tmp_path) / "sequences.csv").open()))
+    assert [r["structure"] for r in rows2] == [r["structure"] for r in rows1]
+
+
+def test_two_designs_sharing_a_pdb_file_name_each_keep_their_own_structure(tmp_path):
+    """Replicate directories can reuse a file name; the second copy must not be skipped."""
+    run_dir = tmp_path / "run"
+    (run_dir / "proteina_complexa").mkdir(parents=True)
+    clone = tmp_path / "clone"
+    inf = clone / "inference" / f"search_binder_local_pipeline_{RUN_NAME}_{RUN_NAME}"
+    for sub, seq in (("seed_1", BINDER_A), ("seed_2", BINDER_B)):
+        (inf / sub).mkdir(parents=True)
+        (inf / sub / "sample.pdb").write_text(_pdb(seq))
+    ev = clone / "evaluation_results" / TASK
+    ev.mkdir(parents=True)
+    _write_csv(ev / "RAW_protein_binder_results_combined.csv", _metric_rows("binder_sequence"))
+    proc = _harvest_in(tmp_path, run_dir, clone)
+    assert proc.returncode == 0, proc.stderr
+    rows = list(csv.DictReader((run_dir / "proteina_complexa" / "sequences.csv").open()))
+    assert len(rows) == 2
+    assert len({r["structure"] for r in rows}) == 2, "both designs were pointed at one file"
+    for r in rows:
+        copy = run_dir / "proteina_complexa" / "structures" / r["structure"]
+        assert _chain_b(copy.read_text()) == r["sequence"]
+
+
+def test_nothing_is_copied_when_the_harvest_finds_no_designs(tmp_path):
+    run_dir = tmp_path / "run"
+    (run_dir / "proteina_complexa").mkdir(parents=True)
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    proc = _harvest_in(tmp_path, run_dir, clone)
+    assert proc.returncode != 0
+    assert not (run_dir / "proteina_complexa" / "structures").exists()
+
+
+def test_the_structure_column_changes_no_extracted_id_sequence_or_metric(harvested, tmp_path):
+    """The column is a link, not a metric: the Evaluator must read the same pool with or without it."""
+    from binder_comparison.extractors.proteina_complexa import ProteinaComplexaExtractor
+
+    rows, proc = harvested()
+    assert proc.returncode == 0, proc.stderr
+    with_col = ProteinaComplexaExtractor().extract(_pc(tmp_path))
+    assert len(with_col) == len(DESIGNS)  # control: the extractor read the harvested table
+    assert all(r["structure"] for r in rows)
+
+    stripped = tmp_path / "stripped"
+    stripped.mkdir()
+    keep = [k for k in rows[0] if k != "structure"]
+    with (stripped / "sequences.csv").open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=keep)
+        w.writeheader()
+        w.writerows({k: r[k] for k in keep} for r in rows)
+    without = ProteinaComplexaExtractor().extract(stripped)
+    assert [(b.binder_id, b.sequence, b.native) for b in with_col] == [
+        (b.binder_id, b.sequence, b.native) for b in without
+    ]

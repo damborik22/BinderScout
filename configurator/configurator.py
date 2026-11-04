@@ -3387,7 +3387,7 @@ echo "=== Collecting binder sequences ==="
 # read from the environment rather than pasted into the Python source (an apostrophe in
 # the run folder would otherwise end a string literal).
 RUN_DIR="$RUN_DIR" python3 - <<'PY'
-import csv, glob, os, sys
+import csv, filecmp, glob, os, shutil, sys
 from pathlib import Path
 
 pc_dir = Path(os.environ['RUN_DIR']) / 'proteina_complexa'
@@ -3485,6 +3485,7 @@ for _d in search_dirs:
                         'plddt_binder_mean': r.get('self_complex_pLDDT', ''),
                         'pae_bt_mean': r.get('self_complex_i_pAE', ''),
                         'scrmsd_binder': r.get('self_binder_scRMSD', ''),
+                        'structure': _hit,
                         'source': 'proteina_complexa',
                     }})
         except Exception as e:
@@ -3499,6 +3500,7 @@ if not rows:
             'design_id': f'complexa_{{_p.stem}}',
             'sequence': _s,
             'length': len(_s),
+            'structure': _p,
             'source': 'proteina_complexa',
         }})
     if rows:
@@ -3514,6 +3516,49 @@ if not rows:
     print('  looked in: ' + (probed if search_dirs else 'outputs/' + run_name) + ' [cwd ' + str(Path.cwd()) + ']', file=sys.stderr)
     print('  candidates probed: ' + probed, file=sys.stderr)
     sys.exit(1)
+
+# Copy the raw outputs into the run directory. Complexa writes its PDBs and metrics CSVs
+# inside its own clone (inference/, evaluation_results/), which is gitignored and deleted
+# by `install --uninstall`. Every other tool keeps its structures under
+# runs/<name>/<tool>/; without this the run held sequences.csv and nothing else, so an
+# archived run could not be re-reported or inspected. Structures go to structures/, the
+# metrics CSVs to raw/, and the `structure` column of sequences.csv names the copy.
+struct_dir = pc_dir / 'structures'
+raw_dir = pc_dir / 'raw'
+struct_dir.mkdir(parents=True, exist_ok=True)
+raw_dir.mkdir(parents=True, exist_ok=True)
+
+def copy_structure(src):
+    # Copy one PDB into structures/ and return the name it now has there. Two designs
+    # from different replicate directories can share a file name; the column must name
+    # the file that holds THIS design, so a name taken by different bytes gets its
+    # parent directory as a prefix instead of being skipped.
+    for name in (src.name, src.parent.name + '__' + src.name):
+        dest = struct_dir / name
+        if not dest.exists():
+            shutil.copy2(src, dest)
+            return name, True
+        if filecmp.cmp(src, dest, shallow=False):
+            return name, False
+    shutil.copy2(src, dest)
+    return dest.name, True
+
+n_pdb = n_csv = 0
+copied_as = {{}}
+for _d in search_dirs:
+    for src in sorted(_d.rglob('*.pdb')):
+        if src not in copied_as:
+            copied_as[src], _new = copy_structure(src)
+            n_pdb += _new
+    for src in sorted(_d.rglob('*.csv')):
+        dest = raw_dir / (_d.name + '__' + '__'.join(src.relative_to(_d).parts))
+        if not dest.exists():
+            shutil.copy2(src, dest)
+            n_csv += 1
+for r in rows:
+    r['structure'] = copied_as.get(r['structure'], '') if r['structure'] is not None else ''
+print(f'  -> copied {{n_pdb}} structure(s) and {{n_csv}} raw CSV(s) into {{pc_dir}}')
+print(f'  {{sum(1 for r in rows if r["structure"])}} of {{len(rows)}} designs linked to a structure')
 
 out_csv = pc_dir / 'sequences.csv'
 with open(out_csv, 'w', newline='') as f:

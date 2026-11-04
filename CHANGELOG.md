@@ -44,6 +44,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **A run with design tools but no Evaluator** now prints one line saying how to get
   `run_evaluate.sh`.
 
+- **Proteina-Complexa: the run directory now keeps its raw output, and each design names its structure.**
+  Ported by hand from the 1.x line (the two lines share no ancestry past `v1.0.3`, so nothing could be
+  cherry-picked). Complexa writes its PDBs and metrics CSVs inside its own gitignored clone, which
+  `install --uninstall` deletes, so an archived run held `sequences.csv` and nothing to inspect. The
+  generated harvest now copies the structures to `proteina_complexa/structures/` and every metrics CSV to
+  `proteina_complexa/raw/`, and `sequences.csv` gains a `structure` column naming the copy that holds that
+  design's binder. Two designs whose PDBs share a file name keep separate copies (the second is prefixed
+  with its directory) instead of the second being skipped and its column pointing at the first design's
+  structure. The column is a link, not a metric: the extractor reads the same ids, sequences and native
+  metrics with or without it, so `rank` and every score are unchanged. This line already carried the
+  rest of master's commit (the all-candidates scan, `binder_sequence`, the `evaluation_results` descent,
+  de-duplication); the Evaluator extractor needed no change.
+
 ## [2.0.3] — 2026-11-03
 
 Work since `v2.0.2` (137 commits). Nothing here changes the ranking:
