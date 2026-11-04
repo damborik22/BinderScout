@@ -82,11 +82,13 @@ and 20 diffusion steps will not produce a binder worth ordering.
 
 A smoke run still needs a GPU and still loads every model. Expect minutes per
 tool, dominated by model loading rather than by the design itself. **BoltzGen is
-the slow one:** `boltzgen_budget: 1` becomes `--num_designs 100` (the configurator
-scales the intermediate pool at 100 per requested design, with a floor of 50), and
-at the measured 5.35 s per intermediate design on a 24 GB card that is about 9
-minutes for the design step alone, before inverse folding, Boltz-2 folding and
-analysis. Note also that the refold step has real memory requirements — see the measured table in the
+the slow one:** `boltzgen_budget: 1` alone would become `--num_designs 100` (the configurator
+scales the intermediate pool at 100 per requested design, with a floor of 50), and the
+whole pool is then folded by Boltz-2 at about 23 s per design on a GB10, so that run needs
+well over 50 minutes. The shipped smoke config therefore sets `boltzgen_intermediate: 8`
+(non-default, smoke only; measured on a GB10 at under 10 minutes end to end), and Mosaic to
+a single 25 aa length (`mosaic_min_length` = `mosaic_max_length`), because each Mosaic length
+took 10-12 minutes there. Note also that the refold step has real memory requirements — see the measured table in the
 main README. On a 12 GB card ESMFold2 cannot run at any size, so use
 `--skip-esmfold2` there.
 

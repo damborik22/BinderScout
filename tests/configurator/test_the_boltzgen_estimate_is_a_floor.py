@@ -47,6 +47,7 @@ def test_the_replay_summary_prints_the_floor_wording(tmp_path, fake_checkout, re
     payload = json.loads((repo / "examples" / "CALCA" / "smoke.json").read_text())
     payload["cfg"]["target_pdb_src"] = str(repo / "examples" / "CALCA" / "target.pdb")
     payload["cfg"]["name"] = "floor"
+    payload["cfg"].pop("boltzgen_intermediate", None)  # the smoke config pins a small pool; this test wants the default
     payload["tools_enabled"] = {"boltzgen": True}
     path = tmp_path / "c.json"
     path.write_text(json.dumps(payload))
