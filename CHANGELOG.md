@@ -15,60 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **The RFD3 geometry gate no longer rejects a compact helical short binder, and now looks at 20-24 residue
-  binders.** It asked every binder for Rg/expected <= 1.45 and >= 0.80 long-range contacts per residue, which a
-  helix cannot satisfy (a helix has no contact between residues 9 or more apart), so it failed good 26-30 aa
-  backbones, and it declined to look at anything under 25 residues, so the CALCA smoke example (20-30 aa) never
-  exercised it. A helical backbone (its own helix fraction >= 0.40) of up to 60 aa, the longest length measured, is now passed with an explicit "NOT VERIFIED:
-  compactness and where the binder sits" note; every other backbone, including any helix longer than 60 aa and any coil mixed into a helical pool, keeps both original criteria; the floor is 20
-  (the shortest length measured). The origin gate (`|fixed_com|`) is unchanged. Measured on real RFD3 backbones
-  (table in `tests/test_rfd3_gate_helix_aware.py`): against the CALCA helix target the mis-centred runs are
-  still helical, so only the origin gate tells them apart, and the geometry gate says so.
-
-- **Protein-Hunter `sequences.csv` design ids are unique.** `summary_high_iptm.csv` has one row per
-  passing cycle, and the collector built `ph_<run_id>` from the run id alone, so different designs
-  shared an id. The id is now `ph_<run>_c<cycle>` (repeats from cycle-less sources are numbered).
-  Nothing joined on the old id: the extractor reads the summary CSV itself.
-- **RFD4 no longer preserves the structure's expression tag.** On 5O45 the contig was the chain's
-  whole label range `A1-129`, which includes AAALE + His6 (119-129, the depositor's own
-  `_struct_ref_seq_dif` rows). The contig now follows `target_sequence` (the wizard's tag-trim offer
-  and `trim_construct_tag` both trim it), keeping `label_seq_id` numbering (`A1-118`), says what was
-  dropped, and warns when a flagged tag is still inside the contig.
-- **`run_rfd4.sh` starts `rfd4-generate` inside its generate dir**, so Hydra's `hydra_outputs/`
-  and `runs/` land in the run folder instead of the operator's current directory.
-- **Installers no longer take over an account's PATH.** The shortcuts-dir `export PATH=` line is
-  appended to `~/.bashrc` only for an interactive install or with the new `--add-to-path`; a `--yes`
-  or non-TTY run (CI, a verification clone) prints the line and leaves the file alone.
-- **The "run folder follows the name" note** for a copied config that only changes `name` no longer
-  reads as a warning about `run_dir`; it states the resulting folder and that nothing is wrong.
-- **A run with design tools but no Evaluator** now prints one line saying how to get
-  `run_evaluate.sh`.
-
-- **A fully resumed Boltz-2 refold no longer loads the model to find nothing to do.** `evaluate.sh`
-  always passes `--resume`; on a finished run the engine still imported jax/equinox/mosaic, built
-  `Boltz2()` and reserved its XLA pool (~19 GB on a 24 GB card, ~9 s) before exiting. `refold-boltz2`
-  now checks, before it imports the script, whether every pool design already has a scored row
-  (the sequence-plus-score key of `refolding/resume.py`, narrowed by `target_sequence` exactly as
-  `evaluate.sh`'s `pool_coverage` does, with a parity test between the two), prints
-  `already complete ... model not loaded` and exits 0 after publishing the existing rows. A design with a
-  blank or missing score is still folded. A pool whose scores were folded against a DIFFERENT target is now
-  refused by the engine itself (exit 1, nothing published) instead of being skipped by sequence and left
-  for `evaluate.sh` to catch afterwards. `refold_batch` in `scripts/refold_boltz2.py` also returns before
-  the target MSA, the weights and `Boltz2()` when every index is skipped. No score, rank or CSV column changes.
-  AF3 and ESMFold2 resume are not changed.
-
-- **Proteina-Complexa: the run directory now keeps its raw output, and each design names its structure.**
-  Ported by hand from the 1.x line (the two lines share no ancestry past `v1.0.3`, so nothing could be
-  cherry-picked). Complexa writes its PDBs and metrics CSVs inside its own gitignored clone, which
-  `install --uninstall` deletes, so an archived run held `sequences.csv` and nothing to inspect. The
-  generated harvest now copies the structures to `proteina_complexa/structures/` and every metrics CSV to
-  `proteina_complexa/raw/`, and `sequences.csv` gains a `structure` column naming the copy that holds that
-  design's binder. Two designs whose PDBs share a file name keep separate copies (the second is prefixed
-  with its directory) instead of the second being skipped and its column pointing at the first design's
-  structure. The column is a link, not a metric: the extractor reads the same ids, sequences and native
-  metrics with or without it, so `rank` and every score are unchanged. This line already carried the
-  rest of master's commit (the all-candidates scan, `binder_sequence`, the `evaluation_results` descent,
-  de-duplication); the Evaluator extractor needed no change.
+_Nothing yet._
 
 ## [2.0.3] — 2026-11-03
 
@@ -301,25 +248,103 @@ the pool refolded by all three engines and reported.
 - **Not ported (known gap):** master's Proteina-Complexa raw-output copy-back and the per-row `structure`
   column that links a design id to its PDB. Tracked for 2.0.4.
 
+### Fixed by the aarch64 full run and the fix lanes (2026-11-04)
+
+- **The RFD3 geometry gate no longer rejects a compact helical short binder, and now looks at 20-24 residue
+  binders.** It asked every binder for Rg/expected <= 1.45 and >= 0.80 long-range contacts per residue, which a
+  helix cannot satisfy (a helix has no contact between residues 9 or more apart), so it failed good 26-30 aa
+  backbones, and it declined to look at anything under 25 residues, so the CALCA smoke example (20-30 aa) never
+  exercised it. A helical backbone (its own helix fraction >= 0.40) of up to 60 aa, the longest length measured, is now passed with an explicit "NOT VERIFIED:
+  compactness and where the binder sits" note; every other backbone, including any helix longer than 60 aa and any coil mixed into a helical pool, keeps both original criteria; the floor is 20
+  (the shortest length measured). The origin gate (`|fixed_com|`) is unchanged. Measured on real RFD3 backbones
+  (table in `tests/test_rfd3_gate_helix_aware.py`): against the CALCA helix target the mis-centred runs are
+  still helical, so only the origin gate tells them apart, and the geometry gate says so.
+
+- **Protein-Hunter `sequences.csv` design ids are unique.** `summary_high_iptm.csv` has one row per
+  passing cycle, and the collector built `ph_<run_id>` from the run id alone, so different designs
+  shared an id. The id is now `ph_<run>_c<cycle>` (repeats from cycle-less sources are numbered).
+  Nothing joined on the old id: the extractor reads the summary CSV itself.
+- **RFD4 no longer preserves the structure's expression tag.** On 5O45 the contig was the chain's
+  whole label range `A1-129`, which includes AAALE + His6 (119-129, the depositor's own
+  `_struct_ref_seq_dif` rows). The contig now follows `target_sequence` (the wizard's tag-trim offer
+  and `trim_construct_tag` both trim it), keeping `label_seq_id` numbering (`A1-118`), says what was
+  dropped, and warns when a flagged tag is still inside the contig.
+- **`run_rfd4.sh` starts `rfd4-generate` inside its generate dir**, so Hydra's `hydra_outputs/`
+  and `runs/` land in the run folder instead of the operator's current directory.
+- **Installers no longer take over an account's PATH.** The shortcuts-dir `export PATH=` line is
+  appended to `~/.bashrc` only for an interactive install or with the new `--add-to-path`; a `--yes`
+  or non-TTY run (CI, a verification clone) prints the line and does not write it. (The `uv` bootstrap's own
+  `~/.local/bin` line is a separate append and is not gated; see Known issues.)
+- **The "run folder follows the name" note** for a copied config that only changes `name` no longer
+  reads as a warning about `run_dir`; it states the resulting folder and that nothing is wrong.
+- **A run with design tools but no Evaluator** now prints one line saying how to get
+  `run_evaluate.sh`.
+
+- **A fully resumed Boltz-2 refold no longer loads the model to find nothing to do.** `evaluate.sh`
+  always passes `--resume`; on a finished run the engine still imported jax/equinox/mosaic, built
+  `Boltz2()` and reserved its XLA pool (~19 GB on a 24 GB card, ~9 s) before exiting. `refold-boltz2`
+  now checks, before it imports the script, whether every pool design already has a scored row
+  (the sequence-plus-score key of `refolding/resume.py`, narrowed by `target_sequence` exactly as
+  `evaluate.sh`'s `pool_coverage` does, with a parity test between the two), prints
+  `already complete ... model not loaded` and exits 0 after publishing the existing rows. A design with a
+  blank or missing score is still folded. A pool whose scores were folded against a DIFFERENT target is now
+  refused by the engine itself (exit 1, nothing published) instead of being skipped by sequence and left
+  for `evaluate.sh` to catch afterwards. `refold_batch` in `scripts/refold_boltz2.py` also returns before
+  the target MSA, the weights and `Boltz2()` when every index is skipped. No score, rank or CSV column changes.
+  AF3 and ESMFold2 resume are not changed.
+
+- **Proteina-Complexa: the run directory now keeps its raw output, and each design names its structure.**
+  Ported by hand from the 1.x line (the two lines share no ancestry past `v1.0.3`, so nothing could be
+  cherry-picked). Complexa writes its PDBs and metrics CSVs inside its own gitignored clone, which
+  `install --uninstall` deletes, so an archived run held `sequences.csv` and nothing to inspect. The
+  generated harvest now copies the structures to `proteina_complexa/structures/` and every metrics CSV to
+  `proteina_complexa/raw/`, and `sequences.csv` gains a `structure` column naming the copy that holds that
+  design's binder. Two designs whose PDBs share a file name keep separate copies (the second is prefixed
+  with its directory) instead of the second being skipped and its column pointing at the first design's
+  structure. The column is a link, not a metric: the extractor reads the same ids, sequences and native
+  metrics with or without it, so `rank` and every score are unchanged. This line already carried the
+  rest of master's commit (the all-candidates scan, `binder_sequence`, the `evaluation_results` descent,
+  de-duplication); the Evaluator extractor needed no change.
+- **`run_pxdesign.sh` starts on an aarch64 host.** It forced `CUDA_HOME` to the conda env, whose aarch64 build has
+  no `bin/nvcc`, so deepspeed (reached through protenix) raised `FileNotFoundError` 8 s in. It now uses the env's CUDA
+  only when it has an nvcc, else the `nvcc` on `PATH`, else `/usr/local/cuda`, and finds the platform's
+  `targets/<arch>-linux` directory (it hard-coded `x86_64-linux`). Found by running every tool's script on an aarch64 host.
+- **`run_proteina_complexa.sh` no longer dies at 0 s on `SC_EXEC: unbound variable`.** The script is `set -u`;
+  `env.sh` reads `${SC_EXEC}` unguarded when the install's `.env` does not define it. `env.sh` is now sourced with
+  `set +u`, as the conda blocks already were.
+- **PXDesign `binder_length` is the sequence length** when the output directory is not named `outputs_len<N>`
+  (it read `?`).
+- **The CALCA smoke config fits a 30 minute budget per tool.** It pins `boltzgen_intermediate: 8` (the default pool
+  of 100 is folded by Boltz-2 at about 23 s per design on a GB10, well over 50 minutes) and one Mosaic length.
+- **Review fixes to the above:** the RFD3 helix exemption is per backbone and capped at 60 aa (a 60-150 aa straight
+  helix, and a coil mixed into a helical pool, are still judged); a third Proteina-Complexa PDB with the same file
+  and parent-directory name keeps its own copy; `--resume --save-pae-bins` on a finished Boltz-2 pool no longer takes
+  the early exit (it used to refuse a CSV without the bins column, and must still).
+
 ### Known issues in 2.0.3
 
-- **aarch64 coverage is partial.** On an aarch64 host (GB10) this release was verified read-only, RFD4-Proteina
-  was installed and run (5 designs, under a memory cap), and that pool was refolded by Boltz-2, AF3 and
-  ESMFold2 and reported (3 engines on every design, gate passed). The full test suite passed there (2331).
-  The other design tools were not run on aarch64 in this release.
-- **The RFD3 geometry gate is blind below 25 residues and can reject a short helix above it.** The CALCA smoke
-  binder (24 aa) gets "cannot verify"; a 26-30 aa helical binder was rejected (long-range contacts 0.00/res
-  is what a helix looks like). The smoke example therefore stays below the floor. Treat the gate as a
-  long-binder check.
-- RFD4 keeps the expression-tag residues and heteroatoms of the input in its contig for PD-L1-style
-  structures; `install_aarch.sh --tool rfd4` adds the checkout's `bin/` to `~/.bashrc` (a throwaway clone
-  used for verification should be removed, or the line deleted, afterwards).
-- A fully resumed Boltz-2 run (nothing left to fold) still loads the model and briefly reserves its XLA pool
-  before exiting; harmless on an idle card, risky on a shared one. An early "nothing to do" exit is planned.
-- Proteina-Complexa raw-output copy-back and the per-row `structure` column (master) are not ported.
-- Only the CALCA smoke example and a PD-L1 contig check were exercised live; the full demo ran on one x86_64
-  host (RTX 3090). BindCraft, BindCraft 2, Mosaic, PXDesign and Proteina-Complexa arms were configured and
-  `bash -n` checked but not run end to end in this release's demo.
+- **aarch64 coverage.** On an aarch64 host (GB10, every GPU job under a driver-enforced memory cap) all nine design
+  tools were run from configurator-generated scripts. Designs came from seven of them (Protein-Hunter, RFD3, Mosaic,
+  BoltzGen, BindCraft, PXDesign, RFD4). The pooled three-engine evaluation of a 10-design CALCA pool (6 tools) and a
+  20-design PD-L1 RFD4 pool scored every design with all three engines and passed the gate, and a re-run refolded
+  nothing. **BindCraft 2** ran but accepted 0 designs in 3 trajectories (the accepted-design path was not exercised
+  there). **Proteina-Complexa is blocked on aarch64**: with the script fixes above, its AF2 reward fails on the removed
+  `jax.clear_backends` (ColabDesign 1.1.1.1 on jax 0.6.2) and the tool correctly refuses to continue. Mosaic and
+  BoltzGen needed the bounded smoke settings above to fit a 30 minute budget; Mosaic restarts from the first length on
+  a re-run instead of resuming. The test suite passed there (2331 at e234cd7).
+- The RFD3 geometry gate passes a helical backbone of 20-60 aa without judging compactness (it says so); the origin
+  gate (`|fixed_com|`) is what catches a mis-centred run on a helical target. Measured on one 32-aa helix target only.
+- Proteina-Complexa registers its target in the shared checkout (`configs/targets/targets_dict.yaml`, `logs/`,
+  `inference/`) even when a run fails; a symlinked or read-only checkout is therefore written to.
+- RFD3 backbones are collected into `design_structures` by sequence, so a diffusion backbone that does not carry the
+  MPNN sequence reports 0 collected.
+- `settings.json` records `binderscout_git_branch: HEAD` when run from a detached tag.
+- A fresh clone has no `Evaluator/envs/mosaic_venv_path` until the installer runs (the error says so); on one
+  aarch64 host the pointer references the `binder-eval-boltz2` env, which has jax and equinox there.
+- The installers' own `uv` bootstrap still appends `~/.local/bin` to `~/.bashrc` (the shortcuts-dir line is gated,
+  that one is not).
+- Only the CALCA smoke example, a PD-L1 contig check and the aarch64 run above were exercised live; the x86_64 demo
+  ran on one host (RTX 3090).
 
 ### Removed
 

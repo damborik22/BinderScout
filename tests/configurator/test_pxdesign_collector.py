@@ -182,3 +182,24 @@ def test_warns_when_summary_is_a_small_selection(tmp_path: Path) -> None:
     assert "WARNING" in combined.upper(), (
         f"a 1-row summary.csv against a 50-row sample pool must warn, not pass silently.\n{combined}"
     )
+
+
+def test_binder_length_is_the_sequence_length_when_the_dir_is_not_named_for_it(tmp_path: Path) -> None:
+    """A single-length run has no outputs_len<N> directory; the column used to read '?'."""
+    task = tmp_path / "pxdesign" / "design_outputs" / "input"
+    _write_csv(
+        task / "summary.csv",
+        SUMMARY_COLUMNS,
+        [
+            {
+                "rank": "1",
+                "task_name": "input",
+                "sequence": SEQ_A,
+                "af2_iptm": "[0.9]",
+                "af2_plddt": "[0.9]",
+                "af2_ipAE": "[5]",
+            }
+        ],
+    )
+    rows = _run_collector(tmp_path)
+    assert rows[0]["binder_length"] == str(len(SEQ_A))

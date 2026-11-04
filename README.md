@@ -299,7 +299,7 @@ Options:
 | `--uninstall` | Remove tool environments, directories, and shortcuts |
 | `--yes` / `-y` | Non-interactive mode: auto-confirms the **safe** prompts only. Destructive ones (re-clone a repo, re-create an env, remove the local Miniforge) are auto-answered **no**, so a repeat install keeps what is already downloaded. |
 | `--skip-preflight` | Skip the disk / GPU / network / toolchain checks run before anything is downloaded |
-| `--add-to-path` | Append the shortcuts dir to `PATH` in `~/.bashrc`. An interactive install does this anyway; a `--yes` or non-TTY run (CI, a verification clone) leaves `~/.bashrc` alone and only prints the `export PATH=` line, so it cannot take over an account's `PATH`. |
+| `--add-to-path` | Append the shortcuts dir to `PATH` in `~/.bashrc`. An interactive install does this anyway; a `--yes` or non-TTY run (CI, a verification clone) does not write that line and only prints the `export PATH=` line, so it cannot take over an account's `PATH`. |
 | `--verify` | Audit what is actually on disk for the selected tools and exit, checking the artifact each tool needs to **run** (weights, env, venv) rather than that its entry point answers. Non-zero exit if anything is unusable; installs nothing. |
 | `--repair` | The same audit, then re-install only the tools that failed it and verify again. The cheap recovery path for a half-built environment — far cheaper than `--force`. |
 | `--stale` | Only with `--repair`: ALSO re-install tools whose `.install_state` marker records a different commit than `HEAD`. Off by default on purpose — staleness is commit *inequality*, so one `git pull` marks every tool stale at once and this would rebuild the whole set. A stale tool still runs; `--verify` reports it either way. |

@@ -2782,7 +2782,7 @@ def _row_from(r, slcsv, length_val):
         'design_id': f'pxdesign_{{name}}',
         'sequence': seq,
         'length': len(seq),
-        'binder_length': length_val,
+        'binder_length': length_val if str(length_val).isdigit() else len(seq),  # '?' when the dir is not outputs_len<N>
         'pxdesign_rank': rank,
         'pxdesign_bucket': r.get('bucket', '').strip(),
         # summary.csv RENAMES the AF2 metrics (trim_summary_df); the original
@@ -2895,7 +2895,7 @@ else:
                 'design_id': f'pxdesign_{{cif.stem}}',
                 'sequence': seq,
                 'length': len(seq),
-                'binder_length': length_m.group(1) if length_m else '?',
+                'binder_length': length_m.group(1) if length_m else len(seq),
                 'source': 'pxdesign',
             }})
     if rows:
