@@ -430,11 +430,7 @@ def refold_batch(
     # pool_coverage counts on; the runner checks the target before it gets here.
     # Not with --save-pae-bins: its header check below must still run (a finished pool without the
     # pae_bins_file column has to be refused, not reported complete with no bins written).
-    if (
-        not save_pae_bins
-        and binder_sequences
-        and all(i in skip_indices for i in range(1, len(binder_sequences) + 1))
-    ):
+    if not save_pae_bins and binder_sequences and all(i in skip_indices for i in range(1, len(binder_sequences) + 1)):
         print(f"[boltz2] already complete: all {len(binder_sequences)} binder(s) have a scored row; model not loaded")
         return
     csv_path = "refold_designs.csv"

@@ -260,7 +260,9 @@ class TestScriptEarlyExit:
         monkeypatch.chdir(tmp_path)
         _write_results(tmp_path / "refold_designs.csv", _scored(POOL))
         with pytest.raises(ValueError, match="pae_bins_file"):
-            script.refold_batch(POOL, TARGET, output_dir=str(tmp_path / "s"), skip_indices={1, 2, 3}, save_pae_bins=True)
+            script.refold_batch(
+                POOL, TARGET, output_dir=str(tmp_path / "s"), skip_indices={1, 2, 3}, save_pae_bins=True
+            )
 
     def test_control_one_design_left_reaches_the_first_forbidden_step(self, script, tmp_path, monkeypatch):
         """Proves the stand-ins are wired in and that the guard, not luck, is what stopped the run above."""
