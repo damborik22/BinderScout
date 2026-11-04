@@ -60,6 +60,9 @@ def _tracked_text_files():
             continue  # binary or unreadable; the home-path test covers binaries
 
 
+_GENERIC_ACCOUNTS = frozenset({"runner", "ubuntu", "admin", "user", "github", "jenkins", "builder", "vagrant"})
+
+
 def _hits(pattern):
     found = []
     for rel, text in _tracked_text_files():
@@ -87,6 +90,8 @@ def test_this_accounts_name_does_not_appear_in_the_tree():
     account = Path.home().name
     if not account or len(account) < 4:
         return  # too short to match meaningfully without false positives
+    if account in _GENERIC_ACCOUNTS:
+        return  # a CI image's stock account ("runner") is an ordinary word in prose, not an identifier
     hits = _hits(re.compile(r"\b" + re.escape(account) + r"\b"))
     assert not hits, (
         f"this box's account name appears in tracked file(s): {', '.join(hits[:10])}"

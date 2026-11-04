@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -81,4 +82,10 @@ def system_conda_present() -> str | None:
     for d in ("/opt/conda", "/opt/miniforge3", "/opt/miniconda3", "/opt/anaconda3"):
         if os.path.isfile(f"{d}/etc/profile.d/conda.sh"):
             return d
+    # clean_env's PATH is /usr/bin:/bin; a hosted CI image can link its conda into one of them
+    # (the runner image of 2026-11 does), and the installer then finds it through `conda info --base`.
+    for exe in ("mamba", "conda"):
+        found = shutil.which(exe, path="/usr/bin:/bin")
+        if found:
+            return found
     return None
