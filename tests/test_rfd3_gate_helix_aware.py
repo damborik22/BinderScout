@@ -35,7 +35,7 @@ What the table says, and what the gate therefore does:
   * Rg/expected is not either: individual good backbones reach 1.55; an ideal straight 26-mer is 1.51.
   * Helix fraction does separate a helical binder from the coil failure (0.27 by DSSP in the measured
     broken coil pool of the 389-aa target, polyproline 0.23; this gate's CA-based measure gives a polyproline
-    chain 0.00, see the coil test), so a helix-dominated binder (mean hx >= 0.40) is passed with a plain
+    chain 0.00, see the coil test), so a helical backbone (own hx >= 0.40, at most HELIX_EXEMPT_MAX_CA aa) is passed with a plain
     statement of what was not verified, and anything below keeps the original two criteria.
   * On THIS target the broken set (measured at T=20 only; no T=200 broken run completed) is NOT
     geometrically a coil: it is as helical as the good set. Only
@@ -166,6 +166,33 @@ class TestCoilStillFails:
         verdict, out = _verdict(tmp_path, _globule(48), capsys)
         assert verdict is True
         assert "helix-dominated" not in out and "want >=0.80" in out
+
+
+class TestHelixExemptionIsBounded:
+    """The exemption covers a helical backbone of a measured length; it does not cover a long rod or a mixed pool."""
+
+    def test_a_long_straight_helix_is_not_exempt(self, tmp_path, capsys):
+        gate = _load_gate()
+        for n in (gate.HELIX_EXEMPT_MAX_CA + 1, 90, 150):
+            for f in tmp_path.glob("*.cif"):
+                f.unlink()
+            verdict, out = _verdict(tmp_path, _helix(n), capsys)
+            assert verdict is False, f"a {n}-aa straight helix passed the geometry gate"
+            assert "helix-dominated" not in out
+
+    def test_a_helix_at_the_measured_maximum_is_still_exempt(self, tmp_path, capsys):
+        gate = _load_gate()
+        verdict, _ = _verdict(tmp_path, _helix(gate.HELIX_EXEMPT_MAX_CA), capsys)
+        assert verdict is True
+
+    def test_a_coil_is_not_rescued_by_a_helix_in_the_same_pool(self, tmp_path, capsys):
+        gate = _load_gate()
+        _write_cif(tmp_path / "a_helix.cif", _helix(30))
+        _write_cif(tmp_path / "b_coil.cif", _coil(30))
+        verdict = gate.check_geometry(str(tmp_path / "*.cif"))
+        out = capsys.readouterr().out
+        assert verdict is False, "the pool MEAN of helix fraction exempted the coil"
+        assert "FAIL" in out
 
 
 class TestFloor:

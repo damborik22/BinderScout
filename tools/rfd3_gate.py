@@ -98,10 +98,16 @@ def check_origin(pattern, limit=40):
 # table in tests/test_rfd3_gate_helix_aware.py); below it the helix fraction rests on too few windows to mean anything.
 MIN_BINDER_CA = 20
 
-# Mean helix fraction (CA i,i+4 distance 5.0-7.2 A) at or above which a binder is judged helix-dominated. The
+# Helix fraction (CA i,i+4 distance 5.0-7.2 A) at or above which a backbone is judged helical. The
 # failure this gate exists for is an extended coil (measured helix 0.27, polyproline 0.23); a binder that is
 # mostly helix is not that failure, whatever its Rg or long-range contacts say. See the measured table.
 HELIX_DOMINANT = 0.40
+
+
+# Longest binder the helix exemption below was MEASURED on. A longer helical binder is not exempt: a single straight
+# helix of 60-150 aa has Rg/expected 2.5-4.4 and no long-range contacts, which is exactly what a mis-seeded run
+# grows, and nothing measured says such a binder is fine.
+HELIX_EXEMPT_MAX_CA = 60
 
 
 def check_geometry(pattern, limit=40):
@@ -110,7 +116,7 @@ def check_geometry(pattern, limit=40):
     for f in sorted(glob.glob(pattern))[:limit]:
         c = ca_chain(f)
         if len(c) >= MIN_BINDER_CA:
-            rows.append(geom(c))
+            rows.append((len(c), *geom(c)))
         elif c:
             lengths.append(len(c))
     if not rows:
@@ -122,25 +128,32 @@ def check_geometry(pattern, limit=40):
         else:
             print("  GEOMETRY GATE: no chain-B CA atoms found — CANNOT VERIFY (not a failure)")
         return None
-    rgr = st.mean(r[0] for r in rows)
-    lr = st.mean(r[1] for r in rows)
-    hx = st.mean(r[2] for r in rows)
+    # Decided PER BACKBONE, not on the pool mean: a mean of 0.5 over one coil and one helix would otherwise
+    # exempt the coil. A backbone is exempt only if it is helical itself AND no longer than the exemption was
+    # measured on; every other backbone is judged on the original criteria.
+    exempt = [r for r in rows if r[3] >= HELIX_DOMINANT and r[0] <= HELIX_EXEMPT_MAX_CA]
+    judged = [r for r in rows if r not in exempt]
     print(f"  backbones checked      {len(rows)}")
     print(
-        f"  helix fraction         {hx:.2f}   (counts as helical at >={HELIX_DOMINANT:.2f}; broken coil pool was 0.27)"
+        f"  helix fraction         {st.mean(r[3] for r in rows):.2f}   (a backbone counts as helical at "
+        f">={HELIX_DOMINANT:.2f}; broken coil pool was 0.27)"
     )
-    if hx >= HELIX_DOMINANT:
+    if exempt:
         # A helix has no long-range contacts (a single straight helix has none at all) and a straight helix is
         # LONGER than a compact fold of the same length, so neither criterion below says anything about it.
         # Applying them rejected a compact helical binder (helix 0.73, Rg/expected 1.23) for "0.00 contacts/res".
-        print(f"  Rg / expected-compact  {rgr:.2f}   (not applied to a helical binder)")
-        print(f"  long-range contacts    {lr:.2f}/res (not applied to a helical binder)")
-        print("  GEOMETRY GATE: PASS — helix-dominated, so not the coil failure this gate detects")
         print(
-            "  NOT VERIFIED here: compactness and where the binder sits. A binder grown from the wrong origin\n"
-            "  is still helical; the ORIGIN GATE (|fixed_com|) is the check for that, not this one."
+            f"  {len(exempt)} helical backbone(s) of <={HELIX_EXEMPT_MAX_CA} aa: Rg / contacts not applied "
+            "(NOT VERIFIED: compactness and where the binder sits;\n"
+            "  a binder grown from the wrong origin is still helical, the ORIGIN GATE (|fixed_com|) checks that)"
+        )
+    if not judged:
+        print(
+            "  GEOMETRY GATE: PASS — helix-dominated: every backbone is helical, so none is the coil failure this gate detects"
         )
         return True
+    rgr = st.mean(r[1] for r in judged)
+    lr = st.mean(r[2] for r in judged)
     print(f"  Rg / expected-compact  {rgr:.2f}   (want <=1.45; round-3 BROKEN pool was 1.90)")
     print(f"  long-range contacts    {lr:.2f}/res (want >=0.80; broken pool was 0.28)")
     ok = rgr <= 1.45 and lr >= 0.80
