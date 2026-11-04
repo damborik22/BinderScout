@@ -2694,7 +2694,7 @@ for _t in "$CONDA_PREFIX"/targets/*-linux; do
 done
 
 # Surface CUDA dev headers + libs for PyTorch's JIT compiler.
-# - cuda_runtime_api.h ships only under $CONDA_PREFIX/targets/x86_64-linux/include
+# - cuda_runtime_api.h ships only under $CONDA_PREFIX/targets/<arch>-linux/include
 #   (conda-forge cuda-cudart-dev layout), not under $CONDA_PREFIX/include.
 # - cuBLAS / cuDNN / NCCL dev headers ship via the pip nvidia-*-cu12 wheels at
 #   site-packages/nvidia/<lib>/include — needed by protenix's JIT layer-norm op.
