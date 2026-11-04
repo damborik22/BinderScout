@@ -377,6 +377,9 @@ def _stub_checkout(tmp_path, with_conda_gcc):
         "#!/bin/bash\n"
         f'echo "CC=${{CC:-}}" > {tmp_path}/seen\n'
         f'echo "$@" >> {tmp_path}/seen\n'
+        # where it was started, and the debris Hydra leaves in that directory
+        f"pwd > {tmp_path}/cwd\n"
+        "mkdir -p hydra_outputs; echo log > hydra_outputs/generate.log\n"
         'out=""; for a in "$@"; do case "$a" in out_dir=*) out="${a#out_dir=}";; esac; done\n'
         'mkdir -p "$out/x"; echo data_x > "$out/x/x_generated.cif"\n'
     )
@@ -415,7 +418,7 @@ def _stub_checkout(tmp_path, with_conda_gcc):
     return checkout, tools
 
 
-def _run_generated(cif_cfg, tmp_path, checkout, tools):
+def _run_generated(cif_cfg, tmp_path, checkout, tools, cwd=None):
     import os
 
     spec = cif_cfg["run_dir"] / "rfd4" / "input.yaml"
@@ -425,7 +428,9 @@ def _run_generated(cif_cfg, tmp_path, checkout, tools):
     # the script refuses a folder that moved since it was generated; record this one
     (cif_cfg["run_dir"] / conf.RUN_LOCATION_FILE).write_text(str(cif_cfg["run_dir"].resolve()))
     env = {"PATH": str(tools), "HOME": str(tmp_path), "BINDERSCOUT_DIR": str(checkout)}
-    return subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, env=os.environ | env | {"CC": ""})
+    return subprocess.run(
+        ["/bin/bash", str(script)], capture_output=True, text=True, env=os.environ | env | {"CC": ""}, cwd=cwd
+    )
 
 
 def test_the_generated_script_turns_off_dataloader_workers(cif_cfg, tmp_path):
@@ -464,3 +469,27 @@ def test_a_conda_toolchain_in_the_checkout_stands_in_for_a_missing_compiler(cif_
     seen = tmp_path / "seen"
     assert seen.exists(), proc.stdout + proc.stderr
     assert "x86_64-conda-linux-gnu-gcc" in seen.read_text().splitlines()[0]
+
+
+def test_hydra_debris_lands_in_the_run_folder_not_where_the_script_was_started(cif_cfg, tmp_path):
+    """rfd4-generate (Hydra) writes hydra_outputs/ into the directory it is started in. The
+    generated script starts it inside the generate dir, so an operator's own directory stays clean."""
+    checkout, tools = _stub_checkout(tmp_path, with_conda_gcc=True)
+    start = tmp_path / "somewhere_else"
+    start.mkdir()
+    proc = _run_generated(cif_cfg, tmp_path, checkout, tools, cwd=start)
+    started_in = (tmp_path / "cwd").read_text().strip()  # absent => the stub never ran
+    gen_dir = (cif_cfg["run_dir"] / "rfd4" / "generate").resolve()
+    assert Path(started_in).resolve() == gen_dir, proc.stdout + proc.stderr
+    assert (gen_dir / "hydra_outputs" / "generate.log").exists(), "control: the stub did leave debris"
+    assert list(start.iterdir()) == [], "debris leaked into the directory the script was started from"
+    # and the arguments are still the absolute ones the move relies on
+    seen = (tmp_path / "seen").read_text()
+    assert f"inputs={cif_cfg['run_dir'].resolve()}/rfd4/input.yaml" in seen
+    assert f"out_dir={gen_dir}" in seen
+
+
+def test_the_template_also_starts_generate_inside_the_generate_dir():
+    body = TestTemplateAndWriterAgree.TEMPLATE.read_text()
+    assert 'cd "$GEN_DIR"' in body
+    assert body.index('cd "$GEN_DIR"') < body.index('"$RFD4_BIN" \\')

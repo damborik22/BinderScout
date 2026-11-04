@@ -5011,14 +5011,21 @@ echo ""
 # deadlocked on aarch64 (GB10) -- 10 min, GPU idle, no output, no error -- while the
 # same command with 0 produced 10/10 designs. Generation is one task per replicate,
 # so parallel loading buys nothing.
-"$RFD4_BIN" \\
-    inputs="$INPUT_YAML" \\
-    num_replicates={n_designs} \\
-    batch_size=1 \\
-    seed={seed} \\
-    num_workers=0 \\
-    out_dir="$GEN_DIR" \\
-    '~metrics'
+#
+# Started from inside $GEN_DIR: Hydra writes hydra_outputs/ (and a runs/ cache dir) into
+# the CURRENT directory, so launched from wherever the operator happened to be it left
+# debris there. Every path rfd4-generate is handed is absolute, so the move is free.
+(
+    cd "$GEN_DIR"
+    "$RFD4_BIN" \\
+        inputs="$INPUT_YAML" \\
+        num_replicates={n_designs} \\
+        batch_size=1 \\
+        seed={seed} \\
+        num_workers=0 \\
+        out_dir="$GEN_DIR" \\
+        '~metrics'
+)
 
 # RFD4 writes one <id>_generated.cif per design, inside a run-named directory of
 # its own choosing under out_dir (".../inference_samples/<id>/"). Found rather
