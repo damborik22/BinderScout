@@ -94,8 +94,14 @@ def check_origin(pattern, limit=40):
     return ok
 
 
-# Fewest chain-B CA atoms the geometry thresholds below are meaningful for (calibrated on ~60-100 aa binders).
-MIN_BINDER_CA = 25
+# Fewest chain-B CA atoms the geometry check is run on. 20 is the shortest binder it was MEASURED on (see the
+# table in tests/test_rfd3_gate_helix_aware.py); below it the helix fraction rests on too few windows to mean anything.
+MIN_BINDER_CA = 20
+
+# Mean helix fraction (CA i,i+4 distance 5.0-7.2 A) at or above which a binder is judged helix-dominated. The
+# failure this gate exists for is an extended coil (measured helix 0.27, polyproline 0.23); a binder that is
+# mostly helix is not that failure, whatever its Rg or long-range contacts say. See the measured table.
+HELIX_DOMINANT = 0.40
 
 
 def check_geometry(pattern, limit=40):
@@ -120,9 +126,23 @@ def check_geometry(pattern, limit=40):
     lr = st.mean(r[1] for r in rows)
     hx = st.mean(r[2] for r in rows)
     print(f"  backbones checked      {len(rows)}")
+    print(
+        f"  helix fraction         {hx:.2f}   (counts as helical at >={HELIX_DOMINANT:.2f}; broken coil pool was 0.27)"
+    )
+    if hx >= HELIX_DOMINANT:
+        # A helix has no long-range contacts (a single straight helix has none at all) and a straight helix is
+        # LONGER than a compact fold of the same length, so neither criterion below says anything about it.
+        # Applying them rejected a compact helical binder (helix 0.73, Rg/expected 1.23) for "0.00 contacts/res".
+        print(f"  Rg / expected-compact  {rgr:.2f}   (not applied to a helical binder)")
+        print(f"  long-range contacts    {lr:.2f}/res (not applied to a helical binder)")
+        print("  GEOMETRY GATE: PASS — helix-dominated, so not the coil failure this gate detects")
+        print(
+            "  NOT VERIFIED here: compactness and where the binder sits. A binder grown from the wrong origin\n"
+            "  is still helical; the ORIGIN GATE (|fixed_com|) is the check for that, not this one."
+        )
+        return True
     print(f"  Rg / expected-compact  {rgr:.2f}   (want <=1.45; round-3 BROKEN pool was 1.90)")
     print(f"  long-range contacts    {lr:.2f}/res (want >=0.80; broken pool was 0.28)")
-    print(f"  helix fraction         {hx:.2f}")
     ok = rgr <= 1.45 and lr >= 0.80
     print(f"  GEOMETRY GATE: {'PASS' if ok else '*** FAIL — these are coils, do NOT run MPNN ***'}")
     return ok

@@ -1,7 +1,9 @@
 """rfd3_gate.check_geometry on a binder below its CA-count floor.
 
-The shipped smoke binder is 24 aa; the gate kept a backbone only at >= 25 CA atoms and then
-printed "no chain-B CA atoms found -- CANNOT VERIFY", which is false: its own parser finds all 24.
+The gate once kept a backbone only at >= 25 CA atoms and printed "no chain-B CA atoms found -- CANNOT
+VERIFY" for a 24-aa one, which is false: its own parser finds all 24. The floor is now
+``MIN_BINDER_CA`` (20, the shortest length measured -- see test_rfd3_gate_helix_aware.py), so these tests
+are written against that constant: the message must name a too-short binder as such.
 """
 
 from __future__ import annotations
@@ -43,14 +45,15 @@ def _write_cif(path: Path, n_chain_b: int) -> Path:
 
 
 class TestShortBinderIsNotReportedAsMissing:
-    def test_24_aa_binder_is_named_as_too_short_not_as_absent(self, tmp_path, capsys):
+    def test_binder_under_the_floor_is_named_as_too_short_not_as_absent(self, tmp_path, capsys):
         gate = _load_gate()
-        _write_cif(tmp_path / "d0.cif", 24)
+        n = gate.MIN_BINDER_CA - 1
+        _write_cif(tmp_path / "d0.cif", n)
         verdict = gate.check_geometry(str(tmp_path / "*.cif"))
         out = capsys.readouterr().out
         assert verdict is None, "a binder under the floor is 'cannot verify', not a pass and not a failure"
-        assert "no chain-B CA atoms" not in out, "the 24 chain-B CA atoms are there; saying otherwise is false"
-        assert "24 aa" in out and "minimum" in out
+        assert "no chain-B CA atoms" not in out, f"the {n} chain-B CA atoms are there; saying otherwise is false"
+        assert f"{n} aa" in out and "minimum" in out
 
     def test_no_chain_b_still_says_so(self, tmp_path, capsys):
         """Control: the genuine empty case keeps its message."""
@@ -62,6 +65,6 @@ class TestShortBinderIsNotReportedAsMissing:
     def test_binder_at_the_floor_is_still_measured(self, tmp_path, capsys):
         """Control: the floor itself did not move."""
         gate = _load_gate()
-        _write_cif(tmp_path / "d0.cif", 25)
+        _write_cif(tmp_path / "d0.cif", gate.MIN_BINDER_CA)
         assert gate.check_geometry(str(tmp_path / "*.cif")) is not None
         assert "backbones checked" in capsys.readouterr().out

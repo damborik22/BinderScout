@@ -4098,8 +4098,8 @@ if [[ -f "$GATE" ]]; then
     if [[ $GATE_FAIL -eq 0 && $GATE_UNVERIFIED -ne 0 ]]; then
         echo ""
         echo "  [warn] The geometry gate could not verify these backbones -- it found no"
-        echo "  fixed_com in the sidecars, or no chain-B CA atoms. That usually means rfd3"
-        echo "  changed a metric name or the binder chain id, NOT that the designs are bad."
+        echo "  fixed_com in the sidecars, no chain-B CA atoms, or only binders under 20 residues."
+        echo "  The first two usually mean rfd3 changed a metric name or the binder chain id, NOT that the designs are bad."
         echo "  Continuing; check a sidecar .json by hand if this is a new rfd3 version."
     fi
     if [[ $GATE_FAIL -ne 0 ]]; then
