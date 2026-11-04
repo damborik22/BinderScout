@@ -4434,6 +4434,16 @@ def _row(design_id, seq, **extras):
         return None
     if all(c == "X" for c in seq):
         return None
+    # The cycle is part of the id: summary_high_iptm.csv carries one row per passing CYCLE,
+    # so several different sequences share a run_id and an id built from it alone collided.
+    # Same shape as the Evaluator extractor's own id (protein_hunter_<run>_c<cycle>).
+    cycle = str(extras.get("cycle", "")).strip()
+    if cycle and cycle.lower() != "nan":
+        try:
+            cycle = str(int(float(cycle)))
+        except ValueError:
+            pass
+        design_id = f"{{design_id}}_c{{cycle}}"
     return {{
         "design_id": f"ph_{{design_id}}",
         "sequence": seq,
@@ -4528,11 +4538,18 @@ if not rows:
 # De-duplicate by sequence (PH summary CSVs may include the same sequence
 # across multiple cycles).
 seen_seq = set()
+seen_id = {{}}
 unique = []
 for r in rows:
     if r["sequence"] in seen_seq:
         continue
     seen_seq.add(r["sequence"])
+    # Belt and braces: a design_id must name ONE design. A source with no cycle column (the
+    # FASTA / PDB fallbacks) can still repeat an id; number the repeats rather than reuse it.
+    n = seen_id.get(r["design_id"], 0) + 1
+    seen_id[r["design_id"]] = n
+    if n > 1:
+        r["design_id"] = f"{{r['design_id']}}__{{n}}"
     unique.append(r)
 
 with open(csv_path, "w", newline="") as f:
