@@ -13,6 +13,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The RFD3 geometry gate no longer rejects a compact helical short binder, and now looks at 20-24 residue
+  binders.** It asked every binder for Rg/expected <= 1.45 and >= 0.80 long-range contacts per residue, which a
+  helix cannot satisfy (a helix has no contact between residues 9 or more apart), so it failed good 26-30 aa
+  backbones, and it declined to look at anything under 25 residues, so the CALCA smoke example (20-30 aa) never
+  exercised it. A binder whose mean helix fraction is >= 0.40 is now passed with an explicit "NOT VERIFIED:
+  compactness and where the binder sits" note; a less helical one keeps both original criteria; the floor is 20
+  (the shortest length measured). The origin gate (`|fixed_com|`) is unchanged. Measured on real RFD3 backbones
+  (table in `tests/test_rfd3_gate_helix_aware.py`): against the CALCA helix target the mis-centred runs are
+  still helical, so only the origin gate tells them apart, and the geometry gate says so.
+
 ## [2.0.3] — 2026-11-03
 
 Work since `v2.0.2` (137 commits). Nothing here changes the ranking:
