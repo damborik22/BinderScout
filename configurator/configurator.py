@@ -221,6 +221,21 @@ def enabled_tools(tools_enabled: dict) -> list[tuple[str, str, str, str]]:
     return [entry for entry in TOOL_SEQUENCE if tools_enabled.get(entry[0])]
 
 
+def print_evaluator_hint(tools_enabled: dict, run_dir: Path) -> None:
+    """One line, when a run has design tools but no Evaluator, saying how to get run_evaluate.sh.
+
+    The Evaluator is a separate yes/no; leaving it off writes no run_evaluate.sh, and nothing
+    said so, so the missing ranking step looked like a generator bug rather than an answer.
+    """
+    if tools_enabled.get("evaluator") or not enabled_tools(tools_enabled):
+        return
+    print(
+        f"  No run_evaluate.sh: the Evaluator is off for this run. To get it, answer y to "
+        f"'Enable cross-evaluation' in the wizard, or set tools_enabled.evaluator to true in "
+        f"{run_dir}/{CONFIG_FILENAME} and re-run `binderscout configure --config` on it."
+    )
+
+
 # ─── Amino-acid 3→1 mapping ──────────────────────────────────────────────────
 
 AA3TO1 = {
@@ -5629,6 +5644,7 @@ def cmd_from_config(config_path: str, run_now: bool) -> None:
         if len(enabled) > 1:
             print(f"  Or the whole pipeline:  bash {run_dir}/run_all.sh")
         print()
+    print_evaluator_hint(tools_enabled, run_dir)
 
 
 # Files each tool's generator reads out of that tool's cloned repo. Absent means the
@@ -6989,6 +7005,7 @@ def wizard():
         if len(enabled_list) > 1:
             print(f"  Or run the full pipeline:  bash {run_dir}/run_all.sh")
         print()
+    print_evaluator_hint(tools_enabled, run_dir)
 
 
 # ─── CLI commands ─────────────────────────────────────────────────────────────
