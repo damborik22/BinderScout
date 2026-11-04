@@ -316,6 +316,15 @@ the pool refolded by all three engines and reported.
   (it read `?`).
 - **The CALCA smoke config fits a 30 minute budget per tool.** It pins `boltzgen_intermediate: 8` (the default pool
   of 100 is folded by Boltz-2 at about 23 s per design on a GB10, well over 50 minutes) and one Mosaic length.
+- **Proteina-Complexa's AF2 reward runs on aarch64.** It was the one tool that could not: jaxlib 0.4.x cannot compile
+  AF2 for sm_121, so the aarch64 install uses jax 0.6.2, which removed what Complexa's vendored ColabDesign (1.1.1.1)
+  still calls (the `jax.tree_*` aliases, about a hundred call sites) and `jax.clear_backends`, whose absence also
+  masked the real error. `install/patches/pc_jax_compat.py` renames the first (same functions, pure rename) and
+  guards the second; `install_aarch.sh` applies it after the existing reward patch, `install.sh` does not (x86_64
+  stays on jax 0.4.29). Verified on a GB10 by running the configurator-generated `run_proteina_complexa.sh` on the
+  CALCA target in a scratch copy of the checkout with the patch applied: `best-of-n`, 2 designs, 3.0 minutes, four AF2
+  reward evaluations with distinct non-zero totals (-0.29 to -0.57) and no reward failure logged. One run, one
+  target, `best-of-n` only: the MCTS recipe and throughput are not measured by it.
 - **Mosaic can resume.** `run_mosaic.sh --resume` (extra arguments now reach `hallucinate.py`) skips every binder
   length already in `designs.csv` for the same target and, for a length whose stage 1 finished, refolds from its
   checkpoint instead of redoing the hallucination. A plain re-run still appends more designs, as it always has. Doing
@@ -346,8 +355,8 @@ the pool refolded by all three engines and reported.
   BoltzGen, BindCraft, PXDesign, RFD4). The pooled three-engine evaluation of a 10-design CALCA pool (6 tools) and a
   20-design PD-L1 RFD4 pool scored every design with all three engines and passed the gate, and a re-run refolded
   nothing. **BindCraft 2** ran but accepted 0 designs in 3 trajectories (the accepted-design path was not exercised
-  there). **Proteina-Complexa is blocked on aarch64**: with the script fixes above, its AF2 reward fails on the removed
-  `jax.clear_backends` (ColabDesign 1.1.1.1 on jax 0.6.2) and the tool correctly refuses to continue. Mosaic and
+  there). **Proteina-Complexa's AF2 reward is unblocked there** (see the fix above) and was exercised once, with
+  `best-of-n`; its MCTS path, the production recipe, and any throughput figure are still unmeasured. Mosaic and
   BoltzGen needed the bounded smoke settings above to fit a 30 minute budget. The test suite passed there (2331 at e234cd7).
 - The RFD3 geometry gate passes a helical backbone of 20-60 aa without judging compactness (it says so); the origin
   gate (`|fixed_com|`) is what catches a mis-centred run on a helical target. Measured on one 32-aa helix target only.

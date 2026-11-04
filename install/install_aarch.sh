@@ -4237,6 +4237,16 @@ SHIMPY
         print_warn "Could not patch PC's composite reward — an unusable reward model will score 0.0 silently"
     fi
 
+    # jax 0.6.2 is what lets AF2 compile for sm_121, and it removed what PC's VENDORED ColabDesign
+    # (1.1.1.1) still calls: the jax.tree_* aliases and jax.clear_backends. Without this the AF2
+    # reward raises on its first score. See the patch's own docstring.
+    print_step "Patching PC: vendored ColabDesign and the AF2 reward on jax 0.6"
+    if python3 "${BINDERSCOUT_DIR}/install/patches/pc_jax_compat.py" "${PROTEINA_COMPLEXA_DIR}"; then
+        print_ok "PC's AF2 reward is compatible with jax 0.6"
+    else
+        print_warn "Could not patch PC for jax 0.6 — its AF2 reward will fail (and the composite reward will refuse)"
+    fi
+
     # Blocker 4/5 and the rest of the manual recipe.
     run_logged "Installing biotite 1.6.0 + graphein" \
         "${PCPIP[@]}" "biotite==1.6.0" graphein \
