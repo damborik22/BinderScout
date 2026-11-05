@@ -76,6 +76,11 @@ What was established (this is what the whole script rests on):
   under the same root are downloaded on first use when missing (default root: ``$HOME``).
   ``--model-dir`` sets ``PROTENIX_ROOT_DIR`` for the subprocess.
 
+Host switches (live smoke on aarch64/GB10, sm_121): ``--trimul-kernel torch --triatt-kernel torch`` are
+REQUIRED there (the default cuequivariance kernels abort in Triton's LLVM: 'sm_121a' is not recognised);
+``--layernorm-type torch`` exports LAYERNORM_TYPE=torch, which avoids the import-time CUDA extension build
+that needs nvcc and ninja. The values used are recorded in ``refold_run_info.json`` under ``settings``.
+
 Emits the same unprefixed CSV as ``refold_af3.py``; the engine name enters at merge time
 (``add_iptm_from_pae_files(prefix="protenix")``). Sidecars in the output dir:
 ``target_msa_mode.json`` and ``refold_run_info.json``.
@@ -105,6 +110,13 @@ TARGET_CHAIN, BINDER_CHAIN = "A", "B"
 NATIVE_PAE_ORDER = "target_binder"
 MSA_FILE_NAME = "non_pairing.a3m"
 DEFAULT_SEED = 101  # `protenix pred -s` default
+#: Values `protenix pred` accepts (v1.1.0 configs_inference.py). The cuequivariance kernels abort on
+#: aarch64 / sm_121 (LLVM: 'sm_121a' not recognised), where `torch` works.
+TRIMUL_KERNELS = ("cuequivariance", "torch")
+TRIATT_KERNELS = ("triattention", "cuequivariance", "deepspeed", "torch")
+#: LAYERNORM_TYPE is read at import by protenix/model/triangular/layers.py; the default builds a CUDA
+#: extension at import (needs nvcc and ninja), `torch` does not.
+LAYERNORM_TYPES = ("fast_layernorm", "torch")
 
 
 class UnlicensedModelError(ValueError):
@@ -166,6 +178,7 @@ def _predict_one(
     num_samples: int,
     trimul_kernel: str | None = None,
     triatt_kernel: str | None = None,
+    layernorm_type: str | None = None,
 ) -> dict:
     """Run Protenix on one binder-target pair; return the top sample.
 
@@ -212,6 +225,8 @@ def _predict_one(
     env = dict(os.environ)
     if model_dir is not None:
         env["PROTENIX_ROOT_DIR"] = str(model_dir)
+    if layernorm_type:
+        env["LAYERNORM_TYPE"] = layernorm_type
 
     result = subprocess.run(cmd, capture_output=True, text=True, errors="replace", env=env)
     if result.returncode != 0:
@@ -401,6 +416,7 @@ class ProtenixAdapter:
         self.model_dir: Path | None = None
         self.trimul_kernel: str | None = None
         self.triatt_kernel: str | None = None
+        self.layernorm_type: str | None = None
 
     def add_args(self, parser) -> None:
         parser.add_argument(
@@ -415,8 +431,26 @@ class ProtenixAdapter:
             help="Protenix data root (sets PROTENIX_ROOT_DIR): holds checkpoint/<model>.pt and common/. "
             "Default: Protenix's own ($PROTENIX_ROOT_DIR, else $HOME); missing files are downloaded.",
         )
-        parser.add_argument("--trimul-kernel", default=None, help="Pass --trimul_kernel through (e.g. torch)")
-        parser.add_argument("--triatt-kernel", default=None, help="Pass --triatt_kernel through (e.g. torch)")
+        parser.add_argument(
+            "--trimul-kernel",
+            default=None,
+            choices=TRIMUL_KERNELS,
+            help="Pass --trimul_kernel through. REQUIRED as `torch` on aarch64/GB10, where the default "
+            "cuequivariance kernels abort with an LLVM sm_121a error.",
+        )
+        parser.add_argument(
+            "--triatt-kernel",
+            default=None,
+            choices=TRIATT_KERNELS,
+            help="Pass --triatt_kernel through (`torch` on aarch64/GB10, see --trimul-kernel).",
+        )
+        parser.add_argument(
+            "--layernorm-type",
+            default=None,
+            choices=LAYERNORM_TYPES,
+            help="Export LAYERNORM_TYPE to the engine. `torch` avoids the import-time CUDA extension build "
+            "(needs nvcc and ninja). Default: pass nothing.",
+        )
 
     def configure(self, args) -> None:
         self.model_name = require_licensed_model(args.model_name)
@@ -425,12 +459,22 @@ class ProtenixAdapter:
             if not self.model_dir.is_dir():
                 raise FileNotFoundError(f"Protenix data root not found: {self.model_dir}")
         self.trimul_kernel, self.triatt_kernel = args.trimul_kernel, args.triatt_kernel
+        self.layernorm_type = args.layernorm_type
 
     def engine_version(self) -> str:
         return _engine_version()
 
     def weights_id(self) -> str:
         return self.model_name
+
+    def run_info_extra(self) -> dict:
+        """The non-default settings a result must be tied to; ``default`` = nothing was passed."""
+        return {
+            "trimul_kernel": self.trimul_kernel or "default",
+            "triatt_kernel": self.triatt_kernel or "default",
+            # An inherited LAYERNORM_TYPE reaches the subprocess too, so it is what was actually used.
+            "layernorm_type": self.layernorm_type or os.environ.get("LAYERNORM_TYPE") or "default",
+        }
 
     def predict_one(self, *, query_id, binder_seq, target_seq, target_msa_path, work_dir, num_seeds, num_samples):
         # Looked up at call time on purpose: the model seam tests replace.
@@ -446,6 +490,7 @@ class ProtenixAdapter:
             num_samples=num_samples,
             trimul_kernel=self.trimul_kernel,
             triatt_kernel=self.triatt_kernel,
+            layernorm_type=self.layernorm_type,
         )
 
 

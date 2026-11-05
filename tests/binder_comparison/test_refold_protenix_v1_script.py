@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import importlib.util
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -580,3 +581,85 @@ def test_a_cif_without_an_atom_site_loop_or_chain_is_refused(mod, tmp_path):
     cif.write_text(mini_cif(nb=0))
     with pytest.raises(ValueError, match="binder"):
         mod._ca_plddt_by_chain(cif, NT, NB)
+
+
+# --- kernel and layernorm switches (needed on aarch64 / hosts without nvcc) -----------------------
+
+
+def test_layernorm_type_is_exported_to_the_subprocess_only_when_asked(mod, tmp_path, monkeypatch):
+    monkeypatch.delenv("LAYERNORM_TYPE", raising=False)
+    captured = _capture_run(mod, monkeypatch)
+    monkeypatch.setattr(mod, "_load_top_sample", lambda *a, **k: {})
+    _call(mod, tmp_path)
+    assert "LAYERNORM_TYPE" not in captured["kw"]["env"]  # unset = pass nothing
+    _call(mod, tmp_path, layernorm_type="torch")
+    assert captured["kw"]["env"]["LAYERNORM_TYPE"] == "torch"
+    # an inherited value is overridden by the explicit option, never the other way round
+    monkeypatch.setenv("LAYERNORM_TYPE", "fast_layernorm")
+    _call(mod, tmp_path, layernorm_type="torch")
+    assert captured["kw"]["env"]["LAYERNORM_TYPE"] == "torch"
+    # and the process's own environment is not modified
+    assert os.environ["LAYERNORM_TYPE"] == "fast_layernorm"
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--trimul-kernel", "triattention"],  # valid for triatt, not for trimul
+        ["--trimul-kernel", "deepspeed"],
+        ["--trimul-kernel", "cuda"],
+        ["--triatt-kernel", "fast"],
+        ["--triatt-kernel", ""],
+        ["--layernorm-type", "cuda"],
+    ],
+)
+def test_unknown_kernel_or_layernorm_values_are_refused_before_any_work(mod, fasta, tmp_path, monkeypatch, flags):
+    called = []
+    monkeypatch.setattr(mod, "_predict_one", lambda **kw: called.append(kw))
+    with pytest.raises(SystemExit) as exc:
+        run_main(mod, fasta, tmp_path, *flags)
+    assert exc.value.code == 2 and not called
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("trimul", ["cuequivariance", "torch"])
+@pytest.mark.parametrize("triatt", ["triattention", "cuequivariance", "deepspeed", "torch"])
+def test_every_documented_kernel_value_is_accepted(mod, fasta, tmp_path, monkeypatch, trimul, triatt):
+    monkeypatch.setattr(mod, "_predict_one", lambda **kw: fake_prediction(tmp_path, kw["query_id"]))
+    code, _ = run_main(mod, fasta, tmp_path, "--trimul-kernel", trimul, "--triatt-kernel", triatt)
+    assert code == 0
+
+
+def test_run_info_settings_record_the_kernels_and_layernorm_actually_used(mod, fasta, tmp_path, monkeypatch):
+    monkeypatch.delenv("LAYERNORM_TYPE", raising=False)
+    seen = {}
+
+    def predict(**kw):
+        seen.update(kw)
+        return fake_prediction(tmp_path, kw["query_id"])
+
+    monkeypatch.setattr(mod, "_predict_one", predict)
+    code, _ = run_main(
+        mod, fasta, tmp_path, "--trimul-kernel", "torch", "--triatt-kernel", "deepspeed", "--layernorm-type", "torch"
+    )
+    assert code == 0
+    info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+    assert info["settings"] == {"trimul_kernel": "torch", "triatt_kernel": "deepspeed", "layernorm_type": "torch"}
+    # the sidecar follows what reaches the model call
+    assert (seen["trimul_kernel"], seen["triatt_kernel"], seen["layernorm_type"]) == ("torch", "deepspeed", "torch")
+
+
+def test_run_info_settings_say_default_when_nothing_was_passed(mod, fasta, tmp_path, monkeypatch):
+    monkeypatch.delenv("LAYERNORM_TYPE", raising=False)
+    monkeypatch.setattr(mod, "_predict_one", lambda **kw: fake_prediction(tmp_path, kw["query_id"]))
+    run_main(mod, fasta, tmp_path)
+    info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+    assert info["settings"] == {"trimul_kernel": "default", "triatt_kernel": "default", "layernorm_type": "default"}
+
+
+def test_an_inherited_layernorm_env_is_recorded_not_hidden(mod, fasta, tmp_path, monkeypatch):
+    monkeypatch.setenv("LAYERNORM_TYPE", "torch")
+    monkeypatch.setattr(mod, "_predict_one", lambda **kw: fake_prediction(tmp_path, kw["query_id"]))
+    run_main(mod, fasta, tmp_path)
+    info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+    assert info["settings"]["layernorm_type"] == "torch"
