@@ -50,10 +50,15 @@ What was established (this is what the whole script rests on):
   the first recycle is below it gets NO structure and exit code 0 (only a ``*_ranking_scores.csv`` saying
   ``early_stopped``). A low-confidence binder is exactly what a benchmark must still score, so it is set to 0
   (the code disables it for any value that is not positive).
-* Settings: ``n_recycles`` 10 is the shipped default. ``num_steps`` is NOT: the shipped config default is 50
-  while the README calls 200 "the standard" (50 shows no deterioration but is 2x faster), and this repo prefers
-  accuracy to speed, so 200 is used (``--num-steps`` changes it). The deviation is on record here and in the
-  start-up line; it is a setting of this benchmark, not of RF3's shipped CLI.
+* Settings: ``n_recycles`` 10 is the shipped default. ``num_steps`` is NOT: RF3's shipped config default is 50,
+  and this adapter uses 200 by default. That is a NON-DEFAULT setting, chosen for cross-engine parity: Chai-1 runs
+  200 diffusion steps (``NUM_DIFFN_TIMESTEPS`` in ``refold_chai1.py``) and the Protenix v1 adapter documents 200
+  (``--use_default_params`` for the v1 base models), so 200 puts the three second-engine candidates on the same
+  sampling budget; the RF3 README also calls 200 "the standard" (50 shows no deterioration but is 2x faster), and
+  this repo prefers accuracy to speed. ``--num-steps 50`` reproduces RF3's shipped default exactly. The value used
+  is on stderr at start-up and in ``refold_run_info.json`` under ``settings`` (``num_steps``, ``n_recycles``,
+  ``early_stopping``, ``diffusion_batch_size``, ``shipped_default_num_steps``), read from the same dict that builds
+  the command line.
 * Input: a JSON list with one ``{"name", "components": [...]}``. Components are concatenated in order, so the
   atom array and therefore the TOKENS run target (``chain_id`` A) then binder (``chain_id`` B).
   ``chain_type`` is passed explicitly (``polypeptide(L)``): RF3 infers it from the letters otherwise and a
@@ -142,7 +147,8 @@ NATIVE_PAE_ORDER = "target_binder"
 MSA_FILE_NAME = "target.a3m"  # the extension selects RF3's MSA parser
 DEFAULT_SEED = 101
 N_RECYCLES = 10  # the shipped default, passed explicitly so it is on record
-DEFAULT_NUM_STEPS = 200  # README "standard"; the shipped CLI default is 50 (see the header)
+DEFAULT_NUM_STEPS = 200  # non-default, for cross-engine parity (see the header)
+SHIPPED_NUM_STEPS = 50  # `num_steps` in RF3's own configs/inference_engine/rf3.yaml
 WIRING_MARKER = "RF3_MSA_WIRING="
 VERSION_MARKER = "RF3_FOUNDRY_DIST="
 PROJECT_ROOT_CRASH = "Project root directory not found"
@@ -328,6 +334,16 @@ def _check_msa_wiring(exe: str, input_json: Path, target_msa_path: Path) -> None
         )
 
 
+def _model_overrides(num_steps: int, num_samples: int) -> dict[str, object]:
+    """The model settings put on the command line. ONE place: the command and ``run_info_extra`` both read it."""
+    return {
+        "diffusion_batch_size": num_samples,
+        "num_steps": num_steps,
+        "n_recycles": N_RECYCLES,
+        "early_stopping_plddt_threshold": 0.0,
+    }
+
+
 def _run_fold(exe: str, overrides: dict[str, object], work_dir: Path, env: dict[str, str]):
     cmd = [exe, "fold", *(f"{key}={_hydra_value(value)}" for key, value in overrides.items())]
     return subprocess.run(cmd, capture_output=True, text=True, errors="replace", env=env, cwd=str(work_dir))
@@ -375,10 +391,7 @@ def _predict_one(
                 "out_dir": out_dir,
                 "ckpt_path": checkpoint,
                 "seed": seed,
-                "diffusion_batch_size": num_samples,
-                "num_steps": num_steps,
-                "n_recycles": N_RECYCLES,
-                "early_stopping_plddt_threshold": 0.0,
+                **_model_overrides(num_steps, num_samples),
                 "compress_outputs": "false",
                 "dump_predictions": "true",
                 "annotate_b_factor_with_plddt": "true",
@@ -572,6 +585,7 @@ class RF3Adapter:
     def __init__(self) -> None:
         self.checkpoint: Path | None = None
         self.num_steps = DEFAULT_NUM_STEPS
+        self.num_samples = 5
         self._version: str | None = None
 
     def add_args(self, parser) -> None:
@@ -599,6 +613,7 @@ class RF3Adapter:
         if args.num_steps < 1:
             raise ValueError("--num-steps must be a positive integer")
         self.num_steps = args.num_steps
+        self.num_samples = args.num_samples
         _rf3_executable()  # fail before any work if RF3 is not there
         print(
             f"[rf3] checkpoint={self.checkpoint} num_steps={self.num_steps} n_recycles={N_RECYCLES} "
@@ -614,6 +629,19 @@ class RF3Adapter:
 
     def weights_id(self) -> str:
         return self.checkpoint.name
+
+    def run_info_extra(self) -> dict[str, object]:
+        """The model settings of this run for ``refold_run_info.json`` (``settings``), read from the very values
+        that go on the command line. ``num_steps`` is non-default (RF3 ships 50); the sidecar ties a result to it."""
+        o = _model_overrides(self.num_steps, self.num_samples)
+        stop = o["early_stopping_plddt_threshold"]
+        return {
+            "num_steps": o["num_steps"],
+            "n_recycles": o["n_recycles"],
+            "early_stopping": "off" if stop <= 0 else f"plddt<{stop}",
+            "diffusion_batch_size": o["diffusion_batch_size"],
+            "shipped_default_num_steps": SHIPPED_NUM_STEPS,
+        }
 
     def predict_one(self, *, query_id, binder_seq, target_seq, target_msa_path, work_dir, num_seeds, num_samples):
         # Looked up at call time on purpose: the model seam tests replace.

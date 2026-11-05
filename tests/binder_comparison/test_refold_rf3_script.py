@@ -221,6 +221,39 @@ def test_default_run_resolves_the_default_checkpoint_and_records_it_and_the_vers
     assert info["seeds"] == [101]
 
 
+def test_run_info_settings_follow_the_values_that_reach_the_command_line(
+    mod, fasta, tmp_path, monkeypatch, stub_env, ckpt_dir
+):
+    """The non-default settings are tied to the result: change them and the sidecar changes with the command."""
+    captured = _capture_run(mod, monkeypatch)
+
+    def settings_for(sub: str, *extra: str) -> tuple[dict, dict]:
+        out = tmp_path / sub
+        out.mkdir()
+        argv = ["--sequences", str(fasta), "--target-seq", TARGET, "--output", str(out / "o.csv")]
+        argv += ["--output-dir", str(out / "out"), "--no-msa", "--model-dir", str(ckpt_dir), *extra]
+        assert mod.main(argv) == 0
+        info = json.loads((out / "out" / "refold_run_info.json").read_text())
+        return info["settings"], _overrides(captured["folds"][-1][0])
+
+    settings, cmd = settings_for("default")
+    assert settings == {
+        "num_steps": 200,
+        "n_recycles": 10,
+        "early_stopping": "off",
+        "diffusion_batch_size": 5,
+        "shipped_default_num_steps": 50,
+    }
+    assert str(settings["num_steps"]) == cmd["num_steps"] == "200"
+    assert str(settings["n_recycles"]) == cmd["n_recycles"]
+    assert str(settings["diffusion_batch_size"]) == cmd["diffusion_batch_size"]
+    assert float(cmd["early_stopping_plddt_threshold"]) == 0.0
+
+    settings, cmd = settings_for("shipped", "--num-steps", "50", "--num-samples", "3")
+    assert settings["num_steps"] == 50 and cmd["num_steps"] == "50"  # --num-steps 50 is RF3's shipped default
+    assert settings["diffusion_batch_size"] == 3 and cmd["diffusion_batch_size"] == "3"
+
+
 def test_the_checkpoint_is_searched_where_foundry_itself_looks(mod, tmp_path, monkeypatch, ckpt_dir):
     other = tmp_path / "empty"
     other.mkdir()

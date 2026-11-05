@@ -186,6 +186,41 @@ def test_sidecars_and_engine_flags(fasta, tmp_path):
     }
 
 
+class SettingsAdapter(FakeAdapter):
+    """FakeAdapter plus the optional ``run_info_extra`` hook."""
+
+    def __init__(self, tmp_path, extra):
+        super().__init__(tmp_path)
+        self._extra = extra
+
+    def run_info_extra(self):
+        return self._extra
+
+
+def test_run_info_extra_hook_is_written_under_a_single_settings_key(fasta, tmp_path):
+    extra = {"num_steps": 50, "early_stopping": "off", "engine": "not-a-collision", "nested": {"a": [1, 2]}}
+    code, _ = go(SettingsAdapter(tmp_path, extra), fasta, tmp_path)
+    assert code == 0
+    info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+    assert info["settings"] == extra
+    # the engine's keys cannot overwrite the driver's own: they live one level down
+    assert info["engine"] == "fakeeng" and info["seeds"] == [7] and info["n_samples"] == 5
+
+
+def test_an_adapter_without_the_hook_gets_no_settings_key(fasta, tmp_path):
+    go(FakeAdapter(tmp_path), fasta, tmp_path)
+    assert "settings" not in json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+
+
+@pytest.mark.parametrize("bad", [{"x": object()}, {"x": {1, 2}}, ["not", "a", "dict"]])
+def test_a_settings_hook_that_cannot_be_serialised_fails_loudly_and_writes_no_sidecar(fasta, tmp_path, bad):
+    ad = SettingsAdapter(tmp_path, bad)
+    with pytest.raises(TypeError):
+        go(ad, fasta, tmp_path)
+    assert not (tmp_path / "out" / "refold_run_info.json").exists()
+    assert ad.calls == []  # no design ran
+
+
 def test_missing_target_msa_exits_2(fasta, tmp_path, monkeypatch):
     from binder_comparison.refolding import target_msa as tm
 

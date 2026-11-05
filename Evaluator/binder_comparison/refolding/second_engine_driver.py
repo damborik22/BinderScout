@@ -69,6 +69,11 @@ class EngineAdapter(Protocol):
     def weights_id(self) -> str:
         """The checkpoint actually used (valid after ``configure``)."""
 
+    # OPTIONAL (not part of the required interface): ``run_info_extra(self) -> dict[str, object]``. If an
+    # adapter defines it, its JSON-serialisable result is written to refold_run_info.json under the single
+    # key ``settings`` (the non-default model settings a result must be tied to). Without it there is no
+    # ``settings`` key. A non-dict or non-serialisable result raises before any sidecar is written.
+
     def predict_one(
         self,
         *,
@@ -219,6 +224,13 @@ def refold_batch(
         "seeds": None,  # filled from the seeds the engine reports having used
         "target_msa_mode": msa_mode,
     }
+    hook = getattr(adapter, "run_info_extra", None)
+    if hook is not None:
+        settings = hook()
+        if not isinstance(settings, dict):
+            raise TypeError(f"{name}: run_info_extra() must return a dict, got {type(settings).__name__}")
+        json.dumps(settings)  # a value that cannot be serialised fails here, before any sidecar is written
+        run_info["settings"] = settings
     _write_run_info(out_dir, run_info)
 
     print(
