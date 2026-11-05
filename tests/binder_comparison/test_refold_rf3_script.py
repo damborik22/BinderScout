@@ -18,6 +18,7 @@ from __future__ import annotations
 import csv
 import importlib.util
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -243,6 +244,7 @@ def test_run_info_settings_follow_the_values_that_reach_the_command_line(
         "early_stopping": "off",
         "diffusion_batch_size": 5,
         "shipped_default_num_steps": 50,
+        "cuequivariance": "disabled",
     }
     assert str(settings["num_steps"]) == cmd["num_steps"] == "200"
     assert str(settings["n_recycles"]) == cmd["n_recycles"]
@@ -980,3 +982,63 @@ def test_a_cif_without_an_atom_site_loop_or_chain_is_refused(mod, tmp_path):
     cif.write_text(mini_cif(nb=0))
     with pytest.raises(ValueError, match="binder"):
         mod._ca_plddt_by_chain(cif, NT, NB)
+
+
+# --- the proprietary cuEquivariance ops are OFF by default -------------------------------------------
+
+
+def test_cuequivariance_is_disabled_in_the_fold_environment_by_default(mod, tmp_path, monkeypatch):
+    monkeypatch.delenv("DISABLE_CUEQUIVARIANCE", raising=False)
+    captured = _capture_run(mod, monkeypatch)
+    monkeypatch.setattr(mod, "_load_top_sample", lambda *a, **k: {})
+    _call(mod, tmp_path)
+    assert captured["folds"][0][1]["env"]["DISABLE_CUEQUIVARIANCE"] == "1"
+
+
+def test_a_stray_enabling_value_in_the_inherited_environment_does_not_beat_the_default(mod, monkeypatch):
+    monkeypatch.setenv("DISABLE_CUEQUIVARIANCE", "0")
+    assert mod._engine_env()["DISABLE_CUEQUIVARIANCE"] == "1"  # the flag is the only switch, so the sidecar is true
+
+
+def test_opting_in_leaves_cuequivariance_on_even_if_the_parent_environment_disables_it(mod, tmp_path, monkeypatch):
+    monkeypatch.setenv("DISABLE_CUEQUIVARIANCE", "1")
+    captured = _capture_run(mod, monkeypatch)
+    monkeypatch.setattr(mod, "_load_top_sample", lambda *a, **k: {})
+    _call(mod, tmp_path, use_cuequivariance=True)
+    assert "DISABLE_CUEQUIVARIANCE" not in captured["folds"][0][1]["env"]
+    assert "DISABLE_CUEQUIVARIANCE" not in mod._engine_env(use_cuequivariance=True)
+
+
+def test_the_process_environment_itself_is_not_modified(mod, monkeypatch):
+    monkeypatch.delenv("DISABLE_CUEQUIVARIANCE", raising=False)
+    mod._engine_env()
+    assert "DISABLE_CUEQUIVARIANCE" not in os.environ
+
+
+def test_run_info_records_whether_cuequivariance_was_used(mod, fasta, tmp_path, monkeypatch, stub_env, ckpt_dir):
+    _capture_run(mod, monkeypatch)
+
+    def settings_for(sub: str, *extra: str) -> dict:
+        out = tmp_path / sub
+        out.mkdir()
+        argv = ["--sequences", str(fasta), "--target-seq", TARGET, "--output", str(out / "o.csv")]
+        argv += ["--output-dir", str(out / "out"), "--no-msa", "--model-dir", str(ckpt_dir), *extra]
+        assert mod.main(argv) == 0
+        return json.loads((out / "out" / "refold_run_info.json").read_text())["settings"]
+
+    assert settings_for("default")["cuequivariance"] == "disabled"
+    assert settings_for("optin", "--use-cuequivariance")["cuequivariance"] == "enabled"
+
+
+def test_the_flag_reaches_the_fold_environment_through_the_adapter(
+    mod, fasta, tmp_path, monkeypatch, stub_env, ckpt_dir
+):
+    captured = _capture_run(mod, monkeypatch)
+    for sub, extra, expect_disabled in (("a", (), True), ("b", ("--use-cuequivariance",), False)):
+        out = tmp_path / sub
+        out.mkdir()
+        argv = ["--sequences", str(fasta), "--target-seq", TARGET, "--output", str(out / "o.csv")]
+        argv += ["--output-dir", str(out / "out"), "--no-msa", "--model-dir", str(ckpt_dir), *extra]
+        assert mod.main(argv) == 0
+        env = captured["folds"][-1][1]["env"]
+        assert ("DISABLE_CUEQUIVARIANCE" in env) is expect_disabled

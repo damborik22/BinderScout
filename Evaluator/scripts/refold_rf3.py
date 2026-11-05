@@ -110,6 +110,10 @@ What was established (this is what the whole script rests on):
   cuEquivariance kernels are an optional import in the source at v0.2.0 and ``production``
   (``SHOULD_USE_CUEQUIVARIANCE`` guards ``import cuequivariance_torch``; the layer falls back to the plain
   einsum): read from the source, not run here.
+* cuEquivariance OFF by default (live smoke): ``DISABLE_CUEQUIVARIANCE=1`` is set in the fold subprocess, so RF3
+  runs on plain PyTorch without NVIDIA's proprietary ops: iptm 0.8439 against 0.8432 with them, +12 s and +1.3 GB
+  per design, no C compiler needed (the ops make Triton JIT-compile C at first use) and no cuequivariance/torch
+  version coupling. ``--use-cuequivariance`` opts back in; the choice is recorded as ``settings.cuequivariance``.
 * HARDWARE: Foundry issue #198 reports ``CUDA out of memory`` on a 23.65 GiB GPU for a ~1000-residue protein plus
   three small molecules at ``diffusion_batch_size=1`` (maintainers: no multi-GPU sharding). Large complexes may
   need a bigger card. ``PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`` is set for the subprocess unless the
@@ -276,9 +280,16 @@ def _foundry_version(exe: str) -> str:
     return f"rc-foundry {version}" + (f" (git {commit})" if commit else "")
 
 
-def _engine_env() -> dict[str, str]:
+def _engine_env(use_cuequivariance: bool = False) -> dict[str, str]:
     env = dict(os.environ)
     env.pop("LOCAL_MSA_DIRS", None)  # RF3 would look the binder up in a local MSA library by sequence hash
+    # foundry/__init__.py reads DISABLE_CUEQUIVARIANCE: RF3 then takes its plain-PyTorch path and never
+    # touches NVIDIA's proprietary cuEquivariance ops. The flag is the only switch, so an inherited value
+    # (either way) is overridden and the sidecar's `cuequivariance` entry is always true.
+    if use_cuequivariance:
+        env.pop("DISABLE_CUEQUIVARIANCE", None)
+    else:
+        env["DISABLE_CUEQUIVARIANCE"] = "1"
     env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     return env
 
@@ -360,6 +371,7 @@ def _predict_one(
     num_steps: int,
     num_seeds: int,
     num_samples: int,
+    use_cuequivariance: bool = False,
 ) -> dict:
     """Run RF3 on one binder-target pair; return the top sample.
 
@@ -380,7 +392,7 @@ def _predict_one(
     if target_msa_path is not None:
         _check_msa_wiring(exe, input_json, target_msa_path)
 
-    env = _engine_env()
+    env = _engine_env(use_cuequivariance)
     for i in range(num_seeds):
         seed = DEFAULT_SEED + i
         out_dir = work_dir / f"seed_{seed}"
@@ -586,6 +598,7 @@ class RF3Adapter:
         self.checkpoint: Path | None = None
         self.num_steps = DEFAULT_NUM_STEPS
         self.num_samples = 5
+        self.use_cuequivariance = False
         self._version: str | None = None
 
     def add_args(self, parser) -> None:
@@ -607,8 +620,16 @@ class RF3Adapter:
             default=DEFAULT_NUM_STEPS,
             help=f"Diffusion steps (default {DEFAULT_NUM_STEPS}, the README's 'standard'; RF3's shipped CLI default is 50)",
         )
+        parser.add_argument(
+            "--use-cuequivariance",
+            action="store_true",
+            help="Let RF3 use NVIDIA's proprietary cuEquivariance ops. Default: OFF (DISABLE_CUEQUIVARIANCE=1) -- "
+            "the live smoke measured the same iptm (0.8439 vs 0.8432) for +12 s and +1.3 GB per design, with no "
+            "C compiler and no cuequivariance/torch version coupling needed.",
+        )
 
     def configure(self, args) -> None:
+        self.use_cuequivariance = args.use_cuequivariance
         self.checkpoint = resolve_checkpoint(args.checkpoint, args.model_dir)
         if args.num_steps < 1:
             raise ValueError("--num-steps must be a positive integer")
@@ -641,6 +662,7 @@ class RF3Adapter:
             "early_stopping": "off" if stop <= 0 else f"plddt<{stop}",
             "diffusion_batch_size": o["diffusion_batch_size"],
             "shipped_default_num_steps": SHIPPED_NUM_STEPS,
+            "cuequivariance": "enabled" if self.use_cuequivariance else "disabled",
         }
 
     def predict_one(self, *, query_id, binder_seq, target_seq, target_msa_path, work_dir, num_seeds, num_samples):
@@ -655,6 +677,7 @@ class RF3Adapter:
             num_steps=self.num_steps,
             num_seeds=num_seeds,
             num_samples=num_samples,
+            use_cuequivariance=self.use_cuequivariance,
         )
 
 
