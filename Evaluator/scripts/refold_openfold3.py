@@ -51,8 +51,8 @@ Emits the same unprefixed CSV as ``refold_af3.py``; the engine name enters at me
 
 from __future__ import annotations
 
-import argparse
 import json
+import math
 import shutil
 import subprocess
 import sys
@@ -60,9 +60,7 @@ from importlib import metadata
 from pathlib import Path
 
 import numpy as np
-from binder_comparison.io.design_ids import parse_fasta_pairs, structure_stems
-from binder_comparison.refolding.second_engine import to_binder_target_pae, write_refold_row
-from binder_comparison.refolding.target_msa import MissingTargetMSA, prepare_target_msa
+from binder_comparison.refolding.second_engine_driver import EngineError, run_cli
 
 ENGINE = "openfold3"
 #: Registry name in openfold3/entry_points/parameters.py at 0.5.1 (== DEFAULT_CHECKPOINT_NAME).
@@ -73,10 +71,6 @@ NATIVE_PAE_ORDER = "target_binder"
 #: OpenFold3 chooses an alignment by file name; this one is in its default ``aln_order``.
 MSA_FILE_NAME = "colabfold_main.a3m"
 DEFAULT_SEED = 42  # openfold3 InferenceExperimentSettings.seeds default
-
-
-class PartialRefoldFailure(RuntimeError):
-    """Some designs folded and some did not.  Distinct exit code, rows kept."""
 
 
 # ---------------------------------------------------------------------------
@@ -168,13 +162,15 @@ def _predict_one(
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"  [openfold3] STDERR: {result.stderr[-4000:]}" if result.stderr else "  [openfold3] No stderr")
-        raise RuntimeError(f"OpenFold3 exited with code {result.returncode}")
+        raise EngineError(f"OpenFold3 exited with code {result.returncode}", result.stderr)
 
     top = _load_top_sample(output_dir, query_id)
     if top is None:
         # run_openfold's writer logs a failed query and carries on, so rc == 0 with no files happens.
         print(f"  [openfold3] STDERR: {result.stderr[-4000:]}" if result.stderr else "  [openfold3] No stderr")
-        raise RuntimeError(f"OpenFold3 produced no prediction for {query_id} (exit code 0, no output files)")
+        raise EngineError(
+            f"OpenFold3 produced no prediction for {query_id} (exit code 0, no output files)", result.stderr
+        )
     return top
 
 
@@ -197,6 +193,9 @@ def _load_top_sample(output_dir: Path, query_id: str) -> dict | None:
             score = float(summary["sample_ranking_score"])
         except (OSError, ValueError, KeyError) as exc:
             print(f"  [openfold3] Unreadable summary {agg_fp.name}: {exc}")
+            continue
+        if not math.isfinite(score):
+            print(f"  [openfold3] Ignoring {agg_fp.name}: non-finite sample_ranking_score ({score})")
             continue
         if best is None or score > best[0]:
             best = (score, summary, conf_fp, cif_fp, agg_fp.parent.name)
@@ -236,173 +235,6 @@ def _ca_plddt_by_chain(cif_path: Path) -> dict[str, np.ndarray]:
 
 
 # ---------------------------------------------------------------------------
-# Batch driver
-# ---------------------------------------------------------------------------
-
-
-def refold_batch(
-    binder_sequences: list[str],
-    target_sequence: str,
-    output_dir: str | Path,
-    output_csv: str | Path,
-    *,
-    num_seeds: int = 1,
-    num_samples: int = 5,
-    model_dir: str | None = None,
-    ckpt_name: str = DEFAULT_CKPT_NAME,
-    skip_indices: set[int] | None = None,
-    binder_ids: list[str | None] | None = None,
-    use_msa: bool = True,
-    msa_cache_dir: str | Path | None = None,
-    allow_no_msa: bool = False,
-) -> None:
-    """Refold each binder against the target with OpenFold3; append rows to ``output_csv``."""
-    skip_indices = skip_indices or set()
-    out_dir = Path(output_dir).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    predictions_root = out_dir / "predictions"
-    predictions_root.mkdir(parents=True, exist_ok=True)
-
-    ckpt_path, weights_id = _resolve_checkpoint(model_dir, ckpt_name)
-
-    jobs = [(i, seq) for i, seq in enumerate(binder_sequences, start=1) if i not in skip_indices]
-    if not jobs:
-        print("[openfold3] Nothing to do (all indices skipped).")
-        return
-
-    # Raises MissingTargetMSA (abort) if the shared MSA cannot be had and no opt-out was given;
-    # also writes target_msa_mode.json into out_dir.
-    target_msa, msa_mode = prepare_target_msa(
-        target_sequence,
-        engine=ENGINE,
-        cache_dir=msa_cache_dir,
-        out_dir=out_dir,
-        use_msa=use_msa,
-        allow_no_msa=allow_no_msa,
-    )
-    target_msa_path: Path | None = None
-    if target_msa:
-        target_msa_path = out_dir / "msas" / "target" / MSA_FILE_NAME
-        target_msa_path.parent.mkdir(parents=True, exist_ok=True)
-        target_msa_path.write_text(target_msa)
-        print(f"[openfold3] Target MSA loaded: {target_msa.count('>')} sequences, {len(target_msa)} bytes")
-
-    run_info = {
-        "engine": ENGINE,
-        "engine_version": _engine_version(),
-        "weights_id": weights_id,
-        "n_samples": num_samples,
-        "n_seeds": num_seeds,
-        "seeds": None,  # filled from the seed directories OpenFold3 actually wrote
-        "target_msa_mode": msa_mode,
-    }
-    _write_run_info(out_dir, run_info)
-
-    print(
-        f"[openfold3] Running {len(jobs)} binder(s) with {num_samples} sample(s) per seed x {num_seeds} seed(s) "
-        f"[weights={weights_id}, target_msa={msa_mode}]"
-    )
-
-    stems = structure_stems(
-        binder_ids, [f"{ENGINE}_{i:04d}" for i in range(1, len(binder_sequences) + 1)], engine=ENGINE
-    )
-    csv_path = Path(output_csv).resolve()
-    failed_idx: list[int] = []
-    seeds_seen: set[int] = set()
-    first_exc: Exception | None = None
-    for idx, binder_seq in jobs:
-        print(f"[openfold3] Binder #{idx}  length={len(binder_seq)} aa")
-        row = {
-            "run_id": f"{ENGINE}_{idx:04d}",
-            "idx": str(idx),
-            "sequence": binder_seq,
-            "target_sequence": target_sequence,
-            "binder_length": str(len(binder_seq)),
-        }
-        try:
-            pred = _predict_one(
-                query_id=row["run_id"],
-                binder_seq=binder_seq,
-                target_seq=target_sequence,
-                target_msa_path=target_msa_path,
-                work_dir=predictions_root / row["run_id"],
-                ckpt_path=ckpt_path,
-                ckpt_name=ckpt_name,
-                num_seeds=num_seeds,
-                num_samples=num_samples,
-            )
-            row.update(_score_prediction(pred, binder_seq, target_sequence, out_dir, stems[idx - 1]))
-            if pred.get("seed") is not None:
-                seeds_seen.add(int(pred["seed"]))
-        except Exception as exc:
-            print(f"[openfold3] ERROR on binder #{idx}: {exc}", file=sys.stderr, flush=True)
-            failed_idx.append(idx)
-            first_exc = first_exc or exc
-            row = {k: row[k] for k in ("run_id", "idx", "sequence", "target_sequence", "binder_length")}
-        write_refold_row(csv_path, row)
-
-    run_info["seeds"] = sorted(seeds_seen) if seeds_seen else None
-    _write_run_info(out_dir, run_info)
-    print(f"[openfold3] Wrote {len(jobs)} row(s) -> {csv_path}")
-
-    n_failed = len(failed_idx)
-    if n_failed == len(jobs):
-        raise RuntimeError(
-            f"All {len(jobs)} binder(s) failed -- OpenFold3 produced no usable output. This is an environment "
-            f"fault, not bad input. First error: {first_exc}. Common causes: not enough free VRAM, the OpenFold3 "
-            "weights not downloaded (run setup_openfold or pass --model-dir), or a CUDA/torch mismatch."
-        )
-    if n_failed:
-        raise PartialRefoldFailure(
-            f"{n_failed} of {len(jobs)} binder(s) failed -- OpenFold3 wrote a BLANK row for each and the rest are "
-            f"valid. Exiting non-zero because a blank row is not a score: it drops that design below the "
-            f"cross-engine gate for a non-quality reason. First error: {first_exc}. "
-            f"Failed design indices: {', '.join(str(i) for i in sorted(failed_idx))}. Re-run with --resume."
-        )
-
-
-def _score_prediction(pred: dict, binder_seq: str, target_seq: str, out_dir: Path, stem: str) -> dict[str, str]:
-    """Turn one model result into CSV cells; save the PAE. Raises (so the row is blank) on any inconsistency."""
-    nb, nt = len(binder_seq), len(target_seq)
-    summary = pred["summary"]
-    # to_binder_target_pae refuses any size other than nb + nt: nothing is saved or scored then.
-    pae = to_binder_target_pae(np.asarray(pred["pae"], dtype=np.float32), nb, nt, order=NATIVE_PAE_ORDER)
-    plddt_binder = np.asarray(pred["plddt_binder"], dtype=np.float32) / 100.0
-    plddt_target = np.asarray(pred["plddt_target"], dtype=np.float32) / 100.0
-    if len(plddt_binder) != nb or len(plddt_target) != nt:
-        raise ValueError(
-            f"pLDDT has {len(plddt_target)} target / {len(plddt_binder)} binder CA values, expected {nt} / {nb}"
-        )
-    iptm = _fmt(summary.get("iptm"))
-    if not iptm:
-        raise ValueError("OpenFold3 summary has no iptm; a blank iptm is not a score")
-
-    pae_file = out_dir / f"{stem}_pae.npy"
-    np.save(pae_file, pae)
-    cif_path = Path(pred["cif"])
-    pdb_path = out_dir / f"{stem}.pdb"
-    pdb_cell = str(pdb_path) if _cif_to_pdb(cif_path, pdb_path) else ""
-
-    bt, tb, bb = pae[:nb, nb:], pae[nb:, :nb], pae[:nb, :nb]  # [binder | target] blocks
-    return {
-        "iptm": iptm,
-        "ptm": _fmt(summary.get("ptm")),
-        "ranking_score": _fmt(summary.get("sample_ranking_score")),
-        "plddt_binder_mean": _fmt(plddt_binder.mean()) if nb else "",
-        "plddt_binder_min": _fmt(plddt_binder.min()) if nb else "",
-        "plddt_target_mean": _fmt(plddt_target.mean()) if nt else "",
-        "pae_bt_mean": _fmt(bt.mean()),
-        "pae_tb_mean": _fmt(tb.mean()),
-        "pae_bb_mean": _fmt(bb.mean()),
-        "pae_overall_mean": _fmt(pae.mean()),
-        "pae_max": _fmt(pae.max()),
-        "cif": str(cif_path),
-        "pdb": pdb_cell,
-        "pae_file": str(pae_file),
-    }
-
-
-# ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
 
@@ -429,105 +261,62 @@ def _engine_version() -> str:
         return "unknown"
 
 
-def _write_run_info(out_dir: Path, info: dict) -> None:
-    (out_dir / "refold_run_info.json").write_text(json.dumps(info, indent=2) + "\n")
-
-
-def _cif_to_pdb(cif_path: Path, pdb_path: Path) -> bool:
-    """Best-effort mmCIF to PDB via gemmi; False (and a message) when it cannot."""
-    try:
-        import gemmi
-
-        gemmi.read_structure(str(cif_path)).write_pdb(str(pdb_path))
-        return True
-    except Exception as exc:
-        print(f"  [openfold3] CIF->PDB conversion failed: {exc}")
-        return False
-
-
-def _fmt(v) -> str:
-    """Stringify a numeric metric; empty string for None/NaN."""
-    if v is None:
-        return ""
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return str(v)
-    return "" if np.isnan(f) else f"{f:.6g}"
-
-
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--sequences", required=True, help="FASTA (or plain text, one seq per line)")
-    parser.add_argument("--target-seq", required=True, help="Target amino acid sequence")
-    parser.add_argument("--output", required=True, help="Output CSV path")
-    parser.add_argument("--output-dir", default="./refold_openfold3", help="Output dir for structures/PAE")
-    parser.add_argument(
-        "--model-dir",
-        default=None,
-        help="OpenFold3 checkpoint: a .pt file, or a directory holding exactly one. Default: --ckpt-name from $OPENFOLD_CACHE",
-    )
-    parser.add_argument(
-        "--ckpt-name", default=DEFAULT_CKPT_NAME, help="Registry name of the checkpoint (default OpenBind-0)"
-    )
-    parser.add_argument("--num-seeds", type=int, default=1)
-    parser.add_argument("--num-samples", type=int, default=5)
-    parser.add_argument("--resume", action="store_true", help="Skip binders already scored in the output CSV")
-    parser.add_argument("--no-msa", action="store_true", help="Disable target MSA (single-sequence mode)")
-    parser.add_argument(
-        "--allow-no-msa",
-        action="store_true",
-        help="Proceed single-sequence if the shared target MSA cannot be obtained (air-gapped nodes). "
-        "Default is to abort -- scores from an MSA-less engine are not comparable to the others.",
-    )
-    parser.add_argument("--msa-cache-dir", default=None, help="Override MSA cache directory")
-    args = parser.parse_args(argv)
+class OpenFold3Adapter:
+    """OpenFold3 plugged into the shared driver (``binder_comparison.refolding.second_engine_driver``)."""
 
-    # The header's first token is the binder_id, as 'extract' writes it; saved structures are named after it.
-    pairs = parse_fasta_pairs(Path(args.sequences).read_text())
-    seqs = [seq for _, seq in pairs]
-    ids = [binder_id for binder_id, _ in pairs]
+    name = ENGINE
+    description = __doc__
+    native_pae_order = NATIVE_PAE_ORDER
+    target_msa_filename = MSA_FILE_NAME
 
-    skip: set[int] = set()
-    if args.resume and Path(args.output).exists():
-        from binder_comparison.refolding.resume import resume_plan
+    def __init__(self) -> None:
+        self.ckpt_path: Path | None = None
+        self.ckpt_name = DEFAULT_CKPT_NAME
+        self._weights_id = DEFAULT_CKPT_NAME
 
-        skip, n_rerun = resume_plan(args.output, seqs)
-        if skip:
-            print(f"[openfold3] Resuming -- skipping {len(skip)} already-completed binders")
-        if n_rerun:
-            print(f"[openfold3] Resuming -- RE-RUNNING {n_rerun} binder(s) whose previous row was blank")
-
-    try:
-        refold_batch(
-            binder_sequences=seqs,
-            binder_ids=ids,
-            target_sequence=args.target_seq,
-            output_dir=args.output_dir,
-            output_csv=args.output,
-            model_dir=args.model_dir,
-            ckpt_name=args.ckpt_name,
-            num_seeds=args.num_seeds,
-            num_samples=args.num_samples,
-            skip_indices=skip,
-            use_msa=not args.no_msa,
-            msa_cache_dir=args.msa_cache_dir,
-            allow_no_msa=args.allow_no_msa,
+    def add_args(self, parser) -> None:
+        parser.add_argument(
+            "--model-dir",
+            default=None,
+            help="OpenFold3 checkpoint: a .pt file, or a directory holding exactly one. "
+            "Default: --ckpt-name from $OPENFOLD_CACHE",
         )
-    except MissingTargetMSA as exc:
-        print(f"\n{exc}", file=sys.stderr)
-        return 2
-    except PartialRefoldFailure as exc:
-        # 3, not 1: the valid rows are on disk and worth keeping, so a wrapper can tell
-        # "re-run these indices" from "this environment is broken".
-        print(f"\n{exc}", file=sys.stderr)
-        return 3
-    return 0
+        parser.add_argument(
+            "--ckpt-name", default=DEFAULT_CKPT_NAME, help="Registry name of the checkpoint (default OpenBind-0)"
+        )
+
+    def configure(self, args) -> None:
+        self.ckpt_name = args.ckpt_name
+        self.ckpt_path, self._weights_id = _resolve_checkpoint(args.model_dir, args.ckpt_name)
+
+    def engine_version(self) -> str:
+        return _engine_version()
+
+    def weights_id(self) -> str:
+        return self._weights_id
+
+    def predict_one(self, *, query_id, binder_seq, target_seq, target_msa_path, work_dir, num_seeds, num_samples):
+        # Looked up at call time on purpose: the model seam tests replace.
+        return _predict_one(
+            query_id=query_id,
+            binder_seq=binder_seq,
+            target_seq=target_seq,
+            target_msa_path=target_msa_path,
+            work_dir=work_dir,
+            ckpt_path=self.ckpt_path,
+            ckpt_name=self.ckpt_name,
+            num_seeds=num_seeds,
+            num_samples=num_samples,
+        )
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run_cli(OpenFold3Adapter(), argv)
 
 
 if __name__ == "__main__":

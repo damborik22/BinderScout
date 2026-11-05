@@ -389,3 +389,15 @@ def test_top_sample_is_the_highest_sample_ranking_score_across_seeds(mod, tmp_pa
 
 def test_top_sample_is_none_when_nothing_was_written(mod, tmp_path):
     assert mod._load_top_sample(tmp_path, "q1") is None
+
+
+def test_non_finite_ranking_scores_are_skipped_when_picking_the_top_sample(mod, tmp_path, monkeypatch):
+    monkeypatch.setattr(mod, "_ca_plddt_by_chain", lambda cif: {"A": np.full(NT, 90.0), "B": np.full(NB, 80.0)})
+    _write_sample(tmp_path, "q1", 42, 1, float("nan"), 1.0)  # json.dumps writes NaN; max() would be order-dependent
+    _write_sample(tmp_path, "q1", 42, 2, 0.30, 2.0)
+    _write_sample(tmp_path, "q1", 43, 1, float("inf"), 3.0)
+    top = mod._load_top_sample(tmp_path, "q1")
+    assert top["cif"].name == "q1_seed_42_sample_2_model.cif"
+    # and when nothing finite is left there is no sample at all
+    _write_sample(tmp_path, "q2", 42, 1, float("nan"), 1.0)
+    assert mod._load_top_sample(tmp_path, "q2") is None
