@@ -70,13 +70,15 @@ default branch `production` (`0d0b0ba`), licence commit `69d5f73`; IntelliFold `
   Attribution-NonCommercial 4.0 International License", with a commercial-licence contact). The
   relicense commit is `d779625` "Change License to Apache 2.0 License", 2024-12-13. All v1.x models
   (released 2026-02-05) postdate it.
-- The model-weight download host was not checked for separate terms (unverified).
+- The model-weight download host was not checked for separate terms (unverified); the host is now named,
+  and still unread, in "Corrections from the live smokes" below.
 
 ### Chai-1
 
 - The licence rests on the README sentence and the Hugging Face card metadata only; no separate
   weights licence file exists. The package downloads weights from `chaiassets.com`, not from
-  Hugging Face (`chai_lab/utils/paths.py` at v0.6.1), and that host's terms were not checked.
+  Hugging Face (`chai_lab/utils/paths.py` at v0.6.1), and that host's terms were not checked. The package
+  also fetches one data file that is not a model weight; see "Corrections from the live smokes".
 - At v0.6.1 the repository tree contains only a `LICENSE` file (Apache-2.0); no acceptable-use
   policy, NOTICE or terms file survived the relicense.
 - History: at the 2024-11-26 snapshot (`44375d5`) `LICENSE.md` was the "Chai Discovery Community
@@ -116,7 +118,8 @@ default branch `production` (`0d0b0ba`), licence commit `69d5f73`; IntelliFold `
   requirements checked; installing it from PyPI on the user's machine is a use of the SDK by that
   user. The Foundry README says the `rf3` extra (cuEquivariance) is Linux-only and skipped on macOS
   while RF3 still runs there, which suggests RF3 can run without it; whether it runs without it on
-  Linux was not tested (unverified).
+  Linux was not tested when this was first written (unverified). The live smoke has since observed it running
+  with the ops disabled but installed; see "Corrections from the live smokes".
   Scope of what was read: only the preamble and the opening of section 1 (the section 1.1 grant and the start of
   1.2) of the NVIDIA agreement were read, not the whole agreement; its field-of-use and commercial-use terms beyond the grant are
   unstated here. If RF3 cannot run without that SDK on Linux (unverified), the effective licence of the
@@ -130,6 +133,119 @@ OpenFold3 describes itself as "aiming to be a bitwise reproduction of DeepMind's
 record read no OpenFold3, Protenix, Chai-1 or Foundry file that vendors AF3 source, and their licence
 and README text does not refer to the AF3 weights or output terms. That is a statement about the
 files read, not an audit of their code or training data (distillation sets were not checked).
+
+## Corrections from the live smokes (read 2026-11-05)
+
+Each candidate's refold adapter was run live on two real PD-L1 designs on 2026-11-05. The smokes
+turned up facts the record above did not have. Where a statement is about something the smoke
+observed, it says so; where it is about a primary-source page or file, the URL, the quote and the
+date read (2026-11-05) are given. Nothing here changes a verdict in the table; the Protenix and RF3
+items add a proprietary-dependency caveat of the same class as the one already recorded for RF3.
+
+### Chai-1: a data file the weight list did not name
+
+- The package also downloads `conformers_v1.apkl`. `chai_lab/utils/paths.py` at v0.6.1 defines it as
+  `cached_conformers = Downloadable(url="https://chaiassets.com/chai1-inference-depencencies/conformers_v1.apkl", path=downloads_path.joinpath("conformers_v1.apkl"))`
+  (the misspelling "depencencies" is in the source). It is the same host, `chaiassets.com`, as the weights, whose
+  terms were not checked.
+- What it is: `chai_lab/data/sources/rdkit.py` at v0.6.1 loads it as the reference-conformer cache
+  (`antipickle.load(path, ...)`), and the class docstring says: "Caches idealized 3D coordinates and list
+  of atoms for residues that exist in the PDB. This is needed to create empty atom coordinates and mask
+  for missing residues and ensure the number of tokens and atoms is the same for chains with the same
+  entity_id". It is a data file, not a model checkpoint, and no licence statement for it was found.
+- Size: an HTTP HEAD on that URL on 2026-11-05 returned `Content-Length: 124726115` (about 119 MiB; the
+  smoke report's "119 MB" is the MiB figure).
+- Observed in the smoke (not a primary-source reading): the whole download for a fresh Chai-1 install was
+  about 6.6 GB, of which the ESM2-3B traced fp16 file was 5.3 GB and the six `models_v2/*.pt` components 1.1 GB.
+- The licence verdict is unchanged (Apache-2.0 per README and Hugging Face metadata); the conformer file
+  falls under whatever the host's terms say, which is unverified.
+
+### Protenix: proprietary NVIDIA wheels are a hard dependency, and the weight host was not in the record
+
+- `pip install protenix==1.1.0` cannot avoid NVIDIA's proprietary cuEquivariance packages. The PyPI
+  metadata of `protenix` 1.1.0 (JSON API, read 2026-11-05) lists, with no environment marker or extra,
+  `cuequivariance-ops-torch-cu12==0.8.0` and `cuequivariance-torch==0.8.0`. `cuequivariance-ops-torch-cu12`
+  0.8.0 in turn requires `cuequivariance-ops-cu12==0.8.0`. The `license` field of
+  `cuequivariance-ops-torch-cu12` 0.8.0 reads "Other/Proprietary License (NVIDIA Proprietary Software)";
+  the `license` field of `cuequivariance-ops-cu12` 0.8.0 (and 0.7.0) begins "# Software License Agreement /
+  LICENSE AGREEMENT FOR NVIDIA MATH LIBRARIES SOFTWARE DEVELOPMENT KITS", the same agreement already quoted in the RF3
+  section (only its opening was read there and here). `cuequivariance-torch` 0.8.0 carries the Apache
+  License 2.0 text.
+- Observed in the smoke: with `--trimul-kernel torch --triatt-kernel torch` and `LAYERNORM_TYPE=torch` the
+  proprietary packages were installed but unused at runtime. This was observed on an aarch64 GB10 host where
+  the default cuEquivariance kernels abort (an LLVM error on sm_121a) so the torch kernels were the only way
+  to run; it was NOT tested with the packages uninstalled, and could not be: the install requires them. The
+  effective licence of the engine on our platform is therefore Apache-2.0 plus the NVIDIA SDK agreement for
+  files that are installed whether or not they are used. The adapter's `--layernorm-type torch` flag, which sets
+  `LAYERNORM_TYPE`, was added after the smoke and has not been run live yet.
+- The weight and CCD download host is `protenix.tos-cn-beijing.volces.com`. `protenix/web_service/dependency_url.py`
+  at v1.1.0 maps `"protenix_base_default_v1.0.0"` to
+  `https://protenix.tos-cn-beijing.volces.com/checkpoint/protenix_base_default_v1.0.0.pt` and the CCD and
+  cluster files to `https://protenix.tos-cn-beijing.volces.com/common/components.cif`,
+  `.../common/components.cif.rdkit_mol.pkl`, `.../common/clusters-by-entity-40.txt` and
+  `.../common/obsolete_release_date.csv`. An HTTP HEAD on the checkpoint on 2026-11-05 returned
+  `Content-Length: 1475950125` and `Last-Modified: Tue, 03 Feb 2026 04:14:06 GMT`; a request for
+  `https://protenix.tos-cn-beijing.volces.com/LICENSE` returned 404. **The terms of that host, and of the
+  CCD and cluster files fetched from it, were not read** (they were not found at the host root and the
+  v1.1.0 README does not mention the host). The verdict for the weights still rests on the README sentence quoted in the table.
+- Observed in the smoke: the first-use download from that host was about 2.1 GB (checkpoint 1.48 GB, `components.cif` 491 MB,
+  `components.cif.rdkit_mol.pkl` 142 MB, `clusters-by-entity-40.txt` 22 MB, `obsolete_release_date.csv` 0.13 MB).
+
+### RF3: the extra as published does not install into a working environment; the adapter avoids the proprietary ops at runtime
+
+- Primary-source facts (PyPI JSON for `rc-foundry` 0.2.0, read 2026-11-05): the package requires
+  `atomworks[ml]>=2.1.1` (a base requirement with no upper bound) and the `rf3` extra requires, on Linux,
+  `cuequivariance-ops-cu12>=0.6.1`, `cuequivariance-ops-torch-cu12>=0.6.1` and `cuequivariance-torch>=0.6.1`.
+  PyPI carries `atomworks` 2.2.0 and 3.0.4 (latest 3.0.4) and `cuequivariance` 0.7.0 and 0.13.0.
+- Observed in the smoke (these are behaviours of the installed packages, not primary-source quotes):
+  `pip install "rc-foundry[rf3]==0.2.0"` resolves `atomworks` 3.0.4, on which
+  `from atomworks.io.utils.selection import AtomSelectionStack` fails, so `rf3.utils.inference` cannot be
+  imported; and it resolves cuEquivariance 0.13.0, which is incompatible with torch 2.7.1 (the first
+  triangle-multiplication call fails). The working set was `atomworks[ml]==2.2.0` plus `cuequivariance`,
+  `cuequivariance-torch`, `cuequivariance-ops-cu12` and `cuequivariance-ops-torch-cu12` all `==0.7.0`, with torch
+  2.7.1+cu126. With cuEquivariance active, Triton also compiles C on first use, so a host with no C compiler fails
+  without `CC`. A plain install is therefore broken, and every fix is a pin the vendor does not publish.
+- The proprietary ops are not needed at runtime. `src/foundry/__init__.py` at tag v0.2.0 reads
+  `_env.bool("DISABLE_CUEQUIVARIANCE", default=False)`: when it is set the module logs "cuEquivariance usage
+  disabled via DISABLE_CUEQUIVARIANCE" and does not import `cuequivariance_torch`, and the import is wrapped in
+  `except ImportError`. The adapter sets `DISABLE_CUEQUIVARIANCE=1` by default (`--use-cuequivariance` opts
+  in).
+- **What was observed, and what was not.** On one PD-L1 design, with the variable set by hand, with no C compiler and `CC`
+  unset, the fold ran to exit 0 (iptm 0.8439 against 0.8432 with the ops enabled; 62 s against 50 s; peak 6,308 MiB against
+  5,008 MiB). The four `cuequivariance*` packages were **installed but disabled** in that run. A run with them
+  **uninstalled** was NOT done; the `except ImportError` fallback in the source is a reading of the source, not
+  a test. The adapter's new default (commit `9117c35`) is unit-tested, and its live check, that the fold log
+  prints the "disabled" line, is still owed.
+- The weights file, `rf3_foundry_01_24_latest_remapped.ckpt`, was fetched from
+  `https://files.ipd.uw.edu/pub/rf3/rf3_foundry_01_24_latest_remapped.ckpt` (observed in the smoke: 3,038,876,446 bytes, the
+  `Content-Length`, sha256 `364ef592fd8042a9cf4176d045015190f8322f961ccca38d891b20ca578d3bb0`). The terms of that host were not
+  read (unverified), as before.
+- The licence verdict is unchanged: BSD-3-Clause code, with the weights statement on the `production` branch only.
+
+### OpenFold3: operational notes, licence unchanged
+
+- Weights: `of3-ob-2025-06-30-174k.pt`, 2,287,872,989 bytes (about 2.29 GB), from the public bucket
+  `openfold3-data` (HTTP HEAD on 2026-11-05: `Content-Length: 2287872989`, `Last-Modified: Fri, 24 Jul 2026 03:15:05 GMT`,
+  the same modification date as recorded above). The smoke fetched exactly this one file with `setup_openfold`.
+- Observed in the smoke: a host with no system C compiler fails per design with "Failed to find C compiler. Please specify via CC
+  environment variable" (Triton JIT) unless `CC` names a gcc; Python headers were present. The release requires
+  Python 3.12 or newer (PyPI metadata for `openfold3` 0.5.1, `Requires-Python >=3.12`).
+- Observed in the smoke: the engine ran with its default kernels, without cuEquivariance or DeepSpeed, so no
+  NVIDIA-proprietary package was involved.
+- The licence caveats above (weights licence resting on two OpenBind pages, no licence file beside the weights,
+  bucket-root file CC BY 4.0) are unchanged by the smoke.
+
+## Environments used in the benchmark
+
+What each engine ran with in the 2026-11-05 live smokes. "Not recorded" means the smoke report did not state it.
+Peak memory and timings are in the runbook (`second_engine_benchmark_runbook.md`).
+
+| Engine | Version / commit | Weights file(s) and size | Python / torch | Host class it ran on |
+|---|---|---|---|---|
+| OpenFold3 | `openfold3==0.5.1` from PyPI (git `795e45b` is the tag read for the record); no kernel extras | `of3-ob-2025-06-30-174k.pt`, 2,287,872,989 B | Python 3.12.13; torch 2.15.0+cu132 | x86_64 24 GB box (RTX 3090) |
+| Protenix | `protenix==1.1.0` (tag `v1.1.0`, `4f1eedf`), model `protenix_base_default_v1.0.0` | `protenix_base_default_v1.0.0.pt` 1,475,950,125 B; first-use total about 2.1 GB with the CCD files | Python 3.12.3; torch 2.7.1+cu128 (triton 3.3.1) | aarch64 GB10 host (unified memory, GPU also used by another tenant during the run) |
+| Chai-1 | `chai_lab==0.6.1` (tag `v0.6.1`, `8d5ac0f`), existing env used unmodified | `esm/traced_sdpa_esm2_t36_3B_UR50D_fp16.pt` 5.3 GB; `models_v2/{bond_loss_input_proj,confidence_head,diffusion_module,feature_embedding,token_embedder,trunk}.pt` 1.1 GB together; `conformers_v1.apkl` 124,726,115 B; about 6.6 GB in all | Python 3.12.14; torch 2.10.0+cu130. The PyPI metadata of `chai_lab` 0.6.1 says `torch<2.7,>=2.3.1`; the env that worked was outside that range | aarch64 GB10 host (unified memory, shared with another smoke) |
+| RF3 | `rc-foundry==0.2.0` (tag `v0.2.0`, `3967144`) with `atomworks[ml]==2.2.0` and the four `cuequivariance*` packages `==0.7.0` | `rf3_foundry_01_24_latest_remapped.ckpt`, 3,038,876,446 B | Python 3.12.13; torch 2.7.1+cu126 (triton 3.3.1) | x86_64 24 GB box (RTX 3090) |
 
 ## IntelliFold-2 clearance
 
