@@ -67,6 +67,7 @@ def fake_prediction(tmp_path: Path, query_id: str, *, pae=None, nt: int = NT, nb
         "plddt_target": np.full(nt, 90.0),
         "plddt_binder": np.full(nb, 80.0),
         "seed": 101,
+        "target_msa_depth": 1,  # the --no-msa runs of these tests: the target is its query alone
     }
 
 
@@ -295,7 +296,7 @@ def test_target_msa_a3m_text_reaches_the_model_call_as_a_file(mod, fasta, tmp_pa
 
     def predict(**kw):
         seen["text"] = Path(kw["target_msa_path"]).read_text()
-        return fake_prediction(tmp_path, kw["query_id"])
+        return {**fake_prediction(tmp_path, kw["query_id"]), "target_msa_depth": 4045}
 
     monkeypatch.setattr(mod, "_predict_one", predict)
     code = mod.main(
@@ -444,12 +445,35 @@ class _T:
         return self
 
 
-def _fake_chai_lab(monkeypatch, tmp_path, *, version="0.6.1", n_cand=3, nt=NT, nb=NB, agg=None):
+def _fake_chai_lab(monkeypatch, tmp_path, *, version="0.6.1", n_cand=3, nt=NT, nb=NB, agg=None, target_depth=4045):
+    """A fake ``chai_lab`` with the three names the worker's MSA probe wraps.
+
+    ``run_inference`` calls ``chai1.get_msa_contexts`` (looked up at call time, as in chai-lab); that calls
+    ``load.parse_aligned_pqt_to_msa_context`` for the target's ``.aligned.pqt`` if the file exists in the MSA
+    directory, and reports ``target_depth`` as its depth.
+    """
+    import hashlib
+
     calls = []
     n = nt + nb
+    chai1 = types.ModuleType("chai_lab.chai1")
+    load = types.ModuleType("chai_lab.data.dataset.msas.load")
+    aligned = types.ModuleType("chai_lab.data.parsing.msas.aligned_pqt")
+
+    aligned.expected_basename = lambda seq: hashlib.sha256(seq.upper().encode()).hexdigest() + ".aligned.pqt"
+    load.parse_aligned_pqt_to_msa_context = lambda path, *a, **k: types.SimpleNamespace(depth=target_depth)
+
+    def get_msa_contexts(chains, msa_directory):
+        path = Path(msa_directory) / aligned.expected_basename(TARGET)
+        if path.is_file():
+            load.parse_aligned_pqt_to_msa_context(path)  # looked up at call time, like load.py's own global
+        return "joined", "profile"
+
+    chai1.get_msa_contexts = get_msa_contexts
 
     def run_inference(**kw):
         calls.append(kw)
+        chai1.get_msa_contexts(["chains"], msa_directory=kw["msa_directory"])
         out = Path(kw["output_dir"])
         out.mkdir(parents=True)
         cifs = []
@@ -468,13 +492,25 @@ def _fake_chai_lab(monkeypatch, tmp_path, *, version="0.6.1", n_cand=3, nt=NT, n
         pae = np.stack([np.full((n, n), float(i), dtype=np.float32) for i in range(n_cand)])
         return types.SimpleNamespace(cif_paths=cifs, ranking_data=rds, pae=_T(pae))
 
+    chai1.run_inference = run_inference
     pkg = types.ModuleType("chai_lab")
     pkg.__version__ = version
-    chai1 = types.ModuleType("chai_lab.chai1")
-    chai1.run_inference = run_inference
     pkg.chai1 = chai1
-    monkeypatch.setitem(sys.modules, "chai_lab", pkg)
-    monkeypatch.setitem(sys.modules, "chai_lab.chai1", chai1)
+    for name, module in {
+        "chai_lab": pkg,
+        "chai_lab.chai1": chai1,
+        "chai_lab.data": types.ModuleType("chai_lab.data"),
+        "chai_lab.data.dataset": types.ModuleType("chai_lab.data.dataset"),
+        "chai_lab.data.dataset.msas": types.ModuleType("chai_lab.data.dataset.msas"),
+        "chai_lab.data.dataset.msas.load": load,
+        "chai_lab.data.parsing": types.ModuleType("chai_lab.data.parsing"),
+        "chai_lab.data.parsing.msas": types.ModuleType("chai_lab.data.parsing.msas"),
+        "chai_lab.data.parsing.msas.aligned_pqt": aligned,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    # attribute links so `from chai_lab.data.dataset.msas import load` resolves
+    sys.modules["chai_lab.data.dataset.msas"].load = load
+    sys.modules["chai_lab.data.dataset"].msas = sys.modules["chai_lab.data.dataset.msas"]
     return calls
 
 
@@ -488,6 +524,8 @@ def _write_spec(mod, tmp_path, **over):
         "num_samples": 3,
         "num_seeds": 1,
         "seed": 101,
+        "target_seq": TARGET,
+        "expect_target_msa": False,
     }
     spec.update(over)
     path = tmp_path / "spec.json"
@@ -640,7 +678,9 @@ def mini_cif(
     return "\n".join(lines) + "\n"
 
 
-def write_result(root: Path, name: str, scores, *, cifs=None, nt=NT, nb=NB, paes=None, ptm=None, result_path=None):
+def write_result(
+    root: Path, name: str, scores, *, cifs=None, nt=NT, nb=NB, paes=None, ptm=None, result_path=None, depth=1
+):
     """Write what the worker writes: result npz + one CIF per candidate. Returns (result_path, cif_paths)."""
     n = len(scores)
     root.mkdir(parents=True, exist_ok=True)
@@ -658,6 +698,7 @@ def write_result(root: Path, name: str, scores, *, cifs=None, nt=NT, nb=NB, paes
         iptm=np.asarray([0.40 + i / 100 for i in range(n)], dtype=np.float32),
         ptm=np.asarray([0.60 + i / 100 for i in range(n)] if ptm is None else ptm, dtype=np.float32),
         cif_paths=np.asarray(cif_paths),
+        **({} if depth is None else {"target_msa_depth": np.int64(depth)}),
     )
     return result, cif_paths
 
@@ -822,3 +863,149 @@ def test_end_to_end_through_the_driver_with_the_worker_stubbed(mod, fasta, tmp_p
     assert float(rows[0]["pae_bt_mean"]) == pytest.approx(BT)  # rows binder, cols target of the native matrix
     assert float(rows[0]["pae_tb_mean"]) == pytest.approx(TB)
     assert rows[1]["iptm"] == "" and rows[1]["pae_file"] == ""
+
+
+# --- a target MSA that fails to load cannot be hidden ----------------------------------------------
+
+
+def _msa_file(mod, spec):
+    """Drop a stand-in for the target's .aligned.pqt where chai-lab looks for it."""
+    path = Path(spec["msa_dir"]) / mod.aligned_pqt_name(TARGET)
+    path.write_bytes(b"pqt")
+    return path
+
+
+def test_check_target_msa_depth_fails_only_a_query_only_target_when_an_msa_was_expected(mod):
+    mod.check_target_msa_depth(4045, expect_msa=True)
+    mod.check_target_msa_depth(1, expect_msa=False)  # --no-msa: depth 1 is the intended state
+    with pytest.raises(mod.EngineError, match="depth 1"):
+        mod.check_target_msa_depth(1, expect_msa=True)
+    with pytest.raises(mod.EngineError, match="no target_msa_depth"):
+        mod.check_target_msa_depth(None, expect_msa=False)  # a missing measurement is never silently fine
+
+
+def test_worker_records_the_depth_chai_lab_actually_loaded_for_the_target(mod, tmp_path, monkeypatch):
+    _fake_chai_lab(monkeypatch, tmp_path, target_depth=4045)
+    spec_path, spec = _write_spec(mod, tmp_path, expect_target_msa=True)
+    _msa_file(mod, spec)
+    assert mod.main(["--chai-worker", str(spec_path)]) == 0
+    with np.load(spec["result"], allow_pickle=False) as res:
+        assert int(res["target_msa_depth"]) == 4045
+
+
+def test_worker_fails_the_design_before_any_model_work_when_the_target_msa_did_not_load(mod, tmp_path, monkeypatch):
+    _fake_chai_lab(monkeypatch, tmp_path)
+    spec_path, spec = _write_spec(mod, tmp_path, expect_target_msa=True)  # but no file for the target
+    with pytest.raises(mod.EngineError, match="depth 1"):
+        mod.main(["--chai-worker", str(spec_path)])
+    assert not Path(spec["result"]).exists()
+    assert not Path(spec["output_dir"]).exists()  # run_inference never got as far as writing structures
+
+
+def test_worker_without_an_expected_msa_records_depth_1(mod, tmp_path, monkeypatch):
+    _fake_chai_lab(monkeypatch, tmp_path)
+    spec_path, spec = _write_spec(mod, tmp_path, expect_target_msa=False)
+    assert mod.main(["--chai-worker", str(spec_path)]) == 0
+    with np.load(spec["result"], allow_pickle=False) as res:
+        assert int(res["target_msa_depth"]) == 1
+
+
+def test_worker_refuses_a_chai_lab_whose_loader_it_cannot_wrap(mod, tmp_path, monkeypatch):
+    _fake_chai_lab(monkeypatch, tmp_path)
+    monkeypatch.delattr(sys.modules["chai_lab.data.dataset.msas.load"], "parse_aligned_pqt_to_msa_context")
+    spec_path, spec = _write_spec(mod, tmp_path, expect_target_msa=True)
+    with pytest.raises(AttributeError):
+        mod.main(["--chai-worker", str(spec_path)])
+    assert not Path(spec["result"]).exists()
+
+
+def test_spec_tells_the_worker_the_target_and_whether_an_msa_is_expected(mod, tmp_path, monkeypatch):
+    captured = _capture_run(mod, monkeypatch, write_result=_touch_result)
+    monkeypatch.setattr(mod, "_load_top_sample", lambda *a, **k: {})
+    monkeypatch.setattr(mod, "_write_parquet", lambda df, path: Path(path).write_bytes(b"x"))
+    _call(mod, tmp_path)
+    assert captured["spec"]["target_seq"] == TARGET and captured["spec"]["expect_target_msa"] is False
+    a3m = tmp_path / "t" / "target.a3m"
+    a3m.parent.mkdir()
+    a3m.write_text(A3M)
+    _call(mod, tmp_path, target_msa_path=a3m)
+    assert captured["spec"]["expect_target_msa"] is True
+
+
+def test_load_top_sample_returns_the_depth_the_worker_measured(mod, tmp_path):
+    kw = dict(num_samples=2, seed=101, binder_seq=BINDER_A, target_seq=TARGET)
+    result, _ = write_result(tmp_path, "q1", [0.2, 0.9], depth=4045)
+    assert mod._load_top_sample(result, **kw)["target_msa_depth"] == 4045
+    result2, _ = write_result(tmp_path / "b", "q2", [0.2, 0.9], depth=None)  # an older / foreign result file
+    assert mod._load_top_sample(result2, **kw)["target_msa_depth"] is None
+
+
+def _fetched_run(mod, fasta, tmp_path, monkeypatch, depths):
+    """Run main in fetched-MSA mode with a stubbed model call returning the given depth per design."""
+    a3m = f">101\n{TARGET}\n>hit\n{TARGET}\n"
+    monkeypatch.setattr(target_msa_mod, "_query_colabfold", lambda seq, *a, **k: a3m)
+    queue = list(depths)
+
+    def predict(**kw):
+        pred = fake_prediction(tmp_path, kw["query_id"])
+        depth = queue.pop(0)
+        if depth == "absent":
+            del pred["target_msa_depth"]
+        else:
+            pred["target_msa_depth"] = depth
+        return pred
+
+    monkeypatch.setattr(mod, "_predict_one", predict)
+    out_csv = tmp_path / "chai.csv"
+    argv = ["--sequences", str(fasta), "--target-seq", TARGET, "--output", str(out_csv)]
+    argv += ["--output-dir", str(tmp_path / "out"), "--msa-cache-dir", str(tmp_path / "cache")]
+    return mod.main(argv), out_csv
+
+
+def test_fetched_mode_records_the_pool_constant_depth_in_run_info(mod, fasta, tmp_path, monkeypatch):
+    code, _ = _fetched_run(mod, fasta, tmp_path, monkeypatch, [4045, 4045])
+    assert code == 0
+    info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+    assert info["settings"] == {"target_msa_depth": 4045}
+
+
+def test_no_msa_mode_records_depth_1_without_failing(mod, fasta, tmp_path, monkeypatch):
+    monkeypatch.setattr(mod, "_predict_one", lambda **kw: fake_prediction(tmp_path, kw["query_id"]))
+    code, _ = run_main(mod, fasta, tmp_path)
+    assert code == 0
+    info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+    assert info["settings"] == {"target_msa_depth": 1}
+
+
+def test_a_query_only_target_in_fetched_mode_is_a_blank_row(mod, fasta, tmp_path, monkeypatch, capsys):
+    code, out_csv = _fetched_run(mod, fasta, tmp_path, monkeypatch, [4045, 1])
+    rows = read_rows(out_csv)
+    assert code == 3 and rows[0]["iptm"] != "" and rows[1]["iptm"] == "" and rows[1]["pae_file"] == ""
+    assert "depth 1" in capsys.readouterr().err
+
+
+def test_a_depth_that_differs_between_designs_fails_the_odd_one(mod, fasta, tmp_path, monkeypatch, capsys):
+    code, out_csv = _fetched_run(mod, fasta, tmp_path, monkeypatch, [4045, 3000])
+    rows = read_rows(out_csv)
+    assert code == 3 and rows[0]["iptm"] != "" and rows[1]["iptm"] == ""
+    assert "differs" in capsys.readouterr().err
+    info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+    assert info["settings"] == {"target_msa_depth": 4045}  # the pool constant is the one that scored
+
+
+def test_a_result_with_no_depth_measurement_fails_the_design(mod, fasta, tmp_path, monkeypatch):
+    with pytest.raises(RuntimeError, match="no target_msa_depth"):  # every design lacked it: the all-failed error
+        _fetched_run(mod, fasta, tmp_path, monkeypatch, ["absent", "absent"])
+    assert all(r["iptm"] == "" for r in read_rows(tmp_path / "chai.csv"))
+
+
+def test_a_4045_row_a3m_converts_without_losing_a_row(mod, tmp_path):
+    # PD-L1 smoke: depth 4045. The conversion must hand chai-lab every distinct non-gap row of the a3m.
+    hits = ["".join("ACDEFGHIKLMNPQRSTVWY"[(i // 20**k) % 20] for k in range(len(TARGET))) for i in range(1, 4045)]
+    a3m = f">101\n{TARGET}\n" + "".join(f">hit{i}\n{h}\n" for i, h in enumerate(hits))
+    df = mod.a3m_to_aligned_df(a3m, TARGET)
+    assert len(df) == 4045 and df["source_database"].iloc[0] == "query"
+    pytest.importorskip("pyarrow")
+    path = tmp_path / mod.aligned_pqt_name(TARGET)
+    mod._write_parquet(df, path)
+    assert len(pd.read_parquet(path)) == 4045

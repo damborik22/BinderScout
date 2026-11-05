@@ -359,3 +359,21 @@ def test_bad_target_refuses_the_whole_run_exit_2_and_writes_nothing(bad_target, 
     assert "target" in err.lower() and ("empty" in err or "non-standard" in err)
     assert ad.calls == []
     assert not out_csv.exists() and not (tmp_path / "out").exists()
+
+
+def test_run_info_extra_is_read_again_after_the_designs_so_measured_values_are_recorded(fasta, tmp_path):
+    class Measuring(FakeAdapter):
+        depth = None
+
+        def predict_one(self, **kw):
+            Measuring.depth = 4045  # only known once a design has run
+            return super().predict_one(**kw)
+
+        def run_info_extra(self):
+            return {"measured": Measuring.depth}
+
+    Measuring.depth = None
+    code, _ = go(Measuring(tmp_path), fasta, tmp_path)
+    assert code == 0
+    info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+    assert info["settings"] == {"measured": 4045}

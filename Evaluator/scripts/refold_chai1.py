@@ -86,7 +86,19 @@ What was established (this is what the whole script rests on):
   and the ESM model are reloaded for every design. An exit 0 without a result file is a FAILED design.
   ``chai_lab`` is imported only inside the worker.
 * Weights are downloaded on first use into ``$CHAI_DOWNLOADS_DIR`` (default: ``<package>/downloads``);
-  ``--model-dir`` sets that variable for the worker.
+  ``--model-dir`` sets that variable for the worker. Live smoke: besides the model components and the traced
+  ESM2 file, chai-lab also fetches ``conformers_v1.apkl`` (119 MB, a data file) from chaiassets.com; the
+  licence record's weight list does not name it.
+* A target MSA that silently fails to load must be impossible to hide. chai-lab's logger has no handler (its
+  INFO "MSA found ... msa.depth=" line never prints) and the parent drops the worker's stderr on success, so
+  nothing can be grepped. Instead the worker wraps chai-lab's OWN loader for the run: it records the depth of
+  every alignment ``parse_aligned_pqt_to_msa_context`` actually parses, and after ``get_msa_contexts`` returns
+  (before any model work) it takes the TARGET's depth from the file chai-lab looks for
+  (``expected_basename(target)``); a target whose file was not found has depth 1 (query only). With a target
+  MSA expected, depth 1 fails the design (blank row). The depth goes into the result file and the adapter
+  records it as ``settings.target_msa_depth`` in ``refold_run_info.json``; it must be identical for every
+  design of the run (it is one MSA), and a design that disagrees fails. The live smoke measured depth 4045 for
+  the PD-L1 target.
 
 Emits the same unprefixed CSV as ``refold_af3.py``; the engine name enters at merge time
 (``add_iptm_from_pae_files(prefix="chai1")``). Sidecars in the output dir: ``target_msa_mode.json`` and
@@ -293,6 +305,8 @@ def _predict_one(
         "num_samples": num_samples,
         "num_seeds": num_seeds,
         "seed": DEFAULT_SEED,
+        "target_seq": target_seq,
+        "expect_target_msa": target_msa_path is not None,
     }
     spec_path = work_dir / "worker_spec.json"
     spec_path.write_text(json.dumps(spec, indent=2))
@@ -331,6 +345,53 @@ def _scalar(x) -> float:
     return float(arr[0])
 
 
+def check_target_msa_depth(depth: int | None, *, expect_msa: bool) -> None:
+    """Fail loudly when a target MSA was supplied but chai-lab folded the target on its query alone."""
+    if depth is None:
+        raise EngineError(
+            "the Chai-1 result carries no target_msa_depth, so a silently unloaded target MSA cannot be ruled out"
+        )
+    if expect_msa and depth <= 1:
+        raise EngineError(
+            f"the target MSA was supplied but chai-lab folded the target with MSA depth {depth} (query only): "
+            "the alignment file was not found or not read (wrong file name, or an MSA that failed to load)"
+        )
+
+
+def _install_msa_depth_probe(target_seq: str, expect_msa: bool):
+    """Wrap chai-lab's own MSA loader; return a getter for the target's loaded depth.
+
+    Must run before ``run_inference``. ``run_inference`` calls ``get_msa_contexts`` (bound in ``chai_lab.chai1``)
+    which parses each chain's ``.aligned.pqt`` through ``parse_aligned_pqt_to_msa_context`` (bound in
+    ``chai_lab.data.dataset.msas.load``); both names are replaced here, so what is measured is what the model
+    is given. Raises if either name is gone (a different chai-lab layout): the depth would be unknowable.
+    """
+    from chai_lab import chai1
+    from chai_lab.data.dataset.msas import load
+    from chai_lab.data.parsing.msas.aligned_pqt import expected_basename
+
+    loaded: dict[str, int] = {}
+    target_name = expected_basename(target_seq)
+    parse, get = load.parse_aligned_pqt_to_msa_context, chai1.get_msa_contexts
+
+    def recording_parse(path, *args, **kwargs):
+        msa = parse(path, *args, **kwargs)
+        loaded[Path(path).name] = int(msa.depth)
+        return msa
+
+    def depth() -> int:
+        return loaded.get(target_name, 1)  # not loaded = chai-lab used the query alone
+
+    def checked_get(*args, **kwargs):
+        out = get(*args, **kwargs)
+        check_target_msa_depth(depth(), expect_msa=expect_msa)  # before any model work
+        return out
+
+    load.parse_aligned_pqt_to_msa_context = recording_parse
+    chai1.get_msa_contexts = checked_get
+    return depth
+
+
 def _run_worker(spec_path: Path) -> None:
     """Worker process: call ``chai_lab.chai1.run_inference`` and dump every candidate to ``result``."""
     spec = json.loads(Path(spec_path).read_text())
@@ -339,6 +400,7 @@ def _run_worker(spec_path: Path) -> None:
 
     require_cleared_version(getattr(chai_lab, "__version__", "unknown"))
     n_samples, n_seeds = int(spec["num_samples"]), int(spec["num_seeds"])
+    target_depth = _install_msa_depth_probe(spec["target_seq"], bool(spec["expect_target_msa"]))
     cand = run_inference(
         fasta_file=Path(spec["fasta"]),
         output_dir=Path(spec["output_dir"]),
@@ -352,6 +414,7 @@ def _run_worker(spec_path: Path) -> None:
         seed=int(spec["seed"]),
         low_memory=True,
     )
+    check_target_msa_depth(target_depth(), expect_msa=bool(spec["expect_target_msa"]))
     expected = n_samples * n_seeds
     pae = _np(cand.pae).astype(np.float32)
     if not (len(cand.cif_paths) == len(cand.ranking_data) == pae.shape[0] == expected):
@@ -366,6 +429,7 @@ def _run_worker(spec_path: Path) -> None:
         iptm=np.asarray([_scalar(rd.ptm_scores.interface_ptm) for rd in cand.ranking_data], dtype=np.float32),
         ptm=np.asarray([_scalar(rd.ptm_scores.complex_ptm) for rd in cand.ranking_data], dtype=np.float32),
         cif_paths=np.asarray([str(Path(p).resolve()) for p in cand.cif_paths]),
+        target_msa_depth=np.int64(target_depth()),
     )
 
 
@@ -379,6 +443,7 @@ def _load_top_sample(result: Path, *, num_samples: int, seed: int, binder_seq: s
     with np.load(result, allow_pickle=False) as res:
         pae, agg, iptm, ptm = res["pae"], res["aggregate_score"], res["iptm"], res["ptm"]
         cifs = [Path(str(p)) for p in res["cif_paths"]]
+        msa_depth = int(res["target_msa_depth"]) if "target_msa_depth" in res.files else None
     n = len(agg)
     if not (n > 0 and n % num_samples == 0 and pae.shape[0] == len(iptm) == len(ptm) == len(cifs) == n):
         raise EngineError(
@@ -407,6 +472,7 @@ def _load_top_sample(result: Path, *, num_samples: int, seed: int, binder_seq: s
         "plddt_target": plddt[TARGET_CHAIN],
         "plddt_binder": plddt[BINDER_CHAIN],
         "seed": seed + i // num_samples,
+        "target_msa_depth": msa_depth,
     }
 
 
@@ -506,6 +572,7 @@ class Chai1Adapter:
 
     def __init__(self) -> None:
         self.model_dir: Path | None = None
+        self.target_msa_depth: int | None = None  # one MSA per run: the first design sets it, the rest must match
 
     def add_args(self, parser) -> None:
         parser.add_argument(
@@ -529,9 +596,13 @@ class Chai1Adapter:
     def weights_id(self) -> str:
         return WEIGHTS_ID
 
+    def run_info_extra(self) -> dict:
+        # None until a design has run; the driver reads this again after the last design.
+        return {"target_msa_depth": self.target_msa_depth}
+
     def predict_one(self, *, query_id, binder_seq, target_seq, target_msa_path, work_dir, num_seeds, num_samples):
         # Looked up at call time on purpose: the model seam tests replace.
-        return _predict_one(
+        pred = _predict_one(
             query_id=query_id,
             binder_seq=binder_seq,
             target_seq=target_seq,
@@ -541,6 +612,16 @@ class Chai1Adapter:
             num_seeds=num_seeds,
             num_samples=num_samples,
         )
+        depth = pred.get("target_msa_depth")
+        check_target_msa_depth(depth, expect_msa=target_msa_path is not None)
+        if self.target_msa_depth is None:
+            self.target_msa_depth = int(depth)
+        elif int(depth) != self.target_msa_depth:
+            raise EngineError(
+                f"target MSA depth {int(depth)} differs from {self.target_msa_depth} seen earlier in this run; "
+                "the target MSA is one file, so every design must see the same alignment"
+            )
+        return pred
 
 
 def main(argv: list[str] | None = None) -> int:

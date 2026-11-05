@@ -93,8 +93,9 @@ class EngineAdapter(Protocol):
 
     # OPTIONAL (not part of the required interface): ``run_info_extra(self) -> dict[str, object]``. If an
     # adapter defines it, its JSON-serialisable result is written to refold_run_info.json under the single
-    # key ``settings`` (the non-default model settings a result must be tied to). Without it there is no
-    # ``settings`` key. A non-dict or non-serialisable result raises before any sidecar is written.
+    # key ``settings`` (the non-default model settings a result must be tied to). It is called before the
+    # first design and again after the last, so a value measured during the run can be recorded. Without it
+    # there is no ``settings`` key. A non-dict or non-serialisable result raises before any sidecar is written.
 
     def predict_one(
         self,
@@ -247,13 +248,7 @@ def refold_batch(
         "seeds": None,  # filled from the seeds the engine reports having used
         "target_msa_mode": msa_mode,
     }
-    hook = getattr(adapter, "run_info_extra", None)
-    if hook is not None:
-        settings = hook()
-        if not isinstance(settings, dict):
-            raise TypeError(f"{name}: run_info_extra() must return a dict, got {type(settings).__name__}")
-        json.dumps(settings)  # a value that cannot be serialised fails here, before any sidecar is written
-        run_info["settings"] = settings
+    _apply_settings(adapter, run_info)  # a bad hook fails here, before any sidecar is written
     _write_run_info(out_dir, run_info)
 
     print(
@@ -298,6 +293,7 @@ def refold_batch(
         write_refold_row(csv_path, row)
 
     run_info["seeds"] = sorted(seeds_seen) if seeds_seen else None
+    _apply_settings(adapter, run_info)  # again: some settings (e.g. a measured MSA depth) exist only after the designs
     _write_run_info(out_dir, run_info)
     print(f"[{name}] Wrote {len(jobs)} row(s) -> {csv_path}")
 
@@ -367,6 +363,18 @@ def _score_prediction(
         "pdb": pdb_cell,
         "pae_file": str(pae_file),
     }
+
+
+def _apply_settings(adapter: EngineAdapter, run_info: dict) -> None:
+    """Put the adapter's optional ``run_info_extra()`` under ``run_info["settings"]``."""
+    hook = getattr(adapter, "run_info_extra", None)
+    if hook is None:
+        return
+    settings = hook()
+    if not isinstance(settings, dict):
+        raise TypeError(f"{adapter.name}: run_info_extra() must return a dict, got {type(settings).__name__}")
+    json.dumps(settings)  # a value that cannot be serialised fails here
+    run_info["settings"] = settings
 
 
 def _write_run_info(out_dir: Path, info: dict) -> None:
