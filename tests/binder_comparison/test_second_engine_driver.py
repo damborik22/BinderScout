@@ -295,3 +295,67 @@ def test_non_finite_or_missing_iptm_is_refused_and_nothing_is_saved(bad, fasta, 
     assert code == 3 and r[0]["iptm"] == "" and r[0]["pae_file"] == ""
     assert "iptm" in capsys.readouterr().err
     assert not list((tmp_path / "out").glob("d1_*_pae.npy"))
+
+
+# --- sequence validation: before any engine call ---------------------------------------------
+
+
+def test_bad_binder_is_a_blank_row_counted_and_the_engine_is_never_called(fasta, tmp_path, capsys):
+    bad = "MKVLJAGX"  # J at 5, X at 8: engines fold these as UNK and score them
+    fasta.write_text(f">d1 a\n{B1}\n>d2 b\n{bad}\n>d3 c\n{B3}\n")
+    ad = FakeAdapter(tmp_path)
+    code, out_csv = go(ad, fasta, tmp_path)
+    err = capsys.readouterr().err
+    r = rows(out_csv)
+    assert code == 3 and "1 of 3" in err
+    assert bad not in ad.calls and ad.calls == [B1, B3]  # never reached the engine
+    assert r[1]["sequence"] == bad and r[1]["iptm"] == "" and r[1]["pae_file"] == ""
+    assert "J" in err and "5" in err and "X" in err and "8" in err  # letters and positions are named
+    assert r[0]["iptm"] != "" and r[2]["iptm"] != ""
+
+
+@pytest.mark.parametrize(
+    "bad", ["mkvlaagw", "MKV LAAG", "MKVL-AGW", "MKVL*AGW", "MKVL1AGW", "MKVLBAGW", "MKVLOAGW", ""]
+)
+def test_each_non_standard_binder_is_refused(bad, fasta, tmp_path):
+    fasta.write_text(f">d1 a\n{B1}\n>d2 b\n{bad or 'M'}\n")
+    if not bad:  # an empty sequence cannot be written into FASTA; drive refold_batch directly instead
+        from binder_comparison.refolding.errors import PartialRefoldFailure
+        from binder_comparison.refolding.second_engine_driver import refold_batch
+
+        ad = FakeAdapter(tmp_path)
+        with pytest.raises(PartialRefoldFailure, match="1 of 2"):
+            refold_batch(
+                ad,
+                binder_sequences=[B1, ""],
+                target_sequence=TARGET,
+                output_dir=tmp_path / "out",
+                output_csv=tmp_path / "o.csv",
+                use_msa=False,
+            )
+        assert ad.calls == [B1]
+        return
+    ad = FakeAdapter(tmp_path)
+    code, out_csv = go(ad, fasta, tmp_path)
+    assert code == 3 and ad.calls == [B1] and rows(out_csv)[1]["iptm"] == ""
+
+
+def test_every_binder_bad_is_still_the_all_failed_error(fasta, tmp_path):
+    fasta.write_text(">d1 a\nMKVLJAGW\n>d2 b\nMKVLZAGW\n")
+    ad = FakeAdapter(tmp_path)
+    with pytest.raises(RuntimeError, match="All 2 binder"):
+        go(ad, fasta, tmp_path)
+    assert ad.calls == []
+
+
+@pytest.mark.parametrize("bad_target", ["ACDEFGHIKX", "acdefghikl", "ACDEF-HIKL", "ACDEFGHIK*", "ACDEFGHIK1", ""])
+def test_bad_target_refuses_the_whole_run_exit_2_and_writes_nothing(bad_target, fasta, tmp_path, capsys):
+    ad = FakeAdapter(tmp_path)
+    out_csv = tmp_path / "o.csv"
+    argv = ["--sequences", str(fasta), "--target-seq", bad_target, "--output", str(out_csv)]
+    argv += ["--output-dir", str(tmp_path / "out"), "--no-msa"]
+    assert run_cli(ad, argv) == 2
+    err = capsys.readouterr().err
+    assert "target" in err.lower() and ("empty" in err or "non-standard" in err)
+    assert ad.calls == []
+    assert not out_csv.exists() and not (tmp_path / "out").exists()

@@ -36,6 +36,28 @@ from binder_comparison.refolding.target_msa import MissingTargetMSA, prepare_tar
 
 #: Lines of the engine's own stderr kept in a failure reason.
 STDERR_TAIL_LINES = 10
+#: The only residue letters a sequence may contain. Engines map everything else (J, X, Z, B, O, U, digits,
+#: ``*``, ``-``) to UNK and SCORE the design with exit 0, so the driver refuses it before any engine call.
+STANDARD_RESIDUES = frozenset("ACDEFGHIKLMNPQRSTVWY")
+
+
+class InvalidSequenceError(ValueError):
+    """A sequence holds something other than the 20 standard uppercase amino-acid letters."""
+
+
+def check_sequence(seq: str, role: str) -> None:
+    """Raise :class:`InvalidSequenceError` naming the offending letters and 1-based positions."""
+    if not seq:
+        raise InvalidSequenceError(f"{role} sequence is empty")
+    bad = [(i, ch) for i, ch in enumerate(seq, start=1) if ch not in STANDARD_RESIDUES]
+    if bad:
+        shown = ", ".join(f"{ch!r} at position {i}" for i, ch in bad[:10])
+        more = f" (and {len(bad) - 10} more)" if len(bad) > 10 else ""
+        raise InvalidSequenceError(
+            f"{role} sequence has non-standard residue letter(s): {shown}{more}. Only the 20 uppercase "
+            "amino-acid letters ACDEFGHIKLMNPQRSTVWY are accepted; engines would fold anything else as UNK "
+            "and still score the design."
+        )
 
 
 class EngineError(RuntimeError):
@@ -159,7 +181,7 @@ def run_cli(adapter: EngineAdapter, argv: list[str] | None = None) -> int:
             msa_cache_dir=args.msa_cache_dir,
             allow_no_msa=args.allow_no_msa,
         )
-    except MissingTargetMSA as exc:
+    except (MissingTargetMSA, InvalidSequenceError) as exc:
         print(f"\n{exc}", file=sys.stderr)
         return 2
     except PartialRefoldFailure as exc:
@@ -187,6 +209,7 @@ def refold_batch(
 ) -> None:
     """Refold each binder against the target with ``adapter``; append rows to ``output_csv``."""
     name = adapter.name
+    check_sequence(target_sequence, "target")  # before anything is created: a bad target refuses the run
     skip_indices = skip_indices or set()
     out_dir = Path(output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -253,6 +276,7 @@ def refold_batch(
             "binder_length": str(len(binder_seq)),
         }
         try:
+            check_sequence(binder_seq, "binder")  # a bad binder never reaches the engine
             pred = adapter.predict_one(
                 query_id=row["run_id"],
                 binder_seq=binder_seq,
