@@ -105,22 +105,34 @@ def test_bootstrap_is_deterministic_and_reports_direction():
     assert a["ci_low"] <= a["macro_diff"] <= a["ci_high"]
 
 
-def _result(macro, lo, hi, per_target):
-    return {"macro_diff": macro, "ci_low": lo, "ci_high": hi, "per_target_diff": per_target}
+A_FAIL = "a: interval wholly below 0"
+B_FAIL = "b: macro difference worse than -0.02"
+C_FAIL = "c: a target worse than -0.05"
+D_FAIL = "d: designs without a score"
+_FULL = {"n_total": 5, "n_scored": 5, "n_dropped_unscored": 0}
 
 
-def test_passes_requires_all_three_clauses():
+def _result(macro, lo, hi, per_target, coverage=None):
+    cov = coverage if coverage is not None else {t: dict(_FULL) for t in per_target}
+    return {"macro_diff": macro, "ci_low": lo, "ci_high": hi, "per_target_diff": per_target, "coverage": cov}
+
+
+def test_passes_requires_all_four_clauses():
     ok, failed = pb.passes(_result(0.0, -0.05, 0.05, {"t1": 0.0, "t2": -0.01}))
     assert ok and failed == []
 
     ok, failed = pb.passes(_result(-0.01, -0.09, -0.01, {"t1": 0.0, "t2": -0.01}))  # interval wholly below 0
-    assert not ok and failed == ["a"]
+    assert not ok and failed == [A_FAIL]
 
     ok, failed = pb.passes(_result(-0.03, -0.06, 0.01, {"t1": 0.0, "t2": -0.01}))  # point worse than -0.02
-    assert not ok and failed == ["b"]
+    assert not ok and failed == [B_FAIL]
 
     ok, failed = pb.passes(_result(0.0, -0.05, 0.05, {"t1": 0.05, "t2": -0.06}))  # one target worse than -0.05
-    assert not ok and failed == ["c"]
+    assert not ok and failed == [C_FAIL]
+
+    dropped = {"t1": dict(_FULL), "t2": {"n_total": 5, "n_scored": 4, "n_dropped_unscored": 1}}
+    ok, failed = pb.passes(_result(0.0, -0.05, 0.05, {"t1": 0.0, "t2": 0.0}, coverage=dropped))
+    assert not ok and failed == [D_FAIL]  # a-c are unaffected by it
 
     # boundaries are inclusive, and a NaN per-target diff (one-class target) does not fail clause c
     ok, failed = pb.passes(_result(-0.02, -0.04, 0.0, {"t1": -0.05, "t2": float("nan")}))
@@ -128,4 +140,46 @@ def test_passes_requires_all_three_clauses():
 
     # no usable macro difference fails closed
     ok, failed = pb.passes(_result(float("nan"), float("nan"), float("nan"), {}))
-    assert not ok and failed == ["a", "b"]
+    assert not ok and failed == [A_FAIL, B_FAIL]
+
+
+def test_full_coverage_reports_counts_equal_to_n_total():
+    df = _pool()
+    res = pb.paired_bootstrap_diff(df, df["good"], df["bad"], n_boot=20, seed=1)
+    assert res["coverage"] == {
+        "t1": {"n_total": 6, "n_scored": 6, "n_dropped_unscored": 0},
+        "t2": {"n_total": 10, "n_scored": 10, "n_dropped_unscored": 0},
+    }
+    ok, failed = pb.passes(pb.paired_bootstrap_diff(df, df["good"], df["good"].copy(), n_boot=20, seed=1))
+    assert ok and failed == []
+
+
+def test_a_target_blank_under_one_panel_fails_clause_d_and_reports_counts():
+    df = _pool()
+    blank_a = df["good"].copy()
+    blank_a[df["target"] == "t2"] = np.nan  # the candidate produced nothing for the whole of t2
+    res = pb.paired_bootstrap_diff(df, blank_a, df["good"], n_boot=20, seed=1)
+    assert res["coverage"]["t2"] == {"n_total": 10, "n_scored": 0, "n_dropped_unscored": 10}
+    assert res["coverage"]["t1"] == {"n_total": 6, "n_scored": 6, "n_dropped_unscored": 0}
+    assert np.isnan(res["per_target_diff"]["t2"])
+    assert res["macro_diff"] == 0.0  # the easy subset alone looks fine ...
+    ok, failed = pb.passes(res)
+    assert not ok and failed == [D_FAIL]  # ... and must not be allowed to pass
+
+
+def test_one_dropped_design_fails_clause_d_only():
+    df = _pool()
+    partial = df["good"].copy()
+    partial.iloc[0] = np.nan  # one t1 design unscored by A
+    res = pb.paired_bootstrap_diff(df, partial, df["good"], n_boot=20, seed=1)
+    assert res["coverage"]["t1"] == {"n_total": 6, "n_scored": 5, "n_dropped_unscored": 1}
+    assert res["coverage"]["t2"]["n_dropped_unscored"] == 0
+    ok, failed = pb.passes(res)
+    assert not ok and failed == [D_FAIL]
+
+
+def test_unlabelled_rows_are_not_counted_as_dropped():
+    df = pd.DataFrame({"target": ["t"] * 5, "binds": [True, False, np.nan, True, False]}, dtype=object)
+    s = pd.Series([0.9, 0.1, np.nan, 0.8, 0.2])  # the NaN score sits on the unlabelled design
+    res = pb.paired_bootstrap_diff(df, s, s.copy(), n_boot=10, seed=0)
+    assert res["coverage"]["t"] == {"n_total": 4, "n_scored": 4, "n_dropped_unscored": 0}

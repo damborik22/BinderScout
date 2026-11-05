@@ -70,6 +70,10 @@ def paired_bootstrap_diff(
     Only designs that are labelled and scored by both are used. Each iteration resamples every target at its
     own size, with the same design indices for both scores. The macro difference averages the targets that have
     an AUC under both scores; a target with none in a resample is skipped for that resample only.
+
+    ``coverage`` records, per target, how many labelled designs there were, how many were scored under both
+    panels, and how many were dropped for lacking a score. Without it a panel that is blank for part or all of
+    a target looks like a panel that agrees with the other on the rest (``passes`` rejects any dropped design).
     """
     has, lab = _labels(df, label_col)
     a, b = _aligned(df, score_a), _aligned(df, score_b)
@@ -79,6 +83,12 @@ def paired_bootstrap_diff(
         str(t): (lab[keep & (targets_all == t)], a[keep & (targets_all == t)], b[keep & (targets_all == t)])
         for t in sorted(set(targets_all))
     }
+
+    coverage = {}
+    for t in groups:
+        in_t = targets_all.astype(str) == t
+        n_total, n_scored = int((has & in_t).sum()), int((keep & in_t).sum())
+        coverage[t] = {"n_total": n_total, "n_scored": n_scored, "n_dropped_unscored": n_total - n_scored}
 
     def diff(la: np.ndarray, sa: np.ndarray, sb: np.ndarray) -> float:
         return _auc(la, sa) - _auc(la, sb)
@@ -105,21 +115,32 @@ def paired_bootstrap_diff(
         "ci_low": ci_low,
         "ci_high": ci_high,
         "per_target_diff": per_target,
+        "coverage": coverage,
     }
 
 
+CLAUSE_A = "a: interval wholly below 0"
+CLAUSE_B = "b: macro difference worse than -0.02"
+CLAUSE_C = "c: a target worse than -0.05"
+CLAUSE_D = "d: designs without a score"
+
+
 def passes(result: dict) -> tuple[bool, list[str]]:
-    """Apply the three-part rule to a ``paired_bootstrap_diff`` result; return (ok, failed clause names).
+    """Apply the four-part rule to a ``paired_bootstrap_diff`` result; return (ok, failed clause names).
 
     a: the 95% interval does not lie wholly below zero; b: the point estimate is not worse than -0.02;
-    c: no target is worse than -0.05 (a target without an AUC is not judged). A missing macro difference
-    fails a and b rather than passing.
+    c: no target is worse than -0.05 (a target without an AUC is not judged there); d: no labelled design was
+    dropped for lacking a score under either panel, in any target (d is what stops a blank panel passing on the
+    subset it did score). A one-class target is a property of the labels and is not a failure. A missing macro
+    difference fails a and b rather than passing.
     """
     failed = []
     if not result["ci_high"] >= 0:
-        failed.append("a")
+        failed.append(CLAUSE_A)
     if not result["macro_diff"] >= MACRO_FLOOR:
-        failed.append("b")
+        failed.append(CLAUSE_B)
     if any(d < TARGET_FLOOR for d in result["per_target_diff"].values() if np.isfinite(d)):
-        failed.append("c")
+        failed.append(CLAUSE_C)
+    if any(c["n_dropped_unscored"] > 0 for c in result["coverage"].values()):
+        failed.append(CLAUSE_D)
     return not failed, failed
