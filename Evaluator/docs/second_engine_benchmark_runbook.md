@@ -29,8 +29,12 @@ file's SHA-256 and the row counts.
 | `<target>.fasta` | The binder sequences of one target, one record per design, header = design id (first token), in the merged CSV's id space. Counts: pd-l1 66, il7r 96, egfr 190, nipah 211. |
 | `<target>.target.txt` | The target sequence, one line. Lengths: pd-l1 220, il7r 219, egfr 621, nipah 602 aa. |
 
-How the FASTA and target files were derived from `raw_refold/` is not recorded in the smoke reports.
-Check them before a run: record count per file as above, every FASTA id present in the merged CSV, and
+Recipe used for the smoke inputs (from the project notes, not re-run here): take the 563 ids of the merged CSV,
+join them to `source/master_designs.csv` on the share for the binder sequences, and take each target's
+sequence from the engines' `raw_refold/` CSVs (`target_sequence`), so that the candidate folds exactly what the
+three baseline engines folded. Warning: the `target` column of `master_designs.csv` differs from the label file's
+for some designs; the labels file is the authority for which target a design belongs to.
+Check the files before a run: record count per file as above, every FASTA id present in the merged CSV, and
 the target length as above.
 
 The target MSA is fetched **once per target** from ColabFold and cached (see "Target MSA" in the
@@ -53,12 +57,13 @@ or a non-standard residue letter in the target). Binders containing a letter out
 amino acids get a blank row before any engine call (driver commit `8e08be1`).
 
 On the aarch64 GB10 host (unified memory) every GPU job goes through `tools/gpurun --cap <GiB>`
-(the smokes used a cap of 30 GiB after querying `tools/gpurun --max`); an uncapped job can reboot the
+(the smokes used a cap of 30 GiB); an uncapped job can reboot the
 machine. Do not copy the cap into a script as a constant: query it.
 
 ### OpenFold3 (x86_64 24 GB box)
 
-Pins observed: `openfold3==0.5.1` (Python 3.12.13, torch 2.15.0+cu132), no kernel extras.
+Pins observed: `openfold3==0.5.1` (Python 3.12.13, torch 2.15.0+cu132), no kernel extras. Not recorded in the smoke report:
+the exact `uv venv` command, the JSON config given to `setup_openfold`, and the path of the gcc used for `CC`.
 
 ```
 uv venv --python 3.12 $ENV            # exact venv command not recorded for this engine
@@ -104,7 +109,8 @@ x86_64 box with `nvcc` is **not recorded**.
 
 Pins observed (an existing environment, used unmodified): `chai_lab==0.6.1`, Python 3.12.14,
 torch 2.10.0+cu130, pandas 2.3.3, pyarrow 25.0.1, numpy 1.26.4, gemmi 0.6.7. How that environment was
-built is not recorded. The directory passed as `--model-dir` must already exist.
+built is not recorded (no install command, and no record of how torch 2.10.0 came to sit beside a `chai_lab` whose
+PyPI metadata asks for `torch<2.7`). The directory passed as `--model-dir` must already exist.
 
 ```
 tools/gpurun --cap <GiB> -- python Evaluator/scripts/refold_chai1.py \
@@ -152,16 +158,16 @@ counters. Token count is target plus binder length.
 
 | Engine, host | Complex | Samples | Wall per design | Peak GPU memory |
 |---|---|---|---|---|
-| OpenFold3, 24 GB RTX 3090 | pd-l1, about 305 tokens | 5 | 35.3 s warm (34.9-36.1 s); the first cold run was 89 s for 2 designs | 5.3 GiB (5,336 MiB) |
-| OpenFold3, 24 GB RTX 3090 | il7r, 326 tokens | 5 | not recorded | 5.7 GiB |
-| OpenFold3, 24 GB RTX 3090 | egfr 621 aa + 63 aa binder, 684 tokens | 5 | 92 s including process start | 19.3 GiB (19,294 MiB) |
+| OpenFold3, 24 GB RTX 3090 | pd-l1, about 305 tokens | 5 | 35.3 s warm (34.9-36.1 s); the first cold run was 89 s for 2 designs | 5,336 MiB (about 5.2 GiB) |
+| OpenFold3, 24 GB RTX 3090 | il7r, 326 tokens | 5 | not recorded | reported as "5.7 GiB" in the smoke report, whose GiB figures for this engine were really MiB/1000 (the MiB value was not recorded; read it as about 5,700 MiB, roughly 5.6 GiB) |
+| OpenFold3, 24 GB RTX 3090 | egfr 621 aa + 63 aa binder, 684 tokens | 5 | 92 s including process start | 19,294 MiB (about 18.8 GiB) |
 | RF3, 24 GB RTX 3090, ops enabled | pd-l1, 308 tokens | 5 | 49.7 s warm, 51.7 s cold | 5,008 MiB |
 | RF3, 24 GB RTX 3090, ops enabled | il7r, 326 tokens | 5 | 50 s | 4,950 MiB |
 | RF3, 24 GB RTX 3090, ops enabled | egfr, 684 tokens | 5 | 123 s | 9,458 MiB |
 | RF3, 24 GB RTX 3090, ops enabled | nipah 602 aa + 144 aa binder, 746 tokens | 5 | 141 s plus a first-use target MSA fetch | 9,192 MiB |
 | RF3, 24 GB RTX 3090, ops disabled (now the default) | pd-l1 design 1, 308 tokens | 5 | 62 s | 6,308 MiB |
 | RF3, 24 GB RTX 3090, ops enabled | pd-l1 design 1 | 1 | 41 s | 4,964 MiB |
-| Chai-1, aarch64 GB10, cap 30 GiB, shared | pd-l1, 308 tokens | 5 | 7.4-8.4 min warm, up to 10.5 min under contention | 11.9 GiB peak during load and trunk (about 2.5 GiB in the diffusion loop); host RSS 10.8-11.3 GiB |
+| Chai-1, aarch64 GB10, cap 30 GiB, shared | pd-l1, 308 tokens | 5 | 7.4-8.4 min warm, up to 10.5 min under contention | 11.9 GiB as reported (`nvidia-smi` sampling; the MiB value was not recorded, so the unit may be MiB/1000) peak during load and trunk (about 2.5 GiB in the diffusion loop); host RSS 10.8-11.3 GiB (`/usr/bin/time`) |
 | Protenix, aarch64 GB10, cap 30 GiB, **contended GPU** (another tenant at about 96% utilisation for the whole session) | pd-l1, 308 tokens | 5 | 8.3-8.7 min | 3.29 GiB allocated / 3.44 GiB reserved |
 | Protenix, same contended host | pd-l1, 308 tokens | 1 | about 173-175 s | not separately measured (at most 3.3 GiB) |
 | Protenix, same contended host | egfr, 684 tokens | 1 | about 450 s | 14.07 GiB allocated / 15.00 GiB reserved |
@@ -287,8 +293,8 @@ smallest targets, not as a finding about the engine. The report must say which o
 
 ## The sample-count caveat
 
-The AF3 baseline scores were produced with 5 samples per design and the best of the five (by ranking
-score). The candidates are run with `--num-samples 1`. That is a deliberate deviation, made because
+`refold_af3.py` defaults `--num-samples` to 5 and AF3 returns its top-ranked sample, so the AF3 baseline is assumed to be
+best-of-5 by ranking score; the setting the baseline pool was actually run with is not recorded. The candidates are run with `--num-samples 1`. That is a deliberate deviation, made because
 the measured spread across samples was small and the cost of 5 samples is not practical for two engines:
 
 | Engine | Measured spread across the samples of one design |
