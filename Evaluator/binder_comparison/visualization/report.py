@@ -576,10 +576,19 @@ _PRI: dict[str, list[str]] = {
 }
 
 
+# The engines this report knew before the second slot became selectable.
+_LEGACY_ENGINES = frozenset({"boltz", "af3", "esmfold2"})
+
+
 def _pri_cols(primary_engine: str) -> list[str]:
-    """Structure columns to try for *primary_engine*'s re-fold (the default engines' table, else the registry's)."""
-    if primary_engine in _PRI:
-        return _PRI[primary_engine]
+    """Structure columns to try for *primary_engine*'s re-fold in the per-tool viewer.
+
+    The legacy table decides for the engines it always covered, including its fallback for the
+    ones it never listed (esmfold2: Boltz-2's structure). Only an engine added since -- Protenix --
+    is resolved through the registry.
+    """
+    if primary_engine in _PRI or primary_engine in _LEGACY_ENGINES:
+        return _PRI.get(primary_engine, ["boltz_pdb", "pdb"])
     try:
         return [*engine(primary_engine).pdb_cols, "boltz_pdb", "pdb"]
     except ValueError:  # not a registered engine
@@ -1581,7 +1590,7 @@ def generate_report(
     )
 
     # Summary statistics table
-    summary_table = _summary_to_html(summary, panel)
+    summary_table = _summary_to_html(summary)
 
     # Plots
     dist_fig = plot_metric_distributions(sort_df)
@@ -3240,9 +3249,8 @@ _METRIC_DESCRIPTION = {
 }
 
 
-def _summary_to_html(summary: dict, panel: Panel | None = None) -> str:
+def _summary_to_html(summary: dict) -> str:
     """Render per-tool summary as an HTML table."""
-    panel_names = " / ".join(e.display for e in (panel or resolve_panel()).engines)
     all_metrics: set[str] = set()
     for tool_data in summary.values():
         all_metrics.update(tool_data.keys())
@@ -3272,7 +3280,7 @@ def _summary_to_html(summary: dict, panel: Panel | None = None) -> str:
                 row += f"<td>{stats['mean']:.4f} ± {stats['std']:.4f}<br><small>n={stats['n']}</small></td>"
             else:
                 row += "<td>—</td>"
-        desc = _METRIC_DESCRIPTION.get(m, "").replace("Boltz-2 / AF3 / ESMFold2", panel_names)
+        desc = _METRIC_DESCRIPTION.get(m, "")
         row += f'<td style="font-size:0.85em;color:#666;text-align:left">{desc}</td>'
         rows.append(f"<tr>{row}</tr>")
 

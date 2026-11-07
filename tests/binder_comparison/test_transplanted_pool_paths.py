@@ -220,3 +220,42 @@ class TestReportOnATransplantedPool:
         root = self._pool(tmp_path, keep_structures=False)
         with pytest.warns(UserWarning, match=r"\[structure\] 3/3 structure files listed in 'boltz_pdb'"):
             self._run(tmp_path, root)
+
+
+class TestEverySecondEnginesStructureColumnsAreRemapped:
+    """The panel-aware half of ``test_every_column_the_viewers_read_is_covered``.
+
+    That test reads the default (AF3) panel's consumer tables. A second engine's structure
+    columns (``protenix_pdb``/``protenix_cif``) must be covered by the same remap when its
+    panel is selected, or a transplanted Protenix pool silently loses its 3D viewer.
+    """
+
+    def test_every_pdb_column_of_every_panel_is_a_remapped_column(self):
+        from binder_comparison.comparison.scoring import _structure_path_columns
+        from binder_comparison.core.engines import SECOND_ENGINES, resolve_panel
+
+        for second in SECOND_ENGINES:
+            covered = set(_structure_path_columns(resolve_panel(second)))
+            for e in resolve_panel(second).engines:
+                assert set(e.pdb_cols) <= covered, (second, e.name)
+
+    def test_the_panel_columns_are_pinned_as_literals(self):
+        from binder_comparison.comparison.scoring import _structure_path_columns
+        from binder_comparison.core.engines import resolve_panel
+
+        assert _STRUCTURE_PATH_COLUMNS == (
+            "boltz_pdb", "boltz_cif", "af3_pdb", "af3_cif", "esmfold2_pdb", "esmfold2_cif", "pdb",
+        )  # fmt: skip
+        assert _structure_path_columns(resolve_panel("protenix")) == (
+            "boltz_pdb", "boltz_cif", "protenix_pdb", "protenix_cif", "esmfold2_pdb", "esmfold2_cif", "pdb",
+        )  # fmt: skip
+
+    def test_a_transplanted_protenix_structure_is_found(self, tmp_path):
+        from binder_comparison.core.engines import resolve_panel
+
+        root = tmp_path / "prot_results"
+        (root / "refold_protenix").mkdir(parents=True)
+        (root / "refold_protenix" / "d1_protenix.pdb").write_text("ATOM\n")
+        df = pd.DataFrame({"binder_id": ["d1"], "protenix_pdb": [f"{FOREIGN}/refold_protenix/d1_protenix.pdb"]})
+        out = remap_structure_paths(df, {"protenix": root}, panel=resolve_panel("protenix"))
+        assert Path(out["protenix_pdb"].iloc[0]) == root / "refold_protenix" / "d1_protenix.pdb"

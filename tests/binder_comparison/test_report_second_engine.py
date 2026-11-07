@@ -16,6 +16,7 @@ import argparse
 import csv
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -287,25 +288,92 @@ class TestSlotColumnsOfTheOtherEngineAreIgnored:
 
 
 class TestHitsWorkbookNamesThePanel:
-    def _workbook_text(self, runs, tmp_path, **extra) -> str:
+    """The workbook leaves the pipeline: its engines line must come from the recorded panel."""
+
+    def _workbook_text(self, cand: Path, tmp_path, **extra) -> str:
         openpyxl = pytest.importorskip("openpyxl")
         from binder_comparison.cli import hits
 
-        cand = runs["root"] / "rep_prot" / "candidates.csv"
         ns = argparse.Namespace(
             candidates=[f"T={cand}"], per_tool=2, refolded=2, extra=None, meta=None, version="1.0", date="",
-            csv=False, output=str(tmp_path / "hits.xlsx"), **extra,
+            csv=False, output=str(tmp_path / "hits.xlsx"), **{"second_engine": None, **extra},
         )  # fmt: skip
         hits.run(ns)
         wb = openpyxl.load_workbook(tmp_path / "hits.xlsx")
         return "\n".join(str(c.value) for ws in wb for row in ws.iter_rows() for c in row if c.value is not None)
 
-    def test_protenix_panel_is_named_and_af3_is_not(self, runs, tmp_path):
-        text = self._workbook_text(runs, tmp_path, second_engine="protenix")
+    def test_a_protenix_pool_is_named_without_passing_the_flag(self, runs, tmp_path):
+        text = self._workbook_text(runs["root"] / "rep_prot" / "candidates.csv", tmp_path)
         assert "Boltz-2, Protenix, ESMFold2 (AF3 not used)" in text
         assert "AlphaFold3" not in text
 
-    def test_default_workbook_text_is_unchanged(self, runs, tmp_path):
-        text = self._workbook_text(runs, tmp_path)
+    def test_the_explicit_flag_overrides_the_recorded_panel(self, runs, tmp_path):
+        text = self._workbook_text(runs["root"] / "rep_prot" / "candidates.csv", tmp_path, second_engine="af3")
         assert "Re-folding: Boltz-2, AlphaFold3, ESMFold2" in text
         assert "Protenix" not in text
+
+    def test_an_af3_pool_is_named_from_its_recorded_panel(self, runs, tmp_path):
+        text = self._workbook_text(runs["root"] / "rep_af3" / "candidates.csv", tmp_path)
+        assert "Re-folding: Boltz-2, AlphaFold3, ESMFold2" in text
+        assert "Protenix" not in text
+
+    def test_a_pool_with_no_metrics_csv_is_unchanged(self, runs, tmp_path):
+        lone = tmp_path / "lone"
+        lone.mkdir()
+        (lone / "candidates.csv").write_bytes((runs["root"] / "rep_prot" / "candidates.csv").read_bytes())
+        text = self._workbook_text(lone / "candidates.csv", tmp_path)
+        assert "Re-folding: Boltz-2, AlphaFold3, ESMFold2" in text
+        assert "Protenix" not in text
+
+    def test_a_metrics_csv_from_before_the_panel_was_recorded_is_unchanged(self, runs, tmp_path):
+        old = tmp_path / "old"
+        old.mkdir()
+        (old / "candidates.csv").write_bytes((runs["root"] / "rep_prot" / "candidates.csv").read_bytes())
+        pd.read_csv(runs["root"] / "rep_prot" / "metrics.csv").drop(columns=["panel", "second_engine"]).to_csv(
+            old / "metrics.csv", index=False
+        )
+        text = self._workbook_text(old / "candidates.csv", tmp_path)
+        assert "Re-folding: Boltz-2, AlphaFold3, ESMFold2" in text
+
+    def test_candidates_csv_itself_is_not_changed_by_the_panel(self, runs):
+        header = (runs["root"] / "rep_af3" / "candidates.csv").read_text().splitlines()[0]
+        assert "panel" not in header and "second_engine" not in header
+
+
+class TestAf3RankOrderIsPinnedToTheCodeBeforeThePanel:
+    """The literal order the AF3 run produced, taken from the pre-change code.
+
+    Obtained by extracting commit 44816b6 (the tree before `binder-compare report` read a panel)
+    with ``git archive`` into an empty directory, running this same synthetic pool through that
+    tree's ``report`` and reading ``rank`` off its metrics.csv. Not derived from this tree.
+    """
+
+    PRE_CHANGE_ORDER: ClassVar[list[tuple[str, int]]] = [
+        ("d01_mpnn1|bindcraft", 1),
+        ("d05|rfd3", 2),
+        ("d02|mosaic", 3),
+        ("d08|rfd3", 4),
+        ("d04_c1|protein_hunter", 5),
+        ("d01_mpnn2|bindcraft", 6),
+        ("d03|boltzgen", 7),
+        ("d04_c2|protein_hunter", 8),
+        ("d07|mosaic", 9),
+        ("d06|pxdesign", 10),
+    ]
+
+    def test_af3_run_ranks_exactly_as_before(self, runs):
+        df = runs["af3"].sort_values("rank")
+        assert list(zip(df["binder_id"], df["rank"].astype(int), strict=True)) == self.PRE_CHANGE_ORDER
+
+    def test_the_protenix_reslot_ranks_the_same(self, runs):
+        df = runs["prot"].sort_values("rank")
+        assert list(zip(df["binder_id"], df["rank"].astype(int), strict=True)) == self.PRE_CHANGE_ORDER
+
+
+class TestPrimaryEngineStructureColumns:
+    def test_esmfold2_keeps_its_old_fallback_to_the_boltz_structure(self):
+        from binder_comparison.visualization.report import _pri_cols
+
+        assert _pri_cols("esmfold2") == ["boltz_pdb", "pdb"]
+        assert _pri_cols("af3") == ["af3_pdb", "af3_cif", "boltz_pdb", "pdb"]
+        assert _pri_cols("protenix") == ["protenix_pdb", "protenix_cif", "boltz_pdb", "pdb"]

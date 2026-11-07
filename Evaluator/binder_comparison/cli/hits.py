@@ -33,12 +33,46 @@ from pathlib import Path
 import pandas as pd
 
 from ..comparison.hits import HITS_COLUMNS, hits_summary, select_hits
-from ..core.engines import SECOND_ENGINES
+from ..core.engines import SECOND_ENGINES, engine
 from ..io.read import read_csv_safe
 
 _ENGINES = "Boltz-2, AlphaFold3, ESMFold2"
 # The engines line as it is written for each second-slot engine (AF3's spelling is the workbook's historic one).
 _ENGINES_BY_SECOND = {"af3": _ENGINES, "protenix": "Boltz-2, Protenix, ESMFold2 (AF3 not used)"}
+
+
+def _engines_text(second: str) -> str:
+    """The engines line for *second*: the spelled-out ones above, else derived from the registry."""
+    return _ENGINES_BY_SECOND.get(second) or f"Boltz-2, {engine(second).display}, ESMFold2 (AF3 not used)"
+
+
+def _recorded_second_engine(candidates: Path) -> str | None:
+    """The second-slot engine recorded in the ``metrics.csv`` that sits beside *candidates*, if any.
+
+    ``report`` writes the constant ``second_engine`` column there. None when there is no such file
+    or column (a pool from before the panel was recorded, which was AF3), or when the column is
+    not one registered engine -- in which case the caller falls back to AF3 and says so.
+    """
+    metrics = candidates.parent / "metrics.csv"
+    if not metrics.exists():
+        return None
+    try:
+        header = pd.read_csv(metrics, nrows=0).columns
+        if "second_engine" not in header:
+            return None
+        values = pd.read_csv(metrics, usecols=["second_engine"])["second_engine"].dropna().unique()
+    except (OSError, ValueError, pd.errors.ParserError):
+        return None
+    if len(values) == 1 and str(values[0]) in SECOND_ENGINES:
+        return str(values[0])
+    print(
+        f"[hits] WARNING: {metrics} records second_engine={list(values)!r}, which is not one registered "
+        "engine; the workbook names AF3 unless --second-engine says otherwise.",
+        file=sys.stderr,
+    )
+    return None
+
+
 _TOOLS = "BindCraft, BoltzGen, Mosaic, Proteina-Complexa, PXDesign, Protein Hunter, RFDiffusion3"
 
 
@@ -91,7 +125,7 @@ def _write_sheet(
 
 
 def run(args: argparse.Namespace) -> None:
-    engines = _ENGINES_BY_SECOND[getattr(args, "second_engine", None) or "af3"]
+    explicit = getattr(args, "second_engine", None)
     metas = dict(_kv(m, "meta") for m in (args.meta or []))
     extras: dict[str, dict[str, int]] = {}
     for spec in args.extra or []:
@@ -104,12 +138,15 @@ def run(args: argparse.Namespace) -> None:
 
     out = Path(args.output)
     tables: dict[str, tuple[pd.DataFrame, dict]] = {}
+    seconds: dict[str, str] = {}
     for spec in args.candidates:
         target, path = _kv(spec, "candidates")
         p = Path(path)
         if not p.exists():
             print(f"Error: candidates file not found: {p}", file=sys.stderr)
             sys.exit(1)
+        # The flag wins; else the panel the report recorded beside this candidates.csv; else AF3 (old pools).
+        seconds[target] = explicit or _recorded_second_engine(p) or "af3"
         cand = read_csv_safe(p)
         missing = [c for c in ("Set", "Method", "Primary sequence") if c not in cand.columns]
         if missing:
@@ -148,20 +185,24 @@ def run(args: argparse.Namespace) -> None:
             "missing it was built before that was true -- reinstalling the package "
             "(pip install -e Evaluator) fixes it permanently."
         ) from exc
+    # One engines line for the info sheet; a workbook mixing panels lists each, never one panel's name for all.
+    info_engines = "; ".join(dict.fromkeys(_engines_text(sec) for sec in seconds.values())) or _ENGINES
     with pd.ExcelWriter(out, engine="openpyxl") as xl:
         info = pd.DataFrame(
             [
                 ["Version", "Date", "Contents"],
                 [args.version, args.date or "", f"Implemented 7 methods: {_TOOLS}"],
-                ["", "", f"Re-folding: {engines}"],
-                ["", "", f"Re-scoring: {engines}"],
-                ["", "", f"Global ranking: mean-ipTM of {engines}"],
+                ["", "", f"Re-folding: {info_engines}"],
+                ["", "", f"Re-scoring: {info_engines}"],
+                ["", "", f"Global ranking: mean-ipTM of {info_engines}"],
                 ["", "", f"Selection: top {args.per_tool} per tool + top {args.refolded} new by our ranking"],
             ]
         )
         info.to_excel(xl, sheet_name="BinderScout", index=False, header=False, startrow=3, startcol=1)
         for target, (hits, s) in tables.items():
-            _write_sheet(xl, target[:31], hits, _meta(metas.get(target, "")), s, args.version, engines)
+            _write_sheet(
+                xl, target[:31], hits, _meta(metas.get(target, "")), s, args.version, _engines_text(seconds[target])
+            )
     print(f"[hits] Written → {out}")
 
 
@@ -196,8 +237,9 @@ def add_parser(subparsers) -> None:
     p.add_argument(
         "--second-engine",
         choices=list(SECOND_ENGINES),
-        default="af3",
-        help="The engine that filled the report's second slot (default af3); names the panel in the workbook.",
+        default=None,
+        help="The engine that filled the report's second slot; names the panel in the workbook. Default: the "
+        "second_engine recorded in the metrics.csv beside each candidates.csv, else af3.",
     )
     p.add_argument("--version", default="1.0", help="BinderScout version written into the sheets (default 1.0).")
     p.add_argument("--date", default="", help="Date written into the info sheet.")

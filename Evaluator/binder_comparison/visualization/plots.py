@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
 from ..core.engines import Panel, resolve_panel
+from ..core.engines import engine as _registered_engine
 
 # Colour scheme per source tool
 TOOL_COLOURS = {
@@ -331,6 +332,21 @@ _ENGINE_RANK_COLS: dict[str, str] = {
 _ENGINE_DISPLAY = {"boltz": "Boltz-2", "af3": "AF3", "protenix": "Protenix", "esmfold2": "ESMFold2"}
 
 
+def _radar_metrics(name: str) -> list[tuple[str, str, str]]:
+    """Radar metrics of engine *name*: its row above, else the second-engine shape from its prefix."""
+    return _ENGINE_RADAR_METRICS.get(name) or [
+        (f"{name}_ipsae_min", "ipSAE_min", "↑"),
+        (f"{name}_iptm", "ipTM", "↑"),
+        (f"{name}_plddt_binder_mean", "pLDDT binder", "↑"),
+        (f"{name}_pae_bt_mean", "PAE b→t", "↓"),
+        (f"{name}_pae_tb_mean", "PAE t→b", "↓"),
+    ]
+
+
+def _display_name(name: str) -> str:
+    return _ENGINE_DISPLAY.get(name) or _registered_engine(name).display
+
+
 def _panel_engine_names(panel: Panel | None) -> list[str]:
     """The engines a per-engine plot may draw, in slot order (None: the default AF3 panel).
 
@@ -356,8 +372,8 @@ def plot_radar_per_engine(df: pd.DataFrame, top_n: int = 10, panel: Panel | None
     # Which engines actually have data?
     active_engines = []
     for e in _panel_engine_names(panel):
-        metrics = _ENGINE_RADAR_METRICS[e]
-        rank_col = _ENGINE_RANK_COLS.get(e)
+        metrics = _radar_metrics(e)
+        rank_col = _ENGINE_RANK_COLS.get(e, f"{e}_ipsae_min")
         if (
             rank_col
             and rank_col in df.columns
@@ -382,7 +398,7 @@ def plot_radar_per_engine(df: pd.DataFrame, top_n: int = 10, panel: Panel | None
 
     all_legend_handles: dict[str, object] = {}
     for ax, engine in zip(axes, active_engines):
-        rank_col = _ENGINE_RANK_COLS[engine]
+        rank_col = _ENGINE_RANK_COLS.get(engine, f"{engine}_ipsae_min")
         # per-tool top-N by this engine's ipsae_min
         per_tool_top: dict[str, pd.DataFrame] = {}
         for tool, gdf in df.groupby("source_tool"):
@@ -392,12 +408,12 @@ def plot_radar_per_engine(df: pd.DataFrame, top_n: int = 10, panel: Panel | None
                 per_tool_top[str(tool)] = top
         tools = sorted(per_tool_top.keys())
         if not tools:
-            ax.text(0.5, 0.5, f"No data for {_ENGINE_DISPLAY[engine]}", ha="center", va="center")
-            ax.set_title(_ENGINE_DISPLAY[engine])
+            ax.text(0.5, 0.5, f"No data for {_display_name(engine)}", ha="center", va="center")
+            ax.set_title(_display_name(engine))
             continue
 
         # Collect per-engine metrics, restrict to columns actually present
-        metric_specs = [m for m in _ENGINE_RADAR_METRICS[engine] if m[0] in df.columns]
+        metric_specs = [m for m in _radar_metrics(engine) if m[0] in df.columns]
         n_metrics = len(metric_specs)
         angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False).tolist() + [0.0]
 
@@ -426,7 +442,7 @@ def plot_radar_per_engine(df: pd.DataFrame, top_n: int = 10, panel: Panel | None
         labels = [lbl if d == "↑" else f"{lbl} (inv)" for _, lbl, d in metric_specs]
         ax.set_xticks(angles[:-1])
         ax.set_xticklabels(labels, size=8)
-        ax.set_title(f"{_ENGINE_DISPLAY[engine]} — top-{top_n} per tool", pad=14)
+        ax.set_title(f"{_display_name(engine)} — top-{top_n} per tool", pad=14)
 
     # Single shared legend below
     if all_legend_handles:
@@ -488,9 +504,7 @@ def plot_radar_per_engine_uniform_selection(
         ax.text(0.5, 0.5, "Not enough data per tool — radar skipped", ha="center", va="center")
         return fig
 
-    active_engines = [
-        e for e in _panel_engine_names(panel) if any(m[0] in df.columns for m in _ENGINE_RADAR_METRICS[e])
-    ]
+    active_engines = [e for e in _panel_engine_names(panel) if any(m[0] in df.columns for m in _radar_metrics(e))]
     if not active_engines:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No engine metric columns present", ha="center", va="center")
@@ -505,7 +519,7 @@ def plot_radar_per_engine_uniform_selection(
     tools = sorted(per_tool_top.keys())
     all_legend: dict[str, object] = {}
     for ax, engine in zip(axes, active_engines):
-        metric_specs = [m for m in _ENGINE_RADAR_METRICS[engine] if m[0] in df.columns]
+        metric_specs = [m for m in _radar_metrics(engine) if m[0] in df.columns]
         n_metrics = len(metric_specs)
         angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False).tolist() + [0.0]
         raw_array = np.array(
@@ -528,7 +542,7 @@ def plot_radar_per_engine_uniform_selection(
         labels = [lbl if d == "↑" else f"{lbl} (inv)" for _, lbl, d in metric_specs]
         ax.set_xticks(angles[:-1])
         ax.set_xticklabels(labels, size=8)
-        ax.set_title(f"{_ENGINE_DISPLAY[engine]} metrics on {pri_label}-top-{top_n}", pad=14)
+        ax.set_title(f"{_display_name(engine)} metrics on {pri_label}-top-{top_n}", pad=14)
 
     if all_legend:
         fig.legend(
@@ -644,7 +658,7 @@ _IPTM_RADAR_SPOKES: list[tuple[str, str]] = [
 ]
 
 
-def plot_radar_iptm(df: pd.DataFrame, top_n: int = 10, panel: Panel | None = None) -> Figure:
+def plot_radar_iptm(df: pd.DataFrame, top_n: int = 10) -> Figure:
     """Per-tool radar over the engine iPTMs — the two-stage view.
 
     Spokes = each available engine's iPTM (raw 0–1, NOT z-scored). One polygon
@@ -657,9 +671,10 @@ def plot_radar_iptm(df: pd.DataFrame, top_n: int = 10, panel: Panel | None = Non
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No source_tool — radar skipped", ha="center", va="center")
         return fig
-    spoke_defs = _IPTM_RADAR_SPOKES if panel is None else [(e.iptm_col, f"{e.display} iPTM") for e in panel.engines]
     spokes = [
-        (c, lbl) for c, lbl in spoke_defs if c in df.columns and pd.to_numeric(df[c], errors="coerce").notna().any()
+        (c, lbl)
+        for c, lbl in _IPTM_RADAR_SPOKES
+        if c in df.columns and pd.to_numeric(df[c], errors="coerce").notna().any()
     ]
     if len(spokes) < 2:
         fig, ax = plt.subplots()
