@@ -482,11 +482,12 @@ step by hand. `bash Evaluator/evaluate.sh --help` prints the same list.
 | `--min-engines N` | How many independent engines must have refolded a design for it to be eligible for the ranking. Default 3 = all of Boltz-2 / AF3 / ESMFold2; floor 2. Designs below the gate are ranked **last, not dropped**. Never lowered automatically — see the warning note below |
 | `--skip-boltz2` / `--skip-af3` / `--skip-esmfold2` | Skip an engine. Each is otherwise auto-detected from its conda env and skipped with a `[note]` if absent |
 | `--af3-env` / `--esmfold2-env` / `--soluprot-env` / `--bindcraft-env` | Override the conda env name for that step |
+| `--second-engine {af3,protenix}` / `--skip-second` / `--protenix-env` | Which engine fills the panel's one second slot (default AF3). Explicit wins and is never swapped: an unusable explicit engine is skipped by name. With no flag AF3 keeps the slot unless its env or weights are unusable; then Protenix is used if `--skip-af3` / `--skip-second` were not given and its env and checkpoint (`weights/protenix`, size-checked) are present, with a notice naming the panel. Scores from different panels are not on one scale. `--skip-second` skips whichever engine holds the slot |
 | `--esmfold2-model full\|fast` | ESMFold2 checkpoint (default `full`) |
 | `--skip-soluprot` / `--soluprot-threshold N` | Control the solubility screen (default threshold 0.5, the paper value) |
 | `--skip-tmprot` / `--tmprot-env ENV` / `--tmprot-threshold N` | Control the melting-temperature screen (default 60.0 °C, the cutoff TmProt's own AUC is reported against). Advisory only: it has no filter mode and must not grow one — and since 2026-09-28 neither has SoluProt |
 | ~~`--soluprot-filter`~~ | **Removed — now exits with an error.** SoluProt is a label, not a filter (see above). The score still reaches the report either way |
-| `--primary-engine boltz\|af3\|esmfold2` | Which engine's metrics are promoted as primary (default `boltz`) |
+| `--primary-engine boltz\|af3\|esmfold2\|protenix` | Which engine's metrics are promoted as primary (default `boltz`). `af3` / `protenix` are valid only while that engine holds the second slot; otherwise refused (exit 2) |
 | `--epitope-residues LIST` | Compute `epitope_match_fraction` inline against intended hotspots, e.g. `'15,18,232'`. Cheap, no extra pass |
 | `--with-affinity` | Opt-in: after the report, run the \|dG/dSASA\| affinity ranking (Rosetta, BindCraft env) on the top 20 and regenerate |
 | `--monomer-dir DIR` | Opt-in: binder-alone structures for the context-dependent-fold check (`fold_robust`) |
@@ -495,7 +496,7 @@ step by hand. `bash Evaluator/evaluate.sh --help` prints the same list.
 | `--resume` | Resume an interrupted run |
 | `--concurrent` | Run the three refold engines staggered-concurrently instead of one after another. Worth ~1.25x (19.8 % wall-clock, measured), but it costs ~54 % of the OS memory headroom — use it only when the box is dedicated |
 | `--stagger N` | Seconds between engine starts under `--concurrent` (default 30). Staggering stops three engines compiling at once |
-| `--gpu-cap-boltz2` / `--gpu-cap-af3` / `--gpu-cap-esmfold2` | Per-engine CUDA MPS device-memory cap (defaults `24G` / `12G` / `24G`). On a unified-memory host (DGX Spark / GB10) the GPU pool **is** system RAM, so an uncapped engine reserves a fraction of the whole machine and can starve the OS. Caps are set at ~1.4-1.5x measured demand |
+| `--gpu-cap-boltz2` / `--gpu-cap-af3` / `--gpu-cap-esmfold2` / `--gpu-cap-protenix` | Per-engine CUDA MPS device-memory cap (defaults `24G` / `12G` / `24G` / `24G`; Protenix is a PyTorch ceiling set above its measured ~20.4 GiB peak on a 779-token complex). On a unified-memory host (DGX Spark / GB10) the GPU pool **is** system RAM, so an uncapped engine reserves a fraction of the whole machine and can starve the OS. Caps are set at ~1.4-1.5x measured demand |
 | `--no-gpu-guard` | Do not start the CUDA MPS guard. Only for hosts with a discrete card, where a runaway allocation kills the process rather than the machine |
 
 > **The gate defaults to 3, and some hosts run two engines.** AF3 itself fits a 24 GB card

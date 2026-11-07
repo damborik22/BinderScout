@@ -39,6 +39,9 @@ gb10_budget () {
                                      # model, measured on THIS box at 17,187 MiB (PLAN:78). Repo cap
                                      # convention is 1.3-1.5x measured peak -> 24, same as Boltz-2 refold.
         pxdesign)       echo 32 ;;
+        protenix)       echo 24 ;;   # Evaluator Protenix refold, the opt-in second engine in place of AF3 (12).
+                                     # Measured peak ~20.4 GiB card-wide on a 779-token complex (a 24 GB card
+                                     # was the ceiling for the choice), so 24 is above it. A torch CEILING.
         protein-hunter) echo 48 ;;   # ~26-30 GiB at N=400. NOTE: spawns a LigandMPNN child every cycle
                                      # which INHERITS the MPS limit, so the worst-case allowance is 2x.
         *)              echo 20 ;;
@@ -56,7 +59,9 @@ gb10_budget () {
 # 3. mosaic at 56 GiB is effectively EXCLUSIVE - it reserves that at import, so nothing else of
 #    consequence fits alongside it. Do not start a refold or a design campaign next to it.
 # 4. bindcraft 24 + the full three-engine refold stack (Boltz-2 24 + AF3 12 + ESMFold2 24 = 60)
-#    is 84 GiB > 81.7. Stagger them or drop an engine.
+#    is 84 GiB > 81.7. Stagger them or drop an engine. When Protenix holds the second slot instead
+#    of AF3 (evaluate.sh --second-engine protenix) its 24 replaces AF3's 12: 24 + 24 + 24 = 72, and
+#    bindcraft 24 + that stack is 96 GiB.
 
 # Which framework does the GPU allocation on each tool. This is not cosmetic: it decides whether
 # the budget is a RESERVATION (JAX preallocates it at import) or a CEILING (PyTorch grows into it),

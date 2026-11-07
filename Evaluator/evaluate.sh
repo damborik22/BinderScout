@@ -19,6 +19,17 @@
 #   --skip-boltz2          skip Boltz-2 refolding (use existing boltz2_results.csv)
 #   --skip-af3             skip AF3 refolding (default: auto-detect binder-eval-af3 env)
 #   --af3-env ENV          conda env for AF3 (default: binder-eval-af3)
+#   --second-engine ENG    which engine fills the SECOND slot of the panel: af3 | protenix.
+#                          The panel is always Boltz-2 + <second> + ESMFold2, never four engines.
+#                          Explicit wins and is never switched: an unusable explicit engine is
+#                          skipped BY NAME. Without the flag the slot is AF3 when its env and
+#                          weights are usable; otherwise Protenix, but only if --skip-af3 /
+#                          --skip-second were not given and Protenix's env and weights are
+#                          present (a notice names the panel). Scores from different panels
+#                          are not on one scale.
+#   --protenix-env ENV     conda env for Protenix (default: binder-eval-protenix); its weights are
+#                          read from <checkout>/weights/protenix (binderscout install --tool protenix)
+#   --skip-second          skip whichever engine holds the second slot (AF3 or Protenix)
 #   --skip-esmfold2        skip ESMFold2 refolding (default: auto-detect binder-eval-esmfold2 env)
 #   --esmfold2-env ENV     conda env for ESMFold2 (default: binder-eval-esmfold2)
 #   --esmfold2-model V     ESMFold2 checkpoint: full | fast (default: full)
@@ -44,9 +55,12 @@
 #                          preallocating at once -- not steady state.
 #   --gpu-cap-boltz2 N     per-engine GPU ceiling, e.g. 24G (default: 24G)
 #   --gpu-cap-af3 N        default: 12G
+#   --gpu-cap-protenix N   default: 24G (env BINDERSCOUT_GPU_CAP_PROTENIX). A PyTorch ceiling, set above
+#                          the measured peak of ~20.4 GiB card-wide on a 779-token complex
 #   --gpu-cap-esmfold2 N   default: 24G
 #   --no-gpu-guard         do NOT apply the MPS ceiling (unsafe on unified memory)
-#   --primary-engine ENG   primary ranking engine: boltz | af3 | esmfold2 (default: boltz)
+#   --primary-engine ENG   primary ranking engine: boltz | af3 | esmfold2 | protenix (default: boltz).
+#                          af3 / protenix are valid only when that engine holds the second slot
 #   --min-engines N        how many independent engines must have refolded a design for it
 #                          to be eligible for the ranking (default 3 = all of Boltz-2 / AF3 /
 #                          ESMFold2; floor 2). Designs below the gate are ranked LAST, not
@@ -245,6 +259,18 @@ ALLOW_NO_MSA=${BINDERSCOUT_ALLOW_NO_MSA:-0}
 SKIP_BOLTZ2=0
 SKIP_AF3=0
 AF3_ENV="binder-eval-af3"
+# The second slot of the panel: AF3 (default) or Protenix. SECOND_FLAG is what the operator asked for
+# ("" = decide below); SECOND_ENGINE is what the run uses once that is decided. Never both.
+SECOND_FLAG=""
+SECOND_ENGINE="af3"
+SKIP_SECOND=0
+SKIP_PROTENIX=1          # cleared only when Protenix holds the slot and is not skipped
+PROTENIX_ENV="binder-eval-protenix"
+# What the installer's --tool protenix leaves behind: <checkout>/weights/protenix/checkpoint/<model>.pt,
+# exactly this many bytes. A different size is a truncated or foreign file, refused up front.
+PROTENIX_MODEL="protenix_base_default_v1.0.0"
+PROTENIX_CKPT_BYTES=1475950125
+PROTENIX_WEIGHTS_DIR="${_BINDERSCOUT_DIR}/weights/protenix"
 SKIP_ESMFOLD2=0
 ESMFOLD2_ENV="binder-eval-esmfold2"
 ESMFOLD2_MODEL="full"
@@ -263,6 +289,9 @@ CONCURRENT=0
 STAGGER=${BINDERSCOUT_STAGGER_S:-30}
 GPU_CAP_BOLTZ2=${BINDERSCOUT_GPU_CAP_BOLTZ2:-24G}
 GPU_CAP_AF3=${BINDERSCOUT_GPU_CAP_AF3:-12G}
+# Protenix: a NON-DEFAULT setting relative to AF3's 12G. A PyTorch ceiling (it does not preallocate),
+# set above the measured peak of ~20.4 GiB card-wide on a 779-token complex, so it never binds.
+GPU_CAP_PROTENIX=${BINDERSCOUT_GPU_CAP_PROTENIX:-24G}
 GPU_CAP_ESMFOLD2=${BINDERSCOUT_GPU_CAP_ESMFOLD2:-24G}
 USE_GPU_GUARD=1
 MIN_ENGINES=""          # empty = let binder-compare apply its own default (3)
@@ -286,6 +315,15 @@ while [[ $# -gt 0 ]]; do
         --skip-boltz2)    SKIP_BOLTZ2=1;     shift ;;
         --skip-af3)       SKIP_AF3=1;        shift ;;
         --af3-env)        AF3_ENV="$2";      shift 2 ;;
+        --second-engine)
+            SECOND_FLAG="${2:-}"
+            case "$SECOND_FLAG" in
+                af3|protenix) ;;
+                *) echo "Error: --second-engine must be one of: af3, protenix (got '$SECOND_FLAG')" >&2; exit 2 ;;
+            esac
+            shift 2 ;;
+        --protenix-env)   PROTENIX_ENV="$2"; shift 2 ;;
+        --skip-second)    SKIP_SECOND=1;     shift ;;
         --skip-esmfold2)  SKIP_ESMFOLD2=1;   shift ;;
         --esmfold2-env)   ESMFOLD2_ENV="$2"; shift 2 ;;
         --esmfold2-model) ESMFOLD2_MODEL="$2"; shift 2 ;;
@@ -312,13 +350,14 @@ while [[ $# -gt 0 ]]; do
         --stagger)            STAGGER="$2";              shift 2 ;;
         --gpu-cap-boltz2)     GPU_CAP_BOLTZ2="$2";       shift 2 ;;
         --gpu-cap-af3)        GPU_CAP_AF3="$2";          shift 2 ;;
+        --gpu-cap-protenix)   GPU_CAP_PROTENIX="$2";     shift 2 ;;
         --gpu-cap-esmfold2)   GPU_CAP_ESMFOLD2="$2";     shift 2 ;;
         --no-gpu-guard)       USE_GPU_GUARD=0;           shift ;;
         --primary-engine)
             PRIMARY_ENGINE="$2"
             case "$PRIMARY_ENGINE" in
-                boltz|af3|esmfold2) ;;
-                *) echo "Error: --primary-engine must be one of: boltz, af3, esmfold2 (got '$PRIMARY_ENGINE')" >&2; exit 1 ;;
+                boltz|af3|esmfold2|protenix) ;;
+                *) echo "Error: --primary-engine must be one of: boltz, af3, esmfold2, protenix (got '$PRIMARY_ENGINE')" >&2; exit 1 ;;
             esac
             shift 2 ;;
         --min-engines)
@@ -395,6 +434,24 @@ _env_missing_reason() {
 # Every optional engine / screen skipped for want of an env, with the reason, for one summary.
 _SKIPPED=()
 
+# --- the second slot ---------------------------------------------------------
+# The panel has exactly one second engine, AF3 or Protenix, and it is decided HERE, once, before
+# anything is detected. An explicit --second-engine wins and is never swapped for the other engine.
+# With no flag AF3 keeps the slot unless it turns out to be unusable (see the fallback below).
+# --skip-af3 still means "skip the AF3 slot"; --skip-second skips whichever engine holds it.
+_AUTO_SECOND=0
+if [[ -n "$SECOND_FLAG" ]]; then
+    SECOND_ENGINE="$SECOND_FLAG"
+elif [[ $SKIP_AF3 -eq 0 && $SKIP_SECOND -eq 0 ]]; then
+    _AUTO_SECOND=1
+fi
+if [[ "$SECOND_ENGINE" == "protenix" ]]; then
+    SKIP_AF3=1                                   # AF3 is not in this panel: no detection, no notes
+    [[ $SKIP_SECOND -eq 1 ]] || SKIP_PROTENIX=0
+elif [[ $SKIP_SECOND -eq 1 ]]; then
+    SKIP_AF3=1
+fi
+
 # Auto-detect AF3 availability unless user skipped it
 if [[ $SKIP_AF3 -eq 0 ]]; then
     if _why="$(_env_missing_reason "${AF3_ENV}")"; then
@@ -446,6 +503,62 @@ if [[ $SKIP_AF3 -eq 0 ]]; then
         echo ""
         SKIP_AF3=1
     fi
+fi
+
+# Protenix: usable means its conda env exists AND the one checkpoint the installer fetched is
+# there at exactly its published size (a size check, as the installer's own). Prints why not and
+# succeeds when it is NOT usable; fails (prints nothing) when it is.
+_protenix_unusable_reason () {
+    local ckpt="${PROTENIX_WEIGHTS_DIR}/checkpoint/${PROTENIX_MODEL}.pt" size
+    if _why="$(_env_missing_reason "${PROTENIX_ENV}")"; then
+        echo "${_why}"
+        return 0
+    fi
+    if [[ ! -f "${ckpt}" ]]; then
+        echo "no Protenix weights found (env '${PROTENIX_ENV}' is installed)"
+        return 0
+    fi
+    size="$(stat -Lc %s "${ckpt}" 2>/dev/null || echo 0)"
+    if [[ "${size}" != "${PROTENIX_CKPT_BYTES}" ]]; then
+        echo "Protenix checkpoint is ${size} bytes, expected ${PROTENIX_CKPT_BYTES} (env '${PROTENIX_ENV}' is installed)"
+        return 0
+    fi
+    return 1
+}
+
+_PANEL_NOTE="panel Boltz-2 + Protenix + ESMFold2; scores from different panels are not on one scale."
+if [[ "$SECOND_ENGINE" == "protenix" && $SKIP_PROTENIX -eq 0 ]]; then
+    # Explicit --second-engine protenix: used if it can run, else skipped BY NAME -- never swapped.
+    if _why="$(_protenix_unusable_reason)"; then
+        echo "[note] ${_why} — Protenix refolding will be skipped."
+        _SKIPPED+=("Protenix: ${_why}")
+        echo "        Expected the checkpoint at ${PROTENIX_WEIGHTS_DIR}/checkpoint/${PROTENIX_MODEL}.pt (${PROTENIX_CKPT_BYTES} bytes)."
+        echo "        (install with 'binderscout install --tool protenix'; opt-in, no AF3 weights needed)"
+        echo ""
+        SKIP_PROTENIX=1
+    else
+        echo "[note] second engine: Protenix (--second-engine protenix); ${_PANEL_NOTE}"
+        echo ""
+    fi
+elif [[ $_AUTO_SECOND -eq 1 && $SKIP_AF3 -eq 1 ]]; then
+    # No flag, and the AF3 detection above just dropped AF3 (env or weights). Fall back to Protenix
+    # only when it is fully usable; otherwise say nothing new and the slot is skipped by name as before.
+    if ! _protenix_unusable_reason >/dev/null; then
+        SECOND_ENGINE="protenix"
+        SKIP_PROTENIX=0
+        echo "[note] second engine: Protenix (AF3 not available); ${_PANEL_NOTE}"
+        echo ""
+    fi
+fi
+
+# The primary engine must be one of THIS panel: af3 only while AF3 holds the slot, protenix only
+# while Protenix does. Refused rather than reinterpreted -- the panel is what the ranking means.
+if [[ "$PRIMARY_ENGINE" == "af3" && "$SECOND_ENGINE" != "af3" ]] \
+    || [[ "$PRIMARY_ENGINE" == "protenix" && "$SECOND_ENGINE" != "protenix" ]]; then
+    echo "Error: --primary-engine ${PRIMARY_ENGINE} is not in this panel: the second slot holds ${SECOND_ENGINE}" >&2
+    echo "       (panel: Boltz-2 + ${SECOND_ENGINE} + ESMFold2). Choose boltz, esmfold2 or ${SECOND_ENGINE}," >&2
+    echo "       or pass --second-engine ${PRIMARY_ENGINE}." >&2
+    exit 2
 fi
 
 # Auto-detect ESMFold2 availability unless user skipped it
@@ -564,6 +677,7 @@ fi
 # an engine that is skipped but already has its CSV on disk still counts toward the gate.
 BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
 AF3_CSV="$OUTPUT/af3_results.csv"
+PROTENIX_CSV="$OUTPUT/protenix_results.csv"
 ESMFOLD2_CSV="$OUTPUT/esmfold2_results.csv"
 
 # What matters for the gate is how many engines the REPORT will have, not how many run
@@ -572,10 +686,17 @@ ESMFOLD2_CSV="$OUTPUT/esmfold2_results.csv"
 # all three engines were in fact present.
 _N_ENGINES=0
 [[ $SKIP_BOLTZ2   -eq 0 || -f "$BOLTZ2_CSV"   ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
-[[ $SKIP_AF3      -eq 0 || -f "$AF3_CSV"      ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+if [[ "$SECOND_ENGINE" == "protenix" ]]; then
+    [[ $SKIP_PROTENIX -eq 0 || -f "$PROTENIX_CSV" ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+else
+    [[ $SKIP_AF3      -eq 0 || -f "$AF3_CSV"      ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+fi
 [[ $SKIP_ESMFOLD2 -eq 0 || -f "$ESMFOLD2_CSV" ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
 if [[ -z "$MIN_ENGINES" ]] && (( _N_ENGINES < 3 )); then
     echo "[warn] ${_N_ENGINES} refold engine(s) will reach the report, but the cross-engine gate defaults to 3."
+    if [[ "$SECOND_ENGINE" == "protenix" && $SKIP_PROTENIX -eq 1 && ! -f "$PROTENIX_CSV" ]]; then
+        echo "       The second slot is Protenix and it is not running (no $(basename "$PROTENIX_CSV") either)."
+    fi
     echo "       Every design will fail the gate and be ranked last, leaving no ranked shortlist."
     if (( _N_ENGINES >= 2 )); then
         echo "       To rank on the engines you have, re-run with:  --min-engines ${_N_ENGINES}"
@@ -622,6 +743,7 @@ if [[ $CONCURRENT -eq 1 ]]; then
 else
     [[ $SKIP_BOLTZ2 -eq 0 ]]   && (( N_STEPS++ ))
     [[ $SKIP_AF3 -eq 0 ]]      && (( N_STEPS++ ))
+    [[ $SKIP_PROTENIX -eq 0 ]] && (( N_STEPS++ ))
     [[ $SKIP_ESMFOLD2 -eq 0 ]] && (( N_STEPS++ ))
 fi
 [[ $SKIP_SOLUPROT -eq 0 ]] && (( N_STEPS++ ))
@@ -708,7 +830,7 @@ fi
 # a3m. Each engine also enforces this itself, so correctness does not depend on
 # this step -- but without it a cold-cache failure surfaces only after the first
 # engine has loaded its weights, which on AF3 is minutes of GPU time.
-if [[ $SKIP_BOLTZ2 -eq 0 || $SKIP_AF3 -eq 0 || $SKIP_ESMFOLD2 -eq 0 ]]; then
+if [[ $SKIP_BOLTZ2 -eq 0 || $SKIP_AF3 -eq 0 || $SKIP_PROTENIX -eq 0 || $SKIP_ESMFOLD2 -eq 0 ]]; then
     echo "[msa] Pre-warming shared target MSA cache..."
     if conda run -n binder-eval python -m binder_comparison.refolding.target_msa \
             --target-seq "$TARGET_SEQ" >/dev/null 2>&1; then
@@ -799,6 +921,19 @@ engine_af3 () {
         --output-dir "$OUTPUT/refold_af3" $f
 }
 # shellcheck disable=SC2046
+engine_protenix () {
+    local f=""; [[ $RESUME -eq 1 ]] && f="--resume"
+    # No kernel option is passed on purpose: refold-protenix forces the torch kernels itself (R5) and
+    # refuses any attempt to set them. It must run INSIDE the Protenix env, hence `conda run -n`.
+    env $(cap_env "$GPU_CAP_PROTENIX") conda run -n "${PROTENIX_ENV}" binder-compare refold-protenix \
+        --sequences "$SEQUENCES" --target-seq "$TARGET_SEQ" -o "$PROTENIX_CSV" \
+        --output-dir "$OUTPUT/refold_protenix" --model-dir "$PROTENIX_WEIGHTS_DIR" $f
+}
+# The second slot: one function the launch paths call, whichever engine holds it.
+engine_second () {
+    if [[ "$SECOND_ENGINE" == "protenix" ]]; then engine_protenix; else engine_af3; fi
+}
+# shellcheck disable=SC2046
 engine_esmfold2 () {
     local f=""; [[ $RESUME -eq 1 ]] && f="--resume"
     env $(cap_env "$GPU_CAP_ESMFOLD2") conda run -n "${ESMFOLD2_ENV}" binder-compare refold-esmfold2 \
@@ -873,6 +1008,7 @@ engine_csv () {
     case "$1" in
         boltz2)   echo "$BOLTZ2_CSV" ;;
         af3)      echo "$AF3_CSV" ;;
+        protenix) echo "$PROTENIX_CSV" ;;
         esmfold2) echo "$ESMFOLD2_CSV" ;;
         *)        echo "" ;;
     esac
@@ -940,7 +1076,8 @@ if [[ $CONCURRENT -eq 1 ]]; then
         echo "       Fix the guard ($GUARD verify) or drop --concurrent." >&2
         exit 2
     fi
-    echo "[step ${STEP}/${N_STEPS}] Refolding — ${STAGGER}s staggered starts, caps ${GPU_CAP_BOLTZ2}/${GPU_CAP_AF3}/${GPU_CAP_ESMFOLD2}"
+    if [[ "$SECOND_ENGINE" == "protenix" ]]; then GPU_CAP_SECOND="$GPU_CAP_PROTENIX"; else GPU_CAP_SECOND="$GPU_CAP_AF3"; fi
+    echo "[step ${STEP}/${N_STEPS}] Refolding — ${STAGGER}s staggered starts, caps ${GPU_CAP_BOLTZ2}/${GPU_CAP_SECOND}/${GPU_CAP_ESMFOLD2}"
     # Stagger exists because the measured peak is the simultaneous COLD START -- all
     # engines preallocating at once -- not steady state. On 2026-08-20 a simultaneous
     # launch peaked at 56.2 GiB and logged one NVRM NV_ERR_NO_MEMORY; 40 s later usage
@@ -957,7 +1094,8 @@ if [[ $CONCURRENT -eq 1 ]]; then
         DELAY=$(( DELAY + STAGGER ))
     }
     [[ $SKIP_BOLTZ2 -eq 0 ]]   && launch_engine boltz2   engine_boltz2
-    [[ $SKIP_AF3 -eq 0 ]]      && launch_engine af3      engine_af3
+    [[ $SKIP_AF3 -eq 0 ]]      && launch_engine af3      engine_second
+    [[ $SKIP_PROTENIX -eq 0 ]] && launch_engine protenix engine_second
     [[ $SKIP_ESMFOLD2 -eq 0 ]] && launch_engine esmfold2 engine_esmfold2
 
     ENGINE_FAIL=0
@@ -987,7 +1125,13 @@ else
 
     if [[ $SKIP_AF3 -eq 0 ]]; then
         echo "[step ${STEP}/${N_STEPS}] AF3 refolding       (conda env: ${AF3_ENV}, cap ${GPU_CAP_AF3})..."
-        run_engine_checked "AF3" engine_af3 "$AF3_CSV"
+        run_engine_checked "AF3" engine_second "$AF3_CSV"
+        (( STEP++ ))
+    fi
+
+    if [[ $SKIP_PROTENIX -eq 0 ]]; then
+        echo "[step ${STEP}/${N_STEPS}] Protenix refolding  (conda env: ${PROTENIX_ENV}, cap ${GPU_CAP_PROTENIX})..."
+        run_engine_checked "Protenix" engine_second "$PROTENIX_CSV"
         (( STEP++ ))
     fi
 
@@ -1012,8 +1156,25 @@ REPORT_ARGS=(
 # design failed the >=3-engine gate. That is the same silent-demotion failure the
 # ESMC-6B bug caused: a design must not be demoted for a bookkeeping reason and have
 # that read as a quality judgement. Include any engine whose CSV is present.
-if [[ -f "$AF3_CSV" ]]; then
-    REPORT_ARGS+=(--af3-results "$AF3_CSV")
+# The second slot holds ONE engine. The AF3 slot is passed exactly as ever (--af3-results, no
+# --second-engine); the Protenix slot is named, so the report records the right panel. A CSV left in
+# the output directory by the engine that does NOT hold the slot is never passed -- columns of the
+# other engine are never averaged in (R3) -- and the operator is told.
+if [[ "$SECOND_ENGINE" == "protenix" ]]; then
+    REPORT_ARGS+=(--second-engine protenix)
+    if [[ -f "$PROTENIX_CSV" ]]; then
+        REPORT_ARGS+=(--second-results "$PROTENIX_CSV")
+    fi
+    if [[ -f "$AF3_CSV" ]]; then
+        echo "[note] ignoring $AF3_CSV: the second slot holds Protenix in this run."
+    fi
+else
+    if [[ -f "$AF3_CSV" ]]; then
+        REPORT_ARGS+=(--af3-results "$AF3_CSV")
+    fi
+    if [[ -f "$PROTENIX_CSV" ]]; then
+        echo "[note] ignoring $PROTENIX_CSV: the second slot holds AF3 in this run."
+    fi
 fi
 if [[ -f "$ESMFOLD2_CSV" ]]; then
     REPORT_ARGS+=(--esmfold2-results "$ESMFOLD2_CSV")
