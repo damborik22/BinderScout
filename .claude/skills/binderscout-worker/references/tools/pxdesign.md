@@ -73,4 +73,4 @@ Wall: <h> on <GPU>. Compute: <GPU-h>.
 Packaged: <TARGET>_PXDesign_<machine>.tar.gz (<size>).
 ```
 
-**Note about cross-validation:** PXDesign uses Protenix internally as its design-time evaluator. The orchestrator's Part J Protenix refolder shares this — for PXDesign outputs, Boltz-2 and AF3 give cleaner independent cross-validation than Protenix refold does. See `binderscout-orchestrator/references/tools/README.md`.
+**Note about cross-validation:** PXDesign uses Protenix internally as its design-time evaluator. The opt-in Protenix refold engine (own env `binder-eval-protenix`, not this one) shares this — for PXDesign outputs, Boltz-2 and AF3 give cleaner independent cross-validation than Protenix refold does. See `binderscout-orchestrator/references/tools/README.md`.

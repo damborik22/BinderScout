@@ -5197,6 +5197,20 @@ def second_slot(cfg: dict) -> tuple[str, bool]:
     return engine, bool(cfg.get("use_af3", False))
 
 
+def check_panel(cfg: dict) -> None:
+    """Refuse an incoherent panel: bad second_engine, both second engines, or a primary outside the panel.
+
+    The panel has one second slot; naming the engine the slot does not hold would be refused by
+    evaluate.sh after the extract step, so refuse it while it costs nothing. cmd_from_config calls
+    this before any file is written; write_run_evaluate calls it again as a second guard.
+    """
+    second_engine, _on = second_slot(cfg)
+    primary = cfg.get("primary_engine", "boltz")
+    if (primary == "af3" and second_engine == "protenix") or (primary == "protenix" and second_engine == "af3"):
+        print_fail(f"primary_engine {primary!r} is not in this panel: second_engine is {second_engine!r}.")
+        sys.exit(1)
+
+
 def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     """Generate run_evaluate.sh — calls Evaluator/evaluate.sh with the right paths."""
     run_dir = cfg["run_dir"]
@@ -5357,11 +5371,7 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         lines.append(f"    --tmprot-threshold {cfg.get('tmprot_threshold', 60.0)} \\")
 
     primary = cfg.get("primary_engine", "boltz")
-    # The panel has one second slot; naming the engine the slot does not hold would be refused
-    # by evaluate.sh after the extract step, so refuse it here while it costs nothing.
-    if (primary == "af3" and second_engine == "protenix") or (primary == "protenix" and second_engine == "af3"):
-        print_fail(f"primary_engine {primary!r} is not in this panel: second_engine is {second_engine!r}.")
-        sys.exit(1)
+    check_panel(cfg)
     lines.append(f"    --primary-engine {primary} \\")
 
     # Emitted ONLY when the operator chose it -- the wizard prompt below, or by hand in
@@ -5747,6 +5757,9 @@ def cmd_from_config(config_path: str, run_now: bool) -> None:
     # here rather than a KeyError traceback. generate() calls preflight again; it only
     # prints on failure, so the repeat is free.
     preflight(cfg, tools_enabled)
+    # Before the run folder exists: an incoherent panel must not leave a half-generated one.
+    if tools_enabled.get("evaluator"):
+        check_panel(cfg)
 
     print_step(f"Generating run folder from {config_path}")
     print(f"  Run folder: {run_dir}")

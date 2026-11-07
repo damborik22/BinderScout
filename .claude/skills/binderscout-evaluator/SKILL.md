@@ -31,7 +31,7 @@ binder-compare monomer  --complex-dir … --monomer-dir … -o monomer.csv
 via `--second-engine protenix` (opt-in; `--skip-second` skips whichever holds the slot). `metrics.csv`
 records the panel in the constant columns `panel` and `second_engine`, and the HTML names it. Scores
 from different panels are **not on one scale** — never compare an AF3-panel `consensus_iptm_mean`
-with a Protenix-panel one. Protenix columns are named `protenix_*`.
+with a Protenix-panel one. Protenix columns are named `protenix_*`. A wizard pick of AF3 does not pin the slot (AF3's emission carries no `--second-engine af3`, which keeps old run scripts byte-identical), so on a box where AF3's weights are absent `evaluate.sh` may use Protenix with a notice; pass `--second-engine af3` explicitly to prevent that.
 
 ## 2. Reading the ranking  →  see `references/ranking.md`
 ONE ranking: cross-engine gate → `consensus_iptm_mean` (`--rank-by` / `--screen-metric` were

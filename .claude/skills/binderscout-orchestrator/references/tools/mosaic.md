@@ -55,7 +55,7 @@ Mosaic's native `ranking_loss` is preserved in `summary.csv`; `bt_ipsae` / `ipsa
 **Parser quirks:**
 - `designs.csv` can mix old 11-column and new 13-column formats when multiple workers run concurrently. Parser may misalign — documented in `Evaluator/docs/pipeline_reference.md`.
 - `target_sequence` column may contain `"REPLACE_ME"` (template placeholder when the run script wasn't fully configured). Evaluator's CSV fallback skips these rows.
-- PAE matrix is native `[binder|target]` ordering (Boltz-2 convention) — column prefix `boltz_pae_*` to distinguish from `af3_*` / `esmfold2_*` (`protenix_*` was retired — Part J reverted).
+- PAE matrix is native `[binder|target]` ordering (Boltz-2 convention) — column prefix `boltz_pae_*` to distinguish from `af3_*` / `esmfold2_*` (`protenix_*` columns exist only when the opt-in Protenix second engine is used, `--second-engine protenix`).
 - pLDDT scale is [0,1] (Boltz-2 native, not the [0,100] AF3 convention).
 - `refold_boltz2.py` appends to CSV — check for duplicate `run_id` if rerun after partial failure.
 

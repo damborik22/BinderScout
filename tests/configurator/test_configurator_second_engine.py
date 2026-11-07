@@ -421,3 +421,37 @@ def test_the_skills_name_the_second_engine_option(rel):
     text = (REPO / rel).read_text()
     assert "--second-engine protenix" in text
     assert "second_engine" in text or "not on one scale" in text
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"second_engine": "protenix", "use_af3": True},
+        {"second_engine": "protenix", "primary_engine": "af3"},
+        {"second_engine": "af2"},
+    ],
+)
+def test_an_incoherent_headless_config_creates_no_run_folder(tmp_path, fake_checkout, replay, over):
+    proc = replay(_config(tmp_path, over), fake_checkout, tmp_path)
+    assert proc.returncode == 1, (proc.stdout + proc.stderr)[-1500:]
+    assert not (fake_checkout / "runs" / "r").exists(), "refused AFTER creating the run folder"
+
+
+# ------------------------------------------------------------------ stale statements stay out of the docs
+
+PROTENIX_DOC = REPO / ".claude" / "skills" / "binderscout-orchestrator" / "references" / "tools" / "protenix.md"
+
+
+def test_the_protenix_reference_no_longer_says_the_refolder_is_gone():
+    text = PROTENIX_DOC.read_text()
+    status = next(line for line in text.splitlines() if line.startswith("**Status:**"))
+    assert "gone" not in status
+    assert "binder-eval-protenix" in text and "--second-engine protenix" in status
+
+
+def test_no_doc_carries_the_wrong_memory_figure():
+    """20.4-20.8 GiB card-wide was measured; 21.3 GiB was a mis-transcription."""
+    for path in (REPO / ".claude").rglob("*.md"):
+        if "worktrees" in path.parts:
+            continue
+        assert "21.3 GiB" not in path.read_text(), path

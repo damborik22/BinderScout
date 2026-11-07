@@ -225,7 +225,7 @@ foundry install ligandmpnn
 ```
 
 ### Second refold engine: AF3 (default) or Protenix (opt-in)
-The panel needs exactly one second engine. AF3 is the default; if its gated weights are absent, either put them in place or use Protenix: `install --tool protenix` shows the Apache-2.0 v1.x licence and the weight host, asks before downloading, and `evaluate.sh --second-engine protenix` runs it (fits a 24 GB card, ~21.3 GiB peak on a 779-token complex). Never both; the panel is recorded in `metrics.csv` and its scores are not on one scale with the other panel's.
+The panel needs exactly one second engine. AF3 is the default; if its gated weights are absent, either put them in place or use Protenix: `install --tool protenix` shows the Apache-2.0 v1.x licence and the weight host, asks before downloading, and `evaluate.sh --second-engine protenix` runs it (peak about 20.4-20.8 GiB card-wide on the largest (~780-token) complexes (nvidia-smi sampled; 24 GB RTX 3090 and a 46 GiB L40S), so a 24 GB card fits with about 3 GiB to spare, less if the card also drives a display). Never both; the panel is recorded in `metrics.csv` and its scores are not on one scale with the other panel's.
 
 ### AF3 (refold use only, aarch64)
 

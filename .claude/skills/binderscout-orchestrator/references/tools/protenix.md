@@ -2,15 +2,17 @@
 
 **Engine:** AF3-class diffusion-based all-atom structure predictor from ByteDance AI4S. Open-source AlphaFold3 reimplementation with multiple checkpoint variants (Protenix-v2 ~464 M params, Protenix-v1 base ~368 M, Protenix-Mini ~lightweight, Protenix-Mini-Tmpl with template support). Outperformed AF3 on diverse benchmarks at matched training cutoff per the v1 paper; v2 adds antibody-antigen and ligand-plausibility improvements.
 **Role (default):** background only — used internally at design time by **PXDesign**, which is built on it. It is **not** a refold engine unless the opt-in below is chosen.
-**Status:** retired as a refolder (2026-07-26). Part J was reverted: AF3 fills the independent-cross-check role, so `refold-protenix` and every `protenix_*` column are gone. Kept here because PXDesign's `ptx_iptm` / `pxdesign_protenix_iptm` come from this engine — a *native* metric, biased toward PXDesign's own designs and never used for ranking.
+**Status:** the Part J refolder was retired on 2026-07-26 (AF3 filled the independent-cross-check role then). Protenix is back ONLY as an opt-in second refold engine (`--second-engine protenix`, a separate env `binder-eval-protenix`, columns `protenix_*`; see "Refold-engine use" below). PXDesign's internal Protenix is unchanged. Kept here because PXDesign's `ptx_iptm` / `pxdesign_protenix_iptm` come from this engine — a *native* metric, biased toward PXDesign's own designs and never used for ranking.
 **Environment:** `binderscout_pxdesign` (PXDesign's env; the `protenix` package and its sm_120 / LayerNorm patches are still installed there for design)
 
 ## Refold-engine use (opt-in second engine; separate from the PXDesign use above)
 
 Protenix v1.x can fill the **second slot** of the refold panel in place of AF3: `evaluate.sh --second-engine protenix` (or `second_engine: protenix` in a run config, or the wizard when `binder-eval-protenix` is installed). The panel is always exactly three engines (Boltz-2 + ESMFold2 + one second engine); AF3 stays the default and a panel never has four.
 - **Install:** opt-in only (`install --tool protenix` or `--second-engine protenix`), never in `--tool all`; env `binder-eval-protenix`, a separate env from PXDesign's. The installer shows the Apache-2.0 v1.x licence and the weight host before downloading and asks first; the v2 weights are proprietary and are not used.
-- **Cost:** fits a 24 GB card (measured ~21.3 GiB peak on a 779-token complex). Columns are named `protenix_*`; AF3 columns are untouched.
+- **Cost:** Peak about 20.4-20.8 GiB card-wide on the largest (~780-token) complexes (nvidia-smi sampled; 24 GB RTX 3090 and a 46 GiB L40S), so a 24 GB card fits with about 3 GiB to spare, less if the card also drives a display. Columns are named `protenix_*`; AF3 columns are untouched.
 - **Reading it:** the panel is recorded in `metrics.csv` (`panel`, `second_engine`). Scores from different panels are **not on one scale**. Benchmark (4 labelled targets): macro AUC 0.7044 vs 0.7231 for the AF3 panel and 0.7279 for Boltz-2 + ESMFold2 — a hypothesis from one small pool, not a result; Protenix was the thinnest of the passes. Source: `Evaluator/docs/second_engine_benchmark.md`, `second_engine_licences.md`.
+- **Licence caveat 1:** the terms of the weight download host itself were not read (the v1.x Apache-2.0 grant rests on the project README); see `Evaluator/docs/second_engine_licences.md`.
+- **Licence caveat 2:** `pip install protenix` pulls NVIDIA proprietary cuEquivariance wheels as a hard dependency; they are unused at runtime because the torch kernels are forced (same record).
 - **Same-model caution still applies:** PXDesign designs against Protenix, so a Protenix-slot refold of PXDesign output is not independent.
 
 ## Principle
@@ -23,7 +25,7 @@ Released in waves:
 - **Protenix-v1** (2026-02) — full feature set (MSA, RNA MSA, template), matches AF3 at same training cutoff
 - **Protenix-v2** (2026-04) — 464 M params, antibody-antigen gains, ligand plausibility update
 
-In BinderScout, Protenix is being added as a **second refolder engine** alongside Boltz-2 (Part J of the evaluator roadmap). The motivation is **engine disagreement as signal**: a design tool whose output `ipsae_min` agrees across both Boltz-2 and Protenix gets `agreement_count = 2`, which is a more decisive signal than either engine alone. The BinderScout CLAUDE.md `Critical domain facts` calls this out as the primary driver of cross-method ranking.
+In BinderScout, Part J (2026-07) added Protenix as a refolder alongside Boltz-2 and was reverted on 2026-07-26; it now returns only as the opt-in second engine described below (history kept here). The motivation is **engine disagreement as signal**: a design tool whose output `ipsae_min` agrees across both Boltz-2 and Protenix gets `agreement_count = 2`, which is a more decisive signal than either engine alone. The BinderScout CLAUDE.md `Critical domain facts` calls this out as the primary driver of cross-method ranking.
 
 **Critical to the orchestrator:** Protenix is used by PXDesign internally during design. PXDesign outputs already have Protenix scores baked into their composite ranking, so Protenix refold of PXDesign outputs is *not* fully independent. For PXDesign, the orchestrator should weight Boltz-2 and AF3 refolds more.
 
