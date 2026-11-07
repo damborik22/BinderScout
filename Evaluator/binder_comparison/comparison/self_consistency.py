@@ -152,6 +152,13 @@ def split_target_binder(pdb_text: str, binder_sequence: str) -> tuple[np.ndarray
 _ENGINE_PDB_COLS = {"boltz": "boltz_pdb", "af3": "af3_pdb", "esmfold2": "esmfold2_pdb"}
 
 
+def engine_pdb_cols(panel=None) -> dict[str, str]:
+    """``{engine name: structure-path column}`` for *panel* (None: the default AF3 panel)."""
+    if panel is None:
+        return _ENGINE_PDB_COLS
+    return {e.name: e.pdb_cols[0] for e in panel.engines}
+
+
 def _resolve(path: str, base_dir):
     """Find a recorded structure path, tolerating a transplanted pool.
 
@@ -197,7 +204,7 @@ def _design_index(design_root) -> dict[str, object]:
     return index
 
 
-def annotate_self_consistency(df, design_root, base_dir, threshold: float = SELF_CONSISTENCY_RMSD_MAX):
+def annotate_self_consistency(df, design_root, base_dir, threshold: float = SELF_CONSISTENCY_RMSD_MAX, panel=None):
     """Add target-aligned design-vs-refold RMSD columns. Advisory: never drops.
 
     Per engine, ``<engine>_self_consistency_rmsd``; overall
@@ -222,7 +229,7 @@ def annotate_self_consistency(df, design_root, base_dir, threshold: float = SELF
                 design_text = None
 
         per_engine: list[float] = []
-        for engine, col in _ENGINE_PDB_COLS.items():
+        for engine, col in engine_pdb_cols(panel).items():
             rmsd = float("nan")
             if design_text is not None and col in row.index:
                 refold_path = _resolve(row.get(col), base_dir)

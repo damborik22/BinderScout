@@ -45,6 +45,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from ..core.engines import Panel
+
 # ColabDesign normalises PAE by this before BindCraft thresholds it.
 PAE_NORMALISER = 31.0
 BINDCRAFT_IPAE_NORMALISED = 0.35
@@ -89,13 +91,21 @@ def _get(row: pd.Series, col: str) -> float | None:
     return _num(row, col)
 
 
-def annotate_confidence_gate(df: pd.DataFrame) -> pd.DataFrame:
+def _iptm_candidates(engine_name: str) -> tuple[str, ...]:
+    """The interface-iPTM columns to read for one engine, most specific first."""
+    return _IPTM_COLS.get(engine_name, (f"{engine_name}_iptm",))
+
+
+def annotate_confidence_gate(df: pd.DataFrame, panel: Panel | None = None) -> pd.DataFrame:
     """Add the advisory confidence-gate columns. Never drops or reorders.
 
     Adds, per engine present, ``<engine>_ipae_ang``; and overall
     ``passes_confidence_gate`` (NA when no engine was measured),
     ``confidence_fail_reasons``, ``confidence_n_engines`` and
     ``would_exclude_confidence``.
+
+    *panel* names the engines judged (None: Boltz-2, AF3, ESMFold2 as always); an engine
+    outside it is not read even when its columns are in the frame.
     """
     out = df.copy()
     ipae_cols: dict[str, list[float | None]] = {}
@@ -103,13 +113,14 @@ def annotate_confidence_gate(df: pd.DataFrame) -> pd.DataFrame:
     reasons: list[str] = []
     missing: list[str] = []
     n_engines: list[int] = []
+    engines = list(_IPTM_COLS) if panel is None else [e.name for e in panel.engines]
 
     for _, row in out.iterrows():
         failures: list[str] = []
         unchecked: list[str] = []
         measured = 0
-        for engine in _IPTM_COLS:
-            iptm = _first_present(row, _IPTM_COLS[engine])
+        for engine in engines:
+            iptm = _first_present(row, _iptm_candidates(engine))
             plddt = _get(row, _PLDDT_COL.format(engine=engine))
             bt = _get(row, _PAE_BT_COL.format(engine=engine))
             tb = _get(row, _PAE_TB_COL.format(engine=engine))

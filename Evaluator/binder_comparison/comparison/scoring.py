@@ -26,6 +26,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from ..core.engines import SECOND_ENGINES, Panel, resolve_panel
+from ..core.engines import engine as _engine
+
 # ---- Thresholds from Overath et al. 2025 ----
 IPSAE_PASS_THRESHOLD = 0.61  # F1-maximising threshold across 15 targets
 IPSAE_HIGH_THRESHOLD = 0.80  # High-confidence binder
@@ -201,7 +204,15 @@ def _load_checked_pae(resolved: Path, L_b: int, target_sequence, ordering: str) 
 
 # The per-engine output directories the runners and evaluate.sh create. A recorded path
 # that names one is never remapped to something below it (see _resolve_pae_path).
-_ENGINE_OUTPUT_DIRS: tuple[str, ...] = ("refold_boltz2", "refold_af3", "refold_esmfold2")
+_DEFAULT_PANEL = resolve_panel()
+_ENGINE_OUTPUT_DIRS: tuple[str, ...] = tuple(e.refold_dir for e in _DEFAULT_PANEL.engines)
+# Every registered engine's directory, not just the default panel's: a recorded path that
+# names ``refold_protenix`` is bounded exactly as one that names ``refold_af3`` is.
+_ALL_ENGINE_OUTPUT_DIRS: tuple[str, ...] = (
+    _engine("boltz").refold_dir,
+    *(_engine(name).refold_dir for name in SECOND_ENGINES),
+    _engine("esmfold2").refold_dir,
+)
 
 
 def _resolve_pae_path(
@@ -252,7 +263,7 @@ def _resolve_pae_path(
     if candidate.exists():
         return candidate
     parts = p.parts[1:] if p.is_absolute() else p.parts
-    engine_dir_at = max((i for i, part in enumerate(parts[:-1]) if part in _ENGINE_OUTPUT_DIRS), default=None)
+    engine_dir_at = max((i for i, part in enumerate(parts[:-1]) if part in _ALL_ENGINE_OUTPUT_DIRS), default=None)
     last_start = engine_dir_at if engine_dir_at is not None else len(parts) - 2
     for start in range(last_start + 1):
         tail = base.joinpath(*parts[start:])
@@ -345,20 +356,20 @@ def _warn_unresolved_pae(
 # read downstream: top20_structures/ + view_top20.pml, the 3D viewers and the inline
 # epitope scoring all pick from this list by name. The engine is the prefix; the bare
 # "pdb" fallback the consumers also try belongs to the anchor (Boltz-2) engine.
-_STRUCTURE_PATH_COLUMNS: tuple[str, ...] = (
-    "boltz_pdb",
-    "boltz_cif",
-    "af3_pdb",
-    "af3_cif",
-    "esmfold2_pdb",
-    "esmfold2_cif",
-    "pdb",
-)
+_STRUCTURE_PATH_COLUMNS: tuple[str, ...] = (*(c for e in _DEFAULT_PANEL.engines for c in e.pdb_cols), "pdb")
+
+
+def _structure_path_columns(panel: Panel | None) -> tuple[str, ...]:
+    """The structure-path columns of *panel* (None: the default panel's, as always)."""
+    if panel is None:
+        return _STRUCTURE_PATH_COLUMNS
+    return (*(c for e in panel.engines for c in e.pdb_cols), "pdb")
 
 
 def remap_structure_paths(
     df: pd.DataFrame,
     base_dirs: dict[str, str | Path | None],
+    panel: Panel | None = None,
 ) -> pd.DataFrame:
     """Resolve every structure-path column against its own engine's results directory.
 
@@ -370,12 +381,15 @@ def remap_structure_paths(
 
     Args:
         df:        merged refold frame (not mutated).
-        base_dirs: ``{"boltz": dir, "af3": dir, "esmfold2": dir}`` -- the directory of
+        base_dirs: ``{"boltz": dir, "af3": dir, "esmfold2": dir}`` (the second key is the
+                   panel's second engine) -- the directory of
                    each engine's results CSV, the best guess at where its refold
                    output directory now sits.
+        panel:     the engine panel whose structure columns are resolved; None is the
+                   default (AF3) panel. Columns of an engine outside it are left alone.
     """
     out = df.copy()
-    for col in _STRUCTURE_PATH_COLUMNS:
+    for col in _structure_path_columns(panel):
         if col not in out.columns:
             continue
         engine = col.split("_", 1)[0] if col != "pdb" else "boltz"
@@ -654,11 +668,9 @@ def add_iptm_from_pae_files(
 
 
 # Per-engine iPSAE thresholds — calibrated for the DunbrackLab 2025 formula at 10 Å cutoff.
-DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {
-    "boltz": IPSAE_PASS_THRESHOLD,  # 0.61
-    "af3": IPSAE_PASS_THRESHOLD,  # 0.61 — DunbrackLab cutoff was tuned for AF3
-    "esmfold2": IPSAE_PASS_THRESHOLD,  # 0.61 — same cutoff until empirical calibration suggests otherwise
-}
+# 0.61 for every engine: the DunbrackLab cutoff was tuned for AF3 and is kept for the others
+# until empirical calibration suggests otherwise (the values live in the engine registry).
+DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {e.name: e.default_threshold for e in _DEFAULT_PANEL.engines}
 
 # Map engine key → DunbrackLab PAE-derived ipsae_min column.
 # NOTE: Boltz uses the prefixed `boltz_pae_*` columns (special add_boltz_ipsae_from_files
@@ -666,22 +678,33 @@ DEFAULT_ENGINE_THRESHOLDS: dict[str, float] = {
 # AF2 is deliberately absent: Part I removed AF2 refolding, so nothing writes
 # `af2_ipsae_min` any more. Its entry survived that removal and kept a dead
 # `--threshold-af2` flag and a `passes_af2_filter_informational` column alive.
-_ENGINE_IPSAE_COLS: dict[str, str] = {
-    "boltz": "boltz_pae_ipsae_min",
-    "af3": "af3_ipsae_min",
-    "esmfold2": "esmfold2_ipsae_min",
-}
+_ENGINE_IPSAE_COLS: dict[str, str] = {e.name: e.ipsae_col for e in _DEFAULT_PANEL.engines}
+
+
+def _ipsae_cols_by_engine(panel: Panel | None) -> dict[str, str]:
+    """``{engine name: ipsae_min column}`` for *panel* (None: the module default)."""
+    if panel is None:
+        return _ENGINE_IPSAE_COLS
+    return {e.name: e.ipsae_col for e in panel.engines}
+
+
+def _engine_thresholds(panel: Panel | None, overrides: dict[str, float] | None) -> dict[str, float]:
+    """Per-engine iPSAE pass thresholds: the panel's defaults, then the caller's overrides."""
+    base = DEFAULT_ENGINE_THRESHOLDS if panel is None else {e.name: e.default_threshold for e in panel.engines}
+    return {**base, **(overrides or {})}
 
 
 def apply_screening_thresholds(
     df: pd.DataFrame,
     primary_engine: str = "boltz",
     engine_thresholds: dict[str, float] | None = None,
+    panel: Panel | None = None,
 ) -> pd.DataFrame:
     """Add Boolean screening flags and quality tier column.
 
     Per-engine flags added (when the corresponding PAE-derived ipsae column is present):
         passes_boltz_filter, passes_af3_filter, passes_esmfold2_filter
+        (``passes_<engine>_filter`` for the second engine of *panel*; None is AF3)
 
     Aggregate flags (derived from `primary_engine` so existing reports still work):
         passes_ipsae_filter   : primary engine's ipsae_min > its threshold
@@ -697,18 +720,19 @@ def apply_screening_thresholds(
         'reject'  : <= 0.40 or NaN
     """
     result = df.copy()
-    thresholds = {**DEFAULT_ENGINE_THRESHOLDS, **(engine_thresholds or {})}
+    thresholds = _engine_thresholds(panel, engine_thresholds)
+    ipsae_cols = _ipsae_cols_by_engine(panel)
 
     # Per-engine pass flags (one per engine actually present in the data)
-    for engine, col in _ENGINE_IPSAE_COLS.items():
+    for engine_name, col in ipsae_cols.items():
         if col not in result.columns:
             continue
-        thr = thresholds.get(engine, IPSAE_PASS_THRESHOLD)
+        thr = thresholds.get(engine_name, IPSAE_PASS_THRESHOLD)
         vals = pd.to_numeric(result[col], errors="coerce")
-        result[f"passes_{engine}_filter"] = vals > thr
+        result[f"passes_{engine_name}_filter"] = vals > thr
 
     # Primary-engine column for tier / aggregate flags
-    primary_col = _ENGINE_IPSAE_COLS.get(primary_engine, _ENGINE_IPSAE_COLS["boltz"])
+    primary_col = ipsae_cols.get(primary_engine, ipsae_cols["boltz"])
     if primary_col not in result.columns:
         # fall back to best-available ipsae column (preserves legacy reports)
         primary_col = _best_ipsae_col(result)
@@ -948,6 +972,7 @@ def compute_agreement(
     df: pd.DataFrame,
     threshold: float = IPSAE_PASS_THRESHOLD,
     engine_thresholds: dict[str, float] | None = None,
+    panel: Panel | None = None,
 ) -> pd.DataFrame:
     """Count how many independent refolding engines agree a design passes.
 
@@ -976,19 +1001,14 @@ def compute_agreement(
     empty — the shape a failed refold actually takes.
     """
     result = df.copy()
-    thresholds = {**DEFAULT_ENGINE_THRESHOLDS, **(engine_thresholds or {})}
-    engine_cols = {
-        "boltz": "boltz_pae_ipsae_min",
-        "af3": "af3_ipsae_min",
-        "esmfold2": "esmfold2_ipsae_min",
-    }
+    thresholds = _engine_thresholds(panel, engine_thresholds)
 
     count = pd.Series(0, index=df.index)
     denom = pd.Series(0, index=df.index)
-    for engine, col in engine_cols.items():
+    for engine_name, col in _ipsae_cols_by_engine(panel).items():
         if col in result.columns:
             vals = pd.to_numeric(result[col], errors="coerce")
-            thr = thresholds.get(engine, threshold)
+            thr = thresholds.get(engine_name, threshold)
             count += (vals > thr).fillna(False).astype(int)
             denom += vals.notna().astype(int)
     result["agreement_count"] = count
@@ -1003,11 +1023,12 @@ def compute_agreement(
 # Per-engine PAE-recomputed iptm columns (engine-independent, directly comparable —
 # computed by add_iptm_from_pae_files). These are preferred over raw model-reported
 # iptm because each engine reports iptm on a slightly different convention.
-_ENGINE_IPTM_COLS: list[str] = [
-    "boltz_pae_iptm",
-    "af3_pae_iptm",
-    "esmfold2_pae_iptm",
-]
+_ENGINE_IPTM_COLS: list[str] = _DEFAULT_PANEL.iptm_cols
+
+
+def _iptm_cols(panel: Panel | None) -> list[str]:
+    """The per-engine ipTM columns the ranking averages (None: the module-level list)."""
+    return _ENGINE_IPTM_COLS if panel is None else panel.iptm_cols
 
 
 def add_chain_iptm_interface(df: pd.DataFrame, prefix: str = "esmfold2") -> pd.DataFrame:
@@ -1036,7 +1057,7 @@ def add_chain_iptm_interface(df: pd.DataFrame, prefix: str = "esmfold2") -> pd.D
     return result
 
 
-def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
+def compute_consensus_iptm(df: pd.DataFrame, panel: Panel | None = None) -> pd.DataFrame:
     """Add a ``consensus_iptm`` column = max of the per-engine PAE-recomputed iptms.
 
     Across the ProteinBase 4-target benchmark (Nipah / EGFR / IL7R / PD-L1, n=175),
@@ -1056,9 +1077,12 @@ def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
         consensus_iptm_min    — min over available engines (most conservative engine).
         consensus_iptm_spread — max − min (engine disagreement; NaN if <2 engines).
         consensus_iptm_n      — how many engines contributed (0–4).
+
+    *panel* names the three engines averaged (None: the default AF3 panel). A column of an
+    engine outside the panel is never an input, even when it is in the frame.
     """
     result = df.copy()
-    present = [c for c in _ENGINE_IPTM_COLS if c in result.columns]
+    present = [c for c in _iptm_cols(panel) if c in result.columns]
     if not present:
         result["consensus_iptm"] = np.nan
         result["consensus_iptm_mean"] = np.nan
@@ -1083,14 +1107,10 @@ def compute_consensus_iptm(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # Per-engine DunbrackLab ipSAE_min columns (engine-comparable, recomputed from PAE files).
-_ENGINE_IPSAE_MIN_COLS: list[str] = [
-    "boltz_pae_ipsae_min",
-    "af3_ipsae_min",
-    "esmfold2_ipsae_min",
-]
+_ENGINE_IPSAE_MIN_COLS: list[str] = _DEFAULT_PANEL.ipsae_cols
 
 
-def compute_consensus_ipsae(df: pd.DataFrame) -> pd.DataFrame:
+def compute_consensus_ipsae(df: pd.DataFrame, panel: Panel | None = None) -> pd.DataFrame:
     """Add ``consensus_ipsae_min_mean`` = mean across engines of the per-engine
     DunbrackLab ipSAE_min.
 
@@ -1105,7 +1125,8 @@ def compute_consensus_ipsae(df: pd.DataFrame) -> pd.DataFrame:
         consensus_ipsae_min_n      — how many engines contributed (0–4).
     """
     result = df.copy()
-    present = [c for c in _ENGINE_IPSAE_MIN_COLS if c in result.columns]
+    cols = _ENGINE_IPSAE_MIN_COLS if panel is None else panel.ipsae_cols
+    present = [c for c in cols if c in result.columns]
     if not present:
         result["consensus_ipsae_min_mean"] = np.nan
         result["consensus_ipsae_min_spread"] = np.nan
@@ -1121,7 +1142,7 @@ def compute_consensus_ipsae(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def rank_designs(df: pd.DataFrame, min_engines: int = MIN_ENGINES_DEFAULT) -> pd.DataFrame:
+def rank_designs(df: pd.DataFrame, min_engines: int = MIN_ENGINES_DEFAULT, panel: Panel | None = None) -> pd.DataFrame:
     """THE ranking. Cross-engine gate, then ``consensus_iptm_mean`` descending.
 
     Adds a single ``rank`` column (1 = best). Ranks ALL rows; nothing is dropped.
@@ -1166,12 +1187,15 @@ def rank_designs(df: pd.DataFrame, min_engines: int = MIN_ENGINES_DEFAULT) -> pd
     datasets (Part N, Part U, OpenBind, SKEMPI) — see comparison.affinity for the
     advisory gate-then-density ranker.
 
+    *panel* is the engine panel the consensus is computed over when the frame does not
+    already carry it (None: the default AF3 panel). The ordering rules do not depend on it.
+
     Raises:
         ValueError: if *min_engines* is below ``MIN_ENGINES_FLOOR``.
     """
     result = df.copy()
     if "consensus_iptm" not in result.columns or "consensus_iptm_mean" not in result.columns:
-        result = compute_consensus_iptm(result)
+        result = compute_consensus_iptm(result, panel=panel)
 
     if min_engines < MIN_ENGINES_FLOOR:
         raise ValueError(
@@ -1211,7 +1235,7 @@ def rank_designs(df: pd.DataFrame, min_engines: int = MIN_ENGINES_DEFAULT) -> pd
         # so say so instead of shipping a full-looking metrics.csv in silence.
         warnings.warn(
             f"[rank] NO engine ipTM was available for ANY of the {len(result)} designs "
-            f"({'/'.join(_ENGINE_IPTM_COLS)} absent or all-NaN), so consensus_iptm_mean "
+            f"({'/'.join(_iptm_cols(panel))} absent or all-NaN), so consensus_iptm_mean "
             f"is empty and the `rank` column is NOT a cross-engine ranking. The usual "
             f"cause is unreadable PAE .npy files — check the <engine>_pae_file paths in "
             f"the refold CSVs.",

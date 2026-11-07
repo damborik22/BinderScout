@@ -84,11 +84,22 @@ def _binder_only_pdb(pdb_text: str, binder_sequence: str) -> str | None:
     return "\n".join(keep) + "\nEND\n" if keep else None
 
 
+_DEFAULT_PDB_COLS: tuple[str, ...] = ("boltz_pdb", "af3_pdb", "esmfold2_pdb", "pdb")
+
+
+def panel_pdb_cols(panel=None) -> tuple[str, ...]:
+    """The structure columns to read for *panel*, then the bare ``pdb`` fallback (None: the default)."""
+    if panel is None:
+        return _DEFAULT_PDB_COLS
+    return (*(e.pdb_cols[0] for e in panel.engines), "pdb")
+
+
 def build_tm_lookup(
     df,
     *,
     base_dir,
-    pdb_cols: tuple[str, ...] = ("boltz_pdb", "af3_pdb", "esmfold2_pdb", "pdb"),
+    pdb_cols: tuple[str, ...] = _DEFAULT_PDB_COLS,
+    panel=None,
     id_col: str = "binder_id",
     sequence_col: str = "sequence",
     foldseek_bin: str | None = None,
@@ -98,8 +109,14 @@ def build_tm_lookup(
 
     None means "not computable here" -- no foldseek, no resolvable structures, or fewer
     than two binders with an identifiable binder chain.
+
+    *panel* swaps the default structure columns for the panel's own (an explicit *pdb_cols*
+    still wins).
     """
     from .self_consistency import _resolve
+
+    if panel is not None and pdb_cols is _DEFAULT_PDB_COLS:
+        pdb_cols = panel_pdb_cols(panel)
 
     binary = foldseek_bin or find_foldseek()
     if binary is None or df is None or len(df) < 2:

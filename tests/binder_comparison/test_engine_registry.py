@@ -43,6 +43,8 @@ def test_af3_row_reproduces_todays_literals():
 
 def test_boltz_and_esmfold2_rows_reproduce_todays_literals():
     boltz, esm = engine("boltz"), engine("esmfold2")
+    assert boltz.prefix == "boltz"
+    assert esm.prefix == "esmfold2"
     assert (boltz.refold_dir, boltz.results_csv) == ("refold_boltz2", "boltz2_results.csv")
     assert boltz.ipsae_col == "boltz_pae_ipsae_min"  # not the af3-style "<prefix>_ipsae_min"
     assert boltz.pdb_cols == ("boltz_pdb", "boltz_cif")
@@ -110,3 +112,18 @@ def test_default_panel_agrees_with_the_scoring_module_literals():
     assert dict(zip(("boltz", "af3", "esmfold2"), panel.ipsae_cols, strict=True)) == scoring._ENGINE_IPSAE_COLS
     assert tuple(e.refold_dir for e in panel.engines) == scoring._ENGINE_OUTPUT_DIRS
     assert all(e.default_threshold == scoring.IPSAE_PASS_THRESHOLD for e in panel.engines)
+
+
+def test_default_panel_structure_columns_are_covered_by_the_scoring_and_report_tables():
+    from binder_comparison.comparison import scoring
+
+    for e in resolve_panel().engines:
+        assert set(e.pdb_cols) <= set(scoring._STRUCTURE_PATH_COLUMNS), e.name
+    assert scoring._STRUCTURE_PATH_COLUMNS[-1] == "pdb"
+
+    # cli/report imports the whole report stack; if that does not import here, only this half is skipped.
+    report = pytest.importorskip("binder_comparison.cli.report")
+    for e in resolve_panel().engines:
+        cols, chain = report._ENGINE_STRUCT_COLS[e.name]
+        assert tuple(cols) == e.pdb_cols, e.name
+        assert chain == e.binder_chain, e.name
