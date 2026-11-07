@@ -435,7 +435,7 @@ choose — see [Ranking metrics](#ranking-metrics) below.
 
 Cross-engine columns are namespaced (`boltz_pae_*`, `af3_*`, `esmfold2_*`). There is **one ranking and no way to select another**: a cross-engine gate (`--min-engines`, default 3) then `consensus_iptm_mean`, emitted as a single `rank` column. `ipsae_min` (DunbrackLab 2025 formula) and `agreement_count` are diagnostic columns — `agreement_count` in particular is a flat null as a screen (macro-AUC 0.532), so do not gate on it. Part U removed the `--rank-by` / `--screen-metric` flags and the `two_stage_rank` / `adaptyv_rank` / `consensus_rank` / `active_rank` columns; the evidence is summarised in `CLAUDE.md` (the full write-up was removed from the tree). AF3 and ESMFold2 produce token-order PAE which the evaluator transposes to match Boltz-2's `[binder|target]` order.
 
-> Evaluation = Boltz-2 + AF3 + ESMFold2, exactly three independent engines. Each is auto-detected from its conda env and can be skipped with `--skip-<engine>`.
+> Evaluation = Boltz-2 + AF3 + ESMFold2, exactly three independent engines (AF3 by default; Protenix opt-in via `--second-engine`). Each is auto-detected from its conda env and can be skipped with `--skip-<engine>`.
 
 #### Usage — `binderscout evaluate` forwards to `binder-compare`
 
@@ -496,7 +496,7 @@ step by hand. `bash Evaluator/evaluate.sh --help` prints the same list.
 | `--resume` | Resume an interrupted run |
 | `--concurrent` | Run the three refold engines staggered-concurrently instead of one after another. Worth ~1.25x (19.8 % wall-clock, measured), but it costs ~54 % of the OS memory headroom — use it only when the box is dedicated |
 | `--stagger N` | Seconds between engine starts under `--concurrent` (default 30). Staggering stops three engines compiling at once |
-| `--gpu-cap-boltz2` / `--gpu-cap-af3` / `--gpu-cap-esmfold2` / `--gpu-cap-protenix` | Per-engine CUDA MPS device-memory cap (defaults `24G` / `12G` / `24G` / `24G`; Protenix is a PyTorch ceiling set above its measured ~20.4 GiB peak on a 779-token complex). On a unified-memory host (DGX Spark / GB10) the GPU pool **is** system RAM, so an uncapped engine reserves a fraction of the whole machine and can starve the OS. Caps are set at ~1.4-1.5x measured demand (the Protenix cap is ~1.2x its measured peak, 24 vs 20.4 GiB, and is a PyTorch ceiling, not a reservation) |
+| `--gpu-cap-boltz2` / `--gpu-cap-af3` / `--gpu-cap-esmfold2` / `--gpu-cap-protenix` | Per-engine CUDA MPS device-memory cap (defaults `24G` / `12G` / `24G` / `24G`; Protenix is a PyTorch ceiling set above its measured peak of about 20.4-20.8 GiB on the ~780-token complexes). On a unified-memory host (DGX Spark / GB10) the GPU pool **is** system RAM, so an uncapped engine reserves a fraction of the whole machine and can starve the OS. Caps are set at ~1.4-1.5x measured demand (the Protenix cap is ~1.2x its measured peak, 24 vs 20.4 GiB, and is a PyTorch ceiling, not a reservation) |
 | `--no-gpu-guard` | Do not start the CUDA MPS guard. Only for hosts with a discrete card, where a runaway allocation kills the process rather than the machine |
 
 > **The gate defaults to 3, and some hosts run two engines.** AF3 itself fits a 24 GB card

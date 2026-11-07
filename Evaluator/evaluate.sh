@@ -58,7 +58,7 @@
 #   --gpu-cap-boltz2 N     per-engine GPU ceiling, e.g. 24G (default: 24G)
 #   --gpu-cap-af3 N        default: 12G
 #   --gpu-cap-protenix N   default: 24G (env BINDERSCOUT_GPU_CAP_PROTENIX). A PyTorch ceiling, set above
-#                          the measured peak of ~20.4 GiB card-wide on a 779-token complex
+#                          the measured peak of about 20.4-20.8 GiB card-wide on the ~780-token complexes
 #   --gpu-cap-esmfold2 N   default: 24G
 #   --no-gpu-guard         do NOT apply the MPS ceiling (unsafe on unified memory)
 #   --primary-engine ENG   primary ranking engine: boltz | af3 | esmfold2 | protenix (default: boltz).

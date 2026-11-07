@@ -1,8 +1,8 @@
 # AF3-replacement benchmark: results
 
-Status: **Part 1 result (2026-11-05), followed by the owner's decision (2026-11-07; see "Outcome" below).** The
-tables below are the Part 1 result as it stood; the outcome section records what was decided and one correction
-to this report's text. Aggregate numbers only; no per-design labels or scores are reproduced here. Licence terms per candidate are in
+Status: **Part 1 result (2026-11-05), followed by the outcome of 2026-11-07 (see "Outcome" below).** The
+tables below are the Part 1 result as it stood; the outcome section records the owner's instructions, the rulings made under
+them and one correction to this report's text. Aggregate numbers only; no per-design labels or scores are reproduced here. Licence terms per candidate are in
 `second_engine_licences.md`; how every run was made is in `second_engine_benchmark_runbook.md`.
 
 ## Question
@@ -126,7 +126,7 @@ nucleic-acid sets for RF3; not stated for OpenBind-0). RF3 and OpenFold3 have th
 - The RF3 and Protenix environments still carry NVIDIA-proprietary wheels as install dependencies that the runs do not execute
   (see the licence record).
 
-## Decisions asked of the owner (answered 2026-11-07; the answers are in "Outcome" below)
+## Decisions asked of the owner (settled 2026-11-07 by rulings under the owner's delegation; see "Outcome" below)
 
 1. Clause (c): keep as written (RF3 and Protenix pass), or relax it for small targets (for example by requiring the per-target
    interval, not the point estimate, to exclude -0.05), which would leave Chai-1 eligible.
@@ -137,19 +137,27 @@ nucleic-acid sets for RF3; not stated for OpenBind-0). RF3 and OpenFold3 have th
 
 ## Outcome (2026-11-07)
 
-### Owner decisions
+### Owner's instructions
 
-- **Criteria.** Success is a similar ROC AUC of `consensus_iptm_mean` on this benchmark, and **no increase in GPU demand**:
-  the ceiling is a 24 GB card, which AF3 and ESMFold2 already need. The replacement is **opt-in; AF3 stays the default.**
-- **Answers to the four questions above.**
-  1. **No relaxation of clause (c) was applied**: the verdicts in the table above stand. The per-target intervals below show that the
+The owner's instructions were only these: the replacement is **opt-in, AF3 stays the default**; success is a similar ROC AUC of
+`consensus_iptm_mean` on this benchmark; "We do not want to increase GPU demand"; and "decide what will be best replacement and
+proceed with integration".
+
+"Ceiling = a 24 GB card" is the controller's reading of "no increase in GPU demand", not an owner statement. Protenix fits the 24 GB card class that ESMFold2 already requires (ESMFold2 holds about 18.9 GiB on a 24 GB card), so no larger GPU is needed; its own peak (20.4-20.8 GiB) is several times AF3's (about 4.4 GiB at 260-390 tokens; AF3 was not measured at about 780 tokens), so the owner's constraint was read as "no new GPU class", not as "no more memory than AF3".
+
+### Rulings made under that delegation (not separately confirmed by the owner)
+
+The four questions above were settled as follows.
+
+  1. **Clause (c) was left as written (no relaxation applied)**: the verdicts in the table above stand. The per-target intervals below show that the
      alternative reading (fail only if the interval is wholly below 0) gives the same split for the engines that matter here.
-  2. **Only Protenix is registered.** RF3 passes the rule but is out on GPU demand: 33.5 to 36.8 GiB card-wide with
+  2. **Only Protenix is registered.** RF3 passes the rule but is out on the 24 GB card class: 33.5 to 36.8 GiB card-wide with
      cuEquivariance disabled; with it enabled RF3 fits a 24 GB card but needs NVIDIA's proprietary wheels at run time.
      Chai-1 fails target PD-L1 on either reading (below). OpenFold3 is below the Boltz-2 + ESMFold2 floor.
   3. The 5-sample PD-L1 rerun was **not done**; Protenix is registered at the 1 sample and 1 seed it was benchmarked at.
-  4. Protenix is always run with torch kernels and torch layer norm, so the proprietary cuEquivariance wheels that `pip install
-     protenix` pulls are installed but not used at run time; the installer's licence text says so and asks before downloading.
+  4. Protenix is always run with torch kernels and torch layer norm. The proprietary cuEquivariance wheels that `pip install
+     protenix` pulls are installed as a hard dependency but not used at run time; the installer's licence notice discloses this and asks
+     before downloading.
 
 ### Per-target paired differences to P0, with 95% intervals
 
@@ -183,7 +191,7 @@ Macro AUC 0.7044 against 0.7231 for the AF3 panel and 0.7279 for the floor; pair
 one pool, not a result**, and nothing here says it matches AF3: the passes show that swapping the third engine costs little on
 this pool.
 
-Memory against the owner's constraint: with torch kernels Protenix peaked at 21,282 MiB (20.8 GiB) card-wide on a 24,576 MiB RTX 3090
+Memory against the constraint as read above: with torch kernels Protenix peaked at 21,282 MiB (20.8 GiB) card-wide on a 24,576 MiB RTX 3090
 (headless) for the longest design (Nipah target 602 aa + 177 aa binder, 779 tokens, 1 sample; ipTM 0.895), and at 20,939 MiB (20.4 GiB)
 on a 46 GiB L40S (EGFR, about 772 tokens). That fits a 24 GB card with about 3 GiB to spare, less if the card also drives a display;
 the 3090 figure is one design. Part 2 (opt-in `--second-engine protenix`, panel recorded in `metrics.csv`) is described in the

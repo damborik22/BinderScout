@@ -41,7 +41,7 @@ In BinderScout, AF3 is the default second engine of the three-engine panel (Part
 - **The decisive cross-check.** AF3 agreement is the single most valuable signal in the BinderScout pool because it's independent of every design tool's lineage. Used as a tiebreaker when Boltz-2 and Protenix disagree.
 - **Same-model-bias suspects.** For Mosaic, BoltzGen, Protein-Hunter (Boltz-bias) and PXDesign (Protenix-bias), AF3 refold is the clean independent signal.
 - **PTM-bearing targets.** AF3 is the strongest predictor in the pool for phosphorylated, methylated, glycosylated, or otherwise modified targets — relevant for therapeutic targets like ApoE4 if PTM-conditioning is in scope.
-- **Final-pool ranking.** For top-tier designs that survive Boltz-2 and Protenix screening, AF3 refold is the final filter. `agreement_count = 3` (all three engines say `ipsae_min > 0.61`) is the strongest in-silico recommendation BinderScout can produce.
+- **Final-pool ranking.** For top-tier designs that survive Boltz-2 and ESMFold2 screening, AF3 refold is the final filter. `agreement_count = 3` (all three engines say `ipsae_min > 0.61`) is the strongest in-silico recommendation BinderScout can produce.
 
 ## When this engine's signal should be weighted down
 

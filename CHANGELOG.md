@@ -17,8 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **An opt-in second refold engine: Protenix v1.x can hold the slot AF3 holds. AF3 stays the default.**
   A panel is exactly three slots: Boltz-2, ESMFold2 and one second engine (`af3` or `protenix`).
-  Nothing changes unless you ask: with no flag, the ranking, the columns and the report of an AF3 panel
-  are what they were.
+  The ranking and the AF3 column names are unchanged; `metrics.csv` gains two constant columns (`panel`,
+  `second_engine`) and the HTML report a panel line on every run, AF3 panel included. With no flag, no usable
+  AF3 and Protenix installed, `evaluate.sh` uses Protenix and prints a notice (pass `--second-engine af3` to
+  prevent that).
   - **Registry.** `Evaluator/binder_comparison/core/engines.py` (`resolve_panel`, `SECOND_ENGINES =
     ("af3", "protenix")`) is the one place that names a panel's engines, columns, output directory and
     results CSV. Column names carry the real engine name (`protenix_pae_iptm`, `protenix_ipsae_min`,
@@ -46,9 +48,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Benchmark result behind the option (2026-11-07)
 
-Owner criteria: the replacement must give a similar `consensus_iptm_mean` ROC AUC on the curated
-Adaptyv benchmark (563 designs, 4 targets), and must **not raise GPU demand**: the ceiling is a 24 GB card,
-which AF3 and ESMFold2 already need. Full table, settings and caveats:
+Owner's instructions: opt-in, AF3 stays the default; success is a similar `consensus_iptm_mean` ROC AUC on the
+curated Adaptyv benchmark (563 designs, 4 targets); "We do not want to increase GPU demand"; and "decide what
+will be best replacement and proceed with integration". The engine choice and the settings (clause (c) left as
+written, no 5-sample PD-L1 rerun, torch kernels forced) are rulings made under that delegation, not separately
+confirmed by the owner. Protenix fits the 24 GB card class that ESMFold2 already requires (ESMFold2 holds about 18.9 GiB on a 24 GB card), so no larger GPU is needed; its own peak (20.4-20.8 GiB) is several times AF3's (about 4.4 GiB at 260-390 tokens; AF3 was not measured at about 780 tokens), so the owner's constraint was read as "no new GPU class", not as "no more memory than AF3". Full table, settings and caveats:
 `Evaluator/docs/second_engine_benchmark.md`.
 
 - **Protenix v1.x** (`protenix_base_default_v1.0.0`, torch kernels and torch layer norm, 1 seed, 1 sample)
@@ -57,8 +61,8 @@ which AF3 and ESMFold2 already need. Full table, settings and caveats:
   [-0.0384, +0.0008]. **It is the thinnest of the passes** (the limit is -0.02), and it is not shown to
   match AF3.
 - **Out, and why:** RF3 passes the rule but needs 33.5-36.8 GiB card-wide with cuEquivariance disabled
-  (with it enabled it fits a 24 GB card but needs NVIDIA proprietary wheels at run time), so it raises GPU
-  demand. Chai-1 fails target PD-L1 (difference -0.120, interval [-0.218, -0.035] wholly below 0).
+  (with it enabled it fits a 24 GB card but needs NVIDIA proprietary wheels at run time), so without them it
+  needs a larger card class. Chai-1 fails target PD-L1 (difference -0.120, interval [-0.218, -0.035] wholly below 0).
   OpenFold3 sits below the Boltz-2 + ESMFold2 floor.
 - **Memory:** Protenix with torch kernels peaked at 21,282 MiB (20.8 GiB) card-wide on a 24,576 MiB RTX 3090
   for the longest design (779 tokens, 1 sample), and 20,939 MiB (20.4 GiB) on a 46 GiB L40S (EGFR, about 772
@@ -79,8 +83,8 @@ which AF3 and ESMFold2 already need. Full table, settings and caveats:
 - Peak memory was measured on one design on the 24 GB card.
 - The `install_aarch.sh` path is the same recipe and has not been run on aarch64 hardware; the cu128 torch wheels
   there are unverified.
-- The live check of the opt-in installer and refold (including a run under a hostile ambient environment) is
-  recorded in `Evaluator/docs/second_engine_benchmark_runbook.md`.
+- The live validation of the installer and refold is written up in the runbook section "Live validation of the
+  opt-in installer and refold (2026-11-07)" (`Evaluator/docs/second_engine_benchmark_runbook.md`).
 
 ### Fixed
 

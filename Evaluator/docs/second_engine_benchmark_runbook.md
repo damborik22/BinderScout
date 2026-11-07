@@ -185,7 +185,7 @@ counters. Token count is target plus binder length.
 The two last Protenix rows are card-wide `nvidia-smi` peaks (including the CUDA context and allocator cache), unlike the
 PyTorch allocated/reserved counters of the GB10 rows above; compare them with the other `nvidia-smi` rows, not with those.
 They are the evidence for the 24 GB claim: a 24 GB card fits the longest design with about 3 GiB to spare, less if it also
-drives a display. `evaluate.sh --gpu-cap-protenix` defaults to 24G, a PyTorch ceiling of about 1.2 times the 20.4 GiB
+drives a display. Protenix fits the 24 GB card class that ESMFold2 already requires (ESMFold2 holds about 18.9 GiB on a 24 GB card), so no larger GPU is needed; its own peak (20.4-20.8 GiB) is several times AF3's (about 4.4 GiB at 260-390 tokens; AF3 was not measured at about 780 tokens), so the owner's constraint was read as "no new GPU class", not as "no more memory than AF3". `evaluate.sh --gpu-cap-protenix` defaults to 24G, a PyTorch ceiling of about 1.2 times the 20.4 GiB
 measured on the L40S, not a reservation.
 
 Not measured: Chai-1 on a 24 GB card or on any target above 308 tokens; OpenFold3 on nipah (long
