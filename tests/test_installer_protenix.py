@@ -20,6 +20,7 @@ What is pinned here, for BOTH installers, with nothing downloaded and no environ
 
 from __future__ import annotations
 
+import hashlib
 import os
 import pty
 import re
@@ -39,9 +40,17 @@ END = "<!-- install-licence:protenix:end -->"
 CKPT_BYTES = 1475950125
 ENV = "binder-eval-protenix"
 
-# These runs never reach a real conda, but the ones that do not use a fake base would try to fetch a
-# Miniforge on a box with none (and the fake curl below records that instead).
-pytestmark = pytest.mark.skipif(bool(system_conda_present()), reason="a conda under /opt would be found")
+# Only the one test that needs a box with NO conda (to see the Miniforge fetch that follows the licence)
+# carries this; everything else runs against a fake base or refuses before conda is looked for, so it
+# runs everywhere, Docker image (which has /opt/miniforge3) included.
+needs_no_system_conda = pytest.mark.skipif(bool(system_conda_present()), reason="a conda under /opt would be found")
+
+# The pins, spelled out: tests below assert the installers carry exactly these.
+CKPT_SHA256 = "2b7d5a8b30494514fc47fd2271a16260528cdba170ba09cc112fdecd8f85ec04"
+# The install-flow tests run the real installer text with these two constants rewritten to describe a
+# tiny fake checkpoint (hashing 1.4 GB per test would add minutes); the real values are pinned statically.
+FLOW_BYTES = 4096
+FLOW_SHA256 = hashlib.sha256(bytes(FLOW_BYTES)).hexdigest()
 
 
 def doc_block() -> str:
@@ -69,7 +78,15 @@ def no_cc_path(tmp_path_factory) -> str:
     return str(d)
 
 
-def _sandbox(tmp_path: Path, platform: str, no_cc_path: str, *, doc_text: str | None = None, cc: bool = True):
+def _sandbox(
+    tmp_path: Path,
+    platform: str,
+    no_cc_path: str,
+    *,
+    doc_text: str | None = None,
+    cc: bool = True,
+    arch: str = "auto",
+):
     """A copy of one installer in an otherwise empty checkout, with the licence doc beside it."""
     repo = tmp_path / "checkout"
     (repo / "install").mkdir(parents=True)
@@ -89,6 +106,13 @@ def _sandbox(tmp_path: Path, platform: str, no_cc_path: str, *, doc_text: str | 
             '[ -n "$out" ] && printf "#!/bin/sh\\nexit 1\\n" > "$out"\nexit 0\n'
         )
         fake.chmod(0o755)
+    # install_aarch.sh asks "Continue anyway?" on any other architecture; these tests are about
+    # Protenix, so the aarch64 script sees an aarch64 host unless a test asks for the real one.
+    fake_arch = {"auto": "aarch64" if platform == "aarch64" else "", "native": ""}.get(arch, arch)
+    if fake_arch:
+        uname = bin_dir / "uname"
+        uname.write_text(f'#!/bin/sh\n[ "$1" = "-m" ] && {{ echo {fake_arch}; exit 0; }}\nexec /usr/bin/uname "$@"\n')
+        uname.chmod(0o755)
     home = tmp_path / "home"
     home.mkdir()
     env = {"HOME": str(home), "PATH": f"{bin_dir}:{no_cc_path}", "LC_ALL": "C"}
@@ -317,16 +341,18 @@ def test_a_bare_enter_declines(platform, tmp_path, no_cc_path):
     _nothing_was_created(repo, tmp_path, calls)
 
 
+@needs_no_system_conda
 @pytest.mark.parametrize("platform", sorted(INSTALLERS))
 def test_yes_prints_the_licence_before_the_first_download(platform, tmp_path, no_cc_path):
     """With --yes and no conda, the first thing fetched is the Miniforge: the licence is already on screen."""
     repo, script, env, calls = _sandbox(tmp_path, platform, no_cc_path)
     _rc, out = _run(script, "--tool protenix --yes --skip-preflight", env, repo)
+    assert doc_block() in out, "the licence block was never printed"
     block_end = out.find(doc_block()) + len(doc_block())
-    assert block_end > len(doc_block()) - 1, out
-    assert calls.exists(), "the run never got as far as its first download"
-    first_download = out.find("Miniforge")
-    assert first_download > block_end, "a download line came before the licence text"
+    assert calls.exists() and "Miniforge" in out[block_end:], (
+        "no download line appeared after the licence: the run never reached its first download"
+    )
+    assert "Miniforge" not in out[: out.find(doc_block())], "a download line came before the licence text"
 
 
 # ─── the compiler check ─────────────────────────────────────────────────────────────────────
@@ -347,6 +373,63 @@ def test_cc_pointing_at_nothing_is_not_a_compiler(platform, tmp_path, no_cc_path
     env["CC"] = "/nonexistent/compiler"
     rc, out = _run(script, "--tool protenix --yes --skip-preflight", env, repo)
     assert rc != 0, out
+    _nothing_was_created(repo, tmp_path, calls)
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_protenix_is_in_the_toolchain_preflight_table(platform):
+    src = INSTALLERS[platform].read_text()
+    block = re.search(r"TOOLCHAIN_TOOLS=\((.*?)\n\)", src, re.S)
+    assert block and re.search(r'"DO_PROTENIX\|Protenix\|[^"]+"', block.group(1)), "Protenix is not in TOOLCHAIN_TOOLS"
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_a_conda_forge_style_compiler_name_is_accepted(platform, tmp_path, no_cc_path):
+    """check_build_toolchain accepts <arch>-conda-linux-gnu-gcc, so the early check must too."""
+    repo, script, env, calls = _sandbox(tmp_path, platform, no_cc_path, cc=False)
+    arch = "aarch64" if platform == "aarch64" else os.uname().machine
+    cdir = tmp_path / "condacc"
+    cdir.mkdir()
+    (cdir / f"{arch}-conda-linux-gnu-gcc").write_text("#!/bin/sh\nexit 0\n")
+    (cdir / f"{arch}-conda-linux-gnu-gcc").chmod(0o755)
+    env["PATH"] = f"{cdir}:{env['PATH']}"
+    rc, out = _run(script, "--tool protenix", env, repo)  # no terminal, no --yes: stops at the licence
+    assert "No C compiler found" not in out, out
+    assert doc_block() in out, "the gate after the compiler check was never reached"
+    assert rc != 0
+    _nothing_was_created(repo, tmp_path, calls)
+
+
+# ─── a wrong-architecture run is refused before any licence is shown ───────────────────────────
+
+
+def test_a_wrong_architecture_is_refused_before_a_licence_is_shown_aarch64_script(tmp_path, no_cc_path):
+    if os.uname().machine == "aarch64":
+        pytest.skip("this host really is aarch64")
+    repo, script, env, calls = _sandbox(tmp_path, "aarch64", no_cc_path, arch="native")
+    rc, out = _run(script, "--tool protenix", env, repo)
+    assert rc != 0 and "Expected aarch64" in out, out
+    assert doc_block() not in out, "a licence was shown to a run that was about to be refused for its architecture"
+    _nothing_was_created(repo, tmp_path, calls)
+
+
+def test_a_wrong_architecture_is_refused_before_a_licence_is_shown_x86_script(tmp_path, no_cc_path):
+    repo, script, env, calls = _sandbox(tmp_path, "x86", no_cc_path, arch="aarch64")
+    # install.sh looks for conda before it refuses an aarch64 host (existing order); give it one
+    env["BINDERSCOUT_CONDA"] = str(fake_base(tmp_path / "base"))
+    # direct subprocess: run_bash would add the override that lets install.sh run on aarch64
+    r = subprocess.run(
+        ["bash", str(script), "--tool", "protenix"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(repo),
+        timeout=120,
+    )
+    out = r.stdout + r.stderr
+    assert r.returncode != 0 and "x86_64 installer" in out, out
+    assert doc_block() not in out, "a licence was shown to a run that was about to be refused for its architecture"
     _nothing_was_created(repo, tmp_path, calls)
 
 
@@ -406,7 +489,16 @@ FAKE_PY = r"""#!/bin/sh
 echo "python $*" >> "$FAKE_LOG"
 if [ -n "$PROTENIX_ROOT_DIR" ]; then
   mkdir -p "$PROTENIX_ROOT_DIR/checkpoint" "$PROTENIX_ROOT_DIR/common"
-  truncate -s "${FAKE_CKPT_BYTES:-1475950125}" "$PROTENIX_ROOT_DIR/checkpoint/$PROTENIX_MODEL.pt"
+  ckpt="$PROTENIX_ROOT_DIR/checkpoint/$PROTENIX_MODEL.pt"
+  if [ -n "$FAKE_FETCH_FAIL" ]; then   # a dropped connection: only a .part exists, and the step fails
+    head -c 100 /dev/zero > "$ckpt.part"
+    exit 1
+  fi
+  if [ -n "$FAKE_BAD_HASH" ]; then     # the right size, the wrong bytes
+    head -c "${FAKE_CKPT_BYTES:-4096}" /dev/zero | tr '\0' x > "$ckpt"
+  else
+    head -c "${FAKE_CKPT_BYTES:-4096}" /dev/zero > "$ckpt"
+  fi
   for f in components.cif components.cif.rdkit_mol.pkl clusters-by-entity-40.txt obsolete_release_date.csv; do
     echo x > "$PROTENIX_ROOT_DIR/common/$f"
   done
@@ -418,6 +510,10 @@ exit 0
 
 def _flow(tmp_path: Path, platform: str, no_cc_path: str, **extra: str):
     repo, script, env, calls = _sandbox(tmp_path, platform, no_cc_path)
+    # describe a tiny fake checkpoint to the installer text under test (see FLOW_BYTES)
+    text = script.read_text()
+    assert text.count(f"PROTENIX_CKPT_BYTES={CKPT_BYTES}\n") == 1 and text.count(CKPT_SHA256) == 1
+    script.write_text(text.replace(str(CKPT_BYTES), str(FLOW_BYTES), 1).replace(CKPT_SHA256, FLOW_SHA256))
     base = fake_base(tmp_path / "base", conda_script=FAKE_CONDA)
     fake_py = tmp_path / "fake_python"
     fake_py.write_text(FAKE_PY)
@@ -447,9 +543,9 @@ def test_install_builds_the_env_fetches_the_weights_and_only_then_marks(platform
     assert at == sorted(at), "install steps ran out of order"
     fetch = calls_log.find("download_from_url")
     assert fetch > at[-1], "the weights were fetched before the env was complete"
-    # the weights landed where Task 18 will point --model-dir, with the exact checkpoint size
+    # the weights landed where Task 18 will point --model-dir, with the (flow-sized) checkpoint
     ckpt = repo / "weights" / "protenix" / "checkpoint" / "protenix_base_default_v1.0.0.pt"
-    assert ckpt.stat().st_size == CKPT_BYTES
+    assert ckpt.stat().st_size == FLOW_BYTES
     # no assertion on torch.cuda: a login node has no GPU
     assert "cuda.is_available" not in calls_log
     # the marker exists, and carries the licence that was shown plus a UTC date
@@ -462,7 +558,7 @@ def test_install_builds_the_env_fetches_the_weights_and_only_then_marks(platform
 @pytest.mark.parametrize("platform", sorted(INSTALLERS))
 def test_install_accepted_at_the_prompt_completes(platform, tmp_path, no_cc_path):
     repo, script, env, _calls, log, _base = _flow(tmp_path, platform, no_cc_path)
-    rc, out = _run_tty(script, "--second-engine protenix --skip-preflight", env, repo, "y\n", "y\n")
+    rc, out = _run_tty(script, "--second-engine protenix --skip-preflight", env, repo, "y\n")
     assert rc == 0, out
     assert (repo / ".install_state" / "protenix").is_file()
     assert doc_block() in out and "Accept and download? [y/N]" in out
@@ -474,7 +570,28 @@ def test_a_wrong_checkpoint_size_refuses_and_writes_no_marker(platform, tmp_path
     repo, script, env, _calls, _log, _base = _flow(tmp_path, platform, no_cc_path, FAKE_CKPT_BYTES="1234")
     rc, out = _run(script, "--tool protenix --yes --skip-preflight", env, repo)
     assert rc != 0, out
-    assert str(CKPT_BYTES) in out and "1234" in out, out
+    assert str(FLOW_BYTES) in out and "1234" in out, out
+    assert not (repo / ".install_state" / "protenix").exists()
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_a_wrong_checkpoint_hash_refuses_names_both_hashes_and_removes_the_file(platform, tmp_path, no_cc_path):
+    repo, script, env, _calls, _log, _base = _flow(tmp_path, platform, no_cc_path, FAKE_BAD_HASH="1")
+    rc, out = _run(script, "--tool protenix --yes --skip-preflight", env, repo)
+    observed = hashlib.sha256(b"x" * FLOW_BYTES).hexdigest()
+    assert rc != 0, out
+    assert FLOW_SHA256 in out and observed in out, "the refusal must name the expected and the observed hash"
+    assert not (repo / "weights" / "protenix" / "checkpoint" / "protenix_base_default_v1.0.0.pt").exists()
+    assert not (repo / ".install_state" / "protenix").exists()
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_a_download_that_dies_leaves_no_checkpoint_and_no_marker(platform, tmp_path, no_cc_path):
+    repo, script, env, _calls, _log, _base = _flow(tmp_path, platform, no_cc_path, FAKE_FETCH_FAIL="1")
+    rc, out = _run(script, "--tool protenix --yes --skip-preflight", env, repo)
+    ckdir = repo / "weights" / "protenix" / "checkpoint"
+    assert rc != 0, out
+    assert not (ckdir / "protenix_base_default_v1.0.0.pt").exists(), "a half-downloaded file looks finished"
     assert not (repo / ".install_state" / "protenix").exists()
 
 
@@ -502,7 +619,7 @@ def test_verify_lists_protenix_and_reads_the_weights(platform, tmp_path, no_cc_p
     rc, out = _run(script, "--verify --tool protenix --yes", env, repo)
     out = re.sub(r"\x1b\[[0-9;]*m", "", out)
     assert rc != 0, out
-    assert re.search(r"✗\s+Protenix", out) and str(CKPT_BYTES) in out, out
+    assert re.search(r"✗\s+Protenix", out) and str(FLOW_BYTES) in out, out
 
 
 @pytest.mark.parametrize("platform", sorted(INSTALLERS))
@@ -532,14 +649,121 @@ def test_uninstall_of_everything_still_works_and_reaches_protenix(platform, tmp_
 
 
 @pytest.mark.parametrize("platform", sorted(INSTALLERS))
-def test_a_repeat_install_keeps_the_weights_it_already_has(platform, tmp_path, no_cc_path):
+def test_a_repeat_install_still_succeeds_and_keeps_its_marker(platform, tmp_path, no_cc_path):
+    """Resume behaviour itself (skip finished files, .part then rename) is executed below, against the
+    real embedded download code; here only the flow around it."""
     repo, script, env, _calls, _log, _base = _flow(tmp_path, platform, no_cc_path)
     assert _run(script, "--tool protenix --yes --skip-preflight", env, repo)[0] == 0
-    ckpt = repo / "weights" / "protenix" / "checkpoint" / "protenix_base_default_v1.0.0.pt"
-    before = ckpt.stat().st_ino
-
     rc, out = _run(script, "--tool protenix --yes --skip-preflight", env, repo)
-
     assert rc == 0, out
-    assert ckpt.stat().st_size == CKPT_BYTES and ckpt.stat().st_ino == before
     assert doc_block() in (repo / ".install_state" / "protenix").read_text()
+
+
+# ─── the embedded download code, executed ──────────────────────────────────────────────────
+
+# The key names the installer indexes in Protenix's own URL table (protenix 1.1.0
+# web_service/dependency_url.py) and the layout it writes under PROTENIX_ROOT_DIR.
+URL_KEYS = {
+    "protenix_base_default_v1.0.0": "checkpoint/protenix_base_default_v1.0.0.pt",
+    "ccd_components_file": "common/components.cif",
+    "ccd_components_rdkit_mol_file": "common/components.cif.rdkit_mol.pkl",
+    "pdb_cluster_file": "common/clusters-by-entity-40.txt",
+    "obsolete_release_data_csv": "common/obsolete_release_date.csv",
+}
+
+STUB_INFERENCE = """
+import os, urllib.request
+
+def download_from_url(tos_url, checkpoint_path, check_weight=True):
+    assert check_weight is False, "install must not unpickle a download"
+    fail = os.environ.get("STUB_FAIL_SUFFIX")
+    if fail and tos_url.endswith(fail):
+        with open(checkpoint_path, "wb") as f:
+            f.write(b"partial")
+        raise RuntimeError("connection dropped")
+    urllib.request.urlretrieve(tos_url, checkpoint_path)
+"""
+
+
+def _embedded_download_code(platform: str) -> str:
+    fn = extract_functions(INSTALLERS[platform], "_protenix_fetch_weights")
+    m = re.search(r"<<'PY'\n(.*?)\nPY\n", fn, re.S)
+    assert m, "the embedded download program was not found in _protenix_fetch_weights"
+    return m.group(1)
+
+
+def _stubbed_download(tmp_path: Path, platform: str, **env_extra: str):
+    """Run the installer's own download program against a stub Protenix whose URL table is file://."""
+    src = tmp_path / "src"
+    src.mkdir(exist_ok=True)
+    urls = {}
+    for key in URL_KEYS:
+        f = src / key
+        f.write_bytes(f"content of {key}\n".encode())
+        urls[key] = f.as_uri()
+    stub = tmp_path / "stub"
+    for pkg in ("protenix", "protenix/web_service", "runner"):
+        (stub / pkg).mkdir(parents=True, exist_ok=True)
+        (stub / pkg / "__init__.py").write_text("")
+    (stub / "protenix/web_service/dependency_url.py").write_text(f"URL = {urls!r}\n")
+    (stub / "runner/inference.py").write_text(STUB_INFERENCE)
+    root = tmp_path / "root"
+    model = "protenix_base_default_v1.0.0"
+    env = {
+        "PATH": os.environ["PATH"],
+        "PYTHONPATH": str(stub),
+        "PROTENIX_ROOT_DIR": str(root),
+        "PROTENIX_MODEL": model,
+        "PROTENIX_CKPT_BYTES": str(len(f"content of {model}\n")),
+        **env_extra,
+    }
+    r = subprocess.run(
+        [sys.executable, "-c", _embedded_download_code(platform)], env=env, capture_output=True, text=True, cwd=tmp_path
+    )
+    return r, root, src
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_the_embedded_download_indexes_the_right_keys_and_writes_the_right_layout(platform, tmp_path):
+    r, root, src = _stubbed_download(tmp_path, platform)
+    assert r.returncode == 0, r.stdout + r.stderr
+    for key, rel in URL_KEYS.items():
+        assert (root / rel).read_bytes() == (src / key).read_bytes(), key
+    assert not list(root.rglob("*.part")), "a .part file was left behind"
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_an_interrupted_download_leaves_only_a_part_file_and_a_rerun_resumes(platform, tmp_path):
+    ckpt_rel = URL_KEYS["protenix_base_default_v1.0.0"]
+    r, root, _src = _stubbed_download(tmp_path, platform, STUB_FAIL_SUFFIX="protenix_base_default_v1.0.0")
+    assert r.returncode != 0
+    assert not (root / ckpt_rel).exists(), "a half-downloaded checkpoint looks finished"
+    assert (root / (ckpt_rel + ".part")).exists()
+
+    # a file an earlier run finished must not be fetched again; the stale .part must go
+    done = root / URL_KEYS["ccd_components_file"]
+    done.parent.mkdir(parents=True, exist_ok=True)
+    done.write_bytes(b"SENTINEL: finished earlier")
+    r, root, src = _stubbed_download(tmp_path, platform)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert done.read_bytes() == b"SENTINEL: finished earlier", "a finished file was downloaded again"
+    assert (root / ckpt_rel).read_bytes() == (src / "protenix_base_default_v1.0.0").read_bytes()
+    assert not list(root.rglob("*.part"))
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_a_checkpoint_of_the_wrong_size_is_replaced_not_kept(platform, tmp_path):
+    ckpt = tmp_path / "root" / URL_KEYS["protenix_base_default_v1.0.0"]
+    ckpt.parent.mkdir(parents=True)
+    ckpt.write_bytes(b"truncated")
+    r, _root, src = _stubbed_download(tmp_path, platform)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert ckpt.read_bytes() == (src / "protenix_base_default_v1.0.0").read_bytes()
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_the_installers_pin_the_checkpoint_size_and_hash(platform):
+    src = INSTALLERS[platform].read_text()
+    assert re.search(rf"^PROTENIX_CKPT_BYTES={CKPT_BYTES}$", src, re.M)
+    assert re.search(rf'^PROTENIX_CKPT_SHA256="{CKPT_SHA256}"$', src, re.M)
+    assert CKPT_SHA256 in DOC.read_text(), "the licence record does not state the pinned hash"

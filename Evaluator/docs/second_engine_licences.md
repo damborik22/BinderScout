@@ -246,6 +246,10 @@ between the two marker comments below at run time and print it verbatim before a
 to install if the markers are missing or the block is empty. The text is the only copy: edit it here, and keep it in
 step with the Protenix sections above. The markers are exact, whole-line strings.
 
+The installers pin the checkpoint `protenix_base_default_v1.0.0.pt` at 1,475,950,125 bytes and SHA-256
+`2b7d5a8b30494514fc47fd2271a16260528cdba170ba09cc112fdecd8f85ec04`: the hash of the file the 2026-11-05 benchmark runs used
+(computed with `sha256sum` on that copy), not a hash published upstream, which the record does not have.
+
 <!-- install-licence:protenix:start -->
 PROTENIX v1.x (ByteDance), the opt-in replacement for AF3 as the second refold engine. Licence read 2026-11-05.
 

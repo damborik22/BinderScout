@@ -181,6 +181,10 @@ PROTENIX_ENV="binder-eval-protenix"
 PROTENIX_VERSION="1.1.0"
 PROTENIX_MODEL="protenix_base_default_v1.0.0"
 PROTENIX_CKPT_BYTES=1475950125
+# sha256 of the checkpoint the 2026-11-05 benchmark runs used. This is NOT an upstream-published
+# hash (the licence record has none): it pins "the bytes that were measured", so wrong bytes under
+# the right size and path are refused rather than run. Checked after the download, like RFD4's.
+PROTENIX_CKPT_SHA256="2b7d5a8b30494514fc47fd2271a16260528cdba170ba09cc112fdecd8f85ec04"
 PROTENIX_TORCH_INDEX="https://download.pytorch.org/whl/cu128"
 PROTENIX_WEIGHTS_DIR="${BINDERSCOUT_DIR}/weights/protenix"
 # The licence text is printed from the record, between these two whole-line markers; it is never
@@ -3699,10 +3703,13 @@ EOF
 # conda solve, with "No such file or directory: 'cc'" on a host with no C compiler. A `cc` or
 # `gcc` on PATH, or a $CC that resolves, is enough: setuptools honours CC.
 _protenix_require_cc() {
-    command -v cc >/dev/null 2>&1 && return 0
-    command -v gcc >/dev/null 2>&1 && return 0
+    local bin
+    # The same names check_build_toolchain accepts (a conda-forge compiler has the long name).
+    for bin in cc gcc "${ARCH}-linux-gnu-gcc" "${ARCH}-conda-linux-gnu-gcc"; do
+        command -v "${bin}" >/dev/null 2>&1 && return 0
+    done
     if [[ -n "${CC:-}" ]] && command -v "${CC%% *}" >/dev/null 2>&1; then return 0; fi
-    print_fail "No C compiler found (no cc or gcc on PATH, and \$CC is unset or does not exist)."
+    print_fail "No C compiler found (no cc, gcc, ${ARCH}-linux-gnu-gcc or ${ARCH}-conda-linux-gnu-gcc on PATH, and \$CC is unset or does not exist)."
     print_fail "  protenix==${PROTENIX_VERSION} builds scikit-learn-extra from source and fails with"
     print_fail "  \"No such file or directory: 'cc'\" without one. Nothing was created or downloaded."
     print_warn "  Fix: install a system C compiler (sudo apt-get install -y gcc), or set CC to one"
@@ -3821,6 +3828,19 @@ _protenix_weights_reason() {
     return 0
 }
 
+# _protenix_checkpoint_sha_reason
+# Prints why the checkpoint is not the pinned bytes (naming expected and observed sha256), or
+# nothing when it is. Install-time only: hashing 1.4 GB is too slow for --verify and the menu,
+# which check the byte count (the same split RFD4 makes).
+_protenix_checkpoint_sha_reason() {
+    local ckpt="${PROTENIX_WEIGHTS_DIR}/checkpoint/${PROTENIX_MODEL}.pt" got
+    got="$(sha256sum "${ckpt}" 2>/dev/null | cut -d' ' -f1)"
+    if [[ "${got}" != "${PROTENIX_CKPT_SHA256}" ]]; then
+        printf '%s' "${PROTENIX_MODEL}.pt sha256 is ${got:-unreadable}, expected ${PROTENIX_CKPT_SHA256}"
+    fi
+    return 0
+}
+
 # _protenix_fetch_weights
 # Protenix's own downloader (runner.inference.download_from_url) and its own URL table
 # (protenix.web_service.dependency_url.URL), run in the new env, into the same layout Protenix
@@ -3926,7 +3946,14 @@ install_protenix() {
         fi
         return 1
     fi
-    print_ok "Protenix weights verified (${PROTENIX_MODEL}.pt = ${PROTENIX_CKPT_BYTES} bytes + CCD data)"
+    _why="$(_protenix_checkpoint_sha_reason)"
+    if [[ -n "${_why}" ]]; then
+        print_fail "Protenix checkpoint failed verification: ${_why}"
+        print_fail "  The checkpoint was removed so a re-run fetches it again."
+        rm -f "${PROTENIX_WEIGHTS_DIR}/checkpoint/${PROTENIX_MODEL}.pt"
+        return 1
+    fi
+    print_ok "Protenix weights verified (${PROTENIX_MODEL}.pt = ${PROTENIX_CKPT_BYTES} bytes, sha256 ${PROTENIX_CKPT_SHA256:0:12}..., + CCD data)"
 
     # Imports, not a GPU: torch.cuda.is_available() is correctly False on a login node, so it is
     # deliberately not asserted here. __file__ is checked so a shadowing directory cannot pass.
@@ -5249,6 +5276,7 @@ TOOLCHAIN_TOOLS=(
     "DO_SOLUPROT|SoluProt|builds open-source USEARCH v12 from source (rcedgar/usearch12)"
     "DO_AF3|AlphaFold 3|pip-builds alphafold3 from the pinned clone, including its C++ extension"
     "DO_PROTEINA_COMPLEXA|Proteina-Complexa|builds cpdb-protein in its uv venv"
+    "DO_PROTENIX|Protenix|builds scikit-learn-extra from source"
 )
 
 # ─── Build toolchain ─────────────────────────────────────────────────────────
@@ -5422,7 +5450,11 @@ main() {
 
     # Everything that can refuse -- a missing C compiler, a licence not shown or not accepted --
     # refuses here, before conda is detected (which may fetch a Miniforge) or anything is created.
-    protenix_early_gate || exit 1
+    # Not on an aarch64 host without the override: the arch refusal below comes first there, so a
+    # wrong-architecture run is refused before it shows a licence.
+    if [[ "${ARCH}" != "aarch64" || "${BINDERSCOUT_ALLOW_X86_INSTALLER:-}" == "1" ]]; then
+        protenix_early_gate || exit 1
+    fi
 
     # --verify and --uninstall must not provision conda: an audit that first downloads and
     # installs a Miniforge is not an audit, and "conda not found" is itself the finding.
