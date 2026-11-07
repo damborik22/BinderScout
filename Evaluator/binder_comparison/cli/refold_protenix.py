@@ -27,6 +27,8 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from ..io.read import read_fasta
+
 # The adapter takes these three from us and nothing else: the CLI never lets a caller
 # change them (R5), so the options exist below only to be refused with a clear message.
 _FIXED_KERNEL_ARGS = ["--trimul-kernel", "torch", "--triatt-kernel", "torch", "--layernorm-type", "torch"]
@@ -98,7 +100,29 @@ def run(args: argparse.Namespace) -> None:
             )
             sys.exit(2)
 
-    rc = _load_adapter_main(args.scripts_path)(_adapter_argv(args))
+    # Same guard as refold-af3 (plus: a header with no residues is not a sequence): an empty FASTA must
+    # fail, not "succeed" with nothing done.
+    if not any(seq for _, seq in read_fasta(args.sequences)):
+        print(f"[refold-protenix] ERROR: no sequences found in {args.sequences}", file=sys.stderr)
+        sys.exit(1)
+
+    # The adapter's configure() would raise a bare FileNotFoundError traceback for a stale data root.
+    model_dir = args.model_dir or os.environ.get("PROTENIX_MODEL_DIR")
+    if model_dir and not Path(model_dir).is_dir():
+        print(f"[refold-protenix] ERROR: Protenix data root not found: {model_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        adapter_main = _load_adapter_main(args.scripts_path)
+    except ImportError as exc:
+        print(
+            "[refold-protenix] ERROR: refold-protenix must run inside the Protenix environment; "
+            f"{exc.name or 'refold_protenix_v1'} is not importable: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    rc = adapter_main(_adapter_argv(args))
     if rc:
         # Passed through unchanged: 3 means rows for the designs that DID fold are on disk,
         # so a wrapper re-runs the named indices instead of treating the env as broken.

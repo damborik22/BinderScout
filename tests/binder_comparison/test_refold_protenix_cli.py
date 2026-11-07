@@ -8,12 +8,27 @@ No GPU, no Protenix: the adapter's ``main`` is replaced by a recorder.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import pytest
 from binder_comparison import main as main_mod
 from binder_comparison.cli import refold_protenix
 
 KERNELS = ["--trimul-kernel", "torch", "--triatt-kernel", "torch", "--layernorm-type", "torch"]
-BASE = ["refold-protenix", "--sequences", "seqs.fasta", "--target-seq", "ACDEFGHIKL", "-o", "out.csv"]
+TARGET = "ACDEFGHIKL"
+BINDER = "MKVLAAGW"
+
+
+BASE = ["refold-protenix", "--sequences", "seqs.fasta", "--target-seq", TARGET, "-o", "out.csv"]
+
+
+@pytest.fixture(autouse=True)
+def _workdir(tmp_path, monkeypatch):
+    """Every test runs in a scratch dir holding a real one-binder seqs.fasta."""
+    (tmp_path / "seqs.fasta").write_text(f">d1 source=test\n{BINDER}\n")
+    monkeypatch.chdir(tmp_path)
 
 
 @pytest.fixture()
@@ -159,6 +174,7 @@ def test_allow_no_msa_and_msa_cache_dir_passthrough(adapter):
 
 def test_model_dir_defaults_to_env_var(adapter, monkeypatch, tmp_path):
     calls, _ = adapter
+    (tmp_path / "from_env").mkdir()
     monkeypatch.setenv("PROTENIX_MODEL_DIR", str(tmp_path / "from_env"))
     _run(BASE)
     assert _opt(calls[0], "--model-dir") == str(tmp_path / "from_env")
@@ -166,7 +182,8 @@ def test_model_dir_defaults_to_env_var(adapter, monkeypatch, tmp_path):
 
 def test_explicit_model_dir_overrides_env_var(adapter, monkeypatch, tmp_path):
     calls, _ = adapter
-    monkeypatch.setenv("PROTENIX_MODEL_DIR", str(tmp_path / "from_env"))
+    (tmp_path / "explicit").mkdir()
+    monkeypatch.setenv("PROTENIX_MODEL_DIR", str(tmp_path / "from_env"))  # does not exist: must not matter
     _run([*BASE, "--model-dir", str(tmp_path / "explicit")])
     assert _opt(calls[0], "--model-dir") == str(tmp_path / "explicit")
 
@@ -187,3 +204,97 @@ def test_the_real_adapter_module_is_found_and_exposes_main():
 def test_missing_scripts_path_is_an_error(tmp_path):
     with pytest.raises(FileNotFoundError):
         refold_protenix._load_adapter_main(tmp_path / "nope")
+
+
+# --- review fixes ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "content", ["", "\n\n", ">only_a_header\n", "ACDEFGH\n"], ids=["empty", "blank", "header-only", "no-header"]
+)
+def test_a_fasta_with_no_sequences_exits_1_and_never_calls_the_adapter(adapter, capsys, tmp_path, content):
+    calls, _ = adapter
+    (tmp_path / "seqs.fasta").write_text(content)
+    with pytest.raises(SystemExit) as exc:
+        _run(BASE)
+    assert exc.value.code == 1
+    assert "no sequences found in seqs.fasta" in capsys.readouterr().err
+    assert calls == []
+
+
+def test_an_adapter_import_failure_says_to_use_the_protenix_environment(monkeypatch, capsys):
+    def boom(name):
+        raise ModuleNotFoundError("No module named 'numpy'", name="numpy")
+
+    monkeypatch.setattr(refold_protenix.importlib, "import_module", boom)
+    with pytest.raises(SystemExit) as exc:
+        _run(BASE)
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "refold-protenix must run inside the Protenix environment" in err
+    assert "numpy is not importable" in err
+    assert "No module named 'numpy'" in err
+
+
+@pytest.mark.parametrize("via", ["flag", "env"])
+def test_a_missing_model_dir_exits_1_naming_the_path(adapter, monkeypatch, capsys, tmp_path, via):
+    calls, _ = adapter
+    gone = str(tmp_path / "gone")
+    argv = list(BASE)
+    if via == "flag":
+        argv += ["--model-dir", gone]
+    else:
+        monkeypatch.setenv("PROTENIX_MODEL_DIR", gone)
+    with pytest.raises(SystemExit) as exc:
+        _run(argv)
+    assert exc.value.code == 1
+    assert f"Protenix data root not found: {gone}" in capsys.readouterr().err
+    assert calls == []
+
+
+def test_the_real_adapter_receives_torch_kernels_and_overrides_an_ambient_layernorm(monkeypatch, tmp_path, capsys):
+    """argv from the CLI -> the REAL adapter main -> the engine subprocess's command line and environment."""
+    main = refold_protenix._load_adapter_main(None)
+    adapter_mod = sys.modules[main.__module__]
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"], seen["env"] = list(cmd), dict(kwargs["env"])
+        return subprocess.CompletedProcess(cmd, 1, "", "stub: engine not run")
+
+    monkeypatch.setattr(adapter_mod, "_protenix_executable", lambda: "protenix")
+    monkeypatch.setattr(adapter_mod.subprocess, "run", fake_run)
+    monkeypatch.setenv("LAYERNORM_TYPE", "fast_layernorm")  # ambient value the CLI must override
+
+    args = refold_protenix_args(tmp_path)
+    # The stub engine fails the only binder, so the adapter refuses the run; only the engine call matters here.
+    with pytest.raises(RuntimeError, match="All 1 binder"):
+        main(refold_protenix._adapter_argv(args))
+
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--trimul_kernel") + 1] == "torch"
+    assert cmd[cmd.index("--triatt_kernel") + 1] == "torch"
+    assert seen["env"]["LAYERNORM_TYPE"] == "torch"
+    assert os.environ["LAYERNORM_TYPE"] == "fast_layernorm"  # only the child's copy changed
+    assert cmd[cmd.index("-n") + 1] == "protenix_base_default_v1.0.0"
+
+
+def refold_protenix_args(tmp_path):
+    import argparse
+
+    subparsers = argparse.ArgumentParser().add_subparsers()
+    refold_protenix.add_parser(subparsers)
+    parser = subparsers.choices["refold-protenix"]
+    return parser.parse_args(
+        [
+            "--sequences",
+            str(tmp_path / "seqs.fasta"),
+            "--target-seq",
+            TARGET,
+            "-o",
+            str(tmp_path / "out.csv"),
+            "--output-dir",
+            str(tmp_path / "work"),
+            "--no-msa",
+        ]
+    )
