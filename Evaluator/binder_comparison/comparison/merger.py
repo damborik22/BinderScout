@@ -2,7 +2,8 @@
 
 Column naming convention after merge:
   - Boltz-2 columns are prefixed with ``boltz_``
-  - AF3 columns (Part K, aarch64) are prefixed with ``af3_``
+  - AF3 columns (Part K, aarch64) are prefixed with ``af3_``; the second slot may instead hold
+    Protenix, whose columns are prefixed with ``protenix_`` (never both)
   - ESMFold2 columns (biohub) are prefixed with ``esmfold2_``
   - ``sequence`` is the join key, present in every engine's CSV
 
@@ -17,6 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..core.engines import resolve_panel
 from ..io.read import read_csv_safe, read_fasta
 
 # Columns that should NOT be prefixed — passthrough identifiers shared across engines
@@ -77,6 +79,8 @@ def merge_refold_results(
     *,
     af3_csv: str | Path | None = None,
     esmfold2_csv: str | Path | None = None,
+    second_csv: str | Path | None = None,
+    second_engine: str = "af3",
 ) -> pd.DataFrame:
     """Outer-join refolding-engine CSVs on the ``sequence`` column.
 
@@ -85,17 +89,36 @@ def merge_refold_results(
                           anchor — report needs at least one engine).
         sequences_fasta:  Optional FASTA from 'extract'; attaches binder_id and
                           source_tool columns.
-        af3_csv:          Optional AF3 results (refold-af3 output).
+        af3_csv:          Optional AF3 results (refold-af3 output). The second slot's
+                          original spelling; it is the same slot as ``second_csv`` and
+                          only valid while ``second_engine`` is ``"af3"``.
         esmfold2_csv:     Optional ESMFold2 results (refold-esmfold2 output).
+        second_csv:       Optional results of whichever engine fills the second slot.
+        second_engine:    ``"af3"`` (default) or ``"protenix"``: which engine ``second_csv``
+                          holds, and therefore the column prefix. Validated by the registry.
 
     Returns:
         DataFrame with per-engine prefixed columns + passthrough identifiers.
     """
+    second = resolve_panel(second_engine).second.prefix
+    if af3_csv and second_csv:
+        raise ValueError(
+            "both af3_csv and second_csv were given, but they are the same slot: the panel has "
+            "exactly one second engine. Pass the AF3 results as either af3_csv or second_csv, not both."
+        )
+    if af3_csv and second != "af3":
+        raise ValueError(
+            f"af3_csv was given together with second_engine={second_engine!r}, but the second slot "
+            f"holds {second_engine} and the AF3 results would be dropped silently. Pass the "
+            f"{second_engine} results as second_csv, or use second_engine='af3'."
+        )
+    second_path = second_csv or af3_csv
+
     engine_dfs: dict[str, pd.DataFrame] = {}
     if boltz2_csv:
         engine_dfs["boltz"] = _load_engine(boltz2_csv, "boltz")
-    if af3_csv:
-        engine_dfs["af3"] = _load_engine(af3_csv, "af3")
+    if second_path:
+        engine_dfs[second] = _load_engine(second_path, second)
     if esmfold2_csv:
         engine_dfs["esmfold2"] = _load_engine(esmfold2_csv, "esmfold2")
 

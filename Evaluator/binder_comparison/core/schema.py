@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .engines import engine as _engine
+
 # binder-compare also runs inside the Python 3.7 `binder-eval-soluprot` env
 # (for `filter-soluprot`), where `typing.Literal` does not exist (3.8+).
 # Annotations are lazy here (PEP 563 `from __future__ import annotations`), so
@@ -204,6 +206,21 @@ class StandardisedMetrics:
     af3_tb_ipsae: float | None = None
     af3_ipsae_min: float | None = None
 
+    # ---- Protenix values: the other engine the panel's second slot may hold (Part 2) ----
+    # Same columns as the AF3 block above, under the engine's real name.
+    protenix_iptm: float | None = None
+    protenix_ptm: float | None = None
+    protenix_ranking_score: float | None = None
+    protenix_plddt_binder_mean: float | None = None
+    protenix_plddt_binder_min: float | None = None
+    protenix_plddt_target_mean: float | None = None
+    protenix_pae_bt: float | None = None
+    protenix_pae_tb: float | None = None
+    protenix_pae_bb: float | None = None
+    protenix_bt_ipsae: float | None = None
+    protenix_tb_ipsae: float | None = None
+    protenix_ipsae_min: float | None = None
+
 
 @dataclass
 class PerResidueData:
@@ -309,7 +326,7 @@ LOWER_IS_BETTER = frozenset(
         "af3_pae_bb",
         "pTMEnergy",
     }
-)
+) | frozenset(f"{_engine('protenix').prefix}_{m}" for m in ("pae_bt", "pae_tb", "pae_bb"))
 
 # Canonical metric names → Boltz-2 source column.
 # These columns are promoted directly (no ensemble averaging).
@@ -365,6 +382,21 @@ ZSCORE_METRICS = list(BOLTZ2_METRIC_MAP.keys()) + [
     "af3_tb_ipsae",
     "af3_ipsae_min",
     "af3_pae_iptm",
+    # Protenix, the other engine the second slot may hold: the same columns under its own
+    # name, generated from the registry's prefix so it cannot drift from the AF3 block above.
+    *(
+        f"{_engine('protenix').prefix}_{m}"
+        for m in (
+            "iptm",
+            "ptm",
+            "ranking_score",
+            "plddt_binder_mean",
+            "bt_ipsae",
+            "tb_ipsae",
+            "ipsae_min",
+            "pae_iptm",
+        )
+    ),
     # ESMFold2 — the third engine, and the one feeding chain_iptm_interface (the
     # autosize gate). Omitting it meant metrics_zscore.csv had no esmfold2_*_z columns
     # and summary.json no ESMFold2 entries, so the engine driving consensus_iptm was
