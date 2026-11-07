@@ -724,16 +724,19 @@ fi
 # only the running ones made a top-up run warn that every design would fail the gate when
 # all three engines were in fact present.
 _N_ENGINES=0
-[[ $SKIP_BOLTZ2   -eq 0 || -f "$BOLTZ2_CSV"   ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+# "Its CSV is on disk" means SCORED rows (csv_rows keys on the `iptm` column all four engines write):
+# a header-only or all-blank CSV is not an engine's results, so it is neither counted here nor, below,
+# passed to the report. Counting the file hid the "gate defaults to 3" warning behind an empty CSV.
+(( SKIP_BOLTZ2   == 0 )) || (( $(csv_rows "$BOLTZ2_CSV") > 0 )) && _N_ENGINES=$(( _N_ENGINES + 1 ))
 if [[ "$SECOND_ENGINE" == "protenix" ]]; then
-    [[ $SKIP_PROTENIX -eq 0 || -f "$PROTENIX_CSV" ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+    (( SKIP_PROTENIX == 0 )) || (( $(csv_rows "$PROTENIX_CSV") > 0 )) && _N_ENGINES=$(( _N_ENGINES + 1 ))
 else
-    [[ $SKIP_AF3      -eq 0 || -f "$AF3_CSV"      ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+    (( SKIP_AF3      == 0 )) || (( $(csv_rows "$AF3_CSV") > 0 )) && _N_ENGINES=$(( _N_ENGINES + 1 ))
 fi
-[[ $SKIP_ESMFOLD2 -eq 0 || -f "$ESMFOLD2_CSV" ]] && _N_ENGINES=$(( _N_ENGINES + 1 ))
+(( SKIP_ESMFOLD2 == 0 )) || (( $(csv_rows "$ESMFOLD2_CSV") > 0 )) && _N_ENGINES=$(( _N_ENGINES + 1 ))
 if [[ -z "$MIN_ENGINES" ]] && (( _N_ENGINES < 3 )); then
     echo "[warn] ${_N_ENGINES} refold engine(s) will reach the report, but the cross-engine gate defaults to 3."
-    if [[ "$SECOND_ENGINE" == "protenix" && $SKIP_PROTENIX -eq 1 && ! -f "$PROTENIX_CSV" ]]; then
+    if [[ "$SECOND_ENGINE" == "protenix" && $SKIP_PROTENIX -eq 1 ]] && (( $(csv_rows "$PROTENIX_CSV") == 0 )); then
         echo "       The second slot is Protenix and it is not running (no $(basename "$PROTENIX_CSV") either)."
     fi
     echo "       Every design will fail the gate and be ranked last, leaving no ranked shortlist."
@@ -1168,8 +1171,11 @@ fi
 
 # --- Report ----------------------------------------------------------------
 echo "[step ${STEP}/${N_STEPS}] Generating report   (binder-eval)..."
-REPORT_ARGS=(
-    --boltz2-results "$BOLTZ2_CSV"
+REPORT_ARGS=()
+if (( SKIP_BOLTZ2 == 0 )) || (( $(csv_rows "$BOLTZ2_CSV") > 0 )); then
+    REPORT_ARGS+=(--boltz2-results "$BOLTZ2_CSV")
+fi
+REPORT_ARGS+=(
     --sequences      "$SEQUENCES"
     -o               "$OUTPUT/report"
 )
@@ -1186,21 +1192,21 @@ REPORT_ARGS=(
 # other engine are never averaged in (R3) -- and the operator is told.
 if [[ "$SECOND_ENGINE" == "protenix" ]]; then
     REPORT_ARGS+=(--second-engine protenix)
-    if [[ -f "$PROTENIX_CSV" ]]; then
+    if (( $(csv_rows "$PROTENIX_CSV") > 0 )); then
         REPORT_ARGS+=(--second-results "$PROTENIX_CSV")
     fi
     if [[ -f "$AF3_CSV" ]]; then
         echo "[note] ignoring $AF3_CSV: the second slot holds Protenix in this run."
     fi
 else
-    if [[ -f "$AF3_CSV" ]]; then
+    if (( $(csv_rows "$AF3_CSV") > 0 )); then
         REPORT_ARGS+=(--af3-results "$AF3_CSV")
     fi
     if [[ -f "$PROTENIX_CSV" ]]; then
         echo "[note] ignoring $PROTENIX_CSV: the second slot holds AF3 in this run."
     fi
 fi
-if [[ -f "$ESMFOLD2_CSV" ]]; then
+if (( $(csv_rows "$ESMFOLD2_CSV") > 0 )); then
     REPORT_ARGS+=(--esmfold2-results "$ESMFOLD2_CSV")
 fi
 if [[ $SKIP_SOLUPROT -eq 0 && $SOLUPROT_OK -eq 1 && -f "$SOLUPROT_CSV" ]]; then
@@ -1237,7 +1243,7 @@ fi
 # load-bearing: the report treats a --tool-csv file as that tool's whole ranked
 # list, so an unfiltered selection would file every tool's designs under one name.
 # Appended after discovery so it wins.
-if [[ -f "$BOLTZ2_CSV" ]]; then
+if (( $(csv_rows "$BOLTZ2_CSV") > 0 )); then
     for _diffusion_tool in rfd3 rfd4; do
         grep -q "source=$_diffusion_tool" "$SEQUENCES" 2>/dev/null || continue
         _diffusion_rank="$OUTPUT/${_diffusion_tool}_native_rank.csv"

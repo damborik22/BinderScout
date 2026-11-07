@@ -110,6 +110,8 @@ def _run(
     extra_env: dict[str, str] | None = None,
     af3_csv: bool | str = False,
     protenix_csv: bool | str = False,
+    esmfold2_csv: bool | str = False,
+    boltz2_csv: bool | str = True,
 ) -> Result:
     """Run evaluate.sh in a sandbox. protenix_weights=None plants no checkpoint; an int plants one that size."""
     sandbox = tmp_path / "Evaluator"
@@ -138,9 +140,13 @@ def _run(
 
     out_dir = tmp_path / "out"
     out_dir.mkdir(exist_ok=True)
-    # --skip-boltz2 needs its CSV on disk; the row is scored for the one pool design.
-    (out_dir / "boltz2_results.csv").write_text("sequence,iptm,target_sequence\nMKTAYIAKQRQ,0.8,MKTAYIAKQRQ\n")
-    for name, kind in (("af3_results.csv", af3_csv), ("protenix_results.csv", protenix_csv)):
+    # --skip-boltz2 needs its CSV on disk; by default it holds a scored row for the one pool design.
+    for name, kind in (
+        ("boltz2_results.csv", boltz2_csv),
+        ("af3_results.csv", af3_csv),
+        ("protenix_results.csv", protenix_csv),
+        ("esmfold2_results.csv", esmfold2_csv),
+    ):
         if kind:  # True = one scored row, "header" = header only, "blank" = a row with every score blank
             body = {True: "MKTAYIAKQRQ,0.8,MKTAYIAKQRQ\n", "header": "", "blank": "MKTAYIAKQRQ,,MKTAYIAKQRQ\n"}[kind]
             (out_dir / name).write_text("sequence,iptm,target_sequence\n" + body)
@@ -391,6 +397,50 @@ def test_explicit_protenix_unusable_with_its_scored_csv_is_skipped_by_name_but_t
     assert r.report[r.report.index("--second-engine") + 1] == "protenix"
     assert r.report[r.report.index("--second-results") + 1] == str(r.out_dir / "protenix_results.csv")
     assert "--af3-results" not in r.report
+
+
+# ------------------------------- only SCORED result CSVs are counted toward the gate and passed on
+
+_GATE_WARNING = "refold engine(s) will reach the report, but the cross-engine gate defaults to 3"
+
+
+@pytest.mark.parametrize("kind", ["header", "blank"])
+def test_an_unscored_af3_csv_is_not_counted_and_not_passed_to_the_report(tmp_path, kind):
+    """AF3 env gone, an empty af3_results.csv left behind, Protenix absent: two engines, and it says so."""
+    r = _run(tmp_path, NEITHER, af3_csv=kind)
+    assert "2 refold engine(s) will reach the report, but the cross-engine gate defaults to 3" in r.out, r.out
+    assert "--min-engines 2" in r.out, r.out
+    assert "--af3-results" not in r.report and "--second-engine" not in r.report
+
+
+@pytest.mark.parametrize("kind", ["header", "blank"])
+def test_an_unscored_boltz2_csv_is_not_counted_and_not_passed_to_the_report(tmp_path, kind):
+    r = _run(tmp_path, ALL_ENVS, boltz2_csv=kind)
+    assert "2 refold engine(s) will reach the report, but the cross-engine gate defaults to 3" in r.out, r.out
+    assert "--boltz2-results" not in r.report
+    assert "--af3-results" in r.report and "--esmfold2-results" in r.report
+
+
+@pytest.mark.parametrize("kind", ["header", "blank"])
+def test_an_unscored_esmfold2_csv_is_not_counted_and_not_passed_to_the_report(tmp_path, kind):
+    r = _run(tmp_path, [e for e in ALL_ENVS if e != "binder-eval-esmfold2"], ["--skip-esmfold2"], esmfold2_csv=kind)
+    assert "2 refold engine(s) will reach the report, but the cross-engine gate defaults to 3" in r.out, r.out
+    assert "--esmfold2-results" not in r.report
+
+
+def test_an_unscored_protenix_csv_is_not_counted_and_not_passed_for_an_explicit_protenix_slot(tmp_path):
+    r = _run(tmp_path, NEITHER, ["--second-engine", "protenix"], protenix_csv="header")
+    assert "2 refold engine(s) will reach the report" in r.out, r.out
+    assert "The second slot is Protenix and it is not running" in r.out, r.out
+    assert r.report[r.report.index("--second-engine") + 1] == "protenix"
+    assert "--second-results" not in r.report
+
+
+def test_scored_csvs_of_skipped_engines_still_count_and_are_still_passed(tmp_path):
+    """A top-up run: the skipped engines' scored CSVs are on disk, so it is a 3-engine report."""
+    r = _run(tmp_path, ["binder-eval"], af3_csv=True, esmfold2_csv=True)
+    assert _GATE_WARNING not in r.out, r.out
+    assert "--af3-results" in r.report and "--esmfold2-results" in r.report and "--boltz2-results" in r.report
 
 
 # ---------------------------------------------------------------- the Protenix weights check
