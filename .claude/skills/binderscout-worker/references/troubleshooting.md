@@ -323,7 +323,7 @@ Falling back to policy: 'reinit'
 ### aarch64 (DGX Spark / GB10)
 
 - aarch64 — only some tools ported. Don't accept assignments for Proteina-Complexa here yet.
-- Hosts the AF3 v3.0.2 refolder (`binder-eval-af3` env), the Boltz-2 refolder (`Mosaic/.venv`), and the Protenix refolder (`binderscout_pxdesign`) for the orchestrator's local cross-engine refold. If this host is also doing worker duty, be careful not to clash refolder runs with worker design runs on the same GPU.
+- Hosts the AF3 v3.0.2 refolder (`binder-eval-af3` env), the Boltz-2 refolder (`Mosaic/.venv`), and, only if installed opt-in (`--tool protenix`), the Protenix refolder in its own `binder-eval-protenix` env (not `binderscout_pxdesign`, which is PXDesign's design env) for the orchestrator's local cross-engine refold. If this host is also doing worker duty, be careful not to clash refolder runs with worker design runs on the same GPU.
 - VPN routing: this host may route to the cluster via a "VPN-on-host" mode if configured — that's primarily for orchestrator-driven remote sessions, not worker-side runs.
 
 ---

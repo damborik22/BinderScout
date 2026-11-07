@@ -35,7 +35,7 @@ Two design checkpoints are loaded by default (`boltzgen1_diverse` + `boltzgen1_a
 
 - **Compute heavy.** The recommended scale is 10,000–60,000 intermediate designs. A100-class GPU recommended; first-time design+refold loop is non-trivial wall time per design.
 - **Low cross-tool pass rate.** Per BinderScout CLAUDE.md known issues: "In CALCA target testing, only 1/50 BoltzGen designs passed the `ipsae_min > 0.61` threshold. Sequences designed for Boltz-2 often don't cross-validate well." The internal Boltz-2 refold is the same model as the evaluator's default refold, so its quality signal isn't fully independent.
-- **Same-model self-judging.** Internal refolding uses Boltz-2; the evaluator's default refolding is also Boltz-2. Adding Protenix and AF3 to the evaluator (Parts J, K) gives BoltzGen the independent cross-checks it currently lacks.
+- **Same-model self-judging.** Internal refolding uses Boltz-2; the evaluator's default refolding is also Boltz-2. Adding AF3 and ESMFold2 to the evaluator (Part K; Protenix is the opt-in alternative for the AF3 slot) gives BoltzGen the independent cross-checks it currently lacks.
 - **AA composition outliers a known issue.** The `--filter_biased` default exists because BoltzGen tends to produce ALA/GLY-heavy designs without the cap.
 - **mmCIF residue indexing.** Uses `label_asym_id` (mmCIF canonical), not `auth_asym_id`. Misuse will silently mis-specify binding sites. Always use `boltzgen check` and visualize before running.
 - **Designed-residue sidechain coordinates are zero** in `intermediate_designs_inverse_folded/*.cif` (only backbone atoms have real coordinates); use `refold_cif/` outputs for downstream geometry.

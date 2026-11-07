@@ -496,7 +496,7 @@ step by hand. `bash Evaluator/evaluate.sh --help` prints the same list.
 | `--resume` | Resume an interrupted run |
 | `--concurrent` | Run the three refold engines staggered-concurrently instead of one after another. Worth ~1.25x (19.8 % wall-clock, measured), but it costs ~54 % of the OS memory headroom — use it only when the box is dedicated |
 | `--stagger N` | Seconds between engine starts under `--concurrent` (default 30). Staggering stops three engines compiling at once |
-| `--gpu-cap-boltz2` / `--gpu-cap-af3` / `--gpu-cap-esmfold2` / `--gpu-cap-protenix` | Per-engine CUDA MPS device-memory cap (defaults `24G` / `12G` / `24G` / `24G`; Protenix is a PyTorch ceiling set above its measured ~20.4 GiB peak on a 779-token complex). On a unified-memory host (DGX Spark / GB10) the GPU pool **is** system RAM, so an uncapped engine reserves a fraction of the whole machine and can starve the OS. Caps are set at ~1.4-1.5x measured demand |
+| `--gpu-cap-boltz2` / `--gpu-cap-af3` / `--gpu-cap-esmfold2` / `--gpu-cap-protenix` | Per-engine CUDA MPS device-memory cap (defaults `24G` / `12G` / `24G` / `24G`; Protenix is a PyTorch ceiling set above its measured ~20.4 GiB peak on a 779-token complex). On a unified-memory host (DGX Spark / GB10) the GPU pool **is** system RAM, so an uncapped engine reserves a fraction of the whole machine and can starve the OS. Caps are set at ~1.4-1.5x measured demand (the Protenix cap is ~1.2x its measured peak, 24 vs 20.4 GiB, and is a PyTorch ceiling, not a reservation) |
 | `--no-gpu-guard` | Do not start the CUDA MPS guard. Only for hosts with a discrete card, where a runaway allocation kills the process rather than the machine |
 
 > **The gate defaults to 3, and some hosts run two engines.** AF3 itself fits a 24 GB card

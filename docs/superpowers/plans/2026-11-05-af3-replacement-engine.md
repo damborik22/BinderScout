@@ -130,7 +130,7 @@ Stop and show the owner the Task 10 table. Part 2 starts only for engines that p
 
 ## Part 2: the switch (owner approved 2026-11-07; registers Protenix only)
 
-Owner decisions that bind this part: success = similar `consensus_iptm_mean` AUC; **no increase in GPU demand** (ceiling = a 24 GB card, as AF3 and ESMFold2 already need), so RF3 (33.5-36.8 GiB without proprietary ops) is out and Chai-1 failed target PD-L1; **Protenix v1.x is the only engine registered** (measured 21.3 GiB peak on a 779-token complex on a 24 GB card). The registry is still engine-agnostic: adding another engine later is one registry row plus an adapter, no edits to scoring.
+Owner decisions that bind this part: success = similar `consensus_iptm_mean` AUC; **no increase in GPU demand** (ceiling = a 24 GB card, as AF3 and ESMFold2 already need), so RF3 (33.5-36.8 GiB without proprietary ops) is out and Chai-1 failed target PD-L1; **Protenix v1.x is the only engine registered** (measured 20.8 GiB peak (21,282 MiB of a 24,576 MiB card) on a 779-token complex on a 24 GB card). The registry is still engine-agnostic: adding another engine later is one registry row plus an adapter, no edits to scoring.
 
 Part 2 rulings (the owner may overturn any):
 - R1. One registry, `Evaluator/binder_comparison/core/engines.py`. Three slots: `boltz` (primary anchor), `second` (`af3` default, or `protenix`), `esmfold2`. A panel is exactly these three; a four-engine panel cannot be expressed.

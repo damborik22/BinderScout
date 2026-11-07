@@ -1,7 +1,8 @@
 # AF3-replacement benchmark: results
 
-Status: **Part 1 result, for the owner's decision.** Nothing in the pipeline has changed. Aggregate numbers only;
-no per-design labels or scores are reproduced here. Licence terms per candidate are in
+Status: **Part 1 result (2026-11-05), followed by the owner's decision (2026-11-07; see "Outcome" below).** The
+tables below are the Part 1 result as it stood; the outcome section records what was decided and one correction
+to this report's text. Aggregate numbers only; no per-design labels or scores are reproduced here. Licence terms per candidate are in
 `second_engine_licences.md`; how every run was made is in `second_engine_benchmark_runbook.md`.
 
 ## Question
@@ -78,8 +79,8 @@ Floor 0.914 / 0.70; Chai-1 0.870 / 0.62; RF3 0.931 / 0.82; Protenix 0.936 / 0.85
    clause reads a single point estimate with no interval. The two-engine floor, which is P0 minus one engine, fails
    the same clause on the same target (-0.072), and Chai-1, whose macro AUC is the highest in the table, fails it only
    through PD-L1. On the pass rule as written the result is **RF3 and Protenix pass; Chai-1 and OpenFold3 fail on clause (c) alone**.
-   Per-target intervals were not computed; with 66 designs they would be wide. Whether to keep clause (c) is the owner's
-   decision (see below), not something this report changes.
+   *(Superseded 2026-11-07: the per-target intervals were computed afterwards and are in the Outcome section below.)*
+   Whether to keep clause (c) was the owner's decision (see below), not something this report changed.
 4. **OpenFold3 is the one clear negative:** its macro difference to the floor has an interval wholly below zero and it is the weakest
    single engine here (0.557).
 5. **Hypothesis, not a result.** Four targets, 563 designs, one pool; Adaptyv and ProteinBase are one dataset. Earlier single-pool
@@ -125,7 +126,7 @@ nucleic-acid sets for RF3; not stated for OpenBind-0). RF3 and OpenFold3 have th
 - The RF3 and Protenix environments still carry NVIDIA-proprietary wheels as install dependencies that the runs do not execute
   (see the licence record).
 
-## Decisions for the owner (Part 2 starts only on your word)
+## Decisions asked of the owner (answered 2026-11-07; the answers are in "Outcome" below)
 
 1. Clause (c): keep as written (RF3 and Protenix pass), or relax it for small targets (for example by requiring the per-target
    interval, not the point estimate, to exclude -0.05), which would leave Chai-1 eligible.
@@ -133,3 +134,57 @@ nucleic-acid sets for RF3; not stated for OpenBind-0). RF3 and OpenFold3 have th
    AUC of the candidates but fails clause (c) on PD-L1 (n = 66).
 3. Whether to spend a 5-sample rerun on PD-L1 for the chosen engines before registering them.
 4. Position on the unused proprietary dependency wheels in the RF3 and Protenix environments.
+
+## Outcome (2026-11-07)
+
+### Owner decisions
+
+- **Criteria.** Success is a similar ROC AUC of `consensus_iptm_mean` on this benchmark, and **no increase in GPU demand**:
+  the ceiling is a 24 GB card, which AF3 and ESMFold2 already need. The replacement is **opt-in; AF3 stays the default.**
+- **Answers to the four questions above.**
+  1. **No relaxation of clause (c) was applied**: the verdicts in the table above stand. The per-target intervals below show that the
+     alternative reading (fail only if the interval is wholly below 0) gives the same split for the engines that matter here.
+  2. **Only Protenix is registered.** RF3 passes the rule but is out on GPU demand: 33.5 to 36.8 GiB card-wide with
+     cuEquivariance disabled; with it enabled RF3 fits a 24 GB card but needs NVIDIA's proprietary wheels at run time.
+     Chai-1 fails target PD-L1 on either reading (below). OpenFold3 is below the Boltz-2 + ESMFold2 floor.
+  3. The 5-sample PD-L1 rerun was **not done**; Protenix is registered at the 1 sample and 1 seed it was benchmarked at.
+  4. Protenix is always run with torch kernels and torch layer norm, so the proprietary cuEquivariance wheels that `pip install
+     protenix` pulls are installed but not used at run time; the installer's licence text says so and asks before downloading.
+
+### Per-target paired differences to P0, with 95% intervals
+
+**This is the first time per-target intervals were computed.** Same paired bootstrap as above (2,000 resamples, seed 0, designs
+resampled within each target); each cell is the AUC difference to the AF3 panel with its interval. The sentence in the
+"What this does and does not say" section that they were not computed is superseded by this table.
+
+| Panel | EGFR | IL7R | Nipah | PD-L1 | Macro |
+|---|---|---|---|---|---|
+| Floor (Boltz-2 + ESMFold2) | +0.071 [+0.037, +0.110] | -0.005 [-0.041, +0.032] | +0.025 [-0.015, +0.065] | -0.072 [-0.157, +0.002] | +0.0048 [-0.0214, +0.0299] |
+| Chai-1 | +0.101 [+0.055, +0.155] | +0.014 [-0.029, +0.062] | +0.030 [-0.017, +0.075] | **-0.120 [-0.218, -0.035]** | +0.0062 [-0.0244, +0.0361] |
+| RF3 | +0.018 [-0.010, +0.047] | +0.005 [-0.041, +0.054] | -0.009 [-0.042, +0.019] | -0.048 [-0.113, +0.006] | -0.0084 [-0.0313, +0.0147] |
+| Protenix | -0.019 [-0.046, +0.005] | -0.004 [-0.045, +0.040] | -0.018 [-0.058, +0.016] | -0.034 [-0.085, +0.009] | -0.0186 [-0.0384, +0.0008] |
+| OpenFold3 | +0.005 [-0.018, +0.029] | -0.033 [-0.101, +0.034] | +0.019 [-0.023, +0.063] | **-0.068 [-0.141, -0.006]** | -0.0192 [-0.0469, +0.0078] |
+
+### Readings of clause (c)
+
+- **As written** (point difference no worse than -0.05 on every target): floor, RF3 and Protenix pass; Chai-1 (-0.120) and
+  OpenFold3 (-0.068) fail on PD-L1 (the floor's -0.072 would also fail it, as the report noted).
+- **Fail only if the interval is wholly below 0:** the same split. Chai-1 and OpenFold3 have an interval wholly below 0 on PD-L1;
+  the floor, RF3 and Protenix do not.
+- **Fail only if the interval is wholly below -0.05** (the relaxation asked about in question 1): Chai-1 and OpenFold3 would pass.
+  That reading is too loose to use, because it lets through OpenFold3, which sits below the floor.
+- Chai-1's macro gain is almost all EGFR (+0.101), where AF3 is weakest in this pool (single-engine AUC 0.394).
+
+### Decision
+
+Register **Protenix v1.x only** (`protenix_base_default_v1.0.0`, torch kernels, 1 seed, 1 sample), as an opt-in second-slot engine.
+Macro AUC 0.7044 against 0.7231 for the AF3 panel and 0.7279 for the floor; paired macro difference -0.0186 [-0.0384, +0.0008].
+**It is the thinnest of the passes** (the point estimate is 0.0014 inside the -0.02 limit), it is a **hypothesis from four targets and
+one pool, not a result**, and nothing here says it matches AF3: the passes show that swapping the third engine costs little on
+this pool.
+
+Memory against the owner's constraint: with torch kernels Protenix peaked at 21,282 MiB (20.8 GiB) card-wide on a 24,576 MiB RTX 3090
+(headless) for the longest design (Nipah target 602 aa + 177 aa binder, 779 tokens, 1 sample; ipTM 0.895), and at 20,939 MiB (20.4 GiB)
+on a 46 GiB L40S (EGFR, about 772 tokens). That fits a 24 GB card with about 3 GiB to spare, less if the card also drives a display;
+the 3090 figure is one design. Part 2 (opt-in `--second-engine protenix`, panel recorded in `metrics.csv`) is described in the
+CHANGELOG.

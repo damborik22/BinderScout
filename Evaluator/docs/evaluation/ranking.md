@@ -9,9 +9,12 @@ the retraction is stated rather than the claim removed — several were.
 ## 1. The answer, in one paragraph
 
 There is **one** ranking and no way to select another. A design must have been refolded by
-at least `--min-engines` independent engines (**default 3**: Boltz-2, AF3, ESMFold2); the
+at least `--min-engines` independent engines (**default 3**: three slots, Boltz-2, ESMFold2 and
+one second engine, AF3 by default or the opt-in Protenix v1.x); the
 survivors are sorted by **`consensus_iptm_mean`**, the mean of the three engines'
-**PAE-recomputed** ipTM. Designs failing the gate are ranked **last, not dropped**. The
+**PAE-recomputed** ipTM. Scores from different panels are not on one scale; `metrics.csv` records
+the panel in constant columns `panel` and `second_engine`, so compare ranks and means only between
+reports that name the same panel. Designs failing the gate are ranked **last, not dropped**. The
 output is a single `rank` column. Everything else the evaluator produces either feeds that
 number, flags a caution for a human, or is reported for inspection — and the catalogue in
 §6 says which, per column.
@@ -254,7 +257,8 @@ therefore omits the metric the pipeline ranks on. Known, not yet fixed.
    prevent. The warning is **stderr only** and does not reach `report.html`.
 
 **What is averaged:** `_ENGINE_IPTM_COLS` = `boltz_pae_iptm`, `af3_pae_iptm`,
-`esmfold2_pae_iptm` — all **recomputed from the `.npy` PAE matrices** by
+`esmfold2_pae_iptm` (with the opt-in Protenix panel, `protenix_pae_iptm` takes the place of `af3_pae_iptm`;
+the panel registry is `binder_comparison/core/engines.py`) — all **recomputed from the `.npy` PAE matrices** by
 `add_iptm_from_pae_files` / `compute_iptm_from_pae` (`scoring.py:391-444`, `:600-663`),
 *not* the engines' self-reported `*_iptm`, which are reported only. The kernel is
 max(bt,tb) of `max_i[mean_j 1/(1+(PAE_ij/d0)²)]` with a global
@@ -284,7 +288,7 @@ labelled pool we own, coverage is 100 % constant, so the gate is **exactly inert
 | `consensus_rank` (max-ipTM) | max-ranking loses to mean-ranking, precision@top-10 % 0.79 vs 0.92 |
 | `--soluprot-filter` | at its own default threshold it discarded several of the tightest measured binders; no threshold above 0.0 met the recall bar |
 | AF2 refolding | Part I; BindCraft / PXDesign still use AF2 internally |
-| Protenix refolding | Part J reverted; AF3 covers the independent cross-check |
+| Protenix refolding (as a fourth, always-on engine) | Part J reverted; AF3 covers the independent cross-check. Protenix v1.x returned 2026-11-07 only as the opt-in engine of the second slot, in place of AF3 (never alongside it) |
 | shrinkage on the gate | +0.0003…0.0006 macro AUC, CIs straddling zero, `k` unidentifiable — and coverage never varies, so it fixes a failure mode that does not occur |
 | `mean(af3, esm)` | reversed with significance on a second pool (−0.0210, p<0.0001, 0/4 targets) |
 

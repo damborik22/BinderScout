@@ -13,6 +13,75 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **An opt-in second refold engine: Protenix v1.x can hold the slot AF3 holds. AF3 stays the default.**
+  A panel is exactly three slots: Boltz-2, ESMFold2 and one second engine (`af3` or `protenix`).
+  Nothing changes unless you ask: with no flag, the ranking, the columns and the report of an AF3 panel
+  are what they were.
+  - **Registry.** `Evaluator/binder_comparison/core/engines.py` (`resolve_panel`, `SECOND_ENGINES =
+    ("af3", "protenix")`) is the one place that names a panel's engines, columns, output directory and
+    results CSV. Column names carry the real engine name (`protenix_pae_iptm`, `protenix_ipsae_min`,
+    `protenix_pdb`, ...); the AF3 names are untouched. A four-engine panel cannot be expressed.
+  - **`binder-compare report --second-engine {af3,protenix} --second-results CSV`.** `--af3-results` and
+    `--threshold-af3` still fill the AF3 slot. `metrics.csv` gains two constant columns, `panel` (for
+    example `boltz+protenix+esmfold2`) and `second_engine`; the HTML report names the panel (for a
+    Protenix panel, "...; AF3 not used") and says that scores from different panels are not on one scale.
+  - **`binder-compare refold-protenix`**, run inside the `binder-eval-protenix` env. It always uses the
+    torch kernels and torch layer norm (never NVIDIA's proprietary ops at run time), refuses model names
+    that are not licensed v1.x checkpoints, exits 3 on a partial failure and 1 on an empty FASTA.
+  - **`evaluate.sh --second-engine {af3,protenix}`, `--protenix-env`, `--gpu-cap-protenix` (default
+    24G) and `--skip-second`.** An explicit `--second-engine` wins and is never swapped for the other
+    engine. With no flag the slot goes to AF3 if it is usable or an `af3_results.csv` with scored rows
+    exists, else to Protenix if it is usable or a scored `protenix_results.csv` exists, else the slot is
+    skipped by name. `--skip-af3` and `--skip-second` never fall back to the other engine.
+  - **Installer: `--tool protenix` / `--second-engine protenix`** (`install.sh` and `install_aarch.sh`).
+    Opt-in, **not** in `--tool all`. It prints the licence record from
+    `Evaluator/docs/second_engine_licences.md` and asks y/N before anything is downloaded (a non-TTY run
+    without `--yes` refuses). It builds `binder-eval-protenix` (Python 3.12, torch 2.7.1 cu128,
+    `protenix==1.1.0`), needs a C compiler, puts the weights under `weights/protenix` and verifies their
+    size and sha256 before it writes its install marker.
+  - **Configurator key `second_engine`** (default `"af3"`; the wizard offers Protenix only when its env
+    exists). A config written before the key existed behaves as before.
+
+### Benchmark result behind the option (2026-11-07)
+
+Owner criteria: the replacement must give a similar `consensus_iptm_mean` ROC AUC on the curated
+Adaptyv benchmark (563 designs, 4 targets), and must **not raise GPU demand**: the ceiling is a 24 GB card,
+which AF3 and ESMFold2 already need. Full table, settings and caveats:
+`Evaluator/docs/second_engine_benchmark.md`.
+
+- **Protenix v1.x** (`protenix_base_default_v1.0.0`, torch kernels and torch layer norm, 1 seed, 1 sample)
+  is the only engine registered. Macro AUC 0.7044 against 0.7231 for the AF3 panel and 0.7279 for the
+  two-engine floor (Boltz-2 + ESMFold2); paired macro difference to the AF3 panel -0.0186, 95% interval
+  [-0.0384, +0.0008]. **It is the thinnest of the passes** (the limit is -0.02), and it is not shown to
+  match AF3.
+- **Out, and why:** RF3 passes the rule but needs 33.5-36.8 GiB card-wide with cuEquivariance disabled
+  (with it enabled it fits a 24 GB card but needs NVIDIA proprietary wheels at run time), so it raises GPU
+  demand. Chai-1 fails target PD-L1 (difference -0.120, interval [-0.218, -0.035] wholly below 0).
+  OpenFold3 sits below the Boltz-2 + ESMFold2 floor.
+- **Memory:** Protenix with torch kernels peaked at 21,282 MiB (20.8 GiB) card-wide on a 24,576 MiB RTX 3090
+  for the longest design (779 tokens, 1 sample), and 20,939 MiB (20.4 GiB) on a 46 GiB L40S (EGFR, about 772
+  tokens). A 24 GB card therefore fits with about 3 GiB to spare, less if it also drives a display.
+- **This is a hypothesis, not a result:** four targets, one pool (Adaptyv and ProteinBase are one dataset),
+  and single-pool effects have been retracted before in this project. Scores from different panels are not on
+  one scale; compare ranks and means only between reports that name the same panel.
+
+### Known limits of the Protenix option
+
+- The weight host's own terms were not read. The licence record cites Apache-2.0 for the code and for the
+  v1.x parameters per the Protenix README; that is not a clearance.
+- `pip install protenix` pulls NVIDIA's proprietary cuEquivariance wheels as dependencies. They are not used at
+  run time (torch kernels are forced), but they are installed.
+- The pinned checkpoint sha256 (`2b7d5a8b...ec04`, 1,475,950,125 bytes) is the hash of the copy the 2026-11-05
+  benchmark runs used, not a hash published upstream.
+- The benchmark ran 1 seed and 1 sample; the sample count of the AF3 baseline numbers was not recorded.
+- Peak memory was measured on one design on the 24 GB card.
+- The `install_aarch.sh` path is the same recipe and has not been run on aarch64 hardware; the cu128 torch wheels
+  there are unverified.
+- The live check of the opt-in installer and refold (including a run under a hostile ambient environment) is
+  recorded in `Evaluator/docs/second_engine_benchmark_runbook.md`.
+
 ### Fixed
 
 _Nothing yet._

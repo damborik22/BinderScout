@@ -24,6 +24,7 @@ BinderScout/
 |-----|----------|--------|
 | `binder-eval` | Sequence extraction + reporting | Created by `Evaluator/install.sh` |
 | `binder-eval-af3` | AF3 v3.0.2 refolding | `binderscout install --tool af3` (gated weights; runs on 24 GB GPUs) |
+| `binder-eval-protenix` | Protenix v1.x refolding, **opt-in** replacement for AF3 in the second slot | `binderscout install --tool protenix` (not in `--tool all`; licence prompt; needs a C compiler; torch kernels forced) |
 | `binder-eval-esmfold2` | ESMFold2 refolding | `binderscout install --tool esmfold2` (in `--tool all`) |
 | Mosaic `.venv` | Boltz-2 refolding | Created by `binderscout install --tool mosaic` |
 
@@ -47,6 +48,12 @@ Mosaic/.venv/bin/binder-compare refold-boltz2 \
 conda run -n binder-eval-af3 binder-compare refold-af3 \
     --sequences seqs.fasta --target-seq SEQ -o af3.csv
 
+# Step 3 alternative (opt-in): Protenix v1.x in the second slot instead of AF3.
+# Panel = three slots: Boltz-2, ESMFold2 and ONE second engine (AF3 by default). evaluate.sh takes
+# --second-engine {af3,protenix}; the report takes --second-engine protenix --second-results protenix.csv
+conda run -n binder-eval-protenix binder-compare refold-protenix \
+    --sequences seqs.fasta --target-seq SEQ -o protenix.csv
+
 # Step 4: ESMFold2 refolding (lightweight, no gated weights)
 conda run -n binder-eval-esmfold2 binder-compare refold-esmfold2 \
     --sequences seqs.fasta --target-seq SEQ -o esmfold2.csv
@@ -63,7 +70,7 @@ bash Evaluator/evaluate.sh \
 
 ## Critical Facts
 
-- **PAE ordering**: Boltz-2 outputs `[binder|target]`; AF3 and ESMFold2 output `[target|binder]` (token order, target first) and the evaluator transposes them. Column prefixes (`boltz_pae_*`, `af3_*`, `esmfold2_*`) distinguish them.
+- **PAE ordering**: Boltz-2 outputs `[binder|target]`; AF3 and ESMFold2 output `[target|binder]` (token order, target first) and the evaluator transposes them. Column prefixes (`boltz_pae_*`, `af3_*`, `esmfold2_*`, and `protenix_*` when Protenix holds the second slot) distinguish them. The Protenix refold saves its PAE binder-first and the report reads it that way.
 - **pLDDT scale**: Boltz-2 and ESMFold2 are native [0,1]; AF3 is [0,100] and is divided by 100 on ingest so every engine's columns are directly comparable.
 - **ipsae_min direction**: **HIGHER IS BETTER** — TM-score-like metric (DunbrackLab 2025 formula).
 - **Append-mode CSVs**: the refold scripts append. If rerun after a partial failure, check for duplicate `run_id` entries. Use `--resume` to skip completed sequences.
@@ -160,11 +167,14 @@ reference. `ipsae_min` is a diagnostic. There is ONE ranking and no way to selec
 (Part U):
 
 1. **Gate:** a design must have been scored by at least `--min-engines` independent
-   engines (default **3** = Boltz-2 / AF3 / ESMFold2; floor 2). Recorded in
+   engines (default **3** = the three slots: Boltz-2, ESMFold2 and the second engine, AF3 by
+   default or Protenix when opted in; floor 2). Recorded in
    `passes_engine_gate`. Failures are ranked **last, not dropped**.
 2. **Sort:** `consensus_iptm_mean` **descending** — the mean of the three engines'
-   **PAE-recomputed** ipTM (`boltz_pae_iptm`, `af3_pae_iptm`, `esmfold2_pae_iptm`), not
-   the engines' self-reported `*_iptm`.
+   **PAE-recomputed** ipTM (`boltz_pae_iptm`, `af3_pae_iptm` or `protenix_pae_iptm`, `esmfold2_pae_iptm`), not
+   the engines' self-reported `*_iptm`. Scores from different panels are not on one scale, so
+   `metrics.csv` records the panel in constant columns `panel` (for example `boltz+protenix+esmfold2`)
+   and `second_engine`; compare ranks and means only between reports that name the same panel.
 3. **Ties:** `consensus_iptm_n` desc (more engines behind an equal mean wins), then
    `consensus_iptm` (the max) desc, then binder pLDDT desc.
 

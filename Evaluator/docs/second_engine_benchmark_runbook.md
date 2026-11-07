@@ -105,6 +105,14 @@ kernel is chosen, `libnvrtc` and `libcublas` from the venv's `nvidia/` directory
 into `--model-dir` from the host named in the licence record. Behaviour with the default kernels on an
 x86_64 box with `nvcc` is **not recorded**.
 
+#### x86_64 environment build observed (24 GB RTX 3090 host)
+
+Python 3.12 (venv or conda), `torch==2.7.1` from the `cu128` wheel index, `protenix==1.1.0`, then
+`pip install -e 'Evaluator[report]'` so `binder-compare` exists in the env (the installer's `binder-eval-protenix` is built the
+same way). **A C compiler is required**, because `scikit-learn-extra` builds from source. `LAYERNORM_TYPE=torch` must be set in
+the environment before `runner.inference` is imported (the import otherwise attempts the CUDA layer-norm extension build);
+`binder-compare refold-protenix` sets it itself and always uses the torch kernels.
+
 ### Chai-1 (aarch64 GB10 host in the smoke)
 
 Pins observed (an existing environment, used unmodified): `chai_lab==0.6.1`, Python 3.12.14,
@@ -171,6 +179,14 @@ counters. Token count is target plus binder length.
 | Protenix, aarch64 GB10, cap 30 GiB, **contended GPU** (another tenant at about 96% utilisation for the whole session) | pd-l1, 308 tokens | 5 | 8.3-8.7 min | 3.29 GiB allocated / 3.44 GiB reserved |
 | Protenix, same contended host | pd-l1, 308 tokens | 1 | about 173-175 s | not separately measured (at most 3.3 GiB) |
 | Protenix, same contended host | egfr, 684 tokens | 1 | about 450 s | 14.07 GiB allocated / 15.00 GiB reserved |
+| Protenix, torch kernels, 24 GB RTX 3090 (headless) | nipah 602 aa + 177 aa binder, 779 tokens (the longest design in the pool) | 1 | not recorded (the run included the weight download) | 21,282 MiB (20.8 GiB of the 24,576 MiB card) card-wide `nvidia-smi`; ipTM 0.895, rc 0; n = 1 design |
+| Protenix, torch kernels, 46 GiB L40S | egfr, about 772 tokens | 1 | not recorded | 20,939 MiB (20.4 GiB) card-wide `nvidia-smi` |
+
+The two last Protenix rows are card-wide `nvidia-smi` peaks (including the CUDA context and allocator cache), unlike the
+PyTorch allocated/reserved counters of the GB10 rows above; compare them with the other `nvidia-smi` rows, not with those.
+They are the evidence for the 24 GB claim: a 24 GB card fits the longest design with about 3 GiB to spare, less if it also
+drives a display. `evaluate.sh --gpu-cap-protenix` defaults to 24G, a PyTorch ceiling of about 1.2 times the 20.4 GiB
+measured on the L40S, not a reservation.
 
 Not measured: Chai-1 on a 24 GB card or on any target above 308 tokens; OpenFold3 on nipah (long
 binders up to 144 aa, about 746 tokens, were predicted to be near the 24 GB limit and need one
@@ -341,3 +357,7 @@ The adapter default stays at 5 samples; only the benchmark runs set 1.
   printing "cuEquivariance usage disabled via DISABLE_CUEQUIVARIANCE".
 - **Failure messages.** When every failure is a deterministic invalid-letter failure, the all-failed and
   partial-failure messages still advise "environment fault" and "--resume"; re-running will not help there.
+
+## Live validation of the opt-in installer and refold (2026-11-07)
+
+Results are added below by the controller.

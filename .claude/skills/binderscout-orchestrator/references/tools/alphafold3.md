@@ -13,7 +13,7 @@ AF3 remains the **reference model** in this lineage. Boltz-2 (MIT) and Protenix 
 
 **Second slot.** AF3 is the default second engine of the three-engine panel (Boltz-2, ESMFold2, one second engine). Protenix v1.x can replace it opt-in via `--second-engine protenix` (see `protenix.md`); the two are never run together, and scores from the two panels are not on one scale.
 
-In BinderScout, AF3 is being added as the **third refolder engine** (Part K). It's hosted in a separate conda env because the DeepMind-provided pipeline has a different MSA stack and database layout. Critically, the BinderScout integration is **aarch64 / DGX Spark only**: the production-grade AF3 stack at the lab is on Blackwell ARM64 hardware. On x86 clusters, only Boltz-2 + Protenix are available as refolders.
+In BinderScout, AF3 is the default second engine of the three-engine panel (Part K). It's hosted in a separate conda env because the DeepMind-provided pipeline has a different MSA stack and database layout. AF3 is not Spark-only: it runs on 24 GB consumer GPUs for our size regime (the old ">=100 GB" figure was a preallocation artifact), so on x86 the panel is Boltz-2 + AF3 + ESMFold2, with AF3 replaceable by the opt-in Protenix v1.x.
 
 **Critical to the orchestrator: AF3 is the most independent refolder in the BinderScout pool.** No design tool in the design pool uses AF3 internally — not BindCraft (AF2), not Mosaic (Boltz-2), not BoltzGen (Boltz-2), not Protein-Hunter (Boltz-2 or Chai), not RFD3 (RF3), not PXDesign (Protenix), not Proteina-Complexa (AF2/RF3 reward models). AF3 refold therefore provides a fully clean signal for every design tool's output. The cost is restricted hardware availability.
 
@@ -47,8 +47,8 @@ In BinderScout, AF3 is being added as the **third refolder engine** (Part K). It
 
 - **Not applicable from a same-model perspective** — no design tool in the BinderScout pool uses AF3 internally.
 - **The only practical caveats are availability and cost:**
-  - On x86 clusters where AF3 isn't available, the `agreement_count` denominator is 2 (Boltz-2 + Protenix), not 3. Orchestrator must adjust thresholds.
-  - For very large pools (>1000 designs), AF3 may be too slow to run on every design. Use Boltz-2 and Protenix first to triage; reserve AF3 for the survivors.
+  - On a host where AF3 isn't available (gated weights not in place) and Protenix is not installed, the `agreement_count` denominator is 2 (Boltz-2 + ESMFold2), not 3. Orchestrator must adjust thresholds.
+  - For very large pools (>1000 designs), AF3 may be too slow to run on every design. Use Boltz-2 and ESMFold2 first to triage; reserve AF3 for the survivors.
 
 ## Outputs the evaluator parses
 
@@ -86,7 +86,7 @@ The orchestrator's primary cross-method comparator. Per CLAUDE.md `Critical doma
 
 > Ranking uses agreement_count (how many engines agree ipsae_min > 0.61) as primary sort, then ipsae_min desc
 
-With all three engines available, `agreement_count ∈ {0, 1, 2, 3}`. With only Boltz-2 + Protenix (x86 environments), denominator is 2 — the orchestrator should track which engines were available per design.
+With all three engines available, `agreement_count ∈ {0, 1, 2, 3}`. With only two engines available (for example Boltz-2 + ESMFold2), denominator is 2 — the orchestrator should track which engines were available per design.
 
 ## Key knobs
 

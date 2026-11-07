@@ -45,7 +45,7 @@ In BinderScout, Boltz-2 is the **default refolding engine for every design**. Af
 - **Mosaic outputs.** Mosaic's design loss can include Boltz-2 confidence terms directly. Refold signal is correlated.
 - **BoltzGen outputs.** BoltzGen runs Boltz-2 internally as its `folding` pipeline step. The evaluator's Boltz-2 refold is the same model — not a fully independent check. CLAUDE.md flags this: "Sequences designed for Boltz-2 often don't cross-validate well" (CALCA: 1/50 BoltzGen designs passed `ipsae_min > 0.61`).
 - **Protein-Hunter (Boltz edition) outputs.** Hallucinates against Boltz-2; same caveat.
-- **For these three tools, treat Protenix and AF3 agreement as the more decisive signal.** The orchestrator's `agreement_count` ranking handles this naturally — disagreement between Boltz-2 (high `ipsae_min`) and Protenix/AF3 (low `ipsae_min`) flags the same-model bias.
+- **For these three tools, treat the second-slot engine (AF3, or the opt-in Protenix) and ESMFold2 agreement as the more decisive signal.** The orchestrator's `agreement_count` ranking handles this naturally — disagreement between Boltz-2 (high `ipsae_min`) and the second-slot engine (low `ipsae_min`) flags the same-model bias.
 
 ## Outputs the evaluator parses
 

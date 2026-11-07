@@ -62,7 +62,7 @@ work, not shipping blockers.
 (Part I), AF3 v3.0.2 as the canonical 2nd refolding engine (Part K — **runs on 24 GB consumer
 GPUs for our size regime**; the old ">=100 GB" figure was a preallocation artifact, see the AF3
 memory note below), Protenix refolding removed (Part J reverted — AF3 covers the 2nd-engine
-role), Protein-Hunter (Part L) and RFD3 (Part M) installed and configurable. Affinity-from-
+role; Protenix v1.x returned 2026-11-07 only as the **opt-in** engine of the second slot, AF3 stays the default — see Part 2 below), Protein-Hunter (Part L) and RFD3 (Part M) installed and configurable. Affinity-from-
 structure-confidence closed as a negative result (Part N). SoluProt is part of `--tool all` and
 both platforms build USEARCH v12 from source. Proteina-Complexa installs and **runs** on aarch64
 as of 2026-10-04 (opt-in; throughput still unmeasured — see the aarch64 entry, which has been
@@ -163,11 +163,12 @@ Target structure (.pdb / .mmcif)
        RFD4-Proteina        (IPD x NVIDIA latent-reasoning diffusion; backbone AND sequence
                              in one pass, no MPNN step; opt-in; run on x86_64
                              and, since 2026-11-04, on aarch64 (needs num_workers=0))
-    → Evaluator (canonical pipeline = Boltz-2 + AF3 + ESMFold2; SoluProt optional screen):
+    → Evaluator (canonical pipeline = Boltz-2 + a second engine + ESMFold2, three slots: the second engine is AF3 by default, Protenix v1.x opt-in; SoluProt optional screen):
        1. Extract sequences from all tool outputs (one extractor per tool)
        1.5. (optional) Screen with SoluProt 1.0 (binder-eval-soluprot env)     [live, x86 + aarch64; LABEL ONLY — scores every design, never drops one]
        2. Refold with Boltz-2 (Mosaic venv)                                    [live, all platforms]
        3. Refold with AlphaFold 3 v3.0.2 (binder-eval-af3 env)                 [live, canonical 2nd engine — runs on 24 GB GPUs; ~4.4 GB peak for a 260–390-token complex]
+          or, opt-in (`--second-engine protenix`), Protenix v1.x (binder-eval-protenix) [torch kernels forced; ~20.8 GiB peak on a 24 GB card, 779 tokens — see the Part 2 note]
        4. Refold with ESMFold2 (binder-eval-esmfold2 env)                      [live, DEFAULT engine — installed by --tool all; auto-detected by evaluate.sh; feeds consensus_iptm + autosize gate]
        5. Rank by cross-engine iPTM (≥3-engine gate → `consensus_iptm_mean`; `--min-engines 2` to relax); generate HTML + CSV report
 ```
@@ -193,7 +194,7 @@ BinderScout/
 ├── Evaluator/                 ← bundled full evaluation pipeline package
 │   ├── binder_comparison/     ← core Python package (extractors, refolding, scoring, viz)
 │   ├── scripts/               ← standalone refold scripts (refold_boltz2.py, refold_af3.py, refold_esmfold2.py)
-│   ├── evaluate.sh            ← shell orchestrator (extract → refold-boltz2 → refold-af3 → refold-esmfold2 → report)
+│   ├── evaluate.sh            ← shell orchestrator (extract → refold-boltz2 → refold-af3 or refold-protenix (the second slot) → refold-esmfold2 → report)
 │   ├── envs/                  ← conda env specs (binder-eval.yml, binder-eval-af3.yml [Spark / H200 / big-VRAM])
 │   ├── docs/                  ← pipeline_reference.md (metrics, known issues)
 │   └── pyproject.toml         ← package: "binder-comparison" v0.1.0
@@ -249,6 +250,7 @@ Each tool runs in its own isolated environment. **Never mix packages across envi
 | `RFD4-Proteina/.venv` | RFD4-Proteina | 3.12 | **uv** | IPD × NVIDIA latent-reasoning diffusion. Run on **x86_64**; installable on aarch64 since 2026-10-29 and run there 2026-11-04 (5 designs in a few minutes under a memory cap; the generated script passes `num_workers=0`, because upstream's default of 4 DataLoader workers deadlocks on that host with no output and no error). Upstream's own `scripts/setup_venv.sh` exits 1 on any other arch, but our installers never call it: they build the venv with `uv` directly. No conda env; the checkout IS the installation, so moving or deleting it breaks `rfd4-generate`. Opt-in (`--tool rfd4`), **not** in `--tool all` |
 | `binder-eval` | Evaluator | 3.10 | conda | Sequence extraction + reporting |
 | `binder-eval-af3` | AF3 refolder | 3.10 | conda | AlphaFold 3 v3.0.2 refolding — **canonical 2nd engine** (Part K; live on Spark / H200 **and on 24 GB consumer GPUs**, checked on three x86_64 machines) |
+| `binder-eval-protenix` | Protenix refolder | 3.12 | conda | **Opt-in** second-slot refold engine in place of AF3 (Protenix v1.x, model `protenix_base_default_v1.0.0`; `--tool protenix`, NOT in `--tool all`; needs a C compiler). **Torch kernels and torch layer norm are forced** (never NVIDIA's proprietary ops at run time). Measured on a 24 GB card: peak 21,282 MiB (20.8 GiB) card-wide for a 779-token complex, 1 sample, n=1 design; so it fits a 24 GB card with about 3 GiB to spare, less if the card drives a display |
 | `binder-eval-esmfold2` | ESMFold2 refolder | 3.10 | conda | **Default refold engine** (biohub). **Measured working: a 50-design pool refolded 50/50 on a 24 GB RTX 3090 (iptm 0.671–0.921, median 0.863), plus a 299-token monomer in 8.3 s and a 598-token dimer in 59.6 s.** ESMC-6B loads bf16 by default (~11.8 GiB resident from a 23.66 GiB fp32 checkpoint), which is why 24 GB suffices and a 12 GB card cannot run it at any size — the dev box was the constraint, never the engine. **That 11.8 GiB is the resident weights, NOT the run: a refold of a ~300-token complex held 18.86 GiB on a 3090 (measured 2026-10-31).** Read it as "ESMFold2 wants the whole card", not "11.8 of 24, so something else fits" — co-scheduling Boltz-2 (4.63 GiB) beside it filled the card and every binder from #12 on raised CUDA OOM. Worse, the run then wrote a full-length CSV with 8 of 100 scored and **exited 0**; `--resume` repairs it (it keys on a non-empty `iptm`), but nothing refuses. **Also: the biohub transformers fork is NOT on every box.** Two of the three x86_64 machines checked have `ESMFold2Model` with `load_esmc` under `transformers.models.esmfold2.modeling_esmfold2`; the third has PyPI transformers at the same version string (4.57.6) and no `esmfold2` module at all, so this engine cannot run there. `hasattr(transformers, "ESMFold2Model")` is the wrong probe — the class is in that submodule. Installed by `--tool all`, auto-detected by `evaluate.sh`; lightweight, no gated weights; feeds `consensus_iptm` + autosize gate |
 | `binder-eval-soluprot` | SoluProt screen | 3.7 | conda | Sequence-only *E. coli* solubility filter (Hon et al. 2021); x86 + aarch64 (aarch64 builds scikit-learn 0.20.4 + USEARCH v12 from source, uses the `--no_tmhmm` model). NOT a refold engine and NOT a filter; runs before refolding and labels every design with `soluprot_score` / `soluprot_passes`. `--soluprot-filter` was removed 2026-09-28 and now exits 1 |
 
@@ -360,7 +362,7 @@ There is **no `aarch64` branch**: one tree, two installers. Branches are release
   substitute for the Mosaic venv. On a shared card, `BOLTZ2_XLA_MEM_FRACTION` is the setting
   that matters: the runner's pool-aware default takes 0.75–0.80 of the device, which on a
   24 GB card is ~19 GiB and OOMs instantly against anything already resident.
-  AF3 v3.0.2 (Part K, live) is the canonical 2nd engine and runs in a dedicated `binder-eval-af3` conda env — on DGX Spark, H200, **and on 24 GB consumer GPUs** (see the AF3 memory note below; the old ">100 GB" requirement was a preallocation artifact). ESMFold2 (biohub) runs in its own `binder-eval-esmfold2` conda env, auto-detected by `evaluate.sh` when present. `evaluate.sh` orchestrates Boltz-2 + AF3 + ESMFold2 — exactly three engines, all auto-detected, each skippable with `--skip-<engine>`.
+  AF3 v3.0.2 (Part K, live) is the canonical 2nd engine and runs in a dedicated `binder-eval-af3` conda env — on DGX Spark, H200, **and on 24 GB consumer GPUs** (see the AF3 memory note below; the old ">100 GB" requirement was a preallocation artifact). ESMFold2 (biohub) runs in its own `binder-eval-esmfold2` conda env, auto-detected by `evaluate.sh` when present. `evaluate.sh` orchestrates Boltz-2 + a second engine + ESMFold2 — exactly three engines (three slots: Boltz-2, ESMFold2 and one second engine, AF3 by default, Protenix opt-in via `--second-engine protenix`), all auto-detected, each skippable with `--skip-<engine>` (`--skip-second` skips whichever engine holds the second slot).
 
 ---
 
@@ -397,7 +399,7 @@ There is **no `aarch64` branch**: one tree, two installers. Branches are release
 - Python classes: PascalCase
 - Python variables/functions: snake_case
 - Bash constants: UPPER_CASE
-- Conda envs: BindCraft, BoltzGen, binder-eval, binder-eval-af3 (canonical 2nd refold engine, Spark / H200), binderscout_pxdesign, binderscout_protein_hunter, binderscout_rfd3
+- Conda envs: BindCraft, BoltzGen, binder-eval, binder-eval-af3 (canonical 2nd refold engine, Spark / H200), binder-eval-protenix (opt-in 2nd refold engine), binderscout_pxdesign, binderscout_protein_hunter, binderscout_rfd3
 
 ### Per-run `settings.json` (reproducibility convention)
 
@@ -523,7 +525,7 @@ the parameter sweep.
 
 **There is ONE ranking, and no way to choose another** (Part U, 2026-07-28): a cross-engine gate, then `consensus_iptm_mean`. It produces a single `rank` column.
 
-**Stage 0 — cross-engine gate.** A design must have been refolded by at least `--min-engines` independent engines (**default 3** = all of Boltz-2 / AF3 / ESMFold2; floor 2). `consensus_iptm_mean` skips missing engines, so without this a single-engine design's mean *is* that one engine's score and it competes against 3-engine means on an incomparable scale — and for Mosaic / Protein-Hunter that engine is the one that designed it. Designs failing the gate are ranked **last, not dropped** (`passes_engine_gate` records it). If nothing clears the gate the run warns and names the shortfall rather than silently reporting that no design was good enough.
+**Stage 0 — cross-engine gate.** A design must have been refolded by at least `--min-engines` independent engines (**default 3** = all three slots: Boltz-2, ESMFold2 and the second engine, AF3 by default or Protenix when opted in; floor 2). `consensus_iptm_mean` skips missing engines, so without this a single-engine design's mean *is* that one engine's score and it competes against 3-engine means on an incomparable scale — and for Mosaic / Protein-Hunter that engine is the one that designed it. Designs failing the gate are ranked **last, not dropped** (`passes_engine_gate` records it). If nothing clears the gate the run warns and names the shortfall rather than silently reporting that no design was good enough.
 
 **Rank — `consensus_iptm_mean`,** ties broken by `consensus_iptm_n` (more engines backing an equal mean wins), then `consensus_iptm`, then binder pLDDT.
 
@@ -584,6 +586,7 @@ the parameter sweep.
   **One real caveat on the flag:** its thresholds are absolute ipSAE cuts (0.61 for all three engines), and that absolute cut measured **inverted** on our own experimental results (see the quality-tier warning below). The *relative* agreement across engines is less exposed to that than the absolute tier is, but a mis-set threshold still mis-sets the count. Treat the flag's direction as informative and its exact threshold as unvalidated.
   **Note which argument this is.** The case for three engines is **adversarial**, not variance reduction: a gamed engine is confidently wrong in a consistent direction, not noisily wrong, so averaging does not fix it the way it fixes noise — independent opinions do. Optimising a single metric harder is not a substitute, which is also why Part U's metric search made things worse.
 - **Do NOT re-litigate the engine set on one pool.** The 3-engine mean beats the *average* single engine (+0.047, p=0.0002) but **not the best one out of fold** (+0.0026, p=0.69), and `mean(boltz,esm)` out-scores it on the benchmark (0.7279 vs 0.7231; +14 binders at top-20). It is still not a reason to change anything: at the shortlist sizes we ship (N=3–8) the whole panel is within ±4 binders, the drop-AF3 effect does not keep its sign across leave-one-target-out folds of that same pool, and it inverts on the secondary pool. Four single-pool effects were retracted in the week of 2026-09-29 — helix, magnitude, shrinkage and `mean(af3,esm)`. **Treat a single-pool effect as a hypothesis, not a result.**
+- **Do NOT present Protenix as "matching" AF3, and do not compare scores across panels (2026-11-07).** The opt-in Protenix second slot passed the benchmark rule as the thinnest of the passes (macro AUC 0.7044 vs 0.7231 for the AF3 panel and 0.7279 for the Boltz-2 + ESMFold2 floor; paired macro difference -0.0186, 95% interval [-0.0384, +0.0008]; four targets, one pool, 1 seed and 1 sample). It was chosen because RF3 (33.5-36.8 GiB card-wide without proprietary ops), Chai-1 (fails PD-L1, interval wholly below 0) and OpenFold3 (below the floor) each fail the owner's constraints, not because it was shown equivalent. That is a single-pool hypothesis. A `consensus_iptm_mean` from a Boltz-2 + Protenix + ESMFold2 panel is **not on the same scale** as one from an AF3 panel: read `panel` and `second_engine` in `metrics.csv` before comparing two reports. Full record: `Evaluator/docs/second_engine_benchmark.md`.
 - **Engine disagreement lowers the mean — but is NOT a useful stratifier.** For short binders (~60aa), refolding engines often disagree on interface quality, and `consensus_iptm_mean` captures that continuously (disagreement drags the mean down). That much holds. What does *not* hold is using disagreement to slice the pool: on Cao, splitting at the median engine spread changed AUC by −0.006/+0.005 against a random-split null of ±0.018 (p=0.71/0.81), and `agreement_count` scores macro-AUC 0.532 with 87.2% of designs tied at zero. Keep `agreement_count` as a diagnostic column; do not gate or stratify on it (Part U).
 - **DO NOT USE Cao 2022 as a benchmark (operator decision, 2026-10-03).** Its Kd labels are too censored to support a conclusion: **73.4 %** of its binder labels are one-sided (**94.2 %** across the full 654,716-design library), its own `kd_ok` quality flag keeps only ~495 designs, and **8 of 12 targets sit at the random-ordering noise floor** — so any Cao result is decided by ~4 informative targets. Measured 2026-10-03: a hand-rolled "two-sided Kd" slice admits designs with `kd_lb == 0` (a degenerate [0, X] interval), and swapping it for `kd_ok` **flips the sign** of an engine-set effect that had p=0.0078. **The canonical labelled benchmark is the curated Adaptyv/ProteinBase set** (563 designs with the full PAE panel, 4 targets, replicated binding calls), assembled 2026-10-02 and kept on the lab's private share; see its own `README.md` and `PROVENANCE.md`. Note that "Adaptyv" and "ProteinBase" are **one dataset**, not two corroborating ones. **Every Cao-derived figure below and in Parts T/U is therefore provisional and must be re-measured on that benchmark before it is relied on.**
 - **The ranking is a triage filter, not a decision procedure.** Calibrate expectations before presenting a top-N as "the best". **(Cao-derived — see the preceding bullet; these specific numbers are provisional.)** On the Cao 2022 near-miss pool (4,442 Rosetta minibinders, 12 targets — the closest analogue to a real campaign pool: hundreds of same-tool, same-length designs against one target) the whole 72-metric field spans macro-AUC **0.471–0.560**, and taking the top decile by the best metric is worth ~**1.5–2× enrichment** (FGFR2 8.98 → 2.13 designs-per-hit) — but it beats a random ranking on only **6/12 targets**, and on TrkA and Tie2 it is *worse than not ranking at all*. Ranking looks much stronger on easier pools (Adaptyv 0.68–0.72, de novo BindCraft 0.72–0.78 macro) and on label-clean positives (Cao rises to 0.73 once one-sided-Kd "binders" are excluded — 73.4% of Cao's binder labels are one-sided; reproduced exactly 2026-10-03, and 94.2% on the full 654,716-design library). **Two of Part U's supporting claims about that were withdrawn on 2026-10-03** — the binary-assay corroboration is near-circular (`binder_4000_nm` is predicted by `kd_ub < 4000` at MCC 0.819, 0.075% error over 654,716 rows), and one-sided binders are NOT "experimentally indistinguishable" from non-binders: they pass at 8.7× the rate (p=4e-62), 32× at 400 nM. Weaker, not indistinguishable. So Cao answers "3 engines vs an *arbitrary* single engine" and must not be used for "vs the *best* single engine" without that caveat. The full coverage-premise investigation was removed from the tree on 2026-11-03 and is archived off-repo. Part U.
@@ -666,7 +669,7 @@ the parameter sweep.
 - **Parts A–H complete** (see STAGES.md); **Parts I, J, K, L, M landed on `[Unreleased]`** (see CHANGELOG). All Roadmap items are done.
 - **Part I — AF2 refolding removed from Evaluator.** Deleted `refold_af2.py`, `af2_runner.py`, `binder-eval-af2.yml`; pruned all `af2_*` schema fields and report plots. BindCraft / PXDesign / Proteina-Complexa still use AF2 internally — only the Evaluator's AF2 refolding step was removed.
 - **Part K — AF3 v3.0.2 is the canonical 2nd refolding engine.** Runs in its own `binder-eval-af3` conda env on DGX Spark, H200, **and on 24 GB consumer GPUs** — the original ">100 GB / OOMs on 24 GB" claim was wrong, see the memory note below. Schema: `af3_*` columns in `StandardisedMetrics`; pLDDT rescaled 0–100 → 0–1 on ingest; PAE transposed from token-order to `[binder|target]` to match Boltz-2.
-- **Part J reverted — Protenix refolding removed.** `refold-protenix`, `protenix_runner.py`, `refold_protenix.py` and every `protenix_*` schema/report column are gone; AF3 covers the independent-cross-check role. This also resolved a live contradiction: `evaluate.sh` ran Protenix opt-OUT (whenever `binderscout_pxdesign` existed) while this file claimed it ran only when explicitly enabled, so two operators with the same designs could get different `consensus_iptm`. **PXDesign still uses Protenix internally** — that is a design tool, and `pxdesign_protenix_iptm` remains a native metric.
+- **Part J reverted — Protenix refolding removed; it came back 2026-11-07 (Part 2) only as the opt-in engine of the second slot.** What was removed was the *opt-out, always-on* fourth engine (`protenix_runner.py`, `refold_protenix.py`, the old `protenix_*` schema/report columns); AF3 covered the independent-cross-check role. The new option is a different thing: a three-slot panel registry (`Evaluator/binder_comparison/core/engines.py`), `binder-compare refold-protenix` (own env `binder-eval-protenix`, torch kernels forced), `--second-engine {af3,protenix}` on `report` and `evaluate.sh`, and constant `panel` / `second_engine` columns in `metrics.csv`. AF3 stays the default; with no flag nothing changes. This also resolved a live contradiction: `evaluate.sh` ran Protenix opt-OUT (whenever `binderscout_pxdesign` existed) while this file claimed it ran only when explicitly enabled, so two operators with the same designs could get different `consensus_iptm`. **PXDesign still uses Protenix internally** — that is a design tool, and `pxdesign_protenix_iptm` remains a native metric.
 - **Part L — Protein-Hunter** installable via `binderscout install --tool protein-hunter` (x86 only; aarch64 blocked by PyRosetta). Conda env `binderscout_protein_hunter`, vendored Boltz-2 + Chai-1 (sokrypton fork). New `ProteinHunterExtractor` reads `summary_high_iptm.csv` by default (`--all-protein-hunter-designs` for all runs). Configurator generates `run_protein_hunter.sh`.
 - **Part M — RFD3** installable via `binderscout install --tool rfd3` (x86; aarch64 opt-in and unvalidated — see aarch64 specifics). Conda env `binderscout_rfd3`, `rc-foundry[rfd3,mpnn]` from PyPI, weights at `weights/foundry/`. New `RFD3Extractor`. Configurator generates `run_rfd3.sh`.
 - **Standalone mode** (Part H, v0.7.0): Installer auto-detects whether system conda is writable. If not, downloads Miniforge3 into `BinderScout/conda/` and creates all environments locally. Shortcuts go to `BinderScout/bin/` instead of `~/.local/bin/`. `--standalone` forces this; `--system-conda` opts out. All generated run scripts and Evaluator shell scripts search local conda first.
@@ -853,6 +856,9 @@ binderscout install --tool all --yes --skip-examples  # non-interactive (CI)
 binderscout install --tool proteina-complexa # install Proteina-Complexa
 binderscout install --tool protein-hunter    # install Protein-Hunter (Part L)
 binderscout install --tool rfd3              # install RFD3 / foundry (Part M)
+binderscout install --tool protenix          # install Protenix v1.x as the opt-in second refold engine (replaces AF3 in the
+binderscout install --second-engine protenix #   second slot; NOT in --tool all). Prints the licence record and asks y/N first
+                                             #   (non-TTY needs --yes); needs a C compiler; env binder-eval-protenix, weights/protenix
 binderscout install --tool rfd4              # install RFD4-Proteina (ninth tool; opt-in,
                                              # aarch64 installable and run, NOT in --tool all; weights licence unverified)
 binderscout install --tool bindcraft2        # install BindCraft 2 (eighth tool), cloned from upstream
@@ -921,6 +927,9 @@ binderscout evaluate extract --mosaic runs/<name>/mosaic --all-mosaic-designs -o
 binderscout evaluate report --boltz2-results boltz2.csv --af3-results af3.csv \
                           --esmfold2-results esmfold2.csv --sequences seqs.fasta -o ./report
 binderscout evaluate report --min-engines 2 …   # relax the cross-engine gate (floor 2)
+binderscout evaluate report --boltz2-results boltz2.csv --second-engine protenix --second-results protenix.csv \
+                          --esmfold2-results esmfold2.csv --sequences seqs.fasta -o ./report   # Protenix in the second slot
+# evaluate.sh: --second-engine {af3,protenix} --protenix-env ENV --gpu-cap-protenix N --skip-second
 
 # Fold bare sequences without a run directory
 binderscout evaluate parse-seqs --input my_seqs.txt -o seqs.fasta
@@ -984,6 +993,10 @@ Mosaic/.venv/bin/binder-compare refold-boltz2 \
 # Refold with AF3 v3.0.2 (canonical 2nd engine — Spark / H200 / 24 GB consumer GPUs)
 conda run -n binder-eval-af3 binder-compare refold-af3 \
     --sequences seqs.fasta --target-seq SEQ -o af3.csv
+
+# Or, opt-in, Protenix v1.x in the second slot instead of AF3 (own env; torch kernels forced)
+conda run -n binder-eval-protenix binder-compare refold-protenix \
+    --sequences seqs.fasta --target-seq SEQ -o protenix.csv
 
 # Generate report (any subset of refold outputs can be passed)
 conda run -n binder-eval binder-compare report \
