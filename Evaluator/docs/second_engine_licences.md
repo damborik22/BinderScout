@@ -239,6 +239,37 @@ and that third-party dependency needs its own review before a commercial deploym
 - The licence caveats above (weights licence resting on two OpenBind pages, no licence file beside the weights,
   bucket-root file CC BY 4.0) are unchanged by the smoke.
 
+## Install-time licence notice (Protenix)
+
+`install/install.sh` and `install/install_aarch.sh` (`--second-engine protenix`, `--tool protenix`) read the text
+between the two marker comments below at run time and print it verbatim before anything is downloaded; they refuse
+to install if the markers are missing or the block is empty. The text is the only copy: edit it here, and keep it in
+step with the Protenix sections above. The markers are exact, whole-line strings.
+
+<!-- install-licence:protenix:start -->
+PROTENIX v1.x (ByteDance), the opt-in replacement for AF3 as the second refold engine. Licence read 2026-11-05.
+
+Licence: Apache-2.0 for the code and for the v1.x model parameters, v1.x only (protenix==1.1.0, model
+protenix_base_default_v1.0.0). The v1.1.0 README says the code and model parameters are "free for both academic
+research and commercial use". Protenix-v2 weights are proprietary and confidential, are not released under any
+open-source licence, and are never installed or used here; the adapter refuses any model name outside v1.x.
+Sources:
+  https://github.com/bytedance/Protenix/blob/v1.1.0/README.md
+  https://github.com/bytedance/Protenix/blob/v1.1.0/LICENSE
+  https://github.com/bytedance/Protenix/blob/main/README.md (the v2 weights statement)
+
+Download host: the checkpoint (1.48 GB) and the CCD and cluster files (about 0.65 GB) come from
+protenix.tos-cn-beijing.volces.com. The terms of that host, and of the CCD and cluster files fetched from it, were
+not read.
+
+NVIDIA wheels: pip install protenix also installs NVIDIA's proprietary cuEquivariance packages
+(cuequivariance-ops-torch-cu12 and cuequivariance-ops-cu12, under the NVIDIA Software License Agreement). They are
+installed but unused at runtime, because the refold adapter always runs the plain torch kernels. A commercial
+deployment needs its own review of that NVIDIA agreement.
+
+Full record, with quotes and pins: Evaluator/docs/second_engine_licences.md. This is not legal advice.
+<!-- install-licence:protenix:end -->
+
 ## Environments used in the benchmark
 
 What each engine ran with in the 2026-11-05 live smokes. "Not recorded" means the smoke report did not state it.

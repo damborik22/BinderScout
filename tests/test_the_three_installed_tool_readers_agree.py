@@ -255,7 +255,7 @@ def test_the_tui_and_the_configurator_use_the_installers_marker_keys():
         for ln in X86.read_text().splitlines()
         if "run_install_step " in ln and "failed_tools+=(" in ln
     }
-    assert len(installer_keys) == 14, sorted(installer_keys)
+    assert len(installer_keys) == 15, sorted(installer_keys)
 
     tui_keys = {key for key, _label, _marker in TUI_TOOLS}
     assert tui_keys <= installer_keys, (

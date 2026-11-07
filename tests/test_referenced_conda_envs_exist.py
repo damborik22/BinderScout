@@ -32,6 +32,7 @@ REAL_ENVS = {
     "binder-eval",
     "binder-eval-af3",
     "binder-eval-esmfold2",
+    "binder-eval-protenix",
     "binder-eval-soluprot",
     "binder-eval-tmprot",
     "binderscout_protein_hunter",

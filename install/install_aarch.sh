@@ -59,6 +59,26 @@ AF3_REPO="https://github.com/google-deepmind/alphafold3"
 AF3_COMMIT="fd39d2c5dcaadfc7333c3466951b27563fa7d6fa"  # v3.0.3.dev, compatible with the v3.0.2 weights
 AF3_DIR="${BINDERSCOUT_DIR}/alphafold3"
 
+# Protenix v1.x (ByteDance): the opt-in replacement for AF3 in the report's second-engine slot
+# (`--tool protenix` or `--second-engine protenix`; never in `--tool all`). The weights land in
+# ${PROTENIX_WEIGHTS_DIR}, which is what refold-protenix takes as --model-dir. Only v1.x is ever
+# fetched: the v2 weights are proprietary (Evaluator/docs/second_engine_licences.md).
+PROTENIX_ENV="binder-eval-protenix"
+PROTENIX_VERSION="1.1.0"
+PROTENIX_MODEL="protenix_base_default_v1.0.0"
+PROTENIX_CKPT_BYTES=1475950125
+PROTENIX_TORCH_INDEX="https://download.pytorch.org/whl/cu128"
+PROTENIX_WEIGHTS_DIR="${BINDERSCOUT_DIR}/weights/protenix"
+# The licence text is printed from the record, between these two whole-line markers; it is never
+# retyped here. No block, no install.
+PROTENIX_LICENCE_DOC="${EVALUATOR_DIR}/docs/second_engine_licences.md"
+PROTENIX_LICENCE_START="<!-- install-licence:protenix:start -->"
+PROTENIX_LICENCE_END="<!-- install-licence:protenix:end -->"
+PROTENIX_LICENCE_ACCEPTED=false
+PROTENIX_LICENCE_TEXT=""
+# Valid --second-engine names (AF3 is the default slot holder and is installed with --tool af3).
+SECOND_ENGINE_VALID="protenix"
+
 # BindCraft 2 (Pacesa Lab). Public since 2026-09-16, but source-available under
 # its own licence (BindCraft2 Source-Available, hosting-restricted), not this
 # repo's MIT, so nothing of it is committed here and BindCraft2/ stays
@@ -174,6 +194,7 @@ NO_CONDA=false           # set by main when a read-only mode found no conda: con
 REPAIR_MODE=false        # --repair: audit, then re-install only what is broken
 REPAIR_STALE=false       # --stale: let --repair ALSO rebuild tools built against another commit
 TOOL_SPECIFIED=false
+SECOND_ENGINE=""         # --second-engine NAME: selects that engine's --tool row (see SECOND_ENGINE_VALID)
 TOOL_ALL=false         # --tool all was given; uninstall widens this to every optional add-on   # set to true when --tool is passed on CLI
 STANDALONE="auto"      # auto | true | false — controls local Miniforge install
 
@@ -205,6 +226,7 @@ DO_PROTEINA_COMPLEXA=false  # opt-in via --tool proteina-complexa. Deprecated he
                         # (3300 AF2 calls per replicate) is only answerable by running it.
 DO_ESMFOLD2=false       # in --tool all (default refold engine) (lightweight 4th refold engine; no gated weights)
 DO_SOLUPROT=false       # in --tool all (sequence-only E. coli solubility screen; source-builds scikit-learn 0.20.4 + USEARCH v12, uses the --no_tmhmm model)
+DO_PROTENIX=false        # opt-in (--tool protenix / --second-engine protenix): never in --tool all; needs a C compiler and an accepted licence
 DO_TMPROT=false         # opt-in: sequence-only melting-temperature screen. GPL-3.0, so cloned
                         # and installed editable rather than vendored. Advisory only -- it has
                         # no filter mode, because Tm predictors are out of domain on hyperstable
@@ -244,6 +266,7 @@ TOOL_REGISTRY=(
     "DO_PROTEIN_HUNTER|Protein-Hunter|install_protein_hunter|false|Boltz/Chai hallucination: protein/cyclic/ligand/DNA/RNA binders (conda; PyRosetta from graylab conda)"
     "DO_AF3|AF3|install_af3|true|AlphaFold 3 refold engine -- builds the env; the weights are gated and requested separately (conda)"
     "DO_ESMFOLD2|ESMFold2|install_esmfold2|true|DEFAULT refold engine -- the cross-engine gate needs 3 engines (conda)"
+    "DO_PROTENIX|Protenix|install_protenix|false|Protenix v1.x refold engine, opt-in replacement for AF3 as the second engine (conda; Apache-2.0 v1.x, ~2 GB weights, needs a C compiler)"
     "DO_SOLUPROT|SoluProt|install_soluprot|false|Sequence-only E. coli solubility screen, pre-refold (conda, Python 3.7; source-builds USEARCH)"
     "DO_TMPROT|TmProt|install_tmprot|false|Sequence-only melting-temperature screen, advisory only (conda; GPL-3.0, not redistributed)"
 )
@@ -307,10 +330,12 @@ while [[ $# -gt 0 ]]; do
                     DO_ESMFOLD2=true ;;
                 soluprot|solu|solubility)
                     DO_SOLUPROT=true ;;
+                protenix)
+                    DO_PROTENIX=true ;;
                 tmprot|tm|thermostability)
                     DO_TMPROT=true ;;
                 *)
-                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, bindcraft2, boltzgen, mosaic, evaluator, pxdesign, proteina-complexa, protein-hunter, rfd3, af3, esmfold2, soluprot, tmprot${RESET}"
+                    echo -e "${RED}Invalid --tool value: $2. Must be one of: all, bindcraft, bindcraft2, boltzgen, mosaic, evaluator, pxdesign, proteina-complexa, protein-hunter, rfd3, af3, esmfold2, protenix, soluprot, tmprot${RESET}"
                     exit 1
                     ;;
             esac
@@ -322,6 +347,28 @@ while [[ $# -gt 0 ]]; do
             ;;
         --cuda)
             CUDA_VERSION="$2"
+            shift 2
+            ;;
+        --second-engine)
+            # The second refold engine, instead of --tool. AF3 is the default holder of that slot and
+            # has its own tool name; everything else must be a name from SECOND_ENGINE_VALID.
+            if [[ $# -lt 2 ]]; then
+                echo -e "${RED}--second-engine needs a value. Valid values: ${SECOND_ENGINE_VALID}${RESET}"
+                exit 1
+            fi
+            SECOND_ENGINE="${2,,}"
+            if [[ "${SECOND_ENGINE}" == "af3" ]]; then
+                echo -e "${RED}AF3 is installed with --tool af3, not --second-engine (valid values: ${SECOND_ENGINE_VALID})${RESET}"
+                exit 1
+            fi
+            if [[ " ${SECOND_ENGINE_VALID} " != *" ${SECOND_ENGINE} "* ]]; then
+                echo -e "${RED}Invalid --second-engine value: $2. Valid values: ${SECOND_ENGINE_VALID}${RESET}"
+                exit 1
+            fi
+            TOOL_SPECIFIED=true
+            case "${SECOND_ENGINE}" in
+                protenix) DO_PROTENIX=true ;;
+            esac
             shift 2
             ;;
         --bc2-source)
@@ -426,6 +473,17 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
                                        (evaluate.sh skips AF3 until they are found)
                   esmfold2             ESMFold2 refolder — opt-in only;
                                        lightweight 4th refold engine, no gated weights
+                  protenix             Protenix v1.x (ByteDance) — the opt-in replacement for
+                                       AF3 as the SECOND refold engine (same as
+                                       --second-engine protenix). NOT in --tool all.
+                                       Prints its licence text and asks
+                                       "Accept and download? [y/N]" before anything is
+                                       fetched (--yes accepts; no terminal and no --yes
+                                       refuses). Needs a C compiler (scikit-learn-extra
+                                       builds from source). Creates binder-eval-protenix
+                                       (Python 3.12, torch 2.7.1 cu128, protenix==1.1.0)
+                                       and fetches ~2.1 GB of v1.x weights into
+                                       weights/protenix. No AF3 weights needed.
                   soluprot             SoluProt solubility screen — opt-in. aarch64
                                        enabled: builds scikit-learn 0.20.4 + USEARCH
                                        v12 from source, patches biopython, uses the
@@ -434,6 +492,10 @@ DGX Spark (aarch64) edition. CUDA ${CUDA_VERSION}. Tools are cloned from upstrea
   --bc2-source  Where BindCraft 2's source is: a .zip, an unpacked directory, or a
                 git URL. Equivalent to exporting BINDCRAFT2_SOURCE. Optional —
                 defaults to https://github.com/PacesaLab/BindCraft2 at v1.0.1.
+  --second-engine NAME
+                Install the named second refold engine: protenix. The same as
+                --tool NAME; opt-in, never in --tool all, licence shown and accepted
+                first. AF3 is installed with --tool af3, not with this flag.
   --tools-dir   Path to pre-cached resources (AF2 weights, ARM64 binaries).
                 Default: <repo>/../../OLD/BinderScout/bindcraft-tools
   --cuda        CUDA version (default: 13.0). Only 13.0 has been tested on DGX Spark (GB10).
@@ -704,6 +766,7 @@ _relocation_reason() {
             fi ;;
         af3) r="$(_stale_editable_reason binder-eval-af3 "${EVALUATOR_DIR}")" ;;
         esmfold2) r="$(_stale_editable_reason binder-eval-esmfold2 "${EVALUATOR_DIR}")" ;;
+        protenix) r="$(_stale_editable_reason binder-eval-protenix "${EVALUATOR_DIR}")" ;;
         tmprot)
             r="$(_stale_editable_reason binder-eval-tmprot "${EVALUATOR_DIR}")"
             # A foreign-checkout NOTE is not a verdict: a BROKEN tmprot-1.0 editable replaces it.
@@ -2722,6 +2785,264 @@ PXDEOF
     print_ok "PXDesign installation complete"
 }
 
+# ─── Protenix v1.x (opt-in second refold engine) ─────────────────────────────
+#
+# `--tool protenix` / `--second-engine protenix`. NOT in `--tool all`: it carries a licence the
+# operator must see and accept first (the text lives in Evaluator/docs/second_engine_licences.md
+# between two marker comments and is printed from there, never retyped here), and `pip install
+# protenix` builds scikit-learn-extra from source, which needs a C compiler. It does not need the
+# AF3 weights, and AF3 stays the default second engine.
+
+# _protenix_require_cc
+# `pip install protenix==1.1.0` builds scikit-learn-extra from source and dies, an hour into a
+# conda solve, with "No such file or directory: 'cc'" on a host with no C compiler. A `cc` or
+# `gcc` on PATH, or a $CC that resolves, is enough: setuptools honours CC.
+_protenix_require_cc() {
+    command -v cc >/dev/null 2>&1 && return 0
+    command -v gcc >/dev/null 2>&1 && return 0
+    if [[ -n "${CC:-}" ]] && command -v "${CC%% *}" >/dev/null 2>&1; then return 0; fi
+    print_fail "No C compiler found (no cc or gcc on PATH, and \$CC is unset or does not exist)."
+    print_fail "  protenix==${PROTENIX_VERSION} builds scikit-learn-extra from source and fails with"
+    print_fail "  \"No such file or directory: 'cc'\" without one. Nothing was created or downloaded."
+    print_warn "  Fix: install a system C compiler (sudo apt-get install -y gcc), or set CC to one"
+    print_warn "       (export CC=/path/to/gcc) and re-run."
+    return 1
+}
+
+# _protenix_licence_notice
+# Prints the install-time licence block of the licence record, verbatim, and succeeds only when
+# the doc has the block between its two marker lines and it is not empty. The text is read at run
+# time: a copy typed into this script would drift from the record it is meant to show.
+_protenix_licence_notice() {
+    [[ -f "${PROTENIX_LICENCE_DOC}" ]] || return 1
+    local text
+    text="$(awk -v s="${PROTENIX_LICENCE_START}" -v e="${PROTENIX_LICENCE_END}" '
+        $0 == s { on = 1; next }
+        $0 == e { if (on) done = 1; on = 0; next }
+        on { print }
+        END { exit(done ? 0 : 1) }' "${PROTENIX_LICENCE_DOC}")" || return 1
+    [[ -n "${text//[[:space:]]/}" ]] || return 1
+    printf '%s\n' "${text//$'\t'/ }"
+}
+
+# protenix_licence_gate
+# The licence is shown, and accepted, before anything is fetched or created. Idempotent: the
+# early call in main and the one inside install_protenix ask once between them. Without --yes it
+# needs a terminal to ask on; with neither it prints the text and refuses, because accepting a
+# licence on someone's behalf is not an installer's call.
+protenix_licence_gate() {
+    [[ "${PROTENIX_LICENCE_ACCEPTED}" == true ]] && return 0
+    local notice
+    if ! notice="$(_protenix_licence_notice)"; then
+        print_fail "Cannot show the Protenix licence notice: no non-empty block between"
+        print_fail "  ${PROTENIX_LICENCE_START} and ${PROTENIX_LICENCE_END}"
+        print_fail "  in ${PROTENIX_LICENCE_DOC}."
+        print_fail "  Refusing to install without showing a licence. Nothing was created or downloaded."
+        return 1
+    fi
+    echo ""
+    echo -e "${BOLD}=== Protenix licence notice ===${RESET}"
+    echo "(from Evaluator/docs/second_engine_licences.md)"
+    echo ""
+    printf '%s\n' "${notice}"
+    echo ""
+    if [[ "${AUTO_YES}" != true ]] && ! _is_interactive; then
+        print_fail "This is a licence the operator must accept, and stdin is not a terminal."
+        print_fail "  Re-run with --yes to accept it. Nothing was created or downloaded."
+        return 1
+    fi
+    if ! confirm "Accept and download?"; then
+        print_fail "Licence not accepted. Nothing was created or downloaded."
+        return 1
+    fi
+    PROTENIX_LICENCE_TEXT="${notice}"
+    PROTENIX_LICENCE_ACCEPTED=true
+    return 0
+}
+
+# protenix_preflight: everything that can refuse before conda is touched.
+protenix_preflight() {
+    _protenix_require_cc || return 1
+    protenix_licence_gate
+}
+
+# protenix_early_gate
+# Run from main before anything else, and again after the interactive menu (which can tick
+# Protenix after the first call). A no-op unless Protenix is selected for an install: --verify,
+# --uninstall and --repair never need the licence (a repair that does reinstall asks inside
+# install_protenix).
+protenix_early_gate() {
+    [[ "${DO_PROTENIX}" == true ]] || return 0
+    if [[ "${VERIFY_ONLY}" == true || "${UNINSTALL_MODE}" == true || "${REPAIR_MODE}" == true ]]; then
+        return 0
+    fi
+    protenix_preflight
+}
+
+# _protenix_append_licence <marker-file>
+# Called by mark_tool_installed for the protenix marker only. The first line stays
+# `date<TAB>sha`, so every marker reader keeps working; the licence text that was shown and the
+# acceptance date (UTC) follow it.
+_protenix_append_licence() {
+    local marker="$1"
+    if [[ -z "${PROTENIX_LICENCE_TEXT}" ]]; then
+        rm -f "${marker}"
+        return 1
+    fi
+    {
+        printf '# Protenix licence notice shown and accepted at %s (UTC)\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf '%s\n' "${PROTENIX_LICENCE_TEXT}"
+    } >> "${marker}"
+}
+
+# _protenix_weights_reason
+# Prints why the weights are not usable, or nothing when they are (and always returns 0, so it can
+# sit inside a command substitution under `set -e`-style callers). The checkpoint must be at its
+# exact byte count and the four CCD/cluster files non-empty. A truncated 1.4 GB download is the
+# failure this exists for: Protenix would open it and die at first use.
+_protenix_weights_reason() {
+    local ckpt="${PROTENIX_WEIGHTS_DIR}/checkpoint/${PROTENIX_MODEL}.pt" size f
+    if [[ ! -f "${ckpt}" ]]; then
+        printf '%s' "no ${PROTENIX_MODEL}.pt under ${PROTENIX_WEIGHTS_DIR}/checkpoint — re-run: install --tool protenix"
+        return 0
+    fi
+    size="$(stat -Lc %s "${ckpt}" 2>/dev/null)"
+    if [[ "${size}" != "${PROTENIX_CKPT_BYTES}" ]]; then
+        printf '%s' "${PROTENIX_MODEL}.pt is ${size} bytes, expected ${PROTENIX_CKPT_BYTES} (truncated download?)"
+        return 0
+    fi
+    for f in components.cif components.cif.rdkit_mol.pkl clusters-by-entity-40.txt obsolete_release_date.csv; do
+        if [[ ! -s "${PROTENIX_WEIGHTS_DIR}/common/${f}" ]]; then
+            printf '%s' "${PROTENIX_WEIGHTS_DIR}/common/${f} is missing or empty"
+            return 0
+        fi
+    done
+    return 0
+}
+
+# _protenix_fetch_weights
+# Protenix's own downloader (runner.inference.download_from_url) and its own URL table
+# (protenix.web_service.dependency_url.URL), run in the new env, into the same layout Protenix
+# reads under PROTENIX_ROOT_DIR: checkpoint/<model>.pt and common/. Each file lands under a .part
+# name and is renamed only when complete, so a dropped connection never leaves a file that looks
+# finished. A checkpoint of the wrong size is replaced rather than kept.
+_protenix_fetch_weights() {
+    local py
+    if ! env_exists "${PROTENIX_ENV}"; then
+        print_fail "${PROTENIX_ENV} env not found"
+        return 1
+    fi
+    py="${BS_ENV_PREFIX}/bin/python"
+    mkdir -p "${PROTENIX_WEIGHTS_DIR}"
+    local code
+    code="$(cat <<'PY'
+import os
+from protenix.web_service.dependency_url import URL
+from runner.inference import download_from_url
+
+root = os.environ["PROTENIX_ROOT_DIR"]
+model = os.environ["PROTENIX_MODEL"]
+want = int(os.environ["PROTENIX_CKPT_BYTES"])
+jobs = [
+    (model, "checkpoint/" + model + ".pt", want),
+    ("ccd_components_file", "common/components.cif", None),
+    ("ccd_components_rdkit_mol_file", "common/components.cif.rdkit_mol.pkl", None),
+    ("pdb_cluster_file", "common/clusters-by-entity-40.txt", None),
+    ("obsolete_release_data_csv", "common/obsolete_release_date.csv", None),
+]
+for key, rel, size in jobs:
+    dst = os.path.join(root, rel)
+    if os.path.isfile(dst) and (os.path.getsize(dst) == size if size else os.path.getsize(dst) > 0):
+        print("already present:", dst)
+        continue
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    part = dst + ".part"
+    print("downloading", URL[key], "->", dst, flush=True)
+    download_from_url(URL[key], part, check_weight=False)
+    os.replace(part, dst)
+PY
+)"
+    # LAYERNORM_TYPE=torch: importing runner.inference otherwise JIT-compiles protenix's CUDA
+    # layer-norm extension, which needs ninja and nvcc and has nothing to do with downloading.
+    ( cd / && env PROTENIX_ROOT_DIR="${PROTENIX_WEIGHTS_DIR}" PROTENIX_MODEL="${PROTENIX_MODEL}" \
+        PROTENIX_CKPT_BYTES="${PROTENIX_CKPT_BYTES}" LAYERNORM_TYPE=torch "${py}" -c "${code}" )
+}
+
+install_protenix() {
+    print_step "Installing Protenix ${PROTENIX_VERSION} refolder (${PROTENIX_ENV} env, opt-in second engine)"
+    # Both gates first, before a single thing is created or fetched. main already ran them for an
+    # explicit --tool / --second-engine; this covers the menu and --repair, and is idempotent.
+    protenix_preflight || return 1
+    ensure_conda_in_path
+
+    if [[ ! -d "${EVALUATOR_DIR}" ]]; then
+        print_fail "Evaluator directory not found at ${EVALUATOR_DIR}"
+        print_warn "It should be bundled in the repository. Try re-cloning BinderScout."
+        return 1
+    fi
+    _refuse_if_env_in_use "${PROTENIX_ENV}" || return 1
+
+    if env_exists "${PROTENIX_ENV}"; then
+        print_warn "Conda environment '${PROTENIX_ENV}' already exists — reusing it."
+    else
+        run_logged "Creating ${PROTENIX_ENV} conda env (Python 3.12)" \
+            "${CONDA_CMD}" create -n "${PROTENIX_ENV}" -y python=3.12 pip \
+            -c conda-forge \
+            || { print_fail "Failed to create ${PROTENIX_ENV} env"; return 1; }
+    fi
+
+    # torch first, from the cu128 index: protenix 1.1.0 was measured on torch 2.7.1+cu128.
+    run_logged --retries 3 "Installing torch 2.7.1 (cu128) into ${PROTENIX_ENV}" \
+        "${CONDA_CMD}" run -n "${PROTENIX_ENV}" \
+        pip install -q torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 \
+        --index-url "${PROTENIX_TORCH_INDEX}" \
+        || { print_fail "Failed to install torch into ${PROTENIX_ENV}"; return 1; }
+
+    # NVIDIA's cuEquivariance wheels come with it as hard dependencies. They are installed and
+    # never run: refold-protenix forces the torch kernels (see the licence text above).
+    run_logged --retries 3 "Installing protenix==${PROTENIX_VERSION} into ${PROTENIX_ENV}" \
+        "${CONDA_CMD}" run -n "${PROTENIX_ENV}" \
+        pip install -q "protenix==${PROTENIX_VERSION}" \
+        || { print_fail "Failed to install protenix==${PROTENIX_VERSION}"; return 1; }
+
+    run_logged "Installing binder-compare into ${PROTENIX_ENV}" \
+        "${CONDA_CMD}" run -n "${PROTENIX_ENV}" pip install -q -e "${EVALUATOR_DIR}[report]" \
+        || { print_fail "Failed to install binder-compare into ${PROTENIX_ENV}"; return 1; }
+
+    # The licence was accepted above, so this is the first download. Prefer Protenix's own
+    # downloader; verify the checkpoint's exact size afterwards and refuse on a mismatch.
+    run_logged --retries 3 "Downloading Protenix ${PROTENIX_MODEL} + CCD data (~2.1 GB)" \
+        _protenix_fetch_weights \
+        || { print_fail "Protenix weight download failed — re-run to resume (finished files are kept)"; return 1; }
+    local _why
+    _why="$(_protenix_weights_reason)"
+    if [[ -n "${_why}" ]]; then
+        print_fail "Protenix weights failed verification: ${_why}"
+        # A checkpoint of the wrong size is removed so a re-run fetches it again rather than keeping it.
+        if [[ -f "${PROTENIX_WEIGHTS_DIR}/checkpoint/${PROTENIX_MODEL}.pt" \
+              && "$(stat -Lc %s "${PROTENIX_WEIGHTS_DIR}/checkpoint/${PROTENIX_MODEL}.pt")" != "${PROTENIX_CKPT_BYTES}" ]]; then
+            rm -f "${PROTENIX_WEIGHTS_DIR}/checkpoint/${PROTENIX_MODEL}.pt"
+        fi
+        return 1
+    fi
+    print_ok "Protenix weights verified (${PROTENIX_MODEL}.pt = ${PROTENIX_CKPT_BYTES} bytes + CCD data)"
+
+    # Imports, not a GPU: torch.cuda.is_available() is correctly False on a login node, so it is
+    # deliberately not asserted here. __file__ is checked so a shadowing directory cannot pass.
+    smoke_test "protenix ${PROTENIX_VERSION} imports" \
+        _env_python_ok "${PROTENIX_ENV}" \
+            "import importlib.metadata as m, protenix, sys; sys.exit(0 if protenix.__file__ and m.version('protenix') == '${PROTENIX_VERSION}' else 1)" \
+        || { print_fail "protenix does not import in ${PROTENIX_ENV} (or is not ${PROTENIX_VERSION})"; return 1; }
+    smoke_test "binder-compare refold-protenix --help" \
+        _env_refold_cli_ok "${PROTENIX_ENV}" refold-protenix \
+        || { print_fail "binder-compare refold-protenix does not run in ${PROTENIX_ENV}"; return 1; }
+
+    print_ok "Protenix installation complete"
+    print_ok "  Weights: ${PROTENIX_WEIGHTS_DIR} (pass as --model-dir to refold-protenix)"
+    print_warn "  The cuEquivariance wheels pip installed are unused: refold-protenix runs the torch kernels."
+    print_warn "  AF3 stays the default second engine; Protenix takes its slot only when asked for."
+}
+
 # ─── AlphaFold 3 (refolder, opt-in) ─────────────────────────────────────────
 
 install_af3() {
@@ -3877,6 +4198,13 @@ uninstall_tool() {
             fi
             print_ok "SoluProt solubility screen uninstalled"
             ;;
+        protenix)
+            print_step "Uninstalling Protenix refolder"
+            env_exists binder-eval-protenix && run_logged "Removing binder-eval-protenix conda env" \
+                "${CONDA_CMD}" env remove -n binder-eval-protenix -y
+            [[ -d "${PROTENIX_WEIGHTS_DIR}" ]] && { rm -rf "${PROTENIX_WEIGHTS_DIR}"; print_ok "Removed ${PROTENIX_WEIGHTS_DIR}"; }
+            print_ok "Protenix refolder uninstalled"
+            ;;
         tmprot|tm|thermostability)
             print_step "Uninstalling TmProt melting-temperature screen"
             env_exists binder-eval-tmprot && run_logged "Removing binder-eval-tmprot conda env" \
@@ -4652,6 +4980,10 @@ mark_tool_installed() {
     printf '%s\t%s\n' "$(date -Is)" \
         "$(git -C "${BINDERSCOUT_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
         > "${INSTALL_STATE_DIR}/$1"
+    # Protenix's marker also records the licence text that was shown and when it was accepted.
+    if [[ "$1" == protenix ]]; then
+        _protenix_append_licence "${INSTALL_STATE_DIR}/$1" || return 1
+    fi
 }
 
 is_tool_marked() { [[ -f "${INSTALL_STATE_DIR}/$1" ]]; }
@@ -4812,6 +5144,7 @@ preflight() {
     [[ "${DO_AF3}"       == true ]]         && need=$(( need + 6 ))
     [[ "${DO_ESMFOLD2}"  == true ]]         && need=$(( need + 6 ))
     [[ "${DO_SOLUPROT}"  == true ]]         && need=$(( need + 2 ))
+    [[ "${DO_PROTENIX}"  == true ]]         && need=$(( need + 12 ))  # py3.12 env + cu128 torch and NVIDIA wheels (~7 GB) + ~2.1 GB weights
     [[ "${DO_TMPROT}"    == true ]]         && need=$(( need + 5 ))   # py3.11 env + torch/transformers/peft + the bundled ESM2-LoRA weights + the clone
     [[ "${CONDA_BASE}" == "${LOCAL_CONDA_DIR}" ]] && need=$(( need + 1 ))
 
@@ -5028,6 +5361,14 @@ sys.exit(0 if (': str' in doc or 'DockingPartners' in src) else 1)"; then
             elif ! _env_refold_cli_ok binder-eval-esmfold2 refold-esmfold2; then
                 VERIFY_REASON="binder-compare refold-esmfold2 does not run in binder-eval-esmfold2 (evaluate.sh calls it there)"
             fi ;;
+        protenix)
+            if ! _env_python_ok binder-eval-protenix "import protenix"; then
+                VERIFY_REASON="protenix does not import in binder-eval-protenix"
+            elif ! _env_refold_cli_ok binder-eval-protenix refold-protenix; then
+                VERIFY_REASON="binder-compare refold-protenix does not run in binder-eval-protenix"
+            else
+                VERIFY_REASON="$(_protenix_weights_reason)"
+            fi ;;
         tmprot)
             if ! _env_python_ok binder-eval-tmprot "import tmprot"; then
                 VERIFY_REASON="tmprot does not import in binder-eval-tmprot"
@@ -5199,6 +5540,10 @@ main() {
     echo -e "${BOLD}=== BinderScout Installer — DGX Spark (aarch64) — $(date) ===${RESET}"
     echo -e "Platform: ${ARCH} | CUDA: ${CUDA_VERSION} | Standalone: ${STANDALONE}"
 
+    # Everything that can refuse -- a missing C compiler, a licence not shown or not accepted --
+    # refuses here, before conda is detected (which may fetch a Miniforge) or anything is created.
+    protenix_early_gate || exit 1
+
     check_arch
     # --verify and --uninstall must not provision conda: an audit that first downloads and
     # installs a Miniforge is not an audit, and "conda not found" is itself the finding.
@@ -5232,6 +5577,8 @@ main() {
             exit 1
         fi
         select_tools_interactive || exit 1
+        # A tool ticked in the menu arrives here without having been through the early gate.
+        protenix_early_gate || exit 1
     fi
 
     # --verify: report what is actually on disk and stop. Runs before preflight
@@ -5319,6 +5666,7 @@ main() {
             DO_BINDCRAFT2=true
             DO_PROTEIN_HUNTER=true
             DO_TMPROT=true
+            DO_PROTENIX=true
         fi
 
         # Driven from a flag|tool|label table rather than one `&&` line per tool:
@@ -5340,7 +5688,8 @@ main() {
             "DO_AF3|af3|AF3" \
             "DO_ESMFOLD2|esmfold2|ESMFold2" \
             "DO_SOLUPROT|soluprot|SoluProt" \
-            "DO_TMPROT|tmprot|TmProt"
+            "DO_TMPROT|tmprot|TmProt" \
+            "DO_PROTENIX|protenix|Protenix"
         do
             IFS='|' read -r flag tool label <<< "${spec}"
             [[ "${!flag}" == true ]] || continue
@@ -5440,6 +5789,7 @@ main() {
     [[ "${DO_ESMFOLD2}"  == true ]] && (( total++ ))
     [[ "${DO_SOLUPROT}"  == true ]] && (( total++ ))
     [[ "${DO_TMPROT}"    == true ]] && (( total++ ))
+    [[ "${DO_PROTENIX}"  == true ]] && (( total++ ))
 
     local failed_tools=()
     FAILED_EXAMPLES=()   # populated by install functions on example failure
@@ -5462,6 +5812,7 @@ main() {
     [[ "${DO_ESMFOLD2}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] ESMFold2${RESET}"; run_install_step esmfold2 install_esmfold2 || failed_tools+=("ESMFold2"); }
     [[ "${DO_SOLUPROT}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] SoluProt 1.0${RESET}"; run_install_step soluprot install_soluprot || failed_tools+=("SoluProt"); }
     [[ "${DO_TMPROT}"    == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] TmProt 1.0${RESET}"; run_install_step tmprot install_tmprot || failed_tools+=("TmProt"); }
+    [[ "${DO_PROTENIX}"  == true ]] && { (( step++ )); echo -e "\n${BOLD}[${step}/${total}] Protenix ${PROTENIX_VERSION}${RESET}"; run_install_step protenix install_protenix || failed_tools+=("Protenix"); }
 
     echo ""
     echo -e "${BOLD}=== Installation Summary ===${RESET}"

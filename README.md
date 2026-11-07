@@ -269,6 +269,7 @@ binderscout install   [--tool bindcraft|bindcraft2|boltzgen|mosaic|pxdesign|prot
                      [--bc2-source <zip|dir|git-url>]  # override BindCraft 2's source (default: upstream)
                      [--tool evaluator]                # the evaluator alone (binder-eval env + binder-compare)
                      [--tool af3|soluprot|tmprot]      # extra evaluator engines (esmfold2, af3 and soluprot ship in --tool all)
+                     [--tool protenix | --second-engine protenix]  # opt-in Protenix v1.x as the second refold engine (not in --tool all)
                      [--cuda VERSION] [--standalone] [--system-conda] [--yes] [--skip-examples]
                      [--skip-preflight] [--force] [--verify] [--repair] [--stale] [--add-to-path]
 binderscout configure [options passed through to configurator.py]
@@ -292,6 +293,7 @@ Options:
 | `--tool evaluator` | Evaluator pipeline only — the `binder-eval` conda env and the `binder-compare` CLI (already in `--tool all`). This is the one to use when someone else ran the designs and you only want to refold, rank and report them. |
 | `--tool esmfold2` | ESMFold2 refolder — **default** (already in `--tool all`); lightweight, no gated weights; also the `autosize` gate. Listed here for explicit re-install. |
 | `--tool af3\|soluprot\|tmprot` | Evaluator-side tools, each in its own env. `af3` = AlphaFold 3 v3.0.2, **in `--tool all`** (the env builds; the weights are gated and requested separately — canonical cross-check). `soluprot` = solubility screen, **already in `--tool all`**; listed here for an explicit re-install (both platforms source-build USEARCH v12, so a C/C++ toolchain is needed; **aarch64**: run `bash install/install_aarch.sh --tool soluprot` — it also source-builds scikit-learn 0.20.4 and uses the `--no_tmhmm` model). `tmprot` = sequence-only melting-temperature screen, **opt-in**, cloned rather than vendored (GPL-3.0); advisory label only, it never filters or ranks. |
+| `--tool protenix` / `--second-engine NAME` | Protenix v1.x (ByteDance) as the **opt-in** second refold engine in place of AF3: `binder-eval-protenix` env (Python 3.12, torch 2.7.1 cu128, `protenix==1.1.0`) plus ~2.1 GB of v1.x weights in `weights/protenix`. **Not** in `--tool all`. It needs a C compiler (`scikit-learn-extra` builds from source; install one or set `CC`), prints its licence text (read from `Evaluator/docs/second_engine_licences.md`) and asks `Accept and download? [y/N]` before anything is fetched; `--yes` accepts, and with no terminal and no `--yes` it refuses. `--second-engine` takes `protenix` only; AF3 is installed with `--tool af3`. No AF3 weights needed. |
 | `--cuda VERSION` | CUDA version for conda package resolution (default: 12.4) |
 | `--skip-examples` | Do not prompt to run bundled examples after install |
 | `--standalone` | Force local Miniforge3 install (no system conda needed) |
