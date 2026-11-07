@@ -23,10 +23,12 @@
 #                          The panel is always Boltz-2 + <second> + ESMFold2, never four engines.
 #                          Explicit wins and is never switched: an unusable explicit engine is
 #                          skipped BY NAME. Without the flag the slot is AF3 when its env and
-#                          weights are usable; otherwise Protenix, but only if --skip-af3 /
-#                          --skip-second were not given and Protenix's env and weights are
-#                          present (a notice names the panel). Scores from different panels
-#                          are not on one scale.
+#                          weights are usable OR an af3_results.csv is already in --output (then
+#                          reported as ever); otherwise Protenix, when its env and weights are
+#                          usable OR a protenix_results.csv is already there (a notice names the
+#                          panel); otherwise the slot is skipped by name. --skip-af3 /
+#                          --skip-second given: no second engine, no fallback. Scores from
+#                          different panels are not on one scale.
 #   --protenix-env ENV     conda env for Protenix (default: binder-eval-protenix); its weights are
 #                          read from <checkout>/weights/protenix (binderscout install --tool protenix)
 #   --skip-second          skip whichever engine holds the second slot (AF3 or Protenix)
@@ -541,12 +543,22 @@ if [[ "$SECOND_ENGINE" == "protenix" && $SKIP_PROTENIX -eq 0 ]]; then
         echo ""
     fi
 elif [[ $_AUTO_SECOND -eq 1 && $SKIP_AF3 -eq 1 ]]; then
-    # No flag, and the AF3 detection above just dropped AF3 (env or weights). Fall back to Protenix
-    # only when it is fully usable; otherwise say nothing new and the slot is skipped by name as before.
-    if ! _protenix_unusable_reason >/dev/null; then
+    # No flag, and the AF3 detection above just dropped AF3 (env or weights). Order, never both:
+    #   2. an af3_results.csv already in the output dir keeps the slot with AF3: nothing runs, and the
+    #      CSV is reported exactly as before this engine existed (a pool refolded elsewhere, or an AF3
+    #      env that is absent here, must not silently change the panel);
+    #   3. else Protenix, when it is fully usable OR its protenix_results.csv is already present;
+    #   4. else nothing new is said and the slot is skipped by name as before.
+    if [[ -f "$OUTPUT/af3_results.csv" ]]; then
+        :   # slot stays AF3; SKIP_AF3 stays 1, the CSV still counts toward the gate and reaches the report
+    elif ! _protenix_unusable_reason >/dev/null; then
         SECOND_ENGINE="protenix"
         SKIP_PROTENIX=0
         echo "[note] second engine: Protenix (AF3 not available); ${_PANEL_NOTE}"
+        echo ""
+    elif [[ -f "$OUTPUT/protenix_results.csv" ]]; then
+        SECOND_ENGINE="protenix"   # nothing runs: the existing CSV is reported
+        echo "[note] second engine: Protenix (AF3 not available; existing protenix_results.csv reported, nothing refolded); ${_PANEL_NOTE}"
         echo ""
     fi
 fi

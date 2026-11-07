@@ -105,6 +105,7 @@ def _run(
     guard: bool = False,
     extra_env: dict[str, str] | None = None,
     af3_csv: bool = False,
+    protenix_csv: bool = False,
 ) -> Result:
     """Run evaluate.sh in a sandbox. protenix_weights=None plants no checkpoint; an int plants one that size."""
     sandbox = tmp_path / "Evaluator"
@@ -137,6 +138,8 @@ def _run(
     (out_dir / "boltz2_results.csv").write_text("sequence,iptm,target_sequence\nMKTAYIAKQRQ,0.8,MKTAYIAKQRQ\n")
     if af3_csv:
         (out_dir / "af3_results.csv").write_text("sequence,iptm,target_sequence\nMKTAYIAKQRQ,0.8,MKTAYIAKQRQ\n")
+    if protenix_csv:
+        (out_dir / "protenix_results.csv").write_text("sequence,iptm,target_sequence\nMKTAYIAKQRQ,0.8,MKTAYIAKQRQ\n")
 
     sequences = tmp_path / "seqs.fasta"
     sequences.write_text(">b1\nMKTAYIAKQRQ\n")
@@ -289,6 +292,64 @@ def test_an_unknown_second_engine_is_refused(tmp_path):
     assert r.rc == 2, r.out
     assert "--second-engine must be one of: af3, protenix (got 'rf3')" in r.out, r.out
     assert r.calls == []
+
+
+# ------------------------------------------- an existing results CSV keeps its slot (no-flag path)
+
+
+def test_an_existing_af3_csv_keeps_the_af3_slot_even_with_protenix_ready_and_no_af3_env(tmp_path):
+    """Pool refolded elsewhere, AF3 env absent here: reported with the AF3 CSV exactly as before."""
+    r = _run(tmp_path, NO_AF3, af3_csv=True)
+    assert r.rc == 0, r.out
+    assert r.refolds("refold-protenix") == [] and r.refolds("refold-af3") == [], r.out
+    assert "Protenix" not in r.out, r.out
+    assert "[skipped] AF3: conda env 'binder-eval-af3' not found" in r.out, r.out  # wording as today
+    assert r.report[r.report.index("--af3-results") + 1] == str(r.out_dir / "af3_results.csv")
+    assert "--second-engine" not in r.report and "--second-results" not in r.report
+    assert "reach the report, but the cross-engine gate defaults to 3" not in r.out, r.out  # the CSV counts
+
+
+def test_an_existing_af3_csv_keeps_the_slot_when_only_the_af3_weights_are_missing(tmp_path):
+    r = _run(tmp_path, ALL_ENVS, af3_weights=False, af3_csv=True)
+    assert r.refolds("refold-protenix") == [] and r.refolds("refold-af3") == [], r.out
+    assert "--af3-results" in r.report and "--second-engine" not in r.report
+
+
+def test_without_an_af3_csv_the_same_box_falls_back_to_protenix(tmp_path):
+    r = _run(tmp_path, NO_AF3)
+    assert "[note] " + PANEL_NOTICE in r.out, r.out
+    assert len(r.refolds("refold-protenix")) == 1, r.out
+    assert r.report[r.report.index("--second-engine") + 1] == "protenix"
+
+
+def test_an_existing_protenix_csv_is_reported_with_nothing_run_when_nothing_else_is_usable(tmp_path):
+    r = _run(tmp_path, NEITHER, protenix_csv=True, protenix_weights=None)
+    assert r.rc == 0, r.out
+    assert r.refolds("refold-protenix") == [] and r.refolds("refold-af3") == [], r.out
+    assert "second engine: Protenix (AF3 not available; existing protenix_results.csv reported" in r.out, r.out
+    assert r.report[r.report.index("--second-engine") + 1] == "protenix"
+    assert r.report[r.report.index("--second-results") + 1] == str(r.out_dir / "protenix_results.csv")
+    assert "--af3-results" not in r.report
+    assert "reach the report, but the cross-engine gate defaults to 3" not in r.out, r.out  # the CSV counts
+
+
+def test_both_csvs_present_and_neither_engine_usable_keeps_af3_never_both(tmp_path):
+    r = _run(tmp_path, NEITHER, af3_csv=True, protenix_csv=True, protenix_weights=None)
+    assert "--af3-results" in r.report and "--second-engine" not in r.report and "--second-results" not in r.report
+
+
+@pytest.mark.parametrize("flag", ["--skip-af3", "--skip-second"])
+def test_a_skip_flag_with_protenix_ready_uses_no_second_engine_and_does_not_fall_back(tmp_path, flag):
+    r = _run(tmp_path, NO_AF3, [flag], af3_csv=True)
+    assert r.refolds("refold-protenix") == [] and r.refolds("refold-af3") == [], r.out
+    assert "Protenix" not in r.out, r.out
+    assert "--second-engine" not in r.report and "--second-results" not in r.report
+
+
+def test_a_skip_flag_does_not_adopt_an_existing_protenix_csv_either(tmp_path):
+    r = _run(tmp_path, NO_AF3, ["--skip-second"], protenix_csv=True)
+    assert "Protenix" not in r.out, r.out
+    assert "--second-engine" not in r.report
 
 
 # ---------------------------------------------------------------- the Protenix weights check
