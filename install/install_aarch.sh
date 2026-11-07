@@ -3007,6 +3007,15 @@ install_protenix() {
     # Both gates first, before a single thing is created or fetched. main already ran them for an
     # explicit --tool / --second-engine; this covers the menu and --repair, and is idempotent.
     protenix_preflight || return 1
+    # The licence is accepted; say what is NOT established before the install work starts. Does not
+    # block. (aarch64 only: install.sh builds for x86_64, where cu128 is the right wheel index.)
+    print_warn "UNVALIDATED ON aarch64 HARDWARE: this Protenix install path has never been run on an aarch64 machine by this installer."
+    print_warn "  It installs torch 2.7.1 from the cu128 wheel index, while every other tool here pins cu130. An arch-wrong"
+    print_warn "  torch can report torch.cuda.is_available() == True and then fail every kernel launch."
+    print_warn "  The only smoke of Protenix on a GB10 ran torch 2.7.1+cu128 (Evaluator/docs/second_engine_licences.md, 'Environments"
+    print_warn "  used in the benchmark'), by hand, not through this installer."
+    print_warn "  Before relying on it, launch a real kernel (not just is_available()):"
+    print_warn "    ${CONDA_CMD} run -n ${PROTENIX_ENV} python -c \"import torch; print((torch.ones(8, device='cuda') * 2).sum().item())\""
     ensure_conda_in_path
 
     if [[ ! -d "${EVALUATOR_DIR}" ]]; then

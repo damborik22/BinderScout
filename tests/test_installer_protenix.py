@@ -150,9 +150,20 @@ def _run_tty(script: Path, args: str, env: dict[str, str], repo: Path, *answers:
     )
     out = b""
     answered = 0
-    deadline = time.monotonic() + 90
+    # Generous and tunable: a loaded machine (the whole suite, other jobs) can stretch a 3 s run a lot.
+    budget = float(os.environ.get("BINDERSCOUT_TEST_TTY_DEADLINE", "300"))
+    deadline = time.monotonic() + budget
+
+    def _fail(what: str):
+        p.kill()
+        p.wait()
+        tail = out.decode(errors="replace")[-1500:]
+        raise AssertionError(f"{what} within {budget:.0f}s (BINDERSCOUT_TEST_TTY_DEADLINE). Last output:\n{tail}")
+
     try:
-        while time.monotonic() < deadline:
+        while True:
+            if time.monotonic() > deadline:
+                _fail("the installer did not finish")
             ready, _, _ = select.select([p.stdout], [], [], 0.5)
             if ready:
                 chunk = os.read(p.stdout.fileno(), 65536)
@@ -164,10 +175,10 @@ def _run_tty(script: Path, args: str, env: dict[str, str], repo: Path, *answers:
                     answered += 1
             elif p.poll() is not None:
                 break
-        else:
-            p.kill()
-            raise AssertionError("the installer did not finish:\n" + out.decode(errors="replace"))
-        p.wait(timeout=30)
+        try:
+            p.wait(timeout=max(30.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            _fail("the installer closed its output but did not exit")
     finally:
         os.close(master)
         os.close(slave)
@@ -831,3 +842,23 @@ def test_the_installers_pin_the_checkpoint_size_and_hash(platform):
     assert re.search(rf"^PROTENIX_CKPT_BYTES={CKPT_BYTES}$", src, re.M)
     assert re.search(rf'^PROTENIX_CKPT_SHA256="{CKPT_SHA256}"$', src, re.M)
     assert CKPT_SHA256 in DOC.read_text(), "the licence record does not state the pinned hash"
+
+
+# ─── the aarch64-only warning ───────────────────────────────────────────────────────────────
+
+AARCH64_WARNING = "UNVALIDATED ON aarch64 HARDWARE"
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_only_the_aarch64_installer_warns_that_its_cu128_torch_is_unvalidated(platform, tmp_path, no_cc_path):
+    repo, script, env, _calls, _log, _base = _flow(tmp_path, platform, no_cc_path)
+    rc, out = _run(script, "--tool protenix --yes --skip-preflight", env, repo)
+    assert rc == 0, "the warning must not block the install:\n" + out
+    if platform == "aarch64":
+        assert AARCH64_WARNING in out and "cu128" in out and "cu130" in out, out
+        assert "torch.cuda.is_available() == True" in out and "torch.ones(8, device='cuda')" in out, out
+        # after the licence was accepted, before any install work
+        assert out.index(doc_block()) < out.index(AARCH64_WARNING)
+        assert (repo / ".install_state" / "protenix").is_file()
+    else:
+        assert AARCH64_WARNING not in out, "the x86 installer must not carry the aarch64 warning"
