@@ -257,13 +257,13 @@ therefore omits the metric the pipeline ranks on. Known, not yet fixed.
 4. **When nothing clears the gate**, `passes_engine_gate` goes constant and stops
    discriminating, so the order becomes `consensus_iptm_mean` alone — and a design scored
    by **one** engine can outrank one scored by three. This is warned about loudly
-   (`scoring.py:893-923`), because it is the single-engine failure the gate exists to
+   (the warning in `rank_designs` in `scoring.py`), because it is the single-engine failure the gate exists to
    prevent. The warning is **stderr only** and does not reach `report.html`.
 
 **What is averaged:** `_ENGINE_IPTM_COLS` = `boltz_pae_iptm`, `af3_pae_iptm`,
 `esmfold2_pae_iptm` (with the opt-in Protenix panel, `protenix_pae_iptm` takes the place of `af3_pae_iptm`;
 the panel registry is `binder_comparison/core/engines.py`) — all **recomputed from the `.npy` PAE matrices** by
-`add_iptm_from_pae_files` / `compute_iptm_from_pae` (`scoring.py:391-444`, `:600-663`),
+`add_iptm_from_pae_files` / `compute_iptm_from_pae` (both in `scoring.py`),
 *not* the engines' self-reported `*_iptm`, which are reported only. The kernel is
 max(bt,tb) of `max_i[mean_j 1/(1+(PAE_ij/d0)²)]` with a global
 `d0 = max(1.0, 1.24·∛(L−15) − 1.8)` and **no PAE cutoff** — deliberately different from the
