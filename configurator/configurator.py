@@ -5345,6 +5345,12 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
             lines.append("    --skip-second \\")
     elif not second_on:
         lines.append("    --skip-af3 \\")
+    elif "second_engine" in cfg:
+        # A config that NAMES the AF3 slot pins it: with no flag evaluate.sh auto-selects and, on a
+        # box where AF3 is unusable but Protenix is installed, would silently switch panels. An
+        # explicit --second-engine af3 skips AF3 by name instead. A config without the key (an old
+        # one) keeps the pre-Part-2 script byte for byte.
+        lines.append("    --second-engine af3 \\")
     if not cfg.get("use_esmfold2", False):
         lines.append("    --skip-esmfold2 \\")
 

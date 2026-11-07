@@ -184,10 +184,42 @@ def test_an_af3_config_generates_the_pre_change_script_byte_for_byte(tmp_path, o
     assert _script(tmp_path, **over) == _expected(tail)
 
 
-def test_an_explicit_af3_slot_is_still_byte_identical(tmp_path):
-    """`second_engine: af3` is what an old config means, so naming it must not change a byte."""
-    over = {"use_boltz": True, "use_af3": True, "use_esmfold2": True, "primary_engine": "boltz", "min_engines": 2}
-    assert _script(tmp_path, second_engine="af3", **over) == _expected(TAIL_AF3_ALL_ON)
+_AF3_ON = {"use_boltz": True, "use_af3": True, "use_esmfold2": True, "primary_engine": "boltz", "min_engines": 2}
+
+
+def test_a_config_that_names_the_af3_slot_pins_it(tmp_path):
+    """With no flag evaluate.sh auto-selects, and on a box where AF3 is unusable but Protenix is
+    installed the panel would silently switch. `--second-engine af3` skips AF3 by name instead.
+    The only difference from the pre-change script is that one line."""
+    body = _script(tmp_path, second_engine="af3", **_AF3_ON)
+    expected = _expected(TAIL_AF3_ALL_ON).replace(
+        '    --tool-root "$RUN_DIR" \\\n', '    --tool-root "$RUN_DIR" \\\n    --second-engine af3 \\\n'
+    )
+    assert body == expected
+    assert body.index("--tool-root") < body.index("--second-engine af3") < body.index("--skip-soluprot")
+
+
+def test_a_named_but_switched_off_af3_slot_keeps_skip_af3_and_no_flag(tmp_path):
+    over = {**_AF3_ON, "use_af3": False, "primary_engine": "esmfold2"}
+    body = _script(tmp_path, second_engine="af3", **over)
+    assert body == _expected(TAIL_AF3_OFF)
+    assert "--second-engine" not in body
+
+
+def test_a_wizard_config_pins_the_slot(tmp_path, scripted):
+    """AF3-only wizard answers -> the keys the wizard writes into cfg -> the generated script."""
+    picked, _prompts, _out = scripted(["", "", "", ""], {**ALL, "af3": True})
+    assert picked["second_engine"] == "af3" and picked["use_af3"] is True
+    keys = {k: picked[k] for k in ("use_boltz", "use_af3", "use_protenix", "second_engine", "use_esmfold2")}
+    body = _script(tmp_path, primary_engine=picked["primary_engine"], **keys)
+    assert "    --second-engine af3 \\\n" in body and "--skip-af3" not in body
+
+
+def test_the_wizard_writes_second_engine_into_cfg():
+    """The wizard's cfg dict carries the key explicitly, which is what makes the pin apply."""
+    src = (REPO / "configurator" / "configurator.py").read_text()
+    wizard_src = src[src.index("def wizard():") :]
+    assert wizard_src.count('"second_engine": second_engine,') >= 2
 
 
 # ------------------------------------------------------------------ the Protenix slot
