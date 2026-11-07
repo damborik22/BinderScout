@@ -360,4 +360,24 @@ The adapter default stays at 5 samples; only the benchmark runs set 1.
 
 ## Live validation of the opt-in installer and refold (2026-11-07)
 
-Results are added below by the controller.
+Run on 2026-11-07 against a clean extract of the Part 2 code (`git archive` of commit 3c26910, before the later
+C++-compiler fix in the installer's early gate) in an isolated scratch checkout, on an x86_64 host with a 24 GB
+RTX 3090 and no system C or C++ compiler. Everything below was observed, not inferred.
+
+| Step | Result |
+|---|---|
+| Licence decline | The licence block printed before any network access. Declining at a TTY prompt exited 1 with "Nothing was created or downloaded", and no `conda/`, `weights/` or `.install_state/protenix` existed afterwards. Without a TTY and without `--yes` the installer printed the block and refused (exit 1). `--second-engine af3` and `--second-engine bogus` each refused (exit 1) with their own message. |
+| Install | `bash install/install.sh --second-engine protenix --yes --standalone --skip-examples` took 279 s including a 2.0 GB weights download (about 9.5 min from the first attempt). Result: Python 3.12.16, torch 2.7.1+cu128, protenix 1.1.0; checkpoint 1,475,950,125 bytes with the pinned sha256; Protenix's own downloader fetched all five files (`protenix_base_default_v1.0.0`, `ccd_components_file`, `ccd_components_rdkit_mol_file`, `pdb_cluster_file`, `obsolete_release_data_csv`). |
+| Install needed | `--skip-preflight` (the toolchain preflight demands make, gcc and g++; the box has none), plus `CC` and `CXX` pointing at a conda-forge gcc/g++ and `cc`, `gcc`, `g++`, `c++` on `PATH`. |
+| Defect found and fixed | The first attempt passed the installer's early gate with a C compiler only, was shown and accepted the licence, then `pip install protenix` died building `scikit-learn-extra` with `No such file or directory: 'g++'`. The early gate now also requires a C++ compiler (commit 15630b4). The fix was not re-run live: it is covered by tests only. |
+| `binder-compare refold-protenix --help` | Ran inside the new env and printed the options. |
+| Refold, 2 PD-L1 designs (220 aa target, 88 and 84 aa binders), 24 GB RTX 3090 | Exit 0, 148.9 s in total, about 74 s per design: each design is a separate `protenix pred` process with about 41 s of fixed start-up and about 28 s of inference. Peak GPU memory 5,854 MiB against an 18 MiB baseline. ipTM 0.8078 and 0.8998. PAE arrays (308, 308) and (304, 304), i.e. binder plus target tokens. Structure stems `<binder_id>_protenix`. |
+| Hostile ambient environment | With `LAYERNORM_TYPE=fast_layernorm` and a hostile Triton cache variable in the caller's environment, the engine log read "Triangle_multiplicative kernel: torch, Triangle_attention kernel: torch" and `refold_run_info.json` recorded torch for all three settings: the adapter overrides the layernorm variable and passes the kernel flags itself. `PROTENIX_ROOT_DIR` was not made hostile (it would have triggered a download); the adapter overwrites it unconditionally. `FUSED_DROPOUT_RESIDUAL` is the only kernel-selecting variable the adapter does not pin; it is inert at inference. |
+| Reproducibility | Three runs of the first design with the same seed gave ipTM 0.8078, 0.8071 and 0.8025: Protenix is **not bit-reproducible** here. Treat differences of a few thousandths in ipTM as noise. |
+| Report | `binder-compare report --second-engine protenix --second-results ...` with the one engine exited 0 with the usual gate warning. `metrics.csv` had `protenix_pae_iptm`, `panel` = `boltz+protenix+esmfold2` and `second_engine` = `protenix`; the HTML contained "Boltz-2 + Protenix + ESMFold2; AF3 not used" and the sentence that scores from different panels are not on one scale. |
+| Uninstall | `--uninstall --tool protenix --yes` removed the env, `weights/protenix` and the marker; the real checkout's `conda/`, `weights/` and `.install_state/` were not touched. |
+
+**Not validated:** aarch64 (the cu128 wheels there are unverified); a full three-engine gate in one report; a re-run
+with partial weights; `--resume`; an install with a full toolchain and no `--skip-preflight`; the 15630b4 gate fix.
+The peak-memory figures in the memory table above and the 5,854 MiB here come from different complexes (779 tokens
+and about 308 tokens).

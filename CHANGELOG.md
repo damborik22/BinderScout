@@ -81,6 +81,10 @@ confirmed by the owner. Protenix fits the 24 GB card class that ESMFold2 already
   benchmark runs used, not a hash published upstream.
 - The benchmark ran 1 seed and 1 sample; the sample count of the AF3 baseline numbers was not recorded.
 - Peak memory was measured on one design on the 24 GB card.
+- Protenix is not bit-reproducible: three runs of one design with the same seed gave ipTM 0.8078, 0.8071 and
+  0.8025, so differences of a few thousandths in ipTM are noise.
+- The installer's early gate requires a C and a C++ compiler (`scikit-learn-extra` builds from source); the
+  toolchain preflight additionally wants make and git, so a box that only sets `CC`/`CXX` needs `--skip-preflight`.
 - The `install_aarch.sh` path is the same recipe and has not been run on aarch64 hardware; the cu128 torch wheels
   there are unverified.
 - The live validation of the installer and refold is written up in the runbook section "Live validation of the
