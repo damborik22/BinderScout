@@ -33,9 +33,12 @@ from pathlib import Path
 import pandas as pd
 
 from ..comparison.hits import HITS_COLUMNS, hits_summary, select_hits
+from ..core.engines import SECOND_ENGINES
 from ..io.read import read_csv_safe
 
 _ENGINES = "Boltz-2, AlphaFold3, ESMFold2"
+# The engines line as it is written for each second-slot engine (AF3's spelling is the workbook's historic one).
+_ENGINES_BY_SECOND = {"af3": _ENGINES, "protenix": "Boltz-2, Protenix, ESMFold2 (AF3 not used)"}
 _TOOLS = "BindCraft, BoltzGen, Mosaic, Proteina-Complexa, PXDesign, Protein Hunter, RFDiffusion3"
 
 
@@ -56,7 +59,9 @@ def _meta(spec: str) -> dict[str, str]:
     return out
 
 
-def _write_sheet(xl, sheet: str, hits: pd.DataFrame, meta: dict, summary: dict, version: str) -> None:
+def _write_sheet(
+    xl, sheet: str, hits: pd.DataFrame, meta: dict, summary: dict, version: str, engines: str = _ENGINES
+) -> None:
     """Header block, then the table — laid out like the hand-built sheets."""
     head = [
         [meta.get("name", sheet), meta.get("uniprot", ""), meta.get("pdb", "")],
@@ -71,8 +76,8 @@ def _write_sheet(xl, sheet: str, hits: pd.DataFrame, meta: dict, summary: dict, 
             "",
             "",
         ],
-        [f"Re-folding / re-scoring: {_ENGINES}", "", ""],
-        [f"Global ranking: mean-ipTM of {_ENGINES}", "", ""],
+        [f"Re-folding / re-scoring: {engines}", "", ""],
+        [f"Global ranking: mean-ipTM of {engines}", "", ""],
     ]
     for note in [v for k, v in meta.items() if k.startswith("note")]:
         head.append([note, "", ""])
@@ -86,6 +91,7 @@ def _write_sheet(xl, sheet: str, hits: pd.DataFrame, meta: dict, summary: dict, 
 
 
 def run(args: argparse.Namespace) -> None:
+    engines = _ENGINES_BY_SECOND[getattr(args, "second_engine", None) or "af3"]
     metas = dict(_kv(m, "meta") for m in (args.meta or []))
     extras: dict[str, dict[str, int]] = {}
     for spec in args.extra or []:
@@ -147,15 +153,15 @@ def run(args: argparse.Namespace) -> None:
             [
                 ["Version", "Date", "Contents"],
                 [args.version, args.date or "", f"Implemented 7 methods: {_TOOLS}"],
-                ["", "", f"Re-folding: {_ENGINES}"],
-                ["", "", f"Re-scoring: {_ENGINES}"],
-                ["", "", f"Global ranking: mean-ipTM of {_ENGINES}"],
+                ["", "", f"Re-folding: {engines}"],
+                ["", "", f"Re-scoring: {engines}"],
+                ["", "", f"Global ranking: mean-ipTM of {engines}"],
                 ["", "", f"Selection: top {args.per_tool} per tool + top {args.refolded} new by our ranking"],
             ]
         )
         info.to_excel(xl, sheet_name="BinderScout", index=False, header=False, startrow=3, startcol=1)
         for target, (hits, s) in tables.items():
-            _write_sheet(xl, target[:31], hits, _meta(metas.get(target, "")), s, args.version)
+            _write_sheet(xl, target[:31], hits, _meta(metas.get(target, "")), s, args.version, engines)
     print(f"[hits] Written → {out}")
 
 
@@ -186,6 +192,12 @@ def add_parser(subparsers) -> None:
         action="append",
         metavar="TARGET=k:v;k:v",
         help="Sheet header fields: name, uniprot, pdb, dashboard, note1, note2…",
+    )
+    p.add_argument(
+        "--second-engine",
+        choices=list(SECOND_ENGINES),
+        default="af3",
+        help="The engine that filled the report's second slot (default af3); names the panel in the workbook.",
     )
     p.add_argument("--version", default="1.0", help="BinderScout version written into the sheets (default 1.0).")
     p.add_argument("--date", default="", help="Date written into the info sheet.")

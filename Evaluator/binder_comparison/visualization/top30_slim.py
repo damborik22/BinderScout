@@ -29,6 +29,7 @@ from ..comparison.scoring import (
     IPSAE_MIN_THRESHOLD,
     IPSAE_PASS_THRESHOLD,
 )
+from ..core.engines import Panel
 
 # display label -> (source column, sort kind). Optional columns drop when absent.
 # `native_rank` leads when present — it only is in the per-tool native tables, where
@@ -107,9 +108,14 @@ def _tier(v) -> str:
     return "low" if v > IPSAE_MIN_THRESHOLD else "rej"
 
 
-def _n_engines(df: pd.DataFrame) -> int:
-    """How many refolding engines contributed — the real ceiling of agreement_count."""
-    return sum(1 for col in _ENGINE_IPSAE_COLS.values() if col in df.columns) or 3
+def _n_engines(df: pd.DataFrame, panel: Panel | None = None) -> int:
+    """How many refolding engines contributed — the real ceiling of agreement_count.
+
+    Counted over the panel's engines (None: the default AF3 panel); an engine outside it does
+    not count even when its columns are in the frame.
+    """
+    cols = _ENGINE_IPSAE_COLS.values() if panel is None else panel.ipsae_cols
+    return sum(1 for col in cols if col in df.columns) or 3
 
 
 def _slim_cols(df: pd.DataFrame):
@@ -253,7 +259,13 @@ SLIM_REPORT_CSS = """
 """
 
 
-def write_top30_slim(df: pd.DataFrame, output_dir: Path, top_per_tool: int = 10, pool_size: int | None = None) -> None:
+def write_top30_slim(
+    df: pd.DataFrame,
+    output_dir: Path,
+    top_per_tool: int = 10,
+    pool_size: int | None = None,
+    panel: Panel | None = None,
+) -> None:
     """Write ``top30_slim.html`` + ``top30_slim.csv`` (decision metrics + per-tool + all-metric roll-ups)."""
     output_dir = Path(output_dir)
     sort_col = "rank" if "rank" in df.columns else "consensus_iptm_mean"
@@ -299,7 +311,7 @@ def write_top30_slim(df: pd.DataFrame, output_dir: Path, top_per_tool: int = 10,
         # ran, so the legend cannot claim a band or an engine count the tables
         # below were not built with. (CSS braces rule out an f-string template.)
         .replace("__TIER_HIGH__", f"{IPSAE_HIGH_THRESHOLD:.2f}".lstrip("0"))
-        .replace("__N_ENGINES__", str(_n_engines(d)))
+        .replace("__N_ENGINES__", str(_n_engines(d, panel)))
     )
     (output_dir / "top30_slim.html").write_text(page)
 

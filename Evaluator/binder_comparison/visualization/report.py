@@ -25,6 +25,7 @@ from ..comparison.scoring import (
     IPSAE_PASS_THRESHOLD,
     MIN_ENGINES_DEFAULT,
 )
+from ..core.engines import Panel, engine, resolve_panel
 from .plots import (
     METRIC_META,
     fig_to_base64,
@@ -52,10 +53,34 @@ _TIER_MED = f"{IPSAE_PASS_THRESHOLD:.2f}"
 _TIER_LOW = f"{IPSAE_MIN_THRESHOLD:.2f}"
 
 # Human-readable engine names, in the order the report lists them.
-_ENGINE_DISPLAY = {"boltz": "Boltz-2", "af3": "AF3", "esmfold2": "ESMFold2"}
+_ENGINE_DISPLAY = {"boltz": "Boltz-2", "af3": "AF3", "protenix": "Protenix", "esmfold2": "ESMFold2"}
+
+# The long form used in viewer captions and the "engines used" sentence.
+_ENGINE_LONG_LABEL = {"boltz": "Boltz-2", "af3": "AlphaFold 3", "protenix": "Protenix", "esmfold2": "ESMFold2"}
+
+# The one sentence a reader needs before comparing two reports (R4).
+_PANEL_SCALE_SENTENCE = (
+    "Scores from different panels are not on one scale: compare ranks and means only between reports "
+    "that name the same panel."
+)
 
 
-def _active_engines(df: pd.DataFrame) -> list[str]:
+def _panel_line_html(panel: Panel | None) -> str:
+    """The panel this report was scored with, and that its numbers belong to that panel alone."""
+    panel = panel or resolve_panel()
+    unused = "; AF3 not used" if panel.second.name != "af3" else ""
+    return (
+        '<p class="panel-line" style="font-size:0.85em;color:#555;margin:0.4em 0;">'
+        f"<b>Engine panel:</b> {html_escape(panel.label)}{unused}. {_PANEL_SCALE_SENTENCE}</p>"
+    )
+
+
+def _panel_ipsae_cols(panel: Panel | None) -> dict[str, str]:
+    """``{engine name: ipSAE_min column}`` of *panel* (None: the default AF3 panel)."""
+    return _ENGINE_IPSAE_COLS if panel is None else {e.name: e.ipsae_col for e in panel.engines}
+
+
+def _active_engines(df: pd.DataFrame, panel: Panel | None = None) -> list[str]:
     """Engines whose ipSAE column is actually present — i.e. that actually ran.
 
     The legends hardcoded "the 3 engines (Boltz-2 / AF3 / ESMFold2)" and "0–3",
@@ -63,17 +88,18 @@ def _active_engines(df: pd.DataFrame) -> list[str]:
     then has a smaller ceiling than the text claims, making a perfectly good
     2-of-2 design look like it failed one of three.
     """
-    return [engine for engine, col in _ENGINE_IPSAE_COLS.items() if col in df.columns]
+    return [name for name, col in _panel_ipsae_cols(panel).items() if col in df.columns]
 
 
-def _resolve_thresholds(engine_thresholds: dict[str, float] | None) -> dict[str, float]:
+def _resolve_thresholds(engine_thresholds: dict[str, float] | None, panel: Panel | None = None) -> dict[str, float]:
     """Merge caller overrides over the defaults, exactly as `scoring` does."""
-    return {**DEFAULT_ENGINE_THRESHOLDS, **(engine_thresholds or {})}
+    base = DEFAULT_ENGINE_THRESHOLDS if panel is None else {e.name: e.default_threshold for e in panel.engines}
+    return {**base, **(engine_thresholds or {})}
 
 
-def _agreement_phrase(df: pd.DataFrame, thresholds: dict[str, float]) -> str:
+def _agreement_phrase(df: pd.DataFrame, thresholds: dict[str, float], panel: Panel | None = None) -> str:
     """Describe `agreement_count`: which engines it counts, and against what cutoff."""
-    engines = _active_engines(df)
+    engines = _active_engines(df, panel)
     if not engines:
         return "How many refolding engines score ipSAE_min above their pass threshold"
     names = " / ".join(_ENGINE_DISPLAY.get(e, e) for e in engines)
@@ -202,6 +228,8 @@ _HTML_TEMPLATE = """\
 </div>
 {designed_total_banner}
 
+{panel_block}
+
 <p style="font-size:0.85em;color:#555;line-height:1.6;">
   <b>Methodology.</b>
   All designed binder sequences are independently re-folded as target–binder complexes by the
@@ -285,7 +313,7 @@ _HTML_TEMPLATE = """\
   </div>
   <div style="flex:1 1 460px;min-width:300px;">
     <p style="font-size:0.85em;color:#555;margin:0 0 0.3em 0;">
-      Per-tool <b>mean iPTM by engine</b> — three bars/tool (Boltz-2 · AF3 · ESMFold2), top-{top_per_tool_display}/tool.
+      Per-tool <b>mean iPTM by engine</b> — three bars/tool ({engine_bar_names}), top-{top_per_tool_display}/tool.
     </p>
     <img src="data:image/png;base64,{engine_bars_plot}" alt="Per-tool mean iPTM by engine (three bars per tool)" style="max-width:100%;height:auto;">
   </div>
@@ -548,6 +576,16 @@ _PRI: dict[str, list[str]] = {
 }
 
 
+def _pri_cols(primary_engine: str) -> list[str]:
+    """Structure columns to try for *primary_engine*'s re-fold (the default engines' table, else the registry's)."""
+    if primary_engine in _PRI:
+        return _PRI[primary_engine]
+    try:
+        return [*engine(primary_engine).pdb_cols, "boltz_pdb", "pdb"]
+    except ValueError:  # not a registered engine
+        return ["boltz_pdb", "pdb"]
+
+
 def _build_per_tool_refold_viewer(
     tool: str,
     tool_df: pd.DataFrame,
@@ -564,7 +602,7 @@ def _build_per_tool_refold_viewer(
     matching the target sequence.
     """
     colour = _TOOL_COLOURS_NGL.get(tool, _TOOL_COLOURS_NGL["unknown"])
-    pdb_cols = [c for c in _PRI.get(primary_engine, ["boltz_pdb", "pdb"]) if c in tool_df.columns]
+    pdb_cols = [c for c in _pri_cols(primary_engine) if c in tool_df.columns]
     if not pdb_cols:
         return ""
     entries = []
@@ -633,7 +671,7 @@ def _build_per_tool_refold_viewer(
         for e in entries
     )
     default_rank = entries[0]["rank"]
-    _engine_label = {"af3": "AlphaFold 3", "esmfold2": "ESMFold2", "boltz": "Boltz-2"}.get(
+    _engine_label = {"af3": "AlphaFold 3", "esmfold2": "ESMFold2", "boltz": "Boltz-2", "protenix": "Protenix"}.get(
         primary_engine, primary_engine.upper()
     )
     html = f"""
@@ -1442,8 +1480,13 @@ def generate_report(
     provenance: dict | None = None,
     lightweight: bool = False,
     binding_map: str | None = None,
+    panel: Panel | None = None,
 ) -> None:
     """Generate and write the HTML report.
+
+    *panel* is the engine panel the scores came from (None: the default AF3 panel). Every
+    engine name, column and cutoff the report prints is read from it, and the report states
+    the panel and that its scores are not comparable with another panel's.
 
     Args:
         df:            DataFrame with all metrics (after Boltz-2 promotion + statistics).
@@ -1484,14 +1527,14 @@ def generate_report(
     # Tier summary
     tier_summary = _tier_summary_to_html(sort_df)
     # Engine threshold legend + cross-engine agreement summary
-    engine_threshold_legend = _engine_threshold_legend_html(sort_df, engine_thresholds)
+    engine_threshold_legend = _engine_threshold_legend_html(sort_df, engine_thresholds, panel)
     agreement_summary = _agreement_summary_html(sort_df)
 
     # Top 30 table (primary + collapsible secondary). flag_disagreement adds a
     # ⚠ warning icon next to the rank when agreement_count < 2 or per-engine
     # iPTM spread > 0.3 — surfaces "single-engine spike" / "one engine rejects"
     # cases that the rank alone hides.
-    primary_cols, secondary_cols = _select_display_cols(sort_df)
+    primary_cols, secondary_cols = _select_display_cols(sort_df, panel)
     top30_primary = sort_df[primary_cols].head(30)
     _rank_col_for_flag = next(
         (c for c in ("rank",) if c in primary_cols),
@@ -1515,6 +1558,7 @@ def generate_report(
         rank_col=_rank_col_for_flag,
         strike_when_false_col="wetlab_recommended" if "wetlab_recommended" in top30_primary.columns else None,
         mark_reason=(sort_df["wetlab_reason"].to_dict() if "wetlab_reason" in sort_df.columns else None),
+        panel=panel,
     ).replace("<table>", '<table style="width:100%">', 1)
     if secondary_cols:
         top30_secondary = sort_df[primary_cols[:2] + secondary_cols].head(30)
@@ -1532,12 +1576,12 @@ def generate_report(
         "Click to expand — full metric set for the Top 30</summary>\n"
         + _full_top30
         + "\n"
-        + _top_table_legend_html(top30_primary, engine_thresholds)
+        + _top_table_legend_html(top30_primary, engine_thresholds, panel)
         + "\n</details>"
     )
 
     # Summary statistics table
-    summary_table = _summary_to_html(summary)
+    summary_table = _summary_to_html(summary, panel)
 
     # Plots
     dist_fig = plot_metric_distributions(sort_df)
@@ -1559,14 +1603,14 @@ def generate_report(
         # subplot per available engine. Falls back to legacy radar if df lacks
         # the per-engine PAE-ipsae columns.
         try:
-            radar_fig = plot_radar_per_engine(sort_df, top_n=top_per_tool)
+            radar_fig = plot_radar_per_engine(sort_df, top_n=top_per_tool, panel=panel)
         except Exception:  # pragma: no cover - defensive
             radar_fig = plot_radar_chart(summary)
         # Second radar: fixed per-tool selection by *our refold rank* (primary engine),
         # then measure each engine on the same designs.
         try:
             radar_fixed_fig = plot_radar_per_engine_uniform_selection(
-                sort_df, primary_engine=primary_engine, top_n=top_per_tool
+                sort_df, primary_engine=primary_engine, top_n=top_per_tool, panel=panel
             )
         except Exception:  # pragma: no cover - defensive
             radar_fixed_fig = None
@@ -1574,7 +1618,7 @@ def generate_report(
     dist_b64 = fig_to_base64(dist_fig)
     radar_b64 = fig_to_base64(radar_fig)
     try:
-        engine_bars_b64 = fig_to_base64(plot_per_tool_engine_iptm(sort_df, top_n=top_per_tool))
+        engine_bars_b64 = fig_to_base64(plot_per_tool_engine_iptm(sort_df, top_n=top_per_tool, panel=panel))
     except Exception:  # pragma: no cover - defensive
         engine_bars_b64 = ""
     scatter_b64 = fig_to_base64(scatter_fig) if scatter_fig is not None else ""
@@ -1779,6 +1823,7 @@ def generate_report(
                                             _eng = {
                                                 "af3": "AlphaFold 3",
                                                 "boltz": "Boltz-2",
+                                                "protenix": "Protenix",
                                             }.get(primary_engine, primary_engine.upper())
                                             viewer_block = (
                                                 "<p style='font-size:0.8em;color:#888;margin:0.2em 0;'>"
@@ -1921,7 +1966,7 @@ def generate_report(
     else:
         ngl_viewer_block = "<p style='color:#888;'><em>No refolded structures available.</em></p>"
 
-    engine_label_map = {"af3": "AlphaFold 3", "esmfold2": "ESMFold2", "boltz": "Boltz-2"}
+    engine_label_map = _ENGINE_LONG_LABEL
     primary_engine_label = engine_label_map.get(primary_engine, primary_engine.upper())
 
     _pri_engine_label = engine_label_map.get(primary_engine, primary_engine.upper())
@@ -2016,9 +2061,11 @@ def generate_report(
 
     # Engine list reflects the engines actually present (populated) in this run.
     _engine_check = [
-        ("<b>Boltz-2</b>", ("boltz_pae_iptm", "boltz_iptm")),
-        ("<b>AlphaFold 3</b>", ("af3_iptm",)),
-        ("<b>ESMFold2</b>", ("esmfold2_iptm",)),
+        (
+            f"<b>{_ENGINE_LONG_LABEL[e.name]}</b>",
+            ("boltz_pae_iptm", "boltz_iptm") if e.name == "boltz" else (f"{e.prefix}_iptm",),
+        )
+        for e in (panel or resolve_panel()).engines
     ]
     _engines = [
         lbl
@@ -2039,7 +2086,7 @@ def generate_report(
     benchmark_provenance_block = _benchmark_provenance_html()
     qc_rules_block = _qc_rules_html() if "qc_pass" in sort_df.columns else ""
     screening_summary_intro = _screening_summary_intro_html()
-    top_table_legend = _slim_legend_html(sort_df, engine_thresholds)
+    top_table_legend = _slim_legend_html(sort_df, engine_thresholds, panel)
     tool_classification_banner = _tool_classification_banner_html(sort_df, tool_overrides=tool_overrides)
 
     # Generation funnel banner (top of the report) from
@@ -2063,6 +2110,8 @@ def generate_report(
         screening_summary_intro=screening_summary_intro,
         top_table_legend=top_table_legend,
         engines_present_html=engines_present_html,
+        panel_block=_panel_line_html(panel),
+        engine_bar_names=" · ".join(e.display for e in (panel or resolve_panel()).engines),
         tool_counts_str=tool_counts_str or "—",
         engine_threshold_legend=engine_threshold_legend,
         agreement_summary=agreement_summary,
@@ -2098,13 +2147,15 @@ def generate_report(
 # ────────────────────────────────────────────────────────────────────────────
 
 
-def _slim_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float] | None = None) -> str:
+def _slim_legend_html(
+    df: pd.DataFrame, engine_thresholds: dict[str, float] | None = None, panel: Panel | None = None
+) -> str:
     """Per-column description table for the slim decision-metrics Top-30 table.
 
     Matches the slim column set (Mean ipTM · Agreement · ipSAE_min · Epitope ·
     Solubility · Tm · Notes); optional columns are shown only when present.
     """
-    agreement_desc = _agreement_phrase(df, _resolve_thresholds(engine_thresholds))
+    agreement_desc = _agreement_phrase(df, _resolve_thresholds(engine_thresholds, panel), panel)
     checks = [
         (
             "Rank",
@@ -2119,7 +2170,7 @@ def _slim_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float] | No
         (
             "Mean ipTM ↑",
             "consensus_iptm_mean",
-            f"<b>Primary ranking metric</b> — mean of the {len(_active_engines(df)) or 3} engines' "
+            f"<b>Primary ranking metric</b> — mean of the {len(_active_engines(df, panel)) or 3} engines' "
             "PAE-recomputed iPTM. Higher = stronger multi-engine consensus, which resists single-engine gaming.",
         ),
         (
@@ -2170,14 +2221,17 @@ def _slim_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float] | No
     return "\n".join(lines)
 
 
-def _top_table_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float] | None = None) -> str:
+def _top_table_legend_html(
+    df: pd.DataFrame, engine_thresholds: dict[str, float] | None = None, panel: Panel | None = None
+) -> str:
     """Per-column description table that sits under the Top-30 table.
 
     Rendered text matches the column set produced by :func:`_select_display_cols`,
     so a reader can never get a description that references a column that isn't in
     the table above.
     """
-    agreement_desc = _agreement_phrase(df, _resolve_thresholds(engine_thresholds))
+    agreement_desc = _agreement_phrase(df, _resolve_thresholds(engine_thresholds, panel), panel)
+    _iptm_label = " / ".join(("boltz_pae_iptm", f"{(panel or resolve_panel()).second.prefix}_iptm", "esmfold2_iptm"))
     rows = [
         ("rank", "Overall rank — cross-engine gate, then mean engine iPTM (the ranking key)."),
         (
@@ -2209,7 +2263,7 @@ def _top_table_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float]
             "flat null as a screen (macro-AUC 0.532 on the Cao benchmark), so do not gate on it.",
         ),
         (
-            "boltz_pae_iptm / af3_iptm / esmfold2_iptm ↑",
+            f"{_iptm_label} ↑",
             "Per-engine PAE-recomputed iPTM (the values entering the mean).",
         ),
         (
@@ -2795,13 +2849,14 @@ def _advisory_legend_html(df: pd.DataFrame) -> str:
     )
 
 
-def _select_display_cols(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+def _select_display_cols(df: pd.DataFrame, panel: Panel | None = None) -> tuple[list[str], list[str]]:
     """Pick columns for the top-20 table: (primary, secondary).
 
     Primary columns are always visible; secondary are in a collapsible section.
     The iPTM/consensus columns lead because ``consensus_iptm_mean`` is the ranking
     metric; ipSAE is a diagnostic and sits in secondary.
     """
+    second_prefix = (panel or resolve_panel()).second.prefix
     # Lead with the iPTM ranking columns; surface agreement_count + spread right
     # at the top so engine-disagreement is visible in the Top-30 table (per
     # maintainer feedback: rank-3 with agreement=1 must not hide).
@@ -2818,7 +2873,7 @@ def _select_display_cols(df: pd.DataFrame) -> tuple[list[str], list[str]]:
         "consensus_iptm_spread",
         "agreement_count",
         "boltz_pae_iptm",
-        "af3_iptm",
+        f"{second_prefix}_iptm",
         "esmfold2_iptm",
         "ipsae_min",
         "consensus_ipsae_min_mean",
@@ -2827,7 +2882,7 @@ def _select_display_cols(df: pd.DataFrame) -> tuple[list[str], list[str]]:
     secondary = [
         "quality_tier",
         "boltz_pae_ipsae_min",
-        "af3_ipsae_min",
+        f"{second_prefix}_ipsae_min",
         "esmfold2_ipsae_min",
         "esmfold2_chain_iptm_interface",
         "consensus_ipsae_min_spread",
@@ -2847,7 +2902,9 @@ def _select_display_cols(df: pd.DataFrame) -> tuple[list[str], list[str]]:
     )
 
 
-def _engine_threshold_legend_html(df: pd.DataFrame, engine_thresholds: dict[str, float] | None = None) -> str:
+def _engine_threshold_legend_html(
+    df: pd.DataFrame, engine_thresholds: dict[str, float] | None = None, panel: Panel | None = None
+) -> str:
     """One-line legend showing per-engine thresholds in effect for this report.
 
     The cutoffs are read from the resolved thresholds rather than retyped: this
@@ -2855,14 +2912,14 @@ def _engine_threshold_legend_html(df: pd.DataFrame, engine_thresholds: dict[str,
     `--threshold-af3` / `--threshold-esmfold2` were set to, and it used to print
     a flat "≥ 0.61" for all three no matter what was passed.
     """
-    thresholds = _resolve_thresholds(engine_thresholds)
+    thresholds = _resolve_thresholds(engine_thresholds, panel)
     rows = []
     # Columns come from the canonical map: boltz uses boltz_pae_*, the rest use
     # <engine>_ipsae_min. The old hardcoded af3_pae_ipsae_min was never written by
     # anything, so the AF3 row never rendered. AF2 is gone (Part I).
-    for engine in _active_engines(df):
-        cutoff = thresholds.get(engine, IPSAE_PASS_THRESHOLD)
-        rows.append(f"{_ENGINE_DISPLAY.get(engine, engine)} ≥ {cutoff:.2f}")
+    for eng in _active_engines(df, panel):
+        cutoff = thresholds.get(eng, IPSAE_PASS_THRESHOLD)
+        rows.append(f"{_ENGINE_DISPLAY.get(eng, eng)} ≥ {cutoff:.2f}")
     if not rows:
         return ""
     return (
@@ -2970,6 +3027,7 @@ def _df_to_html(
     rank_col: str | None = None,
     strike_when_false_col: str | None = None,
     mark_reason: dict | None = None,
+    panel: Panel | None = None,
 ) -> str:
     """Render a DataFrame as an HTML table.
 
@@ -3013,7 +3071,7 @@ def _df_to_html(
                 and pd.notna(agreement.get(idx))
                 and agreement.get(idx) <= DISAGREEMENT_AGREEMENT_MAX
             ):
-                n_engines = len(_active_engines(df)) or 3
+                n_engines = len(_active_engines(df, panel)) or 3
                 reasons.append(f"only {int(agreement.get(idx))}/{n_engines} engines pass ipSAE {_TIER_MED}")
             if spread is not None and pd.notna(spread.get(idx)) and spread.get(idx) >= DISAGREEMENT_SPREAD_MIN:
                 reasons.append(f"per-engine iPTM spread {spread.get(idx):.2f}")
@@ -3182,8 +3240,9 @@ _METRIC_DESCRIPTION = {
 }
 
 
-def _summary_to_html(summary: dict) -> str:
+def _summary_to_html(summary: dict, panel: Panel | None = None) -> str:
     """Render per-tool summary as an HTML table."""
+    panel_names = " / ".join(e.display for e in (panel or resolve_panel()).engines)
     all_metrics: set[str] = set()
     for tool_data in summary.values():
         all_metrics.update(tool_data.keys())
@@ -3213,7 +3272,7 @@ def _summary_to_html(summary: dict) -> str:
                 row += f"<td>{stats['mean']:.4f} ± {stats['std']:.4f}<br><small>n={stats['n']}</small></td>"
             else:
                 row += "<td>—</td>"
-        desc = _METRIC_DESCRIPTION.get(m, "")
+        desc = _METRIC_DESCRIPTION.get(m, "").replace("Boltz-2 / AF3 / ESMFold2", panel_names)
         row += f'<td style="font-size:0.85em;color:#666;text-align:left">{desc}</td>'
         rows.append(f"<tr>{row}</tr>")
 

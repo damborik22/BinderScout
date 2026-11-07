@@ -14,6 +14,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
+from ..core.engines import Panel, resolve_panel
+
 # Colour scheme per source tool
 TOOL_COLOURS = {
     "bindcraft": "#2196F3",  # blue
@@ -106,6 +108,8 @@ METRIC_META: dict[str, tuple[str, str, str]] = {
     "af3_ipsae_min": ("AF3 ipSAE_min", "[0–1]", "↑"),
     "esmfold2_ipsae_min": ("ESMFold2 ipSAE_min", "[0–1]", "↑"),
     "af3_iptm": ("AF3 ipTM", "[0–1]", "↑"),
+    "protenix_ipsae_min": ("Protenix ipSAE_min", "[0–1]", "↑"),
+    "protenix_iptm": ("Protenix ipTM", "[0–1]", "↑"),
     "esmfold2_iptm": ("ESMFold2 ipTM", "[0–1]", "↑"),
     # ── Epitope (cli/epitope.py) ────────────────────────────────────────────
     "epitope_match_fraction": ("Epitope match", "[0–1]", "↑"),
@@ -298,6 +302,13 @@ _ENGINE_RADAR_METRICS: dict[str, list[tuple[str, str, str]]] = {
         ("af3_pae_bt_mean", "PAE b→t", "↓"),
         ("af3_pae_tb_mean", "PAE t→b", "↓"),
     ],
+    "protenix": [
+        ("protenix_ipsae_min", "ipSAE_min", "↑"),
+        ("protenix_iptm", "ipTM", "↑"),
+        ("protenix_plddt_binder_mean", "pLDDT binder", "↑"),
+        ("protenix_pae_bt_mean", "PAE b→t", "↓"),
+        ("protenix_pae_tb_mean", "PAE t→b", "↓"),
+    ],
     "esmfold2": [
         ("esmfold2_ipsae_min", "ipSAE_min", "↑"),
         ("esmfold2_pae_iptm", "ipTM", "↑"),
@@ -313,13 +324,22 @@ _ENGINE_RADAR_METRICS: dict[str, list[tuple[str, str, str]]] = {
 _ENGINE_RANK_COLS: dict[str, str] = {
     "boltz": "boltz_pae_ipsae_min",
     "af3": "af3_ipsae_min",
+    "protenix": "protenix_ipsae_min",
     "esmfold2": "esmfold2_ipsae_min",
 }
 
-_ENGINE_DISPLAY = {"boltz": "Boltz-2", "af3": "AF3", "esmfold2": "ESMFold2"}
+_ENGINE_DISPLAY = {"boltz": "Boltz-2", "af3": "AF3", "protenix": "Protenix", "esmfold2": "ESMFold2"}
 
 
-def plot_radar_per_engine(df: pd.DataFrame, top_n: int = 10) -> Figure:
+def _panel_engine_names(panel: Panel | None) -> list[str]:
+    """The engines a per-engine plot may draw, in slot order (None: the default AF3 panel).
+
+    An engine outside the panel is never drawn, even when its columns are in the frame.
+    """
+    return [e.name for e in (panel or resolve_panel()).engines]
+
+
+def plot_radar_per_engine(df: pd.DataFrame, top_n: int = 10, panel: Panel | None = None) -> Figure:
     """One radar per available refold engine, each showing per-tool **top-N** mean
     (so the chart reflects "tool at its best", not full-pool average).
 
@@ -335,7 +355,8 @@ def plot_radar_per_engine(df: pd.DataFrame, top_n: int = 10) -> Figure:
 
     # Which engines actually have data?
     active_engines = []
-    for e, metrics in _ENGINE_RADAR_METRICS.items():
+    for e in _panel_engine_names(panel):
+        metrics = _ENGINE_RADAR_METRICS[e]
         rank_col = _ENGINE_RANK_COLS.get(e)
         if (
             rank_col
@@ -426,6 +447,7 @@ def plot_radar_per_engine_uniform_selection(
     df: pd.DataFrame,
     primary_engine: str = "af3",
     top_n: int = 10,
+    panel: Panel | None = None,
 ) -> Figure:
     """Per-engine radar where every panel shows the SAME per-tool top-N selection,
     chosen by the evaluator's **primary refold rank** (``<primary_engine>_pae_ipsae_min``
@@ -466,7 +488,9 @@ def plot_radar_per_engine_uniform_selection(
         ax.text(0.5, 0.5, "Not enough data per tool — radar skipped", ha="center", va="center")
         return fig
 
-    active_engines = [e for e in _ENGINE_RADAR_METRICS if any(m[0] in df.columns for m in _ENGINE_RADAR_METRICS[e])]
+    active_engines = [
+        e for e in _panel_engine_names(panel) if any(m[0] in df.columns for m in _ENGINE_RADAR_METRICS[e])
+    ]
     if not active_engines:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No engine metric columns present", ha="center", va="center")
@@ -620,7 +644,7 @@ _IPTM_RADAR_SPOKES: list[tuple[str, str]] = [
 ]
 
 
-def plot_radar_iptm(df: pd.DataFrame, top_n: int = 10) -> Figure:
+def plot_radar_iptm(df: pd.DataFrame, top_n: int = 10, panel: Panel | None = None) -> Figure:
     """Per-tool radar over the engine iPTMs — the two-stage view.
 
     Spokes = each available engine's iPTM (raw 0–1, NOT z-scored). One polygon
@@ -633,10 +657,9 @@ def plot_radar_iptm(df: pd.DataFrame, top_n: int = 10) -> Figure:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No source_tool — radar skipped", ha="center", va="center")
         return fig
+    spoke_defs = _IPTM_RADAR_SPOKES if panel is None else [(e.iptm_col, f"{e.display} iPTM") for e in panel.engines]
     spokes = [
-        (c, lbl)
-        for c, lbl in _IPTM_RADAR_SPOKES
-        if c in df.columns and pd.to_numeric(df[c], errors="coerce").notna().any()
+        (c, lbl) for c, lbl in spoke_defs if c in df.columns and pd.to_numeric(df[c], errors="coerce").notna().any()
     ]
     if len(spokes) < 2:
         fig, ax = plt.subplots()
@@ -1013,18 +1036,15 @@ _ENGINE_BAR_LABEL = {
 }
 
 
-def plot_per_tool_engine_iptm(df: pd.DataFrame, top_n: int | None = None) -> Figure:
+def plot_per_tool_engine_iptm(df: pd.DataFrame, top_n: int | None = None, panel: Panel | None = None) -> Figure:
     """Grouped bar chart — per tool, three bars = each refold engine's mean iPTM.
 
-    For every tool, the mean of Boltz-2 / AF3 / ESMFold2 PAE-recomputed iPTM across
+    For every tool, the mean of each panel engine's PAE-recomputed iPTM (Boltz-2 / AF3 / ESMFold2 by default) across
     the tool's designs (top-``top_n`` by two-stage rank when given). Companion to the
     per-engine radar: shows, side by side, how strongly each engine scores each tool.
     """
-    engines = [
-        ("boltz_pae_iptm", "Boltz-2", "#4C72B0"),
-        ("af3_pae_iptm", "AF3", "#DD8452"),
-        ("esmfold2_pae_iptm", "ESMFold2", "#55A868"),
-    ]
+    slot_colours = ("#4C72B0", "#DD8452", "#55A868")  # one per slot: anchor, second, ESMFold2
+    engines = [(e.iptm_col, e.display, col) for e, col in zip((panel or resolve_panel()).engines, slot_colours)]
     engines = [(c, n, col) for c, n, col in engines if c in df.columns]
     fig, ax = plt.subplots(figsize=(9, 4.5))
     if "source_tool" not in df.columns or not engines:

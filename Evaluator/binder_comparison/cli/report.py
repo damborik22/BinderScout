@@ -34,7 +34,6 @@ from ..comparison.ensemble import compute_ensemble_metrics
 from ..comparison.epitope import epitope_match, extract_interface_residues, parse_hotspots
 from ..comparison.merger import merge_refold_results
 from ..comparison.scoring import (
-    _ENGINE_IPSAE_COLS,
     _STRUCTURE_PATH_COLUMNS,  # noqa: F401  (re-exported: the columns remap_structure_paths covers)
     MIN_ENGINES_DEFAULT,
     MIN_ENGINES_FLOOR,
@@ -55,6 +54,8 @@ from ..comparison.scoring import (
 from ..comparison.self_consistency import annotate_self_consistency
 from ..comparison.sequence_panel import annotate_composition, annotate_sequence_panel
 from ..comparison.statistics import compute_statistics
+from ..core.engines import SECOND_ENGINES, Panel, resolve_panel
+from ..core.engines import engine as _registered_engine
 from ..io.write import write_csv, write_json
 from ..visualization.report import generate_report
 from ..visualization.top30_slim import write_top30_slim
@@ -187,7 +188,7 @@ def _gate_notice_lines(body: str, width: int = 88) -> list[str]:
     return lines
 
 
-def _rank_and_report_the_gate(df: pd.DataFrame, min_engines: int) -> pd.DataFrame:
+def _rank_and_report_the_gate(df: pd.DataFrame, min_engines: int, panel: Panel | None = None) -> pd.DataFrame:
     """rank_designs(), with its gate notices pitched as notices.
 
     rank_designs is library code and warns, which is right -- the warning is a
@@ -211,7 +212,7 @@ def _rank_and_report_the_gate(df: pd.DataFrame, min_engines: int) -> pd.DataFram
     """
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        result = rank_designs(df, min_engines=min_engines)
+        result = rank_designs(df, min_engines=min_engines, **({} if panel is None else {"panel": panel}))
 
     for w in caught:
         text = str(w.message)
@@ -229,7 +230,7 @@ def _rank_and_report_the_gate(df: pd.DataFrame, min_engines: int) -> pd.DataFram
     return result
 
 
-def _refuse_when_every_pae_file_was_unreadable(df: pd.DataFrame) -> None:
+def _refuse_when_every_pae_file_was_unreadable(df: pd.DataFrame, panel: Panel | None = None) -> None:
     """Exit 1 when PAE files were LISTED but not one yielded an ipTM.
 
     That is a refold CSV separated from its PAE directory (copied alone, or relative
@@ -238,9 +239,10 @@ def _refuse_when_every_pae_file_was_unreadable(df: pd.DataFrame) -> None:
     says nothing. A pool with no PAE files at all (native metrics only) is not this and
     passes.
     """
+    panel = panel or resolve_panel()
     listed = [
         col
-        for col in ("boltz_pae_file", "af3_pae_file", "esmfold2_pae_file")
+        for col in (f"{e.prefix}_pae_file" for e in panel.engines)
         if col in df.columns and df[col].astype(str).str.strip().replace({"nan": "", "None": ""}).ne("").any()
     ]
     if not listed:
@@ -252,11 +254,77 @@ def _refuse_when_every_pae_file_was_unreadable(df: pd.DataFrame) -> None:
         f"[report] ERROR: PAE files are listed in {', '.join(listed)} but none could be read, so no design has "
         "an ipTM and there is nothing to rank. The refold CSV is probably separated from its PAE files "
         "(copied without its refold directory, or a relative path read from another working directory). "
-        "Point --boltz2-results / --af3-results / --esmfold2-results at the CSV that sits next to its "
+        f"Point --boltz2-results / {_second_results_flag(panel)} / --esmfold2-results at the CSV that sits next to its "
         "structures, or re-run the refold.",
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def _second_results_flag(panel: Panel) -> str:
+    """The flag that supplies the second slot's CSV: ``--af3-results`` for AF3 (as ever), else ``--second-results``."""
+    return "--af3-results" if panel.second.name == "af3" else "--second-results"
+
+
+def _resolve_second_slot(args: argparse.Namespace) -> tuple[Panel, str | None]:
+    """Which engine fills the second slot, and the CSV that holds its results.
+
+    ``--second-engine`` names the slot's engine (default AF3). ``--af3-results`` is the AF3
+    spelling of the slot's CSV and ``--second-results`` the generic one; each fills the slot
+    only for the engine it names. An AF3 CSV handed to a Protenix report is NOT folded in
+    (the panel has exactly one second engine): the report says so and goes on without it.
+    """
+    second = getattr(args, "second_engine", None) or "af3"
+    panel = resolve_panel(second)
+    af3_csv = getattr(args, "af3_results", None)
+    second_csv = getattr(args, "second_results", None)
+    if second == "af3":
+        if af3_csv and second_csv:
+            print(
+                "[report] ERROR: --af3-results and --second-results were both given, but they fill the same slot "
+                "(the panel has exactly one second engine). Pass the AF3 results as --af3-results or as "
+                "--second-results, not both.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        return panel, second_csv or af3_csv
+    if af3_csv:
+        print(
+            f"[report] NOTICE: --af3-results was given but --second-engine is {second}, so the second slot holds "
+            f"{second} and the AF3 results are ignored (a panel never averages in an engine outside its slot). "
+            f"Pass the {second} results as --second-results, or use --second-engine af3.",
+            file=sys.stderr,
+        )
+    if getattr(args, "threshold_af3", None) is not None:
+        print(
+            f"[report] NOTICE: --threshold-af3 was given but --second-engine is {second}; it is ignored.",
+            file=sys.stderr,
+        )
+    return panel, second_csv
+
+
+def _refuse_primary_engine_outside_the_panel(primary_engine: str, panel: Panel) -> None:
+    names = [e.name for e in panel.engines]
+    if primary_engine in names:
+        return
+    print(
+        f"[report] ERROR: --primary-engine {primary_engine} is not in this report's panel ({panel.label}; "
+        f"engines: {', '.join(names)}). The second slot holds {panel.second.name}"
+        + (
+            "; use --primary-engine af3 only with --second-engine af3."
+            if primary_engine == "af3"
+            else f"; choose one of {', '.join(names)}, or select --second-engine {primary_engine}."
+        ),
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+
+def _pdb_priority(engine_name: str) -> list[str]:
+    """Structure columns to try for *engine_name*'s refold, then Boltz-2's, then the bare ``pdb``."""
+    if engine_name in _ENGINE_PDB_PRIORITY:
+        return _ENGINE_PDB_PRIORITY[engine_name]
+    return [*_registered_engine(engine_name).pdb_cols, "boltz_pdb", "pdb"]
 
 
 # Per-engine structure column preference for the top-20 viewer copy. Module level so the
@@ -269,6 +337,12 @@ _ENGINE_PDB_PRIORITY: dict[str, list[str]] = {
 
 
 def run(args: argparse.Namespace) -> None:
+    # The panel: Boltz-2 + (AF3 | Protenix) + ESMFold2. Everything below -- the merge, the PAE-derived
+    # scores, the consensus, the thresholds, the plots and the HTML -- reads it, never a literal engine.
+    panel, second_results = _resolve_second_slot(args)
+    primary_engine = getattr(args, "primary_engine", "boltz") or "boltz"
+    _refuse_primary_engine_outside_the_panel(primary_engine, panel)
+
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -277,7 +351,8 @@ def run(args: argparse.Namespace) -> None:
     df = merge_refold_results(
         boltz2_csv=args.boltz2_results,
         sequences_fasta=args.sequences,
-        af3_csv=args.af3_results,
+        second_csv=second_results,
+        second_engine=panel.second.name,
         esmfold2_csv=args.esmfold2_results,
     )
 
@@ -303,11 +378,12 @@ def run(args: argparse.Namespace) -> None:
             engine: Path(csv).resolve().parent
             for engine, csv in (
                 ("boltz", args.boltz2_results),
-                ("af3", args.af3_results),
+                (panel.second.name, second_results),
                 ("esmfold2", args.esmfold2_results),
             )
             if csv
         },
+        panel=panel,
     )
 
     # Attach native metrics from BindCraft CSV if provided
@@ -334,7 +410,7 @@ def run(args: argparse.Namespace) -> None:
     # BindCraft's confidence filters on our refold columns (i_pAE <= 10.85 A,
     # binder pLDDT >= 0.8, interface i_pTM >= 0.5). SHADOW MODE like the two
     # above: annotates would_exclude_confidence and excludes nothing.
-    df = annotate_confidence_gate(df)
+    df = annotate_confidence_gate(df, panel=panel)
 
     # Self-consistency: did the refold put the binder where the design did?
     # The field's universal second axis, and target-aligned -- superposing on
@@ -344,7 +420,7 @@ def run(args: argparse.Namespace) -> None:
     if args.sequences:
         _design_root = Path(args.sequences).resolve().parent / "design_structures"
         _struct_base = Path(args.boltz2_results).resolve().parent if args.boltz2_results else _design_root
-        df = annotate_self_consistency(df, design_root=_design_root, base_dir=_struct_base)
+        df = annotate_self_consistency(df, design_root=_design_root, base_dir=_struct_base, panel=panel)
 
     # Design families, two independent axes. Both DIAGNOSTIC -- neither ranks, filters
     # nor gates, the same rule agreement_count follows after Part U.
@@ -369,7 +445,7 @@ def run(args: argparse.Namespace) -> None:
             from ..comparison.foldseek import build_tm_lookup
 
             _fs_base = Path(args.boltz2_results).resolve().parent if args.boltz2_results else Path.cwd()
-            _tm_lookup = build_tm_lookup(df, base_dir=_fs_base)
+            _tm_lookup = build_tm_lookup(df, base_dir=_fs_base, panel=panel)
         except Exception as exc:  # never let a diagnostic sink the report
             warnings.warn(f"[families] structural grouping unavailable: {exc}", stacklevel=2)
             _tm_lookup = None
@@ -474,19 +550,41 @@ def run(args: argparse.Namespace) -> None:
             pinned_binder_length=d0_ref,
         )
 
-    # AF3 (aarch64 / DGX Spark): identical treatment — Part K wires this up end-to-end.
-    af3_base = Path(args.af3_results).resolve().parent if args.af3_results else None
-    if "af3_pae_file" in df.columns:
-        print("[report] Computing AF3 ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
+    # The second slot (AF3, or another registered engine): identical treatment, with the PAE ordering
+    # the engine's refold SAVES -- AF3's is token order (target first); the shared second-engine
+    # driver's is [binder|target] (Engine.pae_order). AF3's literals stay spelled out because
+    # tests/binder_comparison/test_pae_ordering_and_ingest_guards.py pins them against a flipped flag.
+    second = panel.second
+    second_base = Path(second_results).resolve().parent if second_results else None
+    if second.name == "af3":
+        if "af3_pae_file" in df.columns:
+            print("[report] Computing AF3 ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
+            df = add_ipsae_from_pae_files(
+                df, pae_file_col="af3_pae_file", prefix="af3", ordering="target_binder", base_dir=second_base
+            )
+            df = add_iptm_from_pae_files(
+                df,
+                pae_file_col="af3_pae_file",
+                ordering="target_binder",
+                prefix="af3",
+                base_dir=second_base,
+                pinned_binder_length=d0_ref,
+            )
+    elif f"{second.prefix}_pae_file" in df.columns:
+        print(f"[report] Computing {second.display} ipSAE from PAE files (DunbrackLab, cutoff=10 Å)…")
         df = add_ipsae_from_pae_files(
-            df, pae_file_col="af3_pae_file", prefix="af3", ordering="target_binder", base_dir=af3_base
+            df,
+            pae_file_col=f"{second.prefix}_pae_file",
+            prefix=second.prefix,
+            ordering=second.pae_order,
+            base_dir=second_base,
         )
         df = add_iptm_from_pae_files(
             df,
-            pae_file_col="af3_pae_file",
-            ordering="target_binder",
-            prefix="af3",
-            base_dir=af3_base,
+            pae_file_col=f"{second.prefix}_pae_file",
+            ordering=second.pae_order,
+            prefix=second.prefix,
+            base_dir=second_base,
             pinned_binder_length=d0_ref,
         )
 
@@ -510,9 +608,7 @@ def run(args: argparse.Namespace) -> None:
             pinned_binder_length=d0_ref,
         )
 
-    _pinned_cols = [
-        c for c in ("boltz_pae_iptm_pinned", "af3_pae_iptm_pinned", "esmfold2_pae_iptm_pinned") if c in df.columns
-    ]
+    _pinned_cols = [c for c in (f"{col}_pinned" for col in panel.iptm_cols) if c in df.columns]
     if _pinned_cols:
         df["consensus_iptm_mean_pinned"] = df[_pinned_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
 
@@ -524,9 +620,8 @@ def run(args: argparse.Namespace) -> None:
     # Promote the chosen engine's DunbrackLab PAE-based ipsae_min as the primary ranking column.
     # Column naming differs across engines: boltz uses boltz_pae_ipsae_min, others use
     # <engine>_ipsae_min (no _pae_ prefix) — see scoring._ENGINE_IPSAE_COLS for the canonical map.
-    from ..comparison.scoring import _ENGINE_IPSAE_COLS as _EICOLS
+    _EICOLS = {e.name: e.ipsae_col for e in panel.engines}
 
-    primary_engine = getattr(args, "primary_engine", "boltz") or "boltz"
     primary_col = _EICOLS.get(primary_engine, f"{primary_engine}_ipsae_min")
     if primary_col in df.columns and pd.to_numeric(df[primary_col], errors="coerce").notna().any():
         df["ipsae_min"] = df[primary_col]
@@ -547,28 +642,24 @@ def run(args: argparse.Namespace) -> None:
     # Step 3b: Adaptyv scoring pipeline (Overath et al. 2025 methodology)
     # Per-engine thresholds — falls back to defaults (0.61 across the active engines).
     engine_thresholds: dict[str, float] = {}
-    for engine, attr in (
-        ("boltz", "threshold_boltz"),
-        ("af3", "threshold_af3"),
-        ("esmfold2", "threshold_esmfold2"),
-    ):
-        val = getattr(args, attr, None)
+    for e in panel.engines:
+        val = getattr(args, f"threshold_{e.name}", None)
         if val is not None:
-            engine_thresholds[engine] = val
+            engine_thresholds[e.name] = val
     if engine_thresholds:
         print(f"[report] Per-engine thresholds overridden: {engine_thresholds}")
     print(f"[report] Applying screening thresholds (primary engine: {primary_engine})…")
-    df = apply_screening_thresholds(df, primary_engine=primary_engine, engine_thresholds=engine_thresholds)
+    df = apply_screening_thresholds(df, primary_engine=primary_engine, engine_thresholds=engine_thresholds, panel=panel)
     df = compute_composite_scores(df)
-    df = compute_agreement(df, engine_thresholds=engine_thresholds)
+    df = compute_agreement(df, engine_thresholds=engine_thresholds, panel=panel)
 
     # consensus_iptm (max) and consensus_iptm_mean are both computed; the ranking
     # uses the mean. See rank_designs() for why nothing else is offered (Part U).
-    df = compute_consensus_iptm(df)
-    df = compute_consensus_ipsae(df)
+    df = compute_consensus_iptm(df, panel=panel)
+    df = compute_consensus_ipsae(df, panel=panel)
     min_engines = getattr(args, "min_engines", None) or MIN_ENGINES_DEFAULT
-    df = _rank_and_report_the_gate(df, min_engines)
-    _refuse_when_every_pae_file_was_unreadable(df)
+    df = _rank_and_report_the_gate(df, min_engines, panel)
+    _refuse_when_every_pae_file_was_unreadable(df, panel)
     # The actionable form. Picking N designs for synthesis, two slots on one fold is
     # a wasted slot -- so name the swap rather than leaving the reader to find it.
     # A SUGGESTION: nothing here re-ranks or rewrites the selection, because fold
@@ -637,7 +728,7 @@ def run(args: argparse.Namespace) -> None:
     # scores overlap with the campaign's intended epitope, and adds binding_mode. This
     # is what surfaces selectivity for multi-pocket targets (e.g. ApoE4) by default.
     if not getattr(args, "epitope_results", None) and getattr(args, "epitope_residues", None):
-        struct_col, binder_chain = _primary_structure_col(df_display, primary_engine)
+        struct_col, binder_chain = _primary_structure_col(df_display, primary_engine, panel)
         if struct_col is None:
             print("[report] WARNING: no refolded structure columns found; skipping inline epitope.")
         else:
@@ -676,6 +767,11 @@ def run(args: argparse.Namespace) -> None:
             for col in ("family_id", "family_size", "family_rank"):
                 df[col] = df["binder_id"].map(fam[col])
 
+    # The panel that produced these scores, on every row of the one full table: scores from
+    # different panels are not on one scale, so a metrics.csv must say which it came from.
+    df["panel"] = panel.slug
+    df["second_engine"] = panel.second.name
+
     # Step 4: Write outputs — metrics.csv = every row; everything else = distinct designs
     write_csv(df, output_dir / "metrics.csv")
 
@@ -702,9 +798,7 @@ def run(args: argparse.Namespace) -> None:
         # canonical map so these can never drift out of sync again — the hardcoded
         # "af3_pae_ipsae_min" / "protenix_pae_ipsae_min" names were never written by anything,
         # so AF3's ipSAE silently vanished from the wet-lab shortlist.
-        _ENGINE_IPSAE_COLS["boltz"],
-        _ENGINE_IPSAE_COLS["af3"],
-        _ENGINE_IPSAE_COLS["esmfold2"],
+        *panel.ipsae_cols,
         "esmfold2_ipsae_min",
         "consensus_ipsae_min_mean",
         "esmfold2_chain_iptm_interface",
@@ -719,7 +813,7 @@ def run(args: argparse.Namespace) -> None:
         "pae_tb_mean",
         "agreement_count",
         "passes_boltz_filter",
-        "passes_af3_filter",
+        f"passes_{panel.second.name}_filter",
         "passes_esmfold2_filter",
         "native_bg_design_ipsae_min",
         "rank",
@@ -731,7 +825,9 @@ def run(args: argparse.Namespace) -> None:
 
     # Slim decision-metrics table (companion to report.html): the agreed columns
     # + TmProt Tm + a plain-text Notes column (wet-lab advisory, no icon flags).
-    write_top30_slim(df_display, output_dir, top_per_tool=getattr(args, "top_per_tool", None) or 10, pool_size=len(df))
+    write_top30_slim(
+        df_display, output_dir, top_per_tool=getattr(args, "top_per_tool", None) or 10, pool_size=len(df), panel=panel
+    )
     print("  top30_slim.html     — decision-metrics tables: overall + per-tool, all-metric roll-ups (+ .csv)")
 
     # Parse --tool-csv flags into dict (also consumed by the HTML report below).
@@ -754,7 +850,7 @@ def run(args: argparse.Namespace) -> None:
     # Prefer the *primary engine's* PDB so the viewer shows the structure
     # that was actually used for ranking. Fall back through the engine
     # priority order when a particular engine's file is missing.
-    pdb_cols = [c for c in _ENGINE_PDB_PRIORITY.get(primary_engine, ["boltz_pdb", "pdb"]) if c in df.columns]
+    pdb_cols = [c for c in _pdb_priority(primary_engine) if c in df.columns]
     print(f"[report] Top-20 3D viewer source = {primary_engine} (column preference: {pdb_cols})")
     structures_dir = output_dir / "top20_structures"
     structures_dir.mkdir(parents=True, exist_ok=True)
@@ -817,6 +913,7 @@ def run(args: argparse.Namespace) -> None:
         provenance=provenance,
         lightweight=bool(getattr(args, "lightweight", False)),
         binding_map=getattr(args, "binding_map", None),
+        panel=panel,
     )
 
     print(f"\n[report] Done. Output → {output_dir}/")
@@ -1182,13 +1279,25 @@ _ENGINE_STRUCT_COLS: dict[str, tuple[list[str], str]] = {
 }
 
 
-def _primary_structure_col(df: pd.DataFrame, primary_engine: str) -> tuple[str | None, str]:
-    """Pick the structure-path column + binder chain for the primary engine (fallback: any engine)."""
-    cands, chain = _ENGINE_STRUCT_COLS.get(primary_engine, (["boltz_pdb"], "A"))
+def _struct_cols(engine_name: str) -> tuple[list[str], str]:
+    """(structure columns, binder chain) of one registered engine; the default engines' table wins."""
+    if engine_name in _ENGINE_STRUCT_COLS:
+        return _ENGINE_STRUCT_COLS[engine_name]
+    e = _registered_engine(engine_name)
+    return list(e.pdb_cols), e.binder_chain
+
+
+def _primary_structure_col(df: pd.DataFrame, primary_engine: str, panel: Panel | None = None) -> tuple[str | None, str]:
+    """Pick the structure-path column + binder chain for the primary engine (fallback: any engine of the panel)."""
+    try:
+        cands, chain = _struct_cols(primary_engine)
+    except ValueError:  # not a registered engine
+        cands, chain = ["boltz_pdb"], "A"
     for c in cands:
         if c in df.columns and df[c].notna().any():
             return c, chain
-    for _eng, (cc, ch) in _ENGINE_STRUCT_COLS.items():
+    for eng in (e.name for e in (panel or resolve_panel()).engines):
+        cc, ch = _struct_cols(eng)
         for c in cc:
             if c in df.columns and df[c].notna().any():
                 return c, ch
@@ -1429,7 +1538,22 @@ def add_parser(subparsers) -> None:
     p.add_argument(
         "--af3-results",
         metavar="CSV",
-        help="Optional: output from 'refold-af3' (af3_results.csv). Adds a third engine to the agreement_count.",
+        help="Optional: output from 'refold-af3' (af3_results.csv). Fills the AF3 slot (--second-engine af3, the "
+        "default); ignored, with a notice, when --second-engine names another engine. Adds a third engine to the "
+        "agreement_count.",
+    )
+    p.add_argument(
+        "--second-engine",
+        choices=list(SECOND_ENGINES),
+        default="af3",
+        help="Which engine fills the panel's second slot (default: af3). The panel is Boltz-2 + this engine + "
+        "ESMFold2; a design is never scored by an engine outside it.",
+    )
+    p.add_argument(
+        "--second-results",
+        metavar="CSV",
+        help="Optional: refold results of the --second-engine (e.g. protenix_results.csv). With the default engine "
+        "(af3) this is the same slot as --af3-results; giving both is an error.",
     )
     p.add_argument(
         "--soluprot-results",
@@ -1543,10 +1667,12 @@ def add_parser(subparsers) -> None:
     p.add_argument("--output", "-o", required=True, metavar="DIR", help="Output directory for all report files")
     p.add_argument(
         "--primary-engine",
-        choices=["boltz", "af3", "esmfold2"],
+        choices=["boltz", *SECOND_ENGINES, "esmfold2"],
         default="boltz",
         help="Which engine's DunbrackLab PAE-based ipsae_min to use as the primary ranking metric "
-        "(default: boltz). Falls back to boltz if the chosen engine's PAE files are missing.",
+        "(default: boltz). Must be one of the panel's engines: boltz, esmfold2 or the --second-engine "
+        "(the literal af3 stays valid while AF3 is the slot). Falls back to boltz if the chosen engine's "
+        "PAE files are missing.",
     )
     # NOTE (Part U): --rank-by and --screen-metric were REMOVED, not deprecated.
     # There is one ranking — cross-engine gate then consensus_iptm_mean — because
@@ -1567,7 +1693,7 @@ def add_parser(subparsers) -> None:
         default=MIN_ENGINES_DEFAULT,
         metavar="N",
         help=f"Minimum independent refold engines a design needs to clear the cross-engine gate "
-        f"(default: {MIN_ENGINES_DEFAULT} — all of Boltz-2/AF3/ESMFold2; floor: {MIN_ENGINES_FLOOR}). "
+        f"(default: {MIN_ENGINES_DEFAULT} — all three engines of the panel; floor: {MIN_ENGINES_FLOOR}). "
         f"consensus_iptm_mean skips missing engines, so a single-engine design would otherwise compete "
         f"against 3-engine means on an incomparable scale — and for Mosaic/Protein-Hunter that single "
         f"engine is the one that designed it. Lower to {MIN_ENGINES_FLOOR} when only two engines are "
@@ -1590,6 +1716,12 @@ def add_parser(subparsers) -> None:
         type=float,
         default=None,
         help="AF3 ipsae_min pass threshold (default 0.61, DunbrackLab-calibrated)",
+    )
+    p.add_argument(
+        "--threshold-protenix",
+        type=float,
+        default=None,
+        help="Protenix ipsae_min pass threshold when --second-engine protenix (default 0.61, shared cutoff)",
     )
     p.add_argument(
         "--threshold-esmfold2",

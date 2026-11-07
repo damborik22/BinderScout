@@ -31,6 +31,10 @@ class Engine:
     pdb_cols: tuple[str, ...]
     binder_chain: str
     default_threshold: float
+    #: Row/column order of the PAE matrix this engine's refold saves (``<prefix>_pae_file``):
+    #: ``"binder_target"`` ([binder|target], Boltz-2 and every second-engine adapter, which
+    #: re-block before saving) or ``"target_binder"`` (token order, target first: AF3, ESMFold2).
+    pae_order: str = "target_binder"
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,7 @@ _ENGINES: dict[str, Engine] = {
         pdb_cols=("boltz_pdb", "boltz_cif"),
         binder_chain="A",  # Boltz-2 writes the binder first
         default_threshold=_IPSAE_PASS_THRESHOLD,
+        pae_order="binder_target",
     ),
     "af3": Engine(
         name="af3",
@@ -98,6 +103,9 @@ _ENGINES: dict[str, Engine] = {
         pdb_cols=("protenix_pdb", "protenix_cif"),
         binder_chain="B",  # the adapter writes target = chain A, binder = chain B
         default_threshold=_IPSAE_PASS_THRESHOLD,
+        # The shared second-engine driver re-blocks to [binder|target] before np.save
+        # (second_engine_driver._score_prediction), whatever the engine's native order was.
+        pae_order="binder_target",
     ),
     "esmfold2": Engine(
         name="esmfold2",
