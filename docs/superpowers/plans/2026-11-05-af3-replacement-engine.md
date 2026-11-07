@@ -128,6 +128,86 @@ Stop and show the owner the Task 10 table. Part 2 starts only for engines that p
 
 ---
 
-## Part 2 (gated; broken into tasks after the gate)
+## Part 2: the switch (owner approved 2026-11-07; registers Protenix only)
 
-Specified in the spec's "Part 2: the switch". Outline only: engine registry replacing `_ENGINE_IPTM_COLS` and the hard-coded engine handling in `schema.py`, `merger.py`, `report.py`, `evaluate.sh` (`--second-engine`, default `af3`, exclusive); panel recorded in `metrics.csv` and the report; installer option that prints the licence text and source before download, records it in the install state, and needs no AF3 weights; tests pinning each engine's ordering and the AF3-unchanged path (`tests/integration/test_ranking_is_pinned.py` must still pass); CHANGELOG and CLAUDE.md updates.
+Owner decisions that bind this part: success = similar `consensus_iptm_mean` AUC; **no increase in GPU demand** (ceiling = a 24 GB card, as AF3 and ESMFold2 already need), so RF3 (33.5-36.8 GiB without proprietary ops) is out and Chai-1 failed target PD-L1; **Protenix v1.x is the only engine registered** (measured 21.3 GiB peak on a 779-token complex on a 24 GB card). The registry is still engine-agnostic: adding another engine later is one registry row plus an adapter, no edits to scoring.
+
+Part 2 rulings (the owner may overturn any):
+- R1. One registry, `Evaluator/binder_comparison/core/engines.py`. Three slots: `boltz` (primary anchor), `second` (`af3` default, or `protenix`), `esmfold2`. A panel is exactly these three; a four-engine panel cannot be expressed.
+- R2. Column prefix = the real engine name (`protenix_pae_iptm`, `protenix_ipsae_min`, `protenix_pdb`...). AF3 names are untouched.
+- R3. Slot selection: explicit `--second-engine {af3,protenix}` wins. With no flag, `evaluate.sh` uses AF3 if its env and weights are present; otherwise, if exactly one other registered engine is installed, it uses that one and prints a notice naming the panel. Columns of the engine NOT in the slot are ignored with a notice, never averaged.
+- R4. The panel is recorded: `metrics.csv` gets constant columns `panel` (e.g. `boltz+protenix+esmfold2`) and `second_engine`; the HTML report prints "Boltz-2 + Protenix + ESMFold2; AF3 not used" and that scores from different panels are not on one scale.
+- R5. Protenix always runs with the torch kernels and torch layernorm (no proprietary NVIDIA ops at runtime); the installer still pulls the cuEquivariance wheels as a hard dependency of `protenix`, and says so in the licence text it prints.
+- R6. Installer: `--second-engine protenix` (both installers). Opt-in, NOT in `--tool all`, off by default. Prints the licence text and its source before any download, asks y/N unless `--yes`, records text + date in `.install_state/`, downloads the weights only after acceptance, needs no AF3 weights. Declining downloads nothing, writes no marker, exits non-zero.
+
+### Task 13: Engine registry
+
+**Files:** Create `Evaluator/binder_comparison/core/engines.py`; Test `tests/binder_comparison/test_engine_registry.py`.
+
+**Interfaces:**
+- Produces: frozen dataclass `Engine(name, display, prefix, refold_dir, results_csv, iptm_col, ipsae_col, pdb_cols, binder_chain, default_threshold)` and `Panel(boltz, second, esmfold2)` with `.engines`, `.iptm_cols`, `.ipsae_cols`, `.label` (`"Boltz-2 + Protenix + ESMFold2"`), `.slug` (`"boltz+protenix+esmfold2"`). `SECOND_ENGINES = ("af3", "protenix")`. `resolve_panel(second: str = "af3") -> Panel` raises `ValueError` naming the valid values for anything else (including `"boltz"`, `"esmfold2"`, `""`). `engine(name) -> Engine`.
+- The `af3` row reproduces today's literals exactly: iptm `af3_pae_iptm`, ipsae `af3_ipsae_min`, pdb cols `("af3_pdb","af3_cif")`, dir `refold_af3`, csv `af3_results.csv`, chain B, threshold 0.61. `boltz` ipsae col is `boltz_pae_ipsae_min` (not the af3-style name).
+- [ ] Tests: `resolve_panel()` default equals the current `_ENGINE_IPTM_COLS` list order; `resolve_panel("protenix").iptm_cols == ["boltz_pae_iptm","protenix_pae_iptm","esmfold2_pae_iptm"]`; unknown name error text; no panel has 4 engines or a duplicate prefix.
+- [ ] Commit: `Part 2: engine registry`.
+
+### Task 14: Scoring reads the panel
+
+**Files:** Modify `Evaluator/binder_comparison/comparison/scoring.py` (sites: `_ENGINE_OUTPUT_DIRS` ~204, path remap ~351, `DEFAULT_ENGINE_THRESHOLDS`/`_ENGINE_IPSAE_COLS` ~657-671, `apply_screening_thresholds` ~676, agreement_count ~959, `_ENGINE_IPTM_COLS` ~1006, `compute_consensus_iptm` ~1039, `compute_consensus_ipsae` ~1093, `rank_designs` ~1124), `comparison/confidence_gate.py:60`, `comparison/self_consistency.py:152`, `comparison/foldseek.py:91`; Test `tests/binder_comparison/test_scoring_panel.py`.
+
+**Interfaces:** Consumes Task 13. Produces: `compute_consensus_iptm(df, panel=None)`, `rank_designs(df, min_engines=MIN_ENGINES_DEFAULT, panel=None)`, `apply_screening_thresholds(..., panel=None)`; `panel=None` means `resolve_panel("af3")` and MUST reproduce today's behaviour byte for byte. The module-level `_ENGINE_IPTM_COLS` name stays (tests monkeypatch it) and is derived from the default panel.
+- [ ] Tests: (1) the same synthetic pool with its `af3_*` columns renamed `protenix_*` and `panel=resolve_panel("protenix")` gives identical `rank`, `consensus_iptm_mean`, `consensus_iptm_n`, `passes_engine_gate`; (2) a frame holding BOTH `af3_pae_iptm` and `protenix_pae_iptm` with the protenix panel averages only boltz/protenix/esmfold2 (`consensus_iptm_n` never exceeds 3); (3) default-panel call unchanged; (4) `agreement_count` and the ipsae thresholds follow the panel.
+- [ ] `tests/integration/test_ranking_is_pinned.py` passes UNMODIFIED. Commit: `Part 2: scoring reads the engine panel`.
+
+### Task 15: Merger and schema
+
+**Files:** Modify `Evaluator/binder_comparison/comparison/merger.py` (`merge_refold_results`, `_load_engine`), `core/schema.py` (af3 field block ~194-205, ~307-309, ~359-367); Test `tests/binder_comparison/test_merger_second_engine.py`.
+
+**Interfaces:** `merge_refold_results(boltz2_csv, sequences_fasta=None, *, af3_csv=None, esmfold2_csv=None, second_csv=None, second_engine="af3")`. `second_csv` with `second_engine="protenix"` prefixes columns `protenix_`; `af3_csv` keeps working and is the same slot as `second_csv` when `second_engine="af3"`. Passing BOTH `af3_csv` and `second_csv` with different engines refuses (one slot). Schema: engine-prefixed columns for registered second engines are generated from the registry, AF3's remain exactly as they are.
+- [ ] Tests: protenix merge yields `protenix_iptm` etc. and no `af3_*`; the target-mismatch guard and the one-row-per-design guarantee still hold for the protenix slot; `af3_csv`-only call unchanged; both slots filled refuses naming both.
+- [ ] Commit: `Part 2: merger and schema take the second-engine slot`.
+
+### Task 16: `binder-compare report` and the record of the panel
+
+**Files:** Modify `Evaluator/binder_comparison/cli/report.py` (sites ~243-306, 477-489, 514, 529-601, 703-722, 1177-1191, 1430-1432, 1545-1592), `visualization/report.py` (~55-61, 209, 288), `visualization/plots.py` (~106-108, 294-319, 427, 618, 1025), `cli/hits.py:38`; Test `tests/binder_comparison/test_report_second_engine.py`.
+
+**Interfaces:** new `--second-engine {af3,protenix}` (default `af3`) and `--second-results CSV`; `--af3-results`, `--threshold-af3` keep working and apply to the AF3 slot; `--primary-engine` choices come from the registry (`boltz`, the second engine's name, `esmfold2`; the literal `af3` stays valid while AF3 is the slot). If `--af3-results` is given while `--second-engine protenix` (or the reverse) the report prints a notice and ignores the other-slot CSV (R3). `metrics.csv` gains constant `panel` and `second_engine` columns; the HTML shows the panel line and the not-on-one-scale sentence (R4); plot labels and legends use `Panel.label`/display names. AF3 reports must differ from today's only by the two new columns and the panel line.
+- [ ] Tests: end-to-end on the synthetic pool with protenix results: `metrics.csv` carries `protenix_pae_iptm`, `panel == "boltz+protenix+esmfold2"`, no `af3_*` ranking input, HTML contains "AF3 not used"; the AF3 path's `rank` order equals the pre-change order; wrong-slot CSV notice.
+- [ ] Commit: `Part 2: report records the panel and the second engine`.
+
+### Task 17: Protenix refold wired into `binder-compare`
+
+**Files:** Create `Evaluator/binder_comparison/cli/refold_protenix.py` (thin: runs `Evaluator/scripts/refold_protenix_v1.py` in the Protenix env with `--trimul-kernel torch --triatt-kernel torch --layernorm-type torch`, `--output-dir refold_protenix`, writes `protenix_results.csv`, same exit codes as `refold-af3`: 3 on partial failure), register in `main.py`/`cli/__init__.py`; Test `tests/binder_comparison/test_refold_protenix_cli.py`.
+
+**Interfaces:** `binder-compare refold-protenix --sequences F --target-seq S -o CSV --output-dir D [--model-dir D] [--env NAME] [--resume]`; default env `binder-eval-protenix`; `$PROTENIX_MODEL_DIR` default for `--model-dir`. The CSV header equals the shared refold header; structure stems are `<binder_id>_protenix`.
+- [ ] Tests: argument forwarding (kernel flags always present), exit 3 on partial failure, refuses an unlicensed model name, `--resume` passthrough (mock the subprocess).
+- [ ] Commit: `Part 2: refold-protenix subcommand`.
+
+### Task 18: `evaluate.sh`
+
+**Files:** Modify `Evaluator/evaluate.sh` (sites listed by `git grep -n -i af3 Evaluator/evaluate.sh`: flags ~20-54, defaults ~246-268, arg parsing ~287-329, env/weights detection ~398-447, CSV/engine count ~566-588, `engine_af3` ~795, engine lookup ~875, launch ~943-990, report call ~1015-1072, binder chain ~1085); Test `tests/evaluator/test_evaluate_sh_second_engine.py` (dry-run style like `tests/evaluator/test_evaluate_sh_flags.py`).
+
+**Interfaces:** `--second-engine {af3,protenix}`, `--protenix-env NAME`, `--gpu-cap-protenix GiB`, `--skip-second` (and `--skip-af3` keeps meaning "skip the AF3 slot"). Selection per R3. A generic `engine_second()` dispatches to `refold-af3` or `refold-protenix`; the report gets `--second-engine` and `--second-results`. Skipped/absent second engine keeps today's wording (gate unmet, `--min-engines 2` hint) and names the engine.
+- [ ] Tests: slot selection matrix (flag wins; no flag + AF3 ready -> AF3; no flag + only Protenix ready -> Protenix with notice; neither -> skipped by name), `--skip-af3` unchanged, existing `tests/test_shell_evaluate_*` stay green, shellcheck clean.
+- [ ] Commit: `Part 2: evaluate.sh drives the chosen second engine`.
+
+### Task 19: Installers
+
+**Files:** Modify `install/install.sh` and `install/install_aarch.sh` identically in shape (registry row `DO_PROTENIX|Protenix|install_protenix|false` so it is not in `all`; `--second-engine NAME` maps `protenix` to that row and rejects `af3` with "use --tool af3"); new function `install_protenix()` in each; Test `tests/test_installer_protenix.py` (plus keep `tests/test_installers_do_not_drift.py`, `tests/test_installer_tool_registry.py`, `tests/test_referenced_conda_envs_exist.py` green; add `binder-eval-protenix` wherever the last one needs).
+
+**Interfaces:** `install_protenix` creates env `binder-eval-protenix` (Python 3.12; torch 2.7.1 from the `cu128` index; `protenix==1.1.0`; `pip install -e 'Evaluator[report]'`); refuses up front, naming the fix, when no C compiler is found (a dependency, `scikit-learn-extra`, builds from source); prints the licence text and its source from `Evaluator/docs/second_engine_licences.md` (Apache-2.0 code and v1.x parameters, v2 weights proprietary and never used, the weight host, the cuEquivariance wheels installed but unused), prompts y/N unless `--yes`, writes `.install_state/protenix` with the text and the date only after the weights (checkpoint 1,475,950,125 bytes) are on disk, and does not need AF3 weights. Smoke: import `protenix`, `torch.cuda.is_available()` NOT asserted (login nodes), `binder-compare refold-protenix --help` works in the env.
+- [ ] Tests: declining downloads nothing and writes no marker (mock the prompt); `--yes` prints the licence block before the first download line; registry row not in `--tool all`; the licence text printed equals the record's text (read from the doc, not retyped); `--tool all` output unchanged.
+- [ ] Commit: `Part 2: opt-in Protenix installer option`.
+
+### Task 20: Configurator, headless replay, skills
+
+**Files:** Modify `configurator/configurator.py` (~373, 5295-5335, 6405-6480, 6529-6580, 7059), `tools/make_config_builder.py`/`docs/config-builder.html` if the config builder lists engines, `.claude/skills/binderscout-*` and `.claude/agents/invariant-auditor.md` (I5 -> "Exactly three refold engines: Boltz-2, ESMFold2 and one second engine, AF3 by default"); Test `tests/configurator/test_configurator_second_engine.py`.
+
+**Interfaces:** config key `second_engine` (default `"af3"`); the wizard offers Protenix only when `binder-eval-protenix` exists; `run_evaluate.sh` carries `--second-engine`; headless replay of an old config without the key behaves as before.
+- [ ] Tests: generated `run_evaluate.sh` for `second_engine: protenix` has `--second-engine protenix` and no `--skip-af3`-driven surprise; old configs unchanged; `tests/configurator/test_headless_configs_are_reconciled.py` green.
+- [ ] Commit: `Part 2: configurator chooses the second engine`.
+
+### Task 21: End to end, pins and docs
+
+**Files:** Test `tests/integration/test_second_engine_panel_pinned.py` (golden synthetic pool re-slotted to protenix gives the same `rank` order and the right `panel`); modify `CHANGELOG.md` (Unreleased: the option, the registry, the benchmark result with its caveats), `CLAUDE.md` (engine line-up, "exactly three engines" statements, the Protenix env row, the 24 GB measurement), `Evaluator/docs/pipeline_reference.md`, `Evaluator/docs/evaluation/ranking.md` (panels are not on one scale). Run one live check on a 24 GB card: `evaluate.sh --second-engine protenix` on a 2-design pool, `metrics.csv` has `protenix_pae_iptm` for both designs and `panel`.
+- [ ] Gate: the full suite incl. `tests/integration`, ruff, shellcheck, anonymity tests.
+- [ ] Commit: `Part 2: docs, pins and live check`.
