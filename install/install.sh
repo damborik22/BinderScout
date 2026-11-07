@@ -3699,21 +3699,35 @@ EOF
 # AF3 weights, and AF3 stays the default second engine.
 
 # _protenix_require_cc
-# `pip install protenix==1.1.0` builds scikit-learn-extra from source and dies, an hour into a
-# conda solve, with "No such file or directory: 'cc'" on a host with no C compiler. A `cc` or
-# `gcc` on PATH, or a $CC that resolves, is enough: setuptools honours CC.
+# `pip install protenix==1.1.0` builds scikit-learn-extra from source, which contains C and C++
+# extensions: it dies, an hour into a conda solve, with "No such file or directory: 'cc'" without a
+# C compiler and "... 'g++'" without a C++ one (a gcc-only box). So both are required here, before
+# anything is shown or created. A compiler on PATH under any of the names check_build_toolchain
+# accepts, or a $CC / $CXX that resolves, is enough; setuptools honours CC and CXX, and the build
+# steps inherit them because they are ordinary environment variables of this process.
 _protenix_require_cc() {
-    local bin
-    # The same names check_build_toolchain accepts (a conda-forge compiler has the long name).
+    local bin have_cc=false have_cxx=false
     for bin in cc gcc "${ARCH}-linux-gnu-gcc" "${ARCH}-conda-linux-gnu-gcc"; do
-        command -v "${bin}" >/dev/null 2>&1 && return 0
+        command -v "${bin}" >/dev/null 2>&1 && { have_cc=true; break; }
     done
-    if [[ -n "${CC:-}" ]] && command -v "${CC%% *}" >/dev/null 2>&1; then return 0; fi
-    print_fail "No C compiler found (no cc, gcc, ${ARCH}-linux-gnu-gcc or ${ARCH}-conda-linux-gnu-gcc on PATH, and \$CC is unset or does not exist)."
-    print_fail "  protenix==${PROTENIX_VERSION} builds scikit-learn-extra from source and fails with"
-    print_fail "  \"No such file or directory: 'cc'\" without one. Nothing was created or downloaded."
-    print_warn "  Fix: install a system C compiler (sudo apt-get install -y gcc), or set CC to one"
-    print_warn "       (export CC=/path/to/gcc) and re-run."
+    if [[ "${have_cc}" == false && -n "${CC:-}" ]] && command -v "${CC%% *}" >/dev/null 2>&1; then have_cc=true; fi
+    for bin in c++ g++ "${ARCH}-linux-gnu-g++" "${ARCH}-conda-linux-gnu-g++"; do
+        command -v "${bin}" >/dev/null 2>&1 && { have_cxx=true; break; }
+    done
+    if [[ "${have_cxx}" == false && -n "${CXX:-}" ]] && command -v "${CXX%% *}" >/dev/null 2>&1; then have_cxx=true; fi
+    [[ "${have_cc}" == true && "${have_cxx}" == true ]] && return 0
+    if [[ "${have_cc}" == false ]]; then
+        print_fail "No C compiler found (no cc, gcc, ${ARCH}-linux-gnu-gcc or ${ARCH}-conda-linux-gnu-gcc on PATH, and \$CC is unset or does not exist)."
+        print_warn "  Fix: install a system C compiler (sudo apt-get install -y gcc), or set CC to one"
+        print_warn "       (export CC=/path/to/gcc) and re-run."
+    fi
+    if [[ "${have_cxx}" == false ]]; then
+        print_fail "No C++ compiler found (no c++, g++, ${ARCH}-linux-gnu-g++ or ${ARCH}-conda-linux-gnu-g++ on PATH, and \$CXX is unset or does not exist)."
+        print_warn "  Fix: install g++ (sudo apt-get install -y g++), or set CXX to one"
+        print_warn "       (export CXX=/path/to/g++) and re-run."
+    fi
+    print_fail "  protenix==${PROTENIX_VERSION} builds scikit-learn-extra from source, which needs both"
+    print_fail "  (\"No such file or directory: 'cc'\" / 'g++'). Nothing was created or downloaded."
     return 1
 }
 

@@ -85,6 +85,7 @@ def _sandbox(
     *,
     doc_text: str | None = None,
     cc: bool = True,
+    cxx: bool | None = None,
     arch: str = "auto",
 ):
     """A copy of one installer in an otherwise empty checkout, with the licence doc beside it."""
@@ -116,8 +117,12 @@ def _sandbox(
     home = tmp_path / "home"
     home.mkdir()
     env = {"HOME": str(home), "PATH": f"{bin_dir}:{no_cc_path}", "LC_ALL": "C"}
+    # compilers that exist; the install itself is faked. The gate wants a C AND a C++ compiler, so a
+    # fixture that expects to get past it provides both (cxx follows cc unless a test says otherwise).
     if cc:
-        env["CC"] = "/bin/true"  # a compiler that exists; the install itself is faked
+        env["CC"] = "/bin/true"
+    if cc if cxx is None else cxx:
+        env["CXX"] = "/bin/true"
     return repo, script, env, calls
 
 
@@ -369,7 +374,7 @@ def test_no_c_compiler_refuses_up_front_naming_the_fix(platform, tmp_path, no_cc
 
 @pytest.mark.parametrize("platform", sorted(INSTALLERS))
 def test_cc_pointing_at_nothing_is_not_a_compiler(platform, tmp_path, no_cc_path):
-    repo, script, env, calls = _sandbox(tmp_path, platform, no_cc_path, cc=False)
+    repo, script, env, calls = _sandbox(tmp_path, platform, no_cc_path, cc=False, cxx=True)
     env["CC"] = "/nonexistent/compiler"
     rc, out = _run(script, "--tool protenix --yes --skip-preflight", env, repo)
     assert rc != 0, out
@@ -390,13 +395,69 @@ def test_a_conda_forge_style_compiler_name_is_accepted(platform, tmp_path, no_cc
     arch = "aarch64" if platform == "aarch64" else os.uname().machine
     cdir = tmp_path / "condacc"
     cdir.mkdir()
-    (cdir / f"{arch}-conda-linux-gnu-gcc").write_text("#!/bin/sh\nexit 0\n")
-    (cdir / f"{arch}-conda-linux-gnu-gcc").chmod(0o755)
+    for name in ("gcc", "g++"):
+        (cdir / f"{arch}-conda-linux-gnu-{name}").write_text("#!/bin/sh\nexit 0\n")
+        (cdir / f"{arch}-conda-linux-gnu-{name}").chmod(0o755)
     env["PATH"] = f"{cdir}:{env['PATH']}"
     rc, out = _run(script, "--tool protenix", env, repo)  # no terminal, no --yes: stops at the licence
-    assert "No C compiler found" not in out, out
+    assert "No C compiler found" not in out and "No C++ compiler found" not in out, out
     assert doc_block() in out, "the gate after the compiler check was never reached"
     assert rc != 0
+    _nothing_was_created(repo, tmp_path, calls)
+
+
+def _on_path(tmp_path: Path, env: dict[str, str], *names: str) -> None:
+    d = tmp_path / "extra-bin"
+    d.mkdir(exist_ok=True)
+    for name in names:
+        (d / name).write_text("#!/bin/sh\nexit 0\n")
+        (d / name).chmod(0o755)
+    env["PATH"] = f"{d}:{env['PATH']}"
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_gcc_without_a_cxx_compiler_is_refused_up_front_before_the_licence(platform, tmp_path, no_cc_path):
+    """A gcc-only box passed the old gate, accepted the licence, then died building scikit-learn-extra."""
+    repo, script, env, calls = _sandbox(tmp_path, platform, no_cc_path, cc=False)
+    _on_path(tmp_path, env, "gcc")
+    rc, out = _run(script, "--tool protenix --yes --skip-preflight", env, repo)
+    assert rc != 0, out
+    assert "No C++ compiler found" in out and "g++" in out and "export CXX=/path/to/g++" in out, out
+    assert "scikit-learn-extra" in out and "No C compiler found" not in out, out
+    assert doc_block() not in out, "the licence was shown to a run that cannot build"
+    _nothing_was_created(repo, tmp_path, calls)
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_a_conda_forge_style_cxx_name_is_accepted(platform, tmp_path, no_cc_path):
+    repo, script, env, calls = _sandbox(tmp_path, platform, no_cc_path, cc=True, cxx=False)
+    arch = "aarch64" if platform == "aarch64" else os.uname().machine
+    _on_path(tmp_path, env, f"{arch}-conda-linux-gnu-g++")
+    rc, out = _run(script, "--tool protenix", env, repo)
+    assert "No C++ compiler found" not in out and doc_block() in out and rc != 0, out
+    _nothing_was_created(repo, tmp_path, calls)
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_cxx_environment_variable_is_accepted_and_a_bad_one_is_not(platform, tmp_path, no_cc_path):
+    repo, script, env, calls = _sandbox(tmp_path, platform, no_cc_path, cc=False)
+    _on_path(tmp_path, env, "gcc")
+    env["CXX"] = "/bin/true"
+    rc, out = _run(script, "--tool protenix", env, repo)
+    assert "No C++ compiler found" not in out and doc_block() in out and rc != 0, out
+
+    env["CXX"] = "/nonexistent/g++"
+    rc, out = _run(script, "--tool protenix", env, repo)
+    assert "No C++ compiler found" in out and doc_block() not in out and rc != 0, out
+    _nothing_was_created(repo, tmp_path, calls)
+
+
+@pytest.mark.parametrize("platform", sorted(INSTALLERS))
+def test_both_compilers_present_reaches_the_licence_gate(platform, tmp_path, no_cc_path):
+    repo, script, env, calls = _sandbox(tmp_path, platform, no_cc_path, cc=False)
+    _on_path(tmp_path, env, "gcc", "g++")
+    rc, out = _run(script, "--tool protenix", env, repo)
+    assert "compiler found" not in out and doc_block() in out and rc != 0, out
     _nothing_was_created(repo, tmp_path, calls)
 
 
@@ -480,6 +541,7 @@ case "$1" in
     shift
     while [ $# -gt 0 ]; do case "$1" in --live-stream) shift ;; -n) shift 2 ;; *) break ;; esac; done
     echo "run $*" >> "$FAKE_LOG"
+    echo "env CC=$CC CXX=$CXX" >> "$FAKE_LOG"
     ;;
 esac
 exit 0
@@ -541,6 +603,8 @@ def test_install_builds_the_env_fetches_the_weights_and_only_then_marks(platform
     at = [calls_log.find(s) for s in steps]
     assert all(i >= 0 for i in at), (steps, calls_log)
     assert at == sorted(at), "install steps ran out of order"
+    # the compilers the gate accepted reach the build: the pip steps inherit $CC / $CXX
+    assert "env CC=/bin/true CXX=/bin/true" in calls_log
     fetch = calls_log.find("download_from_url")
     assert fetch > at[-1], "the weights were fetched before the env was complete"
     # the weights landed where Task 18 will point --model-dir, with the (flow-sized) checkpoint
