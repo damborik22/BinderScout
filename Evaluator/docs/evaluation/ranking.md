@@ -225,7 +225,8 @@ which kind of target you have before you spend the GPU — that is an open gap.
 
 Engine detection (`evaluate.sh`, the engine-detection and second-slot blocks near the top) is by **conda env name
 only** for AF3 and ESMFold2: nothing checks the env can import its engine, so an empty env shell counts as
-installed. Protenix additionally needs its checkpoint at the expected byte count. Boltz-2 is the
+installed. AF3 additionally needs a non-empty weights directory (otherwise it is dropped by name) and Protenix
+its checkpoint at the expected byte count. Boltz-2 is the
 exception — it is resolved from `Evaluator/envs/mosaic_venv_path` and the run is **refused**
 if its `binder-compare` is absent (the Boltz-2 resolution block).
 
