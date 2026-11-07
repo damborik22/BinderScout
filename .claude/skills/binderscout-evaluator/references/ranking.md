@@ -5,7 +5,7 @@
 exits 2.
 
 - **Stage 0 — cross-engine gate.** A design must have been refolded by at least `--min-engines`
-  independent engines (**default 3** = Boltz-2 / AF3 / ESMFold2; floor 2). Without it a
+  independent engines (**default 3** = Boltz-2 / AF3 / ESMFold2, or Protenix in the AF3 slot; floor 2). Without it a
   single-engine design's mean *is* that engine's score, competing against 3-engine means on an
   incomparable scale — and for Mosaic / Protein-Hunter that engine is the one that designed it.
   Designs failing the gate rank **last, not dropped** (`passes_engine_gate` records it).
@@ -14,6 +14,12 @@ exits 2.
 
 `consensus_iptm` (max across engines) survives as a **diagnostic column only — it does not rank.**
 Max-ranking loses to mean-ranking (precision@top-10% 0.79 vs 0.92).
+
+**Which panel ranked.** `metrics.csv` carries constant `panel` / `second_engine` columns
+(`--second-engine protenix` puts Protenix in the AF3 slot). A `consensus_iptm_mean` from one panel is
+**not on the same scale** as one from another: compare designs within a panel only. On the 4-target
+labelled benchmark the Protenix panel scored macro AUC 0.7044 against 0.7231 for the AF3 panel and
+0.7279 for the Boltz-2 + ESMFold2 floor — a hypothesis from one small pool, not a result.
 
 ## Calibrate the reader before showing a top-N
 

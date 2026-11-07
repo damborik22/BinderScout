@@ -11,6 +11,7 @@ the current engine set (ESMFold2 default, two-stage ranking, + affinity/monomer)
 | extract | `binder-compare extract --<tool> DIR … -o seqs.fasta` | `binder-eval` | one extractor per tool; writes a native-metrics sidecar |
 | refold Boltz-2 | `binder-compare refold-boltz2 --sequences … --target-seq SEQ -o boltz2.csv` | **Mosaic venv** (`Mosaic/.venv`) | default; native `[binder\|target]` PAE, pLDDT [0,1] |
 | refold AF3 | `binder-compare refold-af3 …` | `binder-eval-af3` | canonical 2nd engine; runs on 24 GB GPUs (~4.4 GB peak at ~260 tokens); pLDDT 0–100 → rescaled; PAE transposed |
+| refold Protenix | `binder-compare refold-protenix …` | `binder-eval-protenix` | **opt-in** replacement for the AF3 slot (chosen on `evaluate.sh`, see below), never alongside it; Apache-2.0 v1.x, ~21.3 GiB peak on a 779-token complex (fits 24 GB); columns `protenix_*` |
 | refold ESMFold2 | `binder-compare refold-esmfold2 … --model full` | `binder-eval-esmfold2` | **default**, lightweight; the `chain_iptm_interface` gate |
 | report | `binder-compare report --boltz2-results … --af3-results … --esmfold2-results … -o report/` | `binder-eval` | ranking; HTML + `metrics.csv` |
 | affinity | `binder-compare affinity --metrics report/metrics.csv --structures-dir … --run-rosetta -o affinity.csv` | `BindCraft` (PyRosetta) | Part N — see `affinity.md` |
@@ -26,7 +27,8 @@ Neither tool's confidence enters `consensus_iptm_mean`; both are AF2-biased by c
 
 **One-shot:** `binderscout evaluate run …` / `Evaluator/evaluate.sh` auto-detects installed engines
 (`--skip-<engine>`) and drives extract → refold → two-stage report. Drop to individual subcommands
-for partial re-runs.
+for partial re-runs. The second slot is AF3 by default; `--second-engine protenix` (opt-in) uses
+Protenix instead, and the panel is recorded in `metrics.csv` (`panel`, `second_engine`).
 
 ## Pre-flight
 

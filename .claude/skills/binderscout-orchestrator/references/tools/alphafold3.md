@@ -11,6 +11,8 @@ AlphaFold 3 (Abramson, Adler, Dunger, Evans, Jumper et al. 2024, *Nature*) exten
 
 AF3 remains the **reference model** in this lineage. Boltz-2 (MIT) and Protenix (ByteDance) are independent reimplementations trained on similar but distinct datasets. Whatever they get right, AF3 is the baseline they were measured against — and whatever they get wrong, AF3 is the natural fall-back for cross-validation.
 
+**Second slot.** AF3 is the default second engine of the three-engine panel (Boltz-2, ESMFold2, one second engine). Protenix v1.x can replace it opt-in via `--second-engine protenix` (see `protenix.md`); the two are never run together, and scores from the two panels are not on one scale.
+
 In BinderScout, AF3 is being added as the **third refolder engine** (Part K). It's hosted in a separate conda env because the DeepMind-provided pipeline has a different MSA stack and database layout. Critically, the BinderScout integration is **aarch64 / DGX Spark only**: the production-grade AF3 stack at the lab is on Blackwell ARM64 hardware. On x86 clusters, only Boltz-2 + Protenix are available as refolders.
 
 **Critical to the orchestrator: AF3 is the most independent refolder in the BinderScout pool.** No design tool in the design pool uses AF3 internally — not BindCraft (AF2), not Mosaic (Boltz-2), not BoltzGen (Boltz-2), not Protein-Hunter (Boltz-2 or Chai), not RFD3 (RF3), not PXDesign (Protenix), not Proteina-Complexa (AF2/RF3 reward models). AF3 refold therefore provides a fully clean signal for every design tool's output. The cost is restricted hardware availability.

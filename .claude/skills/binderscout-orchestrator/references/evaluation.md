@@ -18,6 +18,8 @@ Three refolders run as **library code, not jobs**, all locally on the aarch64 (G
 | ESMFold2 | `binder-eval-esmfold2` | live; lightweight, no gated weights | Target-first PAE → transposed; pLDDT [0,1]. Also feeds `chain_iptm_interface` (the autosize gate) |
 | AlphaFold 3 (v3.0.2) | `binder-eval-af3` | Part K, live; canonical 2nd engine | Cross-platform (x86_64 + aarch64) and runs on 24 GB consumer GPUs too — measured 4,430 MiB peak for a 258-token complex on an RTX 3090 (2026-08-14); the old ">100 GB" note was preallocation misread as working set. Target-first PAE → transposed; pLDDT [0,100] → rescaled to [0,1] |
 
+**Second slot.** The panel is exactly three engines: Boltz-2, ESMFold2 and one second engine. AF3 holds that slot by default; `evaluate.sh --second-engine protenix` (opt-in, env `binder-eval-protenix`, Apache-2.0 v1.x, columns `protenix_*`, ~21.3 GiB peak on a 779-token complex so it fits a 24 GB card) puts Protenix there instead — never both. The panel is recorded in `metrics.csv` (`panel`, `second_engine`) and the HTML; scores from different panels are **not on one scale**. On the 4-target labelled benchmark the Protenix panel scored macro AUC 0.7044 vs 0.7231 (AF3 panel) and 0.7279 (Boltz-2 + ESMFold2) — a hypothesis from one small pool, not a result.
+
 Each refolder takes a (binder sequence + target structure + chain assignment) tuple and produces a (`.cif` structure + PAE matrix `.npz`). The evaluator then computes iPSAE on each PAE matrix and merges results.
 
 Because all three envs co-exist on the aarch64 host, the evaluation pipeline is a single Python orchestration:

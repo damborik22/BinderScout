@@ -224,6 +224,9 @@ foundry install proteinmpnn
 foundry install ligandmpnn
 ```
 
+### Second refold engine: AF3 (default) or Protenix (opt-in)
+The panel needs exactly one second engine. AF3 is the default; if its gated weights are absent, either put them in place or use Protenix: `install --tool protenix` shows the Apache-2.0 v1.x licence and the weight host, asks before downloading, and `evaluate.sh --second-engine protenix` runs it (fits a 24 GB card, ~21.3 GiB peak on a 779-token complex). Never both; the panel is recorded in `metrics.csv` and its scores are not on one scale with the other panel's.
+
 ### AF3 (refold use only, aarch64)
 
 Database and model paths set in `binder-eval-af3` env. See `Evaluator/docs/pipeline_reference.md`.

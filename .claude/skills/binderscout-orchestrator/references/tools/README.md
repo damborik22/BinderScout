@@ -40,7 +40,7 @@ Threshold 0.61 is the agreement threshold (the per-engine "pass" cutoff used in 
 | File | One-line summary | Status | Independence from design pool |
 |---|---|---|---|
 | `boltz2.md` | Primary refolder. AF3-class diffusion + affinity head. Native `[binder\|target]` ordering, pLDDT `[0,1]`. | Stable, default | Correlated with Mosaic / BoltzGen / Protein-Hunter |
-| `protenix.md` | **Retired as a refolder** (Part J reverted 2026-07-26). Background only — PXDesign's internal engine. | Not a refolder | n/a |
+| `protenix.md` | PXDesign's internal engine (background); also an **opt-in replacement for the AF3 slot** of the refold panel (`--second-engine protenix`; never a fourth engine, panel recorded in `metrics.csv`). | Opt-in second engine | Correlated with PXDesign outputs |
 | `alphafold3.md` | Third refolder (Part K in progress). DeepMind native AF3 v3.0.2, aarch64 / DGX Spark only. | In progress, aarch64 only | **Fully independent of every design tool** |
 
 ## Entry template

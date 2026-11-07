@@ -19,12 +19,19 @@ not the final affinity word (no metric ranks affinity perfectly — see `affinit
 binder-compare extract  --<tool> DIR …            -o seqs.fasta
 binder-compare refold-boltz2   --sequences seqs.fasta --target-seq SEQ -o boltz2.csv   # Mosaic venv
 binder-compare refold-af3      … -o af3.csv        # binder-eval-af3; GATED WEIGHTS, not big-VRAM (~4.4 GiB peak, fits 24 GB)
+binder-compare refold-protenix … -o protenix.csv   # OPT-IN replacement for refold-af3 (second slot), binder-eval-protenix; never both
 binder-compare refold-esmfold2 … -o esmfold2.csv   # default, lightweight; also the autosize gate
 binder-compare report   --boltz2-results … --af3-results … --esmfold2-results … -o report/
 binder-compare affinity --metrics report/metrics.csv --structures-dir … --run-rosetta -o affinity.csv
 binder-compare monomer  --complex-dir … --monomer-dir … -o monomer.csv
 ```
 `TODO:` which conda env hosts which step; resume semantics; ESMFold2 fast-vs-full.
+
+**Second engine.** A panel is Boltz-2 + ESMFold2 + ONE second engine: AF3 by default, or Protenix v1.x
+via `--second-engine protenix` (opt-in; `--skip-second` skips whichever holds the slot). `metrics.csv`
+records the panel in the constant columns `panel` and `second_engine`, and the HTML names it. Scores
+from different panels are **not on one scale** — never compare an AF3-panel `consensus_iptm_mean`
+with a Protenix-panel one. Protenix columns are named `protenix_*`.
 
 ## 2. Reading the ranking  →  see `references/ranking.md`
 ONE ranking: cross-engine gate → `consensus_iptm_mean` (`--rank-by` / `--screen-metric` were

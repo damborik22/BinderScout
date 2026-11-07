@@ -371,6 +371,9 @@ def detect_installs() -> dict:
             and _env_has_package(protein_hunter_env, "pyrosetta"),
         ),
         "af3": _installed("af3", _env_exists("binder-eval-af3")),
+        # The opt-in alternative second engine (Part 2). Same rule as AF3: an env directory
+        # alone is not an install, so a marker AND the env are both required.
+        "protenix": _installed("protenix", _env_exists("binder-eval-protenix")),
         "esmfold2": _installed("esmfold2", _env_exists("binder-eval-esmfold2")),
         # The permanent, non-racy form of the bug: a `--tool all` run that failed at
         # SoluProt (no `make`) had already created binder-eval-soluprot, so the
@@ -5166,6 +5169,34 @@ echo "  Aggregated FASTA: $RFD4_OUT/sequences.fasta"
     path.chmod(0o755)
 
 
+SECOND_ENGINES = ("af3", "protenix")
+SECOND_ENGINE_LABELS = {"af3": "AF3", "protenix": "Protenix"}
+
+
+def second_slot(cfg: dict) -> tuple[str, bool]:
+    """(engine, enabled) for the panel's second refold slot.
+
+    `second_engine` is `"af3"` (the default, and what every config written before it
+    existed means) or `"protenix"`. `use_af3` keeps meaning "AF3 is the second engine and
+    is on"; `use_protenix` is its twin, and an absent one means ON, because a config that
+    names Protenix as the slot is asking for it. A panel has exactly one second engine, so
+    naming both is refused rather than resolved.
+    """
+    engine = cfg.get("second_engine", "af3")
+    if engine not in SECOND_ENGINES:
+        print_fail(f"second_engine must be one of {', '.join(SECOND_ENGINES)}, not {engine!r}.")
+        sys.exit(1)
+    if engine == "protenix":
+        if cfg.get("use_af3"):
+            print_fail("use_af3 is true but second_engine is 'protenix': a panel has exactly one second engine.")
+            sys.exit(1)
+        return engine, bool(cfg.get("use_protenix", True))
+    if cfg.get("use_protenix"):
+        print_fail("use_protenix is true but second_engine is 'af3': set second_engine to 'protenix'.")
+        sys.exit(1)
+    return engine, bool(cfg.get("use_af3", False))
+
+
 def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     """Generate run_evaluate.sh — calls Evaluator/evaluate.sh with the right paths."""
     run_dir = cfg["run_dir"]
@@ -5292,7 +5323,13 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
     # Engine selection flags (skip flags omit engines NOT selected)
     if not cfg.get("use_boltz", True):
         lines.append("    --skip-boltz2 \\")
-    if not cfg.get("use_af3", False):
+    second_engine, second_on = second_slot(cfg)
+    if second_engine == "protenix":
+        # evaluate.sh puts the AF3 slot off by itself when Protenix holds it, so no --skip-af3.
+        lines.append("    --second-engine protenix \\")
+        if not second_on:
+            lines.append("    --skip-second \\")
+    elif not second_on:
         lines.append("    --skip-af3 \\")
     if not cfg.get("use_esmfold2", False):
         lines.append("    --skip-esmfold2 \\")
@@ -5320,6 +5357,11 @@ def write_run_evaluate(path: Path, cfg: dict, tools_enabled: dict):
         lines.append(f"    --tmprot-threshold {cfg.get('tmprot_threshold', 60.0)} \\")
 
     primary = cfg.get("primary_engine", "boltz")
+    # The panel has one second slot; naming the engine the slot does not hold would be refused
+    # by evaluate.sh after the extract step, so refuse it here while it costs nothing.
+    if (primary == "af3" and second_engine == "protenix") or (primary == "protenix" and second_engine == "af3"):
+        print_fail(f"primary_engine {primary!r} is not in this panel: second_engine is {second_engine!r}.")
+        sys.exit(1)
     lines.append(f"    --primary-engine {primary} \\")
 
     # Emitted ONLY when the operator chose it -- the wizard prompt below, or by hand in
@@ -5719,6 +5761,10 @@ def cmd_from_config(config_path: str, run_now: bool) -> None:
         print("  Evaluator:  enabled")
         if cfg.get("min_engines"):
             print(f"              cross-engine gate: --min-engines {cfg['min_engines']}")
+        if cfg.get("second_engine", "af3") == "protenix":
+            print(
+                "              second engine: Protenix (panel Boltz-2 + Protenix + ESMFold2; not comparable with AF3 panels)"
+            )
 
     if not enabled and not tools_enabled.get("evaluator"):
         print_fail("No tools enabled in this config — nothing to generate.")
@@ -6274,6 +6320,130 @@ def _predict_boltz2(run_dir: Path, mosaic_python: Path) -> str:
 # ─── Wizard ───────────────────────────────────────────────────────────────────
 
 
+def ask_refold_engines(installed: dict) -> dict:
+    """The wizard's refold-engine questions (Boltz-2, ONE second engine, ESMFold2, primary, gate).
+
+    The second slot holds AF3 (the default) or, opt-in, Protenix -- never both, because a panel
+    is exactly three engines. Only AF3 installed: the prompts are exactly what they were before
+    Protenix existed. Only Protenix installed: it is offered (default yes) with one line saying
+    the panel then differs from the AF3 one. Both installed: ask which (default AF3).
+    `use_af3` / `use_protenix` mean "that engine IS the second engine and is on".
+    """
+    use_boltz = use_af3 = use_protenix = use_esmfold2 = False
+    second_engine = "af3"
+    primary_engine = "boltz"
+    min_engines = None
+    use_evaluator = True
+
+    print(f"  {BOLD}Refolding engines for evaluation{RESET}")
+    engines_available = []
+    if installed.get("mosaic"):
+        engines_available.append(("boltz", "Boltz-2 (Mosaic venv)", True))
+    else:
+        print(f"    Boltz-2: {RED}requires Mosaic install{RESET} — skipped")
+    have_af3 = bool(installed.get("af3"))
+    have_protenix = bool(installed.get("protenix"))
+    if have_af3 and have_protenix:
+        engines_available.append(("second_choice", "", True))
+    elif have_protenix:
+        second_engine = "protenix"
+        print_warn(
+            "AF3 is not installed, so the second engine is Protenix: the panel will be "
+            "Boltz-2 + Protenix + ESMFold2 (its scores are not comparable with AF3-panel scores)."
+        )
+        engines_available.append(("protenix", "Protenix (binder-eval-protenix env)", True))
+    elif have_af3:
+        engines_available.append(("af3", "AlphaFold 3 v3.0.2 (binder-eval-af3 env)", True))
+    else:
+        print(f"    AF3: {RED}requires binder-eval-af3 env{RESET} — skipped")
+    if installed.get("esmfold2"):
+        # Default ON. The ranking gates on >=3 independent engines
+        # (--min-engines, default 3), so an all-defaults run that offers
+        # only Boltz-2 produces a report where EVERY design fails the gate
+        # and is ranked last. These entries are already inside an
+        # `if installed.get(...)` guard, so the engine is only offered when
+        # its env exists.
+        engines_available.append(("esmfold2", "ESMFold2 (binder-eval-esmfold2 env)", True))
+    else:
+        print(f"    ESMFold2: {RED}requires binder-eval-esmfold2 env{RESET} — skipped")
+    for key, label, default_on in engines_available:
+        if key == "second_choice":
+            idx, _ = ask_choice(
+                "    Second refold engine (one slot, never both)",
+                [
+                    "AlphaFold 3 v3.0.2 (binder-eval-af3 env)",
+                    "Protenix (binder-eval-protenix env; panel scores are not comparable with the AF3 panel)",
+                    "Neither",
+                ],
+                default_index=0,
+            )
+            if idx == 0:
+                use_af3 = True
+            elif idx == 1:
+                second_engine = "protenix"
+                use_protenix = True
+            continue
+        ans = ask_yn(f"    Use {label}?", default=default_on)
+        if key == "boltz":
+            use_boltz = ans
+        elif key == "af3":
+            use_af3 = ans
+        elif key == "protenix":
+            use_protenix = ans
+        elif key == "esmfold2":
+            use_esmfold2 = ans
+    use_second = use_protenix if second_engine == "protenix" else use_af3
+    second_label = SECOND_ENGINE_LABELS[second_engine]
+    # Require at least one engine
+    if not (use_boltz or use_second or use_esmfold2):
+        print_warn("No refolding engine selected — Evaluator disabled.")
+        use_evaluator = False
+    else:
+        # If >1 engine, pick primary. The second slot's own name is offered, never the other
+        # candidate's: evaluate.sh refuses `--primary-engine af3` on a Protenix panel and back.
+        selected = [
+            k for k, on in (("boltz", use_boltz), (second_engine, use_second), ("esmfold2", use_esmfold2)) if on
+        ]
+        if len(selected) > 1:
+            default_idx = selected.index("boltz") if "boltz" in selected else 0
+            idx, _ = ask_choice("    Primary engine for ranking", selected, default_index=default_idx)
+            primary_engine = selected[idx]
+        else:
+            primary_engine = selected[0]
+
+        # The gate defaults to 3 and is never lowered automatically (see
+        # write_run_evaluate). Ask here, while the engine answers are still on
+        # screen, so the shortfall is a decision rather than an empty report
+        # discovered hours later.
+        if len(selected) == 2:
+            panel_labels = {"boltz": "Boltz-2", second_engine: second_label, "esmfold2": "ESMFold2"}
+            missing = [lbl for k, lbl in panel_labels.items() if k not in selected]
+            print()
+            print_warn("Only 2 refold engines selected, but the cross-engine gate defaults to 3.")
+            print(f"  Not selected: {', '.join(missing)}.")
+            print("  With the default, every design fails the gate and you get no ranked shortlist.")
+            print("  Lowering it ranks on the engines you have — but rankings are then only")
+            print("  comparable to other runs using the same number of engines.")
+            if ask_yn("    Set --min-engines 2 in run_evaluate.sh?", default=True):
+                min_engines = 2
+        elif len(selected) == 1:
+            print()
+            print_warn("Only 1 refold engine selected — a cross-engine consensus needs at least 2.")
+            print("  The gate cannot be met at all, so the ranked shortlist will be empty.")
+            print(f"  Enable {second_label} or ESMFold2 as a second engine to get a ranked report.")
+
+    return {
+        "use_evaluator": use_evaluator,
+        "use_boltz": use_boltz,
+        "use_af3": use_af3,
+        "use_protenix": use_protenix,
+        "use_esmfold2": use_esmfold2,
+        "second_engine": second_engine,
+        "primary_engine": primary_engine,
+        "min_engines": min_engines,
+    }
+
+
 def wizard():
     install_shortcut()
     banner()
@@ -6402,80 +6572,23 @@ def wizard():
     use_evaluator = ask_yn("  Enable cross-evaluation (refolding + ranked report)?", default=False)
 
     # ── Refolding engine selection ──
-    use_boltz = use_af3 = use_esmfold2 = False
+    use_boltz = use_af3 = use_protenix = use_esmfold2 = False
+    second_engine = "af3"
     primary_engine = "boltz"
     # None = leave the cross-engine gate at evaluate.sh's default of 3. Set only by the
-    # explicit prompt below, or by hand in config.json -- never derived from what
-    # happens to be installed on this box.
+    # explicit prompt in ask_refold_engines, or by hand in config.json -- never derived
+    # from what happens to be installed on this box.
     min_engines = None
     if use_evaluator:
-        print(f"  {BOLD}Refolding engines for evaluation{RESET}")
-        engines_available = []
-        if installed.get("mosaic"):
-            engines_available.append(("boltz", "Boltz-2 (Mosaic venv)", True))
-        else:
-            print(f"    Boltz-2: {RED}requires Mosaic install{RESET} — skipped")
-        if installed.get("af3"):
-            engines_available.append(("af3", "AlphaFold 3 v3.0.2 (binder-eval-af3 env)", True))
-        else:
-            print(f"    AF3: {RED}requires binder-eval-af3 env{RESET} — skipped")
-        if installed.get("esmfold2"):
-            # Default ON. The ranking gates on >=3 independent engines
-            # (--min-engines, default 3), so an all-defaults run that offers
-            # only Boltz-2 produces a report where EVERY design fails the gate
-            # and is ranked last. These entries are already inside an
-            # `if installed.get(...)` guard, so the engine is only offered when
-            # its env exists.
-            engines_available.append(("esmfold2", "ESMFold2 (binder-eval-esmfold2 env)", True))
-        else:
-            print(f"    ESMFold2: {RED}requires binder-eval-esmfold2 env{RESET} — skipped")
-        for key, label, default_on in engines_available:
-            ans = ask_yn(f"    Use {label}?", default=default_on)
-            if key == "boltz":
-                use_boltz = ans
-            elif key == "af3":
-                use_af3 = ans
-            elif key == "esmfold2":
-                use_esmfold2 = ans
-        # Require at least one engine
-        if not (use_boltz or use_af3 or use_esmfold2):
-            print_warn("No refolding engine selected — Evaluator disabled.")
-            use_evaluator = False
-        else:
-            # If >1 engine, pick primary
-            selected = [
-                k
-                for k, on in (
-                    ("boltz", use_boltz),
-                    ("af3", use_af3),
-                    ("esmfold2", use_esmfold2),
-                )
-                if on
-            ]
-            if len(selected) > 1:
-                default_idx = selected.index("boltz") if "boltz" in selected else 0
-                idx, _ = ask_choice("    Primary engine for ranking", selected, default_index=default_idx)
-                primary_engine = selected[idx]
-            else:
-                primary_engine = selected[0]
-
-            # The gate defaults to 3 and is never lowered automatically (see
-            # write_run_evaluate). Ask here, while the engine answers are still on
-            # screen, so the shortfall is a decision rather than an empty report
-            # discovered hours later.
-            if len(selected) == 2:
-                print()
-                print_warn("Only 2 refold engines selected, but the cross-engine gate defaults to 3.")
-                print("  With the default, every design fails the gate and you get no ranked shortlist.")
-                print("  Lowering it ranks on the engines you have — but rankings are then only")
-                print("  comparable to other runs using the same number of engines.")
-                if ask_yn("    Set --min-engines 2 in run_evaluate.sh?", default=True):
-                    min_engines = 2
-            elif len(selected) == 1:
-                print()
-                print_warn("Only 1 refold engine selected — a cross-engine consensus needs at least 2.")
-                print("  The gate cannot be met at all, so the ranked shortlist will be empty.")
-                print("  Enable AF3 or ESMFold2 as a second engine to get a ranked report.")
+        picked = ask_refold_engines(installed)
+        use_evaluator = picked["use_evaluator"]
+        use_boltz = picked["use_boltz"]
+        use_af3 = picked["use_af3"]
+        use_protenix = picked["use_protenix"]
+        use_esmfold2 = picked["use_esmfold2"]
+        second_engine = picked["second_engine"]
+        primary_engine = picked["primary_engine"]
+        min_engines = picked["min_engines"]
 
     # ── SoluProt solubility screen (label, not engine, not filter) ──
     # Sits before the refold engines because it is cheap and CPU-only, so the column
@@ -6527,6 +6640,8 @@ def wizard():
         "evaluator": use_evaluator,
         "use_boltz": use_boltz,
         "use_af3": use_af3,
+        "use_protenix": use_protenix,
+        "second_engine": second_engine,
         "use_esmfold2": use_esmfold2,
         "primary_engine": primary_engine,
         "use_soluprot": use_soluprot,
@@ -6540,6 +6655,8 @@ def wizard():
         "evaluator",
         "use_boltz",
         "use_af3",
+        "use_protenix",
+        "second_engine",
         "use_esmfold2",
         "primary_engine",
         "use_soluprot",
@@ -6573,6 +6690,8 @@ def wizard():
         "boltzgen_intermediate": boltzgen_intermediate_default(n_designs),
         "use_boltz": use_boltz,
         "use_af3": use_af3,
+        "use_protenix": use_protenix,
+        "second_engine": second_engine,
         "use_esmfold2": use_esmfold2,
         "primary_engine": primary_engine,
         # None = leave the cross-engine gate at its default of 3. Set only by the
@@ -6965,7 +7084,7 @@ def wizard():
     print(f"  {CYAN}Chains{RESET}:        {chains}  |  {CYAN}Hotspots{RESET}: {hotspots or '(auto)'}")
     print(f"  {CYAN}Binder length{RESET}: {min_length}–{max_length}  |  {CYAN}Top designs{RESET}: {n_designs}")
     # Via enabled_tools(), not the raw dict: tools_enabled also carries
-    # use_boltz / use_af3 / primary_engine / soluprot_* , so iterating it listed
+    # use_boltz / use_af3 / second_engine / primary_engine / soluprot_* , so iterating it listed
     # engine settings as if they were design tools on the last screen before a
     # campaign is generated.
     enabled_list = [label for _k, _s, label, _d in enabled_tools(tools_enabled)]
@@ -7056,8 +7175,9 @@ def wizard():
         engines = []
         if cfg.get("use_boltz"):
             engines.append("Boltz-2")
-        if cfg.get("use_af3"):
-            engines.append("AF3")
+        second_engine, second_on = second_slot(cfg)
+        if second_on:
+            engines.append(SECOND_ENGINE_LABELS[second_engine])
         if cfg.get("use_esmfold2"):
             engines.append("ESMFold2")
         engines_str = " + ".join(engines) if engines else "Boltz-2"
