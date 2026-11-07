@@ -205,6 +205,7 @@ def _load_checked_pae(resolved: Path, L_b: int, target_sequence, ordering: str) 
 # The per-engine output directories the runners and evaluate.sh create. A recorded path
 # that names one is never remapped to something below it (see _resolve_pae_path).
 _DEFAULT_PANEL = resolve_panel()
+# The default panel's directories only; _resolve_pae_path bounds on the full registered set below.
 _ENGINE_OUTPUT_DIRS: tuple[str, ...] = tuple(e.refold_dir for e in _DEFAULT_PANEL.engines)
 # Every registered engine's directory, not just the default panel's: a recorded path that
 # names ``refold_protenix`` is bounded exactly as one that names ``refold_af3`` is.
@@ -981,7 +982,7 @@ def compute_agreement(
     because its DunbrackLab distribution is mis-calibrated on short targets
     (see the ranking-discrepancy investigation, archived off-repo).
 
-    Adds column 'agreement_count' (0–3: Boltz-2, AF3, ESMFold2 over their thresholds)
+    Adds column 'agreement_count' (0–3: the panel's engines over their thresholds; Boltz-2, AF3, ESMFold2 by default)
     and **'agreement_denom'**, how many of those engines actually produced a score for
     that design.
 
@@ -1115,7 +1116,7 @@ def compute_consensus_ipsae(df: pd.DataFrame, panel: Panel | None = None) -> pd.
     DunbrackLab ipSAE_min.
 
     Parallels :func:`compute_consensus_iptm`: averages the independent engines'
-    interface ipSAE_min (boltz / af3 / esmfold2). The metric being
+    interface ipSAE_min (the panel's engines: boltz / af3 / esmfold2 by default). The metric being
     averaged is each engine's ``ipsae_min`` (hence ``_min_mean``). Diagnostic /
     reporting column — the primary ranker stays the two-stage iptm.
 
@@ -1187,14 +1188,18 @@ def rank_designs(df: pd.DataFrame, min_engines: int = MIN_ENGINES_DEFAULT, panel
     datasets (Part N, Part U, OpenBind, SKEMPI) — see comparison.affinity for the
     advisory gate-then-density ranker.
 
-    *panel* is the engine panel the consensus is computed over when the frame does not
-    already carry it (None: the default AF3 panel). The ordering rules do not depend on it.
+    *panel* is the engine panel the consensus is computed over (None: the default AF3
+    panel). With panel=None a consensus already in the frame is used as it stands. With a
+    panel the consensus is ALWAYS recomputed from the panel's columns, overwriting any
+    ``consensus_iptm*`` already present, so a frame scored under another panel (or carrying
+    a stale consensus) cannot be ranked under this one's name. The ordering rules do not
+    depend on the panel.
 
     Raises:
         ValueError: if *min_engines* is below ``MIN_ENGINES_FLOOR``.
     """
     result = df.copy()
-    if "consensus_iptm" not in result.columns or "consensus_iptm_mean" not in result.columns:
+    if panel is not None or "consensus_iptm" not in result.columns or "consensus_iptm_mean" not in result.columns:
         result = compute_consensus_iptm(result, panel=panel)
 
     if min_engines < MIN_ENGINES_FLOOR:

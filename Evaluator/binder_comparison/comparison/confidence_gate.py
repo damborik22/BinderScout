@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ..core.engines import Panel
+from ..core.engines import Panel, resolve_panel
 
 # ColabDesign normalises PAE by this before BindCraft thresholds it.
 PAE_NORMALISER = 31.0
@@ -113,7 +113,8 @@ def annotate_confidence_gate(df: pd.DataFrame, panel: Panel | None = None) -> pd
     reasons: list[str] = []
     missing: list[str] = []
     n_engines: list[int] = []
-    engines = list(_IPTM_COLS) if panel is None else [e.name for e in panel.engines]
+    # _IPTM_COLS is a column-candidate map, not a panel: the default engines come from the registry.
+    engines = [e.name for e in (resolve_panel() if panel is None else panel).engines]
 
     for _, row in out.iterrows():
         failures: list[str] = []

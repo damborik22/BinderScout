@@ -127,3 +127,27 @@ def test_default_panel_structure_columns_are_covered_by_the_scoring_and_report_t
         cols, chain = report._ENGINE_STRUCT_COLS[e.name]
         assert tuple(cols) == e.pdb_cols, e.name
         assert chain == e.binder_chain, e.name
+
+
+def test_default_panel_literals_are_pinned_independently_of_the_registry():
+    """The values TODAY's scoring module carried, spelled out: the registry cannot move them silently."""
+    from binder_comparison.comparison import scoring
+
+    assert scoring._STRUCTURE_PATH_COLUMNS == (
+        "boltz_pdb",
+        "boltz_cif",
+        "af3_pdb",
+        "af3_cif",
+        "esmfold2_pdb",
+        "esmfold2_cif",
+        "pdb",
+    )
+    assert scoring._ENGINE_IPTM_COLS == ["boltz_pae_iptm", "af3_pae_iptm", "esmfold2_pae_iptm"]
+    assert scoring._ENGINE_IPSAE_COLS == {
+        "boltz": "boltz_pae_ipsae_min",
+        "af3": "af3_ipsae_min",
+        "esmfold2": "esmfold2_ipsae_min",
+    }
+    assert scoring._ENGINE_IPSAE_MIN_COLS == ["boltz_pae_ipsae_min", "af3_ipsae_min", "esmfold2_ipsae_min"]
+    assert scoring._ENGINE_OUTPUT_DIRS == ("refold_boltz2", "refold_af3", "refold_esmfold2")
+    assert scoring.DEFAULT_ENGINE_THRESHOLDS == {"boltz": 0.61, "af3": 0.61, "esmfold2": 0.61}

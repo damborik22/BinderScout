@@ -195,7 +195,13 @@ def test_confidence_gate_reads_the_second_engine_of_the_panel():
 
 
 def test_self_consistency_and_foldseek_follow_the_panel():
-    assert self_consistency.engine_pdb_cols(None) == self_consistency._ENGINE_PDB_COLS
+    literal = {"boltz": "boltz_pdb", "af3": "af3_pdb", "esmfold2": "esmfold2_pdb"}
+    assert self_consistency.engine_pdb_cols(None) == literal
+    assert literal == self_consistency._ENGINE_PDB_COLS
+    default = resolve_panel()
+    assert {e.name: e.pdb_cols[0] for e in default.engines} == self_consistency._ENGINE_PDB_COLS
+    assert foldseek._DEFAULT_PDB_COLS == ("boltz_pdb", "af3_pdb", "esmfold2_pdb", "pdb")
+    assert (*(e.pdb_cols[0] for e in default.engines), "pdb") == foldseek._DEFAULT_PDB_COLS
     assert self_consistency.engine_pdb_cols(resolve_panel("protenix")) == {
         "boltz": "boltz_pdb",
         "protenix": "protenix_pdb",
@@ -203,3 +209,38 @@ def test_self_consistency_and_foldseek_follow_the_panel():
     }
     assert foldseek.panel_pdb_cols(resolve_panel("protenix")) == ("boltz_pdb", "protenix_pdb", "esmfold2_pdb", "pdb")
     assert foldseek.panel_pdb_cols(None) == ("boltz_pdb", "af3_pdb", "esmfold2_pdb", "pdb")
+
+
+def test_the_default_gate_engines_do_not_follow_the_candidate_map(monkeypatch):
+    """Adding a protenix row to _IPTM_COLS must not put Protenix into the DEFAULT panel's gate."""
+    monkeypatch.setitem(confidence_gate._IPTM_COLS, "protenix", ("protenix_iptm",))
+    df = pd.DataFrame(
+        {
+            "boltz_iptm": [0.9],
+            "protenix_iptm": [0.9],
+            "protenix_pae_bt_mean": [4.0],
+            "protenix_pae_tb_mean": [6.0],
+            "af3_iptm": [0.9],
+            "af3_pae_bt_mean": [4.0],
+            "af3_pae_tb_mean": [6.0],
+        }
+    )
+    out = confidence_gate.annotate_confidence_gate(df)
+    assert "protenix_ipae_ang" not in out.columns
+    assert "af3_ipae_ang" in out.columns
+
+
+def test_rank_designs_with_a_panel_recomputes_a_stale_consensus():
+    """A consensus computed under the AF3 panel must not be ranked under the Protenix panel's name."""
+    af3_scored = compute_consensus_iptm(_pool("af3"))
+    px = resolve_panel("protenix")
+    frame = af3_scored.rename(columns={"af3_pae_iptm": "protenix_pae_iptm", "af3_ipsae_min": "protenix_ipsae_min"})
+    frame["protenix_pae_iptm"] = 0.5  # the stale consensus no longer matches the columns
+    ranked = rank_designs(frame, panel=px)
+    expect = frame[["boltz_pae_iptm", "protenix_pae_iptm", "esmfold2_pae_iptm"]].mean(axis=1)
+    pd.testing.assert_series_equal(
+        ranked.set_index("binder_id")["consensus_iptm_mean"].sort_index(),
+        pd.Series(
+            expect.values, index=pd.Index(frame["binder_id"], name="binder_id"), name="consensus_iptm_mean"
+        ).sort_index(),
+    )

@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..core.engines import Panel
+
 # RFD3's own protein-binder gate. NOTE: the RFD3 preprint states these cutoffs
 # are taken "from [ref]" -- they are inherited, not RFD3-calibrated, and PMC
 # strips the reference so the originating paper is not identifiable from it.
@@ -152,7 +154,7 @@ def split_target_binder(pdb_text: str, binder_sequence: str) -> tuple[np.ndarray
 _ENGINE_PDB_COLS = {"boltz": "boltz_pdb", "af3": "af3_pdb", "esmfold2": "esmfold2_pdb"}
 
 
-def engine_pdb_cols(panel=None) -> dict[str, str]:
+def engine_pdb_cols(panel: Panel | None = None) -> dict[str, str]:
     """``{engine name: structure-path column}`` for *panel* (None: the default AF3 panel)."""
     if panel is None:
         return _ENGINE_PDB_COLS
@@ -204,7 +206,9 @@ def _design_index(design_root) -> dict[str, object]:
     return index
 
 
-def annotate_self_consistency(df, design_root, base_dir, threshold: float = SELF_CONSISTENCY_RMSD_MAX, panel=None):
+def annotate_self_consistency(
+    df, design_root, base_dir, threshold: float = SELF_CONSISTENCY_RMSD_MAX, panel: Panel | None = None
+):
     """Add target-aligned design-vs-refold RMSD columns. Advisory: never drops.
 
     Per engine, ``<engine>_self_consistency_rmsd``; overall

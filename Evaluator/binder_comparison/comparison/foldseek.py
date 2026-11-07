@@ -29,6 +29,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from ..core.engines import Panel
 from ..io.design_ids import safe_stem
 
 #: Where to look for the binary, in order. ``$FOLDSEEK_BIN`` wins, then anything on
@@ -87,7 +88,7 @@ def _binder_only_pdb(pdb_text: str, binder_sequence: str) -> str | None:
 _DEFAULT_PDB_COLS: tuple[str, ...] = ("boltz_pdb", "af3_pdb", "esmfold2_pdb", "pdb")
 
 
-def panel_pdb_cols(panel=None) -> tuple[str, ...]:
+def panel_pdb_cols(panel: Panel | None = None) -> tuple[str, ...]:
     """The structure columns to read for *panel*, then the bare ``pdb`` fallback (None: the default)."""
     if panel is None:
         return _DEFAULT_PDB_COLS
@@ -99,7 +100,7 @@ def build_tm_lookup(
     *,
     base_dir,
     pdb_cols: tuple[str, ...] = _DEFAULT_PDB_COLS,
-    panel=None,
+    panel: Panel | None = None,
     id_col: str = "binder_id",
     sequence_col: str = "sequence",
     foldseek_bin: str | None = None,
