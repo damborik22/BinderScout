@@ -287,6 +287,11 @@ def _resolve_second_slot(args: argparse.Namespace) -> tuple[Panel, str | None]:
                 file=sys.stderr,
             )
             sys.exit(2)
+        if getattr(args, "threshold_protenix", None) is not None:
+            print(
+                "[report] NOTICE: --threshold-protenix was given but --second-engine is af3; it is ignored.",
+                file=sys.stderr,
+            )
         return panel, second_csv or af3_csv
     if af3_csv:
         print(

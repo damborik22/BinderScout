@@ -82,9 +82,7 @@ In BinderScout, AF3 is the default second engine of the three-engine panel (Part
 
 **Cross-engine agreement_count:**
 
-The orchestrator's primary cross-method comparator. Per CLAUDE.md `Critical domain facts`:
-
-> Ranking uses agreement_count (how many engines agree ipsae_min > 0.61) as primary sort, then ipsae_min desc
+A per-design diagnostic, not the ranking. The ranking is the >=3-engine gate, then `consensus_iptm_mean` (see CLAUDE.md `Evaluation metrics and ranking`); `agreement_count` (how many engines call `ipsae_min` > 0.61) is a warning flag only.
 
 With all three engines available, `agreement_count ∈ {0, 1, 2, 3}`. With only two engines available (for example Boltz-2 + ESMFold2), denominator is 2 — the orchestrator should track which engines were available per design.
 

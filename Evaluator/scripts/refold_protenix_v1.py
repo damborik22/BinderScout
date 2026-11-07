@@ -103,6 +103,8 @@ from binder_comparison.refolding.second_engine_driver import EngineError, run_cl
 
 ENGINE = "protenix"
 #: The checkpoints the licence record covers (Apache-2.0 code and parameters, v1.x only). Exact match.
+#: `protenix_base_20250630_v1.0.0` (training cutoff 2025-06-30) is licensed (v1.x) but was NOT benchmarked,
+#: and is unreachable via `binder-compare refold-protenix`, which forwards no --model-name.
 LICENSED_MODELS = ("protenix_base_default_v1.0.0", "protenix_base_20250630_v1.0.0")
 DEFAULT_MODEL = "protenix_base_default_v1.0.0"
 TARGET_CHAIN, BINDER_CHAIN = "A", "B"

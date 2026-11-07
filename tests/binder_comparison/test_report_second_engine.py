@@ -195,6 +195,21 @@ class TestAf3DefaultIsUnchanged:
         assert list(df.sort_values("rank")["binder_id"]) == list(runs["af3"].sort_values("rank")["binder_id"])
 
 
+class TestThresholdOfTheOtherEngine:
+    def test_threshold_protenix_with_the_af3_slot_is_noticed_and_ignored(self, runs, tmp_path, capsys):
+        df = _run(
+            tmp_path / "rep",
+            [*_base(runs["pool"]), "--af3-results", str(runs["pool"]["af3"]), "--threshold-protenix", "0.5"],
+        )  # fmt: skip
+        err = capsys.readouterr().err
+        assert "--threshold-protenix" in err and "--second-engine is af3" in err and "ignored" in err
+        assert list(df["rank"]) == list(runs["af3"]["rank"])
+
+    def test_the_default_af3_run_prints_no_such_notice(self, runs, tmp_path, capsys):
+        _run(tmp_path / "rep", [*_base(runs["pool"]), "--af3-results", str(runs["pool"]["af3"])])
+        assert "--threshold-protenix" not in capsys.readouterr().err
+
+
 class TestWrongSlotRefusals:
     def test_af3_results_with_the_protenix_slot_is_noticed_and_ignored(self, runs, tmp_path, capsys):
         df = _run(
@@ -311,6 +326,15 @@ class TestHitsWorkbookNamesThePanel:
         text = self._workbook_text(runs["root"] / "rep_prot" / "candidates.csv", tmp_path, second_engine="af3")
         assert "Re-folding: Boltz-2, AlphaFold3, ESMFold2" in text
         assert "Protenix" not in text
+
+    def test_a_disagreeing_explicit_flag_warns_and_wins(self, runs, tmp_path, capsys):
+        self._workbook_text(runs["root"] / "rep_prot" / "candidates.csv", tmp_path, second_engine="af3")
+        err = capsys.readouterr().err
+        assert "--second-engine af3" in err and "second_engine=protenix" in err and "explicit flag wins" in err
+
+    def test_an_agreeing_explicit_flag_is_silent(self, runs, tmp_path, capsys):
+        self._workbook_text(runs["root"] / "rep_prot" / "candidates.csv", tmp_path, second_engine="protenix")
+        assert "disagrees" not in capsys.readouterr().err
 
     def test_an_af3_pool_is_named_from_its_recorded_panel(self, runs, tmp_path):
         text = self._workbook_text(runs["root"] / "rep_af3" / "candidates.csv", tmp_path)

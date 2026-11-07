@@ -146,7 +146,15 @@ def run(args: argparse.Namespace) -> None:
             print(f"Error: candidates file not found: {p}", file=sys.stderr)
             sys.exit(1)
         # The flag wins; else the panel the report recorded beside this candidates.csv; else AF3 (old pools).
-        seconds[target] = explicit or _recorded_second_engine(p) or "af3"
+        recorded = _recorded_second_engine(p)
+        if explicit and recorded and explicit != recorded:
+            print(
+                f"[hits] WARNING: {target}: --second-engine {explicit} disagrees with second_engine={recorded} "
+                f"recorded in the metrics.csv beside {p}; the explicit flag wins, so the workbook names "
+                f"{explicit}, not the panel the report was scored with.",
+                file=sys.stderr,
+            )
+        seconds[target] = explicit or recorded or "af3"
         cand = read_csv_safe(p)
         missing = [c for c in ("Set", "Method", "Primary sequence") if c not in cand.columns]
         if missing:

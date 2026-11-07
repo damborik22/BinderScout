@@ -208,8 +208,11 @@ which kind of target you have before you spend the GPU — that is an open gap.
                                                 │
           ┌─────────────────────────────────────┼──────────────────────────────┐
           ▼                   ▼                 ▼                              │
-      Boltz-2             AF3 v3.0.2        ESMFold2        (SoluProt / TmProt: label only,
-   (Mosaic venv)       (binder-eval-af3) (binder-eval-esmfold2)  run BEFORE refolding)
+      Boltz-2        second engine slot      ESMFold2       (SoluProt / TmProt: label only,
+   (Mosaic venv)     AF3 v3.0.2 (default,  (binder-eval-esmfold2)  run BEFORE refolding)
+                     binder-eval-af3) or
+                     Protenix v1.x (opt-in,
+                     binder-eval-protenix)
           │                   │                 │
           └──── per-engine CSV + PAE .npy + structures ────┐
                                                            ▼
@@ -220,19 +223,20 @@ which kind of target you have before you spend the GPU — that is an open gap.
    consensus_iptm / _mean / _n → rank_designs → wetlab → metrics.csv + report.html
 ```
 
-Engine detection is by **conda env name only** (`evaluate.sh:253-290`); nothing checks the
-env can import its engine, so an empty env shell counts as installed. Boltz-2 is the
+Engine detection (`evaluate.sh`, the engine-detection and second-slot blocks near the top) is by **conda env name
+only** for AF3 and ESMFold2: nothing checks the env can import its engine, so an empty env shell counts as
+installed. Protenix additionally needs its checkpoint at the expected byte count. Boltz-2 is the
 exception — it is resolved from `Evaluator/envs/mosaic_venv_path` and the run is **refused**
-if its `binder-compare` is absent (`:228-241`).
+if its `binder-compare` is absent (the Boltz-2 resolution block).
 
-**`--skip-<engine>` is not symmetric** (`evaluate.sh:561-643`): `--skip-boltz2` means
-*reuse the existing CSV* and still passes it to the report; `--skip-af3` and
-`--skip-esmfold2` mean *drop the engine entirely*, so an existing CSV is **not** passed —
-and at the default gate of 3 every design then fails `passes_engine_gate`.
+**`--skip-<engine>` and an existing CSV.** `--skip-boltz2` means *reuse the existing CSV*. For the others,
+`--skip-af3`, `--skip-esmfold2` and `--skip-second` (whichever engine holds the second slot) mean *do not run the
+engine*, but a results CSV that already holds scored rows is passed to the report even with the skip flag (the report-argument
+block near the end of `evaluate.sh`); a skipped engine with no scored CSV is dropped, and at the default gate of 3 every
+design then fails `passes_engine_gate`. `--skip-af3` and `--skip-second` never fall back to the other second engine.
 
 The exact `report.py` call order is load-bearing (a block placed before `rank` existed was a
-real bug): `compute_statistics` runs at `report.py:385` while the consensus columns are added at
-405–412, so `summary.json` and `metrics_zscore.csv` cannot contain `consensus_iptm_mean`,
+real bug): in `cli/report.py` `compute_statistics` runs before the consensus columns are added, so `summary.json` and `metrics_zscore.csv` cannot contain `consensus_iptm_mean`,
 `consensus_iptm_n`, `agreement_count`, `quality_tier` or `rank`. The per-tool statistics table
 therefore omits the metric the pipeline ranks on. Known, not yet fixed.
 
@@ -242,7 +246,7 @@ therefore omits the metric the pipeline ranks on. Known, not yet fixed.
 
 ## 5. The ranking itself
 
-`rank_designs` (`scoring.py:828-936`):
+`rank_designs` (`comparison/scoring.py`):
 
 1. **Refuses** `min_engines < 2` (`MIN_ENGINES_FLOOR`).
 2. **Gate:** `consensus_iptm_mean.notna() & (consensus_iptm_n >= min_engines)`. Recorded in

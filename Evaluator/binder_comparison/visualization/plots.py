@@ -651,6 +651,8 @@ def plot_radar_chart(
 
 # Engine iPTM columns for the two-stage radar/scatter (uses whichever are present,
 # in this priority order). Mirrors scoring._ENGINE_IPTM_COLS.
+# Dead code kept as-is: `plot_radar_iptm`, the only consumer, is not called by the report. This list is
+# AF3-only and not panel-aware (a Protenix panel would need `protenix_pae_iptm` here).
 _IPTM_RADAR_SPOKES: list[tuple[str, str]] = [
     ("boltz_pae_iptm", "Boltz-2 iPTM"),
     ("af3_pae_iptm", "AF3 iPTM"),

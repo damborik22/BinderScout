@@ -20,7 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   The ranking and the AF3 column names are unchanged; `metrics.csv` gains two constant columns (`panel`,
   `second_engine`) and the HTML report a panel line on every run, AF3 panel included. With no flag, no usable
   AF3 and Protenix installed, `evaluate.sh` uses Protenix and prints a notice (pass `--second-engine af3` to
-  prevent that).
+  prevent that). The configurator pins the slot for configs that name it: a config with `second_engine` emits
+  `--second-engine af3` or `protenix`; an old config without the key emits no flag and is byte-identical to before.
   - **Registry.** `Evaluator/binder_comparison/core/engines.py` (`resolve_panel`, `SECOND_ENGINES =
     ("af3", "protenix")`) is the one place that names a panel's engines, columns, output directory and
     results CSV. Column names carry the real engine name (`protenix_pae_iptm`, `protenix_ipsae_min`,
@@ -87,6 +88,9 @@ confirmed by the owner. Protenix fits the 24 GB card class that ESMFold2 already
   toolchain preflight additionally wants make and git, so a box that only sets `CC`/`CXX` needs `--skip-preflight`.
 - The `install_aarch.sh` path is the same recipe and has not been run on aarch64 hardware; the cu128 torch wheels
   there are unverified.
+- Installing only Protenix on a box that has envs but no `.install_state` markers writes the first marker and
+  switches marker enforcement on for every other tool (pre-existing behaviour of any single-tool install); older
+  unmarked tools then read as not installed in the configurator and TUI until they are re-installed or marked.
 - The live validation of the installer and refold is written up in the runbook section "Live validation of the
   opt-in installer and refold (2026-11-07)" (`Evaluator/docs/second_engine_benchmark_runbook.md`).
 
