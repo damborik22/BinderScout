@@ -86,6 +86,10 @@ class Result:
         self.calls = calls
         self.out_dir = out_dir
 
+    def mentions(self, word: str) -> bool:
+        """Case-insensitive, with the sandbox path removed (pytest puts the test name in it)."""
+        return word.lower() in self.out.replace(str(self.out_dir.parent), "").lower()
+
     def refolds(self, sub: str) -> list[dict]:
         return [c for c in self.calls if c["cmd"][:2] == ["binder-compare", sub]]
 
@@ -104,8 +108,8 @@ def _run(
     protenix_weights: int | None = CKPT_BYTES,
     guard: bool = False,
     extra_env: dict[str, str] | None = None,
-    af3_csv: bool = False,
-    protenix_csv: bool = False,
+    af3_csv: bool | str = False,
+    protenix_csv: bool | str = False,
 ) -> Result:
     """Run evaluate.sh in a sandbox. protenix_weights=None plants no checkpoint; an int plants one that size."""
     sandbox = tmp_path / "Evaluator"
@@ -136,10 +140,10 @@ def _run(
     out_dir.mkdir(exist_ok=True)
     # --skip-boltz2 needs its CSV on disk; the row is scored for the one pool design.
     (out_dir / "boltz2_results.csv").write_text("sequence,iptm,target_sequence\nMKTAYIAKQRQ,0.8,MKTAYIAKQRQ\n")
-    if af3_csv:
-        (out_dir / "af3_results.csv").write_text("sequence,iptm,target_sequence\nMKTAYIAKQRQ,0.8,MKTAYIAKQRQ\n")
-    if protenix_csv:
-        (out_dir / "protenix_results.csv").write_text("sequence,iptm,target_sequence\nMKTAYIAKQRQ,0.8,MKTAYIAKQRQ\n")
+    for name, kind in (("af3_results.csv", af3_csv), ("protenix_results.csv", protenix_csv)):
+        if kind:  # True = one scored row, "header" = header only, "blank" = a row with every score blank
+            body = {True: "MKTAYIAKQRQ,0.8,MKTAYIAKQRQ\n", "header": "", "blank": "MKTAYIAKQRQ,,MKTAYIAKQRQ\n"}[kind]
+            (out_dir / name).write_text("sequence,iptm,target_sequence\n" + body)
 
     sequences = tmp_path / "seqs.fasta"
     sequences.write_text(">b1\nMKTAYIAKQRQ\n")
@@ -201,7 +205,7 @@ def test_explicit_protenix_runs_protenix_and_not_af3(tmp_path):
     assert r.rc == 0, r.out
     assert len(r.refolds("refold-protenix")) == 1, r.out
     assert r.refolds("refold-af3") == [], r.out  # AF3 is ready, and still not in this panel
-    assert "AF3" not in r.out.replace("--second-engine", ""), r.out
+    assert "AF3" not in r.out, r.out
     assert "second engine: Protenix (--second-engine protenix); panel Boltz-2 + Protenix + ESMFold2;" in r.out, r.out
 
 
@@ -210,7 +214,7 @@ def test_explicit_af3_unusable_is_skipped_by_name_and_protenix_does_not_take_ove
     assert "[skipped] AF3: no AF3 weights found" in r.out, r.out
     assert r.refolds("refold-protenix") == [], r.out  # Protenix is fully installed: still no silent switch
     assert r.refolds("refold-af3") == [], r.out
-    assert "Protenix" not in r.out, r.out
+    assert not r.mentions("protenix"), r.out
     assert "--second-engine" not in r.report  # the AF3 slot is reported the AF3 way
     assert "--af3-results" not in r.report  # nothing ran, so no CSV exists
 
@@ -235,7 +239,7 @@ def test_no_flag_and_af3_ready_uses_af3_even_when_protenix_is_installed(tmp_path
     assert r.rc == 0, r.out
     assert len(r.refolds("refold-af3")) == 1, r.out
     assert r.refolds("refold-protenix") == [], r.out
-    assert "Protenix" not in r.out, r.out
+    assert not r.mentions("protenix"), r.out
     assert "--af3-results" in r.report
     assert str(r.out_dir / "af3_results.csv") == r.report[r.report.index("--af3-results") + 1]
     assert "--second-engine" not in r.report and "--second-results" not in r.report
@@ -265,14 +269,14 @@ def test_no_flag_af3_env_missing_and_protenix_ready_also_falls_back(tmp_path):
 def test_a_user_skip_of_the_slot_never_falls_back_to_protenix(tmp_path, flag):
     r = _run(tmp_path, ALL_ENVS, [flag])
     assert r.refolds("refold-protenix") == [] and r.refolds("refold-af3") == [], r.out
-    assert "Protenix" not in r.out, r.out
-    assert "AF3" not in r.out.replace(flag, ""), r.out
+    assert not r.mentions("protenix"), r.out
+    assert "AF3" not in r.out, r.out
 
 
 def test_both_unusable_skips_the_slot_by_name_exactly_as_before(tmp_path):
     r = _run(tmp_path, NEITHER)
     assert "[skipped] AF3: conda env 'binder-eval-af3' not found" in r.out, r.out
-    assert "Protenix" not in r.out, r.out  # nothing new is printed for an engine nobody asked for
+    assert not r.mentions("protenix"), r.out  # nothing new is printed for an engine nobody asked for
     assert r.refolds("refold-protenix") == [] and r.refolds("refold-af3") == [], r.out
 
 
@@ -302,7 +306,7 @@ def test_an_existing_af3_csv_keeps_the_af3_slot_even_with_protenix_ready_and_no_
     r = _run(tmp_path, NO_AF3, af3_csv=True)
     assert r.rc == 0, r.out
     assert r.refolds("refold-protenix") == [] and r.refolds("refold-af3") == [], r.out
-    assert "Protenix" not in r.out, r.out
+    assert not r.mentions("protenix"), r.out
     assert "[skipped] AF3: conda env 'binder-eval-af3' not found" in r.out, r.out  # wording as today
     assert r.report[r.report.index("--af3-results") + 1] == str(r.out_dir / "af3_results.csv")
     assert "--second-engine" not in r.report and "--second-results" not in r.report
@@ -342,14 +346,51 @@ def test_both_csvs_present_and_neither_engine_usable_keeps_af3_never_both(tmp_pa
 def test_a_skip_flag_with_protenix_ready_uses_no_second_engine_and_does_not_fall_back(tmp_path, flag):
     r = _run(tmp_path, NO_AF3, [flag], af3_csv=True)
     assert r.refolds("refold-protenix") == [] and r.refolds("refold-af3") == [], r.out
-    assert "Protenix" not in r.out, r.out
+    assert not r.mentions("protenix"), r.out
     assert "--second-engine" not in r.report and "--second-results" not in r.report
 
 
 def test_a_skip_flag_does_not_adopt_an_existing_protenix_csv_either(tmp_path):
     r = _run(tmp_path, NO_AF3, ["--skip-second"], protenix_csv=True)
-    assert "Protenix" not in r.out, r.out
+    assert not r.mentions("second engine: protenix") and r.refolds("refold-protenix") == [], r.out
     assert "--second-engine" not in r.report
+
+
+@pytest.mark.parametrize("kind", ["header", "blank"])
+def test_an_unscored_af3_csv_neither_keeps_the_slot_nor_blocks_a_usable_protenix(tmp_path, kind):
+    r = _run(tmp_path, NO_AF3, af3_csv=kind)
+    assert "[note] " + PANEL_NOTICE in r.out, r.out
+    assert len(r.refolds("refold-protenix")) == 1, r.out
+    assert "--af3-results" not in r.report
+    assert r.report[r.report.index("--second-engine") + 1] == "protenix"
+
+
+@pytest.mark.parametrize("kind", ["header", "blank"])
+def test_an_unscored_protenix_csv_is_not_adopted(tmp_path, kind):
+    r = _run(tmp_path, NEITHER, protenix_csv=kind, protenix_weights=None)
+    assert "[skipped] AF3: conda env 'binder-eval-af3' not found" in r.out, r.out
+    assert "second engine: protenix" not in r.out.lower(), r.out
+    assert r.refolds("refold-protenix") == [] and r.refolds("refold-af3") == [], r.out
+    assert "--second-engine" not in r.report and "--second-results" not in r.report
+
+
+def test_explicit_af3_unusable_with_its_scored_csv_keeps_the_af3_slot_and_reports_the_csv(tmp_path):
+    r = _run(tmp_path, ALL_ENVS, ["--second-engine", "af3"], af3_weights=False, af3_csv=True)
+    assert r.rc == 0, r.out
+    assert "[skipped] AF3: no AF3 weights found" in r.out, r.out
+    assert r.refolds("refold-af3") == [] and r.refolds("refold-protenix") == [], r.out
+    assert r.report[r.report.index("--af3-results") + 1] == str(r.out_dir / "af3_results.csv")
+    assert "--second-engine" not in r.report and "--second-results" not in r.report
+
+
+def test_explicit_protenix_unusable_with_its_scored_csv_is_skipped_by_name_but_the_csv_is_reported(tmp_path):
+    r = _run(tmp_path, ALL_ENVS[:-1], ["--second-engine", "protenix"], protenix_csv=True)
+    assert r.rc == 0, r.out
+    assert "[skipped] Protenix: conda env 'binder-eval-protenix' not found" in r.out, r.out
+    assert r.refolds("refold-protenix") == [] and r.refolds("refold-af3") == [], r.out
+    assert r.report[r.report.index("--second-engine") + 1] == "protenix"
+    assert r.report[r.report.index("--second-results") + 1] == str(r.out_dir / "protenix_results.csv")
+    assert "--af3-results" not in r.report
 
 
 # ---------------------------------------------------------------- the Protenix weights check
@@ -372,7 +413,7 @@ def test_missing_weights_are_refused_by_name_with_the_install_hint(tmp_path):
 
 def test_a_wrong_sized_checkpoint_blocks_the_automatic_fallback_too(tmp_path):
     r = _run(tmp_path, ALL_ENVS, af3_weights=False, protenix_weights=CKPT_BYTES + 1)
-    assert "Protenix" not in r.out, r.out
+    assert not r.mentions("protenix"), r.out
     assert r.refolds("refold-protenix") == [], r.out
     assert "[skipped] AF3: no AF3 weights found" in r.out, r.out
 
@@ -506,7 +547,7 @@ def test_primary_protenix_is_refused_when_the_slot_is_af3(tmp_path):
     r = _run(tmp_path, ALL_ENVS, ["--primary-engine", "protenix"])
     assert r.rc == 2, r.out
     assert "--primary-engine protenix is not in this panel: the second slot holds af3" in r.out, r.out
-    assert r.calls == [] or not r.refolds("refold-af3"), "a refused panel must not start any refold"
+    assert r.calls == [], "a refused panel must not start anything"
 
 
 def test_primary_af3_is_refused_when_the_slot_is_protenix(tmp_path):

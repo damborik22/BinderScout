@@ -37,11 +37,13 @@ gb10_budget () {
         # --- PyTorch: a CEILING, not a reservation. Generosity is free until the job hits it.
         boltzgen)       echo 24 ;;   # its folding stage loads boltz2_conf_final.ckpt, i.e. a Boltz-2
                                      # model, measured on THIS box at 17,187 MiB (PLAN:78). Repo cap
-                                     # convention is 1.3-1.5x measured peak -> 24, same as Boltz-2 refold.
+                                     # convention is 1.3-1.5x measured peak -> 24, same as Boltz-2 refold. (The protenix row
+                                     # below is the exception: ~1.2x its measured peak, see there.)
         pxdesign)       echo 32 ;;
         protenix)       echo 24 ;;   # Evaluator Protenix refold, the opt-in second engine in place of AF3 (12).
                                      # Measured peak ~20.4 GiB card-wide on a 779-token complex (a 24 GB card
-                                     # was the ceiling for the choice), so 24 is above it. A torch CEILING.
+                                     # was the ceiling for the choice), so 24 is above it, but only ~1.2x (24/20.4), below the
+                                     # 1.3-1.5x convention: a torch CEILING (grows into it), not a reservation.
         protein-hunter) echo 48 ;;   # ~26-30 GiB at N=400. NOTE: spawns a LigandMPNN child every cycle
                                      # which INHERITS the MPS limit, so the worst-case allowance is 2x.
         *)              echo 20 ;;
@@ -61,7 +63,11 @@ gb10_budget () {
 # 4. bindcraft 24 + the full three-engine refold stack (Boltz-2 24 + AF3 12 + ESMFold2 24 = 60)
 #    is 84 GiB > 81.7. Stagger them or drop an engine. When Protenix holds the second slot instead
 #    of AF3 (evaluate.sh --second-engine protenix) its 24 replaces AF3's 12: 24 + 24 + 24 = 72, and
-#    bindcraft 24 + that stack is 96 GiB.
+#    bindcraft 24 + that stack is 96 GiB. Run concurrently the engines' ceilings sum to 72 GiB with
+#    Protenix (Boltz-2 24 + Protenix 24 + ESMFold2 24) against 60 with AF3, worst-case ACTUAL about
+#    68 GiB (Protenix peaks ~20.4 GiB, not its 24), against ~81.7 GiB allocatable: it fits, so
+#    evaluate.sh --concurrent stays advisable on its own (with the MPS ceiling it requires), but not
+#    next to a design campaign (see 4 and 3).
 
 # Which framework does the GPU allocation on each tool. This is not cosmetic: it decides whether
 # the budget is a RESERVATION (JAX preallocates it at import) or a CEILING (PyTorch grows into it),
@@ -70,7 +76,7 @@ gb10_budget () {
 gb10_framework () {
     case "$1" in
         bindcraft|bindcraft2|mosaic)            echo jax ;;
-        boltzgen|pxdesign|protein-hunter)       echo pytorch ;;
+        boltzgen|pxdesign|protein-hunter|protenix) echo pytorch ;;
         *)                                      echo unknown ;;
     esac
 }

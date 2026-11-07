@@ -23,9 +23,9 @@
 #                          The panel is always Boltz-2 + <second> + ESMFold2, never four engines.
 #                          Explicit wins and is never switched: an unusable explicit engine is
 #                          skipped BY NAME. Without the flag the slot is AF3 when its env and
-#                          weights are usable OR an af3_results.csv is already in --output (then
+#                          weights are usable OR an af3_results.csv with scored rows is already in --output (then
 #                          reported as ever); otherwise Protenix, when its env and weights are
-#                          usable OR a protenix_results.csv is already there (a notice names the
+#                          usable OR a protenix_results.csv with scored rows is already there (a notice names the
 #                          panel); otherwise the slot is skipped by name. --skip-af3 /
 #                          --skip-second given: no second engine, no fallback. Scores from
 #                          different panels are not on one scale.
@@ -436,6 +436,34 @@ _env_missing_reason() {
 # Every optional engine / screen skipped for want of an env, with the reason, for one summary.
 _SKIPPED=()
 
+# Per-engine result CSVs. Set HERE, ahead of the second-slot decision, so that decision and the
+# engine count / report below all read the same variables. An engine that is skipped but already
+# has its CSV on disk still counts toward the gate.
+BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
+AF3_CSV="$OUTPUT/af3_results.csv"
+PROTENIX_CSV="$OUTPUT/protenix_results.csv"
+ESMFOLD2_CSV="$OUTPUT/esmfold2_results.csv"
+
+# Counts rows that carry a SCORE, not rows.  The distinction is the whole guard:
+# ESMFold2 writes a full-length row with every score blank when a design OOMs, so
+# `tail -n +2 | wc -l` -- which this was -- counted 50 blanks as 50 successes and
+# printed "ok -- 50 new row(s)" over an engine that produced nothing.  A blank row is
+# not a neutral absence either: it drops that design below the >=3-engine gate, which
+# in metrics.csv is indistinguishable from three engines disliking it.
+#
+# `iptm` is the right column because it is what consensus_iptm_mean averages -- the
+# exact quantity whose absence demotes the design -- and all three engines emit it
+# under that name.  Done in awk rather than by field index: the engines' CSVs have
+# different column orders, so a hard-coded $7 would silently read the wrong column.
+csv_rows () {
+    if [[ ! -f "$1" ]]; then echo 0; return; fi
+    awk -F',' '
+        NR == 1 { for (i = 1; i <= NF; i++) if ($i == "iptm") c = i; next }
+        c && $c != "" { n++ }
+        END { print n + 0 }
+    ' "$1"
+}
+
 # --- the second slot ---------------------------------------------------------
 # The panel has exactly one second engine, AF3 or Protenix, and it is decided HERE, once, before
 # anything is detected. An explicit --second-engine wins and is never swapped for the other engine.
@@ -511,7 +539,7 @@ fi
 # there at exactly its published size (a size check, as the installer's own). Prints why not and
 # succeeds when it is NOT usable; fails (prints nothing) when it is.
 _protenix_unusable_reason () {
-    local ckpt="${PROTENIX_WEIGHTS_DIR}/checkpoint/${PROTENIX_MODEL}.pt" size
+    local ckpt="${PROTENIX_WEIGHTS_DIR}/checkpoint/${PROTENIX_MODEL}.pt" size _why
     if _why="$(_env_missing_reason "${PROTENIX_ENV}")"; then
         echo "${_why}"
         return 0
@@ -544,19 +572,21 @@ if [[ "$SECOND_ENGINE" == "protenix" && $SKIP_PROTENIX -eq 0 ]]; then
     fi
 elif [[ $_AUTO_SECOND -eq 1 && $SKIP_AF3 -eq 1 ]]; then
     # No flag, and the AF3 detection above just dropped AF3 (env or weights). Order, never both:
-    #   2. an af3_results.csv already in the output dir keeps the slot with AF3: nothing runs, and the
+    #   2. an af3_results.csv with scored rows already in the output dir keeps the slot with AF3: nothing runs, and the
     #      CSV is reported exactly as before this engine existed (a pool refolded elsewhere, or an AF3
     #      env that is absent here, must not silently change the panel);
-    #   3. else Protenix, when it is fully usable OR its protenix_results.csv is already present;
+    #   3. else Protenix, when it is fully usable OR its protenix_results.csv already has scored rows;
     #   4. else nothing new is said and the slot is skipped by name as before.
-    if [[ -f "$OUTPUT/af3_results.csv" ]]; then
+    # "Present" means SCORED rows (csv_rows counts a non-empty iptm): a header-only or all-blank CSV
+    # is not results, so it neither keeps the slot on AF3 nor blocks a usable Protenix.
+    if (( $(csv_rows "$AF3_CSV") > 0 )); then
         :   # slot stays AF3; SKIP_AF3 stays 1, the CSV still counts toward the gate and reaches the report
     elif ! _protenix_unusable_reason >/dev/null; then
         SECOND_ENGINE="protenix"
         SKIP_PROTENIX=0
         echo "[note] second engine: Protenix (AF3 not available); ${_PANEL_NOTE}"
         echo ""
-    elif [[ -f "$OUTPUT/protenix_results.csv" ]]; then
+    elif (( $(csv_rows "$PROTENIX_CSV") > 0 )); then
         SECOND_ENGINE="protenix"   # nothing runs: the existing CSV is reported
         echo "[note] second engine: Protenix (AF3 not available; existing protenix_results.csv reported, nothing refolded); ${_PANEL_NOTE}"
         echo ""
@@ -687,10 +717,7 @@ fi
 # the first increment from 0 returns 0 — false — and `set -e` kills the script here.
 # Per-engine result CSVs. Defined here, before the engine count below reads them, because
 # an engine that is skipped but already has its CSV on disk still counts toward the gate.
-BOLTZ2_CSV="$OUTPUT/boltz2_results.csv"
-AF3_CSV="$OUTPUT/af3_results.csv"
-PROTENIX_CSV="$OUTPUT/protenix_results.csv"
-ESMFOLD2_CSV="$OUTPUT/esmfold2_results.csv"
+# (BOLTZ2_CSV, AF3_CSV, PROTENIX_CSV, ESMFOLD2_CSV are set above the second-slot block, which reads them.)
 
 # What matters for the gate is how many engines the REPORT will have, not how many run
 # this invocation: a skipped engine whose CSV is already on disk still counts.  Counting
@@ -960,25 +987,7 @@ engine_esmfold2 () {
 # that exits 0 and writes nothing is the same failure wearing a success code
 # (cf. the AF3 empty-rows incident of 2026-08-21), so rc alone is not enough:
 # the CSV must actually gain rows.
-# Counts rows that carry a SCORE, not rows.  The distinction is the whole guard:
-# ESMFold2 writes a full-length row with every score blank when a design OOMs, so
-# `tail -n +2 | wc -l` -- which this was -- counted 50 blanks as 50 successes and
-# printed "ok -- 50 new row(s)" over an engine that produced nothing.  A blank row is
-# not a neutral absence either: it drops that design below the >=3-engine gate, which
-# in metrics.csv is indistinguishable from three engines disliking it.
-#
-# `iptm` is the right column because it is what consensus_iptm_mean averages -- the
-# exact quantity whose absence demotes the design -- and all three engines emit it
-# under that name.  Done in awk rather than by field index: the engines' CSVs have
-# different column orders, so a hard-coded $7 would silently read the wrong column.
-csv_rows () {
-    if [[ ! -f "$1" ]]; then echo 0; return; fi
-    awk -F',' '
-        NR == 1 { for (i = 1; i <= NF; i++) if ($i == "iptm") c = i; next }
-        c && $c != "" { n++ }
-        END { print n + 0 }
-    ' "$1"
-}
+# (csv_rows is defined above the second-slot block, which needs it.)
 
 # A row delta is not evidence the POOL was refolded. A refold that resumes off a stale CSV
 # shared with earlier pools gains hundreds of rows, refolds none of this pool, and exits 0;
@@ -1106,6 +1115,8 @@ if [[ $CONCURRENT -eq 1 ]]; then
         DELAY=$(( DELAY + STAGGER ))
     }
     [[ $SKIP_BOLTZ2 -eq 0 ]]   && launch_engine boltz2   engine_boltz2
+    # SKIP_AF3 -eq 0 implies the slot is af3 (SKIP_AF3 is forced to 1 for a protenix slot), so
+    # engine_second here is engine_af3; the same holds for the protenix line and the sequential steps.
     [[ $SKIP_AF3 -eq 0 ]]      && launch_engine af3      engine_second
     [[ $SKIP_PROTENIX -eq 0 ]] && launch_engine protenix engine_second
     [[ $SKIP_ESMFOLD2 -eq 0 ]] && launch_engine esmfold2 engine_esmfold2
@@ -1135,6 +1146,7 @@ else
         (( STEP++ ))
     fi
 
+    # (the slot invariant noted at the concurrent launch holds here too: SKIP_AF3 -eq 0 means af3)
     if [[ $SKIP_AF3 -eq 0 ]]; then
         echo "[step ${STEP}/${N_STEPS}] AF3 refolding       (conda env: ${AF3_ENV}, cap ${GPU_CAP_AF3})..."
         run_engine_checked "AF3" engine_second "$AF3_CSV"
