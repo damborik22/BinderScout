@@ -6,6 +6,7 @@ Subcommands:
     refold-boltz2    — refold with Boltz-2 (run in Mosaic venv)
     refold-af3       — refold with AlphaFold 3 v3.0.2 (run in binder-eval-af3 env; runs on 24 GB GPUs)
     refold-esmfold2  — refold with ESMFold2 (biohub; run in binder-eval-esmfold2 env)
+    refold-protenix  — refold with Protenix v1.x (run in the Protenix env; Apache-2.0 v1.x checkpoints only)
     filter-soluprot  — score sequence solubility with SoluProt 1.0 (run in binder-eval-soluprot env; no GPU)
     report           — merge, normalise, generate HTML report
     run              — full pipeline orchestrator
@@ -37,6 +38,7 @@ from .cli import (
     refold_af3,
     refold_boltz2,
     refold_esmfold2,
+    refold_protenix,
     report,
     run,
     screen_tmprot,
@@ -62,6 +64,7 @@ def main(argv=None) -> None:
     parse_seqs.add_parser(subparsers)
     refold_boltz2.add_parser(subparsers)
     refold_af3.add_parser(subparsers)
+    refold_protenix.add_parser(subparsers)
     refold_esmfold2.add_parser(subparsers)
     filter_soluprot.add_parser(subparsers)
     screen_tmprot.add_parser(subparsers)

@@ -521,6 +521,7 @@ Every one takes `--help`. `binderscout evaluate <cmd> …` runs the same thing i
 | `refold-boltz2` | Refold with Boltz-2 (Mosaic venv) |
 | `refold-af3` | Refold with AlphaFold 3 v3.0.2 (`binder-eval-af3`; gated weights) |
 | `refold-esmfold2` | Refold with ESMFold2 (`binder-eval-esmfold2`) — the default engine |
+| `refold-protenix` | Refold with Protenix v1.x (run in the Protenix environment; Apache-2.0 v1.x checkpoints only, torch kernels always) — candidate AF3 replacement |
 | **Screening before the GPU** | |
 | `filter-soluprot` | Sequence-only *E. coli* solubility score (`binder-eval-soluprot`, no GPU) |
 | `screen-tmprot` | Sequence-only melting-temperature prediction (`binder-eval-tmprot`, no GPU). **Advisory column only** — never ranks or drops a design |
