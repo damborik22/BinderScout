@@ -64,7 +64,7 @@ USAGE = f"""{BOLD}BinderScout{RESET} — GPU-accelerated protein binder design t
 {BOLD}Commands:{RESET}
   {CYAN}(no args){RESET}  Launch interactive menu — install, configure, run, evaluate
   {CYAN}install{RESET}    Install the design tools and refold engines (nine design tools,
-             plus the evaluator, ESMFold2, SoluProt and opt-in AF3)
+             plus the evaluator, ESMFold2, SoluProt and opt-in AF3 or Protenix)
   {CYAN}configure{RESET}  Interactive wizard to set up a run (target, tools, parameters)
   {CYAN}status{RESET}     Live campaign state per tool and per box — counts, liveness, ETA
   {CYAN}evaluate{RESET}   Passthrough to the binder-compare evaluator (extract / refold / report / run)
