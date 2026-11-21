@@ -154,6 +154,13 @@ _BASE = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _conda_base_is_the_checkouts_own(monkeypatch):
+    """The recorded conda base is whatever conda the machine has; a runner's system conda adds a line to the
+    generated script's conda search list, so pin it to the checkout's own (which the script never lists twice)."""
+    monkeypatch.setattr(conf, "CONDA_BASE", conf.BINDERSCOUT_DIR / "conda")
+
+
 def _script(tmp_path, **over):
     cfg = {**_BASE, "run_dir": tmp_path, **over}
     path = tmp_path / "run_evaluate.sh"
