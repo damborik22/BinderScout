@@ -107,7 +107,8 @@ nucleic-acid sets for RF3; not stated for OpenBind-0). RF3 and OpenFold3 have th
 
 - **Sample count.** Every candidate ran at 1 sample and 1 seed. The sample count used for the AF3 numbers in P0 is not recorded in the
   merged table, and the AF3 script's own default is 5. Sample-to-sample spread was tiny in the smokes (RF3 none measurable, Protenix 0.004
-  in ipTM), but a 5-sample rerun was not done for any candidate.
+  in ipTM). The shipped Protenix CLI default is 5 samples (as is AF3's), so the benchmarked setting is not the shipped one; a 5-sample
+  rerun was done for Protenix on PD-L1 only (see "PD-L1 5-sample rerun" below), for no other candidate or target.
 - **RF3 diffusion steps** were 200 (parity with the Chai-1 and Protenix settings), not the 50 RF3 ships with; recycles 10, cuEquivariance disabled.
 - **Protenix** ran with torch kernels and torch layer norm (the default kernels need NVIDIA-proprietary wheels, unused here).
   Default and torch kernels differed by at most 0.004 ipTM in the smoke.
@@ -154,7 +155,8 @@ The four questions above were settled as follows.
   2. **Only Protenix is registered.** RF3 passes the rule but is out on the 24 GB card class: 33.5 to 36.8 GiB card-wide with
      cuEquivariance disabled; with it enabled RF3 fits a 24 GB card but needs NVIDIA's proprietary wheels at run time.
      Chai-1 fails target PD-L1 on either reading (below). OpenFold3 is below the Boltz-2 + ESMFold2 floor.
-  3. The 5-sample PD-L1 rerun was **not done**; Protenix is registered at the 1 sample and 1 seed it was benchmarked at.
+  3. The 5-sample PD-L1 rerun was **not done at decision time**; Protenix was registered at the 1 sample and 1 seed it was benchmarked at.
+     It was run afterwards on PD-L1 only (section "PD-L1 5-sample rerun" below).
   4. Protenix is always run with torch kernels and torch layer norm. The proprietary cuEquivariance wheels that `pip install
      protenix` pulls are installed as a hard dependency but not used at run time; the installer's licence notice discloses this and asks
      before downloading.
@@ -196,3 +198,21 @@ Memory against the constraint as read above: with torch kernels Protenix peaked 
 on a 46 GiB L40S (EGFR, about 772 tokens). That fits a 24 GB card with about 3 GiB to spare, less if the card also drives a display;
 the 3090 figure is one design. Part 2 (opt-in `--second-engine protenix`, panel recorded in `metrics.csv`) is described in the
 CHANGELOG.
+
+### PD-L1 5-sample rerun (added after the decision)
+
+Protenix v1.x was re-run on the 66 PD-L1 designs with the shipped CLI defaults (1 seed, 5 samples, torch kernels), the same cached target
+MSA, one design at a time, and scored with the same `panel_benchmark.py` and labels. The 1-sample numbers reproduced first (0.7231 / 0.7044 /
+0.7279 macro). In the "5 samples" panel only PD-L1 is 5-sample; egfr, il7r and nipah remain the 1-sample scores, so its macro is a hybrid.
+
+| Panel (Boltz-2 + second engine + ESMFold2) | PD-L1 AUC | 4-target macro AUC | paired macro difference vs AF3 panel |
+|---|---|---|---|
+| AF3 | 0.7665 | 0.7231 | - |
+| Protenix, 1 sample (benchmarked) | 0.7325 | 0.7044 | -0.0186 [-0.0384, +0.0008] |
+| Protenix, 5 samples on PD-L1 (shipped default) | 0.7546 | 0.7100 | -0.0131 [-0.0344, +0.0071] |
+| Boltz-2 + ESMFold2 floor | 0.6949 | 0.7279 | +0.0048 [-0.0214, +0.0299] (fails clause c on PD-L1) |
+
+- The pass rule still passes at 5 samples. The change from 1 to 5 samples is +0.022 AUC on one target with 66 designs and 32 binders: within
+  noise, a hint that the shipped default is not worse than the benchmarked setting, not a result. It does not change the decision.
+- Cost: 66 designs in about 85 minutes (about 77 s per design), against about 74 s per design measured at 1 sample, so 5 samples cost little extra.
+- **Not measured:** peak GPU memory at 5 samples (the 20.8 GiB figure above is the 1-sample one); the other three targets at 5 samples.
