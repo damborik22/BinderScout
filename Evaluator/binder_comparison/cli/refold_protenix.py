@@ -151,7 +151,14 @@ def add_parser(subparsers) -> None:
         help="Directory for Protenix predictions and structure files (default: ./refold_protenix)",
     )
     p.add_argument("--num-seeds", type=int, default=1, metavar="N", help="Number of random seeds (default: 1)")
-    p.add_argument("--num-samples", type=int, default=5, metavar="N", help="Diffusion samples per seed (default: 5)")
+    p.add_argument(
+        "--num-samples",
+        type=int,
+        default=5,
+        metavar="N",
+        help="Diffusion samples per seed (default: 5). A design whose complex runs the GPU out of memory at "
+        "this count is retried once with 1 sample and recorded in refold_run_info.json (settings.sample_fallbacks)",
+    )
     p.add_argument(
         "--model-dir",
         default=None,

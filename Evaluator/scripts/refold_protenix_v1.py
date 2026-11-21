@@ -69,6 +69,10 @@ What was established (this is what the whole script rests on):
   all-zero B-factors (the column absent) fails the design loudly.
 * Top sample: the highest ``ranking_score`` (= 0.8 iptm + 0.2 ptm + 0.5 disorder - 100 has_clash)
   over all seeds and samples; non-finite scores are skipped.
+* Memory: the confidence step grows with the sample count. 5 samples (the CLI default) of a ~780-token complex
+  ran a 24 GB card out of memory (needs more than about 27 GiB); 1 sample peaks near 20.8 GiB. A design that fails
+  with an out-of-memory error at more than 1 sample is therefore retried ONCE with 1 sample (``FALLBACK_SAMPLES``) in
+  a fresh process and recorded under ``settings.sample_fallbacks`` in ``refold_run_info.json``. Nothing else is retried.
 * Failure mode: ``inference.py`` catches a failed sample, writes ``<out>/ERR/<name>.txt`` and the
   CLI still exits 0. An exit 0 with no sample files is therefore a FAILED design, and the ERR file
   text is attached to the error.
@@ -165,6 +169,16 @@ def build_input(
 def _protenix_executable() -> str:
     sibling = Path(sys.executable).parent / "protenix"
     return str(sibling) if sibling.exists() else (shutil.which("protenix") or "protenix")
+
+
+#: Sample count a design falls back to when the requested count runs the card out of memory.
+FALLBACK_SAMPLES = 1
+
+
+def _is_out_of_memory(exc: EngineError) -> bool:
+    """True when the engine failed because the GPU ran out of memory (stderr or Protenix's own ERR file)."""
+    text = f"{exc} {getattr(exc, 'stderr', '')}".lower()
+    return "outofmemoryerror" in text or "out of memory" in text
 
 
 def _predict_one(
@@ -419,6 +433,8 @@ class ProtenixAdapter:
         self.trimul_kernel: str | None = None
         self.triatt_kernel: str | None = None
         self.layernorm_type: str | None = None
+        #: ``{run_id: {"requested": n, "used": 1}}`` for every design that fell back after running out of memory.
+        self.sample_fallbacks: dict[str, dict[str, int]] = {}
 
     def add_args(self, parser) -> None:
         parser.add_argument(
@@ -471,29 +487,53 @@ class ProtenixAdapter:
 
     def run_info_extra(self) -> dict:
         """The non-default settings a result must be tied to; ``default`` = nothing was passed."""
-        return {
+        extra = {
             "trimul_kernel": self.trimul_kernel or "default",
             "triatt_kernel": self.triatt_kernel or "default",
             # An inherited LAYERNORM_TYPE reaches the subprocess too, so it is what was actually used.
             "layernorm_type": self.layernorm_type or os.environ.get("LAYERNORM_TYPE") or "default",
         }
+        if self.sample_fallbacks:
+            # Present only when it happened: those designs were scored from FEWER samples than were asked for.
+            extra["sample_fallbacks"] = dict(self.sample_fallbacks)
+        return extra
 
     def predict_one(self, *, query_id, binder_seq, target_seq, target_msa_path, work_dir, num_seeds, num_samples):
-        # Looked up at call time on purpose: the model seam tests replace.
-        return _predict_one(
-            query_id=query_id,
-            binder_seq=binder_seq,
-            target_seq=target_seq,
-            target_msa_path=target_msa_path,
-            work_dir=work_dir,
-            model_name=self.model_name,
-            model_dir=self.model_dir,
-            num_seeds=num_seeds,
-            num_samples=num_samples,
-            trimul_kernel=self.trimul_kernel,
-            triatt_kernel=self.triatt_kernel,
-            layernorm_type=self.layernorm_type,
-        )
+        def attempt(samples: int) -> dict:
+            # Looked up at call time on purpose: the model seam tests replace.
+            return _predict_one(
+                query_id=query_id,
+                binder_seq=binder_seq,
+                target_seq=target_seq,
+                target_msa_path=target_msa_path,
+                work_dir=work_dir,
+                model_name=self.model_name,
+                model_dir=self.model_dir,
+                num_seeds=num_seeds,
+                num_samples=samples,
+                trimul_kernel=self.trimul_kernel,
+                triatt_kernel=self.triatt_kernel,
+                layernorm_type=self.layernorm_type,
+            )
+
+        try:
+            return attempt(num_samples)
+        except EngineError as exc:
+            # The confidence step's memory grows with the sample count: 5 samples of a ~780-token complex need
+            # more than a 24 GB card has, while 1 sample (the benchmarked setting) fits. Only an out-of-memory
+            # failure is retried, and only downward; every other failure, and an OOM at 1 sample, is a real failure.
+            if num_samples <= FALLBACK_SAMPLES or not _is_out_of_memory(exc):
+                raise
+            print(
+                f"  [protenix] WARNING: {query_id} ran out of GPU memory at {num_samples} samples; retrying with "
+                f"{FALLBACK_SAMPLES}. This design is scored from {FALLBACK_SAMPLES} sample (recorded in "
+                "refold_run_info.json under settings.sample_fallbacks).",
+                file=sys.stderr,
+                flush=True,
+            )
+            pred = attempt(FALLBACK_SAMPLES)
+            self.sample_fallbacks[query_id] = {"requested": num_samples, "used": FALLBACK_SAMPLES}
+            return pred
 
 
 def main(argv: list[str] | None = None) -> int:

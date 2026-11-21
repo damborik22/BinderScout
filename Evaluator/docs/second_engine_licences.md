@@ -192,6 +192,21 @@ and that third-party dependency needs its own review before a commercial deploym
 - Observed in the smoke: the first-use download from that host was about 2.1 GB (checkpoint 1.48 GB, `components.cif` 491 MB,
   `components.cif.rdkit_mol.pkl` 142 MB, `clusters-by-entity-40.txt` 22 MB, `obsolete_release_date.csv` 0.13 MB).
 
+- Re-read 2026-11-21 (the host's own terms were looked for and still not found):
+  - The v1.1.0 `docs/model_1.0.0_benchmark.md` links the same host for ByteDance's own benchmark downloads, so the host is the
+    project's own distribution channel. That endorses the host; it carries no terms.
+  - The repository `LICENSE` is the plain Apache-2.0 text (identical at v1.1.0 and `main`) and does not mention weights or
+    checkpoints. The Apache-2.0 grant for the v1.x weights therefore rests on the README sentence alone. No model card, release
+    note (v1.0.0, v1.1.0) or weights-specific licence was found, and GitHub's licence API reports no SPDX id for the file.
+  - The `main` README carries both "code and model parameters ... Apache 2.0" and the Protenix-v2 "proprietary and confidential"
+    sentence, and does not say how they interact; the adapter refuses any non-v1.x model name for that reason.
+  - The Volcengine / BytePlus terms that could be fetched (BytePlus Terms of Service, Volcengine Data Processing Agreement) are for
+    customers of those services and say nothing about downloading publicly hosted objects; the Volcengine service agreement and
+    object-storage terms were not rendered by the fetch. Terms of the CCD / cluster / release-date files on that host are also unstated.
+  - Do not use the Hugging Face `oteam/protenix*` mirrors: they re-distribute converted weights under AGPL-3.0-or-later on the OFoldX
+    team's terms and are not the upstream Apache-2.0 v1.x weights.
+  - Nothing here is legal advice and nothing here says "cleared": the host's terms remain unread.
+
 ### RF3: the extra as published does not install into a working environment; the adapter avoids the proprietary ops at runtime
 
 - Primary-source facts (PyPI JSON for `rc-foundry` 0.2.0, read 2026-11-05): the package requires

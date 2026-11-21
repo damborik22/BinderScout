@@ -663,3 +663,104 @@ def test_an_inherited_layernorm_env_is_recorded_not_hidden(mod, fasta, tmp_path,
     run_main(mod, fasta, tmp_path)
     info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
     assert info["settings"]["layernorm_type"] == "torch"
+
+
+# --- out-of-memory fallback: 5 samples of a big complex do not fit a 24 GB card -------------
+
+_OOM = "torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 7.04 GiB. GPU 0 has a total capacity of 23.56 GiB"
+
+
+def _oom_error(mod):
+    return mod.EngineError("Protenix produced no prediction for x (exit code 0, no output files)", _OOM)
+
+
+def test_an_out_of_memory_failure_is_retried_once_at_one_sample_and_recorded(mod, fasta, tmp_path, monkeypatch):
+    calls = []
+
+    def predict(**kw):
+        calls.append((kw["query_id"], kw["num_samples"]))
+        if kw["num_samples"] > 1:
+            raise _oom_error(mod)
+        return fake_prediction(tmp_path, kw["query_id"])
+
+    monkeypatch.setattr(mod, "_predict_one", predict)
+    code, out_csv = run_main(mod, fasta, tmp_path)  # CLI default: 5 samples
+    assert code == 0
+    assert calls == [("protenix_0001", 5), ("protenix_0001", 1), ("protenix_0002", 5), ("protenix_0002", 1)]
+    assert [r["iptm"] for r in read_rows(out_csv)] == ["0.71", "0.71"]  # both designs scored, not blank
+    info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+    assert info["n_samples"] == 5  # what was asked for stays on record
+    assert info["settings"]["sample_fallbacks"] == {
+        "protenix_0001": {"requested": 5, "used": 1},
+        "protenix_0002": {"requested": 5, "used": 1},
+    }
+
+
+def test_a_design_that_fits_is_not_retried_and_leaves_no_fallback_record(mod, fasta, tmp_path, monkeypatch):
+    calls = []
+
+    def predict(**kw):
+        calls.append(kw["num_samples"])
+        return fake_prediction(tmp_path, kw["query_id"])
+
+    monkeypatch.setattr(mod, "_predict_one", predict)
+    code, _ = run_main(mod, fasta, tmp_path)
+    assert code == 0 and calls == [5, 5]
+    info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+    assert "sample_fallbacks" not in info["settings"]
+
+
+def test_only_out_of_memory_is_retried_any_other_failure_stays_a_failure(mod, fasta, tmp_path, monkeypatch):
+    calls = []
+
+    def predict(**kw):
+        calls.append((kw["query_id"], kw["num_samples"]))
+        if kw["query_id"] == "protenix_0001":
+            raise mod.EngineError("Protenix exited with code 1", "RuntimeError: some other fault")
+        return fake_prediction(tmp_path, kw["query_id"])
+
+    monkeypatch.setattr(mod, "_predict_one", predict)
+    code, out_csv = run_main(mod, fasta, tmp_path)
+    assert code == 3  # partial failure, as before
+    assert calls == [("protenix_0001", 5), ("protenix_0002", 5)]  # the failing design was NOT retried
+    assert read_rows(out_csv)[0]["iptm"] == ""
+
+
+def test_an_out_of_memory_at_one_sample_is_a_real_failure_not_retried(mod, fasta, tmp_path, monkeypatch):
+    calls = []
+
+    def predict(**kw):
+        calls.append(kw["num_samples"])
+        raise _oom_error(mod)
+
+    monkeypatch.setattr(mod, "_predict_one", predict)
+    with pytest.raises(RuntimeError, match="All 2 binder"):  # nothing scored: the driver refuses, as ever
+        run_main(mod, fasta, tmp_path, "--num-samples", "1")
+    assert calls == [1, 1]  # one attempt per design, nothing below 1 sample to fall back to
+    info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+    assert "sample_fallbacks" not in info["settings"]
+
+
+def test_a_failed_fallback_is_not_recorded_as_a_fallback(mod, fasta, tmp_path, monkeypatch):
+    def predict(**kw):
+        raise _oom_error(mod)  # OOM even at 1 sample
+
+    monkeypatch.setattr(mod, "_predict_one", predict)
+    with pytest.raises(RuntimeError, match="All 2 binder"):
+        run_main(mod, fasta, tmp_path)
+    info = json.loads((tmp_path / "out" / "refold_run_info.json").read_text())
+    assert "sample_fallbacks" not in info["settings"]  # nothing was scored from fewer samples
+
+
+@pytest.mark.parametrize(
+    ("message", "stderr", "expected"),
+    [
+        ("Protenix exited with code 1", "torch.OutOfMemoryError: CUDA out of memory", True),
+        ("Protenix exited with code 1", "RuntimeError: CUDA error: out of memory", True),
+        ("CUDA out of memory", "", True),
+        ("Protenix exited with code 1", "RuntimeError: shape mismatch", False),
+        ("Protenix exited with code 1", "", False),
+    ],
+)
+def test_out_of_memory_is_recognised_from_the_message_or_the_stderr(mod, message, stderr, expected):
+    assert mod._is_out_of_memory(mod.EngineError(message, stderr)) is expected

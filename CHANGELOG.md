@@ -53,7 +53,7 @@ Owner's instructions: opt-in, AF3 stays the default; success is a similar `conse
 curated Adaptyv benchmark (563 designs, 4 targets); "We do not want to increase GPU demand"; and "decide what
 will be best replacement and proceed with integration". The engine choice and the settings (clause (c) left as
 written, no 5-sample PD-L1 rerun, torch kernels forced) are rulings made under that delegation, not separately
-confirmed by the owner. Protenix fits the 24 GB card class that ESMFold2 already requires (ESMFold2 holds about 18.9 GiB on a 24 GB card), so no larger GPU is needed; its own peak (20.4-20.8 GiB) is several times AF3's (about 4.4 GiB at 260-390 tokens; AF3 was not measured at about 780 tokens), so the owner's constraint was read as "no new GPU class", not as "no more memory than AF3". Full table, settings and caveats:
+confirmed by the owner. Protenix fits the 24 GB card class that ESMFold2 already requires (ESMFold2 holds about 18.9 GiB on a 24 GB card), so no larger GPU is needed; its own peak at 1 sample (20.4-20.8 GiB; at the default 5 samples the largest complexes need more than a 24 GB card holds, so the runner falls back to 1 sample per design on out-of-memory) is several times AF3's (about 4.4 GiB at 260-390 tokens; AF3 was not measured at about 780 tokens), so the owner's constraint was read as "no new GPU class", not as "no more memory than AF3". Full table, settings and caveats:
 `Evaluator/docs/second_engine_benchmark.md`.
 
 - **Protenix v1.x** (`protenix_base_default_v1.0.0`, torch kernels and torch layer norm, 1 seed, 1 sample)
@@ -67,7 +67,13 @@ confirmed by the owner. Protenix fits the 24 GB card class that ESMFold2 already
   OpenFold3 sits below the Boltz-2 + ESMFold2 floor.
 - **Memory:** Protenix with torch kernels peaked at 21,282 MiB (20.8 GiB) card-wide on a 24,576 MiB RTX 3090
   for the longest design (779 tokens, 1 sample), and 20,939 MiB (20.4 GiB) on a 46 GiB L40S (EGFR, about 772
-  tokens). A 24 GB card therefore fits with about 3 GiB to spare, less if it also drives a display.
+  tokens). A 24 GB card therefore fits at 1 sample with about 3 GiB to spare, less if it also drives a display.
+- **Memory at the default 5 samples (measured 2026-11-21, n=1 design):** the same 779-token design ran the 24 GB card out of
+  memory in the confidence step (it wanted another 7 GiB on top of about 20.5 GiB held, so it needs more than about
+  27 GiB); 1 sample succeeded at 20.8 GiB. `refold-protenix` therefore retries a design that fails with an out-of-memory
+  error ONCE at 1 sample, in a fresh process, and records it under `settings.sample_fallbacks` in `refold_run_info.json`
+  (and warns on stderr). Any other failure, and an out-of-memory at 1 sample, still fail the design. Those designs are
+  scored from 1 sample, the setting that was benchmarked. A later `--resume` run overwrites the sidecar record.
 - **This is a hypothesis, not a result:** four targets, one pool (Adaptyv and ProteinBase are one dataset),
   and single-pool effects have been retracted before in this project. Scores from different panels are not on
   one scale; compare ranks and means only between reports that name the same panel.

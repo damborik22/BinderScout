@@ -144,7 +144,7 @@ The owner's instructions were only these: the replacement is **opt-in, AF3 stays
 `consensus_iptm_mean` on this benchmark; "We do not want to increase GPU demand"; and "decide what will be best replacement and
 proceed with integration".
 
-"Ceiling = a 24 GB card" is the controller's reading of "no increase in GPU demand", not an owner statement. Protenix fits the 24 GB card class that ESMFold2 already requires (ESMFold2 holds about 18.9 GiB on a 24 GB card), so no larger GPU is needed; its own peak (20.4-20.8 GiB) is several times AF3's (about 4.4 GiB at 260-390 tokens; AF3 was not measured at about 780 tokens), so the owner's constraint was read as "no new GPU class", not as "no more memory than AF3".
+"Ceiling = a 24 GB card" is the controller's reading of "no increase in GPU demand", not an owner statement. Protenix fits the 24 GB card class that ESMFold2 already requires (ESMFold2 holds about 18.9 GiB on a 24 GB card), so no larger GPU is needed; its own peak at 1 sample (20.4-20.8 GiB; at the default 5 samples the largest complexes need more than a 24 GB card holds, so the runner falls back to 1 sample per design on out-of-memory) is several times AF3's (about 4.4 GiB at 260-390 tokens; AF3 was not measured at about 780 tokens), so the owner's constraint was read as "no new GPU class", not as "no more memory than AF3".
 
 ### Rulings made under that delegation (not separately confirmed by the owner)
 
@@ -195,7 +195,7 @@ this pool.
 
 Memory against the constraint as read above: with torch kernels Protenix peaked at 21,282 MiB (20.8 GiB) card-wide on a 24,576 MiB RTX 3090
 (headless) for the longest design (Nipah target 602 aa + 177 aa binder, 779 tokens, 1 sample; ipTM 0.895), and at 20,939 MiB (20.4 GiB)
-on a 46 GiB L40S (EGFR, about 772 tokens). That fits a 24 GB card with about 3 GiB to spare, less if the card also drives a display;
+on a 46 GiB L40S (EGFR, about 772 tokens). That fits a 24 GB card at 1 sample with about 3 GiB to spare, less if the card also drives a display (at the default 5 samples it does not: see "PD-L1 5-sample rerun" below);
 the 3090 figure is one design. Part 2 (opt-in `--second-engine protenix`, panel recorded in `metrics.csv`) is described in the
 CHANGELOG.
 
@@ -215,4 +215,10 @@ MSA, one design at a time, and scored with the same `panel_benchmark.py` and lab
 - The pass rule still passes at 5 samples. The change from 1 to 5 samples is +0.022 AUC on one target with 66 designs and 32 binders: within
   noise, a hint that the shipped default is not worse than the benchmarked setting, not a result. It does not change the decision.
 - Cost: 66 designs in about 85 minutes (about 77 s per design), against about 74 s per design measured at 1 sample, so 5 samples cost little extra.
-- **Not measured:** peak GPU memory at 5 samples (the 20.8 GiB figure above is the 1-sample one); the other three targets at 5 samples.
+- **Memory at 5 samples (measured 2026-11-21, one design, one attempt per setting, RTX 3090 24 GB, headless):** the longest design (Nipah
+  target 602 aa + 177 aa binder, 779 tokens) at the default 5 samples ran out of memory in the confidence step (a further 7.04 GiB
+  requested on top of about 20.5 GiB held; the real need is above about 27 GiB) and produced no result; the 1-sample control on the
+  same card succeeded (ipTM 0.881, peak 20.8 GiB). The 5-sample PD-L1 run above fitted because those complexes are about 300 tokens.
+  Decision (owner, 2026-11-21): keep 5 samples as the default and retry a design that runs out of memory once at 1 sample, recording
+  it in `refold_run_info.json` (`settings.sample_fallbacks`). 2, 3 and 4 samples were not tried, and `expandable_segments` was not tried.
+- **Not measured:** the other three targets at 5 samples.
